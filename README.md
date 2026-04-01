@@ -2,6 +2,20 @@
 
 3D multiplayer real-time FPS — C++23, SDL3, ECS.
 
+```bash
+# Linux
+bash scripts/setup-linux.sh
+cmake --preset debug && cmake --build --preset debug
+LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/titandoom
+
+# macOS
+bash scripts/setup-macos.sh
+cmake --preset debug && cmake --build --preset debug
+
+# Windows (Developer PowerShell for VS 2022)
+cmake --preset debug-win && cmake --build --preset debug-win
+```
+
 ## Tech stack
 
 | Concern | Library |
