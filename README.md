@@ -35,13 +35,19 @@ All dependencies are fetched automatically via CMake `FetchContent` — **no sys
 
 ## Prerequisites
 
-### Linux (Debian / Ubuntu)
+### Linux — Debian / Ubuntu
 
 ```bash
 bash scripts/setup-linux.sh
 ```
 
-This installs: `cmake`, `ninja`, `clang`, `clang-format`, `clang-tidy`, and all SDL3 system-level headers (X11, Wayland, ALSA, Pulse, etc.).
+### Linux — Arch Linux (and derivatives: Manjaro, EndeavourOS, CachyOS…)
+
+```bash
+bash scripts/setup-archlinux.sh
+```
+
+Both scripts install: `cmake`, `ninja`, `clang`, `clang-format`, `clang-tidy`, and all SDL3 system-level headers (X11, Wayland, ALSA, Pulse, etc.).
 
 ### macOS
 
