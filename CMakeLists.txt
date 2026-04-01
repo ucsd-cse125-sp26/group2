@@ -70,12 +70,49 @@ if(ENABLE_SHADERCROSS)
     FetchContent_MakeAvailable(SDL_shadercross)
 endif()
 
+# ---- Shaders ----
+# Compile GLSL → SPIR-V at build time using glslc.
+# The .spv files land next to the binary so the game can load them at runtime.
+find_program(GLSLC glslc REQUIRED
+    HINTS ENV VULKAN_SDK
+    DOC "glslc GLSL→SPIR-V compiler (install shaderc / vulkan-tools)")
+
+set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
+file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
+
+set(SHADER_SOURCES
+    triangle.vert
+    triangle.frag
+)
+
+set(SHADER_OUTPUTS "")
+foreach(SHADER_SRC ${SHADER_SOURCES})
+    set(SPV_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.spv")
+    add_custom_command(
+        OUTPUT  "${SPV_OUT}"
+        COMMAND ${GLSLC} -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        COMMENT "Compiling shader ${SHADER_SRC}"
+        VERBATIM
+    )
+    list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
+endforeach()
+
+add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
+
 # ---- Sources ----
 file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
 
 add_executable(titandoom ${GAME_SOURCES})
+add_dependencies(titandoom shaders)
+
+# Expose the shader output directory to the binary via a compile definition
+target_compile_definitions(titandoom PRIVATE
+    SHADER_DIR="${SHADER_OUT_DIR}/"
+)
 
 target_include_directories(titandoom PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
