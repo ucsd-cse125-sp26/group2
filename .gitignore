@@ -9,8 +9,6 @@ CMakeCache.txt
 cmake_install.cmake
 CTestTestfile.cmake
 compile_commands.json
-*.cmake
-!cmake/
 
 # IDE / editor
 .vscode/
