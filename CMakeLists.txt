@@ -110,6 +110,8 @@ file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 set(SHADER_SOURCES
     triangle.vert
     triangle.frag
+    scene.vert
+    scene.frag
 )
 
 set(SHADER_OUTPUTS "")
