@@ -27,12 +27,15 @@ static constexpr glm::vec3 k_playerColors[4] = {
     {0.85f, 0.20f, 0.20f}, // slot 3
 };
 
-// Build a player model centered at origin (feet at y=0).
-// capsuleRadius / capsuleHalfHeight and headRadius in Quake units.
+// Build a player model with feet at y=0.
+// Default proportions match the physics AABB (halfWidth=32, halfHeight=36):
+//   capsuleRadius=20  → body width 40 qu (narrower than AABB for visual clarity)
+//   capsuleHalfHeight=16 → body cylinder 32 qu tall; full body 2*20+2*16 = 72 qu = physics height
+//   headRadius=14     → head centre at ~83 qu, top at ~97 qu (just above AABB top)
 std::vector<Vertex> buildPlayerModel(glm::vec3 bodyColor,
-                                     float capsuleRadius     = 32.0f,
-                                     float capsuleHalfHeight = 36.0f,
-                                     float headRadius        = 18.0f,
+                                     float capsuleRadius     = 20.0f,
+                                     float capsuleHalfHeight = 16.0f,
+                                     float headRadius        = 14.0f,
                                      int segments            = 12,
                                      int stacks              = 6);
 

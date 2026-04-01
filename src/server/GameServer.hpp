@@ -27,6 +27,11 @@ struct ClientSlot
     uint32_t lastInputTick = 0;          // most recent processed input tick
     float lastInputTime    = 0.0f;
 
+    // Server-side edge detection for held buttons.
+    // Client sends fireHeld; server computes firePressed = fireHeld && !prevFireHeld.
+    bool prevFireHeld    = false;
+    bool prevAltFireHeld = false;
+
     // Pending inputs not yet processed (in case of minor re-ordering)
     static constexpr int k_inputBuf = 8;
     PktInput inputBuf[k_inputBuf];
@@ -81,7 +86,14 @@ private:
     void handleDisconnect(ClientSlot& cl);
 
     void processTick(float dt);
-    void processWeapon(ClientSlot& cl, const PktInput& inp, float dt);
+    void processWeapon(ClientSlot& cl,
+                       const PktInput& inp,
+                       bool fireHeld,
+                       bool firePressed,
+                       bool altFireHeld,
+                       bool altFirePressed,
+                       bool knifePressed,
+                       float dt);
     void broadcastSnapshot();
     void pushLagCompSnapshot();
     void spawnPlayer(ClientSlot& cl);

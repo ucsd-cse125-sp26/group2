@@ -126,13 +126,17 @@ static PktInput buildInputPacket(AppState* s, float /*dt*/)
     pkt.moveRight  = inp.moveDir.x;
     pkt.yaw        = cam.yaw;
     pkt.pitch      = cam.pitch;
-    pkt.buttons    = Buttons::build(inp.jumpPressed,
-                                    inp.jumpHeld,
-                                    inp.crouchHeld,
-                                    inp.firePressed,
-                                    inp.altFirePressed,
-                                    inp.knifePressed,
-                                    inp.grapplePressed);
+    // Send the held (continuous) state for fire/altFire so the server can
+    // detect its own rising edge.  A single-frame "pressed" bit is too fragile:
+    // if two packets arrive in the same server tick the newest wins and the
+    // one-frame fire event is silently dropped.
+    pkt.buttons = Buttons::build(inp.jumpPressed,
+                                 inp.jumpHeld,
+                                 inp.crouchHeld,
+                                 inp.fireHeld,    // held, not pressed
+                                 inp.altFireHeld, // held, not pressed
+                                 inp.knifePressed,
+                                 inp.grapplePressed);
     return pkt;
 }
 
@@ -351,8 +355,14 @@ SDL_AppResult SDL_AppIterate(void* appstate)
             float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
             glm::vec3 aimDir = glm::normalize(glm::vec3(-sy * cp, sp, cy * cp));
 
-            // Collect remote player capsules for client-side hit preview
-            const float k_capsR = 20.0f, k_capsHH = 50.0f;
+            // Collect remote player capsules for client-side hit preview.
+            // These constants MUST match LagComp::k_capsule* on the server.
+            // pos = tf.position (AABB centre); hitbox:
+            //   bMin.y = pos.y + 12 - (28+20) = pos.y - 36  (feet)
+            //   bMax.y = pos.y + 12 + (28+20) = pos.y + 60  (above head)
+            constexpr float k_capsR    = 20.0f;
+            constexpr float k_capsHH   = 28.0f;
+            constexpr float k_capsYOff = 12.0f;
             CapsuleInfo others[4];
             int otherCount = 0;
             int myId       = s->net ? s->net->myId : 0;
@@ -363,7 +373,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
                 if (!rp.active || !rp.alive)
                     continue;
                 glm::vec3 pos        = glm::mix(rp.posA, rp.posB, rp.lerpT);
-                others[otherCount++] = {i, pos + glm::vec3(0, k_capsHH, 0), k_capsR, k_capsHH};
+                others[otherCount++] = {i, pos + glm::vec3(0.0f, k_capsYOff, 0.0f), k_capsR, k_capsHH};
             }
 
             const auto& stats = k_weaponStats[static_cast<int>(ws.active)];

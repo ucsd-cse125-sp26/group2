@@ -95,25 +95,53 @@ void GameServer::processTick(float dt)
         if (!hp.alive())
             continue;
 
-        // Apply the most-recent buffered input
         if (cl.inputCount > 0) {
-            const PktInput& inp = cl.inputBuf[cl.inputCount - 1];
+            // Use the newest packet for continuous analog state (aim, movement).
+            const PktInput& latest = cl.inputBuf[cl.inputCount - 1];
 
             auto& input = registry.get<InputState>(cl.entity);
             auto& cam   = registry.get<CameraAngles>(cl.entity);
 
-            input.moveDir.x = inp.moveRight;
-            input.moveDir.y = inp.moveFwd;
-            cam.yaw         = inp.yaw;
-            cam.pitch       = inp.pitch;
+            input.moveDir.x = latest.moveRight;
+            input.moveDir.y = latest.moveFwd;
+            cam.yaw         = latest.yaw;
+            cam.pitch       = latest.pitch;
 
-            bool curJump      = inp.buttons.jump();
-            input.jumpHeld    = inp.buttons.jumpHeld();
-            input.jumpPressed = curJump;
-            input.crouchHeld  = inp.buttons.crouch();
-            input.glideHeld   = inp.buttons.jumpHeld();
+            // OR held/pressed bits across ALL buffered packets so no event is
+            // dropped when multiple packets arrive in the same server tick.
+            bool anyFireHeld    = false;
+            bool anyAltFireHeld = false;
+            bool anyJumpHeld    = false;
+            bool anyJumpPressed = false;
+            bool anyKnife       = false;
+            for (int j = 0; j < cl.inputCount; ++j) {
+                const Buttons& b = cl.inputBuf[j].buttons;
+                if (b.fire())
+                    anyFireHeld = true;
+                if (b.altFire())
+                    anyAltFireHeld = true;
+                if (b.jumpHeld())
+                    anyJumpHeld = true;
+                if (b.jump())
+                    anyJumpPressed = true;
+                if (b.knife())
+                    anyKnife = true;
+            }
 
-            processWeapon(cl, inp, dt);
+            // Server-side rising-edge detection for semi-auto weapons.
+            // Client sends fireHeld (continuous); we compute the pressed edge here
+            // so a single missed/late packet can't swallow an entire shot.
+            bool firePressed    = anyFireHeld && !cl.prevFireHeld;
+            bool altFirePressed = anyAltFireHeld && !cl.prevAltFireHeld;
+            cl.prevFireHeld     = anyFireHeld;
+            cl.prevAltFireHeld  = anyAltFireHeld;
+
+            input.jumpHeld    = anyJumpHeld;
+            input.jumpPressed = anyJumpPressed;
+            input.crouchHeld  = latest.buttons.crouch();
+            input.glideHeld   = anyJumpHeld;
+
+            processWeapon(cl, latest, anyFireHeld, firePressed, anyAltFireHeld, altFirePressed, anyKnife, dt);
             cl.inputCount = 0; // consumed
         }
     }
@@ -125,29 +153,36 @@ void GameServer::processTick(float dt)
 // Weapon / hitscan processing
 // ---------------------------------------------------------------------------
 
-void GameServer::processWeapon(ClientSlot& cl, const PktInput& inp, float dt)
+void GameServer::processWeapon(ClientSlot& cl,
+                               const PktInput& inp,
+                               bool fireHeld,
+                               bool firePressed,
+                               bool altFireHeld,
+                               bool /*altFirePressed*/,
+                               bool knifePressed,
+                               float dt)
 {
     auto& ws = registry.get<WeaponState>(cl.entity);
     ws.active =
         static_cast<WeaponId>(std::clamp(static_cast<int>(ws.active), 0, static_cast<int>(WeaponId::Count) - 1));
     weaponUpdate(ws, dt);
 
-    bool fire   = inp.buttons.fire();
-    bool knife  = inp.buttons.knife();
-    bool reload = (inp.buttons.altFire() && !fire);
-
-    if (reload)
+    // altFire held with no primary fire = reload
+    if (altFireHeld && !fireHeld)
         weaponTryReload(ws);
 
-    WeaponId useWeapon = knife ? WeaponId::Knife : ws.active;
+    WeaponId useWeapon = knifePressed ? WeaponId::Knife : ws.active;
     const auto& stats  = k_weaponStats[static_cast<int>(useWeapon)];
+    const bool isMelee = (stats.range <= 100.0f);
 
     bool didFire;
-    if (stats.range > 0.0f && stats.range <= 100.0f) {
-        // Melee
-        didFire = weaponTryFire(ws, fire || knife, fire || knife, dt);
+    if (isMelee) {
+        // Melee: use held so swings feel responsive; cooldown limits rate.
+        didFire = weaponTryFire(ws, fireHeld || knifePressed, fireHeld || knifePressed, dt);
     } else {
-        didFire = weaponTryFire(ws, fire, fire, dt);
+        // Ranged semi-auto: server-computed rising edge avoids the dropped-packet problem.
+        // Automatic: held fires continuously, rate limited by cooldown.
+        didFire = weaponTryFire(ws, fireHeld, firePressed, dt);
     }
 
     if (!didFire)
@@ -190,7 +225,7 @@ void GameServer::processWeapon(ClientSlot& cl, const PktInput& inp, float dt)
 
         caps[capCount++] = {
             .id         = other.id,
-            .center     = pos + glm::vec3(0.0f, LagComp::k_capsuleHalfHeight, 0.0f),
+            .center     = pos + glm::vec3(0.0f, LagComp::k_capsuleYOffset, 0.0f),
             .radius     = LagComp::k_capsuleRadius,
             .halfHeight = LagComp::k_capsuleHalfHeight,
         };
