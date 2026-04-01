@@ -232,22 +232,22 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
-      # ---- Package binary + shaders into a single archive ----
+      # ---- Package: client binary (shaders embedded) + standalone server ----
       - name: Package (Linux / macOS)
         if: runner.os != 'Windows'
         run: |
-          mkdir -p dist/shaders
-          cp build/release/${{ matrix.binary }} dist/
-          cp build/release/shaders/*.spv       dist/shaders/
+          mkdir -p dist
+          cp build/release/${{ matrix.binary }}          dist/
+          cp build/release/titandoom-server              dist/
           tar -czf ${{ matrix.archive }} -C dist .
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist\shaders | Out-Null
+          New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build\release\${{ matrix.binary }}    dist\
-          Copy-Item build\release\shaders\*.spv           dist\shaders\
+          Copy-Item build\release\titandoom-server.exe    dist\
           Compress-Archive -Path dist\* -DestinationPath ${{ matrix.archive }}
 
       - name: Upload artifact

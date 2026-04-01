@@ -1,6 +1,7 @@
 #include "Physics.hpp"
 
 #include "../ecs/Components.hpp"
+#include "Weapons.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -29,9 +30,6 @@ void clampSpeed(glm::vec3& vel, float maxVel)
 
 // ---------------------------------------------------------------------------
 // Source-engine Accelerate() — the heart of bhop and air-strafing.
-// Adds velocity along wishDir, but only up to wishSpeed.
-// Because we project current vel onto wishDir first, strafing sideways adds
-// speed without clipping the total (key to building bhop speed).
 // ---------------------------------------------------------------------------
 void accelerate(glm::vec3& vel, glm::vec3 wishDir, float wishSpeed, float accel, float dt)
 {
@@ -39,7 +37,6 @@ void accelerate(glm::vec3& vel, glm::vec3 wishDir, float wishSpeed, float accel,
     float addSpeed     = wishSpeed - currentSpeed;
     if (addSpeed <= 0.0f)
         return;
-
     float accelAmount = std::min(accel * wishSpeed * dt, addSpeed);
     vel += accelAmount * wishDir;
 }
@@ -52,7 +49,7 @@ void applyFriction(glm::vec3& vel, glm::vec3 up, float stopSpeed, float friction
     glm::vec3 lateralVel = projectOnPlane(vel, up);
     float speed          = glm::length(lateralVel);
     if (speed < 0.001f) {
-        vel -= lateralVel; // kill lateral movement completely
+        vel -= lateralVel;
         return;
     }
     float control  = std::max(speed, stopSpeed);
@@ -62,8 +59,7 @@ void applyFriction(glm::vec3& vel, glm::vec3 up, float stopSpeed, float friction
 }
 
 // ---------------------------------------------------------------------------
-// AABB overlap test.
-// Returns true and writes penetration depth + axis if overlapping.
+// AABB overlap test
 // ---------------------------------------------------------------------------
 bool aabbOverlap(glm::vec3 aCenter, glm::vec3 aHalf, glm::vec3 bCenter, glm::vec3 bHalf, glm::vec3& outDepth)
 {
@@ -73,61 +69,62 @@ bool aabbOverlap(glm::vec3 aCenter, glm::vec3 aHalf, glm::vec3 bCenter, glm::vec
 
     if (overlap.x <= 0.0f || overlap.y <= 0.0f || overlap.z <= 0.0f)
         return false;
-
     outDepth = overlap;
     return true;
 }
 
 // ---------------------------------------------------------------------------
-// Resolve AABB vs world along a single axis, writing collision info back
-// into PlayerController. Returns the displacement needed to push out.
+// Resolve AABB vs world collisions; also detects surf ramps.
 // ---------------------------------------------------------------------------
 glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, Velocity& vel, PlayerController& ctrl)
 {
-    constexpr float k_groundDot = 0.70f; // cos(45°) — surfaces above this are "floor"
+    constexpr float k_groundDot = 0.70f; // cos(~45°) — above this = floor
+    constexpr float k_surfDot   = 0.25f; // above this = surf ramp (below = pure wall)
 
     ctrl.onWall   = false;
     ctrl.onGround = false;
+    ctrl.onSurf   = false;
 
-    // Sweep axis-by-axis (classic Q3 approach)
     glm::vec3 result = pos;
 
-    // Helper: try to push out of any overlapping box
     auto sweep = [&](int axis) {
         for (const auto& box : world.boxes) {
             glm::vec3 depth;
             if (!aabbOverlap(result, half, box.center, box.half, depth))
                 continue;
 
-            // Find the minimum penetration axis that matches our current sweep axis
-            // We only care about this axis right now
             float pen = (result[axis] > box.center[axis]) ? depth[axis] : -depth[axis];
-
             result[axis] += pen;
 
-            // Determine surface normal (approximate)
             glm::vec3 normal{0.0f};
             normal[axis] = (pen > 0.0f) ? 1.0f : -1.0f;
 
             float upDot = glm::dot(normal, glm::vec3(0, 1, 0));
 
             if (upDot >= k_groundDot) {
-                // Floor
                 ctrl.onGround     = true;
                 ctrl.groundNormal = normal;
                 if (vel.linear[axis] < 0.0f)
                     vel.linear[axis] = 0.0f;
             } else if (upDot <= -k_groundDot) {
-                // Ceiling — kill upward velocity
                 if (vel.linear[axis] > 0.0f)
                     vel.linear[axis] = 0.0f;
+            } else if (upDot >= k_surfDot) {
+                // Surf ramp: slide along the surface, don't treat as a wall
+                if (!ctrl.onSurf) {
+                    ctrl.onSurf     = true;
+                    ctrl.surfNormal = normal;
+                }
+                // Remove only the component pushing INTO the surface (no sliding resistance)
+                float vDotN = glm::dot(vel.linear, normal);
+                if (vDotN < 0.0f)
+                    vel.linear -= normal * vDotN;
             } else {
-                // Wall
+                // Vertical wall
                 if (!ctrl.onWall) {
                     ctrl.onWall     = true;
                     ctrl.wallNormal = normal;
                 }
-                // Cancel velocity into wall
                 float vDotN = glm::dot(vel.linear, normal);
                 if (vDotN < 0.0f)
                     vel.linear -= normal * vDotN;
@@ -135,22 +132,137 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
         }
     };
 
-    sweep(1); // Y first (gravity axis) — sets onGround early
-    sweep(0); // X
-    sweep(2); // Z
+    sweep(1); // Y first — sets onGround early
+    sweep(0);
+    sweep(2);
+
+    // Safety net: never let the player fall through the floor
+    constexpr float k_killFloor = -8000.0f;
+    if (result.y < k_killFloor) {
+        result.y      = 36.0f; // respawn height
+        vel.linear    = {0.0f, 0.0f, 0.0f};
+        ctrl.onGround = true;
+    }
 
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Wall-run helper: detect nearby vertical walls via short raycasts
+// Returns true and fills wallNormal if a runnable wall is found.
+// ---------------------------------------------------------------------------
+bool detectWallRun(
+    const glm::vec3& pos, const glm::vec3& half, const World& world, const glm::vec3& fwd, glm::vec3& outNormal)
+{
+    // Cast short rays to the left and right of the player's forward direction
+    constexpr float k_wallSense = 8.0f; // extra reach beyond capsule edge
+    const float senseRange      = half.x + k_wallSense;
+
+    glm::vec3 right  = glm::vec3(fwd.z, 0.0f, -fwd.x);
+    glm::vec3 dirs[] = {right, -right};
+
+    for (auto& dir : dirs) {
+        for (const auto& box : world.boxes) {
+            float tHit     = 0.0f;
+            glm::vec3 bMin = box.center - box.half - glm::vec3(1.0f);
+            glm::vec3 bMax = box.center + box.half + glm::vec3(1.0f);
+            if (rayVsAabb(pos, dir, senseRange, bMin, bMax, tHit)) {
+                // Verify it's a vertical wall, not a ramp or floor
+                glm::vec3 normal = -dir; // approx; correct enough for game feel
+                float upDot      = std::abs(glm::dot(normal, glm::vec3(0, 1, 0)));
+                if (upDot < 0.25f) {
+                    outNormal = glm::normalize(normal - glm::vec3(0, normal.y, 0));
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Grapple hook physics
+// ---------------------------------------------------------------------------
+void updateGrappleHook(GrappleHook& gh,
+                       glm::vec3& pos,
+                       Velocity& vel,
+                       const PlayerController& ctrl,
+                       const glm::vec3& eyePos,
+                       const glm::vec3& aimDir,
+                       bool fireHeld,
+                       bool firePressed,
+                       const World& world,
+                       float dt)
+{
+    (void)ctrl;
+
+    if (!fireHeld && gh.state != GrappleHook::State::Idle) {
+        gh.state = GrappleHook::State::Idle;
+        return;
+    }
+
+    switch (gh.state) {
+    case GrappleHook::State::Idle:
+        if (firePressed) {
+            gh.state  = GrappleHook::State::Flying;
+            gh.tipPos = eyePos;
+            gh.tipVel = aimDir * GrappleHook::k_flySpeed;
+        }
+        break;
+
+    case GrappleHook::State::Flying: {
+        gh.tipPos += gh.tipVel * dt;
+
+        // Check tip vs world geometry
+        for (const auto& box : world.boxes) {
+            float tHit        = 0.0f;
+            glm::vec3 bMin    = box.center - box.half;
+            glm::vec3 bMax    = box.center + box.half;
+            glm::vec3 stepDir = glm::normalize(gh.tipVel);
+            float stepLen     = glm::length(gh.tipVel) * dt;
+            if (rayVsAabb(gh.tipPos - stepDir * stepLen, stepDir, stepLen + 2.0f, bMin, bMax, tHit)) {
+                gh.state       = GrappleHook::State::Attached;
+                gh.anchorPoint = gh.tipPos;
+                gh.ropeLength  = glm::length(gh.anchorPoint - eyePos);
+                break;
+            }
+        }
+
+        // Max range check
+        if (glm::length(gh.tipPos - eyePos) > GrappleHook::k_maxRange)
+            gh.state = GrappleHook::State::Idle;
+        break;
+    }
+
+    case GrappleHook::State::Attached: {
+        // Spring-like pull force toward anchor
+        glm::vec3 toAnchor = gh.anchorPoint - eyePos;
+        float dist         = glm::length(toAnchor);
+        if (dist > 1.0f) {
+            glm::vec3 pullDir  = toAnchor / dist;
+            float pullStrength = GrappleHook::k_pullForce;
+
+            // Only pull if rope is taut (player moved away from anchor)
+            if (dist > gh.ropeLength * 0.95f) {
+                vel.linear += pullDir * pullStrength * dt;
+            }
+        }
+        // Update tip to stay at anchor
+        gh.tipPos = gh.anchorPoint;
+        (void)pos;
+        break;
+    }
+    }
 }
 
 } // namespace
 
 // ---------------------------------------------------------------------------
-// physicsUpdate — called every game tick from main.cpp
+// physicsUpdate — called every game tick
 // ---------------------------------------------------------------------------
 
 void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig& cfg, float dt)
 {
-
     auto view = reg.view<Transform, Velocity, PlayerController, InputState, CameraAngles>();
 
     for (auto entity : view) {
@@ -160,70 +272,97 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
         auto& inp  = view.get<InputState>(entity);
         auto& cam  = view.get<CameraAngles>(entity);
 
-        const glm::vec3 up  = -ctrl.gravityDir; // "up" is against gravity
+        const glm::vec3 up  = -ctrl.gravityDir;
         const float gravity = ctrl.gravityMag;
 
         bool wasOnGround = ctrl.onGround;
 
-        // ---- 1. Build wish direction from input + camera yaw ----------------
-        // Input is in camera-local XZ; rotate by yaw to get world-space
+        // ---- 1. Build wish direction ----------------------------------------
         float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
-        // Forward and right vectors in the horizontal plane.
-        // fwd matches the camera lookAt forward: {-sin, 0, cos}.
-        // right = cross(fwd, up) = {-cos, 0, -sin}  (camera's actual right axis).
-        glm::vec3 fwd   = {-sy, 0.0f, cy};
-        glm::vec3 right = {-cy, 0.0f, -sy};
-
+        glm::vec3 fwd     = {-sy, 0.0f, cy};
+        glm::vec3 right   = {-cy, 0.0f, -sy};
         glm::vec3 wishVec = fwd * inp.moveDir.y + right * inp.moveDir.x;
         float wishLen     = glm::length(wishVec);
         glm::vec3 wishDir = (wishLen > 0.001f) ? wishVec / wishLen : glm::vec3(0.0f);
 
         // ---- 2. Coyote time --------------------------------------------------
-        if (wasOnGround) {
-            ctrl.coyoteTimer = cfg.coyoteTime;
-        } else {
-            ctrl.coyoteTimer = std::max(ctrl.coyoteTimer - dt, 0.0f);
-        }
+        ctrl.coyoteTimer = wasOnGround ? cfg.coyoteTime : std::max(ctrl.coyoteTimer - dt, 0.0f);
+        bool canJump     = ctrl.onGround || ctrl.coyoteTimer > 0.0f;
 
-        bool canJump = ctrl.onGround || ctrl.coyoteTimer > 0.0f;
-
-        // ---- 3. Walljump cooldown -------------------------------------------
+        // ---- 3. Timers -------------------------------------------------------
         if (ctrl.wallCooldown > 0.0f)
             ctrl.wallCooldown -= dt;
-
-        // ---- 4. Glide timer --------------------------------------------------
-        // Track glide state
         if (ctrl.onGround) {
             ctrl.gliding    = false;
             ctrl.glideTimer = 0.0f;
         }
 
-        // ---- 5. Gravity ------------------------------------------------------
+        // ---- 4. Wall-run update (WallRun component, if present) --------------
+        WallRun* wr = reg.try_get<WallRun>(entity);
+        if (wr) {
+            wr->cooldown = std::max(wr->cooldown - dt, 0.0f);
+
+            if (wr->active) {
+                wr->timer += dt;
+                // Detach if too slow, landed, or timer expired
+                float hspd = glm::length(glm::vec2(vel.linear.x, vel.linear.z));
+                if (ctrl.onGround || wr->timer > WallRun::k_maxDuration || hspd < WallRun::k_minSpeed * 0.5f)
+                    wr->active = false;
+            }
+
+            if (!wr->active && !ctrl.onGround && wr->cooldown <= 0.0f) {
+                float hspd = glm::length(glm::vec2(vel.linear.x, vel.linear.z));
+                glm::vec3 detectedNormal;
+                if (hspd >= WallRun::k_minSpeed &&
+                    detectWallRun(
+                        tf.position, {ctrl.halfWidth, ctrl.halfHeight, ctrl.halfWidth}, world, fwd, detectedNormal))
+                {
+                    wr->active     = true;
+                    wr->timer      = 0.0f;
+                    wr->wallNormal = detectedNormal;
+                    // Wall tangent: horizontal direction along wall closest to fwd
+                    wr->wallTangent = glm::normalize(projectOnPlane(fwd, detectedNormal) -
+                                                     glm::vec3(0, projectOnPlane(fwd, detectedNormal).y, 0));
+                }
+            }
+        }
+
+        // ---- 5. Gravity (modified by wall run / glide) ----------------------
         float effectiveGravity = gravity;
-        if (!ctrl.onGround) {
+
+        if (wr && wr->active) {
+            // Wall-running: no gravity (slight downward drift for feel)
+            effectiveGravity = gravity * 0.08f;
+        } else if (!ctrl.onGround) {
             if (inp.glideHeld && !wasOnGround && ctrl.glideTimer < cfg.glideMaxTime &&
                 glm::dot(vel.linear, ctrl.gravityDir) > 0.0f)
             {
-                // Falling + glide key held → glide
                 ctrl.gliding    = true;
                 ctrl.glideTimer = std::min(ctrl.glideTimer + dt, cfg.glideMaxTime);
                 effectiveGravity *= cfg.glideGravityScale;
             } else {
                 ctrl.gliding = false;
             }
-            vel.linear += ctrl.gravityDir * effectiveGravity * dt;
         }
+
+        if (!ctrl.onGround)
+            vel.linear += ctrl.gravityDir * effectiveGravity * dt;
 
         // ---- 6. Movement acceleration ----------------------------------------
         if (ctrl.onGround) {
-            // a. Always apply friction (Source behaviour — friction runs even on the
-            //    jump frame, which gives the tight snappy feel rather than icy sliding).
             applyFriction(vel.linear, up, cfg.stopSpeed, cfg.friction, dt);
-            // b. Ground accelerate (full wishspeed)
             float wishSpeed = cfg.maxSpeedGround * wishLen;
             accelerate(vel.linear, wishDir, wishSpeed, cfg.accelGround, dt);
+        } else if (wr && wr->active) {
+            // Wall-run: full-speed strafe along wall
+            float wishSpeed = cfg.maxSpeedGround * wishLen;
+            accelerate(vel.linear, wishDir, wishSpeed, cfg.accelGround, dt);
+        } else if (ctrl.onSurf) {
+            // Surfing: full-speed strafe (Source surf mechanic — no speed cap)
+            float wishSpeed = cfg.maxSpeedGround * wishLen;
+            accelerate(vel.linear, wishDir, wishSpeed, cfg.accelAir * 1.5f, dt);
         } else {
-            // Air accelerate — wishspeed capped hard (allows strafing, not raw speed)
+            // Air strafe — tight Source cap
             float wishSpeed = std::min(cfg.maxSpeedAir, cfg.maxSpeedGround * wishLen);
             accelerate(vel.linear, wishDir, wishSpeed, cfg.accelAir, dt);
         }
@@ -233,20 +372,29 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
         // ---- 7. Jump ---------------------------------------------------------
         bool doJump = canJump && (inp.jumpPressed || (cfg.autoBhop && inp.jumpHeld));
         if (doJump) {
-            // Bhop key: remove downward velocity component, add full jumpSpeed upward.
-            // Horizontal momentum is completely preserved — this is the bhop mechanic.
             float downVel = glm::dot(vel.linear, ctrl.gravityDir);
             if (downVel > 0.0f)
                 vel.linear -= ctrl.gravityDir * downVel;
             vel.linear += up * cfg.jumpSpeed;
             ctrl.onGround    = false;
             ctrl.coyoteTimer = 0.0f;
+            if (wr)
+                wr->active = false;
         }
 
-        // ---- 8. Wall jump ----------------------------------------------------
+        // ---- 8. Wall-run jump ------------------------------------------------
+        bool doWallRunJump = wr && wr->active && inp.jumpPressed;
+        if (doWallRunJump) {
+            glm::vec3 kickDir = glm::normalize(wr->wallNormal + up * 0.7f);
+            vel.linear        = kickDir * cfg.wallJumpSpeed * 1.5f +
+                                wr->wallTangent * glm::length(glm::vec2(vel.linear.x, vel.linear.z)) * 0.8f;
+            wr->active        = false;
+            wr->cooldown      = cfg.wallCooldown;
+        }
+
+        // ---- 9. Classic wall jump (collision-detected wall) ------------------
         bool doWalljump = !ctrl.onGround && ctrl.onWall && ctrl.wallCooldown <= 0.0f && inp.jumpPressed;
-        if (doWalljump) {
-            // Reflect horizontal velocity off wall normal, boost away
+        if (!doWallRunJump && doWalljump) {
             glm::vec3 lateralVel = projectOnPlane(vel.linear, up);
             glm::vec3 reflected  = glm::reflect(lateralVel, ctrl.wallNormal);
             vel.linear           = reflected * cfg.wallJumpLateral + up * cfg.wallJumpSpeed;
@@ -254,17 +402,23 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
             ctrl.onWall          = false;
         }
 
-        // ---- 9. Integrate position -------------------------------------------
+        // ---- 10. Grapple hook -----------------------------------------------
+        GrappleHook* gh = reg.try_get<GrappleHook>(entity);
+        if (gh) {
+            glm::vec3 eyePos = tf.position + glm::vec3(0.0f, ctrl.eyeHeight, 0.0f);
+            float cp = std::cos(cam.pitch), sp = std::sin(cam.pitch);
+            float sy2 = std::sin(cam.yaw), cy2 = std::cos(cam.yaw);
+            glm::vec3 aimDir = glm::normalize(glm::vec3(-sy2 * cp, sp, cy2 * cp));
+
+            updateGrappleHook(
+                *gh, tf.position, vel, ctrl, eyePos, aimDir, inp.grappleHeld, inp.grapplePressed, world, dt);
+        }
+
+        // ---- 11. Integrate position ------------------------------------------
         tf.position += vel.linear * dt;
 
-        // ---- 10. Collision resolve -------------------------------------------
+        // ---- 12. Collision resolve -------------------------------------------
         glm::vec3 half{ctrl.halfWidth, ctrl.halfHeight, ctrl.halfWidth};
         tf.position = resolveCollisions(tf.position, half, world, vel, ctrl);
-
-        // ---- 11. Auto-bhop landing (after resolve so onGround is fresh) ------
-        if (ctrl.onGround && !wasOnGround) {
-            // We just landed. If jump is held and autoBhop, the next frame's
-            // doJump check handles it (friction is skipped when jumping).
-        }
     }
 }

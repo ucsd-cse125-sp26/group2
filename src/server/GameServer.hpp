@@ -1,0 +1,105 @@
+#pragma once
+#include "../ecs/Components.hpp"
+#include "../game/Physics.hpp"
+#include "../game/Weapons.hpp"
+#include "../game/World.hpp"
+#include "../net/NetChannel.hpp"
+#include "../net/Protocol.hpp"
+#include "LagComp.hpp"
+
+#include <array>
+#include <cstdint>
+#include <entt/entt.hpp>
+
+// ---------------------------------------------------------------------------
+// Per-client state on the server
+// ---------------------------------------------------------------------------
+
+struct ClientSlot
+{
+    bool connected   = false;
+    sockaddr_in addr = {};
+    NetChannel chan;
+    char name[16] = "Player";
+    uint8_t id    = 0xFF;
+
+    entt::entity entity    = entt::null; // ECS entity representing this player
+    uint32_t lastInputTick = 0;          // most recent processed input tick
+    float lastInputTime    = 0.0f;
+
+    // Pending inputs not yet processed (in case of minor re-ordering)
+    static constexpr int k_inputBuf = 8;
+    PktInput inputBuf[k_inputBuf];
+    int inputCount = 0;
+
+    // Respawn timer (-1 = alive)
+    float respawnTimer = -1.0f;
+    int kills          = 0;
+    int deaths         = 0;
+};
+
+// ---------------------------------------------------------------------------
+// GameServer — authoritative game simulation
+// ---------------------------------------------------------------------------
+
+class GameServer
+{
+public:
+    // Returns false on fatal error.
+    bool init(uint16_t port = k_serverPort);
+    void shutdown();
+
+    // Main loop: call this in a tight loop; it sleeps internally.
+    void run();
+
+    // Single tick update (exposed for testing).
+    void tick(float dt);
+
+private:
+    // ---- Network ----
+    UdpSocket sock;
+    uint8_t buf[k_maxPacketBytes];
+
+    std::array<ClientSlot, k_maxPlayers> clients;
+
+    uint8_t connectedCount = 0;
+
+    // ---- Simulation ----
+    World world;
+    PhysicsConfig physicsCfg;
+    entt::registry registry;
+    LagComp lagComp;
+
+    uint32_t serverTick = 0;
+    double simTime      = 0.0;
+
+    // ---- Internal ----
+    void receiveAll();
+    void handlePacket(const PacketHeader* hdr, int len, const sockaddr_in& from);
+    void handleConnect(const PktConnect* pkt, const sockaddr_in& from);
+    void handleInput(ClientSlot& cl, const PktInput* pkt);
+    void handleDisconnect(ClientSlot& cl);
+
+    void processTick(float dt);
+    void processWeapon(ClientSlot& cl, const PktInput& inp, float dt);
+    void broadcastSnapshot();
+    void pushLagCompSnapshot();
+    void spawnPlayer(ClientSlot& cl);
+    void killPlayer(ClientSlot& cl, int attackerId);
+    void checkRespawns(float dt);
+
+    void sendEvent(ClientSlot& cl, EventType evt, uint8_t p1 = 0, uint8_t p2 = 0);
+    void sendEventAll(EventType evt, uint8_t p1 = 0, uint8_t p2 = 0);
+
+    ClientSlot* findClient(const sockaddr_in& from);
+    uint8_t nextFreeSlot() const;
+
+    // Respawn positions (one per slot)
+    static constexpr glm::vec3 k_spawns[k_maxPlayers] = {
+        {0.0f, 36.0f, -400.0f},
+        {400.0f, 36.0f, 0.0f},
+        {0.0f, 36.0f, 400.0f},
+        {-400.0f, 36.0f, 0.0f},
+    };
+    static constexpr float k_respawnDelay = 4.0f; // seconds
+};

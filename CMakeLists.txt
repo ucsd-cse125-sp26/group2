@@ -123,6 +123,8 @@ set(SHADER_SOURCES
     triangle.frag
     scene.vert
     scene.frag
+    hud.vert
+    hud.frag
 )
 
 set(SHADER_OUTPUTS "")
@@ -141,12 +143,40 @@ endforeach()
 
 add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
 
-# ---- Sources ----
-file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+# ---- Platform socket library ----
+if(WIN32)
+    set(SOCKET_LIBS ws2_32)
+else()
+    set(SOCKET_LIBS "")
+endif()
+
+# ---- Shared game / networking sources (used by both client and server) ----
+set(COMMON_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/Socket.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/NetChannel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Physics.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Weapons.cpp"
 )
 
-add_executable(titandoom ${GAME_SOURCES})
+# ---- Client sources ----
+set(CLIENT_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Renderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/MeshGen.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/HUD.cpp"
+)
+
+# ---- Server sources ----
+set(SERVER_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/GameServer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/LagComp.cpp"
+)
+
+# ===========================================================================
+# Client executable
+# ===========================================================================
+add_executable(titandoom ${CLIENT_SOURCES} ${COMMON_SOURCES})
 add_dependencies(titandoom shaders)
 
 if(TITANDOOM_BUNDLE_SHADERS)
@@ -187,14 +217,11 @@ else()
     message(STATUS "Shader bundling: OFF — shaders/ folder required next to the binary")
 endif()
 
-target_include_directories(titandoom PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-)
-
 target_link_libraries(titandoom PRIVATE
     SDL3::SDL3-static
     EnTT::EnTT
     glm::glm
+    ${SOCKET_LIBS}
 )
 
 if(ENABLE_SHADERCROSS)
@@ -207,6 +234,36 @@ set_compiler_warnings(titandoom)
 
 # ---- Sanitizers ----
 enable_sanitizers(titandoom)
+
+# ===========================================================================
+# Dedicated server executable
+# ===========================================================================
+add_executable(titandoom-server ${SERVER_SOURCES} ${COMMON_SOURCES})
+add_dependencies(titandoom-server shaders)
+
+target_include_directories(titandoom-server PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(titandoom-server PRIVATE
+    SDL3::SDL3-static
+    EnTT::EnTT
+    glm::glm
+    ${SOCKET_LIBS}
+)
+
+set_compiler_warnings(titandoom-server)
+enable_sanitizers(titandoom-server)
+
+# Server always loads shaders from disk (for log msgs about SPV files, future use)
+# No shaders needed at server runtime currently — just copy for completeness.
+add_custom_command(TARGET titandoom-server POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SHADER_OUT_DIR}"
+            "$<TARGET_FILE_DIR:titandoom-server>/shaders"
+    COMMENT "Copying shaders to server binary directory"
+    VERBATIM
+)
 
 # ---- Symlink compile_commands.json to project root for clang-tidy ----
 if(NOT WIN32)
