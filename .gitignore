@@ -1,0 +1,60 @@
+# Build output
+build/
+out/
+.cache/
+
+# CMake artifacts (keep cmake/ module directory)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+*.cmake
+!cmake/
+
+# IDE / editor
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docview
+.vs/
+*.swp
+*.swo
+*~
+
+# Compiled objects & libraries
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+
+# clangd LSP
+.clangd/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
+*.log
+
+# Distribution / packaging
+dist/
+*.tar.gz
+*.zip

@@ -1,0 +1,72 @@
+---
+BasedOnStyle:  LLVM
+IndentWidth:   4
+TabWidth:      4
+UseTab:        Never
+ColumnLimit:   120
+
+# Braces
+BreakBeforeBraces:          Custom
+BraceWrapping:
+  AfterClass:               true
+  AfterControlStatement:    MultiLine
+  AfterEnum:                true
+  AfterFunction:            true
+  AfterNamespace:           true
+  AfterStruct:              true
+  AfterUnion:               true
+  BeforeElse:               false
+  IndentBraces:             false
+  SplitEmptyFunction:       false
+  SplitEmptyRecord:         false
+
+# Access modifiers
+AccessModifierOffset:       -4
+IndentAccessModifiers:      false
+
+# Namespaces
+NamespaceIndentation:       None
+CompactNamespaces:          false
+
+# Includes
+SortIncludes:               CaseSensitive
+IncludeBlocks:              Regroup
+IncludeCategories:
+  # Project headers (quoted)
+  - Regex:    '^"'
+    Priority: 1
+  # SDL headers
+  - Regex:    '^<SDL3/'
+    Priority: 2
+  # Third-party (angle bracket)
+  - Regex:    '^<'
+    Priority: 3
+
+# Alignment
+AlignConsecutiveAssignments:  Consecutive
+AlignConsecutiveDeclarations: None
+AlignTrailingComments:
+  Kind:            Always
+  OverEmptyLines:  1
+
+# Short forms — keep them readable
+AllowShortBlocksOnASingleLine:     Empty
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine:  Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine:      false
+
+# Line breaking
+BreakConstructorInitializers:   BeforeComma
+PackConstructorInitializers:    NextLine
+BreakInheritanceList:           BeforeComma
+BinPackArguments:               false
+BinPackParameters:              false
+AlwaysBreakTemplateDeclarations: Yes
+
+# Pointers / references: int* ptr, not int *ptr
+PointerAlignment:   Left
+ReferenceAlignment: Left
+
+# Trailing commas in multiline constructs
+InsertTrailingCommas: Wrapped

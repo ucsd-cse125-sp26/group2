@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------ #
+  #  Build & sanitizer run on all three platforms                        #
+  # ------------------------------------------------------------------ #
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+            preset: debug
+            cc: clang
+            cxx: clang++
+
+          - name: macOS
+            os: macos-latest
+            preset: debug
+            cc: clang
+            cxx: clang++
+
+          - name: Windows
+            os: windows-latest
+            preset: debug-win
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- Linux deps ----------
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build clang clang-format clang-tidy \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols \
+            libpulse-dev libasound2-dev \
+            libdbus-1-dev libudev-dev \
+            libgl-dev libgles2-mesa-dev \
+            libdrm-dev libgbm-dev
+
+      # ---------- macOS deps ----------
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      # ---------- Windows deps ----------
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      # ---------- Cache FetchContent downloads ----------
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmake/packages
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: fetchcontent-${{ runner.os }}-
+
+      # ---------- Configure ----------
+      - name: Configure
+        env:
+          CC:  ${{ matrix.cc  || '' }}
+          CXX: ${{ matrix.cxx || '' }}
+        run: cmake --preset ${{ matrix.preset }}
+
+      # ---------- Build ----------
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+  # ------------------------------------------------------------------ #
+  #  Format check — fast, runs only on Linux                            #
+  # ------------------------------------------------------------------ #
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          find src -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) \
+            | xargs clang-format --dry-run --Werror
+
+  # ------------------------------------------------------------------ #
+  #  clang-tidy — non-blocking, report-only                             #
+  # ------------------------------------------------------------------ #
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    continue-on-error: true   # informational until the codebase stabilises
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build clang clang-tidy \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols \
+            libpulse-dev libasound2-dev \
+            libdbus-1-dev libudev-dev \
+            libgl-dev libgles2-mesa-dev \
+            libdrm-dev libgbm-dev
+
+      - name: Configure (no sanitizers, just compile_commands)
+        env:
+          CC:  clang
+          CXX: clang++
+        run: cmake --preset release
+
+      - name: Run clang-tidy
+        run: |
+          find src -type f \( -name "*.cpp" \) \
+            | xargs clang-tidy -p build/release

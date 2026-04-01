@@ -1,0 +1,25 @@
+# LeakSanitizer suppressions for known false positives from system libraries.
+# Usage: LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/titandoom
+#
+# These leaks originate inside SDL3's Linux backends (dbus, Wayland) and are
+# not real leaks in our code. SDL does not perform full dbus/Wayland teardown
+# because the OS reclaims all memory on exit anyway.
+
+# dbus — used by SDL for Wayland/ibus/system theme detection
+leak:dbus_bus_register
+leak:internal_bus_get
+leak:dbus_bus_add_match
+leak:dbus_message_new_empty_header
+leak:dbus_message_new_method_call
+leak:_dbus_message_loader_queue_messages
+leak:_dbus_header_load
+leak:dbus_connection_send_with_reply_and_block
+
+# libwayland-client
+leak:wl_display_connect
+leak:wl_global_create
+
+# SDL internals
+leak:SDL_DBus_Init
+leak:SDL_SystemTheme_Init
+leak:Wayland_CreateDevice
