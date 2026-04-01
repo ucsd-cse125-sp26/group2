@@ -24,6 +24,17 @@ option(ENABLE_UBSAN       "Enable UndefinedBehaviorSanitizer" OFF)
 option(ENABLE_TSAN        "Enable ThreadSanitizer"            OFF)
 option(ENABLE_SHADERCROSS "Build with SDL_shadercross"        OFF)
 
+# Embed compiled SPIR-V into the executable so no shaders/ folder is needed at runtime.
+# Defaults to ON for Release/RelWithDebInfo, OFF for Debug (keeps hot-reload possible).
+if(CMAKE_BUILD_TYPE MATCHES "^Rel")
+    set(_bundle_shaders_default ON)
+else()
+    set(_bundle_shaders_default OFF)
+endif()
+option(TITANDOOM_BUNDLE_SHADERS
+    "Embed SPIR-V shaders into the executable (single-binary distribution)"
+    ${_bundle_shaders_default})
+
 # ---- Dependencies ----
 
 # SDL3 — window, input, GPU API (Vulkan/Metal/DX12), audio
@@ -138,15 +149,43 @@ file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
 add_executable(titandoom ${GAME_SOURCES})
 add_dependencies(titandoom shaders)
 
-# Copy compiled shaders into <build>/shaders/ next to the binary at post-build.
-# SDL_GetBasePath() + "shaders/<name>.spv" is how the binary locates them at runtime.
-add_custom_command(TARGET titandoom POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${SHADER_OUT_DIR}"
-        "$<TARGET_FILE_DIR:titandoom>/shaders"
-    COMMENT "Copying shaders to binary directory"
-    VERBATIM
-)
+if(TITANDOOM_BUNDLE_SHADERS)
+    # ---- Embed SPIR-V into a generated C++ header ----
+    # Write the list of compiled SPV paths to a file; the script reads it at build time
+    # (avoids CMake semicolon-escaping issues when passing lists via -D to cmake -P).
+    string(REPLACE ";" "\n" _spv_list_content "${SHADER_OUTPUTS}")
+    file(WRITE "${CMAKE_BINARY_DIR}/spv_list.txt" "${_spv_list_content}")
+
+    set(_embedded_header "${CMAKE_BINARY_DIR}/embedded_shaders.hpp")
+
+    add_custom_command(
+        OUTPUT  "${_embedded_header}"
+        COMMAND ${CMAKE_COMMAND}
+                "-DSPV_LIST_FILE=${CMAKE_BINARY_DIR}/spv_list.txt"
+                "-DOUTPUT_FILE=${_embedded_header}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedShaders.cmake"
+        DEPENDS ${SHADER_OUTPUTS}
+        COMMENT "Embedding SPIR-V shaders into the executable"
+        VERBATIM
+    )
+    add_custom_target(embed_shaders DEPENDS "${_embedded_header}")
+    add_dependencies(titandoom embed_shaders)
+
+    # Let Renderer.cpp find the generated header via #include "embedded_shaders.hpp"
+    target_include_directories(titandoom PRIVATE "${CMAKE_BINARY_DIR}")
+    target_compile_definitions(titandoom PRIVATE TITANDOOM_BUNDLE_SHADERS)
+    message(STATUS "Shader bundling: ON  — shaders compiled into the executable")
+else()
+    # Copy compiled shaders next to the binary; SDL_GetBasePath() locates them at runtime.
+    add_custom_command(TARGET titandoom POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${SHADER_OUT_DIR}"
+                "$<TARGET_FILE_DIR:titandoom>/shaders"
+        COMMENT "Copying shaders to binary directory"
+        VERBATIM
+    )
+    message(STATUS "Shader bundling: OFF — shaders/ folder required next to the binary")
+endif()
 
 target_include_directories(titandoom PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
