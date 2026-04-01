@@ -74,21 +74,26 @@ bool aabbOverlap(glm::vec3 aCenter, glm::vec3 aHalf, glm::vec3 bCenter, glm::vec
 }
 
 // ---------------------------------------------------------------------------
-// Resolve AABB vs world collisions.
+// Resolve AABB vs world collisions — one substep pass.
 //
-// Strategy: minimum-penetration-axis (SAT).
-// For each overlapping box we push along the axis with the smallest overlap.
-// This avoids the old sweep-Y-first bug where touching the side of a tall box
-// caused the player to be ejected downward by hundreds of units.
+// Minimum-penetration-axis (SAT) + 16 substeps per frame.
 //
-// Multiple iterations handle cases where resolving one collision creates a
-// new overlap with an adjacent box.
+// Why min-penetration (NOT decomposed-axis):
+//   The floor is half=(2000,20,2000). When gravity dips the player 0.01 qu
+//   into the floor, overlap = (2032, 0.01, 2032). Min axis = Y (0.01) →
+//   push up 0.01. Correct. A decomposed X-first pass would see overlap.x=2032
+//   and shove the player 2032 units sideways into the perimeter wall — that
+//   was the spawn-outside-map bug.
+//
+// Why substeps prevent tall-wall Y-sink:
+//   At 16 substeps the max horizontal penetration per substep is ~7 qu.
+//   For any tall box (e.g. tower half.y=300), overlap.y = 72 qu while
+//   overlap.x = 7 qu → min = X → push back. No downward ejection.
 // ---------------------------------------------------------------------------
 glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, Velocity& vel, PlayerController& ctrl)
 {
-    constexpr float k_groundDot = 0.70f; // cos(~45°) — above this = floor/ceiling
-    constexpr float k_surfDot   = 0.25f; // above this = surf ramp (unused with axis-aligned boxes)
-    constexpr int k_iters       = 4;     // passes — handles corner/edge stacking
+    constexpr float k_groundDot = 0.70f;
+    constexpr int k_iters       = 3;
 
     ctrl.onWall   = false;
     ctrl.onGround = false;
@@ -102,9 +107,7 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
             if (!aabbOverlap(result, half, box.center, box.half, depth))
                 continue;
 
-            // Choose the axis of minimum penetration.
-            // This is the correct SAT resolution: push out along the least-invaded axis,
-            // which for side contacts is X or Z (small), not Y (huge for tall boxes).
+            // Minimum-penetration axis.
             int axis = 0;
             if (depth[1] < depth[0])
                 axis = 1;
@@ -125,20 +128,9 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
                 if (vel.linear.y < 0.0f)
                     vel.linear.y = 0.0f;
             } else if (upDot <= -k_groundDot) {
-                // Ceiling
                 if (vel.linear.y > 0.0f)
                     vel.linear.y = 0.0f;
-            } else if (upDot >= k_surfDot) {
-                // Surf ramp (would need angled geometry; kept for future use)
-                if (!ctrl.onSurf) {
-                    ctrl.onSurf     = true;
-                    ctrl.surfNormal = normal;
-                }
-                float vDotN = glm::dot(vel.linear, normal);
-                if (vDotN < 0.0f)
-                    vel.linear -= normal * vDotN;
             } else {
-                // Vertical wall
                 if (!ctrl.onWall) {
                     ctrl.onWall     = true;
                     ctrl.wallNormal = normal;
@@ -150,9 +142,7 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
         }
     }
 
-    // Safety net: if somehow clipped below the world, teleport to safe height.
-    // The visible floor bottom is at y=-40; catch anything below that quickly.
-    constexpr float k_killFloor = -400.0f;
+    constexpr float k_killFloor = -200.0f;
     if (result.y < k_killFloor) {
         result.y      = 36.0f;
         vel.linear    = {0.0f, 0.0f, 0.0f};
@@ -169,8 +159,7 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
 bool detectWallRun(
     const glm::vec3& pos, const glm::vec3& half, const World& world, const glm::vec3& fwd, glm::vec3& outNormal)
 {
-    // Cast short rays to the left and right of the player's forward direction
-    constexpr float k_wallSense = 8.0f; // extra reach beyond capsule edge
+    constexpr float k_wallSense = 8.0f;
     const float senseRange      = half.x + k_wallSense;
 
     glm::vec3 right  = glm::vec3(fwd.z, 0.0f, -fwd.x);
@@ -182,8 +171,7 @@ bool detectWallRun(
             glm::vec3 bMin = box.center - box.half - glm::vec3(1.0f);
             glm::vec3 bMax = box.center + box.half + glm::vec3(1.0f);
             if (rayVsAabb(pos, dir, senseRange, bMin, bMax, tHit)) {
-                // Verify it's a vertical wall, not a ramp or floor
-                glm::vec3 normal = -dir; // approx; correct enough for game feel
+                glm::vec3 normal = -dir;
                 float upDot      = std::abs(glm::dot(normal, glm::vec3(0, 1, 0)));
                 if (upDot < 0.25f) {
                     outNormal = glm::normalize(normal - glm::vec3(0, normal.y, 0));
@@ -228,7 +216,6 @@ void updateGrappleHook(GrappleHook& gh,
     case GrappleHook::State::Flying: {
         gh.tipPos += gh.tipVel * dt;
 
-        // Check tip vs world geometry
         for (const auto& box : world.boxes) {
             float tHit        = 0.0f;
             glm::vec3 bMin    = box.center - box.half;
@@ -243,26 +230,19 @@ void updateGrappleHook(GrappleHook& gh,
             }
         }
 
-        // Max range check
         if (glm::length(gh.tipPos - eyePos) > GrappleHook::k_maxRange)
             gh.state = GrappleHook::State::Idle;
         break;
     }
 
     case GrappleHook::State::Attached: {
-        // Spring-like pull force toward anchor
         glm::vec3 toAnchor = gh.anchorPoint - eyePos;
         float dist         = glm::length(toAnchor);
         if (dist > 1.0f) {
-            glm::vec3 pullDir  = toAnchor / dist;
-            float pullStrength = GrappleHook::k_pullForce;
-
-            // Only pull if rope is taut (player moved away from anchor)
-            if (dist > gh.ropeLength * 0.95f) {
-                vel.linear += pullDir * pullStrength * dt;
-            }
+            glm::vec3 pullDir = toAnchor / dist;
+            if (dist > gh.ropeLength * 0.95f)
+                vel.linear += pullDir * GrappleHook::k_pullForce * dt;
         }
-        // Update tip to stay at anchor
         gh.tipPos = gh.anchorPoint;
         (void)pos;
         break;
@@ -319,7 +299,6 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
 
             if (wr->active) {
                 wr->timer += dt;
-                // Detach if too slow, landed, or timer expired
                 float hspd = glm::length(glm::vec2(vel.linear.x, vel.linear.z));
                 if (ctrl.onGround || wr->timer > WallRun::k_maxDuration || hspd < WallRun::k_minSpeed * 0.5f)
                     wr->active = false;
@@ -332,10 +311,9 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
                     detectWallRun(
                         tf.position, {ctrl.halfWidth, ctrl.halfHeight, ctrl.halfWidth}, world, fwd, detectedNormal))
                 {
-                    wr->active     = true;
-                    wr->timer      = 0.0f;
-                    wr->wallNormal = detectedNormal;
-                    // Wall tangent: horizontal direction along wall closest to fwd
+                    wr->active      = true;
+                    wr->timer       = 0.0f;
+                    wr->wallNormal  = detectedNormal;
                     wr->wallTangent = glm::normalize(projectOnPlane(fwd, detectedNormal) -
                                                      glm::vec3(0, projectOnPlane(fwd, detectedNormal).y, 0));
                 }
@@ -346,7 +324,6 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
         float effectiveGravity = gravity;
 
         if (wr && wr->active) {
-            // Wall-running: no gravity (slight downward drift for feel)
             effectiveGravity = gravity * 0.08f;
         } else if (!ctrl.onGround) {
             if (inp.glideHeld && !wasOnGround && ctrl.glideTimer < cfg.glideMaxTime &&
@@ -369,15 +346,12 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
             float wishSpeed = cfg.maxSpeedGround * wishLen;
             accelerate(vel.linear, wishDir, wishSpeed, cfg.accelGround, dt);
         } else if (wr && wr->active) {
-            // Wall-run: full-speed strafe along wall
             float wishSpeed = cfg.maxSpeedGround * wishLen;
             accelerate(vel.linear, wishDir, wishSpeed, cfg.accelGround, dt);
         } else if (ctrl.onSurf) {
-            // Surfing: full-speed strafe (Source surf mechanic — no speed cap)
             float wishSpeed = cfg.maxSpeedGround * wishLen;
             accelerate(vel.linear, wishDir, wishSpeed, cfg.accelAir * 1.5f, dt);
         } else {
-            // Air strafe — tight Source cap
             float wishSpeed = std::min(cfg.maxSpeedAir, cfg.maxSpeedGround * wishLen);
             accelerate(vel.linear, wishDir, wishSpeed, cfg.accelAir, dt);
         }
@@ -429,11 +403,47 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
                 *gh, tf.position, vel, ctrl, eyePos, aimDir, inp.grappleHeld, inp.grapplePressed, world, dt);
         }
 
-        // ---- 11. Integrate position ------------------------------------------
-        tf.position += vel.linear * dt;
+        // ---- 11+12. Substep position integration + collision resolution ------
+        //
+        // 16 substeps keep per-step displacement ≤ 7 qu so we can't tunnel
+        // through thin walls (8 qu) or cause wrong-axis ejections.
+        //
+        // CRITICAL: resolveCollisions resets onGround/onWall at each call.
+        // When standing still, substep 1 detects the floor and zeroes vel.y;
+        // substeps 2-16 then see zero overlap (player at exact floor surface)
+        // and leave onGround=false. We accumulate flags across all substeps
+        // with OR so the frame ends with the correct contact state.
+        //
+        {
+            const glm::vec3 half{ctrl.halfWidth, ctrl.halfHeight, ctrl.halfWidth};
+            constexpr int k_substeps = 16;
+            const float subDt        = dt / static_cast<float>(k_substeps);
 
-        // ---- 12. Collision resolve -------------------------------------------
-        glm::vec3 half{ctrl.halfWidth, ctrl.halfHeight, ctrl.halfWidth};
-        tf.position = resolveCollisions(tf.position, half, world, vel, ctrl);
+            bool accGround          = false;
+            bool accWall            = false;
+            glm::vec3 accGroundNorm = ctrl.groundNormal;
+            glm::vec3 accWallNorm   = ctrl.wallNormal;
+
+            for (int sub = 0; sub < k_substeps; ++sub) {
+                tf.position += vel.linear * subDt;
+                tf.position = resolveCollisions(tf.position, half, world, vel, ctrl);
+
+                if (ctrl.onGround) {
+                    accGround     = true;
+                    accGroundNorm = ctrl.groundNormal;
+                }
+                if (ctrl.onWall) {
+                    accWall     = true;
+                    accWallNorm = ctrl.wallNormal;
+                }
+            }
+
+            // Write accumulated contact state back so the next frame's
+            // movement calculations (friction, acceleration, coyote, jump) are correct.
+            ctrl.onGround     = accGround;
+            ctrl.groundNormal = accGroundNorm;
+            ctrl.onWall       = accWall;
+            ctrl.wallNormal   = accWallNorm;
+        }
     }
 }
