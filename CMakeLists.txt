@@ -77,8 +77,14 @@ endif()
 #   Ubuntu:  sudo apt-get install glslang-tools  (glslangValidator)
 #   macOS:   brew install glslang         (glslangValidator)
 #   Windows: install Vulkan SDK           (glslc)
-find_program(GLSLC glslc HINTS ENV VULKAN_SDK PATH_SUFFIXES bin)
-find_program(GLSLANG_VALIDATOR glslangValidator HINTS ENV VULKAN_SDK PATH_SUFFIXES bin)
+find_program(GLSLC glslc
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin   # Homebrew macOS
+    PATH_SUFFIXES bin)
+find_program(GLSLANG_VALIDATOR glslangValidator
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin   # Homebrew macOS
+    PATH_SUFFIXES bin)
 
 if(GLSLC)
     message(STATUS "Shader compiler: glslc (${GLSLC})")
