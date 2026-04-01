@@ -33,6 +33,8 @@ struct HudState
     float hitMarkerTimer = 0.0f; // shows hit marker for this many seconds
     bool killedSomeone   = false;
 
+    float muzzleFlashTimer = 0.0f; // brief flash on fire (0.07 s)
+
     // Grapple
     bool grappleActive = false;
 };

@@ -94,12 +94,14 @@ private:
     ClientSlot* findClient(const sockaddr_in& from);
     uint8_t nextFreeSlot() const;
 
-    // Respawn positions (one per slot)
+    // Respawn positions — open floor areas, verified clear of all map geometry.
+    // Floor top is y=0; player center at y=36 means feet exactly on floor.
+    // Player 1 was wrongly at (400,36,0) which is inside the low platform (Y:[0,128]).
     static constexpr glm::vec3 k_spawns[k_maxPlayers] = {
-        {0.0f, 36.0f, -400.0f},
-        {400.0f, 36.0f, 0.0f},
-        {0.0f, 36.0f, 400.0f},
-        {-400.0f, 36.0f, 0.0f},
+        {0.0f, 36.0f, 0.0f},                      // dead center
+        {-700.0f, 36.0f, -700.0f},                // SW corner (clear of tower & cover boxes)
+        {700.0f, 36.0f, -700.0f},                 // SE corner (clear of platform & cover box)
+        {700.0f, 36.0f, 700.0f},                  // NE corner (clear of bhop walls)
     };
     static constexpr float k_respawnDelay = 4.0f; // seconds
 };

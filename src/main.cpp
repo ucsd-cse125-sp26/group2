@@ -329,14 +329,54 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     // ---- Local physics tick (client prediction) ----
     physicsUpdate(s->registry, s->world, s->physicsCfg, dt);
 
-    // ---- Weapon tick (client-side for ammo display) ----
+    // ---- Weapon tick (client-side for ammo display + visual feedback) ----
     {
         auto& ws  = s->registry.get<WeaponState>(s->player);
         auto& inp = s->registry.get<InputState>(s->player);
         weaponUpdate(ws, dt);
-        weaponTryFire(ws, inp.fireHeld, inp.firePressed, dt);
+        bool shotFired = weaponTryFire(ws, inp.fireHeld, inp.firePressed, dt);
         if (inp.reloadPressed)
             weaponTryReload(ws);
+
+        // Visual shot feedback: muzzle flash + client-side hitscan impact marker
+        if (shotFired) {
+            s->hudState.muzzleFlashTimer = 0.07f;
+
+            const auto& tf   = s->registry.get<Transform>(s->player);
+            const auto& ctrl = s->registry.get<PlayerController>(s->player);
+            const auto& cam  = s->registry.get<CameraAngles>(s->player);
+
+            glm::vec3 eyePos = tf.position + glm::vec3(0.0f, ctrl.eyeHeight, 0.0f);
+            float cp = std::cos(cam.pitch), sp = std::sin(cam.pitch);
+            float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
+            glm::vec3 aimDir = glm::normalize(glm::vec3(-sy * cp, sp, cy * cp));
+
+            // Collect remote player capsules for client-side hit preview
+            const float k_capsR = 20.0f, k_capsHH = 50.0f;
+            CapsuleInfo others[4];
+            int otherCount = 0;
+            int myId       = s->net ? s->net->myId : 0;
+            for (int i = 0; i < 4 && otherCount < 4; ++i) {
+                if (i == myId)
+                    continue;
+                const auto& rp = s->remotes[i];
+                if (!rp.active || !rp.alive)
+                    continue;
+                glm::vec3 pos        = glm::mix(rp.posA, rp.posB, rp.lerpT);
+                others[otherCount++] = {i, pos + glm::vec3(0, k_capsHH, 0), k_capsR, k_capsHH};
+            }
+
+            const auto& stats = k_weaponStats[static_cast<int>(ws.active)];
+            if (stats.range > 0.0f) {
+                HitResult hr = hitscanFire(eyePos, aimDir, stats, s->world, others, otherCount);
+                if (hr.hit)
+                    s->renderer.addImpact(hr.point, hr.normal);
+            }
+        }
+
+        // Decay muzzle flash
+        if (s->hudState.muzzleFlashTimer > 0.0f)
+            s->hudState.muzzleFlashTimer = std::max(0.0f, s->hudState.muzzleFlashTimer - dt);
 
         // Update HUD state from weapon
         s->hudState.ammo      = ws.ammo;
@@ -537,6 +577,9 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
         // Only skip own model in first-person (myId = 0 in offline mode)
         int skipSelf = (s->net && s->net->connected) ? myId : 0;
+
+        // Age impact markers before the draw (so upload sees current lifetimes)
+        s->renderer.tickImpacts(dt);
 
         s->renderer.drawScene(cmdbuf, swapchain, uniforms, positions, yaws, alive, skipSelf);
 

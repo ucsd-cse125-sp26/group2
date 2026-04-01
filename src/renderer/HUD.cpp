@@ -290,6 +290,14 @@ void HUD::buildGeometry(std::vector<HudVertex>& verts, uint32_t w, uint32_t h, c
     if (state.grappleActive) {
         addQuad(verts, cx - 3.0f, cy - 3.0f, cx + 3.0f, cy + 3.0f, {0.3f, 0.8f, 1.0f, 0.9f}, w, h);
     }
+
+    // ---- Muzzle flash — brief full-screen vignette around the crosshair ----
+    if (state.muzzleFlashTimer > 0.0f) {
+        float frac = state.muzzleFlashTimer / 0.07f; // 1 → 0
+        float r    = 70.0f + 80.0f * frac;           // grows outward from crosshair
+        float a    = 0.55f * frac;
+        addQuad(verts, cx - r, cy - r, cx + r, cy + r, {1.0f, 0.7f, 0.2f, a}, w, h);
+    }
 }
 
 // ---------------------------------------------------------------------------

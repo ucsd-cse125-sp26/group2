@@ -10,6 +10,21 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
+// Client-side impact marker (bullet hit spark, no networking)
+// ---------------------------------------------------------------------------
+
+struct ImpactMarker
+{
+    glm::vec3 pos;
+    glm::vec3 normal; // surface normal for oriented cross
+    float life;       // seconds remaining
+    float maxLife;    // for brightness fade
+};
+
+// Max simultaneous impact markers; oldest are overwritten.
+static constexpr int k_maxImpacts = 64;
+
+// ---------------------------------------------------------------------------
 // Per-player GPU resources (one set per player slot)
 // ---------------------------------------------------------------------------
 
@@ -43,6 +58,17 @@ struct Renderer
     // One pre-built player model per slot (uploaded at init)
     std::array<PlayerModel, 4> playerModels;
 
+    // Impact markers — dynamic vertex buffer rebuilt each frame
+    SDL_GPUBuffer* impactVBuf                  = nullptr;
+    uint32_t impactVCount                      = 0;
+    static constexpr uint32_t k_impactBufVerts = k_maxImpacts * 18; // 3 quads × 6 verts
+
+    // Call from game loop to add a new impact and tick existing ones.
+    void addImpact(const glm::vec3& pos, const glm::vec3& normal);
+    void tickImpacts(float dt);
+    // Called inside drawScene() to upload impact geometry before rendering.
+    void uploadImpacts(SDL_GPUCommandBuffer* cmdbuf);
+
     bool init(SDL_GPUDevice* gpu, SDL_Window* window, const World& world);
     void onResize(uint32_t w, uint32_t h);
 
@@ -60,6 +86,8 @@ struct Renderer
     void destroy();
 
 private:
+    std::vector<ImpactMarker> impacts; // active markers
+
     SDL_GPUShader* loadShader(const char* filename,
                               SDL_GPUShaderStage stage,
                               uint32_t vertUniformBufs,

@@ -74,12 +74,21 @@ bool aabbOverlap(glm::vec3 aCenter, glm::vec3 aHalf, glm::vec3 bCenter, glm::vec
 }
 
 // ---------------------------------------------------------------------------
-// Resolve AABB vs world collisions; also detects surf ramps.
+// Resolve AABB vs world collisions.
+//
+// Strategy: minimum-penetration-axis (SAT).
+// For each overlapping box we push along the axis with the smallest overlap.
+// This avoids the old sweep-Y-first bug where touching the side of a tall box
+// caused the player to be ejected downward by hundreds of units.
+//
+// Multiple iterations handle cases where resolving one collision creates a
+// new overlap with an adjacent box.
 // ---------------------------------------------------------------------------
 glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, Velocity& vel, PlayerController& ctrl)
 {
-    constexpr float k_groundDot = 0.70f; // cos(~45°) — above this = floor
-    constexpr float k_surfDot   = 0.25f; // above this = surf ramp (below = pure wall)
+    constexpr float k_groundDot = 0.70f; // cos(~45°) — above this = floor/ceiling
+    constexpr float k_surfDot   = 0.25f; // above this = surf ramp (unused with axis-aligned boxes)
+    constexpr int k_iters       = 4;     // passes — handles corner/edge stacking
 
     ctrl.onWall   = false;
     ctrl.onGround = false;
@@ -87,11 +96,20 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
 
     glm::vec3 result = pos;
 
-    auto sweep = [&](int axis) {
+    for (int iter = 0; iter < k_iters; ++iter) {
         for (const auto& box : world.boxes) {
             glm::vec3 depth;
             if (!aabbOverlap(result, half, box.center, box.half, depth))
                 continue;
+
+            // Choose the axis of minimum penetration.
+            // This is the correct SAT resolution: push out along the least-invaded axis,
+            // which for side contacts is X or Z (small), not Y (huge for tall boxes).
+            int axis = 0;
+            if (depth[1] < depth[0])
+                axis = 1;
+            if (depth[2] < depth[axis])
+                axis = 2;
 
             float pen = (result[axis] > box.center[axis]) ? depth[axis] : -depth[axis];
             result[axis] += pen;
@@ -104,18 +122,18 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
             if (upDot >= k_groundDot) {
                 ctrl.onGround     = true;
                 ctrl.groundNormal = normal;
-                if (vel.linear[axis] < 0.0f)
-                    vel.linear[axis] = 0.0f;
+                if (vel.linear.y < 0.0f)
+                    vel.linear.y = 0.0f;
             } else if (upDot <= -k_groundDot) {
-                if (vel.linear[axis] > 0.0f)
-                    vel.linear[axis] = 0.0f;
+                // Ceiling
+                if (vel.linear.y > 0.0f)
+                    vel.linear.y = 0.0f;
             } else if (upDot >= k_surfDot) {
-                // Surf ramp: slide along the surface, don't treat as a wall
+                // Surf ramp (would need angled geometry; kept for future use)
                 if (!ctrl.onSurf) {
                     ctrl.onSurf     = true;
                     ctrl.surfNormal = normal;
                 }
-                // Remove only the component pushing INTO the surface (no sliding resistance)
                 float vDotN = glm::dot(vel.linear, normal);
                 if (vDotN < 0.0f)
                     vel.linear -= normal * vDotN;
@@ -130,16 +148,13 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
                     vel.linear -= normal * vDotN;
             }
         }
-    };
+    }
 
-    sweep(1); // Y first — sets onGround early
-    sweep(0);
-    sweep(2);
-
-    // Safety net: never let the player fall through the floor
-    constexpr float k_killFloor = -8000.0f;
+    // Safety net: if somehow clipped below the world, teleport to safe height.
+    // The visible floor bottom is at y=-40; catch anything below that quickly.
+    constexpr float k_killFloor = -400.0f;
     if (result.y < k_killFloor) {
-        result.y      = 36.0f; // respawn height
+        result.y      = 36.0f;
         vel.linear    = {0.0f, 0.0f, 0.0f};
         ctrl.onGround = true;
     }

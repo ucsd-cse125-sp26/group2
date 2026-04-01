@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <glm/glm.hpp>
@@ -152,6 +153,108 @@ SDL_GPUBuffer* Renderer::uploadVertexBuffer(const std::vector<Vertex>& verts) co
 }
 
 // ---------------------------------------------------------------------------
+// Impact markers
+// ---------------------------------------------------------------------------
+
+void Renderer::addImpact(const glm::vec3& pos, const glm::vec3& normal)
+{
+    constexpr float k_life = 0.35f;
+    // Recycle oldest if full
+    if (static_cast<int>(impacts.size()) >= k_maxImpacts)
+        impacts.erase(impacts.begin());
+    impacts.push_back({pos, normal, k_life, k_life});
+}
+
+void Renderer::tickImpacts(float dt)
+{
+    for (auto it = impacts.begin(); it != impacts.end();) {
+        it->life -= dt;
+        if (it->life <= 0.0f)
+            it = impacts.erase(it);
+        else
+            ++it;
+    }
+}
+
+void Renderer::uploadImpacts(SDL_GPUCommandBuffer* cmdbuf)
+{
+    impactVCount = 0;
+    if (impacts.empty())
+        return;
+
+    // Build a small cross of 3 axis-aligned quads at each impact point.
+    // Size fades from 8 qu down to 0 as life expires.
+    std::vector<Vertex> verts;
+    verts.reserve(impacts.size() * 18);
+
+    for (const auto& imp : impacts) {
+        float frac   = imp.life / imp.maxLife; // 1 → 0
+        float sz     = 8.0f * frac;            // shrink over time
+        float bright = frac;
+        // Bright yellow-orange spark color
+        glm::vec3 col = {1.0f, 0.6f + bright * 0.4f, bright * 0.3f};
+
+        // Three thin axis-aligned crosses centred on impact point:
+        // XY cross
+        auto q = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d) {
+            verts.push_back({a, col});
+            verts.push_back({b, col});
+            verts.push_back({c, col});
+            verts.push_back({a, col});
+            verts.push_back({c, col});
+            verts.push_back({d, col});
+        };
+        glm::vec3 p = imp.pos;
+        float h     = sz * 0.5f;
+        float t     = 1.5f; // thickness
+        // Horizontal bar (XZ plane)
+        q(p + glm::vec3(-h, -t, -t), p + glm::vec3(h, -t, -t), p + glm::vec3(h, t, t), p + glm::vec3(-h, t, t));
+        // Vertical bar (Y axis)
+        q(p + glm::vec3(-t, -h, -t), p + glm::vec3(t, -h, -t), p + glm::vec3(t, h, t), p + glm::vec3(-t, h, t));
+        // Depth bar (Z axis)
+        q(p + glm::vec3(-t, -t, -h), p + glm::vec3(t, -t, -h), p + glm::vec3(t, t, h), p + glm::vec3(-t, t, h));
+    }
+
+    if (verts.empty())
+        return;
+
+    uint32_t byteSize = static_cast<uint32_t>(verts.size() * sizeof(Vertex));
+
+    // Ensure impactVBuf is large enough; recreate if needed
+    if (!impactVBuf || byteSize > k_impactBufVerts * sizeof(Vertex)) {
+        if (impactVBuf)
+            SDL_ReleaseGPUBuffer(gpu, impactVBuf);
+        SDL_GPUBufferCreateInfo bi{};
+        bi.usage   = SDL_GPU_BUFFERUSAGE_VERTEX;
+        bi.size    = std::max(byteSize, k_impactBufVerts * static_cast<uint32_t>(sizeof(Vertex)));
+        impactVBuf = SDL_CreateGPUBuffer(gpu, &bi);
+    }
+
+    if (!impactVBuf)
+        return;
+
+    SDL_GPUTransferBufferCreateInfo tbCI{};
+    tbCI.usage                = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbCI.size                 = byteSize;
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(gpu, &tbCI);
+    if (!tb)
+        return;
+
+    void* mapped = SDL_MapGPUTransferBuffer(gpu, tb, false);
+    std::memcpy(mapped, verts.data(), byteSize);
+    SDL_UnmapGPUTransferBuffer(gpu, tb);
+
+    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmdbuf);
+    SDL_GPUTransferBufferLocation src{tb, 0};
+    SDL_GPUBufferRegion dst{impactVBuf, 0, byteSize};
+    SDL_UploadToGPUBuffer(copy, &src, &dst, false);
+    SDL_EndGPUCopyPass(copy);
+    SDL_ReleaseGPUTransferBuffer(gpu, tb);
+
+    impactVCount = static_cast<uint32_t>(verts.size());
+}
+
+// ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
 
@@ -280,6 +383,9 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
     depth.load_op     = SDL_GPU_LOADOP_CLEAR;
     depth.store_op    = SDL_GPU_STOREOP_DONT_CARE;
 
+    // Upload dynamic impact marker geometry before any render pass opens.
+    uploadImpacts(cmdbuf);
+
     // ---- Draw world geometry ----
     // Uniforms MUST be pushed OUTSIDE the render pass.
     SDL_PushGPUVertexUniformData(cmdbuf, 0, &viewProjUniforms, sizeof(viewProjUniforms));
@@ -296,21 +402,47 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
 
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
 
-    // World
+    // World geometry
     SDL_GPUBufferBinding wbBind{worldVBuf, 0};
     SDL_BindGPUVertexBuffers(pass, 0, &wbBind, 1);
     SDL_DrawGPUPrimitives(pass, worldVCount, 1, 0, 0);
 
+    // Impact markers (uploaded CPU-side each frame, rendered in same pass)
+    if (impactVBuf && impactVCount > 0) {
+        SceneUniforms identityUniforms;
+        identityUniforms.viewProj = viewProjUniforms.viewProj;
+        identityUniforms.model    = glm::mat4(1.0f);
+        // Must end and re-open to push new vertex uniforms outside pass
+        SDL_EndGPURenderPass(pass);
+
+        color.load_op  = SDL_GPU_LOADOP_LOAD;
+        depth.load_op  = SDL_GPU_LOADOP_LOAD;
+        depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+
+        SDL_PushGPUVertexUniformData(cmdbuf, 0, &identityUniforms, sizeof(identityUniforms));
+        FragTint impTint{{1.0f, 1.0f, 1.0f, 1.0f}};
+        SDL_PushGPUFragmentUniformData(cmdbuf, 0, &impTint, sizeof(impTint));
+
+        pass = SDL_BeginGPURenderPass(cmdbuf, &color, 1, &depth);
+        if (pass) {
+            SDL_BindGPUGraphicsPipeline(pass, pipeline);
+            SDL_GPUBufferBinding ibBind{impactVBuf, 0};
+            SDL_BindGPUVertexBuffers(pass, 0, &ibBind, 1);
+            SDL_DrawGPUPrimitives(pass, impactVCount, 1, 0, 0);
+        }
+    }
+
     // ---- Draw player models ----
+    // CRITICAL: set load_op = LOAD BEFORE the first player-model pass begins,
+    // otherwise BeginGPURenderPass clears the world geometry we just drew.
+    color.load_op  = SDL_GPU_LOADOP_LOAD;
+    depth.load_op  = SDL_GPU_LOADOP_LOAD;
+    depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+
     for (int i = 0; i < 4; ++i) {
-        if (i == localPlayerId)
-            continue; // first-person — skip own model
-        if (!playerAlive[i])
-            continue;
-        if (!playerModels[i].vbuf)
+        if (i == localPlayerId || !playerAlive[i] || !playerModels[i].vbuf)
             continue;
 
-        // Build model matrix: translate to world position + rotate by yaw
         glm::mat4 model = glm::mat4(1.0f);
         model           = glm::translate(model, playerPositions[i]);
         model           = glm::rotate(model, playerYaws[i] + glm::radians(180.0f), glm::vec3(0, 1, 0));
@@ -319,22 +451,19 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
         playerUniforms.viewProj = viewProjUniforms.viewProj;
         playerUniforms.model    = model;
 
-        SDL_EndGPURenderPass(pass);
+        // Uniforms MUST be pushed outside a render pass.
+        if (pass) {
+            SDL_EndGPURenderPass(pass);
+            pass = nullptr;
+        }
 
         SDL_PushGPUVertexUniformData(cmdbuf, 0, &playerUniforms, sizeof(playerUniforms));
-
-        // No tint override — vertex colors carry the team color
         FragTint playerTint{{1.0f, 1.0f, 1.0f, 1.0f}};
         SDL_PushGPUFragmentUniformData(cmdbuf, 0, &playerTint, sizeof(playerTint));
 
         pass = SDL_BeginGPURenderPass(cmdbuf, &color, 1, &depth);
         if (!pass)
             break;
-
-        // LOAD (not CLEAR) subsequent passes
-        color.load_op  = SDL_GPU_LOADOP_LOAD;
-        depth.load_op  = SDL_GPU_LOADOP_LOAD;
-        depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
 
         SDL_BindGPUGraphicsPipeline(pass, pipeline);
         SDL_GPUBufferBinding pbBind{playerModels[i].vbuf, 0};
