@@ -23,7 +23,7 @@ sudo pacman -S --needed --noconfirm \
     libxrandr \
     libxcursor \
     libxi \
-    libxscrnsaver \
+    libxss \
     libxkbcommon \
     wayland \
     wayland-protocols \
