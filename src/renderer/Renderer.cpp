@@ -439,12 +439,16 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
     depth.load_op  = SDL_GPU_LOADOP_LOAD;
     depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
 
+    // Physics position is the AABB centre; model local y=0 is feet.
+    // Translate down by halfHeight so feet land on the collision floor.
+    constexpr float k_modelHalfHeight = 36.0f;
+
     for (int i = 0; i < 4; ++i) {
         if (i == localPlayerId || !playerAlive[i] || !playerModels[i].vbuf)
             continue;
 
         glm::mat4 model = glm::mat4(1.0f);
-        model           = glm::translate(model, playerPositions[i]);
+        model           = glm::translate(model, playerPositions[i] - glm::vec3(0.0f, k_modelHalfHeight, 0.0f));
         model           = glm::rotate(model, playerYaws[i] + glm::radians(180.0f), glm::vec3(0, 1, 0));
 
         SceneUniforms playerUniforms;

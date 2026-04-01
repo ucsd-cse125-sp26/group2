@@ -28,9 +28,19 @@ struct LagSnapshot
 class LagComp
 {
 public:
-    // Capsule geometry (same for every player for now)
-    static constexpr float k_capsuleRadius     = 32.0f; // qu (= 0.4 m)
-    static constexpr float k_capsuleHalfHeight = 36.0f; // qu (= 0.45 m)
+    // Capsule hitbox geometry — must stay in sync with the client hitbox in main.cpp
+    // and with MeshGen model proportions.
+    //
+    // tf.position = AABB centre (feet = tf.position.y - 36, top = tf.position.y + 36).
+    // Hitbox AABB: centre = tf.position + (0, k_capsuleYOffset, 0),
+    //              extends ± (k_capsuleHalfHeight + k_capsuleRadius) in Y,
+    //              extends ± k_capsuleRadius in X/Z.
+    //
+    //   bMin.y = tf.position.y + 12 - (28+20) = tf.position.y - 36  (feet level) ✓
+    //   bMax.y = tf.position.y + 12 + (28+20) = tf.position.y + 60  (above head) ✓
+    static constexpr float k_capsuleRadius     = 20.0f; // qu — horizontal half-width of hitbox
+    static constexpr float k_capsuleHalfHeight = 28.0f; // qu — half of cylinder portion
+    static constexpr float k_capsuleYOffset    = 12.0f; // qu — centre Y above tf.position
 
     // Push the current frame into the ring buffer.
     void push(uint32_t tick, const LagSnapshot::Entry entries[k_maxPlayers], uint8_t count);
