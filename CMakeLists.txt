@@ -71,11 +71,31 @@ if(ENABLE_SHADERCROSS)
 endif()
 
 # ---- Shaders ----
-# Compile GLSL → SPIR-V at build time using glslc.
-# The .spv files land next to the binary so the game can load them at runtime.
-find_program(GLSLC glslc REQUIRED
-    HINTS ENV VULKAN_SDK
-    DOC "glslc GLSL→SPIR-V compiler (install shaderc / vulkan-tools)")
+# Compile GLSL → SPIR-V at build time.
+# Prefers glslc (shaderc); falls back to glslangValidator.
+#   Arch:    sudo pacman -S shaderc        (glslc)
+#   Ubuntu:  sudo apt-get install glslang-tools  (glslangValidator)
+#   macOS:   brew install glslang         (glslangValidator)
+#   Windows: install Vulkan SDK           (glslc)
+find_program(GLSLC glslc HINTS ENV VULKAN_SDK PATH_SUFFIXES bin)
+find_program(GLSLANG_VALIDATOR glslangValidator HINTS ENV VULKAN_SDK PATH_SUFFIXES bin)
+
+if(GLSLC)
+    message(STATUS "Shader compiler: glslc (${GLSLC})")
+    set(SHADER_COMPILE_TOOL "${GLSLC}")
+    set(SHADER_COMPILE_FLAGS "")         # glslc infers stage from .vert/.frag extension
+elseif(GLSLANG_VALIDATOR)
+    message(STATUS "Shader compiler: glslangValidator (${GLSLANG_VALIDATOR})")
+    set(SHADER_COMPILE_TOOL "${GLSLANG_VALIDATOR}")
+    set(SHADER_COMPILE_FLAGS "-V")       # -V = output SPIR-V binary
+else()
+    message(FATAL_ERROR
+        "No GLSL→SPIR-V compiler found.\n"
+        "  Arch:    sudo pacman -S shaderc\n"
+        "  Ubuntu:  sudo apt-get install glslang-tools\n"
+        "  macOS:   brew install glslang\n"
+        "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
+endif()
 
 set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
@@ -91,7 +111,8 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     set(SPV_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.spv")
     add_custom_command(
         OUTPUT  "${SPV_OUT}"
-        COMMAND ${GLSLC} -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
+                -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
         DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}"
         COMMENT "Compiling shader ${SHADER_SRC}"
         VERBATIM
@@ -109,9 +130,14 @@ file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
 add_executable(titandoom ${GAME_SOURCES})
 add_dependencies(titandoom shaders)
 
-# Expose the shader output directory to the binary via a compile definition
-target_compile_definitions(titandoom PRIVATE
-    SHADER_DIR="${SHADER_OUT_DIR}/"
+# Copy compiled shaders into <build>/shaders/ next to the binary at post-build.
+# SDL_GetBasePath() + "shaders/<name>.spv" is how the binary locates them at runtime.
+add_custom_command(TARGET titandoom POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${SHADER_OUT_DIR}"
+        "$<TARGET_FILE_DIR:titandoom>/shaders"
+    COMMENT "Copying shaders to binary directory"
+    VERBATIM
 )
 
 target_include_directories(titandoom PRIVATE

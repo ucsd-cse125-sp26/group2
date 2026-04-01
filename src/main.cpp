@@ -8,24 +8,36 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Returns the path to a compiled shader (.spv) file relative to the binary.
+// Looks inside a "shaders/" subdirectory next to the executable.
+static std::string shaderPath(const char* filename) {
+    const char* base = SDL_GetBasePath();
+    std::string path = base ? base : "./";
+    path += "shaders/";
+    path += filename;
+    return path;
+}
+
 static SDL_GPUShader* loadShader(
     SDL_GPUDevice* gpu,
-    const char* path,
+    const char* filename,
     SDL_GPUShaderStage stage,
     Uint32 samplerCount,
     Uint32 uniformBufferCount,
     Uint32 storageBufferCount,
     Uint32 storageTextureCount
 ) {
-    size_t codeSize = 0;
-    void* code = SDL_LoadFile(path, &codeSize);
+    std::string path = shaderPath(filename);
+    size_t codeSize  = 0;
+    void* code       = SDL_LoadFile(path.c_str(), &codeSize);
     if (!code) {
-        SDL_Log("Failed to load shader %s: %s", path, SDL_GetError());
+        SDL_Log("Failed to load shader %s: %s", path.c_str(), SDL_GetError());
         return nullptr;
     }
 
@@ -99,13 +111,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     // ---- Load shaders ---------------------------------------------------
     SDL_GPUShader* vert = loadShader(
         state->gpu,
-        SHADER_DIR "triangle.vert.spv",
+        "triangle.vert.spv",
         SDL_GPU_SHADERSTAGE_VERTEX,
         0, 0, 0, 0
     );
     SDL_GPUShader* frag = loadShader(
         state->gpu,
-        SHADER_DIR "triangle.frag.spv",
+        "triangle.frag.spv",
         SDL_GPU_SHADERSTAGE_FRAGMENT,
         0, 0, 0, 0
     );
