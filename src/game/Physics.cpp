@@ -171,8 +171,8 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
         // Forward and right vectors in the horizontal plane.
         // fwd matches the camera lookAt forward: {-sin, 0, cos}.
         // right = cross(fwd, up) = {-cos, 0, -sin}  (camera's actual right axis).
-        glm::vec3 fwd   = {-sy,  0.0f,  cy};
-        glm::vec3 right = {-cy,  0.0f, -sy};
+        glm::vec3 fwd   = {-sy, 0.0f, cy};
+        glm::vec3 right = {-cy, 0.0f, -sy};
 
         glm::vec3 wishVec = fwd * inp.moveDir.y + right * inp.moveDir.x;
         float wishLen     = glm::length(wishVec);
