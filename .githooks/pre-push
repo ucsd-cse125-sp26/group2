@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Pre-push: verify ALL tracked C++ sources are correctly formatted before pushing.
-# This is the last local gate before code reaches CI — blocks push on any violation.
+# Pre-push: run clang-format (blocking) and clang-tidy (advisory) on project sources.
 set -euo pipefail
 
-# Same binary preference as pre-commit and CI.
+# ---------------------------------------------------------------------------
+# 1. clang-format — blocks the push on any violation
+# ---------------------------------------------------------------------------
+
 if command -v clang-format-18 &>/dev/null; then
     CF=clang-format-18
 elif command -v clang-format &>/dev/null; then
@@ -11,26 +13,83 @@ elif command -v clang-format &>/dev/null; then
 else
     echo "[pre-push] WARNING: clang-format not found — skipping format gate." >&2
     echo "           Run scripts/setup-linux.sh (or setup-macos.sh) to install it." >&2
+    CF=""
+fi
+
+if [ -n "$CF" ]; then
+    CF_VER=$("$CF" --version 2>&1 | head -1)
+    echo "[pre-push] Format check ($CF_VER) ..."
+
+    FORMAT_FAILED=0
+    while IFS= read -r f; do
+        if ! "$CF" --dry-run --Werror "$f" 2>/dev/null; then
+            echo "    ✗ $f" >&2
+            FORMAT_FAILED=1
+        fi
+    done < <(find src -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) | sort)
+
+    if [ "$FORMAT_FAILED" -ne 0 ]; then
+        printf '\n[pre-push] ✗ Unformatted files detected — push blocked.\n' >&2
+        printf '  Auto-fix: cmake --build --preset debug --target format\n' >&2
+        printf '  Then:     git add -u && git push\n\n' >&2
+        exit 1
+    fi
+    echo "[pre-push] ✓ Format clean."
+fi
+
+# ---------------------------------------------------------------------------
+# 2. clang-tidy — advisory (warns but never blocks the push)
+# ---------------------------------------------------------------------------
+
+if ! command -v clang-tidy &>/dev/null; then
+    echo "[pre-push] WARNING: clang-tidy not found — skipping tidy check." >&2
     exit 0
 fi
 
-CF_VER=$("$CF" --version 2>&1 | head -1)
-echo "[pre-push] Format check ($CF_VER) ..."
-
-# Collect all tracked C++ files under src/
-FAILED=0
-while IFS= read -r f; do
-    if ! "$CF" --dry-run --Werror "$f" 2>/dev/null; then
-        echo "    ✗ $f" >&2
-        FAILED=1
+# Locate compile_commands.json — prefer build/debug, accept any other preset.
+COMPILE_DB=""
+for candidate in build/debug/compile_commands.json build/release/compile_commands.json build/*/compile_commands.json; do
+    if [ -f "$candidate" ]; then
+        COMPILE_DB="$candidate"
+        break
     fi
-done < <(find src -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) | sort)
+done
 
-if [ "$FAILED" -ne 0 ]; then
-    printf '\n[pre-push] ✗ Unformatted files detected — push blocked.\n' >&2
-    printf '  Auto-fix: cmake --build --preset debug --target format\n' >&2
-    printf '  Then:     git add -u && git push\n\n' >&2
-    exit 1
+if [ -z "$COMPILE_DB" ]; then
+    echo "[pre-push] NOTE: no compile_commands.json found — skipping tidy." >&2
+    echo "           Run 'cmake --preset debug' first to enable tidy checks." >&2
+    exit 0
 fi
 
-echo "[pre-push] ✓ All files pass."
+BUILD_DIR=$(dirname "$COMPILE_DB")
+
+# Extract only project source files (src/, not _deps/).
+TIDY_FILES=$(python3 -c "
+import json, sys
+with open('$COMPILE_DB') as f:
+    data = json.load(f)
+files = [e['file'] for e in data if '/src/' in e['file'] and '/_deps/' not in e['file']]
+print('\n'.join(files))
+" 2>/dev/null)
+
+if [ -z "$TIDY_FILES" ]; then
+    echo "[pre-push] NOTE: no project files in compile_commands.json — skipping tidy." >&2
+    exit 0
+fi
+
+CT_VER=$(clang-tidy --version 2>&1 | head -1)
+echo "[pre-push] clang-tidy check ($CT_VER) ..."
+echo "[pre-push]   database: $COMPILE_DB"
+
+TIDY_OUT=$(echo "$TIDY_FILES" | xargs clang-tidy -p "$BUILD_DIR" 2>&1 || true)
+
+# Show only lines from our source files (filter out suppressed noise from deps).
+USER_WARNINGS=$(echo "$TIDY_OUT" | grep "^/.*src/.*warning:\|^/.*src/.*error:" || true)
+
+if [ -n "$USER_WARNINGS" ]; then
+    printf '\n[pre-push] clang-tidy found issues (advisory — push not blocked):\n' >&2
+    echo "$USER_WARNINGS" >&2
+    printf '\n[pre-push] Fix with: clang-tidy -p build/debug --fix <file>\n\n' >&2
+else
+    echo "[pre-push] ✓ clang-tidy clean."
+fi

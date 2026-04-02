@@ -151,7 +151,7 @@ void SDLGPURenderer::renderFrame()
 
     SDL_GPUColorTargetInfo colorTarget{};
     colorTarget.texture = swapchain;
-    colorTarget.clear_color = {0.10f, 0.10f, 0.10f, 1.0f};
+    colorTarget.clear_color = {.r = 0.10f, .g = 0.10f, .b = 0.10f, .a = 1.0f};
     colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
     colorTarget.store_op = SDL_GPU_STOREOP_STORE;
 
