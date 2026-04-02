@@ -96,19 +96,19 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
   # ------------------------------------------------------------------ #
-  #  Format check                                                        #
+  #  Format check — pinned to clang-format-18 (ships on ubuntu-24.04)  #
   # ------------------------------------------------------------------ #
   format:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang-format
-        run: sudo apt-get install -y clang-format
+      - name: Install clang-format-18
+        run: sudo apt-get install -y clang-format-18
       - name: Check formatting
         run: |
           find src -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) \
-            | xargs clang-format --dry-run --Werror
+            | xargs clang-format-18 --dry-run --Werror
 
   # ------------------------------------------------------------------ #
   #  clang-tidy — non-blocking                                           #
@@ -142,7 +142,7 @@ jobs:
             | xargs clang-tidy -p build/release
 
   # ------------------------------------------------------------------ #
-  #  Release builds — optimised, no sanitizers                          #
+  #  Release builds — optimised, shaders embedded, no sanitizers        #
   #  Runs on: push to main  →  updates "latest" pre-release             #
   #            tag v*.*.*   →  creates versioned release                #
   # ------------------------------------------------------------------ #
@@ -159,22 +159,28 @@ jobs:
             preset: release
             cc: clang
             cxx: clang++
-            binary: titandoom
-            archive: titandoom-linux-x86_64.tar.gz
+            client_src: build/release/titandoom
+            server_src: build/release/titandoom-server
+            client_artifact: titandoom-linux-x86_64
+            server_artifact: titandoom-server-linux-x86_64
 
           - name: macOS
             os: macos-latest
             preset: release
             cc: clang
             cxx: clang++
-            binary: titandoom
-            archive: titandoom-macos.tar.gz
+            client_src: build/release/titandoom
+            server_src: build/release/titandoom-server
+            client_artifact: titandoom-macos
+            server_artifact: titandoom-server-macos
 
           - name: Windows
             os: windows-latest
             preset: release
-            binary: titandoom.exe
-            archive: titandoom-windows-x86_64.zip
+            client_src: build\release\titandoom.exe
+            server_src: build\release\titandoom-server.exe
+            client_artifact: titandoom-windows-x86_64.exe
+            server_artifact: titandoom-server-windows-x86_64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -232,29 +238,33 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
-      # ---- Package: client binary (shaders embedded) + standalone server ----
-      - name: Package (Linux / macOS)
+      # ---- Stage binaries with their release names (Linux / macOS) ----
+      - name: Stage binaries (Linux / macOS)
         if: runner.os != 'Windows'
         run: |
-          mkdir -p dist
-          cp build/release/${{ matrix.binary }}          dist/
-          cp build/release/titandoom-server              dist/
-          tar -czf ${{ matrix.archive }} -C dist .
+          cp ${{ matrix.client_src }} ${{ matrix.client_artifact }}
+          cp ${{ matrix.server_src }} ${{ matrix.server_artifact }}
 
-      - name: Package (Windows)
+      # ---- Stage binaries with their release names (Windows) ----
+      - name: Stage binaries (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item build\release\${{ matrix.binary }}    dist\
-          Copy-Item build\release\titandoom-server.exe    dist\
-          Compress-Archive -Path dist\* -DestinationPath ${{ matrix.archive }}
+          Copy-Item ${{ matrix.client_src }} ${{ matrix.client_artifact }}
+          Copy-Item ${{ matrix.server_src }} ${{ matrix.server_artifact }}
 
-      - name: Upload artifact
+      - name: Upload client binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
+          name: ${{ matrix.client_artifact }}
+          path: ${{ matrix.client_artifact }}
+          retention-days: 7
+
+      - name: Upload server binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.server_artifact }}
+          path: ${{ matrix.server_artifact }}
           retention-days: 7
 
   # ------------------------------------------------------------------ #
@@ -279,16 +289,16 @@ jobs:
       - name: Determine release metadata
         id: meta
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "tag=${{ github.ref_name }}"          >> "$GITHUB_OUTPUT"
-            echo "title=${{ github.ref_name }}"        >> "$GITHUB_OUTPUT"
-            echo "prerelease=false"                    >> "$GITHUB_OUTPUT"
-            echo "notes=Versioned release ${{ github.ref_name }}." >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}"                                  >> "$GITHUB_OUTPUT"
+            echo "title=${GITHUB_REF_NAME}"                                >> "$GITHUB_OUTPUT"
+            echo "prerelease=false"                                        >> "$GITHUB_OUTPUT"
+            echo "notes=Versioned release ${GITHUB_REF_NAME}."            >> "$GITHUB_OUTPUT"
           else
-            echo "tag=latest"                          >> "$GITHUB_OUTPUT"
-            echo "title=Latest Build"                  >> "$GITHUB_OUTPUT"
-            echo "prerelease=true"                     >> "$GITHUB_OUTPUT"
-            echo "notes=Automated build from \`main\` — commit ${{ github.sha }}." >> "$GITHUB_OUTPUT"
+            echo "tag=latest"                                              >> "$GITHUB_OUTPUT"
+            echo "title=Latest Build"                                      >> "$GITHUB_OUTPUT"
+            echo "prerelease=true"                                         >> "$GITHUB_OUTPUT"
+            echo "notes=Automated build from \`main\` — commit ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
           fi
 
       - name: Delete existing 'latest' release (rolling update)
@@ -302,16 +312,23 @@ jobs:
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG:       ${{ steps.meta.outputs.tag }}
+          RELEASE_TITLE:     ${{ steps.meta.outputs.title }}
+          RELEASE_NOTES:     ${{ steps.meta.outputs.notes }}
+          RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
           PRERELEASE_FLAG=""
-          if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
+          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
             PRERELEASE_FLAG="--prerelease"
           fi
 
-          gh release create "${{ steps.meta.outputs.tag }}" \
-            --title "${{ steps.meta.outputs.title }}" \
-            --notes "${{ steps.meta.outputs.notes }}" \
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_NOTES" \
             $PRERELEASE_FLAG \
-            titandoom-linux-x86_64.tar.gz \
-            titandoom-macos.tar.gz \
-            titandoom-windows-x86_64.zip
+            titandoom-linux-x86_64 \
+            titandoom-server-linux-x86_64 \
+            titandoom-macos \
+            titandoom-server-macos \
+            titandoom-windows-x86_64.exe \
+            titandoom-server-windows-x86_64.exe

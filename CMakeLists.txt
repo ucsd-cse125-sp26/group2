@@ -235,6 +235,11 @@ set_compiler_warnings(titandoom)
 # ---- Sanitizers ----
 enable_sanitizers(titandoom)
 
+# ---- Windows: suppress min/max macros from <windows.h> ----
+if(WIN32)
+    target_compile_definitions(titandoom PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # ===========================================================================
 # Dedicated server executable
 # ===========================================================================
@@ -254,6 +259,11 @@ target_link_libraries(titandoom-server PRIVATE
 
 set_compiler_warnings(titandoom-server)
 enable_sanitizers(titandoom-server)
+
+# ---- Windows: suppress min/max macros from <windows.h> ----
+if(WIN32)
+    target_compile_definitions(titandoom-server PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 
 # Server always loads shaders from disk (for log msgs about SPV files, future use)
 # No shaders needed at server runtime currently — just copy for completeness.

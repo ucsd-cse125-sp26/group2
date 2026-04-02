@@ -6,9 +6,6 @@
 #include <cmath>
 #include <cstring>
 
-// Spawn point definition (needed out-of-class for older GCC)
-constexpr glm::vec3 GameServer::k_spawns[k_maxPlayers];
-
 // ---------------------------------------------------------------------------
 // Init / shutdown
 // ---------------------------------------------------------------------------
