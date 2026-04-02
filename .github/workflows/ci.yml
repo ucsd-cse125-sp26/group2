@@ -46,7 +46,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang clang-format clang-tidy \
+            ninja-build clang clang-format-18 clang-tidy \
             glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
@@ -132,17 +132,23 @@ jobs:
             libgl-dev libgles2-mesa-dev \
             libdrm-dev libgbm-dev
       - name: Configure
-        # Use the debug preset (TITANDOOM_BUNDLE_SHADERS=OFF) so clang-tidy never
-        # needs the generated embedded_shaders.hpp header, which only exists after
-        # a full build with shader bundling enabled.
+        # Use the debug preset (GROUP2_BUNDLE_SHADERS=OFF, USE_OPENGL=OFF) so
+        # clang-tidy never needs the generated embedded_shaders.hpp header.
         env:
           CC:  clang
           CXX: clang++
         run: cmake --preset debug
       - name: Run clang-tidy
+        # Only tidy files that are in compile_commands.json (avoids errors for
+        # files belonging to the inactive rendering backend).
         run: |
-          find src -type f -name "*.cpp" \
-            | xargs clang-tidy -p build/debug
+          python3 -c "
+          import json, subprocess, sys
+          with open('build/debug/compile_commands.json') as f:
+              files = [e['file'] for e in json.load(f)]
+          result = subprocess.run(['clang-tidy', '-p', 'build/debug'] + files)
+          sys.exit(result.returncode)
+          "
 
   # ------------------------------------------------------------------ #
   #  Release builds — optimised, shaders embedded, no sanitizers        #
@@ -162,28 +168,22 @@ jobs:
             preset: release
             cc: clang
             cxx: clang++
-            client_src: build/release/titandoom
-            server_src: build/release/titandoom-server
-            client_artifact: titandoom-linux-x86_64
-            server_artifact: titandoom-server-linux-x86_64
+            binary_src: build/release/group2
+            artifact: group2-linux-x86_64
 
           - name: macOS
             os: macos-latest
             preset: release
             cc: clang
             cxx: clang++
-            client_src: build/release/titandoom
-            server_src: build/release/titandoom-server
-            client_artifact: titandoom-macos
-            server_artifact: titandoom-server-macos
+            binary_src: build/release/group2
+            artifact: group2-macos
 
           - name: Windows
             os: windows-latest
             preset: release
-            client_src: build\release\titandoom.exe
-            server_src: build\release\titandoom-server.exe
-            client_artifact: titandoom-windows-x86_64.exe
-            server_artifact: titandoom-server-windows-x86_64.exe
+            binary_src: build\release\group2.exe
+            artifact: group2-windows-x86_64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -241,33 +241,20 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
-      # ---- Stage binaries with their release names (Linux / macOS) ----
-      - name: Stage binaries (Linux / macOS)
+      - name: Stage binary (Linux / macOS)
         if: runner.os != 'Windows'
-        run: |
-          cp ${{ matrix.client_src }} ${{ matrix.client_artifact }}
-          cp ${{ matrix.server_src }} ${{ matrix.server_artifact }}
+        run: cp ${{ matrix.binary_src }} ${{ matrix.artifact }}
 
-      # ---- Stage binaries with their release names (Windows) ----
-      - name: Stage binaries (Windows)
+      - name: Stage binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          Copy-Item ${{ matrix.client_src }} ${{ matrix.client_artifact }}
-          Copy-Item ${{ matrix.server_src }} ${{ matrix.server_artifact }}
+        run: Copy-Item ${{ matrix.binary_src }} ${{ matrix.artifact }}
 
-      - name: Upload client binary
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.client_artifact }}
-          path: ${{ matrix.client_artifact }}
-          retention-days: 7
-
-      - name: Upload server binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.server_artifact }}
-          path: ${{ matrix.server_artifact }}
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
           retention-days: 7
 
   # ------------------------------------------------------------------ #
@@ -315,9 +302,9 @@ jobs:
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG:       ${{ steps.meta.outputs.tag }}
-          RELEASE_TITLE:     ${{ steps.meta.outputs.title }}
-          RELEASE_NOTES:     ${{ steps.meta.outputs.notes }}
+          RELEASE_TAG:        ${{ steps.meta.outputs.tag }}
+          RELEASE_TITLE:      ${{ steps.meta.outputs.title }}
+          RELEASE_NOTES:      ${{ steps.meta.outputs.notes }}
           RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
           PRERELEASE_FLAG=""
@@ -329,9 +316,6 @@ jobs:
             --title "$RELEASE_TITLE" \
             --notes "$RELEASE_NOTES" \
             $PRERELEASE_FLAG \
-            titandoom-linux-x86_64 \
-            titandoom-server-linux-x86_64 \
-            titandoom-macos \
-            titandoom-server-macos \
-            titandoom-windows-x86_64.exe \
-            titandoom-server-windows-x86_64.exe
+            group2-linux-x86_64 \
+            group2-macos \
+            group2-windows-x86_64.exe
