@@ -43,7 +43,11 @@ IncludeCategories:
     Priority: 3
 
 # Alignment
-AlignConsecutiveAssignments:  Consecutive
+# Consecutive-assignment alignment is intentionally disabled: the behaviour when a
+# multiline assignment sits inside an otherwise consecutive group changed between
+# clang-format 18 and 22, causing spurious CI failures.  Keeping it off means both
+# versions produce identical output.
+AlignConsecutiveAssignments:  None
 AlignConsecutiveDeclarations: None
 AlignTrailingComments:
   Kind:            Always

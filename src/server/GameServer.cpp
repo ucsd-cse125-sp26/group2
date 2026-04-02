@@ -46,7 +46,7 @@ void GameServer::shutdown()
 void GameServer::run()
 {
     const Uint64 nsPerTick = static_cast<Uint64>(1e9 / k_serverTickHz);
-    Uint64 nextTick        = SDL_GetTicksNS();
+    Uint64 nextTick = SDL_GetTicksNS();
 
     while (true) {
         receiveAll();
@@ -97,20 +97,20 @@ void GameServer::processTick(float dt)
             const PktInput& latest = cl.inputBuf[cl.inputCount - 1];
 
             auto& input = registry.get<InputState>(cl.entity);
-            auto& cam   = registry.get<CameraAngles>(cl.entity);
+            auto& cam = registry.get<CameraAngles>(cl.entity);
 
             input.moveDir.x = latest.moveRight;
             input.moveDir.y = latest.moveFwd;
-            cam.yaw         = latest.yaw;
-            cam.pitch       = latest.pitch;
+            cam.yaw = latest.yaw;
+            cam.pitch = latest.pitch;
 
             // OR held/pressed bits across ALL buffered packets so no event is
             // dropped when multiple packets arrive in the same server tick.
-            bool anyFireHeld    = false;
+            bool anyFireHeld = false;
             bool anyAltFireHeld = false;
-            bool anyJumpHeld    = false;
+            bool anyJumpHeld = false;
             bool anyJumpPressed = false;
-            bool anyKnife       = false;
+            bool anyKnife = false;
             for (int j = 0; j < cl.inputCount; ++j) {
                 const Buttons& b = cl.inputBuf[j].buttons;
                 if (b.fire())
@@ -128,15 +128,15 @@ void GameServer::processTick(float dt)
             // Server-side rising-edge detection for semi-auto weapons.
             // Client sends fireHeld (continuous); we compute the pressed edge here
             // so a single missed/late packet can't swallow an entire shot.
-            bool firePressed    = anyFireHeld && !cl.prevFireHeld;
+            bool firePressed = anyFireHeld && !cl.prevFireHeld;
             bool altFirePressed = anyAltFireHeld && !cl.prevAltFireHeld;
-            cl.prevFireHeld     = anyFireHeld;
-            cl.prevAltFireHeld  = anyAltFireHeld;
+            cl.prevFireHeld = anyFireHeld;
+            cl.prevAltFireHeld = anyAltFireHeld;
 
-            input.jumpHeld    = anyJumpHeld;
+            input.jumpHeld = anyJumpHeld;
             input.jumpPressed = anyJumpPressed;
-            input.crouchHeld  = latest.buttons.crouch();
-            input.glideHeld   = anyJumpHeld;
+            input.crouchHeld = latest.buttons.crouch();
+            input.glideHeld = anyJumpHeld;
 
             processWeapon(cl, latest, anyFireHeld, firePressed, anyAltFireHeld, altFirePressed, anyKnife, dt);
             cl.inputCount = 0; // consumed
@@ -169,7 +169,7 @@ void GameServer::processWeapon(ClientSlot& cl,
         weaponTryReload(ws);
 
     WeaponId useWeapon = knifePressed ? WeaponId::Knife : ws.active;
-    const auto& stats  = k_weaponStats[static_cast<int>(useWeapon)];
+    const auto& stats = k_weaponStats[static_cast<int>(useWeapon)];
     const bool isMelee = (stats.range <= 100.0f);
 
     bool didFire;
@@ -186,8 +186,8 @@ void GameServer::processWeapon(ClientSlot& cl,
         return;
 
     // Build aim direction from client's yaw/pitch
-    const auto& cam  = registry.get<CameraAngles>(cl.entity);
-    const auto& tf   = registry.get<Transform>(cl.entity);
+    const auto& cam = registry.get<CameraAngles>(cl.entity);
+    const auto& tf = registry.get<Transform>(cl.entity);
     const auto& ctrl = registry.get<PlayerController>(cl.entity);
     glm::vec3 eyePos = tf.position + glm::vec3(0.0f, ctrl.eyeHeight, 0.0f);
 
@@ -212,7 +212,7 @@ void GameServer::processWeapon(ClientSlot& cl,
         glm::vec3 pos;
         bool alive = true;
         if (hasRewind) {
-            pos   = rwPos[other.id];
+            pos = rwPos[other.id];
             alive = rwAlive[other.id];
         } else {
             pos = registry.get<Transform>(other.entity).position;
@@ -221,9 +221,9 @@ void GameServer::processWeapon(ClientSlot& cl,
             continue;
 
         caps[capCount++] = {
-            .id         = other.id,
-            .center     = pos + glm::vec3(0.0f, LagComp::k_capsuleYOffset, 0.0f),
-            .radius     = LagComp::k_capsuleRadius,
+            .id = other.id,
+            .center = pos + glm::vec3(0.0f, LagComp::k_capsuleYOffset, 0.0f),
+            .radius = LagComp::k_capsuleRadius,
             .halfHeight = LagComp::k_capsuleHalfHeight,
         };
     }
@@ -242,7 +242,7 @@ void GameServer::processWeapon(ClientSlot& cl,
         auto& vic = clients[hit.victimId];
         if (vic.connected && vic.entity != entt::null) {
             auto& vicHp = registry.get<Health>(vic.entity);
-            int actual  = vicHp.applyDamage(stats.damage);
+            int actual = vicHp.applyDamage(stats.damage);
             sendEvent(vic, EventType::Damaged, cl.id, static_cast<uint8_t>(actual));
             if (!vicHp.alive())
                 killPlayer(vic, cl.id);
@@ -257,7 +257,7 @@ void GameServer::processWeapon(ClientSlot& cl,
 void GameServer::pushLagCompSnapshot()
 {
     LagSnapshot::Entry entries[k_maxPlayers] = {};
-    uint8_t cnt                              = 0;
+    uint8_t cnt = 0;
     for (auto& cl : clients) {
         if (!cl.connected || cl.entity == entt::null)
             continue;
@@ -276,33 +276,33 @@ void GameServer::pushLagCompSnapshot()
 void GameServer::broadcastSnapshot()
 {
     PktSnapshot snap{};
-    snap.serverTick  = serverTick;
+    snap.serverTick = serverTick;
     snap.playerCount = 0;
 
     for (auto& cl : clients) {
         if (!cl.connected || cl.entity == entt::null)
             continue;
-        auto& tf   = registry.get<Transform>(cl.entity);
-        auto& vel  = registry.get<Velocity>(cl.entity);
+        auto& tf = registry.get<Transform>(cl.entity);
+        auto& vel = registry.get<Velocity>(cl.entity);
         auto& ctrl = registry.get<PlayerController>(cl.entity);
-        auto& cam  = registry.get<CameraAngles>(cl.entity);
-        auto& hp   = registry.get<Health>(cl.entity);
-        auto& ws   = registry.get<WeaponState>(cl.entity);
+        auto& cam = registry.get<CameraAngles>(cl.entity);
+        auto& hp = registry.get<Health>(cl.entity);
+        auto& ws = registry.get<WeaponState>(cl.entity);
 
-        auto& ps  = snap.players[snap.playerCount++];
-        ps.id     = cl.id;
-        ps.flags  = PlayerState::makeFlags(hp.alive(), ctrl.onGround, ctrl.onWall);
+        auto& ps = snap.players[snap.playerCount++];
+        ps.id = cl.id;
+        ps.flags = PlayerState::makeFlags(hp.alive(), ctrl.onGround, ctrl.onWall);
         ps.health = static_cast<uint8_t>(std::max(0, std::min(255, hp.current)));
         ps.weapon = static_cast<uint8_t>(ws.active);
-        ps.ammo   = static_cast<uint8_t>(std::max(0, std::min(255, ws.ammo)));
-        ps.posX   = tf.position.x;
-        ps.posY   = tf.position.y;
-        ps.posZ   = tf.position.z;
-        ps.velX   = vel.linear.x;
-        ps.velY   = vel.linear.y;
-        ps.velZ   = vel.linear.z;
-        ps.yaw    = cam.yaw;
-        ps.pitch  = cam.pitch;
+        ps.ammo = static_cast<uint8_t>(std::max(0, std::min(255, ws.ammo)));
+        ps.posX = tf.position.x;
+        ps.posY = tf.position.y;
+        ps.posZ = tf.position.z;
+        ps.velX = vel.linear.x;
+        ps.velY = vel.linear.y;
+        ps.velZ = vel.linear.z;
+        ps.yaw = cam.yaw;
+        ps.pitch = cam.pitch;
     }
 
     int pktLen = static_cast<int>(sizeof(PacketHeader) + 8 + snap.playerCount * sizeof(PlayerState));
@@ -375,8 +375,8 @@ void GameServer::handleConnect(const PktConnect* pkt, const sockaddr_in& from)
         // Re-send ack
         PktConnectAck ack{};
         ack.hdr.clientId = existing->id;
-        ack.clientId     = existing->id;
-        ack.serverTick   = serverTick;
+        ack.clientId = existing->id;
+        ack.serverTick = serverTick;
         existing->chan.send(&ack, sizeof(ack), PacketType::ConnectAck, 0xFF);
         return;
     }
@@ -391,12 +391,12 @@ void GameServer::handleConnect(const PktConnect* pkt, const sockaddr_in& from)
         return;
     }
 
-    auto& cl     = clients[slot];
+    auto& cl = clients[slot];
     cl.connected = true;
-    cl.addr      = from;
+    cl.addr = from;
     cl.chan.init(&sock, &from);
     std::memcpy(cl.name, pkt->name, sizeof(cl.name));
-    cl.name[15]      = '\0';
+    cl.name[15] = '\0';
     cl.lastInputTick = 0;
 
     char addrStr[32];
@@ -410,8 +410,8 @@ void GameServer::handleConnect(const PktConnect* pkt, const sockaddr_in& from)
     // Send ack
     PktConnectAck ack{};
     ack.hdr.clientId = slot;
-    ack.clientId     = slot;
-    ack.serverTick   = serverTick;
+    ack.clientId = slot;
+    ack.serverTick = serverTick;
     cl.chan.send(&ack, sizeof(ack), PacketType::ConnectAck, 0xFF);
 }
 
@@ -438,8 +438,8 @@ void GameServer::handleDisconnect(ClientSlot& cl)
         registry.destroy(cl.entity);
         cl.entity = entt::null;
     }
-    cl.connected   = false;
-    cl.inputCount  = 0;
+    cl.connected = false;
+    cl.inputCount = 0;
     connectedCount = connectedCount > 0 ? connectedCount - 1 : 0;
 }
 
@@ -452,7 +452,7 @@ void GameServer::spawnPlayer(ClientSlot& cl)
     if (cl.entity != entt::null)
         registry.destroy(cl.entity);
 
-    cl.entity         = registry.create();
+    cl.entity = registry.create();
     glm::vec3 spawnPt = k_spawns[cl.id % k_maxPlayers];
 
     registry.emplace<Transform>(cl.entity, Transform{spawnPt});
@@ -475,7 +475,7 @@ void GameServer::spawnPlayer(ClientSlot& cl)
 
 void GameServer::killPlayer(ClientSlot& cl, int attackerId)
 {
-    auto& hp   = registry.get<Health>(cl.entity);
+    auto& hp = registry.get<Health>(cl.entity);
     hp.current = 0;
     cl.deaths++;
 
@@ -508,8 +508,8 @@ void GameServer::sendEvent(ClientSlot& cl, EventType evt, uint8_t p1, uint8_t p2
 {
     PktEvent pkt{};
     pkt.eventType = static_cast<uint8_t>(evt);
-    pkt.param1    = p1;
-    pkt.param2    = p2;
+    pkt.param1 = p1;
+    pkt.param2 = p2;
     cl.chan.send(&pkt, sizeof(pkt), PacketType::Event, 0xFF);
 }
 

@@ -22,16 +22,16 @@ struct HudVertex
 
 struct HudState
 {
-    int health       = 100; // 0-100
-    int maxHealth    = 100;
-    int armor        = 0;
-    int ammo         = 30;
-    int reserve      = 90;
-    bool reloading   = false;
+    int health = 100; // 0-100
+    int maxHealth = 100;
+    int armor = 0;
+    int ammo = 30;
+    int reserve = 90;
+    bool reloading = false;
     float reloadFrac = 0.0f;     // 0-1
 
     float hitMarkerTimer = 0.0f; // shows hit marker for this many seconds
-    bool killedSomeone   = false;
+    bool killedSomeone = false;
 
     float muzzleFlashTimer = 0.0f; // brief flash on fire (0.07 s)
 
@@ -53,9 +53,9 @@ public:
     void tickHitMarker(float dt);
 
 private:
-    SDL_GPUDevice* gpu              = nullptr;
-    SDL_GPUGraphicsPipeline* pipe   = nullptr;
-    SDL_GPUBuffer* vbuf             = nullptr;
+    SDL_GPUDevice* gpu = nullptr;
+    SDL_GPUGraphicsPipeline* pipe = nullptr;
+    SDL_GPUBuffer* vbuf = nullptr;
     static constexpr int k_maxVerts = 2048;
 
     void buildGeometry(std::vector<HudVertex>& verts, uint32_t w, uint32_t h, const HudState& state) const;

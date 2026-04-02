@@ -8,9 +8,9 @@
 
 void LagComp::push(uint32_t tick, const LagSnapshot::Entry entries[k_maxPlayers], uint8_t playerCount)
 {
-    head       = (head + 1) % k_lagCompTicks;
+    head = (head + 1) % k_lagCompTicks;
     auto& snap = ring[head];
-    snap.tick  = tick;
+    snap.tick = tick;
     snap.count = playerCount;
     for (int i = 0; i < k_maxPlayers; ++i)
         snap.players[i] = entries[i];
@@ -29,15 +29,15 @@ const LagSnapshot* LagComp::find(uint32_t tick) const
         return nullptr;
 
     const LagSnapshot* best = nullptr;
-    uint32_t bestDif        = 0xFFFFFFFFu;
+    uint32_t bestDif = 0xFFFFFFFFu;
 
     for (int i = 0; i < count; ++i) {
-        int idx       = (head - i + k_lagCompTicks) % k_lagCompTicks;
+        int idx = (head - i + k_lagCompTicks) % k_lagCompTicks;
         const auto& s = ring[idx];
-        uint32_t dif  = (s.tick > tick) ? s.tick - tick : tick - s.tick;
+        uint32_t dif = (s.tick > tick) ? s.tick - tick : tick - s.tick;
         if (dif < bestDif) {
             bestDif = dif;
-            best    = &s;
+            best = &s;
         }
     }
     return best;
@@ -55,7 +55,7 @@ bool LagComp::rewind(uint32_t tick, glm::vec3 outPositions[k_maxPlayers], bool o
 
     for (int i = 0; i < k_maxPlayers; ++i) {
         outPositions[i] = snap->players[i].pos;
-        outAlive[i]     = snap->players[i].alive;
+        outAlive[i] = snap->players[i].alive;
     }
     return true;
 }

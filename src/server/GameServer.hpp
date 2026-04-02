@@ -17,19 +17,19 @@
 
 struct ClientSlot
 {
-    bool connected   = false;
+    bool connected = false;
     sockaddr_in addr = {};
     NetChannel chan;
     char name[16] = "Player";
-    uint8_t id    = 0xFF;
+    uint8_t id = 0xFF;
 
-    entt::entity entity    = entt::null; // ECS entity representing this player
-    uint32_t lastInputTick = 0;          // most recent processed input tick
-    float lastInputTime    = 0.0f;
+    entt::entity entity = entt::null; // ECS entity representing this player
+    uint32_t lastInputTick = 0;       // most recent processed input tick
+    float lastInputTime = 0.0f;
 
     // Server-side edge detection for held buttons.
     // Client sends fireHeld; server computes firePressed = fireHeld && !prevFireHeld.
-    bool prevFireHeld    = false;
+    bool prevFireHeld = false;
     bool prevAltFireHeld = false;
 
     // Pending inputs not yet processed (in case of minor re-ordering)
@@ -39,8 +39,8 @@ struct ClientSlot
 
     // Respawn timer (-1 = alive)
     float respawnTimer = -1.0f;
-    int kills          = 0;
-    int deaths         = 0;
+    int kills = 0;
+    int deaths = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ private:
     LagComp lagComp;
 
     uint32_t serverTick = 0;
-    double simTime      = 0.0;
+    double simTime = 0.0;
 
     // ---- Internal ----
     void receiveAll();

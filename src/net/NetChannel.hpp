@@ -28,7 +28,7 @@ public:
     void init(UdpSocket* socket, const sockaddr_in* peerAddr = nullptr);
     void setPeer(const sockaddr_in& addr)
     {
-        peer    = addr;
+        peer = addr;
         hasPeer = true;
     }
     const sockaddr_in& getPeer() const { return peer; }
@@ -57,18 +57,18 @@ public:
     // Stats
     // ---------------------------------------------------------------------------
 
-    uint32_t packetsSent     = 0;
+    uint32_t packetsSent = 0;
     uint32_t packetsReceived = 0;
-    uint32_t packetsDropped  = 0; // stale / duplicate
+    uint32_t packetsDropped = 0; // stale / duplicate
 
 private:
-    UdpSocket* sock  = nullptr;
+    UdpSocket* sock = nullptr;
     sockaddr_in peer = {};
-    bool hasPeer     = false;
+    bool hasPeer = false;
 
     uint16_t outSeq = 0; // next outgoing sequence
-    uint16_t inSeq  = 0; // last accepted incoming sequence
-    uint16_t inAck  = 0; // last sequence WE received (sent back to peer)
+    uint16_t inSeq = 0;  // last accepted incoming sequence
+    uint16_t inAck = 0;  // last sequence WE received (sent back to peer)
     uint16_t inBits = 0; // ack bitmask for inAck-1 .. inAck-16
 
     // Track which incoming sequences we've seen (duplicate detection).

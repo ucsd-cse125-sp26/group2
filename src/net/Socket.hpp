@@ -11,7 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
-using SockFd                      = SOCKET;
+using SockFd = SOCKET;
 static constexpr SockFd k_badSock = INVALID_SOCKET;
 #else
 #include <arpa/inet.h>
@@ -20,7 +20,7 @@ static constexpr SockFd k_badSock = INVALID_SOCKET;
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
-using SockFd                      = int;
+using SockFd = int;
 static constexpr SockFd k_badSock = -1;
 #endif
 

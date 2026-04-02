@@ -74,7 +74,7 @@ private:
         };
 
         for (int f = 0; f < 6; f++) {
-            glm::vec3 fc   = glm::clamp(col * k_shade[f], 0.0f, 1.0f);
+            glm::vec3 fc = glm::clamp(col * k_shade[f], 0.0f, 1.0f);
             const int* idx = faces[f];
             // Triangle 1
             mesh.push_back({p[idx[0]], fc});
@@ -97,13 +97,13 @@ private:
 namespace level
 {
 
-constexpr glm::vec3 GRAY      = {0.52f, 0.52f, 0.52f};
+constexpr glm::vec3 GRAY = {0.52f, 0.52f, 0.52f};
 constexpr glm::vec3 DARK_GRAY = {0.32f, 0.32f, 0.32f};
 constexpr glm::vec3 BLUE_GRAY = {0.38f, 0.40f, 0.55f};
-constexpr glm::vec3 TEAL      = {0.28f, 0.58f, 0.58f};
-constexpr glm::vec3 BROWN     = {0.60f, 0.42f, 0.24f};
-constexpr glm::vec3 ORANGE    = {0.80f, 0.48f, 0.16f};
-constexpr glm::vec3 RUST      = {0.65f, 0.28f, 0.16f};
+constexpr glm::vec3 TEAL = {0.28f, 0.58f, 0.58f};
+constexpr glm::vec3 BROWN = {0.60f, 0.42f, 0.24f};
+constexpr glm::vec3 ORANGE = {0.80f, 0.48f, 0.16f};
+constexpr glm::vec3 RUST = {0.65f, 0.28f, 0.16f};
 
 inline World build()
 {

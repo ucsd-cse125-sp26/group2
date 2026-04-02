@@ -25,8 +25,8 @@ bool rayVsAabb(const glm::vec3& origin,
                 return false;
         } else {
             float invD = 1.0f / dir[i];
-            float t1   = (boxMin[i] - origin[i]) * invD;
-            float t2   = (boxMax[i] - origin[i]) * invD;
+            float t1 = (boxMin[i] - origin[i]) * invD;
+            float t2 = (boxMax[i] - origin[i]) * invD;
             if (t1 > t2)
                 std::swap(t1, t2);
             tmin = std::max(tmin, t1);
@@ -71,12 +71,12 @@ void weaponUpdate(WeaponState& ws, float dt)
     if (ws.reloading) {
         ws.reload -= dt;
         if (ws.reload <= 0.0f) {
-            ws.reloading   = false;
-            ws.reload      = 0.0f;
-            int need       = ws.ammo < 0 ? 0 : 0; // silence unused
+            ws.reloading = false;
+            ws.reload = 0.0f;
+            int need = ws.ammo < 0 ? 0 : 0; // silence unused
             const auto& st = k_weaponStats[static_cast<int>(ws.active)];
-            need           = st.magSize - ws.ammo;
-            int take       = std::min(need, ws.reserve);
+            need = st.magSize - ws.ammo;
+            int take = std::min(need, ws.reserve);
             ws.ammo += take;
             ws.reserve -= take;
         }
@@ -123,7 +123,7 @@ bool weaponTryReload(WeaponState& ws)
     if (ws.reserve <= 0)
         return false;
     ws.reloading = true;
-    ws.reload    = st.reloadTime;
+    ws.reload = st.reloadTime;
     return true;
 }
 
@@ -143,14 +143,14 @@ HitResult hitscanFire(const glm::vec3& eyePos,
 
     // Test world geometry (AABB boxes)
     for (const auto& box : world.boxes) {
-        float tHit     = 0.0f;
+        float tHit = 0.0f;
         glm::vec3 bMin = box.center - box.half;
         glm::vec3 bMax = box.center + box.half;
         if (rayVsAabb(eyePos, aimDir, best.dist, bMin, bMax, tHit)) {
             if (tHit < best.dist) {
-                best.hit      = true;
-                best.dist     = tHit;
-                best.point    = eyePos + aimDir * tHit;
+                best.hit = true;
+                best.dist = tHit;
+                best.point = eyePos + aimDir * tHit;
                 best.victimId = -1;
                 // Approximate normal: find closest face
                 glm::vec3 p = best.point - box.center;
@@ -159,8 +159,8 @@ HitResult hitscanFire(const glm::vec3& eyePos,
                 for (int i = 0; i < 3; ++i) {
                     float v = std::abs(p[i]) / box.half[i];
                     if (v > maxV) {
-                        maxV    = v;
-                        norm    = glm::vec3(0.0f);
+                        maxV = v;
+                        norm = glm::vec3(0.0f);
                         norm[i] = p[i] < 0.0f ? -1.0f : 1.0f;
                     }
                 }
@@ -172,13 +172,13 @@ HitResult hitscanFire(const glm::vec3& eyePos,
     // Test player capsules
     for (int i = 0; i < otherCount; ++i) {
         const auto& cap = others[i];
-        float tHit      = 0.0f;
+        float tHit = 0.0f;
         if (rayVsCapsule(eyePos, aimDir, best.dist, cap.center, cap.radius, cap.halfHeight, tHit)) {
             if (tHit < best.dist) {
-                best.hit      = true;
-                best.dist     = tHit;
-                best.point    = eyePos + aimDir * tHit;
-                best.normal   = -aimDir;
+                best.hit = true;
+                best.dist = tHit;
+                best.point = eyePos + aimDir * tHit;
+                best.normal = -aimDir;
                 best.victimId = cap.id;
             }
         }
@@ -202,13 +202,13 @@ HitResult meleeAttack(const glm::vec3& eyePos,
 
     for (int i = 0; i < otherCount; ++i) {
         const auto& cap = others[i];
-        float tHit      = 0.0f;
+        float tHit = 0.0f;
         if (rayVsCapsule(eyePos, aimDir, best.dist, cap.center, cap.radius, cap.halfHeight, tHit)) {
             if (tHit < best.dist) {
-                best.hit      = true;
-                best.dist     = tHit;
-                best.point    = eyePos + aimDir * tHit;
-                best.normal   = -aimDir;
+                best.hit = true;
+                best.dist = tHit;
+                best.point = eyePos + aimDir * tHit;
+                best.normal = -aimDir;
                 best.victimId = cap.id;
             }
         }

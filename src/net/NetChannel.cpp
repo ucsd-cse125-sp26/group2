@@ -23,7 +23,7 @@ void NetChannel::init(UdpSocket* socket, const sockaddr_in* peerAddr)
 {
     sock = socket;
     if (peerAddr) {
-        peer    = *peerAddr;
+        peer = *peerAddr;
         hasPeer = true;
     }
 }
@@ -37,12 +37,12 @@ int NetChannel::send(void* packet, int totalBytes, PacketType type, uint8_t clie
     if (!sock || !sock->isOpen() || !hasPeer)
         return -1;
 
-    auto* hdr     = static_cast<PacketHeader*>(packet);
-    hdr->magic    = k_magic;
+    auto* hdr = static_cast<PacketHeader*>(packet);
+    hdr->magic = k_magic;
     hdr->sequence = outSeq++;
-    hdr->ack      = inAck;
-    hdr->ackBits  = inBits;
-    hdr->type     = static_cast<uint8_t>(type);
+    hdr->ack = inAck;
+    hdr->ackBits = inBits;
+    hdr->type = static_cast<uint8_t>(type);
     hdr->clientId = clientId;
 
     int sent = sock->sendTo(packet, totalBytes, peer);
@@ -81,8 +81,8 @@ int NetChannel::recv(void* buf, int maxLen, sockaddr_in& outFrom)
     // Update our local ack tracking (what we'll report back in outgoing pkts)
     if (seqGreater(seq, inAck) || packetsReceived == 0) {
         uint16_t delta = seq - inAck;
-        inBits         = static_cast<uint16_t>((inBits << delta) | (1u << (delta - 1)));
-        inAck          = seq;
+        inBits = static_cast<uint16_t>((inBits << delta) | (1u << (delta - 1)));
+        inAck = seq;
     } else {
         uint16_t delta = inAck - seq;
         if (delta < 16)
@@ -101,7 +101,7 @@ bool NetChannel::checkAndUpdateSeq(uint16_t seq)
 {
     if (packetsReceived == 0) {
         // First packet: accept unconditionally
-        inSeq    = seq;
+        inSeq = seq;
         recvMask = 1;
         return true;
     }

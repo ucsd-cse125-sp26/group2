@@ -29,10 +29,10 @@
 // ---------------------------------------------------------------------------
 
 constexpr float k_mouseSensitivity = 0.0015f;
-constexpr float k_fovDeg           = 100.0f;
-constexpr float k_nearPlane        = 4.0f;
-constexpr float k_farPlane         = 16000.0f;
-constexpr glm::vec3 k_spawnPos     = {0.0f, 36.0f, 0.0f};
+constexpr float k_fovDeg = 100.0f;
+constexpr float k_nearPlane = 4.0f;
+constexpr float k_farPlane = 16000.0f;
+constexpr glm::vec3 k_spawnPos = {0.0f, 36.0f, 0.0f};
 
 // ---------------------------------------------------------------------------
 // Remote-player interpolation state (one per server slot)
@@ -40,15 +40,15 @@ constexpr glm::vec3 k_spawnPos     = {0.0f, 36.0f, 0.0f};
 
 struct RemotePlayer
 {
-    bool active    = false;
+    bool active = false;
     glm::vec3 posA = {0.0f, 0.0f, 0.0f}; // older snapshot
     glm::vec3 posB = {0.0f, 0.0f, 0.0f}; // newer snapshot
-    float yawA     = 0.0f;
-    float yawB     = 0.0f;
-    float lerpT    = 1.0f; // 0 = A, 1 = B
-    float lerpDt   = 1.0f / k_snapshotHz;
+    float yawA = 0.0f;
+    float yawB = 0.0f;
+    float lerpT = 1.0f; // 0 = A, 1 = B
+    float lerpDt = 1.0f / k_snapshotHz;
     uint8_t health = 100;
-    bool alive     = true;
+    bool alive = true;
 };
 
 // ---------------------------------------------------------------------------
@@ -59,10 +59,10 @@ struct ClientNet
 {
     UdpSocket sock;
     NetChannel chan;
-    uint8_t myId        = 0xFF; // assigned by server
-    bool connected      = false;
+    uint8_t myId = 0xFF; // assigned by server
+    bool connected = false;
     uint32_t clientTick = 0;
-    float sendTimer     = 0.0f;
+    float sendTimer = 0.0f;
 
     static constexpr float k_inputSendRate = 1.0f / 60.0f; // 60 Hz input
 };
@@ -83,12 +83,12 @@ struct AppState
     entt::registry registry;
     entt::entity player = entt::null;
 
-    bool mouseCaptured  = false;
-    bool prevJump       = false;
-    bool prevFire       = false;
-    bool prevGrapple    = false;
+    bool mouseCaptured = false;
+    bool prevJump = false;
+    bool prevFire = false;
+    bool prevGrapple = false;
     uint32_t frameCount = 0;
-    Uint64 lastTick     = 0;
+    Uint64 lastTick = 0;
 
     // Networking (optional — nullptr = offline mode)
     ClientNet* net = nullptr;
@@ -97,7 +97,7 @@ struct AppState
     RemotePlayer remotes[4];
 
     // Client-side snapshot of own state (from server) for reconciliation
-    bool hasServerState  = false;
+    bool hasServerState = false;
     float serverPosError = 0.0f;
 };
 
@@ -122,10 +122,10 @@ static PktInput buildInputPacket(AppState* s, float /*dt*/)
 
     PktInput pkt{};
     pkt.clientTick = s->net->clientTick;
-    pkt.moveFwd    = inp.moveDir.y;
-    pkt.moveRight  = inp.moveDir.x;
-    pkt.yaw        = cam.yaw;
-    pkt.pitch      = cam.pitch;
+    pkt.moveFwd = inp.moveDir.y;
+    pkt.moveRight = inp.moveDir.x;
+    pkt.yaw = cam.yaw;
+    pkt.pitch = cam.pitch;
     // Send the held (continuous) state for fire/altFire so the server can
     // detect its own rising edge.  A single-frame "pressed" bit is too fragile:
     // if two packets arrive in the same server tick the newest wins and the
@@ -153,7 +153,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
         return SDL_APP_FAILURE;
     }
 
-    auto* s   = new AppState();
+    auto* s = new AppState();
     *appstate = s;
 
     // ---- GPU device ----
@@ -292,42 +292,42 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     auto* s = static_cast<AppState*>(appstate);
 
     // ---- Delta time ----
-    Uint64 now  = SDL_GetTicksNS();
-    float dt    = static_cast<float>(now - s->lastTick) * 1e-9f;
-    dt          = std::min(dt, 0.033f);
+    Uint64 now = SDL_GetTicksNS();
+    float dt = static_cast<float>(now - s->lastTick) * 1e-9f;
+    dt = std::min(dt, 0.033f);
     s->lastTick = now;
 
     // ---- Build input snapshot ----
     if (s->mouseCaptured) {
-        auto& inp        = s->registry.get<InputState>(s->player);
+        auto& inp = s->registry.get<InputState>(s->player);
         const bool* keys = SDL_GetKeyboardState(nullptr);
 
-        float mx       = static_cast<float>((keys[SDL_SCANCODE_D] ? 1 : 0) - (keys[SDL_SCANCODE_A] ? 1 : 0));
-        float mz       = static_cast<float>((keys[SDL_SCANCODE_W] ? 1 : 0) - (keys[SDL_SCANCODE_S] ? 1 : 0));
-        float len      = std::sqrt(mx * mx + mz * mz);
-        inp.moveDir    = (len > 0.001f) ? glm::vec2(mx / len, mz / len) : glm::vec2(0.0f);
+        float mx = static_cast<float>((keys[SDL_SCANCODE_D] ? 1 : 0) - (keys[SDL_SCANCODE_A] ? 1 : 0));
+        float mz = static_cast<float>((keys[SDL_SCANCODE_W] ? 1 : 0) - (keys[SDL_SCANCODE_S] ? 1 : 0));
+        float len = std::sqrt(mx * mx + mz * mz);
+        inp.moveDir = (len > 0.001f) ? glm::vec2(mx / len, mz / len) : glm::vec2(0.0f);
         inp.mouseDelta = {0.0f, 0.0f};
 
-        bool curJump    = keys[SDL_SCANCODE_SPACE] != 0;
-        inp.jumpHeld    = curJump;
+        bool curJump = keys[SDL_SCANCODE_SPACE] != 0;
+        inp.jumpHeld = curJump;
         inp.jumpPressed = curJump && !s->prevJump;
-        s->prevJump     = curJump;
-        inp.glideHeld   = curJump;
-        inp.crouchHeld  = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+        s->prevJump = curJump;
+        inp.glideHeld = curJump;
+        inp.crouchHeld = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
 
-        bool curFire       = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0;
-        inp.firePressed    = curFire && !s->prevFire;
-        inp.fireHeld       = curFire;
-        s->prevFire        = curFire;
-        inp.altFireHeld    = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_RMASK) != 0;
+        bool curFire = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0;
+        inp.firePressed = curFire && !s->prevFire;
+        inp.fireHeld = curFire;
+        s->prevFire = curFire;
+        inp.altFireHeld = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_RMASK) != 0;
         inp.altFirePressed = inp.altFireHeld;
-        inp.knifePressed   = keys[SDL_SCANCODE_F] != 0;
-        inp.reloadPressed  = keys[SDL_SCANCODE_R] != 0;
+        inp.knifePressed = keys[SDL_SCANCODE_F] != 0;
+        inp.reloadPressed = keys[SDL_SCANCODE_R] != 0;
 
-        bool curGrapple    = keys[SDL_SCANCODE_E] != 0;
+        bool curGrapple = keys[SDL_SCANCODE_E] != 0;
         inp.grapplePressed = curGrapple && !s->prevGrapple;
-        inp.grappleHeld    = curGrapple;
-        s->prevGrapple     = curGrapple;
+        inp.grappleHeld = curGrapple;
+        s->prevGrapple = curGrapple;
     }
 
     // ---- Local physics tick (client prediction) ----
@@ -335,7 +335,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
     // ---- Weapon tick (client-side for ammo display + visual feedback) ----
     {
-        auto& ws  = s->registry.get<WeaponState>(s->player);
+        auto& ws = s->registry.get<WeaponState>(s->player);
         auto& inp = s->registry.get<InputState>(s->player);
         weaponUpdate(ws, dt);
         bool shotFired = weaponTryFire(ws, inp.fireHeld, inp.firePressed, dt);
@@ -346,9 +346,9 @@ SDL_AppResult SDL_AppIterate(void* appstate)
         if (shotFired) {
             s->hudState.muzzleFlashTimer = 0.07f;
 
-            const auto& tf   = s->registry.get<Transform>(s->player);
+            const auto& tf = s->registry.get<Transform>(s->player);
             const auto& ctrl = s->registry.get<PlayerController>(s->player);
-            const auto& cam  = s->registry.get<CameraAngles>(s->player);
+            const auto& cam = s->registry.get<CameraAngles>(s->player);
 
             glm::vec3 eyePos = tf.position + glm::vec3(0.0f, ctrl.eyeHeight, 0.0f);
             float cp = std::cos(cam.pitch), sp = std::sin(cam.pitch);
@@ -360,19 +360,19 @@ SDL_AppResult SDL_AppIterate(void* appstate)
             // pos = tf.position (AABB centre); hitbox:
             //   bMin.y = pos.y + 12 - (28+20) = pos.y - 36  (feet)
             //   bMax.y = pos.y + 12 + (28+20) = pos.y + 60  (above head)
-            constexpr float k_capsR    = 20.0f;
-            constexpr float k_capsHH   = 28.0f;
+            constexpr float k_capsR = 20.0f;
+            constexpr float k_capsHH = 28.0f;
             constexpr float k_capsYOff = 12.0f;
             CapsuleInfo others[4];
             int otherCount = 0;
-            int myId       = s->net ? s->net->myId : 0;
+            int myId = s->net ? s->net->myId : 0;
             for (int i = 0; i < 4 && otherCount < 4; ++i) {
                 if (i == myId)
                     continue;
                 const auto& rp = s->remotes[i];
                 if (!rp.active || !rp.alive)
                     continue;
-                glm::vec3 pos        = glm::mix(rp.posA, rp.posB, rp.lerpT);
+                glm::vec3 pos = glm::mix(rp.posA, rp.posB, rp.lerpT);
                 others[otherCount++] = {i, pos + glm::vec3(0.0f, k_capsYOff, 0.0f), k_capsR, k_capsHH};
             }
 
@@ -389,8 +389,8 @@ SDL_AppResult SDL_AppIterate(void* appstate)
             s->hudState.muzzleFlashTimer = std::max(0.0f, s->hudState.muzzleFlashTimer - dt);
 
         // Update HUD state from weapon
-        s->hudState.ammo      = ws.ammo;
-        s->hudState.reserve   = ws.reserve;
+        s->hudState.ammo = ws.ammo;
+        s->hudState.reserve = ws.reserve;
         s->hudState.reloading = ws.reloading;
         s->hudState.reloadFrac =
             ws.reloading ? (1.0f - ws.reload / k_weaponStats[static_cast<int>(ws.active)].reloadTime) : 0.0f;
@@ -398,12 +398,12 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
     // ---- Update HUD state from player ----
     {
-        auto& hp              = s->registry.get<Health>(s->player);
-        s->hudState.health    = hp.current;
+        auto& hp = s->registry.get<Health>(s->player);
+        s->hudState.health = hp.current;
         s->hudState.maxHealth = hp.max;
-        s->hudState.armor     = hp.armor;
+        s->hudState.armor = hp.armor;
 
-        auto* gh                  = s->registry.try_get<GrappleHook>(s->player);
+        auto* gh = s->registry.try_get<GrappleHook>(s->player);
         s->hudState.grappleActive = gh && gh->state != GrappleHook::State::Idle;
 
         if (s->hudState.hitMarkerTimer > 0.0f)
@@ -426,8 +426,8 @@ SDL_AppResult SDL_AppIterate(void* appstate)
             auto type = static_cast<PacketType>(hdr->type);
 
             if (type == PacketType::ConnectAck && n >= static_cast<int>(sizeof(PktConnectAck))) {
-                auto* ack         = reinterpret_cast<PktConnectAck*>(buf);
-                s->net->myId      = ack->clientId;
+                auto* ack = reinterpret_cast<PktConnectAck*>(buf);
+                s->net->myId = ack->clientId;
                 s->net->connected = true;
                 SDL_Log("Client: connected! Assigned slot %u (server tick %u)", ack->clientId, ack->serverTick);
             } else if (type == PacketType::Snapshot && n >= static_cast<int>(sizeof(PacketHeader) + 8)) {
@@ -446,38 +446,38 @@ SDL_AppResult SDL_AppIterate(void* appstate)
                             // Large error: hard correction
                             tf.position = serverPos;
                         }
-                        auto& hp   = s->registry.get<Health>(s->player);
+                        auto& hp = s->registry.get<Health>(s->player);
                         hp.current = ps.health;
                     } else {
                         // Update remote player interpolation buffer
-                        auto& rp  = s->remotes[ps.id];
-                        rp.posA   = rp.posB;
-                        rp.yawA   = rp.yawB;
-                        rp.posB   = {ps.posX, ps.posY, ps.posZ};
-                        rp.yawB   = ps.yaw;
-                        rp.lerpT  = 0.0f;
+                        auto& rp = s->remotes[ps.id];
+                        rp.posA = rp.posB;
+                        rp.yawA = rp.yawB;
+                        rp.posB = {ps.posX, ps.posY, ps.posZ};
+                        rp.yawB = ps.yaw;
+                        rp.lerpT = 0.0f;
                         rp.lerpDt = 1.0f / k_snapshotHz;
                         rp.health = ps.health;
-                        rp.alive  = ps.alive();
+                        rp.alive = ps.alive();
                         rp.active = true;
                     }
                 }
             } else if (type == PacketType::Event && n >= static_cast<int>(sizeof(PktEvent))) {
-                auto* evt    = reinterpret_cast<PktEvent*>(buf);
+                auto* evt = reinterpret_cast<PktEvent*>(buf);
                 auto evtType = static_cast<EventType>(evt->eventType);
                 if (evtType == EventType::HitConfirm) {
                     s->hudState.hitMarkerTimer = 0.2f;
-                    s->hudState.killedSomeone  = false;
+                    s->hudState.killedSomeone = false;
                 } else if (evtType == EventType::Killed) {
                     s->hudState.hitMarkerTimer = 0.5f;
-                    s->hudState.killedSomeone  = true;
+                    s->hudState.killedSomeone = true;
                 } else if (evtType == EventType::Respawn) {
-                    auto& tf    = s->registry.get<Transform>(s->player);
+                    auto& tf = s->registry.get<Transform>(s->player);
                     tf.position = k_spawnPos;
-                    auto& vel   = s->registry.get<Velocity>(s->player);
-                    vel.linear  = {0.0f, 0.0f, 0.0f};
-                    auto& hp    = s->registry.get<Health>(s->player);
-                    hp.current  = hp.max;
+                    auto& vel = s->registry.get<Velocity>(s->player);
+                    vel.linear = {0.0f, 0.0f, 0.0f};
+                    auto& hp = s->registry.get<Health>(s->player);
+                    hp.current = hp.max;
                 }
             } else if (type == PacketType::Kick) {
                 SDL_Log("Client: kicked by server (full or banned)");
@@ -497,7 +497,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
         s->net->sendTimer += dt;
         if (s->net->connected && s->net->sendTimer >= ClientNet::k_inputSendRate) {
             s->net->sendTimer = 0.0f;
-            PktInput pkt      = buildInputPacket(s, dt);
+            PktInput pkt = buildInputPacket(s, dt);
             s->net->chan.send(&pkt, sizeof(pkt), PacketType::Input, s->net->myId);
         } else if (!s->net->connected) {
             // Retry connect every 0.5s
@@ -513,11 +513,11 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
     // ---- Debug title ----
     {
-        const auto& vel  = s->registry.get<Velocity>(s->player);
+        const auto& vel = s->registry.get<Velocity>(s->player);
         const auto& ctrl = s->registry.get<PlayerController>(s->player);
-        auto* wr         = s->registry.try_get<WallRun>(s->player);
-        auto* gh         = s->registry.try_get<GrappleHook>(s->player);
-        float hspd       = glm::length(glm::vec2(vel.linear.x, vel.linear.z));
+        auto* wr = s->registry.try_get<WallRun>(s->player);
+        auto* gh = s->registry.try_get<GrappleHook>(s->player);
+        float hspd = glm::length(glm::vec2(vel.linear.x, vel.linear.z));
         char title[192];
         std::snprintf(title,
                       sizeof(title),
@@ -548,9 +548,9 @@ SDL_AppResult SDL_AppIterate(void* appstate)
         s->frameCount++;
         s->renderer.onResize(swW, swH);
 
-        const auto& tf   = s->registry.get<Transform>(s->player);
+        const auto& tf = s->registry.get<Transform>(s->player);
         const auto& ctrl = s->registry.get<PlayerController>(s->player);
-        const auto& cam  = s->registry.get<CameraAngles>(s->player);
+        const auto& cam = s->registry.get<CameraAngles>(s->player);
 
         glm::mat4 view = buildViewMatrix(tf, ctrl, cam);
         glm::mat4 proj = glm::perspective(
@@ -558,19 +558,19 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
         SceneUniforms uniforms;
         uniforms.viewProj = proj * view;
-        uniforms.model    = glm::mat4(1.0f);
+        uniforms.model = glm::mat4(1.0f);
 
         // Collect remote player positions for rendering
         glm::vec3 positions[4] = {};
-        float yaws[4]          = {};
-        bool alive[4]          = {};
+        float yaws[4] = {};
+        bool alive[4] = {};
 
         // Local player slot
         int myId = s->net ? s->net->myId : 0;
         if (myId < 4) {
             positions[myId] = tf.position;
-            yaws[myId]      = cam.yaw;
-            alive[myId]     = true;
+            yaws[myId] = cam.yaw;
+            alive[myId] = true;
         }
 
         // Remote players (interpolated)
@@ -581,8 +581,8 @@ SDL_AppResult SDL_AppIterate(void* appstate)
             if (!rp.active || !rp.alive)
                 continue;
             positions[i] = glm::mix(rp.posA, rp.posB, rp.lerpT);
-            yaws[i]      = rp.yawA + (rp.yawB - rp.yawA) * rp.lerpT;
-            alive[i]     = true;
+            yaws[i] = rp.yawA + (rp.yawB - rp.yawA) * rp.lerpT;
+            alive[i] = true;
         }
 
         // Only skip own model in first-person (myId = 0 in offline mode)
@@ -612,9 +612,9 @@ void SDL_AppQuit(void* appstate, SDL_AppResult /*result*/)
     // Graceful disconnect
     if (s->net && s->net->connected) {
         PacketHeader disc{};
-        disc.magic    = k_magic;
+        disc.magic = k_magic;
         disc.clientId = s->net->myId;
-        disc.type     = static_cast<uint8_t>(PacketType::Disconnect);
+        disc.type = static_cast<uint8_t>(PacketType::Disconnect);
         s->net->chan.send(&disc, sizeof(disc), PacketType::Disconnect, s->net->myId);
     }
     if (s->net) {

@@ -38,9 +38,9 @@ void buildSphere(std::vector<Vertex>& out, glm::vec3 center, float radius, glm::
             float phi1 = 2.0f * k_pi * static_cast<float>(lon + 1) / static_cast<float>(segs);
 
             auto vert = [&](float theta, float phi) -> Vertex {
-                float x      = std::cos(theta) * std::cos(phi);
-                float y      = std::sin(theta);
-                float z      = std::cos(theta) * std::sin(phi);
+                float x = std::cos(theta) * std::cos(phi);
+                float y = std::sin(theta);
+                float z = std::cos(theta) * std::sin(phi);
                 float bright = 0.5f + 0.5f * y; // top brighter than bottom
                 return {center + glm::vec3(x, y, z) * radius, shade(color, bright)};
             };
@@ -88,7 +88,7 @@ void buildHemisphere(
     std::vector<Vertex>& out, glm::vec3 center, float radius, glm::vec3 color, int segs, int stacks, bool top)
 {
     int start = top ? stacks / 2 : 0;
-    int end   = top ? stacks : stacks / 2;
+    int end = top ? stacks : stacks / 2;
 
     for (int lat = start; lat < end; ++lat) {
         float theta0 = k_pi * static_cast<float>(lat) / static_cast<float>(stacks) - k_pi * 0.5f;
@@ -99,9 +99,9 @@ void buildHemisphere(
             float phi1 = 2.0f * k_pi * static_cast<float>(lon + 1) / static_cast<float>(segs);
 
             auto vert = [&](float theta, float phi) -> Vertex {
-                float x      = std::cos(theta) * std::cos(phi);
-                float y      = std::sin(theta);
-                float z      = std::cos(theta) * std::sin(phi);
+                float x = std::cos(theta) * std::cos(phi);
+                float y = std::sin(theta);
+                float z = std::cos(theta) * std::sin(phi);
                 float bright = 0.5f + 0.5f * y;
                 return {center + glm::vec3(x, y, z) * radius, shade(color, bright)};
             };
@@ -148,7 +148,7 @@ std::vector<Vertex> buildPlayerModel(
 
     // Head — slightly lighter color to distinguish from body
     glm::vec3 headColor = glm::clamp(bodyColor + glm::vec3(0.15f), glm::vec3(0.0f), glm::vec3(1.0f));
-    float headCenter    = bodyTop + capsuleRadius + headRadius * 0.8f; // sits on top of body
+    float headCenter = bodyTop + capsuleRadius + headRadius * 0.8f; // sits on top of body
     buildSphere(verts, {0.0f, headCenter, 0.0f}, headRadius, headColor, segments, stacks);
 
     return verts;

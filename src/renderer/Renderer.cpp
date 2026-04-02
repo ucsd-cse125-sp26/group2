@@ -46,9 +46,9 @@ SDL_GPUShader* Renderer::loadShader(const char* filename,
                                     uint32_t fragUniformBufs) const
 {
     SDL_GPUShaderCreateInfo info{};
-    info.entrypoint          = "main";
-    info.format              = SDL_GPU_SHADERFORMAT_SPIRV;
-    info.stage               = stage;
+    info.entrypoint = "main";
+    info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    info.stage = stage;
     info.num_uniform_buffers = (stage == SDL_GPU_SHADERSTAGE_VERTEX) ? vertUniformBufs : fragUniformBufs;
 
 #ifdef TITANDOOM_BUNDLE_SHADERS
@@ -57,7 +57,7 @@ SDL_GPUShader* Renderer::loadShader(const char* filename,
         SDL_Log("Renderer: no embedded shader named '%s'", filename);
         return nullptr;
     }
-    info.code      = emb.data;
+    info.code = emb.data;
     info.code_size = emb.size;
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(gpu, &info);
@@ -71,12 +71,12 @@ SDL_GPUShader* Renderer::loadShader(const char* filename,
     path += filename;
 
     size_t codeSize = 0;
-    void* code      = SDL_LoadFile(path.c_str(), &codeSize);
+    void* code = SDL_LoadFile(path.c_str(), &codeSize);
     if (!code) {
         SDL_Log("Renderer: cannot load shader '%s': %s", path.c_str(), SDL_GetError());
         return nullptr;
     }
-    info.code      = static_cast<const Uint8*>(code);
+    info.code = static_cast<const Uint8*>(code);
     info.code_size = codeSize;
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(gpu, &info);
@@ -97,14 +97,14 @@ void Renderer::createDepthTexture(uint32_t w, uint32_t h)
         SDL_ReleaseGPUTexture(gpu, depthTex);
 
     SDL_GPUTextureCreateInfo info{};
-    info.type                 = SDL_GPU_TEXTURETYPE_2D;
-    info.format               = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    info.usage                = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-    info.width                = w;
-    info.height               = h;
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    info.width = w;
+    info.height = h;
     info.layer_count_or_depth = 1;
-    info.num_levels           = 1;
-    info.sample_count         = SDL_GPU_SAMPLECOUNT_1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
     depthTex = SDL_CreateGPUTexture(gpu, &info);
     if (!depthTex)
@@ -122,8 +122,8 @@ SDL_GPUBuffer* Renderer::uploadVertexBuffer(const std::vector<Vertex>& verts) co
     uint32_t byteSize = static_cast<uint32_t>(verts.size() * sizeof(Vertex));
 
     SDL_GPUBufferCreateInfo bufInfo{};
-    bufInfo.usage      = SDL_GPU_BUFFERUSAGE_VERTEX;
-    bufInfo.size       = byteSize;
+    bufInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+    bufInfo.size = byteSize;
     SDL_GPUBuffer* buf = SDL_CreateGPUBuffer(gpu, &bufInfo);
     if (!buf) {
         SDL_Log("Renderer: vertex buffer create failed");
@@ -131,8 +131,8 @@ SDL_GPUBuffer* Renderer::uploadVertexBuffer(const std::vector<Vertex>& verts) co
     }
 
     SDL_GPUTransferBufferCreateInfo tbInfo{};
-    tbInfo.usage              = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    tbInfo.size               = byteSize;
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = byteSize;
     SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(gpu, &tbInfo);
 
     void* mapped = SDL_MapGPUTransferBuffer(gpu, tb, false);
@@ -140,7 +140,7 @@ SDL_GPUBuffer* Renderer::uploadVertexBuffer(const std::vector<Vertex>& verts) co
     SDL_UnmapGPUTransferBuffer(gpu, tb);
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(gpu);
-    SDL_GPUCopyPass* copy     = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
     SDL_GPUTransferBufferLocation src{tb, 0};
     SDL_GPUBufferRegion dst{buf, 0, byteSize};
     SDL_UploadToGPUBuffer(copy, &src, &dst, false);
@@ -188,8 +188,8 @@ void Renderer::uploadImpacts(SDL_GPUCommandBuffer* cmdbuf)
     verts.reserve(impacts.size() * 18);
 
     for (const auto& imp : impacts) {
-        float frac   = imp.life / imp.maxLife; // 1 → 0
-        float sz     = 8.0f * frac;            // shrink over time
+        float frac = imp.life / imp.maxLife; // 1 → 0
+        float sz = 8.0f * frac;              // shrink over time
         float bright = frac;
         // Bright yellow-orange spark color
         glm::vec3 col = {1.0f, 0.6f + bright * 0.4f, bright * 0.3f};
@@ -205,8 +205,8 @@ void Renderer::uploadImpacts(SDL_GPUCommandBuffer* cmdbuf)
             verts.push_back({d, col});
         };
         glm::vec3 p = imp.pos;
-        float h     = sz * 0.5f;
-        float t     = 1.5f; // thickness
+        float h = sz * 0.5f;
+        float t = 1.5f; // thickness
         // Horizontal bar (XZ plane)
         q(p + glm::vec3(-h, -t, -t), p + glm::vec3(h, -t, -t), p + glm::vec3(h, t, t), p + glm::vec3(-h, t, t));
         // Vertical bar (Y axis)
@@ -225,8 +225,8 @@ void Renderer::uploadImpacts(SDL_GPUCommandBuffer* cmdbuf)
         if (impactVBuf)
             SDL_ReleaseGPUBuffer(gpu, impactVBuf);
         SDL_GPUBufferCreateInfo bi{};
-        bi.usage   = SDL_GPU_BUFFERUSAGE_VERTEX;
-        bi.size    = std::max(byteSize, k_impactBufVerts * static_cast<uint32_t>(sizeof(Vertex)));
+        bi.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+        bi.size = std::max(byteSize, k_impactBufVerts * static_cast<uint32_t>(sizeof(Vertex)));
         impactVBuf = SDL_CreateGPUBuffer(gpu, &bi);
     }
 
@@ -234,8 +234,8 @@ void Renderer::uploadImpacts(SDL_GPUCommandBuffer* cmdbuf)
         return;
 
     SDL_GPUTransferBufferCreateInfo tbCI{};
-    tbCI.usage                = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    tbCI.size                 = byteSize;
+    tbCI.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbCI.size = byteSize;
     SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(gpu, &tbCI);
     if (!tb)
         return;
@@ -260,8 +260,8 @@ void Renderer::uploadImpacts(SDL_GPUCommandBuffer* cmdbuf)
 
 bool Renderer::init(SDL_GPUDevice* gpuDevice, SDL_Window* win, const World& world)
 {
-    gpu     = gpuDevice;
-    window  = win;
+    gpu = gpuDevice;
+    window = win;
     windowW = 0;
     windowH = 0;
 
@@ -277,38 +277,38 @@ bool Renderer::init(SDL_GPUDevice* gpuDevice, SDL_Window* win, const World& worl
         {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, sizeof(float) * 3},
     };
     SDL_GPUVertexBufferDescription vbDesc{};
-    vbDesc.slot               = 0;
-    vbDesc.pitch              = sizeof(Vertex);
-    vbDesc.input_rate         = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vbDesc.slot = 0;
+    vbDesc.pitch = sizeof(Vertex);
+    vbDesc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
     vbDesc.instance_step_rate = 0;
 
     SDL_GPUVertexInputState vertexInput{};
-    vertexInput.vertex_attributes          = attrs;
-    vertexInput.num_vertex_attributes      = 2;
+    vertexInput.vertex_attributes = attrs;
+    vertexInput.num_vertex_attributes = 2;
     vertexInput.vertex_buffer_descriptions = &vbDesc;
-    vertexInput.num_vertex_buffers         = 1;
+    vertexInput.num_vertex_buffers = 1;
 
     SDL_GPUDepthStencilState depthState{};
-    depthState.compare_op         = SDL_GPU_COMPAREOP_LESS;
-    depthState.enable_depth_test  = true;
+    depthState.compare_op = SDL_GPU_COMPAREOP_LESS;
+    depthState.enable_depth_test = true;
     depthState.enable_depth_write = true;
 
     SDL_GPUColorTargetDescription colorTarget{};
     colorTarget.format = SDL_GetGPUSwapchainTextureFormat(gpu, window);
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.vertex_shader                         = vert;
-    pipelineInfo.fragment_shader                       = frag;
-    pipelineInfo.vertex_input_state                    = vertexInput;
-    pipelineInfo.primitive_type                        = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pipelineInfo.depth_stencil_state                   = depthState;
-    pipelineInfo.rasterizer_state.fill_mode            = SDL_GPU_FILLMODE_FILL;
-    pipelineInfo.rasterizer_state.cull_mode            = SDL_GPU_CULLMODE_NONE;
-    pipelineInfo.rasterizer_state.front_face           = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+    pipelineInfo.vertex_shader = vert;
+    pipelineInfo.fragment_shader = frag;
+    pipelineInfo.vertex_input_state = vertexInput;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pipelineInfo.depth_stencil_state = depthState;
+    pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     pipelineInfo.target_info.color_target_descriptions = &colorTarget;
-    pipelineInfo.target_info.num_color_targets         = 1;
-    pipelineInfo.target_info.depth_stencil_format      = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    pipelineInfo.target_info.has_depth_stencil_target  = true;
+    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pipelineInfo.target_info.has_depth_stencil_target = true;
 
     pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &pipelineInfo);
     SDL_ReleaseGPUShader(gpu, vert);
@@ -320,17 +320,17 @@ bool Renderer::init(SDL_GPUDevice* gpuDevice, SDL_Window* win, const World& worl
 
     // ---- Upload world mesh ----
     worldVCount = static_cast<uint32_t>(world.mesh.size());
-    worldVBuf   = uploadVertexBuffer(world.mesh);
+    worldVBuf = uploadVertexBuffer(world.mesh);
     if (!worldVBuf)
         return false;
 
     // ---- Build one player model per slot ----
     for (int i = 0; i < 4; ++i) {
-        glm::vec3 col          = MeshGen::k_playerColors[i];
-        auto verts             = MeshGen::buildPlayerModel(col);
+        glm::vec3 col = MeshGen::k_playerColors[i];
+        auto verts = MeshGen::buildPlayerModel(col);
         playerModels[i].vcount = static_cast<uint32_t>(verts.size());
-        playerModels[i].color  = col;
-        playerModels[i].vbuf   = uploadVertexBuffer(verts);
+        playerModels[i].color = col;
+        playerModels[i].vbuf = uploadVertexBuffer(verts);
         if (!playerModels[i].vbuf)
             SDL_Log("Renderer: player model %d upload failed", i);
     }
@@ -372,16 +372,16 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
     }
 
     SDL_GPUColorTargetInfo color{};
-    color.texture     = swapchain;
+    color.texture = swapchain;
     color.clear_color = {0.05f, 0.07f, 0.12f, 1.0f};
-    color.load_op     = SDL_GPU_LOADOP_CLEAR;
-    color.store_op    = SDL_GPU_STOREOP_STORE;
+    color.load_op = SDL_GPU_LOADOP_CLEAR;
+    color.store_op = SDL_GPU_STOREOP_STORE;
 
     SDL_GPUDepthStencilTargetInfo depth{};
-    depth.texture     = depthTex;
+    depth.texture = depthTex;
     depth.clear_depth = 1.0f;
-    depth.load_op     = SDL_GPU_LOADOP_CLEAR;
-    depth.store_op    = SDL_GPU_STOREOP_DONT_CARE;
+    depth.load_op = SDL_GPU_LOADOP_CLEAR;
+    depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
 
     // Upload dynamic impact marker geometry before any render pass opens.
     uploadImpacts(cmdbuf);
@@ -411,12 +411,12 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
     if (impactVBuf && impactVCount > 0) {
         SceneUniforms identityUniforms;
         identityUniforms.viewProj = viewProjUniforms.viewProj;
-        identityUniforms.model    = glm::mat4(1.0f);
+        identityUniforms.model = glm::mat4(1.0f);
         // Must end and re-open to push new vertex uniforms outside pass
         SDL_EndGPURenderPass(pass);
 
-        color.load_op  = SDL_GPU_LOADOP_LOAD;
-        depth.load_op  = SDL_GPU_LOADOP_LOAD;
+        color.load_op = SDL_GPU_LOADOP_LOAD;
+        depth.load_op = SDL_GPU_LOADOP_LOAD;
         depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
 
         SDL_PushGPUVertexUniformData(cmdbuf, 0, &identityUniforms, sizeof(identityUniforms));
@@ -435,8 +435,8 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
     // ---- Draw player models ----
     // CRITICAL: set load_op = LOAD BEFORE the first player-model pass begins,
     // otherwise BeginGPURenderPass clears the world geometry we just drew.
-    color.load_op  = SDL_GPU_LOADOP_LOAD;
-    depth.load_op  = SDL_GPU_LOADOP_LOAD;
+    color.load_op = SDL_GPU_LOADOP_LOAD;
+    depth.load_op = SDL_GPU_LOADOP_LOAD;
     depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
 
     // Physics position is the AABB centre; model local y=0 is feet.
@@ -448,12 +448,12 @@ void Renderer::drawScene(SDL_GPUCommandBuffer* cmdbuf,
             continue;
 
         glm::mat4 model = glm::mat4(1.0f);
-        model           = glm::translate(model, playerPositions[i] - glm::vec3(0.0f, k_modelHalfHeight, 0.0f));
-        model           = glm::rotate(model, playerYaws[i] + glm::radians(180.0f), glm::vec3(0, 1, 0));
+        model = glm::translate(model, playerPositions[i] - glm::vec3(0.0f, k_modelHalfHeight, 0.0f));
+        model = glm::rotate(model, playerYaws[i] + glm::radians(180.0f), glm::vec3(0, 1, 0));
 
         SceneUniforms playerUniforms;
         playerUniforms.viewProj = viewProjUniforms.viewProj;
-        playerUniforms.model    = model;
+        playerUniforms.model = model;
 
         // Uniforms MUST be pushed outside a render pass.
         if (pass) {
@@ -500,6 +500,6 @@ void Renderer::destroy()
     if (pipeline)
         SDL_ReleaseGPUGraphicsPipeline(gpu, pipeline);
     worldVBuf = nullptr;
-    depthTex  = nullptr;
-    pipeline  = nullptr;
+    depthTex = nullptr;
+    pipeline = nullptr;
 }

@@ -7,14 +7,14 @@
 // ---------------------------------------------------------------------------
 
 constexpr uint16_t k_serverPort = 27015;
-constexpr uint32_t k_magic      = 0x54444F4D;                    // 'TDOM'
-constexpr int k_maxPlayers      = 4;
-constexpr int k_serverTickHz    = 64;                            // physics ticks per second
-constexpr int k_snapshotHz      = 20;                            // snapshots sent per second
-constexpr int k_snapshotEvery   = k_serverTickHz / k_snapshotHz; // = 3 ticks
-constexpr int k_lagCompTicks    = 96;                            // 1.5 s of history at 64 Hz
-constexpr int k_maxPacketBytes  = 1400;                          // stay under UDP MTU
-constexpr float k_tickDt        = 1.0f / k_serverTickHz;
+constexpr uint32_t k_magic = 0x54444F4D;                       // 'TDOM'
+constexpr int k_maxPlayers = 4;
+constexpr int k_serverTickHz = 64;                             // physics ticks per second
+constexpr int k_snapshotHz = 20;                               // snapshots sent per second
+constexpr int k_snapshotEvery = k_serverTickHz / k_snapshotHz; // = 3 ticks
+constexpr int k_lagCompTicks = 96;                             // 1.5 s of history at 64 Hz
+constexpr int k_maxPacketBytes = 1400;                         // stay under UDP MTU
+constexpr float k_tickDt = 1.0f / k_serverTickHz;
 
 // ---------------------------------------------------------------------------
 // Packet type enum
@@ -23,15 +23,15 @@ constexpr float k_tickDt        = 1.0f / k_serverTickHz;
 enum class PacketType : uint8_t
 {
     // Client → Server
-    Connect    = 0x01, // join request + player name
+    Connect = 0x01,    // join request + player name
     Disconnect = 0x02, // graceful leave
-    Input      = 0x03, // per-tick input state
+    Input = 0x03,      // per-tick input state
 
     // Server → Client
     ConnectAck = 0x10, // accepted: assigns clientId + current tick
-    Snapshot   = 0x11, // full world state (player positions, health…)
-    Event      = 0x12, // HitConfirm / Kill / Pickup etc.
-    Kick       = 0x13, // rejected / server full
+    Snapshot = 0x11,   // full world state (player positions, health…)
+    Event = 0x12,      // HitConfirm / Kill / Pickup etc.
+    Kick = 0x13,       // rejected / server full
 };
 
 // ---------------------------------------------------------------------------
@@ -41,12 +41,12 @@ enum class PacketType : uint8_t
 #pragma pack(push, 1)
 struct PacketHeader
 {
-    uint32_t magic    = k_magic;
-    uint16_t sequence = 0;    // sender's outgoing sequence
-    uint16_t ack      = 0;    // last received sequence from the other side
-    uint16_t ackBits  = 0;    // bitfield: bits 0..15 = ack-1 .. ack-16
-    uint8_t type      = 0;    // PacketType
-    uint8_t clientId  = 0xFF; // 0xFF = server, 0-3 = client slot
+    uint32_t magic = k_magic;
+    uint16_t sequence = 0;   // sender's outgoing sequence
+    uint16_t ack = 0;        // last received sequence from the other side
+    uint16_t ackBits = 0;    // bitfield: bits 0..15 = ack-1 .. ack-16
+    uint8_t type = 0;        // PacketType
+    uint8_t clientId = 0xFF; // 0xFF = server, 0-3 = client slot
 };
 static_assert(sizeof(PacketHeader) == 12, "header size changed");
 
@@ -160,10 +160,10 @@ struct PktSnapshot
 enum class EventType : uint8_t
 {
     HitConfirm = 0x01, // you hit someone
-    Killed     = 0x02, // you killed someone
-    Damaged    = 0x03, // you took damage
-    Respawn    = 0x04, // you respawned
-    PickedUp   = 0x05, // item pickup
+    Killed = 0x02,     // you killed someone
+    Damaged = 0x03,    // you took damage
+    Respawn = 0x04,    // you respawned
+    PickedUp = 0x05,   // item pickup
 };
 
 struct PktEvent

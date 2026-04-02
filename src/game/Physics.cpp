@@ -34,7 +34,7 @@ void clampSpeed(glm::vec3& vel, float maxVel)
 void accelerate(glm::vec3& vel, glm::vec3 wishDir, float wishSpeed, float accel, float dt)
 {
     float currentSpeed = glm::dot(vel, wishDir);
-    float addSpeed     = wishSpeed - currentSpeed;
+    float addSpeed = wishSpeed - currentSpeed;
     if (addSpeed <= 0.0f)
         return;
     float accelAmount = std::min(accel * wishSpeed * dt, addSpeed);
@@ -47,13 +47,13 @@ void accelerate(glm::vec3& vel, glm::vec3 wishDir, float wishSpeed, float accel,
 void applyFriction(glm::vec3& vel, glm::vec3 up, float stopSpeed, float friction, float dt)
 {
     glm::vec3 lateralVel = projectOnPlane(vel, up);
-    float speed          = glm::length(lateralVel);
+    float speed = glm::length(lateralVel);
     if (speed < 0.001f) {
         vel -= lateralVel;
         return;
     }
-    float control  = std::max(speed, stopSpeed);
-    float drop     = control * friction * dt;
+    float control = std::max(speed, stopSpeed);
+    float drop = control * friction * dt;
     float newSpeed = std::max(speed - drop, 0.0f);
     vel -= lateralVel * (1.0f - newSpeed / speed);
 }
@@ -63,8 +63,8 @@ void applyFriction(glm::vec3& vel, glm::vec3 up, float stopSpeed, float friction
 // ---------------------------------------------------------------------------
 bool aabbOverlap(glm::vec3 aCenter, glm::vec3 aHalf, glm::vec3 bCenter, glm::vec3 bHalf, glm::vec3& outDepth)
 {
-    glm::vec3 d       = aCenter - bCenter;
-    glm::vec3 sum     = aHalf + bHalf;
+    glm::vec3 d = aCenter - bCenter;
+    glm::vec3 sum = aHalf + bHalf;
     glm::vec3 overlap = sum - glm::abs(d);
 
     if (overlap.x <= 0.0f || overlap.y <= 0.0f || overlap.z <= 0.0f)
@@ -93,11 +93,11 @@ bool aabbOverlap(glm::vec3 aCenter, glm::vec3 aHalf, glm::vec3 bCenter, glm::vec
 glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, Velocity& vel, PlayerController& ctrl)
 {
     constexpr float k_groundDot = 0.70f;
-    constexpr int k_iters       = 3;
+    constexpr int k_iters = 3;
 
-    ctrl.onWall   = false;
+    ctrl.onWall = false;
     ctrl.onGround = false;
-    ctrl.onSurf   = false;
+    ctrl.onSurf = false;
 
     glm::vec3 result = pos;
 
@@ -123,7 +123,7 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
             float upDot = glm::dot(normal, glm::vec3(0, 1, 0));
 
             if (upDot >= k_groundDot) {
-                ctrl.onGround     = true;
+                ctrl.onGround = true;
                 ctrl.groundNormal = normal;
                 if (vel.linear.y < 0.0f)
                     vel.linear.y = 0.0f;
@@ -132,7 +132,7 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
                     vel.linear.y = 0.0f;
             } else {
                 if (!ctrl.onWall) {
-                    ctrl.onWall     = true;
+                    ctrl.onWall = true;
                     ctrl.wallNormal = normal;
                 }
                 float vDotN = glm::dot(vel.linear, normal);
@@ -144,8 +144,8 @@ glm::vec3 resolveCollisions(glm::vec3 pos, glm::vec3 half, const World& world, V
 
     constexpr float k_killFloor = -200.0f;
     if (result.y < k_killFloor) {
-        result.y      = 36.0f;
-        vel.linear    = {0.0f, 0.0f, 0.0f};
+        result.y = 36.0f;
+        vel.linear = {0.0f, 0.0f, 0.0f};
         ctrl.onGround = true;
     }
 
@@ -160,19 +160,19 @@ bool detectWallRun(
     const glm::vec3& pos, const glm::vec3& half, const World& world, const glm::vec3& fwd, glm::vec3& outNormal)
 {
     constexpr float k_wallSense = 8.0f;
-    const float senseRange      = half.x + k_wallSense;
+    const float senseRange = half.x + k_wallSense;
 
-    glm::vec3 right  = glm::vec3(fwd.z, 0.0f, -fwd.x);
+    glm::vec3 right = glm::vec3(fwd.z, 0.0f, -fwd.x);
     glm::vec3 dirs[] = {right, -right};
 
     for (auto& dir : dirs) {
         for (const auto& box : world.boxes) {
-            float tHit     = 0.0f;
+            float tHit = 0.0f;
             glm::vec3 bMin = box.center - box.half - glm::vec3(1.0f);
             glm::vec3 bMax = box.center + box.half + glm::vec3(1.0f);
             if (rayVsAabb(pos, dir, senseRange, bMin, bMax, tHit)) {
                 glm::vec3 normal = -dir;
-                float upDot      = std::abs(glm::dot(normal, glm::vec3(0, 1, 0)));
+                float upDot = std::abs(glm::dot(normal, glm::vec3(0, 1, 0)));
                 if (upDot < 0.25f) {
                     outNormal = glm::normalize(normal - glm::vec3(0, normal.y, 0));
                     return true;
@@ -207,7 +207,7 @@ void updateGrappleHook(GrappleHook& gh,
     switch (gh.state) {
     case GrappleHook::State::Idle:
         if (firePressed) {
-            gh.state  = GrappleHook::State::Flying;
+            gh.state = GrappleHook::State::Flying;
             gh.tipPos = eyePos;
             gh.tipVel = aimDir * GrappleHook::k_flySpeed;
         }
@@ -217,15 +217,15 @@ void updateGrappleHook(GrappleHook& gh,
         gh.tipPos += gh.tipVel * dt;
 
         for (const auto& box : world.boxes) {
-            float tHit        = 0.0f;
-            glm::vec3 bMin    = box.center - box.half;
-            glm::vec3 bMax    = box.center + box.half;
+            float tHit = 0.0f;
+            glm::vec3 bMin = box.center - box.half;
+            glm::vec3 bMax = box.center + box.half;
             glm::vec3 stepDir = glm::normalize(gh.tipVel);
-            float stepLen     = glm::length(gh.tipVel) * dt;
+            float stepLen = glm::length(gh.tipVel) * dt;
             if (rayVsAabb(gh.tipPos - stepDir * stepLen, stepDir, stepLen + 2.0f, bMin, bMax, tHit)) {
-                gh.state       = GrappleHook::State::Attached;
+                gh.state = GrappleHook::State::Attached;
                 gh.anchorPoint = gh.tipPos;
-                gh.ropeLength  = glm::length(gh.anchorPoint - eyePos);
+                gh.ropeLength = glm::length(gh.anchorPoint - eyePos);
                 break;
             }
         }
@@ -237,7 +237,7 @@ void updateGrappleHook(GrappleHook& gh,
 
     case GrappleHook::State::Attached: {
         glm::vec3 toAnchor = gh.anchorPoint - eyePos;
-        float dist         = glm::length(toAnchor);
+        float dist = glm::length(toAnchor);
         if (dist > 1.0f) {
             glm::vec3 pullDir = toAnchor / dist;
             if (dist > gh.ropeLength * 0.95f)
@@ -261,34 +261,34 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
     auto view = reg.view<Transform, Velocity, PlayerController, InputState, CameraAngles>();
 
     for (auto entity : view) {
-        auto& tf   = view.get<Transform>(entity);
-        auto& vel  = view.get<Velocity>(entity);
+        auto& tf = view.get<Transform>(entity);
+        auto& vel = view.get<Velocity>(entity);
         auto& ctrl = view.get<PlayerController>(entity);
-        auto& inp  = view.get<InputState>(entity);
-        auto& cam  = view.get<CameraAngles>(entity);
+        auto& inp = view.get<InputState>(entity);
+        auto& cam = view.get<CameraAngles>(entity);
 
-        const glm::vec3 up  = -ctrl.gravityDir;
+        const glm::vec3 up = -ctrl.gravityDir;
         const float gravity = ctrl.gravityMag;
 
         bool wasOnGround = ctrl.onGround;
 
         // ---- 1. Build wish direction ----------------------------------------
         float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
-        glm::vec3 fwd     = {-sy, 0.0f, cy};
-        glm::vec3 right   = {-cy, 0.0f, -sy};
+        glm::vec3 fwd = {-sy, 0.0f, cy};
+        glm::vec3 right = {-cy, 0.0f, -sy};
         glm::vec3 wishVec = fwd * inp.moveDir.y + right * inp.moveDir.x;
-        float wishLen     = glm::length(wishVec);
+        float wishLen = glm::length(wishVec);
         glm::vec3 wishDir = (wishLen > 0.001f) ? wishVec / wishLen : glm::vec3(0.0f);
 
         // ---- 2. Coyote time --------------------------------------------------
         ctrl.coyoteTimer = wasOnGround ? cfg.coyoteTime : std::max(ctrl.coyoteTimer - dt, 0.0f);
-        bool canJump     = ctrl.onGround || ctrl.coyoteTimer > 0.0f;
+        bool canJump = ctrl.onGround || ctrl.coyoteTimer > 0.0f;
 
         // ---- 3. Timers -------------------------------------------------------
         if (ctrl.wallCooldown > 0.0f)
             ctrl.wallCooldown -= dt;
         if (ctrl.onGround) {
-            ctrl.gliding    = false;
+            ctrl.gliding = false;
             ctrl.glideTimer = 0.0f;
         }
 
@@ -311,9 +311,9 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
                     detectWallRun(
                         tf.position, {ctrl.halfWidth, ctrl.halfHeight, ctrl.halfWidth}, world, fwd, detectedNormal))
                 {
-                    wr->active      = true;
-                    wr->timer       = 0.0f;
-                    wr->wallNormal  = detectedNormal;
+                    wr->active = true;
+                    wr->timer = 0.0f;
+                    wr->wallNormal = detectedNormal;
                     wr->wallTangent = glm::normalize(projectOnPlane(fwd, detectedNormal) -
                                                      glm::vec3(0, projectOnPlane(fwd, detectedNormal).y, 0));
                 }
@@ -329,7 +329,7 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
             if (inp.glideHeld && !wasOnGround && ctrl.glideTimer < cfg.glideMaxTime &&
                 glm::dot(vel.linear, ctrl.gravityDir) > 0.0f)
             {
-                ctrl.gliding    = true;
+                ctrl.gliding = true;
                 ctrl.glideTimer = std::min(ctrl.glideTimer + dt, cfg.glideMaxTime);
                 effectiveGravity *= cfg.glideGravityScale;
             } else {
@@ -365,7 +365,7 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
             if (downVel > 0.0f)
                 vel.linear -= ctrl.gravityDir * downVel;
             vel.linear += up * cfg.jumpSpeed;
-            ctrl.onGround    = false;
+            ctrl.onGround = false;
             ctrl.coyoteTimer = 0.0f;
             if (wr)
                 wr->active = false;
@@ -375,20 +375,20 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
         bool doWallRunJump = wr && wr->active && inp.jumpPressed;
         if (doWallRunJump) {
             glm::vec3 kickDir = glm::normalize(wr->wallNormal + up * 0.7f);
-            vel.linear        = kickDir * cfg.wallJumpSpeed * 1.5f +
-                                wr->wallTangent * glm::length(glm::vec2(vel.linear.x, vel.linear.z)) * 0.8f;
-            wr->active        = false;
-            wr->cooldown      = cfg.wallCooldown;
+            vel.linear = kickDir * cfg.wallJumpSpeed * 1.5f +
+                         wr->wallTangent * glm::length(glm::vec2(vel.linear.x, vel.linear.z)) * 0.8f;
+            wr->active = false;
+            wr->cooldown = cfg.wallCooldown;
         }
 
         // ---- 9. Classic wall jump (collision-detected wall) ------------------
         bool doWalljump = !ctrl.onGround && ctrl.onWall && ctrl.wallCooldown <= 0.0f && inp.jumpPressed;
         if (!doWallRunJump && doWalljump) {
             glm::vec3 lateralVel = projectOnPlane(vel.linear, up);
-            glm::vec3 reflected  = glm::reflect(lateralVel, ctrl.wallNormal);
-            vel.linear           = reflected * cfg.wallJumpLateral + up * cfg.wallJumpSpeed;
-            ctrl.wallCooldown    = cfg.wallCooldown;
-            ctrl.onWall          = false;
+            glm::vec3 reflected = glm::reflect(lateralVel, ctrl.wallNormal);
+            vel.linear = reflected * cfg.wallJumpLateral + up * cfg.wallJumpSpeed;
+            ctrl.wallCooldown = cfg.wallCooldown;
+            ctrl.onWall = false;
         }
 
         // ---- 10. Grapple hook -----------------------------------------------
@@ -417,33 +417,33 @@ void physicsUpdate(entt::registry& reg, const World& world, const PhysicsConfig&
         {
             const glm::vec3 half{ctrl.halfWidth, ctrl.halfHeight, ctrl.halfWidth};
             constexpr int k_substeps = 16;
-            const float subDt        = dt / static_cast<float>(k_substeps);
+            const float subDt = dt / static_cast<float>(k_substeps);
 
-            bool accGround          = false;
-            bool accWall            = false;
+            bool accGround = false;
+            bool accWall = false;
             glm::vec3 accGroundNorm = ctrl.groundNormal;
-            glm::vec3 accWallNorm   = ctrl.wallNormal;
+            glm::vec3 accWallNorm = ctrl.wallNormal;
 
             for (int sub = 0; sub < k_substeps; ++sub) {
                 tf.position += vel.linear * subDt;
                 tf.position = resolveCollisions(tf.position, half, world, vel, ctrl);
 
                 if (ctrl.onGround) {
-                    accGround     = true;
+                    accGround = true;
                     accGroundNorm = ctrl.groundNormal;
                 }
                 if (ctrl.onWall) {
-                    accWall     = true;
+                    accWall = true;
                     accWallNorm = ctrl.wallNormal;
                 }
             }
 
             // Write accumulated contact state back so the next frame's
             // movement calculations (friction, acceleration, coyote, jump) are correct.
-            ctrl.onGround     = accGround;
+            ctrl.onGround = accGround;
             ctrl.groundNormal = accGroundNorm;
-            ctrl.onWall       = accWall;
-            ctrl.wallNormal   = accWallNorm;
+            ctrl.onWall = accWall;
+            ctrl.wallNormal = accWallNorm;
         }
     }
 }

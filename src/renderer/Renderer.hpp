@@ -31,8 +31,8 @@ static constexpr int k_maxImpacts = 64;
 struct PlayerModel
 {
     SDL_GPUBuffer* vbuf = nullptr;
-    uint32_t vcount     = 0;
-    glm::vec3 color     = {1.0f, 1.0f, 1.0f};
+    uint32_t vcount = 0;
+    glm::vec3 color = {1.0f, 1.0f, 1.0f};
 };
 
 // ---------------------------------------------------------------------------
@@ -46,21 +46,21 @@ struct FragTint
 
 struct Renderer
 {
-    SDL_GPUDevice* gpu                = nullptr;
-    SDL_Window* window                = nullptr;
+    SDL_GPUDevice* gpu = nullptr;
+    SDL_Window* window = nullptr;
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
-    SDL_GPUBuffer* worldVBuf          = nullptr;
-    SDL_GPUTexture* depthTex          = nullptr;
-    uint32_t worldVCount              = 0;
-    uint32_t windowW                  = 0;
-    uint32_t windowH                  = 0;
+    SDL_GPUBuffer* worldVBuf = nullptr;
+    SDL_GPUTexture* depthTex = nullptr;
+    uint32_t worldVCount = 0;
+    uint32_t windowW = 0;
+    uint32_t windowH = 0;
 
     // One pre-built player model per slot (uploaded at init)
     std::array<PlayerModel, 4> playerModels;
 
     // Impact markers — dynamic vertex buffer rebuilt each frame
-    SDL_GPUBuffer* impactVBuf                  = nullptr;
-    uint32_t impactVCount                      = 0;
+    SDL_GPUBuffer* impactVBuf = nullptr;
+    uint32_t impactVCount = 0;
     static constexpr uint32_t k_impactBufVerts = k_maxImpacts * 18; // 3 quads × 6 verts
 
     // Call from game loop to add a new impact and tick existing ones.
