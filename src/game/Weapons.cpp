@@ -73,9 +73,8 @@ void weaponUpdate(WeaponState& ws, float dt)
         if (ws.reload <= 0.0f) {
             ws.reloading = false;
             ws.reload = 0.0f;
-            int need = ws.ammo < 0 ? 0 : 0; // silence unused
             const auto& st = k_weaponStats[static_cast<int>(ws.active)];
-            need = st.magSize - ws.ammo;
+            int need = st.magSize - ws.ammo;
             int take = std::min(need, ws.reserve);
             ws.ammo += take;
             ws.reserve -= take;

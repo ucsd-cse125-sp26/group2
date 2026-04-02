@@ -261,8 +261,10 @@ void HUD::buildGeometry(std::vector<HudVertex>& verts, uint32_t w, uint32_t h, c
     constexpr float k_dotSp = 12.0f;
     int dotCols = std::min(state.ammo, 30);
     for (int i = 0; i < dotCols; ++i) {
-        float dx = ammoX + static_cast<float>(i % 10) * k_dotSp;
-        float dy = ammoY - static_cast<float>(i / 10) * k_dotSp;
+        int col = i % 10; // intentional integer column index
+        int row = i / 10; // intentional integer row index
+        float dx = ammoX + static_cast<float>(col) * k_dotSp;
+        float dy = ammoY - static_cast<float>(row) * k_dotSp;
         glm::vec4 dc = state.reloading ? glm::vec4{0.7f, 0.7f, 0.2f, 0.7f} : glm::vec4{0.95f, 0.95f, 0.95f, 0.85f};
         addQuad(verts, dx, dy, dx + k_dotR, dy + k_dotR, dc, w, h);
     }
@@ -281,8 +283,10 @@ void HUD::buildGeometry(std::vector<HudVertex>& verts, uint32_t w, uint32_t h, c
 
     // Reserve ammo text substitute: small dim dots
     for (int i = 0; i < std::min(state.reserve, 30); ++i) {
-        float dx = ammoX + static_cast<float>(i % 10) * 7.0f;
-        float dy = ammoY + 20.0f + static_cast<float>(i / 10) * 7.0f;
+        int col = i % 10; // intentional integer column index
+        int row = i / 10; // intentional integer row index
+        float dx = ammoX + static_cast<float>(col) * 7.0f;
+        float dy = ammoY + 20.0f + static_cast<float>(row) * 7.0f;
         addQuad(verts, dx, dy, dx + 3.0f, dy + 3.0f, {0.5f, 0.5f, 0.5f, 0.5f}, w, h);
     }
 

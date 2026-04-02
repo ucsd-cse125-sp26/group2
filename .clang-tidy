@@ -17,7 +17,9 @@ Checks: >
 WarningsAsErrors: ''
 
 CheckOptions:
-  # Naming — CamelCase types, camelCase functions/variables, m_ prefix for members
+  # Naming — CamelCase types, camelBack functions/variables, k_ prefix for constants.
+  # No m_ prefix on members: the codebase uses plain camelBack for both struct fields
+  # and class members.
   - key: readability-identifier-naming.ClassCase
     value: CamelCase
   - key: readability-identifier-naming.StructCase
@@ -34,10 +36,16 @@ CheckOptions:
     value: camelBack
   - key: readability-identifier-naming.ParameterCase
     value: camelBack
-  - key: readability-identifier-naming.MemberPrefix
-    value: m_
+  - key: readability-identifier-naming.MemberCase
+    value: camelBack
   - key: readability-identifier-naming.ConstantCase
-    value: UPPER_CASE
+    value: camelBack
+  - key: readability-identifier-naming.ConstantPrefix
+    value: k_
+  - key: readability-identifier-naming.StaticConstantCase
+    value: camelBack
+  - key: readability-identifier-naming.StaticConstantPrefix
+    value: k_
   - key: readability-identifier-naming.NamespaceCase
     value: lower_case
   - key: readability-identifier-naming.TemplateParameterCase

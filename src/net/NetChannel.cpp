@@ -81,7 +81,10 @@ int NetChannel::recv(void* buf, int maxLen, sockaddr_in& outFrom)
     // Update our local ack tracking (what we'll report back in outgoing pkts)
     if (seqGreater(seq, inAck) || packetsReceived == 0) {
         uint16_t delta = seq - inAck;
-        inBits = static_cast<uint16_t>((inBits << delta) | (1u << (delta - 1)));
+        // Guard: when delta == 0 (first-ever packet with seq 0), shifting by (delta-1)
+        // would be 1u << 65535 — undefined behaviour.  Skip the shift; inBits stays 0.
+        if (delta > 0)
+            inBits = static_cast<uint16_t>((inBits << delta) | (1u << (delta - 1)));
         inAck = seq;
     } else {
         uint16_t delta = inAck - seq;

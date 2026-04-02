@@ -132,14 +132,17 @@ jobs:
             libgl-dev libgles2-mesa-dev \
             libdrm-dev libgbm-dev
       - name: Configure
+        # Use the debug preset (TITANDOOM_BUNDLE_SHADERS=OFF) so clang-tidy never
+        # needs the generated embedded_shaders.hpp header, which only exists after
+        # a full build with shader bundling enabled.
         env:
           CC:  clang
           CXX: clang++
-        run: cmake --preset release
+        run: cmake --preset debug
       - name: Run clang-tidy
         run: |
           find src -type f -name "*.cpp" \
-            | xargs clang-tidy -p build/release
+            | xargs clang-tidy -p build/debug
 
   # ------------------------------------------------------------------ #
   #  Release builds — optimised, shaders embedded, no sanitizers        #
