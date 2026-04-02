@@ -101,21 +101,21 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     auto* s = static_cast<AppState*>(appstate);
 
     // Compute time elapsed since the last frame (seconds).
-    const Uint64 now = SDL_GetTicks();
-    const float dt = static_cast<float>(now - s->lastTick) / 1000.0f;
-    s->lastTick = now;
+    const Uint64 k_now = SDL_GetTicks();
+    const float k_dt = static_cast<float>(k_now - s->lastTick) / 1000.0f;
+    s->lastTick = k_now;
 
     // Move the player with WASD or arrow keys.
     // Convention: +X = right, +Y = up (both renderers handle the NDC mapping).
     const bool* keys = SDL_GetKeyboardState(nullptr);
     if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP])
-        s->player.pos.y += s->player.speed * dt;
+        s->player.pos.y += s->player.speed * k_dt;
     if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN])
-        s->player.pos.y -= s->player.speed * dt;
+        s->player.pos.y -= s->player.speed * k_dt;
     if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT])
-        s->player.pos.x -= s->player.speed * dt;
+        s->player.pos.x -= s->player.speed * k_dt;
     if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT])
-        s->player.pos.x += s->player.speed * dt;
+        s->player.pos.x += s->player.speed * k_dt;
 
     s->renderer.renderFrame(s->player.pos);
     return SDL_APP_CONTINUE;
