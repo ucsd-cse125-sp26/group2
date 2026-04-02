@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <glm/vec2.hpp>
+
 // When BUNDLE_SHADERS is ON (Release builds), SPIR-V bytes are embedded as
 // constexpr arrays in this generated header instead of loaded from disk.
 #ifdef BUNDLE_SHADERS
@@ -95,7 +97,8 @@ bool SDLGPURenderer::init(SDL_Window* win)
     }
 
     // Load shaders.
-    SDL_GPUShader* vert = loadShader(device, "shaders/triangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
+    // Vertex shader uses 1 uniform buffer slot (player position offset).
+    SDL_GPUShader* vert = loadShader(device, "shaders/triangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
     SDL_GPUShader* frag = loadShader(device, "shaders/triangle.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
@@ -136,7 +139,7 @@ bool SDLGPURenderer::init(SDL_Window* win)
     return true;
 }
 
-void SDLGPURenderer::renderFrame()
+void SDLGPURenderer::renderFrame(glm::vec2 playerPos)
 {
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
     if (!cmd)
@@ -157,6 +160,10 @@ void SDLGPURenderer::renderFrame()
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
+
+    // Upload player position as a vertex uniform (slot 0 → set 1, binding 0 in the shader).
+    SDL_PushGPUVertexUniformData(cmd, 0, &playerPos, sizeof(playerPos));
+
     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0); // 3 verts, 1 instance
     SDL_EndGPURenderPass(pass);
 

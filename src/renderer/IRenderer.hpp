@@ -1,5 +1,7 @@
 #pragma once
 
+#include <glm/vec2.hpp>
+
 struct SDL_Window;
 
 // ---------------------------------------------------------------------------
@@ -20,7 +22,8 @@ public:
     virtual bool init(SDL_Window* window) = 0;
 
     // Called every frame.  Renders and presents one frame.
-    virtual void renderFrame() = 0;
+    // playerPos is in world space (+X = right, +Y = up).
+    virtual void renderFrame(glm::vec2 playerPos) = 0;
 
     // Called before the window is destroyed.
     virtual void shutdown() = 0;

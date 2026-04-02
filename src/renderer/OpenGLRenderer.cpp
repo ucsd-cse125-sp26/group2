@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <glad/glad.h>
+#include <glm/vec2.hpp>
 
 // ---------------------------------------------------------------------------
 // Inline GLSL shaders — OpenGL 4.1 core profile.
@@ -12,6 +13,7 @@
 
 static const char* k_vertSrc = R"glsl(
 #version 410 core
+uniform vec2 uOffset;
 out vec4 vColor;
 void main() {
     const vec2 pos[3] = vec2[3](
@@ -24,7 +26,8 @@ void main() {
         vec4(0.0, 1.0, 0.0, 1.0),
         vec4(0.0, 0.0, 1.0, 1.0)
     );
-    gl_Position = vec4(pos[gl_VertexID], 0.0, 1.0);
+    // OpenGL NDC has +Y = up, matching the game-space convention directly.
+    gl_Position = vec4(pos[gl_VertexID] + uOffset, 0.0, 1.0);
     vColor      = col[gl_VertexID];
 }
 )glsl";
@@ -114,6 +117,9 @@ bool OpenGLRenderer::init(SDL_Window* win)
         return false;
     }
 
+    // Cache the location of the player-position uniform.
+    offsetLoc = glGetUniformLocation(shaderProgram, "uOffset");
+
     // An empty VAO is required by OpenGL 4.1 core profile even with no vertex
     // attributes (positions come from gl_VertexID inside the shader).
     glGenVertexArrays(1, &vao);
@@ -121,7 +127,7 @@ bool OpenGLRenderer::init(SDL_Window* win)
     return true;
 }
 
-void OpenGLRenderer::renderFrame()
+void OpenGLRenderer::renderFrame(glm::vec2 playerPos)
 {
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
@@ -131,6 +137,8 @@ void OpenGLRenderer::renderFrame()
     glClear(GL_COLOR_BUFFER_BIT);
 
     glUseProgram(shaderProgram);
+    if (offsetLoc != -1)
+        glUniform2f(offsetLoc, playerPos.x, playerPos.y);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 

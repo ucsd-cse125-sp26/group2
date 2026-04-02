@@ -4,6 +4,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <glm/vec2.hpp>
+
 // ---------------------------------------------------------------------------
 // OpenGLRenderer — RGB triangle via OpenGL 4.1 core profile.
 //
@@ -18,7 +20,7 @@ class OpenGLRenderer : public IRenderer
 {
 public:
     bool init(SDL_Window* window) override;
-    void renderFrame() override;
+    void renderFrame(glm::vec2 playerPos) override;
     void shutdown() override;
 
 private:
@@ -26,4 +28,5 @@ private:
     SDL_GLContext glContext = nullptr;
     unsigned int vao = 0;
     unsigned int shaderProgram = 0;
+    int offsetLoc = -1; // location of the uOffset uniform
 };

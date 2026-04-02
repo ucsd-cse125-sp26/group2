@@ -4,6 +4,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <glm/vec2.hpp>
+
 // ---------------------------------------------------------------------------
 // SDLGPURenderer — RGB triangle via the SDL3 GPU pipeline.
 //
@@ -17,7 +19,7 @@ class SDLGPURenderer : public IRenderer
 {
 public:
     bool init(SDL_Window* window) override;
-    void renderFrame() override;
+    void renderFrame(glm::vec2 playerPos) override;
     void shutdown() override;
 
 private:
