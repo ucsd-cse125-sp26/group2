@@ -139,13 +139,15 @@ jobs:
           CXX: clang++
         run: cmake --preset debug
       - name: Run clang-tidy
-        # Only tidy files that are in compile_commands.json (avoids errors for
-        # files belonging to the inactive rendering backend).
+        # Only tidy project source files — exclude FetchContent deps (_deps/)
+        # so clang-tidy never chokes on SDL3/GLM internals, missing PCH files,
+        # or generated Wayland protocol sources.  Mirrors the pre-push hook filter.
         run: |
           python3 -c "
           import json, subprocess, sys
           with open('build/debug/compile_commands.json') as f:
-              files = [e['file'] for e in json.load(f)]
+              files = [e['file'] for e in json.load(f)
+                       if '/src/' in e['file'] and '/_deps/' not in e['file']]
           result = subprocess.run(['clang-tidy', '-p', 'build/debug'] + files)
           sys.exit(result.returncode)
           "
