@@ -41,13 +41,31 @@ compile_commands.json
 # clangd LSP
 .clangd/
 
-# OS
+# Claude Code
+.remember/
+.claude/
+
+# macOS
 .DS_Store
 .DS_Store?
 ._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.AppleDouble
+.AppleDB
+.AppleDesktop
+.LSOverride
+__MACOSX/
+
+# Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
 
 # Logs
 *.log
