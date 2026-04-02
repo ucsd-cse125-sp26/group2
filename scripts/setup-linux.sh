@@ -7,15 +7,21 @@ echo "==> Updating package lists..."
 sudo apt-get update -qq
 
 echo "==> Installing build tools..."
+# clang-format-18 and clang-tidy-18 are pinned to match the CI version (ubuntu-24.04 default).
+# Using the same version locally and in CI ensures formatting never drifts between the two.
 sudo apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     ninja-build \
     clang \
-    clang-format \
-    clang-tidy \
+    clang-format-18 \
+    clang-tidy-18 \
     lldb \
     git
+
+# Register the pinned versions as the default so plain 'clang-format' / 'clang-tidy' resolve to -18.
+sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 18
+sudo update-alternatives --install /usr/bin/clang-tidy   clang-tidy   /usr/bin/clang-tidy-18   18
 
 echo "==> Installing SDL3 system dependencies..."
 sudo apt-get install -y --no-install-recommends \

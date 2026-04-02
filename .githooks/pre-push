@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Pre-push: verify ALL tracked C++ sources are correctly formatted before pushing.
+# This is the last local gate before code reaches CI — blocks push on any violation.
+set -euo pipefail
+
+# Same binary preference as pre-commit and CI.
+if command -v clang-format-18 &>/dev/null; then
+    CF=clang-format-18
+elif command -v clang-format &>/dev/null; then
+    CF=clang-format
+else
+    echo "[pre-push] WARNING: clang-format not found — skipping format gate." >&2
+    echo "           Run scripts/setup-linux.sh (or setup-macos.sh) to install it." >&2
+    exit 0
+fi
+
+CF_VER=$("$CF" --version 2>&1 | head -1)
+echo "[pre-push] Format check ($CF_VER) ..."
+
+# Collect all tracked C++ files under src/
+FAILED=0
+while IFS= read -r f; do
+    if ! "$CF" --dry-run --Werror "$f" 2>/dev/null; then
+        echo "    ✗ $f" >&2
+        FAILED=1
+    fi
+done < <(find src -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) | sort)
+
+if [ "$FAILED" -ne 0 ]; then
+    printf '\n[pre-push] ✗ Unformatted files detected — push blocked.\n' >&2
+    printf '  Auto-fix: cmake --build --preset debug --target format\n' >&2
+    printf '  Then:     git add -u && git push\n\n' >&2
+    exit 1
+fi
+
+echo "[pre-push] ✓ All files pass."
