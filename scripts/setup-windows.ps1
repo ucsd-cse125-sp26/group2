@@ -78,7 +78,7 @@ git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
 # up as uncommitted changes. Files stay tracked in git so new clones
 # get the correct CMake preset config, but local modifications by
 # CLion are silently ignored.
-git update-index --skip-worktree .idea/workspace.xml .idea/misc.xml .idea/vcs.xml
+git update-index --skip-worktree .idea/workspace.xml .idea/misc.xml .idea/vcs.xml .idea/cmake.xml
 
 Write-Host ""
 Write-Host "==> All prerequisites installed." -ForegroundColor Green
@@ -89,7 +89,9 @@ Write-Host "IDE setup (CLion / Visual Studio / VSCode):" -ForegroundColor Cyan
 Write-Host "  1. Open your IDE and select File > Open > this repo root"
 Write-Host "  2. CMake presets (debug-win, release-win, relwithdebinfo-win) appear automatically"
 Write-Host "  3. Select a preset and build"
+Write-Host "  CLion: the repo ships .idea/cmake.xml which sets the Visual Studio toolchain."
+Write-Host "         If CLion can't find it, add one in Settings > Toolchains."
 Write-Host ""
-Write-Host "Command-line build (any terminal):" -ForegroundColor Cyan
+Write-Host "Command-line build (Developer PowerShell for VS 2022):" -ForegroundColor Cyan
 Write-Host "  cmake --preset debug-win   && cmake --build --preset debug-win"
 Write-Host "  cmake --preset release-win && cmake --build --preset release-win"

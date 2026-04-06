@@ -26,13 +26,9 @@ option(USE_OPENGL   "Use OpenGL 4.1 core backend instead of SDL3 GPU"  OFF)
 option(USE_ENTT     "Use EnTT ECS library (OFF = minimal stub)"        OFF)
 
 # Embed compiled SPIR-V into the binary (SDL3 GPU path only).
-# Defaults to ON for single-config Release/RelWithDebInfo so no shaders/
-# folder is needed at runtime.  For multi-config generators (Visual Studio)
-# CMAKE_BUILD_TYPE is empty at configure time, so default to OFF and let
-# CI / the user pass -DGROUP2_BUNDLE_SHADERS=ON explicitly.
-# Always OFF for the OpenGL backend (no SPIR-V).
-get_property(_is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-if(NOT USE_OPENGL AND NOT _is_multi_config AND CMAKE_BUILD_TYPE MATCHES "^Rel")
+# Defaults to ON for Release/RelWithDebInfo so no shaders/ folder is
+# needed at runtime.  Always OFF for the OpenGL backend (no SPIR-V).
+if(NOT USE_OPENGL AND CMAKE_BUILD_TYPE MATCHES "^Rel")
     set(_bundle_shaders_default ON)
 else()
     set(_bundle_shaders_default OFF)

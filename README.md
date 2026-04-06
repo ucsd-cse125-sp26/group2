@@ -13,7 +13,7 @@ bash scripts/setup-macos.sh
 cmake --preset debug && cmake --build --preset debug
 ./build/debug/group2
 
-# Windows (Developer PowerShell for VS 2022)
+# Windows (run setup-windows.ps1 first, then open Developer PowerShell for VS 2022)
 cmake --preset debug-win && cmake --build --preset debug-win
 .\build\debug-win\group2.exe
 ```
@@ -26,7 +26,7 @@ cmake --preset debug-win && cmake --build --preset debug-win
 | Graphics (optional) | OpenGL 4.1 core profile via [glad](https://github.com/Dav1dde/glad) (`-DUSE_OPENGL=ON`) |
 | ECS (optional) | [EnTT](https://github.com/skypjack/entt) (`-DUSE_ENTT=ON`) or roll your own |
 | Math | [GLM](https://github.com/g-truc/glm) |
-| Build | CMake 3.25+ · Ninja |
+| Build | CMake 3.25+ · Ninja · MSVC 2022 (Windows) · Clang (Linux/macOS) |
 | Sanitizers | ASan + UBSan (debug Linux/macOS), ASan (Windows MSVC) |
 | Lint | clang-format-18 · clang-tidy |
 | CI | GitHub Actions (Ubuntu · macOS · Windows) |
@@ -68,7 +68,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\setup-windows.ps1
 ```
 
-Visual Studio 2022 is a manual prerequisite (free Community edition). The script installs `cmake`, `ninja`, and LLVM via `winget`.
+The script installs everything needed via `winget`: **VS Build Tools 2022** (MSVC compiler + Windows SDK — auto-installed if no VS 2022 is found), CMake, Ninja, LLVM (clang-format/clang-tidy), and the Vulkan SDK (shader tools).
 
 > **Note — git tag fetch:** The setup scripts also run `git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"`, which prevents `git pull` from failing with "would clobber existing tag". If you cloned before running a setup script, run that one command manually.
 
@@ -94,7 +94,7 @@ The binary lands in `build/<preset>/group2`.
 
 ### Windows
 
-Open **Developer PowerShell for VS 2022**, then:
+Open **Developer PowerShell for VS 2022** (Start Menu → search "Developer PowerShell"), then:
 
 ```powershell
 cmake --preset debug-win
@@ -103,17 +103,25 @@ cmake --build --preset debug-win
 
 The binary lands in `build\debug-win\group2.exe`.
 
+> **Why Developer PowerShell?** The Windows presets use MSVC (`cl.exe`) which requires the Visual Studio developer environment on PATH. IDEs handle this automatically (see IDE setup below), but command-line builds need the Developer PowerShell.
+
 ---
 
 ## IDE setup
 
 ### CLion
 Open the **repo root folder** in CLion. It reads `CMakePresets.json` automatically.
-The preset profiles are pre-enabled via `.idea/workspace.xml` committed in this repo
-and should appear already checked in **Settings › Build, Execution, Deployment › CMake**.
+The preset profiles are pre-enabled via `.idea/` files committed in this repo
+and should appear already checked in **Settings > Build, Execution, Deployment > CMake**.
 CLion evaluates the preset conditions and shows only the presets matching your platform
 (`debug-win`, `release-win`, `relwithdebinfo-win` on Windows; `debug`, `release`,
 `relwithdebinfo` on Linux/macOS).
+
+**Windows:** The `.idea/cmake.xml` in this repo configures the Windows presets to use
+CLion's **Visual Studio** toolchain, which automatically sets up the MSVC developer
+environment. If CLion cannot find this toolchain, go to
+**Settings > Build, Execution, Deployment > Toolchains**, click **+**, and add a
+**Visual Studio** toolchain. CLion will auto-detect your VS 2022 / Build Tools installation.
 
 If CLion has also added its own "Debug" profile (pointing at `cmake-build-debug/`), delete
 it from that settings page and keep only the preset-based ones.
