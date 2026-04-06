@@ -132,14 +132,14 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     auto& reg = s->registry;
 
     // ---- Delta time ----
-    const uint64_t now = SDL_GetTicks();
-    const float dt = static_cast<float>(now - s->lastTicks) / 1000.f;
-    s->lastTicks = now;
+    const uint64_t k_now = SDL_GetTicks();
+    const float k_dt = static_cast<float>(k_now - s->lastTicks) / 1000.f;
+    s->lastTicks = k_now;
 
     // ---- EnTT system: move entities ----
-    reg.view<Position, Velocity>().each([dt](Position& p, const Velocity& v) {
-        p.x += v.dx * dt;
-        p.y += v.dy * dt;
+    reg.view<Position, Velocity>().each([k_dt](Position& p, const Velocity& v) {
+        p.x += v.dx * k_dt;
+        p.y += v.dy * k_dt;
     });
 
     // ---- ImGui new-frame ----
@@ -154,7 +154,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 #endif
     );
     ImGui::Text("Entities: %zu", static_cast<size_t>(reg.storage<entt::entity>().size()));
-    ImGui::Text("FPS:      %.1f", ImGui::GetIO().Framerate);
+    ImGui::Text("FPS:      %.1f", static_cast<double>(ImGui::GetIO().Framerate));
     ImGui::End();
 #endif
 
@@ -185,12 +185,11 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     // Upload ImGui vertex/index data BEFORE SDL_BeginGPURenderPass.
     s->imgui.prepareGPU(cmd);
 
-    const SDL_GPUColorTargetInfo colorTarget{
-        .texture = swapchain,
-        .load_op = SDL_GPU_LOADOP_CLEAR,
-        .store_op = SDL_GPU_STOREOP_STORE,
-        .clear_color = {0.1f, 0.1f, 0.1f, 1.f},
-    };
+    SDL_GPUColorTargetInfo colorTarget{};
+    colorTarget.texture = swapchain;
+    colorTarget.clear_color = {.r = 0.1f, .g = 0.1f, .b = 0.1f, .a = 1.f};
+    colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    colorTarget.store_op = SDL_GPU_STOREOP_STORE;
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
 
     s->renderer.draw(pass);
