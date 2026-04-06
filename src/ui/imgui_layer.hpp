@@ -8,18 +8,20 @@
 // calls compile out of shipping binaries.
 //
 // SDL3 GPU usage sequence per frame:
-//   1. newFrame()              — backend + ImGui new-frame
+//   1. newFrame()               — backend + ImGui new-frame
 //   2. (build ImGui UI)
-//   3. prepare(cmdBuf)         — ImGui::Render() + PrepareDrawData (before pass)
-//   4. SDL_BeginGPURenderPass(...)
-//   5. render(renderPass, cmdBuf)  — upload + rasterise into the open pass
-//   6. SDL_EndGPURenderPass(...)
+//   3. endFrame()               — ImGui::Render() (finalises draw list)
+//   4. prepareGPU(cmdBuf)       — upload vertex/index data BEFORE render pass
+//   5. SDL_BeginGPURenderPass(...)
+//   6. render(renderPass, cmdBuf) — rasterise into the open pass
+//   7. SDL_EndGPURenderPass(...)
 //
 // OpenGL usage sequence per frame:
 //   1. newFrame()
 //   2. (build ImGui UI)
-//   3. prepare(nullptr)        — ImGui::Render() only; no-op cmdBuf
+//   3. endFrame()               — ImGui::Render()
 //   4. render(nullptr, nullptr) — ImGui_ImplOpenGL3_RenderDrawData
+//   5. SDL_GL_SwapWindow(window) — done in main.cpp after render()
 // ---------------------------------------------------------------------------
 class ImGuiLayer
 {

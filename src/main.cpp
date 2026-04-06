@@ -159,10 +159,11 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 #endif
 
 #ifdef USE_OPENGL
-    // OpenGL path: finalise ImGui frame, then renderer draws + swaps.
+    // OpenGL path: finalise ImGui frame, draw triangle, render ImGui overlay, then swap.
     s->imgui.endFrame();
-    s->renderer.draw(nullptr);
-    s->imgui.render(nullptr, nullptr);
+    s->renderer.draw(nullptr);         // clear + draw triangle (no swap)
+    s->imgui.render(nullptr, nullptr); // draw ImGui overlay on top
+    SDL_GL_SwapWindow(s->window);      // now swap the complete frame
 #else
     // SDL3 GPU path: shared command buffer.
     // endFrame() must be called every frame to keep ImGui's internal

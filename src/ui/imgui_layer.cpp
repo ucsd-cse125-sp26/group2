@@ -22,8 +22,13 @@ bool ImGuiLayer::init(SDL_Window* window, SDL_GPUDevice* device)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
 
+#ifdef USE_OPENGL
+    if (!ImGui_ImplSDL3_InitForOpenGL(window, SDL_GL_GetCurrentContext()))
+        return false;
+#else
     if (!ImGui_ImplSDL3_InitForSDLGPU(window))
         return false;
+#endif
 
 #ifdef USE_OPENGL
     (void)device;

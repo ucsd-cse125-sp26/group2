@@ -133,8 +133,6 @@ void OpenGLRenderer::draw(SDL_GPURenderPass* /*unused*/)
     glUseProgram(shaderProgram);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-
-    SDL_GL_SwapWindow(window);
 }
 
 void OpenGLRenderer::shutdown()
