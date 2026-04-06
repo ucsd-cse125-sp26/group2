@@ -87,6 +87,9 @@ if(USE_OPENGL)
     FetchContent_MakeAvailable(glad)
 endif()
 
+# Ultralight — HTML UI renderer (prebuilt SDK, SDL3 GPU driver path)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Ultralight.cmake")
+
 # Dear ImGui — immediate-mode GUI (dev overlay; SDL3 GPU + OpenGL backends)
 FetchContent_Declare(
     imgui
@@ -243,6 +246,50 @@ endif()
 # ===========================================================================
 add_executable(group2 ${SOURCES})
 
+# ---- Ultralight: copy shared libs + resources next to binary ----
+if(WIN32)
+    set(UL_SHARED_LIBS
+        "${UL_CORE_DLL}" "${UL_WEB_DLL}" "${UL_UI_DLL}")
+elseif(APPLE)
+    set(UL_SHARED_LIBS
+        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}")
+else()
+    set(UL_SHARED_LIBS
+        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}")
+endif()
+
+foreach(_ul_lib ${UL_SHARED_LIBS})
+    add_custom_command(TARGET group2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_ul_lib}" "$<TARGET_FILE_DIR:group2>"
+        COMMENT "Copying Ultralight lib: ${_ul_lib}"
+        VERBATIM
+    )
+endforeach()
+
+if(EXISTS "${UL_RESOURCES_DIR}")
+    add_custom_command(TARGET group2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${UL_RESOURCES_DIR}" "$<TARGET_FILE_DIR:group2>/resources"
+        COMMENT "Copying Ultralight resources/"
+        VERBATIM
+    )
+endif()
+
+# rpath so the binary finds the copied .so/.dylib at runtime
+if(UNIX AND NOT APPLE)
+    set_target_properties(group2 PROPERTIES
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
+    )
+endif()
+if(APPLE)
+    set_target_properties(group2 PROPERTIES
+        BUILD_RPATH "@executable_path"
+        INSTALL_RPATH "@executable_path"
+    )
+endif()
+
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
@@ -259,6 +306,7 @@ target_link_libraries(group2 PRIVATE
     glm::glm
     EnTT::EnTT
     imgui
+    Ultralight::UI
 )
 
 if(USE_OPENGL)
