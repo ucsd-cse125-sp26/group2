@@ -221,6 +221,7 @@ endif()
 # ---- Sources ----
 set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/imgui_layer.cpp"
 )
 if(USE_OPENGL)
     list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/OpenGLRenderer.cpp")
@@ -235,6 +236,7 @@ add_executable(group2 ${SOURCES})
 
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
 )
 
 # SDL3 GPU path: compile shaders before linking the binary.
