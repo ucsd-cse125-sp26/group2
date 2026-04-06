@@ -13,7 +13,7 @@ bash scripts/setup-macos.sh
 cmake --preset debug && cmake --build --preset debug
 ./build/debug/group2
 
-# Windows (run setup-windows.ps1 first, then open Developer PowerShell for VS 2022)
+# Windows (run setup-windows.ps1 first)
 cmake --preset debug-win && cmake --build --preset debug-win
 .\build\debug-win\group2.exe
 ```
@@ -94,16 +94,12 @@ The binary lands in `build/<preset>/group2`.
 
 ### Windows
 
-Open **Developer PowerShell for VS 2022** (Start Menu → search "Developer PowerShell"), then:
-
 ```powershell
 cmake --preset debug-win
 cmake --build --preset debug-win
 ```
 
-The binary lands in `build\debug-win\group2.exe`.
-
-> **Why Developer PowerShell?** The Windows presets use MSVC (`cl.exe`) which requires the Visual Studio developer environment on PATH. IDEs handle this automatically (see IDE setup below), but command-line builds need the Developer PowerShell.
+The binary lands in `build\debug-win\group2.exe`. No Developer PowerShell needed — the CMake toolchain file auto-detects MSVC via `vswhere`.
 
 ---
 
@@ -116,12 +112,6 @@ and should appear already checked in **Settings > Build, Execution, Deployment >
 CLion evaluates the preset conditions and shows only the presets matching your platform
 (`debug-win`, `release-win`, `relwithdebinfo-win` on Windows; `debug`, `release`,
 `relwithdebinfo` on Linux/macOS).
-
-**Windows:** The `.idea/cmake.xml` in this repo configures the Windows presets to use
-CLion's **Visual Studio** toolchain, which automatically sets up the MSVC developer
-environment. If CLion cannot find this toolchain, go to
-**Settings > Build, Execution, Deployment > Toolchains**, click **+**, and add a
-**Visual Studio** toolchain. CLion will auto-detect your VS 2022 / Build Tools installation.
 
 If CLion has also added its own "Debug" profile (pointing at `cmake-build-debug/`), delete
 it from that settings page and keep only the preset-based ones.
