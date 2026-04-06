@@ -92,7 +92,8 @@ SDL_AppResult SDL_AppEvent(void* /*appstate*/, SDL_Event* event)
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
     auto* s = static_cast<AppState*>(appstate);
-    s->renderer.renderFrame();
+    // TODO Task 4: full render loop restructure
+    // s->renderer.draw(nullptr);
     return SDL_APP_CONTINUE;
 }
 

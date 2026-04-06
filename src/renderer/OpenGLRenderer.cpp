@@ -70,14 +70,14 @@ GLuint compileShader(GLenum type, const char* src)
 
 bool OpenGLRenderer::init(SDL_Window* win)
 {
-    window = win;
+    window_ = win;
 
-    glContext = SDL_GL_CreateContext(window);
-    if (!glContext) {
+    context_ = SDL_GL_CreateContext(window_);
+    if (!context_) {
         SDL_Log("OpenGLRenderer: SDL_GL_CreateContext failed: %s", SDL_GetError());
         return false;
     }
-    SDL_GL_MakeCurrent(window, glContext);
+    SDL_GL_MakeCurrent(window_, context_);
     SDL_GL_SetSwapInterval(1); // vsync
 
     // Load all OpenGL function pointers via glad.
@@ -96,58 +96,58 @@ bool OpenGLRenderer::init(SDL_Window* win)
         return false;
     }
 
-    shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vert);
-    glAttachShader(shaderProgram, frag);
-    glLinkProgram(shaderProgram);
+    shaderProgram_ = glCreateProgram();
+    glAttachShader(shaderProgram_, vert);
+    glAttachShader(shaderProgram_, frag);
+    glLinkProgram(shaderProgram_);
     glDeleteShader(vert);
     glDeleteShader(frag);
 
     GLint linked = 0;
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &linked);
+    glGetProgramiv(shaderProgram_, GL_LINK_STATUS, &linked);
     if (!linked) {
         char log[512];
-        glGetProgramInfoLog(shaderProgram, sizeof(log), nullptr, log);
+        glGetProgramInfoLog(shaderProgram_, sizeof(log), nullptr, log);
         SDL_Log("OpenGLRenderer: program link error: %s", log);
-        glDeleteProgram(shaderProgram);
-        shaderProgram = 0;
+        glDeleteProgram(shaderProgram_);
+        shaderProgram_ = 0;
         return false;
     }
 
     // An empty VAO is required by OpenGL 4.1 core profile even with no vertex
     // attributes (positions come from gl_VertexID inside the shader).
-    glGenVertexArrays(1, &vao);
+    glGenVertexArrays(1, &vao_);
 
     return true;
 }
 
-void OpenGLRenderer::renderFrame()
+void OpenGLRenderer::draw(SDL_GPURenderPass* /*unused*/)
 {
     int w = 0, h = 0;
-    SDL_GetWindowSizeInPixels(window, &w, &h);
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
     glViewport(0, 0, w, h);
 
     glClearColor(0.10f, 0.10f, 0.10f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    glUseProgram(shaderProgram);
-    glBindVertexArray(vao);
+    glUseProgram(shaderProgram_);
+    glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
-    SDL_GL_SwapWindow(window);
+    SDL_GL_SwapWindow(window_);
 }
 
 void OpenGLRenderer::shutdown()
 {
-    if (vao)
-        glDeleteVertexArrays(1, &vao);
-    if (shaderProgram)
-        glDeleteProgram(shaderProgram);
-    if (glContext)
-        SDL_GL_DestroyContext(glContext);
+    if (vao_)
+        glDeleteVertexArrays(1, &vao_);
+    if (shaderProgram_)
+        glDeleteProgram(shaderProgram_);
+    if (context_)
+        SDL_GL_DestroyContext(context_);
 
-    vao = 0;
-    shaderProgram = 0;
-    glContext = nullptr;
-    window = nullptr;
+    vao_ = 0;
+    shaderProgram_ = 0;
+    context_ = nullptr;
+    window_ = nullptr;
 }
