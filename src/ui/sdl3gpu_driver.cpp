@@ -323,8 +323,8 @@ bool SDL3GPUDriver::buildPipelines(const char* basePath, SDL_Window* window)
     SDL_GPUShader* fillPathFrag = loadSPIRV(fillPathFragPath.c_str(), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
     // composite.vert: 0 samplers, 0 uniform buffers
     SDL_GPUShader* compositeVert = loadSPIRV(compositeVertPath.c_str(), SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-    // composite.frag: 1 sampler, 0 uniform buffers
-    SDL_GPUShader* compositeFrag = loadSPIRV(compositeFragPath.c_str(), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+    // composite.frag: 1 sampler, 1 uniform buffer (UV rect)
+    SDL_GPUShader* compositeFrag = loadSPIRV(compositeFragPath.c_str(), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 
     bool ok = fillVert && fillFrag && fillPathVert && fillPathFrag && compositeVert && compositeFrag;
 
@@ -889,9 +889,30 @@ void SDL3GPUDriver::flushCommands(SDL_GPUCommandBuffer* cmdBuf)
 {
     uploadDirtyTextures(cmdBuf);
 
-    // One-shot diagnostic: log command count on first non-empty flush
+    // One-shot diagnostic: log each command on first flush
     if (!pendingCommands.empty() && !commandsEverFlushed) {
         SDL_Log("[UL] first non-empty flush: %zu commands", pendingCommands.size());
+        for (size_t i = 0; i < pendingCommands.size(); ++i) {
+            const auto& c = pendingCommands[i].cmd;
+            if (c.command_type == ultralight::CommandType::ClearRenderBuffer) {
+                SDL_Log("[UL]  cmd[%zu]: ClearRenderBuffer rb=%u", i, c.gpu_state.render_buffer_id);
+            } else {
+                auto rbSearch = renderBuffers.find(c.gpu_state.render_buffer_id);
+                uint32_t texId = (rbSearch != renderBuffers.end()) ? rbSearch->second.textureId : 0;
+                SDL_Log("[UL]  cmd[%zu]: DrawGeometry rb=%u→tex=%u geo=%u "
+                        "shader=%d scalars=(%g,%g,%g) vp=%ux%u",
+                        i,
+                        c.gpu_state.render_buffer_id,
+                        texId,
+                        c.geometry_id,
+                        static_cast<int>(c.gpu_state.shader_type),
+                        static_cast<double>(c.gpu_state.uniform_scalar[0]),
+                        static_cast<double>(c.gpu_state.uniform_scalar[1]),
+                        static_cast<double>(c.gpu_state.uniform_scalar[2]),
+                        c.gpu_state.viewport_width,
+                        c.gpu_state.viewport_height);
+            }
+        }
         commandsEverFlushed = true;
     }
 

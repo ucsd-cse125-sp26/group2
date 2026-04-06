@@ -181,18 +181,26 @@ void UltralightLayer::render()
         renderer->Render();
 }
 
-void UltralightLayer::composite(SDL_GPURenderPass* pass, uint32_t /*vpW*/, uint32_t /*vpH*/)
+void UltralightLayer::composite(SDL_GPUCommandBuffer* cmd, SDL_GPURenderPass* pass, uint32_t /*vpW*/, uint32_t /*vpH*/)
 {
     if (!view)
         return;
 
     ultralight::RenderTarget rt = view->render_target();
+    if (rt.is_empty)
+        return;
 
-    // One-shot diagnostic log
+    // One-shot diagnostic log including UV coords
     if (!compositeEverLogged) {
-        SDL_Log("[UL] composite: rt.texture_id=%u pipeline=%p",
+        SDL_Log("[UL] composite: texture_id=%u is_empty=%d uv=(%g,%g,%g,%g) tex=%ux%u",
                 rt.texture_id,
-                static_cast<void*>(driver->getCompositePipeline()));
+                static_cast<int>(rt.is_empty),
+                static_cast<double>(rt.uv_coords.left),
+                static_cast<double>(rt.uv_coords.top),
+                static_cast<double>(rt.uv_coords.right),
+                static_cast<double>(rt.uv_coords.bottom),
+                rt.texture_width,
+                rt.texture_height);
         compositeEverLogged = true;
     }
 
@@ -207,6 +215,16 @@ void UltralightLayer::composite(SDL_GPURenderPass* pass, uint32_t /*vpW*/, uint3
     b.texture = ulTex;
     b.sampler = ulSamp;
     SDL_BindGPUFragmentSamplers(pass, 0, &b, 1);
+
+    // Push UV rect so the composite shader samples only the content region
+    // (the RTT may be padded or only partially filled).
+    struct CompositeUniforms
+    {
+        float left, top, right, bottom;
+    };
+    CompositeUniforms uvRect{
+        .left = rt.uv_coords.left, .top = rt.uv_coords.top, .right = rt.uv_coords.right, .bottom = rt.uv_coords.bottom};
+    SDL_PushGPUFragmentUniformData(cmd, 0, &uvRect, sizeof(uvRect));
 
     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 }

@@ -230,7 +230,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     {
         int vpW = 0, vpH = 0;
         SDL_GetWindowSize(s->window, &vpW, &vpH);
-        s->ultralightLayer.composite(pass, static_cast<uint32_t>(vpW), static_cast<uint32_t>(vpH));
+        s->ultralightLayer.composite(cmd, pass, static_cast<uint32_t>(vpW), static_cast<uint32_t>(vpH));
     }
 #endif
     s->imgui.render(pass, cmd);

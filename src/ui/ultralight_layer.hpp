@@ -14,7 +14,7 @@ public:
     bool init(SDL_Window* window, SDL_GPUDevice* device);
     void update();
     void render();
-    void composite(SDL_GPURenderPass* pass, uint32_t viewportW, uint32_t viewportH);
+    void composite(SDL_GPUCommandBuffer* cmd, SDL_GPURenderPass* pass, uint32_t viewportW, uint32_t viewportH);
     void shutdown();
 
 private:
