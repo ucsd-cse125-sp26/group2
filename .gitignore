@@ -45,6 +45,9 @@ compile_commands.json
 .remember/
 .claude/
 
+# Git worktrees
+.worktrees/
+
 # macOS
 .DS_Store
 .DS_Store?
