@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 # Install all build prerequisites for titandoom on Windows.
 # Run once after cloning from an elevated PowerShell:
 #   Set-ExecutionPolicy Bypass -Scope Process -Force
