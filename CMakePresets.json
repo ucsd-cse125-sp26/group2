@@ -26,14 +26,10 @@
     {
       "name": "base-msvc",
       "hidden": true,
-      "generator": "Visual Studio 17 2022",
-      "architecture": {
-        "value": "x64",
-        "strategy": "set"
-      },
-      "binaryDir": "${sourceDir}/build/${presetName}",
+      "inherits": "base",
       "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_C_COMPILER":   "cl",
+        "CMAKE_CXX_COMPILER": "cl"
       }
     },
 
@@ -58,6 +54,7 @@
       "displayName": "Debug (Windows — ASan via MSVC)",
       "inherits": "base-msvc",
       "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_ASAN":      "ON"
       },
       "condition": {
@@ -85,7 +82,9 @@
       "name": "release-win",
       "displayName": "Release (Windows)",
       "inherits": "base-msvc",
-      "cacheVariables": {},
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -111,7 +110,9 @@
       "name": "relwithdebinfo-win",
       "displayName": "RelWithDebInfo (Windows)",
       "inherits": "base-msvc",
-      "cacheVariables": {},
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -122,10 +123,10 @@
 
   "buildPresets": [
     { "name": "debug",             "configurePreset": "debug" },
-    { "name": "debug-win",         "configurePreset": "debug-win",         "configuration": "Debug" },
+    { "name": "debug-win",         "configurePreset": "debug-win" },
     { "name": "release",           "configurePreset": "release" },
-    { "name": "release-win",       "configurePreset": "release-win",       "configuration": "Release" },
+    { "name": "release-win",       "configurePreset": "release-win" },
     { "name": "relwithdebinfo",    "configurePreset": "relwithdebinfo" },
-    { "name": "relwithdebinfo-win","configurePreset": "relwithdebinfo-win", "configuration": "RelWithDebInfo" }
+    { "name": "relwithdebinfo-win","configurePreset": "relwithdebinfo-win" }
   ]
 }

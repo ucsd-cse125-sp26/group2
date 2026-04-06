@@ -40,6 +40,10 @@ jobs:
           - name: Windows
             os: windows-latest
             preset: debug-win
+            cc: cl
+            cxx: cl
+            # sccache + MSVC requires embedded debug info (/Z7 not /Zi)
+            extra_cmake: -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +71,11 @@ jobs:
           echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
           echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # VS2022 (via msvc-dev-cmd) already ships Ninja — no choco install needed.
       # Vulkan SDK provides glslc, required at configure time by CMakeLists.txt
       # even when GROUP2_BUNDLE_SHADERS=OFF (shaders compile to .spv at build time).
       - name: Install Vulkan SDK (Windows)
@@ -208,9 +217,10 @@ jobs:
           - name: Windows
             os: windows-latest
             preset: release-win
-            binary_src: build\release-win\Release\group2.exe
+            cc: cl
+            cxx: cl
+            binary_src: build\release-win\group2.exe
             artifact: group2-windows-x86_64.exe
-            extra_cmake: -DGROUP2_BUNDLE_SHADERS=ON
 
     steps:
       - uses: actions/checkout@v4
@@ -238,6 +248,10 @@ jobs:
           echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
           echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install Vulkan SDK (Windows)
         if: runner.os == 'Windows'
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -251,9 +265,9 @@ jobs:
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/${{ matrix.preset }}/_deps
-          key: deps-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-${{ runner.os }}-${{ matrix.preset }}-
+          path: build/release/_deps
+          key: deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ runner.os }}-release-
 
       - name: Configure
         shell: bash
@@ -264,8 +278,7 @@ jobs:
           cmake --preset ${{ matrix.preset }} \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
-            ${{ matrix.extra_cmake || '' }}
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 
       - name: Build
         shell: bash
