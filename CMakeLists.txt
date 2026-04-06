@@ -71,6 +71,45 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT)
 
+# Dear ImGui — immediate-mode GUI (dev overlay; SDL3 GPU + OpenGL backends)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.91.8
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+set(IMGUI_SOURCES
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
+)
+if(USE_OPENGL)
+    list(APPEND IMGUI_SOURCES
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp")
+else()
+    list(APPEND IMGUI_SOURCES
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp")
+endif()
+
+add_library(imgui STATIC ${IMGUI_SOURCES})
+target_include_directories(imgui PUBLIC
+    "${imgui_SOURCE_DIR}"
+    "${imgui_SOURCE_DIR}/backends"
+)
+target_link_libraries(imgui PRIVATE SDL3::SDL3-static)
+if(USE_OPENGL)
+    target_link_libraries(imgui PRIVATE glad)
+endif()
+# Suppress warnings from imgui itself
+target_compile_options(imgui PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-w>
+    $<$<CXX_COMPILER_ID:MSVC>:/W0>
+)
+
 # glad — OpenGL 4.1 core function loader, generated via Python3 (optional)
 if(USE_OPENGL)
     FetchContent_Declare(
@@ -204,9 +243,9 @@ endif()
 target_link_libraries(group2 PRIVATE
     SDL3::SDL3-static
     glm::glm
+    EnTT::EnTT
+    imgui
 )
-
-target_link_libraries(group2 PRIVATE EnTT::EnTT)
 
 if(USE_OPENGL)
     target_link_libraries(group2 PRIVATE glad)
