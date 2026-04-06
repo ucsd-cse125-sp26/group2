@@ -109,9 +109,11 @@ The binary lands in `build\debug-win\group2.exe`.
 
 ### CLion
 Open the **repo root folder** in CLion. It reads `CMakePresets.json` automatically.
-The preset profiles (`debug`, `debug-win`, `release`, `relwithdebinfo`) are pre-enabled
-via `.idea/workspace.xml` committed in this repo and should appear already checked in
-**Settings › Build, Execution, Deployment › CMake**.
+The preset profiles are pre-enabled via `.idea/workspace.xml` committed in this repo
+and should appear already checked in **Settings › Build, Execution, Deployment › CMake**.
+CLion evaluates the preset conditions and shows only the presets matching your platform
+(`debug-win`, `release-win`, `relwithdebinfo-win` on Windows; `debug`, `release`,
+`relwithdebinfo` on Linux/macOS).
 
 If CLion has also added its own "Debug" profile (pointing at `cmake-build-debug/`), delete
 it from that settings page and keep only the preset-based ones.
@@ -129,8 +131,8 @@ it from that settings page and keep only the preset-based ones.
 
 ### Visual Studio 2022
 Use **File › Open › Folder** (not *Open › Project/Solution*) to open the repo root.
-VS 2022 reads `CMakePresets.json` natively — `debug-win` and `release` appear in the
-configuration dropdown at the top of the window.
+VS 2022 reads `CMakePresets.json` natively — `debug-win`, `release-win`, and
+`relwithdebinfo-win` appear in the configuration dropdown at the top of the window.
 
 1. Select **debug-win** from the configuration dropdown.
 2. **Build:** `Ctrl+Shift+B`.

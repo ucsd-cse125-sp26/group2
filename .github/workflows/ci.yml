@@ -40,6 +40,8 @@ jobs:
           - name: Windows
             os: windows-latest
             preset: debug-win
+            cc: cl
+            cxx: cl
             # sccache + MSVC requires embedded debug info (/Z7 not /Zi)
             extra_cmake: -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
@@ -214,8 +216,10 @@ jobs:
 
           - name: Windows
             os: windows-latest
-            preset: release
-            binary_src: build\release\group2.exe
+            preset: release-win
+            cc: cl
+            cxx: cl
+            binary_src: build\release-win\group2.exe
             artifact: group2-windows-x86_64.exe
 
     steps:
