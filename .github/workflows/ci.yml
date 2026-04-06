@@ -19,6 +19,8 @@ jobs:
     name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     if: github.event_name == 'pull_request'
+    env:
+      SCCACHE_GHA_ENABLED: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -72,33 +74,14 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       # VS2022 (via msvc-dev-cmd) already ships Ninja — no choco install needed.
-      # glslangValidator is required at configure time by CMakeLists.txt even when
-      # GROUP2_BUNDLE_SHADERS=OFF: shaders are still compiled to .spv at build time
-      # and loaded from disk at runtime. Use a cached 4MB binary instead of the
-      # full ~200MB Vulkan SDK (saves ~23s per run vs jakoch/install-vulkan-sdk-action).
-      - name: Cache glslangValidator (Windows)
+      # Vulkan SDK provides glslc, required at configure time by CMakeLists.txt
+      # even when GROUP2_BUNDLE_SHADERS=OFF (shaders compile to .spv at build time).
+      - name: Install Vulkan SDK (Windows)
         if: runner.os == 'Windows'
-        id: glslang-cache
-        uses: actions/cache@v4
+        uses: jakoch/install-vulkan-sdk-action@v1
         with:
-          path: C:\glslang
-          key: glslang-win-15.1.0
-
-      - name: Download glslangValidator (Windows)
-        if: runner.os == 'Windows' && steps.glslang-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $url = "https://github.com/KhronosGroup/glslang/releases/download/15.1.0/glslang-15.1.0-windows-Release.zip"
-          Invoke-WebRequest -Uri $url -OutFile glslang.zip
-          Expand-Archive -Path glslang.zip -DestinationPath C:\glslang
-
-      - name: Add glslangValidator to PATH (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $binPath = "C:\glslang\bin"
-          if (-not (Test-Path $binPath)) { $binPath = (Get-ChildItem C:\glslang -Recurse -Filter "glslangValidator.exe" | Select-Object -First 1).DirectoryName }
-          echo $binPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          vulkan_version: latest
+          cache: true
 
       - name: Setup sccache
         uses: mozilla/sccache-action@v0.0.9
@@ -207,6 +190,8 @@ jobs:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     if: github.event_name == 'push'
+    env:
+      SCCACHE_GHA_ENABLED: "true"
     strategy:
       fail-fast: false
       matrix:
