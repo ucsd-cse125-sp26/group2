@@ -2,6 +2,8 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <string>
+
 #ifdef USE_OPENGL
 #include "renderer/OpenGLRenderer.hpp"
 using ActiveRenderer = OpenGLRenderer;
@@ -12,6 +14,11 @@ using ActiveRenderer = SDLGPURenderer;
 
 #include "ecs/Registry.hpp"
 #include "ui/imgui_layer.hpp"
+
+#ifndef USE_OPENGL
+#include "ui/sdl3gpu_driver.hpp"
+#include "ui/ultralight_layer.hpp"
+#endif
 
 #ifndef NDEBUG
 #include <imgui.h>
@@ -41,6 +48,10 @@ struct AppState
     ActiveRenderer renderer;
     Registry registry;
     ImGuiLayer imgui;
+#ifndef USE_OPENGL
+    SDL3GPUDriver* ulDriver = nullptr;
+    UltralightLayer ultralightLayer{nullptr};
+#endif
     uint64_t lastTicks = 0;
 };
 
@@ -89,6 +100,20 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
         SDL_Log("ImGui init failed");
         return SDL_APP_FAILURE;
     }
+
+#ifndef USE_OPENGL
+    s->ulDriver = new SDL3GPUDriver(s->renderer.device());
+    new (&s->ultralightLayer) UltralightLayer(s->ulDriver);
+
+    const std::string k_basePath = SDL_GetBasePath() ? SDL_GetBasePath() : "./";
+    if (!s->ulDriver->buildPipelines(k_basePath.c_str()))
+        SDL_Log("UL pipeline build failed — UI disabled");
+
+    if (!s->ultralightLayer.init(s->window, s->renderer.device())) {
+        SDL_Log("UltralightLayer init failed");
+        return SDL_APP_FAILURE;
+    }
+#endif
 
     // ---- EnTT demo entities ----
     auto& reg = s->registry;
@@ -155,6 +180,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     );
     ImGui::Text("Entities: %zu", static_cast<size_t>(reg.storage<entt::entity>().size()));
     ImGui::Text("FPS:      %.1f", static_cast<double>(ImGui::GetIO().Framerate));
+    ImGui::Text("UL:       active");
     ImGui::End();
 #endif
 
@@ -168,6 +194,10 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     // SDL3 GPU path: shared command buffer.
     // endFrame() must be called every frame to keep ImGui's internal
     // frame counter consistent, even when the swapchain is unavailable.
+#ifndef USE_OPENGL
+    s->ultralightLayer.update();
+    s->ultralightLayer.render();
+#endif
     s->imgui.endFrame();
 
     SDL_GPUDevice* dev = s->renderer.device();
@@ -184,6 +214,9 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
     // Upload ImGui vertex/index data BEFORE SDL_BeginGPURenderPass.
     s->imgui.prepareGPU(cmd);
+#ifndef USE_OPENGL
+    s->ulDriver->flushCommands(cmd);
+#endif
 
     SDL_GPUColorTargetInfo colorTarget{};
     colorTarget.texture = swapchain;
@@ -193,6 +226,13 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
 
     s->renderer.draw(pass);
+#ifndef USE_OPENGL
+    {
+        int vpW = 0, vpH = 0;
+        SDL_GetWindowSize(s->window, &vpW, &vpH);
+        s->ultralightLayer.composite(pass, static_cast<uint32_t>(vpW), static_cast<uint32_t>(vpH));
+    }
+#endif
     s->imgui.render(pass, cmd);
 
     SDL_EndGPURenderPass(pass);
@@ -207,6 +247,11 @@ void SDL_AppQuit(void* appstate, SDL_AppResult /*result*/)
     auto* s = static_cast<AppState*>(appstate);
     if (!s)
         return;
+#ifndef USE_OPENGL
+    s->ultralightLayer.shutdown();
+    delete s->ulDriver;
+    s->ulDriver = nullptr;
+#endif
     s->imgui.shutdown();
     s->renderer.shutdown();
     SDL_DestroyWindow(s->window);

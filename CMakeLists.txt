@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 
+# Ultralight's prebuilt SDK declares cmake_minimum_required(VERSION 3.3.2). CMake 4.0+
+# rejects < 3.5 in nested projects unless the effective policy floor is raised.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+    # 3.5 is the hard floor for CMake 4.0; 3.10 matches FetchContent deps (GLM, Ultralight)
+    # and avoids deprecation spam from their old cmake_minimum_required lines.
+    set(CMAKE_POLICY_VERSION_MINIMUM "3.10" CACHE STRING
+        "Minimum policy version for nested projects (Ultralight SDK, GLM, etc.)")
+endif()
+
 project(group2
     VERSION 0.1.0
     DESCRIPTION "CSE 125 Group 2"
@@ -239,6 +248,13 @@ if(USE_OPENGL)
     list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/OpenGLRenderer.cpp")
 else()
     list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/SDLGPURenderer.cpp")
+endif()
+
+if(NOT USE_OPENGL)
+    list(APPEND SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/sdl3gpu_driver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ultralight_layer.cpp"
+    )
 endif()
 
 # ===========================================================================
