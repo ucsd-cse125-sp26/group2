@@ -1,5 +1,5 @@
 #define SDL_MAIN_USE_CALLBACKS // For using callbacks instead of a main() entrypoint
-#include "renderer/renderer.h"
+#include "game/Game.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -10,20 +10,28 @@
 
 SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
 {
-    return rendererInit(appstate, 0, nullptr);
+    auto* game = new Game();
+
+    if (!game->init())
+        return SDL_APP_FAILURE;
+
+    *appstate = game;
+    return SDL_APP_CONTINUE;
 }
 
-SDL_AppResult SDL_AppEvent(void* /*appstate*/, SDL_Event* event)
+SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 {
-    return rendererAppEvent(nullptr, event);
+    return static_cast<Game*>(appstate)->event(event);
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
-    return rendererAppIterate(appstate);
+    return static_cast<Game*>(appstate)->iterate();
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult /*result*/)
 {
-    return rendererAppQuit(appstate, SDL_APP_SUCCESS);
+    auto* game = static_cast<Game*>(appstate);
+    game->quit();
+    delete game;
 }
