@@ -66,6 +66,7 @@ set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/renderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/renderer.h"
 )
 
 # ===========================================================================
