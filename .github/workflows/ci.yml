@@ -63,8 +63,9 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           which ninja || brew install ninja
-          brew install glslang
-          echo "$(brew --prefix glslang)/bin" >> "$GITHUB_PATH"
+          brew install glslang spirv-cross
+          echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
+          echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
@@ -91,6 +92,7 @@ jobs:
           restore-keys: deps-${{ runner.os }}-${{ matrix.preset }}-
 
       - name: Configure
+        shell: bash
         env:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
@@ -102,6 +104,7 @@ jobs:
             ${{ matrix.extra_cmake || '' }}
 
       - name: Build
+        shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
       - name: Validate MSL shaders (macOS)
@@ -259,6 +262,7 @@ jobs:
           restore-keys: deps-${{ runner.os }}-release-
 
       - name: Configure
+        shell: bash
         env:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
@@ -269,6 +273,7 @@ jobs:
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 
       - name: Build
+        shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
       - name: Validate MSL shaders (macOS)
