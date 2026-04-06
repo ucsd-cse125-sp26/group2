@@ -64,9 +64,10 @@ endif()
 # ---- Sources ----
 set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/main.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/renderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/renderer.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Game.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Game.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Renderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Renderer.hpp"
 )
 
 # ===========================================================================
