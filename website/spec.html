@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSE_125_GROUP_02 // PROJECT_SPECS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=Work+Sans:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+
+  <header class="topbar">
+    <div class="brand">CSE_125_GROUP_02</div>
+
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a href="#" class="active">Overview</a>
+      <a href="#">Docs</a>
+      <a href="#">Archive</a>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="status-chip">
+        <span class="status-label">System_Status</span>
+        <span class="status-value">Progressing</span>
+      </div>
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--ghost">GitHub_Link</a>
+      <button class="mobile-toggle" id="mobileToggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar" aria-label="Sidebar navigation">
+    <div class="operator-card">
+      <div class="operator-row">
+        <div class="operator-icon">
+          <span class="material-symbols-outlined">person</span>
+        </div>
+        <div>
+          <p class="operator-name">TERMINAL_01</p>
+          <p class="operator-status">Status: Online</p>
+        </div>
+      </div>
+    </div>
+
+    <nav class="side-nav">
+      <a class="nav-link" href="#">
+        <span class="material-symbols-outlined">terminal</span>
+        <span>Home</span>
+      </a>
+      <a class="nav-link active" href="#">
+        <span class="material-symbols-outlined">deployed_code</span>
+        <span>Project_Specs</span>
+      </a>
+      <a class="nav-link" href="#">
+        <span class="material-symbols-outlined">article</span>
+        <span>Weekly_Reports</span>
+      </a>
+      <a class="nav-link" href="#">
+        <span class="material-symbols-outlined">task_alt</span>
+        <span>Final Report</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--primary" style="display:block; text-align: center;">GitHub_Link</a>
+    </div>
+  </aside>
+
+  <main class="page">
+    <div class="content">
+      <section class="hero">
+        <h1 class="hero-title">PROJECT_SPECS</h1>
+        <div class="hero-tag">&lt;Insert_Game_Name&gt;</div>
+      </section>
+
+      <section class="section" id="project-description">
+        <h2 class="section-title">01_PROJECT_DESCRIPTION</h2>
+
+        <div class="grid-2">
+          <article class="panel">
+            <div>
+              <p class="muted-label">Concept_Overview</p>
+              <p class="body-copy">A fast-paced, parkour-based arena shooter with momentum-driven movement inspired by Titanfall and Quake. Gravity can shift mid-match, creating a constantly changing combat environment. Players collect weapons placed throughout the map and engage in ability-based combat using tools, debuffs, and power-ups. The game is set within a retro-inspired sci-fi world <-- UPDATE WITH THEME.</p>
+            </div>
+
+            <div style="margin-top: 28px;">
+              <p class="muted-label">Win_Loss_Conditions</p>
+              <p class="small-copy" style="font-size:15px;color:var(--text);">GAMEPLAY: Time/Score based PVP deathmatch in an arena style map.</p>
+              <div class="objective-boxes">
+                <section class="mini-panel victory">
+                  <p class="micro-title">Victory</p>
+                  <p class="micro-copy">Meet score requirement or have highest score when the timer ends.</p>
+                </section>
+                <section class="mini-panel termination">
+                  <p class="micro-title">Defeat</p>
+                  <p class="micro-copy">Fail to have the highest score by the end of the match.</p>
+                </section>
+              </div>
+            </div>
+
+            <div style="margin-top: 26px;">
+              <p class="muted-label">Unique_Identifiers</p>
+              <ul class="diamond-list">
+                <li>Fluid and momentum-driven movement</li>
+                <li>Shifting gravity</li>
+                <li>Equipable guns and abilities</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="panel inset">
+            <p class="card-title">Feature_Priority_Matrix</p>
+
+            <div class="priority-block">
+              <div class="priority-head">
+                <p class="priority-label">Must_Have</p>
+                <p class="priority-rank">Critical</p>
+              </div>
+              <div class="priority-bar"><div class="priority-fill" style="width: 100%;"></div></div>
+              <p class="small-copy">Core movement, combat, match system, small number of guns (hitscan, projectile, tracking), shifting gravity, base player model.</p>
+            </div>
+
+            <div class="priority-block">
+              <div class="priority-head">
+                <p class="priority-label">Want</p>
+                <p class="priority-rank">High_Priority</p>
+              </div>
+              <div class="priority-bar"><div class="priority-fill" style="width: 50%;"></div></div>
+              <p class="small-copy">Sliding and wall running, abilities, customizable match system, dynamic lighting, animations, sounds, music.</p>
+            </div>
+
+            <div class="priority-block">
+              <div class="priority-head">
+                <p class="priority-label">Extended</p>
+                <p class="priority-rank">Stretch_Goal</p>
+              </div>
+              <div class="priority-bar"><div class="priority-fill" style="width: 25%;"></div></div>
+              <p class="small-copy">Lag compensation and advanced networking, adjustable player limit, additional player models, additional maps (different sizes).</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="group-management">
+        <h2 class="section-title">02_GROUP_MANAGEMENT_PROTOCOLOLS</h2>
+
+        <div class="split-panel">
+          <article class="panel">
+            <p class="card-title">Team_Members</p>
+            <div class="role-list">
+              <div class="role-item"><span>Joshua Castaneda</span><span class="value">Graphics / Physics</span></div>
+              <div class="role-item"><span>Cedric-James David</span><span class="value">Gameplay / Network</span></div>
+              <div class="role-item"><span>Guthry Hahm</span><span class="value">Graphics</span></div>
+              <div class="role-item"><span>Daniil Katulevskiy</span><span class="value">Physics / CI</span></div>
+              <div class="role-item"><span>Jolina Leong</span><span class="value">ART / Modeling</span></div>
+              <div class="role-item"><span>Jacob Roner</span><span class="value">Gameplay / Integration</span></div>
+              <div class="role-item"><span>Scott Semtner</span><span class="value">Network</span></div>
+            </div>
+          </article>
+
+          <article class="panel" style="background: linear-gradient(180deg, rgba(23,29,19,0.98), rgba(17,23,14,0.98));">
+            <p class="card-title">Comm_Channels</p>
+            <div class="comm-block">
+              <p class="comm-label">link_Platforms</p>
+              <p class="comm-value">GitHub Projects // Discord // Google Drive</p>
+            </div>
+            <div class="comm-block">
+              <p class="comm-label">Sync_Schedule</p>
+              <p class="comm-value highlight">Tue / Thur @ 1230 Hours</p>
+            </div>
+            <div class="comm-block">
+              <p class="comm-label">Decision_Logic</p>
+              <p class="comm-value italic">“Consensus-Driven with Leaders making final code decisions. ”</p>
+            </div>
+          </article>
+
+          <div class="stack">
+            <article class="mini-panel" style="padding:16px 16px 18px; box-shadow: inset 3px 0 0 rgba(255,143,138,0.75), inset 0 0 0 1px rgba(255,255,255,0.03);">
+              <p class="comm-label" style="color:var(--error); font-size:11px; font-weight:800;">Schedule_Management</p>
+              <p class="small-copy">Semi-weekly meetings - audit progress and manage scope.</p>
+            </article>
+            <article class="mini-panel" style="padding:16px 16px 18px; box-shadow: inset 3px 0 0 rgba(221,200,8,0.55), inset 0 0 0 1px rgba(255,255,255,0.03);">
+              <p class="comm-label" style="color:var(--yellow); font-size:11px; font-weight:800;">Reporting_Struct</p>
+              <p class="small-copy">Weekly group reports managed by Jacob - Weekly individual reports produced by each member.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="project-development">
+        <h2 class="section-title">03_PROJECT_DEVELOPMENT</h2>
+
+        <div class="dev-strip">
+          <div class="grid-4">
+            <article class="dev-card">
+              <span class="material-symbols-outlined">groups</span>
+              <h3>Dev_Roles</h3>
+              <div class="row" style="display: table; clear: both;">
+                <ul style="float: left; width: 50%; padding-right: 40px;">
+                  <li>Graphics</li>
+                  <li>Networking</li>
+                  <li>Physics</li>
+                </ul>
+                <ul style="float: left; width: 50%;">
+                  <li>Gameplay</li>
+                  <li>Art</li>
+                  <li>Pipeline/CI</li>
+                </ul>
+              </div>
+            </article>
+            <article class="dev-card">
+              <span class="material-symbols-outlined">construction</span>
+              <h3>Tooling</h3>
+              <ul>
+                <li>C++ 23 / OpenGL and SDL</li>
+                <li>Clang tools / Blender</li>
+              </ul>
+            </article>
+            <article class="dev-card">
+              <span class="material-symbols-outlined">bug_report</span>
+              <h3>Testing_Protocols</h3>
+              <p>Iterative Play Testing + Unit tests for components.</p>
+            </article>
+            <article class="dev-card">
+              <span class="material-symbols-outlined">description</span>
+              <h3>Documentation</h3>
+              <p>Internal Dev Logs + External Player Manual, all in markdown.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="project-schedule">
+        <h2 class="section-title">04_PROJECT_SCHEDULE (MILESTONES)</h2>
+
+        <div class="schedule-grid">
+          <div>
+            <p class="subsection-label">High_Level_Timeline</p>
+            <article class="timeline-card">
+              <div class="timeline-item">
+                <div class="timeline-week">W_03</div>
+                <div>
+                  <p class="timeline-title">Stitched Prototype</p>
+                  <p class="timeline-desc">Simple core components - graphics, networking, and physics.</p>
+                </div>
+              </div>
+              <div class="timeline-item">
+                <div class="timeline-week">W_05</div>
+                <div>
+                  <p class="timeline-title">MVP Baseline</p>
+                  <p class="timeline-desc">First playable loop with basic UI elements.</p>
+                </div>
+              </div>
+              <div class="timeline-item">
+                <div class="timeline-week">W_10</div>
+                <div>
+                  <p class="timeline-title emphasis">Final Product</p>
+                  <p class="timeline-desc">Testing + GM build ready for demo.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div>
+            <p class="subsection-label">Weekly_Delta_Logs</p>
+            <div class="table-wrap">
+              <table aria-label="Weekly delta logs">
+                <tbody>
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-01-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_01</span>
+                          <span class="week-expander__title">Brainstorming &amp; Setup</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Complete</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-01-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Initial team brainstorming, project direction discussions, repository setup,
+                            discord setup, and project specs.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-02-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_02</span>
+                          <span class="week-expander__title">Core Components &amp; Concepting</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Active</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-02-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Core components for local only game: Camera, objects, movement. Build foundation for Client-Server achitecture. Concept game theme and character/weapon designs. Implement basic game components.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-03-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_03</span>
+                          <span class="week-expander__title">Stitching &amp; Modeling</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-03-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Stitch graphics and networking components. Implement textures and lighting. Develop Client server sync. Begin on fundamental physics components. Begin modeling character and weapons. Implement initial match loop.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-04-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_04</span>
+                          <span class="week-expander__title">Systems Expansion</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-04-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Improve the physics system and implement the gravity mechanic. Expand networking to support higher-level sync between players and game state. Contine developing 3d models. Refine gameplay loop for smooth core combat and movement interaction.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-05-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_05</span>
+                          <span class="week-expander__title">Core Gameplay Completion &amp; MVP</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-05-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Complete MVP with playable multiplayer deathmatch loop. Finalize core gameplay systems, like spawning, scoring, match timer, and win condition. Add additional guns and abilities. Integrate character and weapon models. Refine movement and combat.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-06-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_06</span>
+                          <span class="week-expander__title">Feature Expansion &amp; Refinement</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-06-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Expand the ability system with at least one or two functional abilities such as grappling hook or jet pack. Improve gun balance and combat experience. Polish the gravity-shifting mechanic so it works reliably in multiplayer. Integrate map. Begin testing for major gameplay or networking issues.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-07-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_07</span>
+                          <span class="week-expander__title">Multiplayer Stability &amp; Game Polish</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-07-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Improve network sync and reduce noticeable desync during combat and movement. Add physics interactions for wall running and sliding. Add UI elements such as score display, timer, and match state feedback. Polish graphics, lighting, and visual clarity. Playtesting to evaluate pacing and fun factor.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-08-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_08</span>
+                          <span class="week-expander__title">Content Blitz</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-08-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Finish the main planned weapons, abilities, and player systems. Complete the primary map and environment art pass. Add remaining audio/visuals for weapons, movement, and abilities if time. Finalize customizable match settings. Begin prioritizing bug fixes and identifying which stretch goals can be implemented.
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-09-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_09</span>
+                          <span class="week-expander__title">Integration &amp; Stretch Goals</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-09-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Complete integration of all major systems into a stable build. Add any additional strech goal items. Focus on bug fixing, performance improvements, and resolving gameplay issues. 
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr class="expander-row" data-expander>
+                    <td colspan="3">
+                      <button
+                        class="week-expander"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="week-10-details"
+                      >
+                        <span class="week-expander__left">
+                          <span class="week-expander__week">Week_10</span>
+                          <span class="week-expander__title">Clean Up &amp; Polish</span>
+                        </span>
+                        <span class="week-expander__right">
+                          <span class="week-expander__status">Pending</span>
+                          <span class="material-symbols-outlined week-expander__icon">expand_more</span>
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr class="expander-content-row" id="week-10-details" aria-hidden="true">
+                    <td colspan="3">
+                      <div class="week-expander__content-outer">
+                        <div class="week-expander__content">
+                          <p class="week-expander__label">Summary</p>
+                          <p class="week-expander__text">
+                            Polish the final game build for presentation. Fix remaining high-priority bugs and improve usability where possible. Improve documentation and ensure the repository is organized. Prepare the final web page. 
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="status-hud" aria-label="Status HUD">
+    <div class="meta">
+      <span class="label">Date</span><span class="value" id="hudDate">----</span>
+      <span class="label">Time</span><span class="value" id="hudTime">--:--:--</span>
+      <span class="label">Latency</span><span class="value" id="hudLatency">18ms</span>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div>© 1999 Group_02. All Rights Reserved.</div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a class="foot-link" href="#">Privacy_Protocols</a>
+      <a class="foot-link" href="#">System_Status</a>
+      <a class="foot-link" href="#">Support_Comms</a>
+    </nav>
+    <div class="footer-build">Insert_Game_Name</div>
+  </footer>
+  <script src="script.js"></script>
+</body>
+</html>
