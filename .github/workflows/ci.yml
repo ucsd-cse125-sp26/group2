@@ -47,7 +47,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-format-18 clang-tidy \
-            glslang-tools \
+            glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -59,8 +59,9 @@ jobs:
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ninja glslang
-          echo "$(brew --prefix glslang)/bin" >> "$GITHUB_PATH"
+          brew install ninja glslang spirv-cross
+          echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
+          echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
@@ -95,6 +96,14 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
+      - name: Validate MSL shaders (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for f in build/${{ matrix.preset }}/shaders/*.msl; do
+            echo "Validating $f ..."
+            xcrun -sdk macosx metal -fsyntax-only -x metal "$f"
+          done
+
   # ------------------------------------------------------------------ #
   #  Format check — pinned to clang-format-18 (ships on ubuntu-24.04)  #
   # ------------------------------------------------------------------ #
@@ -123,7 +132,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang clang-tidy glslang-tools \
+            ninja-build clang clang-tidy glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -195,7 +204,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang glslang-tools \
+            ninja-build clang glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -207,8 +216,9 @@ jobs:
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ninja glslang
-          echo "$(brew --prefix glslang)/bin" >> "$GITHUB_PATH"
+          brew install ninja glslang spirv-cross
+          echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
+          echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
@@ -242,6 +252,14 @@ jobs:
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+      - name: Validate MSL shaders (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for f in build/${{ matrix.preset }}/shaders/*.msl; do
+            echo "Validating $f ..."
+            xcrun -sdk macosx metal -fsyntax-only -x metal "$f"
+          done
 
       - name: Stage binary (Linux / macOS)
         if: runner.os != 'Windows'
