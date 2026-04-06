@@ -24,7 +24,7 @@ cmake --preset debug-win && cmake --build --preset debug-win
 |---|---|
 | Window / Input / GPU | [SDL3](https://github.com/libsdl-org/SDL) — Vulkan · Metal · DX12 via SDL GPU API |
 | Graphics (optional) | OpenGL 4.1 core profile via [glad](https://github.com/Dav1dde/glad) (`-DUSE_OPENGL=ON`) |
-| ECS (optional) | [EnTT](https://github.com/skypjack/entt) (`-DUSE_ENTT=ON`) or roll your own |
+| ECS | [EnTT](https://github.com/skypjack/entt) (always enabled) |
 | Math | [GLM](https://github.com/g-truc/glm) |
 | Build | CMake 3.25+ · Ninja |
 | Sanitizers | ASan + UBSan (debug Linux/macOS), ASan (Windows MSVC) |
@@ -125,7 +125,6 @@ LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/group2
 | Option | Default | Description |
 |---|---|---|
 | `USE_OPENGL` | `OFF` | Use OpenGL 4.1 core backend (glad) instead of SDL3 GPU pipeline |
-| `USE_ENTT` | `OFF` | Use EnTT ECS library; `OFF` = minimal stub in `src/ecs/Registry.hpp` |
 | `GROUP2_BUNDLE_SHADERS` | `ON` in Release | Embed SPIR-V shaders into the binary (SDL3 GPU path only) |
 | `ENABLE_ASAN` | `OFF` | AddressSanitizer (on by default in `debug` preset) |
 | `ENABLE_UBSAN` | `OFF` | UndefinedBehaviorSanitizer (on by default in `debug` preset) |
@@ -134,9 +133,6 @@ LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/group2
 ```bash
 # OpenGL backend
 cmake --preset debug -DUSE_OPENGL=ON
-
-# EnTT ECS
-cmake --preset debug -DUSE_ENTT=ON
 ```
 
 ---
@@ -156,10 +152,7 @@ The SDL3 GPU backend requires a GLSL→SPIR-V compiler at build time (`glslc` or
 
 ## ECS
 
-`src/ecs/Registry.hpp` exposes a single `Registry` type:
-
-- **`-DUSE_ENTT=ON`** → `Registry = entt::registry` (full EnTT API)
-- **Default** → minimal stub class; replace with your own implementation
+`src/ecs/Registry.hpp` exposes a single `Registry` type — `Registry = entt::registry` (EnTT is always enabled).
 
 ---
 
@@ -256,5 +249,5 @@ To update a dependency, change the `GIT_TAG` in `CMakeLists.txt` and delete `bui
 |---|---|---|
 | SDL3 | `release-3.2.0` | always |
 | GLM | `1.0.1` | always |
-| EnTT | `v3.14.0` | `USE_ENTT=ON` |
+| EnTT | `v3.14.0` | always |
 | glad | `v0.1.36` | `USE_OPENGL=ON` |
