@@ -43,9 +43,10 @@ compile_commands.json
 # clangd LSP
 .clangd/
 
-# Claude Code
+# Claude Code — local session data and AI-generated plans; not for the repo
 .remember/
 .claude/
+docs/superpowers/
 
 # Git worktrees
 .worktrees/
