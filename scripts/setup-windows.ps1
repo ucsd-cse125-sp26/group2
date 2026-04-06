@@ -6,24 +6,32 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "==> Checking for Visual Studio 2022..." -ForegroundColor Cyan
+Write-Host "==> Checking for MSVC C++ build tools..." -ForegroundColor Cyan
 
 $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-if (-not (Test-Path $vsWhere)) {
-    Write-Host "    Visual Studio 2022 not found."
-    Write-Host "    Please install 'Visual Studio 2022' (Community edition is free):"
-    Write-Host "    https://visualstudio.microsoft.com/downloads/"
-    Write-Host ""
-    Write-Host "    Required workloads during install:"
-    Write-Host "      - Desktop development with C++"
-    Write-Host "    Optional but recommended:"
-    Write-Host "      - Game development with C++"
-    Write-Host ""
-    Write-Host "    Re-run this script after installing VS 2022."
-    exit 1
+$hasMSVC = $false
+if (Test-Path $vsWhere) {
+    $vsPath = & $vsWhere -version "[17.0,18.0)" -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath | Select-Object -First 1
+    if ($vsPath) { $hasMSVC = $true }
 }
 
-Write-Host "    Visual Studio found." -ForegroundColor Green
+if (-not $hasMSVC) {
+    Write-Host "    No VS 2022 installation with C++ tools found." -ForegroundColor Yellow
+    Write-Host "    Installing Visual Studio 2022 Build Tools (free, ~2-3 GB)..." -ForegroundColor Cyan
+    winget install --id Microsoft.VisualStudio.2022.BuildTools `
+        --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive --wait" `
+        --silent --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "    ERROR: VS Build Tools installation failed." -ForegroundColor Red
+        Write-Host "    Install manually: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022"
+        exit 1
+    }
+    Write-Host "    VS Build Tools installed." -ForegroundColor Green
+} else {
+    Write-Host "    MSVC C++ tools found at: $vsPath" -ForegroundColor Green
+}
 
 # winget — available on Windows 10 1709+ and Windows 11
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -77,15 +85,11 @@ Write-Host "==> All prerequisites installed." -ForegroundColor Green
 Write-Host ""
 Write-Host "IMPORTANT: Close and reopen CLion / your terminal so PATH changes take effect." -ForegroundColor Yellow
 Write-Host ""
-Write-Host "CLion setup:" -ForegroundColor Cyan
-Write-Host "  1. Open CLion and select File > Open > this repo root"
+Write-Host "IDE setup (CLion / Visual Studio / VSCode):" -ForegroundColor Cyan
+Write-Host "  1. Open your IDE and select File > Open > this repo root"
 Write-Host "  2. CMake presets (debug-win, release-win, relwithdebinfo-win) appear automatically"
-Write-Host "  3. Select a preset from the dropdown, then press the play button"
+Write-Host "  3. Select a preset and build"
 Write-Host ""
-Write-Host "Command-line build (run inside 'Developer PowerShell for VS 2022'):" -ForegroundColor Cyan
+Write-Host "Command-line build (any terminal):" -ForegroundColor Cyan
 Write-Host "  cmake --preset debug-win   && cmake --build --preset debug-win"
 Write-Host "  cmake --preset release-win && cmake --build --preset release-win"
-Write-Host ""
-Write-Host "You can open 'Developer PowerShell for VS 2022' from the Start Menu,"
-Write-Host "or launch it with:"
-Write-Host "  & '`${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1'"

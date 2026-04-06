@@ -26,10 +26,14 @@
     {
       "name": "base-msvc",
       "hidden": true,
-      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_C_COMPILER":   "cl",
-        "CMAKE_CXX_COMPILER": "cl"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
 
@@ -54,7 +58,6 @@
       "displayName": "Debug (Windows — ASan via MSVC)",
       "inherits": "base-msvc",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_ASAN":      "ON"
       },
       "condition": {
@@ -67,7 +70,7 @@
     {
       "name": "release",
       "displayName": "Release",
-      "inherits": "base",
+      "inherits": "base-clang",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       },
@@ -82,9 +85,7 @@
       "name": "release-win",
       "displayName": "Release (Windows)",
       "inherits": "base-msvc",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
-      },
+      "cacheVariables": {},
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -95,7 +96,7 @@
     {
       "name": "relwithdebinfo",
       "displayName": "RelWithDebInfo",
-      "inherits": "base",
+      "inherits": "base-clang",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       },
@@ -110,9 +111,7 @@
       "name": "relwithdebinfo-win",
       "displayName": "RelWithDebInfo (Windows)",
       "inherits": "base-msvc",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
-      },
+      "cacheVariables": {},
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -123,10 +122,10 @@
 
   "buildPresets": [
     { "name": "debug",             "configurePreset": "debug" },
-    { "name": "debug-win",         "configurePreset": "debug-win" },
+    { "name": "debug-win",         "configurePreset": "debug-win",         "configuration": "Debug" },
     { "name": "release",           "configurePreset": "release" },
-    { "name": "release-win",       "configurePreset": "release-win" },
+    { "name": "release-win",       "configurePreset": "release-win",       "configuration": "Release" },
     { "name": "relwithdebinfo",    "configurePreset": "relwithdebinfo" },
-    { "name": "relwithdebinfo-win","configurePreset": "relwithdebinfo-win" }
+    { "name": "relwithdebinfo-win","configurePreset": "relwithdebinfo-win", "configuration": "RelWithDebInfo" }
   ]
 }
