@@ -43,11 +43,11 @@ sudo pacman -S --needed --noconfirm \
 
 echo "==> Configuring git for this repository..."
 git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
-# Prevent CLion's workspace.xml edits (run configs, UI state) from
-# showing up as uncommitted changes. The file stays tracked in git
-# so new clones get the correct CMake preset config, but local
-# modifications by CLion are silently ignored.
-git update-index --skip-worktree .idea/workspace.xml
+# Prevent CLion's .idea/ edits (run configs, UI state) from showing
+# up as uncommitted changes. Files stay tracked in git so new clones
+# get the correct CMake preset config, but local modifications by
+# CLion are silently ignored.
+git update-index --skip-worktree .idea/workspace.xml .idea/misc.xml .idea/vcs.xml
 
 echo ""
 echo "==> All prerequisites installed."
