@@ -72,6 +72,60 @@ if ($sdkRoot) {
     Write-Host "             Add its Bin directory to your PATH manually so cmake can find glslc / spirv-cross."
 }
 
+Write-Host "==> Configuring CLion Visual Studio toolchain..." -ForegroundColor Cyan
+# .idea/cmake.xml references TOOLCHAIN_NAME="Visual Studio". CLion must have a
+# toolchain by that exact name in its global settings, otherwise it falls back to
+# MinGW and rejects the MSVC compiler our toolchain file provides.
+$clionDirs = @(Get-ChildItem "$env:APPDATA\JetBrains" -Filter "CLion*" -Directory -ErrorAction SilentlyContinue)
+if ($clionDirs.Count -gt 0) {
+    foreach ($clionDir in $clionDirs) {
+        $optionsDir   = Join-Path $clionDir.FullName "options"
+        $toolchainsXml = Join-Path $optionsDir "toolchains.xml"
+        if (-not (Test-Path $optionsDir)) {
+            New-Item -ItemType Directory -Path $optionsDir -Force | Out-Null
+        }
+        if (-not (Test-Path $toolchainsXml)) {
+            @"
+<?xml version="1.0" encoding="UTF-8"?>
+<application>
+  <component name="CPPToolchains" version="4">
+    <toolchain name="Visual Studio" toolSetKind="MSVCToolSet" />
+  </component>
+</application>
+"@ | Set-Content $toolchainsXml -Encoding UTF8
+            Write-Host "    Created $toolchainsXml" -ForegroundColor Green
+        } else {
+            $doc = New-Object System.Xml.XmlDocument
+            $doc.Load($toolchainsXml)
+            if ($null -eq $doc.SelectSingleNode('//toolchain[@name="Visual Studio"]')) {
+                $comp = $doc.SelectSingleNode('//component[@name="CPPToolchains"]')
+                if ($null -eq $comp) {
+                    $comp = $doc.CreateElement("component")
+                    $comp.SetAttribute("name", "CPPToolchains")
+                    $comp.SetAttribute("version", "4")
+                    $doc.DocumentElement.AppendChild($comp) | Out-Null
+                }
+                $tc = $doc.CreateElement("toolchain")
+                $tc.SetAttribute("name", "Visual Studio")
+                $tc.SetAttribute("toolSetKind", "MSVCToolSet")
+                # Insert first → becomes the default toolchain
+                if ($comp.HasChildNodes) {
+                    $comp.InsertBefore($tc, $comp.FirstChild) | Out-Null
+                } else {
+                    $comp.AppendChild($tc) | Out-Null
+                }
+                $doc.Save($toolchainsXml)
+                Write-Host "    Added 'Visual Studio' toolchain to $($clionDir.Name)" -ForegroundColor Green
+            } else {
+                Write-Host "    'Visual Studio' toolchain already present in $($clionDir.Name)" -ForegroundColor Green
+            }
+        }
+    }
+} else {
+    Write-Host "    CLion not found — run this script again after installing CLion." -ForegroundColor Yellow
+    Write-Host "    Or add it manually: Settings > Build > Toolchains > + Visual Studio" -ForegroundColor Yellow
+}
+
 Write-Host "==> Configuring git for this repository..." -ForegroundColor Cyan
 git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
 # Prevent CLion's .idea/ edits (run configs, UI state) from showing
