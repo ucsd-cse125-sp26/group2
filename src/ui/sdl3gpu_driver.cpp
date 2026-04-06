@@ -232,7 +232,7 @@ SDL_GPUGraphicsPipeline* SDL3GPUDriver::buildPipelineInternal(SDL_GPUShader* ver
     return pipeline;
 }
 
-bool SDL3GPUDriver::buildPipelines(const char* basePath)
+bool SDL3GPUDriver::buildPipelines(const char* basePath, SDL_Window* window)
 {
     std::string base(basePath);
     // Ensure trailing slash
@@ -319,8 +319,8 @@ bool SDL3GPUDriver::buildPipelines(const char* basePath)
     SDL_GPUShader* fillFrag = loadSPIRV(fillFragPath.c_str(), SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
     // fill_path.vert: 0 samplers, 1 uniform buffer
     SDL_GPUShader* fillPathVert = loadSPIRV(fillPathVertPath.c_str(), SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-    // fill_path.frag: 0 samplers, 0 uniform buffers
-    SDL_GPUShader* fillPathFrag = loadSPIRV(fillPathFragPath.c_str(), SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    // fill_path.frag: 1 sampler (sPattern), 1 uniform buffer (FragUniforms)
+    SDL_GPUShader* fillPathFrag = loadSPIRV(fillPathFragPath.c_str(), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
     // composite.vert: 0 samplers, 0 uniform buffers
     SDL_GPUShader* compositeVert = loadSPIRV(compositeVertPath.c_str(), SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
     // composite.frag: 1 sampler, 0 uniform buffers
@@ -329,17 +329,11 @@ bool SDL3GPUDriver::buildPipelines(const char* basePath)
     bool ok = fillVert && fillFrag && fillPathVert && fillPathFrag && compositeVert && compositeFrag;
 
     if (ok) {
-        // Use swapchain texture format for the fill pipelines (render into RTT textures)
-        SDL_GPUTextureFormat swapFmt =
-            SDL_GetGPUSwapchainTextureFormat(device,
-                                             // We need any window to query — use nullptr workaround: just hardcode
-                                             // BGRA8 SDL docs: SDL_GetGPUSwapchainTextureFormat needs a window. We'll
-                                             // use BGRA8 which is the common swapchain format. The fill pipelines
-                                             // render into RTT textures that we create as BGRA8, so this is correct.
-                                             nullptr);
-        // If nullptr window fails, fall back to B8G8R8A8_UNORM
+        // Query the real swapchain format so the composite pipeline's attachment format matches.
+        SDL_GPUTextureFormat swapFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
         if (swapFmt == SDL_GPU_TEXTUREFORMAT_INVALID)
             swapFmt = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+        SDL_Log("[UL] swapchain format = %d", static_cast<int>(swapFmt));
 
         fillPipeline = buildPipelineInternal(fillVert,
                                              fillFrag,
@@ -894,6 +888,12 @@ void SDL3GPUDriver::executeCommand(SDL_GPUCommandBuffer* cmdBuf, const ultraligh
 void SDL3GPUDriver::flushCommands(SDL_GPUCommandBuffer* cmdBuf)
 {
     uploadDirtyTextures(cmdBuf);
+
+    // One-shot diagnostic: log command count on first non-empty flush
+    if (!pendingCommands.empty() && !commandsEverFlushed) {
+        SDL_Log("[UL] first non-empty flush: %zu commands", pendingCommands.size());
+        commandsEverFlushed = true;
+    }
 
     for (auto& pc : pendingCommands)
         executeCommand(cmdBuf, pc.cmd);

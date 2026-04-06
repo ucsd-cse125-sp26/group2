@@ -22,4 +22,5 @@ private:
     SDL_GPUDevice* gpuDevice = nullptr;
     ultralight::RefPtr<ultralight::Renderer> renderer;
     ultralight::RefPtr<ultralight::View> view;
+    bool compositeEverLogged = false;
 };

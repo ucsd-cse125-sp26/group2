@@ -187,6 +187,15 @@ void UltralightLayer::composite(SDL_GPURenderPass* pass, uint32_t /*vpW*/, uint3
         return;
 
     ultralight::RenderTarget rt = view->render_target();
+
+    // One-shot diagnostic log
+    if (!compositeEverLogged) {
+        SDL_Log("[UL] composite: rt.texture_id=%u pipeline=%p",
+                rt.texture_id,
+                static_cast<void*>(driver->getCompositePipeline()));
+        compositeEverLogged = true;
+    }
+
     SDL_GPUTexture* ulTex = driver->getTexture(rt.texture_id);
     SDL_GPUSampler* ulSamp = driver->getSampler(rt.texture_id);
     if (!ulTex || !ulSamp)

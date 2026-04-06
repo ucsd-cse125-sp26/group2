@@ -106,7 +106,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
     new (&s->ultralightLayer) UltralightLayer(s->ulDriver);
 
     const std::string k_basePath = SDL_GetBasePath() ? SDL_GetBasePath() : "./";
-    if (!s->ulDriver->buildPipelines(k_basePath.c_str()))
+    if (!s->ulDriver->buildPipelines(k_basePath.c_str(), s->window))
         SDL_Log("UL pipeline build failed — UI disabled");
 
     if (!s->ultralightLayer.init(s->window, s->renderer.device())) {

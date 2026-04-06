@@ -12,7 +12,7 @@ public:
     explicit SDL3GPUDriver(SDL_GPUDevice* device);
     ~SDL3GPUDriver() override;
 
-    bool buildPipelines(const char* basePath);
+    bool buildPipelines(const char* basePath, SDL_Window* window);
     void flushCommands(SDL_GPUCommandBuffer* cmdBuf);
     SDL_GPUTexture* getTexture(uint32_t textureId) const;
     SDL_GPUSampler* getSampler(uint32_t textureId) const;
@@ -95,6 +95,7 @@ private:
     uint32_t nextTexId = 1;
     uint32_t nextRbId = 1;
     uint32_t nextGeoId = 1;
+    bool commandsEverFlushed = false;
 
     SDL_GPUShader*
     loadSPIRV(const char* path, SDL_GPUShaderStage stage, uint32_t numSamplers, uint32_t numUniformBuffers);
