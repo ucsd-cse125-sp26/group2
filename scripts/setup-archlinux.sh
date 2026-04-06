@@ -42,6 +42,12 @@ sudo pacman -S --needed --noconfirm \
     libdrm
 
 echo ""
+echo "==> Dependency notes:"
+echo "    EnTT, Dear ImGui, Ultralight SDK — fetched automatically"
+echo "    by CMake FetchContent on first build (requires internet)."
+echo "    Ultralight .so/.dylib files are copied next to the binary"
+echo "    by CMake post-build steps."
+echo ""
 echo "==> All prerequisites installed."
 echo ""
 echo "Build commands:"

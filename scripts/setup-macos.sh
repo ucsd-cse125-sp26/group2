@@ -60,6 +60,12 @@ ln -sf "$LLVM18_BIN/clang-format" "$LLVM18_BIN/clang-format-18" 2>/dev/null || t
 ln -sf "$LLVM18_BIN/clang-tidy"   "$LLVM18_BIN/clang-tidy-18"   2>/dev/null || true
 
 echo ""
+echo "==> Dependency notes:"
+echo "    EnTT, Dear ImGui, Ultralight SDK — fetched automatically"
+echo "    by CMake FetchContent on first build (requires internet)."
+echo "    Ultralight .so/.dylib files are copied next to the binary"
+echo "    by CMake post-build steps."
+echo ""
 echo "==> All prerequisites installed."
 echo ""
 echo "Build commands:"

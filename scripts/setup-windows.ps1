@@ -65,6 +65,11 @@ if ($sdkRoot) {
 }
 
 Write-Host ""
+Write-Host "==> Dependency notes:" -ForegroundColor Cyan
+Write-Host "    EnTT, Dear ImGui, Ultralight SDK are fetched automatically"
+Write-Host "    by CMake FetchContent on first build (requires internet)."
+Write-Host "    Ultralight DLLs are copied next to the .exe by CMake."
+Write-Host ""
 Write-Host "==> All prerequisites installed." -ForegroundColor Green
 Write-Host ""
 Write-Host "Build commands (run inside 'Developer PowerShell for VS 2022'):" -ForegroundColor Yellow
