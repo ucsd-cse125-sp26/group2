@@ -75,7 +75,14 @@ git update-index --skip-worktree .idea/workspace.xml
 Write-Host ""
 Write-Host "==> All prerequisites installed." -ForegroundColor Green
 Write-Host ""
-Write-Host "Build commands (run inside 'Developer PowerShell for VS 2022'):" -ForegroundColor Yellow
+Write-Host "IMPORTANT: Close and reopen CLion / your terminal so PATH changes take effect." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "CLion setup:" -ForegroundColor Cyan
+Write-Host "  1. Open CLion and select File > Open > this repo root"
+Write-Host "  2. CMake presets (debug-win, release, relwithdebinfo) appear automatically"
+Write-Host "  3. Select a preset from the dropdown, then press the play button"
+Write-Host ""
+Write-Host "Command-line build (run inside 'Developer PowerShell for VS 2022'):" -ForegroundColor Cyan
 Write-Host "  cmake --preset debug-win && cmake --build --preset debug-win"
 Write-Host "  cmake --preset release   && cmake --build --preset release"
 Write-Host ""
