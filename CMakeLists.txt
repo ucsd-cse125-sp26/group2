@@ -71,6 +71,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT)
 
+# glad — OpenGL 4.1 core function loader, generated via Python3 (optional)
+# Must be declared before imgui so the glad target exists when imgui links it.
+if(USE_OPENGL)
+    FetchContent_Declare(
+        glad
+        GIT_REPOSITORY https://github.com/Dav1dde/glad.git
+        GIT_TAG        v0.1.36
+        GIT_SHALLOW    TRUE
+    )
+    set(GLAD_PROFILE    "core"   CACHE STRING "" FORCE)
+    set(GLAD_API        "gl=4.1" CACHE STRING "" FORCE)
+    set(GLAD_GENERATOR  "c"      CACHE STRING "" FORCE)
+    set(GLAD_EXTENSIONS ""       CACHE STRING "" FORCE)
+    FetchContent_MakeAvailable(glad)
+endif()
+
 # Dear ImGui — immediate-mode GUI (dev overlay; SDL3 GPU + OpenGL backends)
 FetchContent_Declare(
     imgui
@@ -85,6 +101,8 @@ set(IMGUI_SOURCES
     "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp"
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    # Shared SDL3 platform backend used by both the SDL3 GPU and OpenGL render paths.
+    # imgui_demo.cpp is intentionally excluded (debug demo window not needed in shipping builds).
     "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
 )
 if(USE_OPENGL)
@@ -104,26 +122,11 @@ target_link_libraries(imgui PRIVATE SDL3::SDL3-static)
 if(USE_OPENGL)
     target_link_libraries(imgui PRIVATE glad)
 endif()
-# Suppress warnings from imgui itself
+# Suppress warnings from imgui itself (GNU/Clang/AppleClang on Linux/macOS, MSVC on Windows)
 target_compile_options(imgui PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-w>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-w>
     $<$<CXX_COMPILER_ID:MSVC>:/W0>
 )
-
-# glad — OpenGL 4.1 core function loader, generated via Python3 (optional)
-if(USE_OPENGL)
-    FetchContent_Declare(
-        glad
-        GIT_REPOSITORY https://github.com/Dav1dde/glad.git
-        GIT_TAG        v0.1.36
-        GIT_SHALLOW    TRUE
-    )
-    set(GLAD_PROFILE    "core"   CACHE STRING "" FORCE)
-    set(GLAD_API        "gl=4.1" CACHE STRING "" FORCE)
-    set(GLAD_GENERATOR  "c"      CACHE STRING "" FORCE)
-    set(GLAD_EXTENSIONS ""       CACHE STRING "" FORCE)
-    FetchContent_MakeAvailable(glad)
-endif()
 
 # ---- Shaders (SDL3 GPU path only) ----
 if(NOT USE_OPENGL)
