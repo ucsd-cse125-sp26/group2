@@ -50,6 +50,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-format-18 clang-tidy \
+            glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -60,19 +61,24 @@ jobs:
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
-        # ninja is pre-installed on macos-latest; skip the brew install
-        # GROUP2_BUNDLE_SHADERS=OFF for Debug — no glslang/spirv-cross needed
-        run: which ninja || brew install ninja
+        run: |
+          which ninja || brew install ninja
+          brew install glslang
+          echo "$(brew --prefix glslang)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Ninja (Windows)
+      # VS2022 (via msvc-dev-cmd) already ships Ninja — no choco install needed.
+      # Vulkan SDK provides glslc, required at configure time by CMakeLists.txt
+      # even when GROUP2_BUNDLE_SHADERS=OFF (the if(NOT USE_OPENGL) block runs unconditionally).
+      - name: Install Vulkan SDK (Windows)
         if: runner.os == 'Windows'
-        run: choco install ninja -y
-
-      # No Vulkan SDK for debug — GROUP2_BUNDLE_SHADERS defaults OFF for Debug
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: latest
+          cache: true
 
       - name: Setup sccache
         uses: mozilla/sccache-action@v0.0.9
@@ -135,6 +141,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-tidy \
+            glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
