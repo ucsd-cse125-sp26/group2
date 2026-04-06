@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <Ultralight/Bitmap.h>
+#include <Ultralight/Matrix.h>
 #include <cstring>
 #include <string>
 
@@ -479,7 +480,8 @@ void SDL3GPUDriver::CreateTexture(uint32_t id, ultralight::RefPtr<ultralight::Bi
         if (!tex.texture) {
             SDL_Log("[UL] CreateTexture %u (%ux%u) failed: %s", id, tex.width, tex.height, SDL_GetError());
         } else {
-            // Copy pixel data for deferred upload
+            // Copy pixel data for deferred upload, preserving row_bytes stride
+            tex.rowBytes = bm->row_bytes();
             auto locked = bm->LockPixelsSafe();
             if (locked) {
                 size_t sz = bm->size();
@@ -500,7 +502,7 @@ void SDL3GPUDriver::CreateTexture(uint32_t id, ultralight::RefPtr<ultralight::Bi
     sci.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     tex.sampler = SDL_CreateGPUSampler(device, &sci);
 
-    textures[id] = std::move(tex);
+    textures[id] = tex;
 }
 
 void SDL3GPUDriver::UpdateTexture(uint32_t id, ultralight::RefPtr<ultralight::Bitmap> bm)
@@ -510,6 +512,7 @@ void SDL3GPUDriver::UpdateTexture(uint32_t id, ultralight::RefPtr<ultralight::Bi
         return;
 
     auto& tex = it->second;
+    tex.rowBytes = bm->row_bytes();
     auto locked = bm->LockPixelsSafe();
     if (locked) {
         size_t sz = bm->size();
@@ -698,7 +701,24 @@ SDL_GPUSampler* SDL3GPUDriver::getSampler(uint32_t textureId) const
 // ---------------------------------------------------------------------------
 void SDL3GPUDriver::fillVertexUniforms(VertexUniforms& out, const ultralight::GPUState& s) const
 {
-    memcpy(out.transform, s.transform.data, sizeof(float) * 16);
+    // The GPU state transform is the model/page matrix; we must multiply it by
+    // the screen-space orthographic projection before passing to the vertex shader.
+    //
+    // flip_y=true: Ultralight always renders to its own RTT (render_buffer_id != 0).
+    // In Vulkan, NDC Y=-1 is at the top of the render target (row 0).  We want
+    // CSS Y=0 (top of page) to land at row 0 — which requires the Y-flipped
+    // projection (CSS Y=0 → NDC Y=-1).  This matches how AppCore's OpenGL driver
+    // sets flip_y=true for any non-zero render_buffer_id.
+    ultralight::Matrix ortho;
+    ortho.SetOrthographicProjection(s.viewport_width, s.viewport_height, true);
+
+    ultralight::Matrix model;
+    model.Set(s.transform); // load from Matrix4x4
+
+    ortho.Transform(model); // ortho = ortho * model
+
+    const ultralight::Matrix4x4 k_mvp = ortho.GetMatrix4x4();
+    memcpy(out.transform, k_mvp.data, sizeof(float) * 16);
 }
 
 void SDL3GPUDriver::fillFragUniforms(FragUniforms& out, const ultralight::GPUState& s) const
@@ -753,12 +773,15 @@ void SDL3GPUDriver::uploadDirtyTextures(SDL_GPUCommandBuffer* cmdBuf)
 
         SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmdBuf);
 
-        uint32_t bpp = (tex.format == SDL_GPU_TEXTUREFORMAT_R8_UNORM) ? 1u : 4u;
+        // pixels_per_row tells SDL_GPU how many pixels to advance per row.
+        // rowBytes is the actual byte stride; divide by bytes-per-pixel.
+        const uint32_t k_bpp = (tex.format == SDL_GPU_TEXTUREFORMAT_R8_UNORM) ? 1u : 4u;
+        const uint32_t k_pixPerRow = (tex.rowBytes > 0) ? (tex.rowBytes / k_bpp) : tex.width;
 
         SDL_GPUTextureTransferInfo src{};
         src.transfer_buffer = tb;
         src.offset = 0;
-        src.pixels_per_row = tex.width;
+        src.pixels_per_row = k_pixPerRow;
         src.rows_per_layer = tex.height;
 
         SDL_GPUTextureRegion dst{};
@@ -767,7 +790,6 @@ void SDL3GPUDriver::uploadDirtyTextures(SDL_GPUCommandBuffer* cmdBuf)
         dst.h = tex.height;
         dst.d = 1;
 
-        (void)bpp; // used implicitly in pixels_per_row / rows_per_layer calculation
         SDL_UploadToGPUTexture(cp, &src, &dst, false);
         SDL_EndGPUCopyPass(cp);
 
@@ -888,33 +910,6 @@ void SDL3GPUDriver::executeCommand(SDL_GPUCommandBuffer* cmdBuf, const ultraligh
 void SDL3GPUDriver::flushCommands(SDL_GPUCommandBuffer* cmdBuf)
 {
     uploadDirtyTextures(cmdBuf);
-
-    // One-shot diagnostic: log each command on first flush
-    if (!pendingCommands.empty() && !commandsEverFlushed) {
-        SDL_Log("[UL] first non-empty flush: %zu commands", pendingCommands.size());
-        for (size_t i = 0; i < pendingCommands.size(); ++i) {
-            const auto& c = pendingCommands[i].cmd;
-            if (c.command_type == ultralight::CommandType::ClearRenderBuffer) {
-                SDL_Log("[UL]  cmd[%zu]: ClearRenderBuffer rb=%u", i, c.gpu_state.render_buffer_id);
-            } else {
-                auto rbSearch = renderBuffers.find(c.gpu_state.render_buffer_id);
-                uint32_t texId = (rbSearch != renderBuffers.end()) ? rbSearch->second.textureId : 0;
-                SDL_Log("[UL]  cmd[%zu]: DrawGeometry rb=%u→tex=%u geo=%u "
-                        "shader=%d scalars=(%g,%g,%g) vp=%ux%u",
-                        i,
-                        c.gpu_state.render_buffer_id,
-                        texId,
-                        c.geometry_id,
-                        static_cast<int>(c.gpu_state.shader_type),
-                        static_cast<double>(c.gpu_state.uniform_scalar[0]),
-                        static_cast<double>(c.gpu_state.uniform_scalar[1]),
-                        static_cast<double>(c.gpu_state.uniform_scalar[2]),
-                        c.gpu_state.viewport_width,
-                        c.gpu_state.viewport_height);
-            }
-        }
-        commandsEverFlushed = true;
-    }
 
     for (auto& pc : pendingCommands)
         executeCommand(cmdBuf, pc.cmd);

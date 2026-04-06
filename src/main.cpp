@@ -53,6 +53,8 @@ struct AppState
     UltralightLayer ultralightLayer{nullptr};
 #endif
     uint64_t lastTicks = 0;
+    int frameCount = 0;
+    uint64_t lastStatusTick = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -113,6 +115,17 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
         SDL_Log("UltralightLayer init failed");
         return SDL_APP_FAILURE;
     }
+
+    // Handle menu actions forwarded from JS via window.onAction().
+    s->ultralightLayer.setActionCallback([](const std::string& action) {
+        SDL_Log("[App] JS action: \"%s\"", action.c_str());
+        if (action == "quit") {
+            SDL_Event quitEvt{};
+            quitEvt.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&quitEvt);
+        }
+        // "new_game" and "settings" can be wired up as the game grows.
+    });
 #endif
 
     // ---- EnTT demo entities ----
@@ -140,7 +153,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
 
 SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 {
-    (void)appstate;
+    auto* s = static_cast<AppState*>(appstate);
 #ifndef NDEBUG
     ImGui_ImplSDL3_ProcessEvent(event);
 #endif
@@ -148,6 +161,35 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
         return SDL_APP_SUCCESS;
     if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE)
         return SDL_APP_SUCCESS;
+
+#ifndef USE_OPENGL
+    // Forward mouse/scroll events into the Ultralight view so JS click
+    // handlers and hover states work correctly.
+    switch (event->type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        s->ultralightLayer.fireMouseMove(static_cast<int>(event->motion.x), static_cast<int>(event->motion.y));
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        s->ultralightLayer.fireMouseButton(static_cast<int>(event->button.x),
+                                           static_cast<int>(event->button.y),
+                                           true,
+                                           event->button.button == SDL_BUTTON_RIGHT);
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        s->ultralightLayer.fireMouseButton(static_cast<int>(event->button.x),
+                                           static_cast<int>(event->button.y),
+                                           false,
+                                           event->button.button == SDL_BUTTON_RIGHT);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL:
+        s->ultralightLayer.fireScroll(
+            0, 0, static_cast<int>(event->wheel.x * 20.f), static_cast<int>(event->wheel.y * 20.f));
+        break;
+    default:
+        break;
+    }
+#endif
+
     return SDL_APP_CONTINUE;
 }
 
@@ -197,6 +239,14 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 #ifndef USE_OPENGL
     s->ultralightLayer.update();
     s->ultralightLayer.render();
+
+    // Push a live frame-count to the HTML footer once per second.
+    ++s->frameCount;
+    if (k_now - s->lastStatusTick >= 1000u) {
+        s->ultralightLayer.pushFrameCount(s->frameCount);
+        s->frameCount = 0;
+        s->lastStatusTick = k_now;
+    }
 #endif
     s->imgui.endFrame();
 

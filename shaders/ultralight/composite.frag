@@ -12,9 +12,5 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
     vec2 uv = mix(u.uvRect.xy, u.uvRect.zw, v_uv);
-    vec4 tex = texture(sULTexture, uv);
-    // DEBUG: add a bright red+alpha tint so the composite quad is visible
-    // even when the UL texture content is transparent.
-    // Remove this tint once the menu renders correctly.
-    out_color = tex + vec4(0.4, 0.0, 0.0, 0.4);
+    out_color = texture(sULTexture, uv);
 }

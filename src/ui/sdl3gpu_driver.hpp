@@ -41,6 +41,7 @@ private:
         SDL_GPUSampler* sampler = nullptr;
         uint32_t width = 0;
         uint32_t height = 0;
+        uint32_t rowBytes = 0; // actual byte stride per row (may be padded)
         std::vector<uint8_t> pendingData;
         SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
         bool dirty = false;
@@ -95,7 +96,6 @@ private:
     uint32_t nextTexId = 1;
     uint32_t nextRbId = 1;
     uint32_t nextGeoId = 1;
-    bool commandsEverFlushed = false;
 
     SDL_GPUShader*
     loadSPIRV(const char* path, SDL_GPUShaderStage stage, uint32_t numSamplers, uint32_t numUniformBuffers);
