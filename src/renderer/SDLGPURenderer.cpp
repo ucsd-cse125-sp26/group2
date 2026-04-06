@@ -125,19 +125,19 @@ bool SDLGPURenderer::init(SDL_Window* win)
     SDL_Log("SDLGPURenderer: driver = %s", SDL_GetGPUDeviceDriver(gpuDevice));
 
     // Determine which single format the chosen backend actually uses.
-    const SDL_GPUShaderFormat available = SDL_GetGPUShaderFormats(gpuDevice);
+    const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(gpuDevice);
     SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
-    if (available & SDL_GPU_SHADERFORMAT_SPIRV) {
+    if (k_available & SDL_GPU_SHADERFORMAT_SPIRV) {
         activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
     }
 #ifdef HAVE_MSL_SHADERS
-    else if (available & SDL_GPU_SHADERFORMAT_MSL)
+    else if (k_available & SDL_GPU_SHADERFORMAT_MSL)
     {
         activeFormat = SDL_GPU_SHADERFORMAT_MSL;
     }
 #endif
     if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
-        SDL_Log("SDLGPURenderer: no supported shader format (available: 0x%x)", static_cast<unsigned>(available));
+        SDL_Log("SDLGPURenderer: no supported shader format (available: 0x%x)", static_cast<unsigned>(k_available));
         return false;
     }
 

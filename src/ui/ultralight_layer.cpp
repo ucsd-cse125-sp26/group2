@@ -478,8 +478,8 @@ void UltralightLayer::pushStatus(const std::string& msg)
         else
             safe += c;
     }
-    const std::string js = "if(window.setStatus) window.setStatus('" + safe + "')";
-    evaluateScript(js.c_str());
+    const std::string k_js = "if(window.setStatus) window.setStatus('" + safe + "')";
+    evaluateScript(k_js.c_str());
 }
 
 void UltralightLayer::pushFrameCount(int n)

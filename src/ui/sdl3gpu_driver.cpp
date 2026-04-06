@@ -756,7 +756,7 @@ void SDL3GPUDriver::uploadDirtyTextures(SDL_GPUCommandBuffer* cmdBuf)
         if (!tex.dirty || tex.pendingData.empty())
             continue;
 
-        uint32_t dataSize = static_cast<uint32_t>(tex.pendingData.size());
+        auto dataSize = static_cast<uint32_t>(tex.pendingData.size());
 
         SDL_GPUTransferBufferCreateInfo tbi{};
         tbi.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
