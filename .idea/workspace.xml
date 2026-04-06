@@ -22,10 +22,18 @@
                      PROFILE_DISPLAY_NAME="Release"
                      ENABLED="true" FROM_PRESET="true"
                      GENERATION_DIR="$PROJECT_DIR$/build/release" />
+      <configuration PROFILE_NAME="release-win"
+                     PROFILE_DISPLAY_NAME="Release (Windows)"
+                     ENABLED="true" FROM_PRESET="true"
+                     GENERATION_DIR="$PROJECT_DIR$/build/release-win" />
       <configuration PROFILE_NAME="relwithdebinfo"
                      PROFILE_DISPLAY_NAME="RelWithDebInfo"
                      ENABLED="true" FROM_PRESET="true"
                      GENERATION_DIR="$PROJECT_DIR$/build/relwithdebinfo" />
+      <configuration PROFILE_NAME="relwithdebinfo-win"
+                     PROFILE_DISPLAY_NAME="RelWithDebInfo (Windows)"
+                     ENABLED="true" FROM_PRESET="true"
+                     GENERATION_DIR="$PROJECT_DIR$/build/relwithdebinfo-win" />
     </configurations>
   </component>
 </project>
