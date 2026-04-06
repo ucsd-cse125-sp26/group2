@@ -13,11 +13,12 @@ concurrency:
 
 jobs:
   # ------------------------------------------------------------------ #
-  #  Debug build + sanitizers — runs on every push and PR               #
+  #  Debug build — PRs only; release build covers main                  #
   # ------------------------------------------------------------------ #
   build:
     name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -37,6 +38,8 @@ jobs:
           - name: Windows
             os: windows-latest
             preset: debug-win
+            # sccache + MSVC requires embedded debug info (/Z7 not /Zi)
+            extra_cmake: -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +50,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-format-18 clang-tidy \
-            glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -58,10 +60,9 @@ jobs:
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
-        run: |
-          brew install ninja glslang spirv-cross
-          echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
-          echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
+        # ninja is pre-installed on macos-latest; skip the brew install
+        # GROUP2_BUNDLE_SHADERS=OFF for Debug — no glslang/spirv-cross needed
+        run: which ninja || brew install ninja
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
@@ -71,27 +72,28 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ninja -y
 
-      - name: Install Vulkan SDK (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install vulkan-sdk --yes
-          $sdk = (Get-ChildItem "C:\VulkanSDK" | Sort-Object Name -Descending | Select-Object -First 1).FullName
-          "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV  -Encoding utf8 -Append
+      # No Vulkan SDK for debug — GROUP2_BUNDLE_SHADERS defaults OFF for Debug
 
-      - name: Cache FetchContent
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.9
+
+      - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: ~/.cmake/packages
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: fetchcontent-${{ runner.os }}-
+          path: build/${{ matrix.preset }}/_deps
+          key: deps-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ runner.os }}-${{ matrix.preset }}-
 
       - name: Configure
         env:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
-        run: cmake --preset ${{ matrix.preset }}
+        run: |
+          cmake --preset ${{ matrix.preset }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
+            ${{ matrix.extra_cmake || '' }}
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
@@ -132,7 +134,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang clang-tidy glslang-tools spirv-cross \
+            ninja-build clang clang-tidy \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -140,17 +142,23 @@ jobs:
             libdbus-1-dev libudev-dev \
             libgl-dev libgles2-mesa-dev \
             libdrm-dev libgbm-dev
+
+      - name: Cache FetchContent deps
+        uses: actions/cache@v4
+        with:
+          path: build/debug/_deps
+          key: deps-Linux-debug-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-Linux-debug-
+
       - name: Configure
-        # Use the debug preset (GROUP2_BUNDLE_SHADERS=OFF, USE_OPENGL=OFF) so
-        # clang-tidy never needs the generated embedded_shaders.hpp header.
         env:
           CC:  clang
           CXX: clang++
-        run: cmake --preset debug
+        run: |
+          cmake --preset debug \
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+
       - name: Run clang-tidy
-        # Only tidy project source files — exclude FetchContent deps (_deps/)
-        # so clang-tidy never chokes on SDL3/GLM internals, missing PCH files,
-        # or generated Wayland protocol sources.  Mirrors the pre-push hook filter.
         run: |
           python3 -c "
           import json, subprocess, sys
@@ -169,7 +177,7 @@ jobs:
   release-build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push'   # skip on PRs
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -216,7 +224,9 @@ jobs:
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ninja glslang spirv-cross
+          # ninja is pre-installed on macos-latest; skip the brew install
+          which ninja || brew install ninja
+          brew install glslang spirv-cross
           echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
           echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
@@ -224,31 +234,32 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Ninja (Windows)
-        if: runner.os == 'Windows'
-        run: choco install ninja -y
-
       - name: Install Vulkan SDK (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install vulkan-sdk --yes
-          $sdk = (Get-ChildItem "C:\VulkanSDK" | Sort-Object Name -Descending | Select-Object -First 1).FullName
-          "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV  -Encoding utf8 -Append
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: latest
+          cache: true
 
-      - name: Cache FetchContent
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.9
+
+      - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: ~/.cmake/packages
-          key: fetchcontent-release-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: fetchcontent-release-${{ runner.os }}-
+          path: build/release/_deps
+          key: deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ runner.os }}-release-
 
       - name: Configure
         env:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
-        run: cmake --preset ${{ matrix.preset }}
+        run: |
+          cmake --preset ${{ matrix.preset }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
@@ -289,7 +300,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4   # needed for gh CLI repo context
+      - uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
