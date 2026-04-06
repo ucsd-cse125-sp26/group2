@@ -12,12 +12,12 @@ class SDLGPURenderer : public IRenderer
 {
 public:
     bool init(SDL_Window* window) override;
-    void draw(SDL_GPURenderPass* render_pass) override;
-    SDL_GPUDevice* device() const override { return device_; }
+    void draw(SDL_GPURenderPass* renderPass) override;
+    [[nodiscard]] SDL_GPUDevice* device() const override { return gpuDevice; }
     void shutdown() override;
 
 private:
-    SDL_Window* window_ = nullptr;
-    SDL_GPUDevice* device_ = nullptr;
-    SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
+    SDL_Window* gpuWindow = nullptr;
+    SDL_GPUDevice* gpuDevice = nullptr;
+    SDL_GPUGraphicsPipeline* gpuPipeline = nullptr;
 };

@@ -106,7 +106,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
 
 bool SDLGPURenderer::init(SDL_Window* win)
 {
-    window_ = win;
+    gpuWindow = win;
 
     // Request every shader format we have compiled shaders for.
     // SDL3 will pick the best available backend (Vulkan → SPIR-V on Linux/Windows,
@@ -117,15 +117,15 @@ bool SDLGPURenderer::init(SDL_Window* win)
 #endif
         ;
 
-    device_ = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
-    if (!device_) {
+    gpuDevice = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
+    if (!gpuDevice) {
         SDL_Log("SDLGPURenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
     }
-    SDL_Log("SDLGPURenderer: driver = %s", SDL_GetGPUDeviceDriver(device_));
+    SDL_Log("SDLGPURenderer: driver = %s", SDL_GetGPUDeviceDriver(gpuDevice));
 
     // Determine which single format the chosen backend actually uses.
-    const SDL_GPUShaderFormat available = SDL_GetGPUShaderFormats(device_);
+    const SDL_GPUShaderFormat available = SDL_GetGPUShaderFormats(gpuDevice);
     SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
     if (available & SDL_GPU_SHADERFORMAT_SPIRV) {
         activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
@@ -141,19 +141,19 @@ bool SDLGPURenderer::init(SDL_Window* win)
         return false;
     }
 
-    if (!SDL_ClaimWindowForGPUDevice(device_, window_)) {
+    if (!SDL_ClaimWindowForGPUDevice(gpuDevice, gpuWindow)) {
         SDL_Log("SDLGPURenderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
         return false;
     }
 
     // Load shaders using the active format.
     SDL_GPUShader* vert =
-        loadShader(device_, "shaders/triangle.vert", activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
+        loadShader(gpuDevice, "shaders/triangle.vert", activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
     SDL_GPUShader* frag =
-        loadShader(device_, "shaders/triangle.frag", activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
+        loadShader(gpuDevice, "shaders/triangle.frag", activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
     if (!vert || !frag) {
-        SDL_ReleaseGPUShader(device_, vert);
-        SDL_ReleaseGPUShader(device_, frag);
+        SDL_ReleaseGPUShader(gpuDevice, vert);
+        SDL_ReleaseGPUShader(gpuDevice, frag);
         return false;
     }
 
@@ -168,7 +168,7 @@ bool SDLGPURenderer::init(SDL_Window* win)
 
     // Render target: match the swapchain format.
     SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device_, window_);
+    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(gpuDevice, gpuWindow);
     pipelineInfo.target_info.color_target_descriptions = &colorTarget;
     pipelineInfo.target_info.num_color_targets = 1;
 
@@ -176,13 +176,13 @@ bool SDLGPURenderer::init(SDL_Window* win)
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
 
-    pipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &pipelineInfo);
+    gpuPipeline = SDL_CreateGPUGraphicsPipeline(gpuDevice, &pipelineInfo);
 
     // Shaders are consumed by the pipeline — release our references.
-    SDL_ReleaseGPUShader(device_, vert);
-    SDL_ReleaseGPUShader(device_, frag);
+    SDL_ReleaseGPUShader(gpuDevice, vert);
+    SDL_ReleaseGPUShader(gpuDevice, frag);
 
-    if (!pipeline_) {
+    if (!gpuPipeline) {
         SDL_Log("SDLGPURenderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
         return false;
     }
@@ -190,22 +190,22 @@ bool SDLGPURenderer::init(SDL_Window* win)
     return true;
 }
 
-void SDLGPURenderer::draw(SDL_GPURenderPass* render_pass)
+void SDLGPURenderer::draw(SDL_GPURenderPass* renderPass)
 {
-    SDL_BindGPUGraphicsPipeline(render_pass, pipeline_);
-    SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
+    SDL_BindGPUGraphicsPipeline(renderPass, gpuPipeline);
+    SDL_DrawGPUPrimitives(renderPass, 3, 1, 0, 0);
 }
 
 void SDLGPURenderer::shutdown()
 {
-    if (device_) {
-        SDL_WaitForGPUIdle(device_);
-        if (pipeline_)
-            SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
-        SDL_ReleaseWindowFromGPUDevice(device_, window_);
-        SDL_DestroyGPUDevice(device_);
+    if (gpuDevice) {
+        SDL_WaitForGPUIdle(gpuDevice);
+        if (gpuPipeline)
+            SDL_ReleaseGPUGraphicsPipeline(gpuDevice, gpuPipeline);
+        SDL_ReleaseWindowFromGPUDevice(gpuDevice, gpuWindow);
+        SDL_DestroyGPUDevice(gpuDevice);
     }
-    pipeline_ = nullptr;
-    device_ = nullptr;
-    window_ = nullptr;
+    gpuPipeline = nullptr;
+    gpuDevice = nullptr;
+    gpuWindow = nullptr;
 }
