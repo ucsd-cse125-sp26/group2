@@ -1,0 +1,20 @@
+{
+  // Visual Studio 2022 — Open Folder CMake debug configuration.
+  // VS 2022 reads CMakePresets.json natively; select "debug-win" from the
+  // configuration dropdown before pressing F5.
+  //
+  // If VS 2022 shows a different string in "Select Startup Item" for the group2
+  // target, update "projectTarget" to match it exactly.
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "group2.exe",
+      "name": "group2 (debug-win)",
+      "currentDir": "${workspaceRoot}",
+      "args": []
+    }
+  ]
+}

@@ -50,6 +50,9 @@ sudo apt-get install -y --no-install-recommends \
     libdrm-dev \
     libgbm-dev
 
+echo "==> Configuring git for this repository..."
+git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
+
 echo ""
 echo "==> All prerequisites installed."
 echo ""

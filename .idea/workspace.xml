@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <!--
+    Minimal shared skeleton — only CMake preset wiring lives here.
+    CLion will append run configs and UI state locally; do NOT commit those changes.
+    To update preset config: edit only the <component name="CMakeSettings"> block.
+  -->
+  <component name="CMakePresetLoader"><![CDATA[{
+  "useNewFormat": true
+}]]></component>
+  <component name="CMakeSettings">
+    <configurations>
+      <configuration PROFILE_NAME="debug"
+                     PROFILE_DISPLAY_NAME="Debug (Linux/macOS — ASan + UBSan)"
+                     ENABLED="true" FROM_PRESET="true"
+                     GENERATION_DIR="$PROJECT_DIR$/build/debug" />
+      <configuration PROFILE_NAME="debug-win"
+                     PROFILE_DISPLAY_NAME="Debug (Windows — ASan via MSVC)"
+                     ENABLED="true" FROM_PRESET="true"
+                     GENERATION_DIR="$PROJECT_DIR$/build/debug-win" />
+      <configuration PROFILE_NAME="release"
+                     PROFILE_DISPLAY_NAME="Release"
+                     ENABLED="true" FROM_PRESET="true"
+                     GENERATION_DIR="$PROJECT_DIR$/build/release" />
+      <configuration PROFILE_NAME="relwithdebinfo"
+                     PROFILE_DISPLAY_NAME="RelWithDebInfo"
+                     ENABLED="true" FROM_PRESET="true"
+                     GENERATION_DIR="$PROJECT_DIR$/build/relwithdebinfo" />
+    </configurations>
+  </component>
+</project>

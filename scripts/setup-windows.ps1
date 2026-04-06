@@ -64,6 +64,9 @@ if ($sdkRoot) {
     Write-Host "             Add its Bin directory to your PATH manually so cmake can find glslc / spirv-cross."
 }
 
+Write-Host "==> Configuring git for this repository..." -ForegroundColor Cyan
+git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
+
 Write-Host ""
 Write-Host "==> All prerequisites installed." -ForegroundColor Green
 Write-Host ""

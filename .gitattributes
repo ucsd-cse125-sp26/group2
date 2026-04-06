@@ -1,1 +1,12 @@
+# Tell GitHub this file is auto-managed by CLion — collapse it in PR diffs
+.idea/workspace.xml linguist-generated=true
+
+# Consistent line endings
+*.sh    text eol=lf
+*.ps1   text eol=crlf
+*.cpp   text eol=lf
+*.hpp   text eol=lf
+*.glsl  text eol=lf
+*.vert  text eol=lf
+*.frag  text eol=lf
 assets/** filter=lfs diff=lfs merge=lfs -text
