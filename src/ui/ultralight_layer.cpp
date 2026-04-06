@@ -8,6 +8,7 @@
 #include <Ultralight/platform/FileSystem.h>
 #include <Ultralight/platform/Logger.h>
 #include <Ultralight/platform/Platform.h>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Minimal Logger — routes Ultralight log messages to SDL_Log
@@ -26,30 +27,47 @@ public:
 static SDLLogger gLogger;
 
 // ---------------------------------------------------------------------------
-// Minimal FileSystem — stub that always returns "file not found"
+// FileSystem — reads files from the real filesystem via SDL I/O
 // ---------------------------------------------------------------------------
 class SDLFileSystem : public ultralight::FileSystem
 {
 public:
     bool FileExists(const ultralight::String& path) override
     {
-        (void)path;
-        return false;
+        SDL_PathInfo info{};
+        return SDL_GetPathInfo(path.utf8().data(), &info);
     }
-    ultralight::String GetFileMimeType(const ultralight::String& path) override
+
+    ultralight::String GetFileMimeType(const ultralight::String& /*path*/) override
     {
-        (void)path;
-        return {};
+        return "application/octet-stream";
     }
-    ultralight::String GetFileCharset(const ultralight::String& path) override
-    {
-        (void)path;
-        return {};
-    }
+
+    ultralight::String GetFileCharset(const ultralight::String& /*path*/) override { return "utf-8"; }
+
     ultralight::RefPtr<ultralight::Buffer> OpenFile(const ultralight::String& path) override
     {
-        (void)path;
-        return {};
+        SDL_IOStream* io = SDL_IOFromFile(path.utf8().data(), "rb");
+        if (!io)
+            return {};
+        const Sint64 k_fileSize = SDL_GetIOSize(io);
+        if (k_fileSize <= 0) {
+            SDL_CloseIO(io);
+            return {};
+        }
+        void* buf = SDL_malloc(static_cast<size_t>(k_fileSize));
+        if (!buf) {
+            SDL_CloseIO(io);
+            return {};
+        }
+        if (SDL_ReadIO(io, buf, static_cast<size_t>(k_fileSize)) != static_cast<size_t>(k_fileSize)) {
+            SDL_free(buf);
+            SDL_CloseIO(io);
+            return {};
+        }
+        SDL_CloseIO(io);
+        return ultralight::Buffer::Create(
+            buf, static_cast<size_t>(k_fileSize), buf, [](void* userData, void* /*data*/) { SDL_free(userData); });
     }
 };
 static SDLFileSystem gFileSystem;
@@ -101,8 +119,13 @@ bool UltralightLayer::init(SDL_Window* window, SDL_GPUDevice* dev)
 {
     gpuDevice = dev;
 
+    // Build an absolute resource prefix so Ultralight finds icudt67l.dat and
+    // friends regardless of the working directory (important in IDEs like CLion).
+    const char* rawBase = SDL_GetBasePath();
+    const std::string k_resourcePrefix = std::string(rawBase ? rawBase : "./") + "resources/";
+
     ultralight::Config cfg;
-    cfg.resource_path_prefix = "./resources/";
+    cfg.resource_path_prefix = k_resourcePrefix.c_str();
     cfg.face_winding = ultralight::FaceWinding::CounterClockwise;
 
     auto& platform = ultralight::Platform::instance();
