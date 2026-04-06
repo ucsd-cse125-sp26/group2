@@ -265,13 +265,13 @@ add_executable(group2 ${SOURCES})
 # ---- Ultralight: copy shared libs + resources next to binary ----
 if(WIN32)
     set(UL_SHARED_LIBS
-        "${UL_CORE_DLL}" "${UL_WEB_DLL}" "${UL_UI_DLL}")
+        "${UL_CORE_DLL}" "${UL_WEB_DLL}" "${UL_UI_DLL}" "${UL_APPCORE_DLL}")
 elseif(APPLE)
     set(UL_SHARED_LIBS
-        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}")
+        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}" "${UL_APPCORE_LIB}")
 else()
     set(UL_SHARED_LIBS
-        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}")
+        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}" "${UL_APPCORE_LIB}")
 endif()
 
 foreach(_ul_lib ${UL_SHARED_LIBS})
@@ -323,6 +323,7 @@ target_link_libraries(group2 PRIVATE
     EnTT::EnTT
     imgui
     Ultralight::UI
+    Ultralight::AppCore
 )
 
 if(USE_OPENGL)

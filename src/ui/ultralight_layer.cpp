@@ -4,14 +4,14 @@
 
 #include <SDL3/SDL.h>
 
+#include <AppCore/Platform.h>
 #include <Ultralight/platform/Config.h>
-#include <Ultralight/platform/FileSystem.h>
 #include <Ultralight/platform/Logger.h>
 #include <Ultralight/platform/Platform.h>
 #include <string>
 
 // ---------------------------------------------------------------------------
-// Minimal Logger — routes Ultralight log messages to SDL_Log
+// Logger — routes Ultralight log messages to SDL_Log
 // ---------------------------------------------------------------------------
 class SDLLogger : public ultralight::Logger
 {
@@ -25,52 +25,6 @@ public:
     }
 };
 static SDLLogger gLogger;
-
-// ---------------------------------------------------------------------------
-// FileSystem — reads files from the real filesystem via SDL I/O
-// ---------------------------------------------------------------------------
-class SDLFileSystem : public ultralight::FileSystem
-{
-public:
-    bool FileExists(const ultralight::String& path) override
-    {
-        SDL_PathInfo info{};
-        return SDL_GetPathInfo(path.utf8().data(), &info);
-    }
-
-    ultralight::String GetFileMimeType(const ultralight::String& /*path*/) override
-    {
-        return "application/octet-stream";
-    }
-
-    ultralight::String GetFileCharset(const ultralight::String& /*path*/) override { return "utf-8"; }
-
-    ultralight::RefPtr<ultralight::Buffer> OpenFile(const ultralight::String& path) override
-    {
-        SDL_IOStream* io = SDL_IOFromFile(path.utf8().data(), "rb");
-        if (!io)
-            return {};
-        const Sint64 k_fileSize = SDL_GetIOSize(io);
-        if (k_fileSize <= 0) {
-            SDL_CloseIO(io);
-            return {};
-        }
-        void* buf = SDL_malloc(static_cast<size_t>(k_fileSize));
-        if (!buf) {
-            SDL_CloseIO(io);
-            return {};
-        }
-        if (SDL_ReadIO(io, buf, static_cast<size_t>(k_fileSize)) != static_cast<size_t>(k_fileSize)) {
-            SDL_free(buf);
-            SDL_CloseIO(io);
-            return {};
-        }
-        SDL_CloseIO(io);
-        return ultralight::Buffer::Create(
-            buf, static_cast<size_t>(k_fileSize), buf, [](void* userData, void* /*data*/) { SDL_free(userData); });
-    }
-};
-static SDLFileSystem gFileSystem;
 
 // ---------------------------------------------------------------------------
 // HTML menu content
@@ -131,7 +85,10 @@ bool UltralightLayer::init(SDL_Window* window, SDL_GPUDevice* dev)
     auto& platform = ultralight::Platform::instance();
     platform.set_config(cfg);
     platform.set_logger(&gLogger);
-    platform.set_file_system(&gFileSystem);
+    // Use AppCore's native font loader (reads system fonts on Linux/macOS/Windows)
+    platform.set_font_loader(ultralight::GetPlatformFontLoader());
+    // Use AppCore's native file system rooted at the binary directory
+    platform.set_file_system(ultralight::GetPlatformFileSystem(k_resourcePrefix.c_str()));
     platform.set_gpu_driver(driver);
 
     renderer = ultralight::Renderer::Create();
