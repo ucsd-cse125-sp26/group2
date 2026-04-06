@@ -89,14 +89,14 @@ SDL_GPUGraphicsPipeline* SDL3GPUDriver::buildPipelineInternal(SDL_GPUShader* ver
                                                               SDL_GPUTextureFormat targetFmt,
                                                               bool enableBlend)
 {
-    const bool isFill = (vfmt == ultralight::VertexBufferFormat::_2f_4ub_2f_2f_28f);
-    const uint32_t stride = isFill ? k_stride140 : k_stride20;
+    const bool k_isFill = (vfmt == ultralight::VertexBufferFormat::_2f_4ub_2f_2f_28f);
+    const uint32_t k_stride = k_isFill ? k_stride140 : k_stride20;
 
     // --- vertex attributes ---
     SDL_GPUVertexAttribute attrs[11]{};
     uint32_t numAttrs = 0;
 
-    if (isFill) {
+    if (k_isFill) {
         // _2f_4ub_2f_2f_28f: 11 attributes
         // loc 0: pos  float2  offset 0
         attrs[0].location = 0;
@@ -173,7 +173,7 @@ SDL_GPUGraphicsPipeline* SDL3GPUDriver::buildPipelineInternal(SDL_GPUShader* ver
 
     SDL_GPUVertexBufferDescription vbDesc{};
     vbDesc.slot = 0;
-    vbDesc.pitch = stride;
+    vbDesc.pitch = k_stride;
     vbDesc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
     vbDesc.instance_step_rate = 0;
 
@@ -238,7 +238,7 @@ bool SDL3GPUDriver::buildPipelines(const char* basePath)
     // Ensure trailing slash
     if (!base.empty() && base.back() != '/')
         base += '/';
-    const std::string shaderDir = base + "shaders/ultralight/";
+    const std::string k_shaderDir = base + "shaders/ultralight/";
 
     // --- dummy 1×1 white BGRA texture ---
     {
@@ -306,12 +306,12 @@ bool SDL3GPUDriver::buildPipelines(const char* basePath)
     }
 
     // --- load shaders ---
-    auto fillVertPath = shaderDir + "fill.vert.spv";
-    auto fillFragPath = shaderDir + "fill.frag.spv";
-    auto fillPathVertPath = shaderDir + "fill_path.vert.spv";
-    auto fillPathFragPath = shaderDir + "fill_path.frag.spv";
-    auto compositeVertPath = shaderDir + "composite.vert.spv";
-    auto compositeFragPath = shaderDir + "composite.frag.spv";
+    auto fillVertPath = k_shaderDir + "fill.vert.spv";
+    auto fillFragPath = k_shaderDir + "fill.frag.spv";
+    auto fillPathVertPath = k_shaderDir + "fill_path.vert.spv";
+    auto fillPathFragPath = k_shaderDir + "fill_path.frag.spv";
+    auto compositeVertPath = k_shaderDir + "composite.vert.spv";
+    auto compositeFragPath = k_shaderDir + "composite.frag.spv";
 
     // fill.vert: 0 samplers, 1 uniform buffer (VertexUniforms at set=1)
     SDL_GPUShader* fillVert = loadSPIRV(fillVertPath.c_str(), SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
@@ -643,7 +643,7 @@ void SDL3GPUDriver::CreateGeometry(uint32_t id, const ultralight::VertexBuffer& 
     geo.vfmt = vb.format;
     geo.indexCount = ib.size / sizeof(uint32_t);
     uploadGeometryBuffers(device, geo.vertexBuf, geo.indexBuf, vb, ib);
-    geometry[id] = std::move(geo);
+    geometry[id] = geo;
 }
 
 void SDL3GPUDriver::UpdateGeometry(uint32_t id, const ultralight::VertexBuffer& vb, const ultralight::IndexBuffer& ib)

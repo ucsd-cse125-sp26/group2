@@ -153,7 +153,7 @@ void UltralightLayer::composite(SDL_GPURenderPass* pass, uint32_t /*vpW*/, uint3
     if (!view)
         return;
 
-    const ultralight::RenderTarget rt = view->render_target();
+    ultralight::RenderTarget rt = view->render_target();
     SDL_GPUTexture* ulTex = driver->getTexture(rt.texture_id);
     SDL_GPUSampler* ulSamp = driver->getSampler(rt.texture_id);
     if (!ulTex || !ulSamp)

@@ -1,39 +1,37 @@
 # cmake/Ultralight.cmake
-# Downloads the Ultralight v1.4.0 prebuilt SDK for the current platform,
-# creates imported shared-library targets, and schedules post-build steps
-# to copy shared libs + resources next to the binary.
+# Downloads the Ultralight v1.4.0-beta prebuilt SDK (commit 208d653) for the
+# current platform from the public Ultralight CDN, creates imported
+# shared-library targets, and schedules post-build copy steps.
 #
 # Targets created:
 #   Ultralight::Core     — UltralightCore
 #   Ultralight::Web      — WebCore
 #   Ultralight::UI       — Ultralight
 
-set(UL_VERSION "1.4.0")
-set(UL_BASE_URL "https://github.com/ultralight-ux/Ultralight/releases/download/v${UL_VERSION}")
+set(UL_CDN_BASE "https://ultralight-sdk.sfo2.cdn.digitaloceanspaces.com")
+set(UL_SHA "208d653")  # v1.4.0-beta
 
 # Detect platform + architecture
 if(WIN32)
-    set(UL_ARCHIVE "ultralight-sdk-win-x64.7z")
-    set(UL_HASH "")  # populate after first successful download
+    set(UL_ARCHIVE "ultralight-sdk-${UL_SHA}-win-x64.7z")
 elseif(APPLE)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64")
-        set(UL_ARCHIVE "ultralight-sdk-mac-arm64.tar.gz")
+        set(UL_ARCHIVE "ultralight-sdk-${UL_SHA}-mac-arm64.7z")
     else()
-        set(UL_ARCHIVE "ultralight-sdk-mac-x64.tar.gz")
+        set(UL_ARCHIVE "ultralight-sdk-${UL_SHA}-mac-x64.7z")
     endif()
-    set(UL_HASH "")
 else()
-    set(UL_ARCHIVE "ultralight-sdk-linux-x64.tar.gz")
-    set(UL_HASH "")
+    set(UL_ARCHIVE "ultralight-sdk-${UL_SHA}-linux-x64.7z")
 endif()
 
 include(FetchContent)
 FetchContent_Declare(ultralight_sdk
-    URL "${UL_BASE_URL}/${UL_ARCHIVE}"
+    URL "${UL_CDN_BASE}/${UL_ARCHIVE}"
 )
 FetchContent_MakeAvailable(ultralight_sdk)
 
-# Locate SDK root (FetchContent places it in ultralight_sdk_SOURCE_DIR)
+# Locate SDK root — FetchContent sets ultralight_sdk_SOURCE_DIR.
+# The archive is flat (no wrapping subdirectory), so SOURCE_DIR is the SDK root.
 set(UL_SDK_ROOT "${ultralight_sdk_SOURCE_DIR}")
 
 # Platform-specific library paths and filenames
@@ -59,7 +57,8 @@ else()
 endif()
 
 set(UL_INCLUDE_DIR "${UL_SDK_ROOT}/include")
-set(UL_RESOURCES_DIR "${UL_SDK_ROOT}/bin/resources"
+# Note: resources/ is at the SDK root, not inside bin/
+set(UL_RESOURCES_DIR "${UL_SDK_ROOT}/resources"
     CACHE PATH "Ultralight runtime resources directory")
 
 # Helper to create a SHARED IMPORTED target
@@ -90,8 +89,9 @@ else()
     _ul_add_target(Ultralight::UI   "${UL_UI_LIB}"   "")
 endif()
 
-# Propagate include dirs transitively from UI (the main target apps link to)
+# Propagate include dirs transitively
 target_link_libraries(Ultralight::UI INTERFACE Ultralight::Core Ultralight::Web)
 
 message(STATUS "Ultralight SDK: ${UL_SDK_ROOT}")
+message(STATUS "Ultralight include: ${UL_INCLUDE_DIR}")
 message(STATUS "Ultralight resources: ${UL_RESOURCES_DIR}")
