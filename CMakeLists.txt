@@ -23,7 +23,6 @@ option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
 option(USE_OPENGL   "Use OpenGL 4.1 core backend instead of SDL3 GPU"  OFF)
-option(USE_ENTT     "Use EnTT ECS library (OFF = minimal stub)"        OFF)
 
 # Embed compiled SPIR-V into the binary (SDL3 GPU path only).
 # Defaults to ON for Release/RelWithDebInfo so no shaders/ folder is
@@ -63,16 +62,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
-# EnTT — fast header-only ECS library (optional)
-if(USE_ENTT)
-    FetchContent_Declare(
-        EnTT
-        GIT_REPOSITORY https://github.com/skypjack/entt.git
-        GIT_TAG        v3.14.0
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(EnTT)
-endif()
+# EnTT — fast header-only ECS library (always enabled)
+FetchContent_Declare(
+    EnTT
+    GIT_REPOSITORY https://github.com/skypjack/entt.git
+    GIT_TAG        v3.14.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(EnTT)
 
 # glad — OpenGL 4.1 core function loader, generated via Python3 (optional)
 if(USE_OPENGL)
@@ -209,10 +206,7 @@ target_link_libraries(group2 PRIVATE
     glm::glm
 )
 
-if(USE_ENTT)
-    target_link_libraries(group2 PRIVATE EnTT::EnTT)
-    target_compile_definitions(group2 PRIVATE USE_ENTT)
-endif()
+target_link_libraries(group2 PRIVATE EnTT::EnTT)
 
 if(USE_OPENGL)
     target_link_libraries(group2 PRIVATE glad)
