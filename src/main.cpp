@@ -26,6 +26,7 @@ struct AppState
 {
     SDL_Window* window = nullptr;
     ActiveRenderer renderer;
+    SDL_Renderer* sdl_renderer = nullptr;
     Registry registry;
 };
 
@@ -72,6 +73,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
         return SDL_APP_FAILURE;
     }
 
+    s->sdl_renderer = SDL_CreateRenderer(s->window, nullptr);
+
 #ifdef USE_OPENGL
     SDL_Log("Backend: OpenGL 4.1 core");
 #else
@@ -92,7 +95,21 @@ SDL_AppResult SDL_AppEvent(void* /*appstate*/, SDL_Event* event)
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
     auto* s = static_cast<AppState*>(appstate);
-    s->renderer.renderFrame();
+    // s->renderer.renderFrame();
+
+    SDL_FRect rect;
+
+    SDL_SetRenderDrawColor(s->sdl_renderer, 0, 0, 0, 255);
+    SDL_RenderClear(s->sdl_renderer);
+
+    SDL_SetRenderDrawColor(s->sdl_renderer, 255, 0, 0, 255);
+    rect.x = rect.y = 100;
+    rect.w = 440;
+    rect.h = 280;
+    SDL_RenderFillRect(s->sdl_renderer, &rect);
+
+    SDL_RenderPresent(s->sdl_renderer);
+
     return SDL_APP_CONTINUE;
 }
 
