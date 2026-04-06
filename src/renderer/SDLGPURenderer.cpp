@@ -2,7 +2,7 @@
 
 #include <SDL3/SDL.h>
 
-// When BUNDLE_SHADERS is ON (Release builds), SPIR-V bytes are embedded as
+// When BUNDLE_SHADERS is ON (Release builds), shader bytes are embedded as
 // constexpr arrays in this generated header instead of loaded from disk.
 #ifdef BUNDLE_SHADERS
 #include "embedded_shaders.hpp"
@@ -14,9 +14,12 @@
 
 namespace
 {
-// Load a SPIR-V shader from disk or from the embedded byte arrays.
+// Load a shader from disk or from the embedded byte arrays.
+// shaderBase — path stem without extension, e.g. "shaders/triangle.vert"
+// format     — SDL_GPU_SHADERFORMAT_SPIRV or SDL_GPU_SHADERFORMAT_MSL
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
-                          const char* spvPath,
+                          const char* shaderBase,
+                          SDL_GPUShaderFormat format,
                           SDL_GPUShaderStage stage,
                           Uint32 samplerCount,
                           Uint32 uniformBufferCount,
@@ -25,31 +28,55 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
 {
     SDL_GPUShaderCreateInfo info{};
     info.stage = stage;
-    info.format = SDL_GPU_SHADERFORMAT_SPIRV;
-    info.entrypoint = "main";
+    info.format = format;
+    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL
+    // (Metal forbids a function literally named "main").
+    info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
     info.num_samplers = samplerCount;
     info.num_uniform_buffers = uniformBufferCount;
     info.num_storage_buffers = storageBufferCount;
     info.num_storage_textures = storageTextureCount;
 
 #ifdef BUNDLE_SHADERS
-    // Embedded SPIR-V — pick the right array by filename stem.
-    // EmbedShaders.cmake generates: k_spv_<stem>_<ext>_spv[] / _size
-    if (SDL_strcmp(spvPath, "shaders/triangle.vert.spv") == 0) {
-        info.code = k_spv_triangle_vert_spv;
-        info.code_size = k_spv_triangle_vert_spv_size;
-    } else if (SDL_strcmp(spvPath, "shaders/triangle.frag.spv") == 0) {
-        info.code = k_spv_triangle_frag_spv;
-        info.code_size = k_spv_triangle_frag_spv_size;
-    } else {
-        SDL_Log("SDLGPURenderer: unknown embedded shader: %s", spvPath);
+    // Embedded shaders — select by base name + format.
+    // EmbedShaders.cmake generates: k_<stem>_<ext>[] / k_<stem>_<ext>_size
+    // where <stem>_<ext> is the filename with non-alphanumeric chars → '_'.
+    static const struct
+    {
+        const char* name;
+        SDL_GPUShaderFormat fmt;
+        const Uint8* code;
+        Uint32 size;
+    } k_embedded[] = {
+        // SPIR-V — Vulkan backend (Linux, Windows)
+        {"shaders/triangle.vert", SDL_GPU_SHADERFORMAT_SPIRV, k_triangle_vert_spv, k_triangle_vert_spv_size},
+        {"shaders/triangle.frag", SDL_GPU_SHADERFORMAT_SPIRV, k_triangle_frag_spv, k_triangle_frag_spv_size},
+#ifdef HAVE_MSL_SHADERS
+        // MSL — Metal backend (macOS)
+        {"shaders/triangle.vert", SDL_GPU_SHADERFORMAT_MSL, k_triangle_vert_msl, k_triangle_vert_msl_size},
+        {"shaders/triangle.frag", SDL_GPU_SHADERFORMAT_MSL, k_triangle_frag_msl, k_triangle_frag_msl_size},
+#endif
+    };
+
+    bool found = false;
+    for (const auto& e : k_embedded) {
+        if (e.fmt == format && SDL_strcmp(e.name, shaderBase) == 0) {
+            info.code = e.code;
+            info.code_size = e.size;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        SDL_Log("SDLGPURenderer: no embedded shader for '%s' (format 0x%x)", shaderBase, static_cast<unsigned>(format));
         return nullptr;
     }
 #else
-    // Load SPIR-V from disk next to the binary.
+    // Load shader from disk next to the binary.
+    const char* ext = (format == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
     const char* basePath = SDL_GetBasePath();
     char fullPath[512];
-    SDL_snprintf(fullPath, sizeof(fullPath), "%s%s", basePath ? basePath : "", spvPath);
+    SDL_snprintf(fullPath, sizeof(fullPath), "%s%s%s", basePath ? basePath : "", shaderBase, ext);
 
     size_t codeSize = 0;
     void* code = SDL_LoadFile(fullPath, &codeSize);
@@ -68,7 +95,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
 #endif
 
     if (!shader)
-        SDL_Log("SDLGPURenderer: SDL_CreateGPUShader(%s) failed: %s", spvPath, SDL_GetError());
+        SDL_Log("SDLGPURenderer: SDL_CreateGPUShader(%s) failed: %s", shaderBase, SDL_GetError());
     return shader;
 }
 } // namespace
@@ -81,22 +108,49 @@ bool SDLGPURenderer::init(SDL_Window* win)
 {
     window = win;
 
-    // Create a GPU device — prefer Vulkan, fall back to whatever SDL3 picks.
-    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
+    // Request every shader format we have compiled shaders for.
+    // SDL3 will pick the best available backend (Vulkan → SPIR-V on Linux/Windows,
+    // Metal → MSL on macOS).
+    constexpr SDL_GPUShaderFormat k_wantedFormats = SDL_GPU_SHADERFORMAT_SPIRV
+#ifdef HAVE_MSL_SHADERS
+                                                    | SDL_GPU_SHADERFORMAT_MSL
+#endif
+        ;
+
+    device = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
     if (!device) {
         SDL_Log("SDLGPURenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
     }
     SDL_Log("SDLGPURenderer: driver = %s", SDL_GetGPUDeviceDriver(device));
 
+    // Determine which single format the chosen backend actually uses.
+    const SDL_GPUShaderFormat available = SDL_GetGPUShaderFormats(device);
+    SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
+    if (available & SDL_GPU_SHADERFORMAT_SPIRV) {
+        activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
+    }
+#ifdef HAVE_MSL_SHADERS
+    else if (available & SDL_GPU_SHADERFORMAT_MSL)
+    {
+        activeFormat = SDL_GPU_SHADERFORMAT_MSL;
+    }
+#endif
+    if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
+        SDL_Log("SDLGPURenderer: no supported shader format (available: 0x%x)", static_cast<unsigned>(available));
+        return false;
+    }
+
     if (!SDL_ClaimWindowForGPUDevice(device, window)) {
         SDL_Log("SDLGPURenderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
         return false;
     }
 
-    // Load shaders.
-    SDL_GPUShader* vert = loadShader(device, "shaders/triangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
-    SDL_GPUShader* frag = loadShader(device, "shaders/triangle.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
+    // Load shaders using the active format.
+    SDL_GPUShader* vert =
+        loadShader(device, "shaders/triangle.vert", activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
+    SDL_GPUShader* frag =
+        loadShader(device, "shaders/triangle.frag", activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
         SDL_ReleaseGPUShader(device, frag);

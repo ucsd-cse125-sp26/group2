@@ -19,6 +19,13 @@ sudo apt-get install -y --no-install-recommends \
     lldb \
     git
 
+echo "==> Installing shader tools..."
+# glslang-tools — GLSL → SPIR-V compiler (glslangValidator)
+# spirv-cross   — SPIR-V → MSL transpiler (generates Metal shaders for cross-platform builds)
+sudo apt-get install -y --no-install-recommends \
+    glslang-tools \
+    spirv-cross
+
 # Register the pinned versions as the default so plain 'clang-format' / 'clang-tidy' resolve to -18.
 sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 18
 sudo update-alternatives --install /usr/bin/clang-tidy   clang-tidy   /usr/bin/clang-tidy-18   18

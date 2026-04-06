@@ -16,6 +16,13 @@ sudo pacman -S --needed --noconfirm \
     lldb \
     git
 
+echo "==> Installing shader tools..."
+# shaderc   — GLSL → SPIR-V compiler (glslc); preferred over glslangValidator
+# spirv-cross — SPIR-V → MSL transpiler (generates Metal shaders for cross-platform builds)
+sudo pacman -S --needed --noconfirm \
+    shaderc \
+    spirv-cross
+
 echo "==> Installing SDL3 system dependencies..."
 sudo pacman -S --needed --noconfirm \
     libx11 \
