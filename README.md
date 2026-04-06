@@ -70,6 +70,8 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 Visual Studio 2022 is a manual prerequisite (free Community edition). The script installs `cmake`, `ninja`, and LLVM via `winget`.
 
+> **Note — git tag fetch:** The setup scripts also run `git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"`, which prevents `git pull` from failing with "would clobber existing tag". If you cloned before running a setup script, run that one command manually.
+
 ---
 
 ## Building
@@ -100,6 +102,40 @@ cmake --build --preset debug-win
 ```
 
 The binary lands in `build\debug-win\group2.exe`.
+
+---
+
+## IDE setup
+
+### CLion
+Open the **repo root folder** in CLion. It reads `CMakePresets.json` automatically.
+The preset profiles (`debug`, `debug-win`, `release`, `relwithdebinfo`) are pre-enabled
+via `.idea/workspace.xml` committed in this repo and should appear already checked in
+**Settings › Build, Execution, Deployment › CMake**.
+
+If CLion has also added its own "Debug" profile (pointing at `cmake-build-debug/`), delete
+it from that settings page and keep only the preset-based ones.
+
+> **Note:** CLion modifies `workspace.xml` locally as you work (run configs, UI state).
+> Do **not** commit those changes — only commit deliberate edits to the `CMakeSettings` block.
+
+### VS Code
+1. Install the recommended extensions when prompted (`.vscode/extensions.json` is committed).
+   The key extension is **CMake Tools** (`ms-vscode.cmake-tools`).
+2. CMake Tools detects `CMakePresets.json` automatically (`cmake.useCMakePresets: "always"` is set).
+3. Select a preset from the status bar — `debug` on Linux/macOS, `debug-win` on Windows.
+4. **Build:** `Ctrl+Shift+B` or the build button in the CMake status bar.
+5. **Debug:** `F5` → pick **Launch group2 (Linux / macOS)** or **Launch group2 (Windows)**.
+
+### Visual Studio 2022
+Use **File › Open › Folder** (not *Open › Project/Solution*) to open the repo root.
+VS 2022 reads `CMakePresets.json` natively — `debug-win` and `release` appear in the
+configuration dropdown at the top of the window.
+
+1. Select **debug-win** from the configuration dropdown.
+2. **Build:** `Ctrl+Shift+B`.
+3. **Run / Debug:** `F5` — VS 2022 auto-detects the `group2.exe` CMake target.
+   (`launch.vs.json` in the repo root provides the explicit debug entry.)
 
 ---
 

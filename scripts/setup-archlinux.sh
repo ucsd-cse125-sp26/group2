@@ -41,6 +41,9 @@ sudo pacman -S --needed --noconfirm \
     mesa \
     libdrm
 
+echo "==> Configuring git for this repository..."
+git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
+
 echo ""
 echo "==> All prerequisites installed."
 echo ""

@@ -59,6 +59,9 @@ fi
 ln -sf "$LLVM18_BIN/clang-format" "$LLVM18_BIN/clang-format-18" 2>/dev/null || true
 ln -sf "$LLVM18_BIN/clang-tidy"   "$LLVM18_BIN/clang-tidy-18"   2>/dev/null || true
 
+echo "==> Configuring git for this repository..."
+git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
+
 echo ""
 echo "==> All prerequisites installed."
 echo ""

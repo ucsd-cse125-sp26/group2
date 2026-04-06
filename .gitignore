@@ -1,6 +1,7 @@
 # Build output
 build/
 out/
+cmake-build-debug/
 .cache/
 
 # CMake artifacts (keep cmake/ module directory)
@@ -11,8 +12,8 @@ CTestTestfile.cmake
 compile_commands.json
 
 # IDE / editor
-.vscode/
-.idea/
+.idea/*
+!.idea/workspace.xml
 *.user
 *.suo
 *.sln.docview
@@ -20,6 +21,7 @@ compile_commands.json
 *.swp
 *.swo
 *~
+.ai/
 
 # Compiled objects & libraries
 *.o
