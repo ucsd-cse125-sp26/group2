@@ -268,6 +268,27 @@ set_compiler_warnings(group2)
 # ---- Sanitizers ----
 enable_sanitizers(group2)
 
+# Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
+# without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on
+# the user PATH, but it lives alongside cl.exe in the MSVC tools directory).
+if(WIN32 AND ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    cmake_path(GET CMAKE_CXX_COMPILER PARENT_PATH _msvc_bin_dir)
+    set(_asan_dll "${_msvc_bin_dir}/clang_rt.asan_dynamic-x86_64.dll")
+    if(EXISTS "${_asan_dll}")
+        add_custom_command(TARGET group2 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_asan_dll}"
+                    "$<TARGET_FILE_DIR:group2>/clang_rt.asan_dynamic-x86_64.dll"
+            COMMENT "Copying MSVC ASan runtime DLL to output directory"
+            VERBATIM
+        )
+    else()
+        message(WARNING
+            "MSVC ASan DLL not found: ${_asan_dll} — "
+            "the debug binary may fail with 0xC0000135 outside a Developer PowerShell.")
+    endif()
+endif()
+
 # ---- Windows: suppress min/max macros from <windows.h> ----
 if(WIN32)
     target_compile_definitions(group2 PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
