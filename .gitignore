@@ -12,15 +12,12 @@ CTestTestfile.cmake
 compile_commands.json
 
 # IDE / editor
-.idea/*
-!.idea/cmake.xml
-!.idea/misc.xml
-!.idea/vcs.xml
-!.idea/workspace.xml
+.idea/
+.vscode/
+.vs/
 *.user
 *.suo
 *.sln.docview
-.vs/
 *.swp
 *.swo
 *~
