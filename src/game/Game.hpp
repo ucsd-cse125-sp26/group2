@@ -14,7 +14,7 @@ public:
     void quit();
 
 private:
-    SDL_Window* window;
-    Renderer* renderer;
+    SDL_Window* window = nullptr;
+    Renderer renderer;
     Registry registry;
 };

@@ -73,6 +73,58 @@ if(USE_ENTT)
     FetchContent_MakeAvailable(EnTT)
 endif()
 
+# ---- Shaders: GLSL → SPIR-V ----
+# Prefers glslc (shaderc); falls back to glslangValidator.
+#   Linux:   sudo apt-get install glslang-tools   (glslangValidator)
+#   macOS:   brew install glslang                 (glslangValidator)
+#   Windows: install Vulkan SDK                   (glslc)
+# Note: no spirv-cross needed — SDL3 converts SPIR-V → MSL at runtime on macOS/Metal.
+find_program(GLSLC glslc
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin
+    PATH_SUFFIXES bin)
+find_program(GLSLANG_VALIDATOR glslangValidator
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin
+    PATH_SUFFIXES bin)
+
+if(GLSLC)
+    message(STATUS "Shader compiler: glslc (${GLSLC})")
+    set(SHADER_COMPILE_TOOL  "${GLSLC}")
+    set(SHADER_COMPILE_FLAGS "")        # glslc infers stage from .vert/.frag
+elseif(GLSLANG_VALIDATOR)
+    message(STATUS "Shader compiler: glslangValidator (${GLSLANG_VALIDATOR})")
+    set(SHADER_COMPILE_TOOL  "${GLSLANG_VALIDATOR}")
+    set(SHADER_COMPILE_FLAGS "-V")      # -V = output SPIR-V binary
+else()
+    message(FATAL_ERROR
+        "No GLSL→SPIR-V compiler found.\n"
+        "  Linux:   sudo apt-get install glslang-tools\n"
+        "  macOS:   brew install glslang\n"
+        "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
+endif()
+
+set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
+file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
+
+set(SHADER_SOURCES triangle.vert triangle.frag)
+set(SHADER_OUTPUTS "")
+foreach(SHADER_SRC ${SHADER_SOURCES})
+    set(SPV_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.spv")
+    add_custom_command(
+        OUTPUT  "${SPV_OUT}"
+        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
+                -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        COMMENT "Compiling shader ${SHADER_SRC} → SPIR-V"
+        VERBATIM
+    )
+    list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
+endforeach()
+
+add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
+
 # ---- Sources ----
 set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
@@ -89,6 +141,18 @@ add_executable(group2 ${SOURCES})
 
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+# Compile shaders before linking the binary.
+add_dependencies(group2 shaders)
+
+# Copy compiled SPIR-V shaders next to the binary so SDL_GetBasePath() finds them.
+add_custom_command(TARGET group2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SHADER_OUT_DIR}"
+            "$<TARGET_FILE_DIR:group2>/shaders"
+    COMMENT "Copying shaders to binary directory"
+    VERBATIM
 )
 
 # ---- Link libraries ----

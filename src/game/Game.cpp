@@ -22,14 +22,11 @@ bool Game::init()
         return false;
     }
 
-    SDL_Renderer* sdlRenderer = SDL_CreateRenderer(window, nullptr);
-    if (!sdlRenderer) {
-        SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
+    if (!renderer.init(window)) {
+        SDL_Log("Renderer init failed");
         SDL_DestroyWindow(window);
         return false;
     }
-    renderer = new Renderer();
-    renderer->init(sdlRenderer);
 
     return true;
 }
@@ -46,13 +43,13 @@ SDL_AppResult Game::event(SDL_Event* event)
 
 SDL_AppResult Game::iterate()
 {
-    renderer->drawFrame();
+    renderer.drawFrame();
     return SDL_APP_CONTINUE;
 }
 
 void Game::quit()
 {
-    renderer->quit();
+    renderer.quit();
     SDL_DestroyWindow(window);
     NET_Quit();
     SDL_Quit();
