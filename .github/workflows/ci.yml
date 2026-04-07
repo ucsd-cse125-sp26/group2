@@ -54,6 +54,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-format-18 clang-tidy \
+            glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -66,10 +67,21 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           which ninja || brew install ninja
+          brew install glslang
+          echo "$(brew --prefix glslang)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+
+      # Vulkan SDK provides glslc, used to compile GLSL → SPIR-V at build time.
+      # No spirv-cross needed — SDL3 converts SPIR-V → MSL at runtime on Metal.
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: latest
+          cache: true
 
       - name: Setup sccache
         uses: mozilla/sccache-action@v0.0.9
@@ -126,6 +138,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-tidy \
+            glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -208,6 +221,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang \
+            glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -220,10 +234,21 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           which ninja || brew install ninja
+          brew install glslang
+          echo "$(brew --prefix glslang)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+
+      # Vulkan SDK provides glslc for GLSL → SPIR-V compilation.
+      # No spirv-cross needed — SDL3 handles SPIR-V → MSL at runtime on Metal.
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: latest
+          cache: true
 
       - name: Setup sccache
         uses: mozilla/sccache-action@v0.0.9
