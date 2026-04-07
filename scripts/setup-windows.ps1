@@ -48,12 +48,12 @@ winget install --id Ninja-build.Ninja --silent --accept-source-agreements --acce
 Write-Host "==> Installing LLVM (clang-format, clang-tidy)..." -ForegroundColor Cyan
 winget install --id LLVM.LLVM --silent --accept-source-agreements --accept-package-agreements
 
-Write-Host "==> Installing Vulkan SDK (glslc + spirv-cross shader tools)..." -ForegroundColor Cyan
-# The Vulkan SDK bundles glslc (GLSL → SPIR-V compiler) and spirv-cross
-# (SPIR-V → MSL transpiler), both required by the SDL3 GPU shader build.
+Write-Host "==> Installing Vulkan SDK (glslc shader compiler)..." -ForegroundColor Cyan
+# The Vulkan SDK bundles glslc (GLSL → SPIR-V compiler), required at build time.
+# spirv-cross is NOT needed: SDL3 converts SPIR-V → MSL internally at runtime on Metal.
 winget install --id KhronosGroup.VulkanSDK --silent --accept-source-agreements --accept-package-agreements
 
-# Locate the SDK and add its Bin dir to the user's PATH so cmake can find glslc / spirv-cross.
+# Locate the SDK and add its Bin dir to the user's PATH so cmake can find glslc.
 $sdkRoot = (Get-ChildItem "C:\VulkanSDK" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending |
             Select-Object -First 1).FullName
@@ -69,7 +69,7 @@ if ($sdkRoot) {
     }
 } else {
     Write-Host "    WARNING: Could not locate Vulkan SDK under C:\VulkanSDK." -ForegroundColor Yellow
-    Write-Host "             Add its Bin directory to your PATH manually so cmake can find glslc / spirv-cross."
+    Write-Host "             Add its Bin directory to your PATH manually so cmake can find glslc."
 }
 
 Write-Host "==> Configuring CLion Visual Studio toolchain..." -ForegroundColor Cyan
