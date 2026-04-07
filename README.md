@@ -154,6 +154,13 @@ Press **Escape** or close the window to quit.
 LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/group2
 ```
 
+### Running Server
+
+```bash
+./build/debug/server      # Linux / macOS
+.\build\debug-win\server  # Windows
+```
+
 ---
 
 ## CMake options

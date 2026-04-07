@@ -4,13 +4,23 @@
 
 #include <SDL3_net/SDL_net.h>
 
-bool Server::init(NET_Address* addr, Uint16 port)
+bool Server::init(const char* addr, Uint16 port)
 {
-    sock = NET_CreateDatagramSocket(addr, port);
+    NET_Address* netAddr = NET_ResolveHostname(addr);
+    while (NET_GetAddressStatus(netAddr) == NET_WAITING) {
+        SDL_Delay(100);
+    }
+    if (NET_GetAddressStatus(netAddr) == NET_FAILURE) {
+        SDL_Log("Failed to resolve address: %s", SDL_GetError());
+        return false;
+    }
+
+    sock = NET_CreateDatagramSocket(netAddr, port);
     if (!sock) {
         SDL_Log("Failed to create server socket: %s", SDL_GetError());
         return false;
     }
+
     SDL_Log("Server created on port %d", (int)port);
     return true;
 }
