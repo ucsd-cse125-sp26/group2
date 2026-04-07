@@ -90,8 +90,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}/_deps
-          key: deps-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-${{ runner.os }}-${{ matrix.preset }}-
+          key: deps-v2-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-${{ runner.os }}-${{ matrix.preset }}-
+
+      # Remove stale *-build and *-subbuild dirs after cache restore.
+      # Those dirs contain CMakeCache.txt files that record the generator
+      # used in the run that created the cache — if it differs from the
+      # current run's generator, CMake fails with "generator does not match".
+      # Source dirs (*-src) are left intact so FetchContent doesn't re-download.
+      # sccache handles compilation caching, so re-building from source is fast.
+      - name: Purge stale dep build dirs
+        shell: bash
+        run: |
+          find build/${{ matrix.preset }}/_deps -maxdepth 1 -type d \
+            \( -name '*-build' -o -name '*-subbuild' \) \
+            -exec rm -rf {} + 2>/dev/null || true
 
       - name: Configure
         shell: bash
@@ -151,8 +164,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/debug/_deps
-          key: deps-Linux-debug-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-Linux-debug-
+          key: deps-v2-Linux-debug-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-Linux-debug-
+
+      - name: Purge stale dep build dirs
+        shell: bash
+        run: |
+          find build/debug/_deps -maxdepth 1 -type d \
+            \( -name '*-build' -o -name '*-subbuild' \) \
+            -exec rm -rf {} + 2>/dev/null || true
 
       - name: Configure
         env:
@@ -257,8 +277,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}/_deps
-          key: deps-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-${{ runner.os }}-${{ matrix.preset }}-
+          key: deps-v2-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-${{ runner.os }}-${{ matrix.preset }}-
+
+      # Remove stale *-build and *-subbuild dirs after cache restore.
+      # Those dirs contain CMakeCache.txt files that record the generator
+      # used in the run that created the cache — if it differs from the
+      # current run's generator, CMake fails with "generator does not match".
+      # Source dirs (*-src) are left intact so FetchContent doesn't re-download.
+      # sccache handles compilation caching, so re-building from source is fast.
+      - name: Purge stale dep build dirs
+        shell: bash
+        run: |
+          find build/${{ matrix.preset }}/_deps -maxdepth 1 -type d \
+            \( -name '*-build' -o -name '*-subbuild' \) \
+            -exec rm -rf {} + 2>/dev/null || true
 
       - name: Configure
         shell: bash
