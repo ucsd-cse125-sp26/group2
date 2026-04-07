@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ecs/Registry.hpp"
+#include "net/Client.hpp"
 #include "renderer/Renderer.hpp"
 
 #include <SDL3/SDL.h>
@@ -17,4 +18,5 @@ private:
     SDL_Window* window = nullptr;
     Renderer renderer;
     Registry registry;
+    Client client;
 };
