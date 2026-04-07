@@ -1,4 +1,6 @@
 #define SDL_MAIN_USE_CALLBACKS
+#include "net/Client.hpp"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -29,6 +31,7 @@ struct AppState
     SDL_Window* window = nullptr;
     ActiveRenderer renderer;
     Registry registry;
+    Client client;
 };
 
 // ---------------------------------------------------------------------------
@@ -86,21 +89,47 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
     }
     SDL_Log("SDL_net initialized successfully");
 
+    NET_Address* addr = NET_ResolveHostname("127.0.0.1");
+    while (NET_GetAddressStatus(addr) == NET_WAITING) {
+        SDL_Delay(100);
+    }
+    if (NET_GetAddressStatus(addr) == NET_FAILURE) {
+        SDL_Log("Failed to resolve address: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    if (!s->client.init(addr, 9999)) {
+        SDL_Log("Failed to connect to server");
+        return SDL_APP_FAILURE;
+    }
+
     return SDL_APP_CONTINUE;
 }
 
-SDL_AppResult SDL_AppEvent(void* /*appstate*/, SDL_Event* event)
+SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 {
+    auto* s = static_cast<AppState*>(appstate);
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
     if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE)
         return SDL_APP_SUCCESS;
+
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_SPACE) {
+        const char* msg = "Hello from client!";
+        s->client.send(msg, (int)strlen(msg));
+        SDL_Log("Sent message to server");
+    }
+
     return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
     auto* s = static_cast<AppState*>(appstate);
+
+    while (s->client.poll()) {
+    }
+
     s->renderer.renderFrame();
     return SDL_APP_CONTINUE;
 }
@@ -111,6 +140,7 @@ void SDL_AppQuit(void* appstate, SDL_AppResult /*result*/)
     if (!s)
         return;
     s->renderer.shutdown();
+    s->client.shutdown();
     SDL_DestroyWindow(s->window);
     NET_Quit();
     SDL_Quit();

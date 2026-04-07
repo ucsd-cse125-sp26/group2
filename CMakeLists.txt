@@ -194,6 +194,7 @@ endif()
 # ---- Sources ----
 set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/Client.cpp"
 )
 if(USE_OPENGL)
     list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/OpenGLRenderer.cpp")
@@ -208,6 +209,11 @@ add_executable(group2 ${SOURCES})
 
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+add_executable(server
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/server_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/Server.cpp"
 )
 
 # SDL3 GPU path: compile shaders before linking the binary.
@@ -275,11 +281,16 @@ else()
     endif()
 endif()
 
+target_include_directories(server PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(server PRIVATE SDL3::SDL3-static SDL3_net::SDL3_net)
+
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
+set_compiler_warnings(server)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
+enable_sanitizers(server)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
 # without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on
