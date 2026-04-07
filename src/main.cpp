@@ -89,16 +89,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
     }
     SDL_Log("SDL_net initialized successfully");
 
-    NET_Address* addr = NET_ResolveHostname("127.0.0.1");
-    while (NET_GetAddressStatus(addr) == NET_WAITING) {
-        SDL_Delay(100);
-    }
-    if (NET_GetAddressStatus(addr) == NET_FAILURE) {
-        SDL_Log("Failed to resolve address: %s", SDL_GetError());
-        return SDL_APP_FAILURE;
-    }
-
-    if (!s->client.init(addr, 9999)) {
+    if (!s->client.init("127.0.0.1", 9999)) {
         SDL_Log("Failed to connect to server");
         return SDL_APP_FAILURE;
     }

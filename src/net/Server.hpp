@@ -2,7 +2,7 @@
 class Server
 {
 public:
-    bool init(NET_Address*, Uint16 port);
+    bool init(const char* addr, Uint16 port);
     void shutdown();
     void run();
 

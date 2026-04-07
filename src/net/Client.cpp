@@ -6,25 +6,25 @@
 
 #include <SDL3_net/SDL_net.h>
 
-bool Client::init(NET_Address* addr, Uint16 port)
+bool Client::init(const char* addr, Uint16 port)
 {
-    server_port = port;
+    serverPort = port;
     sock = NET_CreateDatagramSocket(nullptr, 0);
     if (!sock) {
         SDL_Log("Failed to create client %s", SDL_GetError());
         return false;
     }
 
-    server_addr = NET_ResolveHostname(NET_GetAddressString(addr));
-    while (NET_GetAddressStatus(server_addr) == NET_WAITING) {
+    serverAddr = NET_ResolveHostname(addr);
+    while (NET_GetAddressStatus(serverAddr) == NET_WAITING) {
         SDL_Delay(100);
     }
-    if (NET_GetAddressStatus(server_addr) == NET_FAILURE) {
+    if (NET_GetAddressStatus(serverAddr) == NET_FAILURE) {
         SDL_Log("Failed to resolve server address: %s", SDL_GetError());
         return false;
     }
 
-    SDL_Log("Client created, server address is %s", NET_GetAddressString(server_addr));
+    SDL_Log("Client created, server address is %s", NET_GetAddressString(serverAddr));
     return true;
 }
 
@@ -35,15 +35,15 @@ void Client::shutdown()
         sock = nullptr;
     }
 
-    if (server_addr) {
-        NET_UnrefAddress(server_addr);
-        server_addr = nullptr;
+    if (serverAddr) {
+        NET_UnrefAddress(serverAddr);
+        serverAddr = nullptr;
     }
 }
 
 bool Client::send(const void* data, int len)
 {
-    return NET_SendDatagram(sock, server_addr, server_port, data, len);
+    return NET_SendDatagram(sock, serverAddr, serverPort, data, len);
 }
 
 bool Client::poll()

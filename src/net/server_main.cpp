@@ -9,17 +9,8 @@ int main()
     SDL_Init(0);
     NET_Init();
 
-    NET_Address* addr = NET_ResolveHostname("127.0.0.1");
-    while (NET_GetAddressStatus(addr) == NET_WAITING) {
-        SDL_Delay(100);
-    }
-    if (NET_GetAddressStatus(addr) == NET_FAILURE) {
-        SDL_Log("Failed to resolve address: %s", SDL_GetError());
-        return 1;
-    }
-
     Server server;
-    if (!server.init(addr, 9999)) {
+    if (!server.init("127.0.0.1", 9999)) {
         return 1;
     }
 
