@@ -49,8 +49,8 @@ Write-Host "==> Installing LLVM (clang-format, clang-tidy)..." -ForegroundColor 
 winget install --id LLVM.LLVM --silent --accept-source-agreements --accept-package-agreements
 
 Write-Host "==> Installing Vulkan SDK (glslc + spirv-cross shader tools)..." -ForegroundColor Cyan
-# The Vulkan SDK bundles glslc (GLSL → SPIR-V compiler) and spirv-cross
-# (SPIR-V → MSL transpiler), both required by the SDL3 GPU shader build.
+# The Vulkan SDK bundles glslc (GLSL → SPIR-V) and spirv-cross (SPIR-V → MSL),
+# both required by the SDL3 GPU shader build pipeline.
 winget install --id KhronosGroup.VulkanSDK --silent --accept-source-agreements --accept-package-agreements
 
 # Locate the SDK and add its Bin dir to the user's PATH so cmake can find glslc / spirv-cross.
