@@ -17,8 +17,8 @@ sudo pacman -S --needed --noconfirm \
     git
 
 echo "==> Installing shader tools..."
-# shaderc   — GLSL → SPIR-V compiler (glslc); preferred over glslangValidator
-# spirv-cross — SPIR-V → MSL transpiler (generates Metal shaders for cross-platform builds)
+# shaderc     — GLSL → SPIR-V compiler (glslc); preferred over glslangValidator
+# spirv-cross — SPIR-V → MSL transpiler (required for macOS/Metal cross-compilation)
 sudo pacman -S --needed --noconfirm \
     shaderc \
     spirv-cross
