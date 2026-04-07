@@ -2,6 +2,8 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <SDL3_net/SDL_net.h>
+
 // ---------------------------------------------------------------------------
 // Select rendering backend at compile time.
 //   cmake --preset debug -DUSE_OPENGL=ON   → OpenGL 4.1 core (glad)
@@ -77,6 +79,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
 #else
     SDL_Log("Backend: SDL3 GPU pipeline");
 #endif
+
+    if (!NET_Init()) {
+        SDL_Log("NET_Init() failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    SDL_Log("SDL_net initialized successfully");
+
     return SDL_APP_CONTINUE;
 }
 
@@ -103,6 +112,7 @@ void SDL_AppQuit(void* appstate, SDL_AppResult /*result*/)
         return;
     s->renderer.shutdown();
     SDL_DestroyWindow(s->window);
+    NET_Quit();
     SDL_Quit();
     delete s;
 }

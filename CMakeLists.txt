@@ -54,6 +54,18 @@ set(SDL_STATIC   ON  CACHE BOOL "" FORCE)
 set(SDL_PIPEWIRE OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL3)
 
+# SDL3_net — networking library for SDL3
+block()
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_Declare(
+        SDL3_net
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL_net.git
+        GIT_TAG        main
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(SDL3_net)
+endblock()
+
 # GLM — header-only math library (vectors, matrices, quaternions)
 FetchContent_Declare(
     glm
@@ -207,6 +219,7 @@ endif()
 target_link_libraries(group2 PRIVATE
     SDL3::SDL3-static
     glm::glm
+    SDL3_net::SDL3_net
 )
 
 if(USE_ENTT)
