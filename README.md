@@ -22,8 +22,9 @@ cmake --preset debug-win && cmake --build --preset debug-win
 
 | Concern | Library |
 |---|---|
-| Window / Input / GPU | [SDL3](https://github.com/libsdl-org/SDL) — Vulkan · Metal · DX12 via SDL GPU API |
-| Graphics (optional) | OpenGL 4.1 core profile via [glad](https://github.com/Dav1dde/glad) (`-DUSE_OPENGL=ON`) |
+| Window / Input | [SDL3](https://github.com/libsdl-org/SDL) |
+| Rendering | SDL3 Renderer API (GPU-accelerated 2D, software-projected 3D) |
+| Networking | [SDL3_net](https://github.com/libsdl-org/SDL_net) |
 | ECS (optional) | [EnTT](https://github.com/skypjack/entt) (`-DUSE_ENTT=ON`) or roll your own |
 | Math | [GLM](https://github.com/g-truc/glm) |
 | Build | CMake 3.25+ · Ninja · MSVC 2022 (Windows) · Clang (Linux/macOS) |
@@ -68,7 +69,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\setup-windows.ps1
 ```
 
-The script installs everything needed via `winget`: **VS Build Tools 2022** (MSVC compiler + Windows SDK — auto-installed if no VS 2022 is found), CMake, Ninja, LLVM (clang-format/clang-tidy), and the Vulkan SDK (shader tools).
+The script installs everything needed via `winget`: **VS Build Tools 2022** (MSVC compiler + Windows SDK — auto-installed if no VS 2022 is found), CMake, Ninja, LLVM (clang-format/clang-tidy), and the Vulkan SDK.
 
 > **Note — git tag fetch:** The setup scripts also run `git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"`, which prevents `git pull` from failing with "would clobber existing tag". If you cloned before running a setup script, run that one command manually.
 
@@ -85,7 +86,7 @@ All commands run from the repo root.
 cmake --preset debug
 cmake --build --preset debug
 
-# Release (shaders embedded in binary)
+# Release
 cmake --preset release
 cmake --build --preset release
 ```
@@ -160,33 +161,26 @@ LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/group2
 
 | Option | Default | Description |
 |---|---|---|
-| `USE_OPENGL` | `OFF` | Use OpenGL 4.1 core backend (glad) instead of SDL3 GPU pipeline |
 | `USE_ENTT` | `OFF` | Use EnTT ECS library; `OFF` = minimal stub in `src/ecs/Registry.hpp` |
-| `GROUP2_BUNDLE_SHADERS` | `ON` in Release | Embed SPIR-V shaders into the binary (SDL3 GPU path only) |
 | `ENABLE_ASAN` | `OFF` | AddressSanitizer (on by default in `debug` preset) |
 | `ENABLE_UBSAN` | `OFF` | UndefinedBehaviorSanitizer (on by default in `debug` preset) |
 | `ENABLE_TSAN` | `OFF` | ThreadSanitizer (mutually exclusive with ASan) |
 
 ```bash
-# OpenGL backend
-cmake --preset debug -DUSE_OPENGL=ON
-
 # EnTT ECS
 cmake --preset debug -DUSE_ENTT=ON
 ```
 
 ---
 
-## Rendering backends
+## Rendering
 
-Two backends share the same `IRenderer` interface (`src/renderer/IRenderer.hpp`):
+The renderer (`src/renderer/Renderer`) wraps SDL3's Renderer API — a GPU-accelerated
+2D drawing layer that works on Vulkan, Metal, and Direct3D without requiring custom shaders
+or a shader compilation toolchain.
 
-| Backend | Flag | Shader format | Notes |
-|---|---|---|---|
-| **SDL3 GPU** *(default)* | *(none)* | SPIR-V (compiled from GLSL at build time) | Runs on Vulkan · Metal · DX12 |
-| **OpenGL 4.1 core** | `-DUSE_OPENGL=ON` | Inline GLSL (compiled at runtime) | macOS compatible; no SPIR-V toolchain needed |
-
-The SDL3 GPU backend requires a GLSL→SPIR-V compiler at build time (`glslc` or `glslangValidator`). The OpenGL backend has no such requirement — shaders are embedded as C++ string literals.
+3D geometry is projected on the CPU using GLM (MVP transform → NDC → screen space) and
+drawn via `SDL_RenderGeometry`. Triangles are depth-sorted per frame (painter's algorithm).
 
 ---
 
@@ -222,8 +216,8 @@ Key rules (see `.clang-format`): 4-space indent · 120 column limit · Allman br
 
 | Kind | Style | Example |
 |---|---|---|
-| Class / Struct | `CamelCase` | `AppState` |
-| Function / Method | `camelBack` | `renderFrame()` |
+| Class / Struct | `CamelCase` | `Game` |
+| Function / Method | `camelBack` | `drawFrame()` |
 | Variable / Parameter | `camelBack` | `deltaTime` |
 | Member field | `camelBack` | `window` |
 | Constant | `k_camelBack` | `k_winW` |
@@ -240,7 +234,7 @@ GitHub Actions runs on every push and PR:
 | `build` | Ubuntu · macOS · Windows | Debug build with sanitizers |
 | `format` | Ubuntu | `clang-format-18 --dry-run --Werror` — blocks merge |
 | `tidy` | Ubuntu | `clang-tidy` — non-blocking while codebase grows |
-| `release-build` | Ubuntu · macOS · Windows | Optimised build, shaders embedded |
+| `release-build` | Ubuntu · macOS · Windows | Optimised build |
 | `publish` | Ubuntu | Creates / updates GitHub Release |
 
 Release binaries are published to GitHub Releases on every push to `main` (rolling `latest` pre-release) and on version tags `v*.*.*` (versioned release).
@@ -255,7 +249,6 @@ group2/
 ├── .githooks/                 # pre-commit (auto-format) + pre-push (format gate)
 ├── cmake/
 │   ├── CompilerWarnings.cmake
-│   ├── EmbedShaders.cmake     # embeds SPIR-V into the binary for Release
 │   └── Sanitizers.cmake
 ├── sanitizers/
 │   └── lsan.supp              # LSan suppressions for SDL3 false positives
@@ -264,17 +257,16 @@ group2/
 │   ├── setup-archlinux.sh
 │   ├── setup-macos.sh
 │   └── setup-windows.ps1
-├── shaders/                   # GLSL source (compiled to SPIR-V at build time)
-│   ├── triangle.vert
-│   └── triangle.frag
 ├── src/
 │   ├── ecs/
 │   │   └── Registry.hpp       # Registry type (EnTT or stub)
+│   ├── game/
+│   │   ├── Game.hpp           # Top-level game object (init/event/iterate/quit)
+│   │   └── Game.cpp
 │   ├── renderer/
-│   │   ├── IRenderer.hpp      # Pure-virtual backend interface
-│   │   ├── SDLGPURenderer.hpp/cpp  # SDL3 GPU pipeline backend
-│   │   └── OpenGLRenderer.hpp/cpp  # OpenGL 4.1 core backend
-│   └── main.cpp               # Entry point (SDL3 app callbacks)
+│   │   ├── Renderer.hpp       # SDL3 Renderer wrapper + 3D projection
+│   │   └── Renderer.cpp
+│   └── main.cpp               # SDL3 app callbacks → Game
 ├── .clang-format
 ├── .clang-tidy
 ├── .gitignore
@@ -291,6 +283,6 @@ To update a dependency, change the `GIT_TAG` in `CMakeLists.txt` and delete `bui
 | Library | Tag | Condition |
 |---|---|---|
 | SDL3 | `release-3.2.0` | always |
+| SDL3_net | `main` | always |
 | GLM | `1.0.1` | always |
 | EnTT | `v3.14.0` | `USE_ENTT=ON` |
-| glad | `v0.1.36` | `USE_OPENGL=ON` |

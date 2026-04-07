@@ -54,7 +54,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-format-18 clang-tidy \
-            glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -67,23 +66,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           which ninja || brew install ninja
-          brew install glslang spirv-cross
-          echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
-          echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
-
-      # VS2022 (via msvc-dev-cmd) already ships Ninja — no choco install needed.
-      # Vulkan SDK provides glslc, required at configure time by CMakeLists.txt
-      # even when GROUP2_BUNDLE_SHADERS=OFF (shaders compile to .spv at build time).
-      - name: Install Vulkan SDK (Windows)
-        if: runner.os == 'Windows'
-        uses: jakoch/install-vulkan-sdk-action@v1
-        with:
-          vulkan_version: latest
-          cache: true
 
       - name: Setup sccache
         uses: mozilla/sccache-action@v0.0.9
@@ -110,14 +96,6 @@ jobs:
       - name: Build
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --parallel
-
-      - name: Validate MSL shaders (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          for f in build/${{ matrix.preset }}/shaders/*.msl; do
-            echo "Validating $f ..."
-            xcrun -sdk macosx metal -fsyntax-only -x metal "$f"
-          done
 
   # ------------------------------------------------------------------ #
   #  Format check — pinned to clang-format-18 (ships on ubuntu-24.04)  #
@@ -148,7 +126,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang clang-tidy \
-            glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -184,7 +161,7 @@ jobs:
           "
 
   # ------------------------------------------------------------------ #
-  #  Release builds — optimised, shaders embedded, no sanitizers        #
+  #  Release builds — optimised, no sanitizers                          #
   #  Runs on: push to main  →  updates "latest" pre-release             #
   #            tag v*.*.*   →  creates versioned release                #
   # ------------------------------------------------------------------ #
@@ -230,7 +207,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang glslang-tools spirv-cross \
+            ninja-build clang \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols \
@@ -242,22 +219,11 @@ jobs:
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          # ninja is pre-installed on macos-latest; skip the brew install
           which ninja || brew install ninja
-          brew install glslang spirv-cross
-          echo "$(brew --prefix glslang)/bin"    >> "$GITHUB_PATH"
-          echo "$(brew --prefix spirv-cross)/bin" >> "$GITHUB_PATH"
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install Vulkan SDK (Windows)
-        if: runner.os == 'Windows'
-        uses: jakoch/install-vulkan-sdk-action@v1
-        with:
-          vulkan_version: latest
-          cache: true
 
       - name: Setup sccache
         uses: mozilla/sccache-action@v0.0.9
@@ -265,9 +231,9 @@ jobs:
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/release/_deps
-          key: deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-${{ runner.os }}-release-
+          path: build/${{ matrix.preset }}/_deps
+          key: deps-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ runner.os }}-${{ matrix.preset }}-
 
       - name: Configure
         shell: bash
@@ -283,14 +249,6 @@ jobs:
       - name: Build
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --parallel
-
-      - name: Validate MSL shaders (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          for f in build/${{ matrix.preset }}/shaders/*.msl; do
-            echo "Validating $f ..."
-            xcrun -sdk macosx metal -fsyntax-only -x metal "$f"
-          done
 
       - name: Stage binary (Linux / macOS)
         if: runner.os != 'Windows'
