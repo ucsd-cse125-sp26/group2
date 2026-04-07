@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CMakeSharedSettings">
+    <configurations>
+      <!-- Linux / macOS — uses system clang (set by the preset) -->
+      <configuration PROFILE_NAME="debug"   ENABLED="true"  CONFIG_NAME="debug"   />
+      <configuration PROFILE_NAME="release" ENABLED="false" CONFIG_NAME="release" />
+
+      <!-- Windows — requires a CLion toolchain named exactly "Visual Studio" -->
+      <!-- Create it once in Settings > Build > Toolchains > + Visual Studio  -->
+      <configuration PROFILE_NAME="debug-win"          ENABLED="false" CONFIG_NAME="debug-win"          TOOLCHAIN_NAME="Visual Studio" />
+      <configuration PROFILE_NAME="release-win"        ENABLED="false" CONFIG_NAME="release-win"        TOOLCHAIN_NAME="Visual Studio" />
+      <configuration PROFILE_NAME="relwithdebinfo-win" ENABLED="false" CONFIG_NAME="relwithdebinfo-win" TOOLCHAIN_NAME="Visual Studio" />
+    </configurations>
+  </component>
+</project>

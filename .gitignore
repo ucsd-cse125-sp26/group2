@@ -12,7 +12,8 @@ CTestTestfile.cmake
 compile_commands.json
 
 # IDE / editor
-.idea/
+.idea/*
+!.idea/cmake.xml
 .vscode/
 .vs/
 *.user
