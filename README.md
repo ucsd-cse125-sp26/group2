@@ -24,7 +24,7 @@ cmake --preset debug-win && cmake --build --preset debug-win
 |---|---|
 | Window / Input | [SDL3](https://github.com/libsdl-org/SDL) |
 | GPU rendering | SDL3 GPU API — Vulkan (Linux/Windows) · Metal (macOS) · Direct3D 12 (Windows) |
-| Shaders | GLSL compiled to SPIR-V at build time; SDL3 converts SPIR-V → MSL at runtime on Metal |
+| Shaders | GLSL → SPIR-V (via glslc/glslangValidator) · SPIR-V → MSL (via spirv-cross, for Metal) |
 | Networking | [SDL3_net](https://github.com/libsdl-org/SDL_net) |
 | ECS (optional) | [EnTT](https://github.com/skypjack/entt) (`-DUSE_ENTT=ON`) or roll your own |
 | Math | [GLM](https://github.com/g-truc/glm) |
@@ -42,9 +42,9 @@ All C++ dependencies are fetched automatically via CMake `FetchContent` — no m
 Each setup script installs build tools, the GLSL→SPIR-V shader compiler, and SDL3's
 system-level dependencies in one shot. Run it once after cloning.
 
-> **Note on spirv-cross:** You do **not** need to install spirv-cross.
-> SDL3 ships its own internal SPIR-V→MSL transpiler and runs it at startup on macOS/Metal.
-> All you need to provide is SPIR-V (compiled from GLSL at build time).
+> **Note on spirv-cross:** `spirv-cross` **is required** on macOS and is included in the
+> Vulkan SDK on Windows. SDL3's Metal backend only accepts MSL or precompiled Metal libraries —
+> it does not perform any SPIR-V→MSL conversion internally.
 
 ### Linux — Debian / Ubuntu
 
@@ -52,7 +52,7 @@ system-level dependencies in one shot. Run it once after cloning.
 bash scripts/setup-linux.sh
 ```
 
-Installs: `cmake`, `ninja`, `clang`, `clang-format-18`, `clang-tidy-18`, `glslang-tools` (for `glslangValidator`), and all SDL3 system headers (X11, Wayland, ALSA, Pulse, etc.).
+Installs: `cmake`, `ninja`, `clang`, `clang-format-18`, `clang-tidy-18`, `glslang-tools` (GLSL→SPIR-V), `spirv-cross` (SPIR-V→MSL), and all SDL3 system headers (X11, Wayland, ALSA, Pulse, etc.).
 
 ### Linux — Arch Linux (and derivatives: Manjaro, EndeavourOS, CachyOS…)
 
@@ -60,7 +60,7 @@ Installs: `cmake`, `ninja`, `clang`, `clang-format-18`, `clang-tidy-18`, `glslan
 bash scripts/setup-archlinux.sh
 ```
 
-Installs: `cmake`, `ninja`, `clang`, `shaderc` (for `glslc`), and SDL3 system dependencies.
+Installs: `cmake`, `ninja`, `clang`, `shaderc` (GLSL→SPIR-V via `glslc`), `spirv-cross` (SPIR-V→MSL), and SDL3 system dependencies.
 
 ### macOS
 
@@ -69,7 +69,7 @@ bash scripts/setup-macos.sh
 ```
 
 Requires Xcode Command Line Tools (provides clang + Metal) + [Homebrew](https://brew.sh).
-Installs: `cmake`, `ninja`, `llvm@18`, `glslang` (for `glslangValidator`).
+Installs: `cmake`, `ninja`, `llvm@18`, `glslang` (GLSL→SPIR-V), `spirv-cross` (SPIR-V→MSL, required for Metal).
 
 ### Windows
 
@@ -80,7 +80,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\setup-windows.ps1
 ```
 
-Installs via `winget`: **VS Build Tools 2022** (MSVC + Windows SDK), CMake, Ninja, LLVM (clang-format/clang-tidy), and the **Vulkan SDK** (provides `glslc` for GLSL→SPIR-V compilation).
+Installs via `winget`: **VS Build Tools 2022** (MSVC + Windows SDK), CMake, Ninja, LLVM (clang-format/clang-tidy), and the **Vulkan SDK** (provides `glslc` for GLSL→SPIR-V and `spirv-cross` for SPIR-V→MSL).
 
 > **Note — git tag fetch:** The setup scripts run `git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"` to prevent `git pull` from failing with "would clobber existing tag". If you cloned before running a setup script, run that one line manually.
 
@@ -185,16 +185,16 @@ buffers, depth buffers, and custom shaders.
 
 ### Shader pipeline
 
-Shaders are written in GLSL and compiled to SPIR-V at build time:
+Shaders are written in GLSL and compiled at build time:
 
 ```
-shaders/foo.vert  ──glslc/glslangValidator──►  build/.../shaders/foo.vert.spv
-shaders/foo.frag  ──glslc/glslangValidator──►  build/.../shaders/foo.frag.spv
+shaders/foo.vert  ──glslc/glslangValidator──►  foo.vert.spv  ──spirv-cross──►  foo.vert.msl
+shaders/foo.frag  ──glslc/glslangValidator──►  foo.frag.spv  ──spirv-cross──►  foo.frag.msl
 ```
 
-At startup, the renderer loads the `.spv` files from the `shaders/` folder next to the binary.
-On macOS, SDL3 converts SPIR-V → MSL internally before passing it to the Metal runtime —
-no spirv-cross install is required.
+All compiled outputs land in `build/<preset>/shaders/` and are copied next to the binary at
+build time. At startup the renderer queries `SDL_GetGPUShaderFormats` to determine which
+backend is active and loads `.spv` (Vulkan) or `.msl` (Metal) accordingly.
 
 ---
 

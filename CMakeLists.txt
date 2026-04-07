@@ -73,17 +73,25 @@ if(USE_ENTT)
     FetchContent_MakeAvailable(EnTT)
 endif()
 
-# ---- Shaders: GLSL → SPIR-V ----
-# Prefers glslc (shaderc); falls back to glslangValidator.
-#   Linux:   sudo apt-get install glslang-tools   (glslangValidator)
-#   macOS:   brew install glslang                 (glslangValidator)
-#   Windows: install Vulkan SDK                   (glslc)
-# Note: no spirv-cross needed — SDL3 converts SPIR-V → MSL at runtime on macOS/Metal.
+# ---- Shaders: GLSL → SPIR-V (→ MSL on macOS) ----
+# Step 1: GLSL → SPIR-V
+#   Prefers glslc (shaderc); falls back to glslangValidator.
+#   Linux:   sudo apt-get install glslang-tools
+#   macOS:   brew install glslang
+#   Windows: install Vulkan SDK (https://vulkan.lunarg.com/)
+# Step 2: SPIR-V → MSL (macOS Metal backend only)
+#   macOS:   brew install spirv-cross
+#   Linux:   sudo apt-get install spirv-cross  (only needed for cross-builds targeting macOS)
+#   Windows: bundled with the Vulkan SDK
 find_program(GLSLC glslc
     HINTS ENV VULKAN_SDK
     PATHS /opt/homebrew/bin /usr/local/bin
     PATH_SUFFIXES bin)
 find_program(GLSLANG_VALIDATOR glslangValidator
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin
+    PATH_SUFFIXES bin)
+find_program(SPIRV_CROSS spirv-cross
     HINTS ENV VULKAN_SDK
     PATHS /opt/homebrew/bin /usr/local/bin
     PATH_SUFFIXES bin)
@@ -104,6 +112,16 @@ else()
         "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
 endif()
 
+if(SPIRV_CROSS)
+    message(STATUS "MSL transpiler:  spirv-cross (${SPIRV_CROSS})")
+elseif(APPLE)
+    message(FATAL_ERROR
+        "spirv-cross not found — required on macOS for the SDL3 GPU Metal backend.\n"
+        "  brew install spirv-cross")
+else()
+    message(STATUS "spirv-cross not found — MSL shaders will not be built (non-macOS build)")
+endif()
+
 set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
@@ -111,6 +129,7 @@ file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 set(SHADER_SOURCES triangle.vert triangle.frag)
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
+    # GLSL → SPIR-V
     set(SPV_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.spv")
     add_custom_command(
         OUTPUT  "${SPV_OUT}"
@@ -121,6 +140,19 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
         VERBATIM
     )
     list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
+
+    # SPIR-V → MSL (Metal backend on macOS)
+    if(SPIRV_CROSS)
+        set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
+        add_custom_command(
+            OUTPUT  "${MSL_OUT}"
+            COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
+            DEPENDS "${SPV_OUT}"
+            COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
+            VERBATIM
+        )
+        list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+    endif()
 endforeach()
 
 add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
@@ -154,6 +186,11 @@ add_custom_command(TARGET group2 POST_BUILD
     COMMENT "Copying shaders to binary directory"
     VERBATIM
 )
+
+# Tell the renderer which shader formats were compiled.
+if(SPIRV_CROSS)
+    target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
+endif()
 
 # ---- Link libraries ----
 target_link_libraries(group2 PRIVATE

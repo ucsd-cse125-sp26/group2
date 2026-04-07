@@ -6,9 +6,12 @@
 
 namespace
 {
-// Load a SPIR-V shader from disk and create a GPU shader object.
+// Load a shader from disk.
+// path   — full path to the .spv or .msl file
+// stage  — vertex or fragment
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
                           const char* path,
+                          SDL_GPUShaderFormat format,
                           SDL_GPUShaderStage stage,
                           Uint32 samplerCount,
                           Uint32 uniformBufferCount,
@@ -25,13 +28,16 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     SDL_GPUShaderCreateInfo info{};
     info.code = static_cast<const Uint8*>(code);
     info.code_size = static_cast<Uint32>(codeSize);
-    info.entrypoint = "main";
-    info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    info.format = format;
     info.stage = stage;
     info.num_samplers = samplerCount;
     info.num_uniform_buffers = uniformBufferCount;
     info.num_storage_buffers = storageBufferCount;
     info.num_storage_textures = storageTextureCount;
+
+    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL
+    // (Metal forbids a function literally named "main").
+    info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(dev, &info);
     SDL_free(code);
@@ -50,9 +56,16 @@ bool Renderer::init(SDL_Window* win)
 {
     window = win;
 
-    // SDL3 accepts SPIR-V on all backends.
-    // On Metal (macOS) SDL3 converts SPIR-V → MSL internally at runtime.
-    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, /*debug=*/false, nullptr);
+    // Advertise every shader format we have compiled shaders for.
+    // SDL3 picks the best available backend (Vulkan on Linux/Windows → SPIR-V,
+    // Metal on macOS → MSL).
+    constexpr SDL_GPUShaderFormat k_wantedFormats = SDL_GPU_SHADERFORMAT_SPIRV
+#ifdef HAVE_MSL_SHADERS
+                                                    | SDL_GPU_SHADERFORMAT_MSL
+#endif
+        ;
+
+    device = SDL_CreateGPUDevice(k_wantedFormats, /*debug_mode=*/false, nullptr);
     if (!device) {
         SDL_Log("Renderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
@@ -64,14 +77,34 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // Build paths to compiled SPIR-V shaders sitting next to the binary.
-    const char* base = SDL_GetBasePath();
-    char vertPath[512], fragPath[512];
-    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/triangle.vert.spv", base ? base : "");
-    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/triangle.frag.spv", base ? base : "");
+    // Determine which single format the chosen backend actually uses.
+    const SDL_GPUShaderFormat available = SDL_GetGPUShaderFormats(device);
+    SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
 
-    SDL_GPUShader* vert = loadShader(device, vertPath, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
-    SDL_GPUShader* frag = loadShader(device, fragPath, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
+    if (available & SDL_GPU_SHADERFORMAT_SPIRV) {
+        activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
+    }
+#ifdef HAVE_MSL_SHADERS
+    else if (available & SDL_GPU_SHADERFORMAT_MSL)
+    {
+        activeFormat = SDL_GPU_SHADERFORMAT_MSL;
+    }
+#endif
+
+    if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
+        SDL_Log("Renderer: no supported shader format available (got 0x%x)", static_cast<unsigned>(available));
+        return false;
+    }
+
+    // Build paths to compiled shaders next to the binary.
+    const char* base = SDL_GetBasePath();
+    const char* ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    char vertPath[512], fragPath[512];
+    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/triangle.vert%s", base ? base : "", ext);
+    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/triangle.frag%s", base ? base : "", ext);
+
+    SDL_GPUShader* vert = loadShader(device, vertPath, activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
+    SDL_GPUShader* frag = loadShader(device, fragPath, activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
         SDL_ReleaseGPUShader(device, frag);

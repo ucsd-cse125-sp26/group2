@@ -32,8 +32,8 @@ echo "==> Installing build tools..."
 # llvm@18 is pinned to match the CI version (ubuntu-24.04 / clang-format-18).
 # Using the same clang-format version locally and in CI prevents formatting drift.
 # glslang     — GLSL → SPIR-V compiler (glslangValidator)
-# spirv-cross is NOT needed: SDL3 converts SPIR-V → MSL internally at runtime on Metal.
-brew install cmake ninja llvm@18 glslang
+# spirv-cross — SPIR-V → MSL transpiler (required for Metal backend on macOS)
+brew install cmake ninja llvm@18 glslang spirv-cross
 
 LLVM18_BIN="$(brew --prefix llvm@18)/bin"
 

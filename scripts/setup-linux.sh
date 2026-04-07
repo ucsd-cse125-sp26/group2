@@ -21,9 +21,10 @@ sudo apt-get install -y --no-install-recommends \
 
 echo "==> Installing shader tools..."
 # glslang-tools — GLSL → SPIR-V compiler (glslangValidator)
-# spirv-cross is NOT needed: SDL3 converts SPIR-V → MSL internally at runtime on macOS/Metal.
+# spirv-cross   — SPIR-V → MSL transpiler (required for macOS/Metal builds)
 sudo apt-get install -y --no-install-recommends \
-    glslang-tools
+    glslang-tools \
+    spirv-cross
 
 # Register the pinned versions as the default so plain 'clang-format' / 'clang-tidy' resolve to -18.
 sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 18
