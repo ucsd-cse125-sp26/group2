@@ -212,8 +212,8 @@ target_include_directories(group2 PRIVATE
 )
 
 add_executable(server
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/server_main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/Server.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/server_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/Server.cpp"
 )
 
 # SDL3 GPU path: compile shaders before linking the binary.

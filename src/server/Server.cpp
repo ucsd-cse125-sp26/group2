@@ -4,8 +4,9 @@
 
 #include <SDL3_net/SDL_net.h>
 
-bool Server::init(const char* addr, Uint16 port)
+bool Server::init(const char* addr, Uint16 port, int tickRateMs)
 {
+    serverTickRateMs = tickRateMs;
     NET_Address* netAddr = NET_ResolveHostname(addr);
     while (NET_GetAddressStatus(netAddr) == NET_WAITING) {
         SDL_Delay(100);
@@ -53,6 +54,6 @@ void Server::run()
             NET_DestroyDatagram(dgram);
         }
 
-        SDL_Delay(1);
+        SDL_Delay(serverTickRateMs);
     }
 }

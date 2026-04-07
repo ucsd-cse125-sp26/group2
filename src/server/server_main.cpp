@@ -1,4 +1,4 @@
-#include "net/Server.hpp"
+#include "Server.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -9,8 +9,10 @@ int main()
     SDL_Init(0);
     NET_Init();
 
+    int tickRateMs = 30;
+
     Server server;
-    if (!server.init("127.0.0.1", 9999)) {
+    if (!server.init("127.0.0.1", 9999, tickRateMs)) {
         return 1;
     }
 
