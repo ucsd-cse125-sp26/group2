@@ -1,9 +1,180 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSE_125_GROUP_02 // HOME</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=Work+Sans:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
 <body>
+  <div class="backdrop" id="backdrop"></div>
 
-<h1>Group 2 (yay!) (via automation)</h1>
-<p>Sorry, the home page is not done yet! Here is a link to the <a href="spec.html">project spec</a></p>
+  <header class="topbar">
+    <div class="brand">CSE_125_GROUP_02</div>
 
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a href="#" class="active">Overview</a>
+      <a href="#">Docs</a>
+      <a href="#">Archive</a>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="status-chip">
+        <span class="status-label">System_Status</span>
+        <span class="status-value">Progressing</span>
+      </div>
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--ghost">GitHub_Link</a>
+      <button class="mobile-toggle" id="mobileToggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar" aria-label="Sidebar navigation">
+    <div class="operator-card">
+      <div class="operator-row">
+        <div class="operator-icon">
+          <span class="material-symbols-outlined">person</span>
+        </div>
+        <div>
+          <p class="operator-name">TERMINAL_01</p>
+          <p class="operator-status">Status: Online</p>
+        </div>
+      </div>
+    </div>
+
+    <nav class="side-nav">
+      <a class="nav-link  active" href="index.html">
+        <span class="material-symbols-outlined">terminal</span>
+        <span>Home</span>
+      </a>
+      <a class="nav-link" href="spec.html">
+        <span class="material-symbols-outlined">deployed_code</span>
+        <span>Project_Specs</span>
+      </a>
+      <a class="nav-link" href="reports.html">
+        <span class="material-symbols-outlined">article</span>
+        <span>Weekly_Reports</span>
+      </a>
+      <a class="nav-link" href="#">
+        <span class="material-symbols-outlined">task_alt</span>
+        <span>Final Report</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--primary" style="display:block; text-align: center;">GitHub_Link</a>
+    </div>
+  </aside>
+
+  <main class="page">
+    <div class="content">
+      <section class="home-hero" aria-label="Campaign spotlight">
+        <img src="img/first_render.png" alt="Project Screenshots" class="home-hero-image" />
+        <div class="home-hero-overlay"></div>
+
+        <div class="home-hero-content">
+          <p class="home-chip">CSE_125 // Group_02</p>
+          <h1>Project:<br />Accelerate</h1>
+          <p class="home-hero-copy">
+            Group_02 presents a multiplayer shooter with ultra-fast mobility, shifting gravity, and intense combat. Collect weapons and abilities to fight your way to the top!
+          <div class="home-hero-actions">
+            <a href="#" class="button home-btn-primary">Latest_Version</a>
+            <a href="spec.html" class="button home-btn-secondary">View_Specs</a>
+          </div>
+        </div>
+
+        <div class="home-hero-meta" aria-label="Sector metadata">
+          <p>Sector_ID: 9500-Gilman</p>
+          <p>Coord: 32.117.3.1</p>
+          <p>Status: Live</p>
+        </div>
+      </section>
+
+      <section class="home-grid" aria-label="News and mission briefing">
+        <div class="home-feed">
+          <div class="home-section-head">
+            <h2><span aria-hidden="true"></span> Latest_News_Feed</h2>
+            <p>1 Entries Found</p>
+          </div>
+
+          <article class="news-card">
+            <div class="news-thumb-wrap">
+              <img src="img/paper.png" alt="Circuit board render" class="news-thumb" />
+            </div>
+            <div class="news-body">
+              <p class="news-meta">04.6.2026 // Update_Log</p>
+              <h3>Week_01 Complete</h3>
+              <p>
+                Development has commenced! The project specs have been defined and the intial setup completed.
+              </p>
+              <a href="spec.html" class="news-action">View_Specs <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></a>
+            </div>
+          </article>
+
+        </div>
+
+        <aside class="mission-panel" aria-label="Mission briefing">
+          <h2><span class="material-symbols-outlined" aria-hidden="true">assignment_late</span> Mission_Briefing</h2>
+
+          <div class="brief-item">
+            <p>Current_Objective</p>
+            <span>Initialize graphics, networking, and physics.</span>
+          </div>
+
+          <div class="brief-item danger">
+            <p>Priority Task</p>
+            <span>Render a scene with a camera and simple primitives.</span>
+          </div>
+
+          <div class="diag-card" aria-label="System diagnostics">
+            <h3>System Diagnostics</h3>
+            <div class="diag-row">
+              <div class="diag-bar">
+                <div class="priority-bar"><div class="priority-fill" style="width: 10%;"></div></div>
+              </div>
+              <p><span>Completion</span><strong>10%</strong></p>
+            </div>
+            <div class="diag-row">
+              <div class="diag-bar">
+                <div class="priority-bar"><div class="priority-fill" style="width: 25%;"></div></div>
+              </div>
+              <p><span>Current Build</span><strong>Prototype</strong></p>
+            </div>
+            <div class="diag-row">
+              <p><span>Team Status</span><strong style="color:rgb(51, 235, 51)">On Schedule</strong></p>
+            </div>
+          </div>
+
+          <p class="mission-warning">
+            Warning: Unauthorized access to this briefing terminal is punishable by law.
+          </p>
+
+        </aside>
+      </section>
+    </div>
+  </main>
+
+  <div class="status-hud" aria-label="Status HUD">
+    <div class="meta">
+      <span class="label">Date</span><span class="value" id="hudDate">----</span>
+      <span class="label">Time</span><span class="value" id="hudTime">--:--:--</span>
+      <span class="label">Latency</span><span class="value" id="hudLatency">18ms</span>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div>© 1999 Group_02. All Rights Reserved.</div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a class="foot-link" href="img/gag/no-privacy.jpg">Privacy_Protocols</a>
+      <a class="foot-link" href="img/gag/lost.png">System_Status</a>
+      <a class="foot-link" href="img/gag/lost.png">Support_Comms</a>
+    </nav>
+    <div class="footer-build">Project_Accelerate</div>
+  </footer>
+  <script src="script.js"></script>
 </body>
 </html>
