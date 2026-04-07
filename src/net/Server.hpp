@@ -3,9 +3,10 @@ class Server
 {
 public:
     bool init(NET_Address*, Uint16 port);
-    void run();
     void shutdown();
+    void run();
 
 private:
-    NET_Server* server;
-}
+    NET_DatagramSocket* sock;
+    bool running;
+};
