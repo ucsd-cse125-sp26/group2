@@ -22,20 +22,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake")
 option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
-option(USE_OPENGL   "Use OpenGL 4.1 core backend instead of SDL3 GPU"  OFF)
 option(USE_ENTT     "Use EnTT ECS library (OFF = minimal stub)"        OFF)
-
-# Embed compiled SPIR-V into the binary (SDL3 GPU path only).
-# Defaults to ON for Release/RelWithDebInfo so no shaders/ folder is
-# needed at runtime.  Always OFF for the OpenGL backend (no SPIR-V).
-if(NOT USE_OPENGL AND CMAKE_BUILD_TYPE MATCHES "^Rel")
-    set(_bundle_shaders_default ON)
-else()
-    set(_bundle_shaders_default OFF)
-endif()
-option(GROUP2_BUNDLE_SHADERS
-    "Embed SPIR-V shaders into the executable (SDL3 GPU path, Release builds)"
-    ${_bundle_shaders_default})
 
 # ---- Dependencies ----
 
@@ -86,121 +73,99 @@ if(USE_ENTT)
     FetchContent_MakeAvailable(EnTT)
 endif()
 
-# glad — OpenGL 4.1 core function loader, generated via Python3 (optional)
-if(USE_OPENGL)
-    FetchContent_Declare(
-        glad
-        GIT_REPOSITORY https://github.com/Dav1dde/glad.git
-        GIT_TAG        v0.1.36
-        GIT_SHALLOW    TRUE
-    )
-    set(GLAD_PROFILE    "core"   CACHE STRING "" FORCE)
-    set(GLAD_API        "gl=4.1" CACHE STRING "" FORCE)
-    set(GLAD_GENERATOR  "c"      CACHE STRING "" FORCE)
-    set(GLAD_EXTENSIONS ""       CACHE STRING "" FORCE)
-    FetchContent_MakeAvailable(glad)
+# ---- Shaders: GLSL → SPIR-V (→ MSL on macOS) ----
+# Step 1: GLSL → SPIR-V
+#   Prefers glslc (shaderc); falls back to glslangValidator.
+#   Linux:   sudo apt-get install glslang-tools
+#   macOS:   brew install glslang
+#   Windows: install Vulkan SDK (https://vulkan.lunarg.com/)
+# Step 2: SPIR-V → MSL (macOS Metal backend only)
+#   macOS:   brew install spirv-cross
+#   Linux:   sudo apt-get install spirv-cross  (only needed for cross-builds targeting macOS)
+#   Windows: bundled with the Vulkan SDK
+find_program(GLSLC glslc
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin
+    PATH_SUFFIXES bin)
+find_program(GLSLANG_VALIDATOR glslangValidator
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin
+    PATH_SUFFIXES bin)
+find_program(SPIRV_CROSS spirv-cross
+    HINTS ENV VULKAN_SDK
+    PATHS /opt/homebrew/bin /usr/local/bin
+    PATH_SUFFIXES bin)
+
+if(GLSLC)
+    message(STATUS "Shader compiler: glslc (${GLSLC})")
+    set(SHADER_COMPILE_TOOL  "${GLSLC}")
+    set(SHADER_COMPILE_FLAGS "")        # glslc infers stage from .vert/.frag
+elseif(GLSLANG_VALIDATOR)
+    message(STATUS "Shader compiler: glslangValidator (${GLSLANG_VALIDATOR})")
+    set(SHADER_COMPILE_TOOL  "${GLSLANG_VALIDATOR}")
+    set(SHADER_COMPILE_FLAGS "-V")      # -V = output SPIR-V binary
+else()
+    message(FATAL_ERROR
+        "No GLSL→SPIR-V compiler found.\n"
+        "  Linux:   sudo apt-get install glslang-tools\n"
+        "  macOS:   brew install glslang\n"
+        "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
 endif()
 
-# ---- Shaders (SDL3 GPU path only) ----
-if(NOT USE_OPENGL)
-    # ---- GLSL → SPIR-V compiler ----
-    # Prefers glslc (shaderc); falls back to glslangValidator.
-    #   Arch:    sudo pacman -S shaderc            (glslc)
-    #   Ubuntu:  sudo apt-get install glslang-tools (glslangValidator)
-    #   macOS:   brew install glslang              (glslangValidator)
-    #   Windows: install Vulkan SDK                (glslc)
-    find_program(GLSLC glslc
-        HINTS ENV VULKAN_SDK
-        PATHS /opt/homebrew/bin /usr/local/bin
-        PATH_SUFFIXES bin)
-    find_program(GLSLANG_VALIDATOR glslangValidator
-        HINTS ENV VULKAN_SDK
-        PATHS /opt/homebrew/bin /usr/local/bin
-        PATH_SUFFIXES bin)
+if(SPIRV_CROSS)
+    message(STATUS "MSL transpiler:  spirv-cross (${SPIRV_CROSS})")
+elseif(APPLE)
+    message(FATAL_ERROR
+        "spirv-cross not found — required on macOS for the SDL3 GPU Metal backend.\n"
+        "  brew install spirv-cross")
+else()
+    message(STATUS "spirv-cross not found — MSL shaders will not be built (non-macOS build)")
+endif()
 
-    if(GLSLC)
-        message(STATUS "Shader compiler: glslc (${GLSLC})")
-        set(SHADER_COMPILE_TOOL  "${GLSLC}")
-        set(SHADER_COMPILE_FLAGS "")        # glslc infers stage from .vert/.frag
-    elseif(GLSLANG_VALIDATOR)
-        message(STATUS "Shader compiler: glslangValidator (${GLSLANG_VALIDATOR})")
-        set(SHADER_COMPILE_TOOL  "${GLSLANG_VALIDATOR}")
-        set(SHADER_COMPILE_FLAGS "-V")      # -V = output SPIR-V binary
-    else()
-        message(FATAL_ERROR
-            "No GLSL→SPIR-V compiler found.\n"
-            "  Arch:    sudo pacman -S shaderc\n"
-            "  Ubuntu:  sudo apt-get install glslang-tools\n"
-            "  macOS:   brew install glslang\n"
-            "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
-    endif()
+set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
+file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-    # ---- SPIR-V → MSL transpiler (macOS Metal backend) ----
-    # Required on macOS; optional elsewhere (enables MSL shaders on all platforms).
-    #   macOS:   brew install spirv-cross
-    #   Ubuntu:  sudo apt-get install spirv-cross
-    #   Windows: bundled with the Vulkan SDK
-    find_program(SPIRV_CROSS spirv-cross
-        HINTS ENV VULKAN_SDK
-        PATHS /opt/homebrew/bin /usr/local/bin
-        PATH_SUFFIXES bin)
+set(SHADER_SOURCES triangle.vert triangle.frag)
+set(SHADER_OUTPUTS "")
+foreach(SHADER_SRC ${SHADER_SOURCES})
+    # GLSL → SPIR-V
+    set(SPV_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.spv")
+    add_custom_command(
+        OUTPUT  "${SPV_OUT}"
+        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
+                -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        COMMENT "Compiling shader ${SHADER_SRC} → SPIR-V"
+        VERBATIM
+    )
+    list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
+
+    # SPIR-V → MSL (Metal backend on macOS)
     if(SPIRV_CROSS)
-        message(STATUS "MSL transpiler: spirv-cross (${SPIRV_CROSS})")
-    elseif(APPLE)
-        message(FATAL_ERROR
-            "spirv-cross not found — required on macOS for the SDL3 GPU Metal backend.\n"
-            "  brew install spirv-cross\n"
-            "  See scripts/setup-macos.sh")
-    else()
-        message(STATUS "spirv-cross not found — MSL shaders will not be built (non-macOS)")
-    endif()
-
-    set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
-    set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
-    file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
-
-    set(SHADER_SOURCES triangle.vert triangle.frag)
-    set(SHADER_OUTPUTS "")
-    foreach(SHADER_SRC ${SHADER_SOURCES})
-        # GLSL → SPIR-V
-        set(SPV_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.spv")
+        set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
         add_custom_command(
-            OUTPUT  "${SPV_OUT}"
-            COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
-                    -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
-            DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}"
-            COMMENT "Compiling shader ${SHADER_SRC} to SPIR-V"
+            OUTPUT  "${MSL_OUT}"
+            COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
+            DEPENDS "${SPV_OUT}"
+            COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
             VERBATIM
         )
-        list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
+        list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+    endif()
+endforeach()
 
-        # SPIR-V → MSL (for SDL3 GPU Metal backend on macOS)
-        if(SPIRV_CROSS)
-            set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
-            add_custom_command(
-                OUTPUT  "${MSL_OUT}"
-                COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
-                DEPENDS "${SPV_OUT}"
-                COMMENT "Transpiling shader ${SHADER_SRC} to MSL"
-                VERBATIM
-            )
-            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
-        endif()
-    endforeach()
-
-    add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
-endif()
+add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
 
 # ---- Sources ----
 set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/net/Client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Game.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Game.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Renderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Renderer.hpp"
 )
-if(USE_OPENGL)
-    list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/OpenGLRenderer.cpp")
-else()
-    list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/SDLGPURenderer.cpp")
-endif()
 
 # ===========================================================================
 # Executable
@@ -216,9 +181,21 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/Server.cpp"
 )
 
-# SDL3 GPU path: compile shaders before linking the binary.
-if(NOT USE_OPENGL)
-    add_dependencies(group2 shaders)
+# Compile shaders before linking the binary.
+add_dependencies(group2 shaders)
+
+# Copy compiled SPIR-V shaders next to the binary so SDL_GetBasePath() finds them.
+add_custom_command(TARGET group2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SHADER_OUT_DIR}"
+            "$<TARGET_FILE_DIR:group2>/shaders"
+    COMMENT "Copying shaders to binary directory"
+    VERBATIM
+)
+
+# Tell the renderer which shader formats were compiled.
+if(SPIRV_CROSS)
+    target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
 endif()
 
 # ---- Link libraries ----
@@ -231,54 +208,6 @@ target_link_libraries(group2 PRIVATE
 if(USE_ENTT)
     target_link_libraries(group2 PRIVATE EnTT::EnTT)
     target_compile_definitions(group2 PRIVATE USE_ENTT)
-endif()
-
-if(USE_OPENGL)
-    target_link_libraries(group2 PRIVATE glad)
-    target_compile_definitions(group2 PRIVATE USE_OPENGL)
-else()
-    # Tell the renderer which shader formats were compiled so it can advertise
-    # the right formats to SDL_CreateGPUDevice at runtime.
-    if(SPIRV_CROSS)
-        target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
-    endif()
-    # ---- Shader bundling (SDL3 GPU release builds) ----
-    if(GROUP2_BUNDLE_SHADERS)
-        # Write the list of compiled shader paths to a file; the embed script reads
-        # it at build time (avoids CMake semicolon-escaping in -D arguments).
-        string(REPLACE ";" "\n" _shader_list_content "${SHADER_OUTPUTS}")
-        file(WRITE "${CMAKE_BINARY_DIR}/shader_list.txt" "${_shader_list_content}")
-
-        set(_embedded_header "${CMAKE_BINARY_DIR}/embedded_shaders.hpp")
-
-        add_custom_command(
-            OUTPUT  "${_embedded_header}"
-            COMMAND ${CMAKE_COMMAND}
-                    "-DSPV_LIST_FILE=${CMAKE_BINARY_DIR}/shader_list.txt"
-                    "-DOUTPUT_FILE=${_embedded_header}"
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedShaders.cmake"
-            DEPENDS ${SHADER_OUTPUTS}
-            COMMENT "Embedding shaders (SPIR-V + MSL) into the executable"
-            VERBATIM
-        )
-        add_custom_target(embed_shaders DEPENDS "${_embedded_header}")
-        add_dependencies(group2 embed_shaders)
-
-        # Let SDLGPURenderer.cpp find the generated header.
-        target_include_directories(group2 PRIVATE "${CMAKE_BINARY_DIR}")
-        target_compile_definitions(group2 PRIVATE BUNDLE_SHADERS)
-        message(STATUS "Shader bundling: ON  — shaders compiled into the executable")
-    else()
-        # Copy compiled shaders next to the binary so SDL_GetBasePath() finds them.
-        add_custom_command(TARGET group2 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    "${SHADER_OUT_DIR}"
-                    "$<TARGET_FILE_DIR:group2>/shaders"
-            COMMENT "Copying shaders to binary directory"
-            VERBATIM
-        )
-        message(STATUS "Shader bundling: OFF — shaders/ folder required next to the binary")
-    endif()
 endif()
 
 target_include_directories(server PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

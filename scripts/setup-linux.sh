@@ -21,7 +21,7 @@ sudo apt-get install -y --no-install-recommends \
 
 echo "==> Installing shader tools..."
 # glslang-tools — GLSL → SPIR-V compiler (glslangValidator)
-# spirv-cross   — SPIR-V → MSL transpiler (generates Metal shaders for cross-platform builds)
+# spirv-cross   — SPIR-V → MSL transpiler (required for macOS/Metal builds)
 sudo apt-get install -y --no-install-recommends \
     glslang-tools \
     spirv-cross
