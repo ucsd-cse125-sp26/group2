@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSE_125_GROUP_02 // HOME</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=Work+Sans:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+
+  <header class="topbar">
+    <div class="brand">CSE_125_GROUP_02</div>
+
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a href="#" class="active">Overview</a>
+      <a href="#">Docs</a>
+      <a href="#">Archive</a>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="status-chip">
+        <span class="status-label">System_Status</span>
+        <span class="status-value">Progressing</span>
+      </div>
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--ghost">GitHub_Link</a>
+      <button class="mobile-toggle" id="mobileToggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar" aria-label="Sidebar navigation">
+    <div class="operator-card">
+      <div class="operator-row">
+        <div class="operator-icon">
+          <span class="material-symbols-outlined">person</span>
+        </div>
+        <div>
+          <p class="operator-name">TERMINAL_01</p>
+          <p class="operator-status">Status: Online</p>
+        </div>
+      </div>
+    </div>
+
+    <nav class="side-nav">
+      <a class="nav-link" href="index.html">
+        <span class="material-symbols-outlined">terminal</span>
+        <span>Home</span>
+      </a>
+      <a class="nav-link" href="spec.html">
+        <span class="material-symbols-outlined">deployed_code</span>
+        <span>Project_Specs</span>
+      </a>
+      <a class="nav-link  active" href="reports.html">
+        <span class="material-symbols-outlined">article</span>
+        <span>Weekly_Reports</span>
+      </a>
+      <a class="nav-link" href="#">
+        <span class="material-symbols-outlined">task_alt</span>
+        <span>Final Report</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--primary" style="display:block; text-align: center;">GitHub_Link</a>
+    </div>
+  </aside>
+
+  <main class="page">
+    <div class="content">
+      <section class="reports-shell" aria-label="Weekly reports archive">
+        <div class="reports-bg-word" aria-hidden="true">REPORTS</div>
+
+        <header class="reports-header">
+          <div>
+            <h1><span aria-hidden="true"></span> Dev_Logs_Archive</h1>
+            <p>Project Accelerate // Report Entries</p>
+          </div>
+          <div class="reports-signal" aria-label="Uplink quality">
+            <small>Uplink Quality</small>
+            <div class="reports-signal-bars">
+              <i></i><i></i><i></i><i class="low"></i><i class="low"></i>
+            </div>
+          </div>
+        </header>
+
+        <section class="report-list" aria-label="Report links">
+          <article class="report-entry report-entry--featured">
+            <div class="report-entry-meta">
+                <div style="display:flex; gap:10px;">
+                    <span class="report-chip">Latest_Entry</span>
+                    <span class="report-entry-tag">Week_02</span>
+                </div>
+              <time datetime="2026-04-06">Date: 2026.04.06</time>
+            </div>
+            <h2>Featured Report Example</h2>
+            <p>
+              This is a placeholder for the latest report.
+            </p>
+            <div class="report-entry-footer">
+              <div class="report-mini-meta">
+                <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
+                <span>Data_Set: Reports</span>
+              </div>
+              <div class="report-mini-meta">
+                <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+                <span>Category: Unclassified</span>
+              </div>
+              <a class="report-link" href="#">[ View_Report ] <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></a>
+            </div>
+          </article>
+
+          <article class="report-entry">
+            <div class="report-entry-meta">
+              <span class="report-entry-tag">Week_02</span>
+              <time datetime="2026-04-06">Date: 2026.04.06</time>
+            </div>
+            <h3>Report Entry Example</h3>
+            <p>This is a palceholder for a regular report.</p>
+            <div class="report-entry-footer">
+                <div class="report-mini-meta">
+                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
+                    <span>Data_Set: Reports</span>
+                </div>
+                <div class="report-mini-meta">
+                    <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+                    <span>Category: Unclassified</span>
+                </div>
+                <a class="report-link" href="#">[ View_Report ] <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></a>
+            </div>
+          </article>
+
+          <article class="report-entry report-entry--muted">
+            <div class="report-entry-meta">
+              <span class="report-entry-tag">Week_02</span>
+              <time datetime="2026-04-06">Date: 2026.04.06</time>
+            </div>
+            <h3>Muted Report Entry Example</h3>
+            <p>This is a place holder for a muted report.</p>
+            <div class="report-entry-footer">
+                <div class="report-mini-meta">
+                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
+                    <span>Data_Set: Reports</span>
+                </div>
+                <div class="report-mini-meta">
+                    <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+                    <span>Category: Unclassified</span>
+                </div>
+                <a class="report-link" href="#">[ View_Report ] <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></a>
+            </div>
+          </article>
+
+          <article class="report-entry report-entry--legacy">
+            <div class="report-entry-meta">
+              <span class="report-entry-tag">Week_02</span>
+              <time datetime="2026-04-06">Date: 2026.04.06</time>
+            </div>
+            <h3>Legacy Report Entry Example</h3>
+            <p>This is a placeholder for a legacy report.</p>
+            <div class="report-entry-footer">
+                <div class="report-mini-meta">
+                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
+                    <span>Data_Set: Reports</span>
+                </div>
+                <div class="report-mini-meta">
+                    <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+                    <span>Category: Unclassified</span>
+                </div>
+                <a class="report-link" href="#">[ View_Report ] <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></a>
+            </div>
+          </article>
+
+        </section>
+
+        <section class="reports-hud-grid" aria-label="Archive system status">
+          <article class="reports-hud-card">
+            <p>Cpu_Load</p>
+            <div class="reports-hud-line"><span class="reports-hud-fill" data-target="42"></span></div>
+            <strong>42%</strong>
+          </article>
+          <article class="reports-hud-card">
+            <p>Mem_Allocation</p>
+            <div class="reports-hud-line"><span class="reports-hud-fill" data-target="78"></span></div>
+            <strong>78%</strong>
+          </article>
+          <article class="reports-hud-card">
+            <p>Connection_Stability</p>
+            <div class="reports-hud-line"><span class="reports-hud-fill" data-target="95"></span></div>
+            <strong>95%</strong>
+          </article>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <div class="status-hud" aria-label="Status HUD">
+    <div class="meta">
+      <span class="label">Date</span><span class="value" id="hudDate">----</span>
+      <span class="label">Time</span><span class="value" id="hudTime">--:--:--</span>
+      <span class="label">Latency</span><span class="value" id="hudLatency">18ms</span>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div>© 1999 Group_02. All Rights Reserved.</div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a class="foot-link" href="img/gag/no-privacy.jpg">Privacy_Protocols</a>
+      <a class="foot-link" href="img/gag/lost.png">System_Status</a>
+      <a class="foot-link" href="img/gag/lost.png">Support_Comms</a>
+    </nav>
+    <div class="footer-build">Project_Accelerate</div>
+  </footer>
+  <script src="script.js"></script>
+</body>
+</html>

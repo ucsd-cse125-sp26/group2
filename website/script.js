@@ -6,6 +6,7 @@
       const hudDate = document.getElementById('hudDate');
       const hudTime = document.getElementById('hudTime');
       const hudLatency = document.getElementById('hudLatency');
+      const reportsHudFills = document.querySelectorAll('.reports-hud-fill[data-target]');
 
       function openNav() {
         body.classList.add('nav-open');
@@ -55,8 +56,23 @@
         hudLatency.textContent = value + 'ms';
       }
 
+      function animateReportsHud() {
+        if (!reportsHudFills.length) return;
+
+        requestAnimationFrame(function () {
+          reportsHudFills.forEach(function (fill, index) {
+            const target = Number(fill.getAttribute('data-target') || '0');
+
+            setTimeout(function () {
+              fill.style.width = target + '%';
+            }, index * 120);
+          });
+        });
+      }
+
       updateHudClock();
       updateLatency();
+      animateReportsHud();
       setInterval(updateHudClock, 1000);
       setInterval(updateLatency, 2500);
 
