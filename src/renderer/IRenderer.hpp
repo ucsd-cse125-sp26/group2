@@ -1,27 +1,22 @@
 #pragma once
-
-struct SDL_Window;
+#include <SDL3/SDL.h>
 
 // ---------------------------------------------------------------------------
-// IRenderer — common interface shared by all rendering backends.
+// IRenderer — interface for the active rendering backend.
 //
-// Each backend (SDL3 GPU, OpenGL, …) implements this interface.
-// Swap backends at configure time:
-//   cmake --preset debug -DUSE_OPENGL=ON   → OpenGL 4.1 core
-//   cmake --preset debug                   → SDL3 GPU pipeline (default)
+// init()     — create GPU device / context, pipeline.
+// draw()     — record draw commands into an already-open render pass.
+//              For SDL3 GPU path: renderPass is a live SDL_GPURenderPass*.
+//              For OpenGL path:   renderPass is ignored (nullptr).
+// device()   — returns the SDL_GPUDevice* (SDL3 GPU path) or nullptr (GL).
+// shutdown() — destroy all GPU objects.
 // ---------------------------------------------------------------------------
-
 class IRenderer
 {
 public:
     virtual ~IRenderer() = default;
-
-    // Called once after the window is created.  Returns false on fatal error.
     virtual bool init(SDL_Window* window) = 0;
-
-    // Called every frame.  Renders and presents one frame.
-    virtual void renderFrame() = 0;
-
-    // Called before the window is destroyed.
+    virtual void draw(SDL_GPURenderPass* renderPass) = 0;
+    [[nodiscard]] virtual SDL_GPUDevice* device() const = 0;
     virtual void shutdown() = 0;
 };

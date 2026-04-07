@@ -72,12 +72,12 @@ bool OpenGLRenderer::init(SDL_Window* win)
 {
     window = win;
 
-    glContext = SDL_GL_CreateContext(window);
-    if (!glContext) {
+    context = SDL_GL_CreateContext(window);
+    if (!context) {
         SDL_Log("OpenGLRenderer: SDL_GL_CreateContext failed: %s", SDL_GetError());
         return false;
     }
-    SDL_GL_MakeCurrent(window, glContext);
+    SDL_GL_MakeCurrent(window, context);
     SDL_GL_SetSwapInterval(1); // vsync
 
     // Load all OpenGL function pointers via glad.
@@ -121,7 +121,7 @@ bool OpenGLRenderer::init(SDL_Window* win)
     return true;
 }
 
-void OpenGLRenderer::renderFrame()
+void OpenGLRenderer::draw(SDL_GPURenderPass* /*unused*/)
 {
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
@@ -133,8 +133,6 @@ void OpenGLRenderer::renderFrame()
     glUseProgram(shaderProgram);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-
-    SDL_GL_SwapWindow(window);
 }
 
 void OpenGLRenderer::shutdown()
@@ -143,11 +141,11 @@ void OpenGLRenderer::shutdown()
         glDeleteVertexArrays(1, &vao);
     if (shaderProgram)
         glDeleteProgram(shaderProgram);
-    if (glContext)
-        SDL_GL_DestroyContext(glContext);
+    if (context)
+        SDL_GL_DestroyContext(context);
 
     vao = 0;
     shaderProgram = 0;
-    glContext = nullptr;
+    context = nullptr;
     window = nullptr;
 }

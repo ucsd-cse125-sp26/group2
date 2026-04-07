@@ -135,6 +135,11 @@ git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
 git update-index --skip-worktree .idea/workspace.xml .idea/misc.xml .idea/vcs.xml .idea/cmake.xml
 
 Write-Host ""
+Write-Host "==> Dependency notes:" -ForegroundColor Cyan
+Write-Host "    EnTT, Dear ImGui, Ultralight SDK are fetched automatically"
+Write-Host "    by CMake FetchContent on first build (requires internet)."
+Write-Host "    Ultralight DLLs are copied next to the .exe by CMake."
+Write-Host ""
 Write-Host "==> All prerequisites installed." -ForegroundColor Green
 Write-Host ""
 Write-Host "IMPORTANT: Close and reopen CLion / your terminal so PATH changes take effect." -ForegroundColor Yellow

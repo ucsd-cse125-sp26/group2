@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 
+# Ultralight's prebuilt SDK declares cmake_minimum_required(VERSION 3.3.2). CMake 4.0+
+# rejects < 3.5 in nested projects unless the effective policy floor is raised.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+    # 3.5 is the hard floor for CMake 4.0; 3.10 matches FetchContent deps (GLM, Ultralight)
+    # and avoids deprecation spam from their old cmake_minimum_required lines.
+    set(CMAKE_POLICY_VERSION_MINIMUM "3.10" CACHE STRING
+        "Minimum policy version for nested projects (Ultralight SDK, GLM, etc.)")
+endif()
+
 project(group2
     VERSION 0.1.0
     DESCRIPTION "CSE 125 Group 2"
@@ -23,7 +32,6 @@ option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
 option(USE_OPENGL   "Use OpenGL 4.1 core backend instead of SDL3 GPU"  OFF)
-option(USE_ENTT     "Use EnTT ECS library (OFF = minimal stub)"        OFF)
 
 # Embed compiled SPIR-V into the binary (SDL3 GPU path only).
 # Defaults to ON for Release/RelWithDebInfo so no shaders/ folder is
@@ -63,18 +71,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
-# EnTT — fast header-only ECS library (optional)
-if(USE_ENTT)
-    FetchContent_Declare(
-        EnTT
-        GIT_REPOSITORY https://github.com/skypjack/entt.git
-        GIT_TAG        v3.14.0
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(EnTT)
-endif()
+# EnTT — fast header-only ECS library (always enabled)
+FetchContent_Declare(
+    EnTT
+    GIT_REPOSITORY https://github.com/skypjack/entt.git
+    GIT_TAG        v3.14.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(EnTT)
 
 # glad — OpenGL 4.1 core function loader, generated via Python3 (optional)
+# Must be declared before imgui so the glad target exists when imgui links it.
 if(USE_OPENGL)
     FetchContent_Declare(
         glad
@@ -88,6 +95,50 @@ if(USE_OPENGL)
     set(GLAD_EXTENSIONS ""       CACHE STRING "" FORCE)
     FetchContent_MakeAvailable(glad)
 endif()
+
+# Ultralight — HTML UI renderer (prebuilt SDK, SDL3 GPU driver path)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Ultralight.cmake")
+
+# Dear ImGui — immediate-mode GUI (dev overlay; SDL3 GPU + OpenGL backends)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.91.8
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+set(IMGUI_SOURCES
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    # Shared SDL3 platform backend used by both the SDL3 GPU and OpenGL render paths.
+    # imgui_demo.cpp is intentionally excluded (debug demo window not needed in shipping builds).
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
+)
+if(USE_OPENGL)
+    list(APPEND IMGUI_SOURCES
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp")
+else()
+    list(APPEND IMGUI_SOURCES
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp")
+endif()
+
+add_library(imgui STATIC ${IMGUI_SOURCES})
+target_include_directories(imgui PUBLIC
+    "${imgui_SOURCE_DIR}"
+    "${imgui_SOURCE_DIR}/backends"
+)
+target_link_libraries(imgui PRIVATE SDL3::SDL3-static)
+if(USE_OPENGL)
+    target_link_libraries(imgui PRIVATE glad)
+endif()
+# Suppress warnings from imgui itself (GNU/Clang/AppleClang on Linux/macOS, MSVC on Windows)
+target_compile_options(imgui PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-w>
+    $<$<CXX_COMPILER_ID:MSVC>:/W0>
+)
 
 # ---- Shaders (SDL3 GPU path only) ----
 if(NOT USE_OPENGL)
@@ -147,7 +198,16 @@ if(NOT USE_OPENGL)
     set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
     file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-    set(SHADER_SOURCES triangle.vert triangle.frag)
+    set(SHADER_SOURCES
+        triangle.vert
+        triangle.frag
+        ultralight/fill.vert
+        ultralight/fill.frag
+        ultralight/fill_path.vert
+        ultralight/fill_path.frag
+        ultralight/composite.vert
+        ultralight/composite.frag
+    )
     set(SHADER_OUTPUTS "")
     foreach(SHADER_SRC ${SHADER_SOURCES})
         # GLSL → SPIR-V
@@ -182,6 +242,7 @@ endif()
 # ---- Sources ----
 set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/imgui_layer.cpp"
 )
 if(USE_OPENGL)
     list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/OpenGLRenderer.cpp")
@@ -189,13 +250,65 @@ else()
     list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/SDLGPURenderer.cpp")
 endif()
 
+if(NOT USE_OPENGL)
+    list(APPEND SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/sdl3gpu_driver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ultralight_layer.cpp"
+    )
+endif()
+
 # ===========================================================================
 # Executable
 # ===========================================================================
 add_executable(group2 ${SOURCES})
 
+# ---- Ultralight: copy shared libs + resources next to binary ----
+if(WIN32)
+    set(UL_SHARED_LIBS
+        "${UL_CORE_DLL}" "${UL_WEB_DLL}" "${UL_UI_DLL}" "${UL_APPCORE_DLL}")
+elseif(APPLE)
+    set(UL_SHARED_LIBS
+        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}" "${UL_APPCORE_LIB}")
+else()
+    set(UL_SHARED_LIBS
+        "${UL_CORE_LIB}" "${UL_WEB_LIB}" "${UL_UI_LIB}" "${UL_APPCORE_LIB}")
+endif()
+
+foreach(_ul_lib ${UL_SHARED_LIBS})
+    add_custom_command(TARGET group2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_ul_lib}" "$<TARGET_FILE_DIR:group2>"
+        COMMENT "Copying Ultralight lib: ${_ul_lib}"
+        VERBATIM
+    )
+endforeach()
+
+if(EXISTS "${UL_RESOURCES_DIR}")
+    add_custom_command(TARGET group2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${UL_RESOURCES_DIR}" "$<TARGET_FILE_DIR:group2>/resources"
+        COMMENT "Copying Ultralight resources/"
+        VERBATIM
+    )
+endif()
+
+# rpath so the binary finds the copied .so/.dylib at runtime
+if(UNIX AND NOT APPLE)
+    set_target_properties(group2 PROPERTIES
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
+    )
+endif()
+if(APPLE)
+    set_target_properties(group2 PROPERTIES
+        BUILD_RPATH "@executable_path"
+        INSTALL_RPATH "@executable_path"
+    )
+endif()
+
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
 )
 
 # SDL3 GPU path: compile shaders before linking the binary.
@@ -207,12 +320,11 @@ endif()
 target_link_libraries(group2 PRIVATE
     SDL3::SDL3-static
     glm::glm
+    EnTT::EnTT
+    imgui
+    Ultralight::UI
+    Ultralight::AppCore
 )
-
-if(USE_ENTT)
-    target_link_libraries(group2 PRIVATE EnTT::EnTT)
-    target_compile_definitions(group2 PRIVATE USE_ENTT)
-endif()
 
 if(USE_OPENGL)
     target_link_libraries(group2 PRIVATE glad)

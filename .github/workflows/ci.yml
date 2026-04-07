@@ -91,8 +91,10 @@ jobs:
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/${{ matrix.preset }}/_deps
-          key: deps-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
+          path: |
+            ~/.cmake/packages
+            ${{ github.workspace }}/build/_deps
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/Ultralight.cmake') }}
           restore-keys: deps-${{ runner.os }}-${{ matrix.preset }}-
 
       - name: Configure
@@ -160,8 +162,10 @@ jobs:
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/debug/_deps
-          key: deps-Linux-debug-${{ hashFiles('CMakeLists.txt') }}
+          path: |
+            ~/.cmake/packages
+            ${{ github.workspace }}/build/_deps
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/Ultralight.cmake') }}
           restore-keys: deps-Linux-debug-
 
       - name: Configure
@@ -265,8 +269,10 @@ jobs:
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/release/_deps
-          key: deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt') }}
+          path: |
+            ~/.cmake/packages
+            ${{ github.workspace }}/build/_deps
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/Ultralight.cmake') }}
           restore-keys: deps-${{ runner.os }}-release-
 
       - name: Configure
