@@ -23,7 +23,7 @@ bool Server::init(const char* addr, Uint16 port)
         return false;
     }
 
-    SDL_Log("Server: listening on port %d", (int)port);
+    SDL_Log("Server: listening on port %d", static_cast<int>(port));
     return true;
 }
 
@@ -50,7 +50,7 @@ void Server::handleDatagram(NET_Datagram* dgram)
 {
     const char* addr = NET_GetAddressString(dgram->addr);
     SDL_Log("Server: received %d bytes from %s:%d", dgram->buflen, addr, dgram->port);
-    SDL_Log("Server: data: %.*s", dgram->buflen, (const char*)dgram->buf);
+    SDL_Log("Server: data: %.*s", dgram->buflen, reinterpret_cast<const char*>(dgram->buf));
 
     // Echo back to sender.
     NET_SendDatagram(sock, dgram->addr, dgram->port, dgram->buf, dgram->buflen);

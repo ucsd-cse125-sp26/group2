@@ -50,7 +50,7 @@ bool Client::poll()
     NET_Datagram* dgram = nullptr;
     NET_ReceiveDatagram(sock, &dgram);
     if (dgram) {
-        SDL_Log("Received (%d bytes): %.*s", dgram->buflen, dgram->buflen, (const char*)dgram->buf);
+        SDL_Log("Received (%d bytes): %.*s", dgram->buflen, dgram->buflen, reinterpret_cast<const char*>(dgram->buf));
         NET_DestroyDatagram(dgram);
         return true;
     }
