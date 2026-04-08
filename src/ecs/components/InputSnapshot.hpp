@@ -22,7 +22,12 @@ struct InputSnapshot
     bool jump{false};
     bool crouch{false};
 
-    // Camera orientation (radians, absolute)
+    // Camera orientation (radians, absolute).
+    // yaw   — horizontal look, accumulated from mouse X deltas
+    // pitch — vertical look, clamped to [-89°, +89°] by InputSampleSystem
+    // roll  — currently always 0; reserved for dynamic movement tilt effects
+    //         (e.g. lean into strafes, wallrun tilt) without breaking anything downstream
     float yaw{0.0f};
     float pitch{0.0f};
+    float roll{0.0f};
 };

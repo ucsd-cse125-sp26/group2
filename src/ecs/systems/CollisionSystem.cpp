@@ -8,37 +8,124 @@
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
 
+#include <glm/geometric.hpp>
+
 namespace systems
 {
 
-// Distance the bump loop pushes entities off a surface after each contact.
-// Prevents floating-point error from leaving the entity 1–2 ULP inside the
-// plane on the next tick, which would cause the sweep to skip it.
-static constexpr float k_pushback = 0.03125f; // Quake's DIST_EPSILON = 1/32
+static constexpr float k_pushback = 0.03125f;                         // Quake DIST_EPSILON
+static constexpr float k_groundProbeDistance = physics::k_stepHeight; // also used for slope snap
 
-// How far below the current position to probe for a floor each tick.
-// Must be > k_pushback so the probe always reaches past the pushback gap.
-// Intentionally larger than one tick of gravity-induced velocity so we
-// detect ground even when the entity is resting with near-zero velocity.
-static constexpr float k_groundProbeDistance = 0.1f;
+// ---------------------------------------------------------------------------
+// depenetrate
+//
+// Runs before the bump loop. If the entity starts inside any plane (from
+// shape changes like uncrouch, spawn, or floating-point accumulation), push
+// it out along the plane normal until it is clearly outside.
+//
+// Without this, sweepAABB's "if (distStart < k_r) continue" guard silently
+// skips penetrated planes, allowing the entity to fall through geometry.
+// ---------------------------------------------------------------------------
+static void
+depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, std::span<const physics::Plane> planes)
+{
+    for (const physics::Plane& plane : planes) {
+        const float k_r = std::abs(plane.normal.x) * halfExtents.x + std::abs(plane.normal.y) * halfExtents.y +
+                          std::abs(plane.normal.z) * halfExtents.z;
 
+        const float k_dist = glm::dot(plane.normal, pos) - plane.distance;
+
+        if (k_dist < k_r) {
+            // Push entity out so it sits just outside the surface.
+            const float k_overlap = k_r - k_dist;
+            pos += plane.normal * (k_overlap + k_pushback);
+
+            // Kill velocity into the plane so the entity doesn't immediately
+            // re-penetrate on the next tick.
+            const float k_into = glm::dot(vel, plane.normal);
+            if (k_into < 0.0f)
+                vel -= plane.normal * k_into;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// tryStepUp — attempt to step over a low obstacle when a wall is hit.
+// ---------------------------------------------------------------------------
+static bool tryStepUp(glm::vec3& pos,
+                      glm::vec3& vel,
+                      const glm::vec3& halfExtents,
+                      float remainingTime,
+                      std::span<const physics::Plane> planes)
+{
+    const glm::vec3 k_stepVec{0.0f, physics::k_stepHeight, 0.0f};
+
+    // 1. Lift straight up — abort if ceiling blocks.
+    const glm::vec3 k_liftEnd = pos + k_stepVec;
+    const physics::HitResult k_lift = physics::sweepAABB(halfExtents, pos, k_liftEnd, planes);
+    if (k_lift.hit)
+        return false;
+
+    // 2. Sweep horizontally at step height — abort if still blocked.
+    const glm::vec3 k_horizEnd = k_liftEnd + glm::vec3{vel.x * remainingTime, 0.0f, vel.z * remainingTime};
+    const physics::HitResult k_horizSweep = physics::sweepAABB(halfExtents, k_liftEnd, k_horizEnd, planes);
+    if (k_horizSweep.hit)
+        return false;
+
+    // 3. Drop back down — must land on a floor-like surface.
+    const glm::vec3 k_dropEnd = k_horizEnd - k_stepVec;
+    const physics::HitResult k_drop = physics::sweepAABB(halfExtents, k_horizEnd, k_dropEnd, planes);
+
+    if (!k_drop.hit || k_drop.normal.y <= 0.7f)
+        return false;
+
+    pos = k_horizEnd - k_stepVec * k_drop.tFirst;
+    pos += k_drop.normal * k_pushback;
+    vel.y = 0.0f;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// snapToGround — keep entity glued to descending slopes / step-downs.
+// ---------------------------------------------------------------------------
+static void
+snapToGround(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, std::span<const physics::Plane> planes)
+{
+    const glm::vec3 k_probeTarget = pos - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
+
+    const physics::HitResult k_snap = physics::sweepAABB(halfExtents, pos, k_probeTarget, planes);
+
+    if (!k_snap.hit || k_snap.normal.y <= 0.7f)
+        return;
+
+    pos = pos - glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
+    pos += k_snap.normal * k_pushback;
+    vel.y = 0.0f;
+}
+
+// ---------------------------------------------------------------------------
+// runCollision
+// ---------------------------------------------------------------------------
 void runCollision(Registry& registry, float dt, std::span<const physics::Plane> planes)
 {
     registry.view<Position, Velocity, CollisionShape, PlayerState>().each(
         [dt, planes](Position& pos, Velocity& vel, const CollisionShape& shape, PlayerState& state) {
-            // ----------------------------------------------------------------
-            // Phase 1 — Bump loop (collision response)
-            //
-            // Sweeps the AABB along the intended movement path and resolves
-            // any contacts by moving to the contact point, clipping velocity,
-            // and retrying with the remaining time. Up to 4 iterations handles
-            // corners and triple-surface contacts (Quake PM_SlideMove style).
-            //
-            // This phase answers: "where does the entity end up this tick?"
-            // It does NOT set grounded — see Phase 2.
-            // ----------------------------------------------------------------
+            const bool k_wasGrounded = state.grounded;
             state.grounded = false;
 
+            // ----------------------------------------------------------------
+            // Phase 0 — Depenetration
+            //
+            // Fix any overlap between the AABB and world planes that was
+            // introduced this tick by shape changes (crouch/uncrouch), spawn,
+            // or floating-point accumulation. Must run before the bump loop so
+            // the sweep does not skip penetrated planes.
+            // ----------------------------------------------------------------
+            depenetrate(pos.value, vel.value, shape.halfExtents, planes);
+
+            // ----------------------------------------------------------------
+            // Phase 1 — Bump loop (collision response + stair stepping)
+            // ----------------------------------------------------------------
             float remainingTime = dt;
 
             for (int clip = 0; clip < 4 && remainingTime > 1e-5f; ++clip) {
@@ -50,37 +137,36 @@ void runCollision(Registry& registry, float dt, std::span<const physics::Plane> 
                     break;
                 }
 
-                // Move to the contact point.
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
-                // Push slightly off the surface so floating-point error cannot
-                // leave the entity inside the plane on the next tick.
-                pos.value += k_hit.normal * k_pushback;
-
-                // Clip velocity to slide along the surface.
                 const bool k_isFloor = k_hit.normal.y > 0.7f;
-                const float k_overbounce = k_isFloor ? physics::k_overbounceFloor : physics::k_overbounceWall;
 
-                vel.value = physics::clipVelocity(vel.value, k_hit.normal, k_overbounce);
+                if (k_isFloor) {
+                    pos.value += k_hit.normal * k_pushback;
+                    vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
+                } else {
+                    if (k_wasGrounded && tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, planes)) {
+                        state.grounded = true;
+                        break;
+                    }
+
+                    pos.value += k_hit.normal * k_pushback;
+                    vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceWall);
+                }
             }
 
             // ----------------------------------------------------------------
-            // Phase 2 — Ground probe (grounded detection)
-            //
-            // This phase answers a different question from Phase 1:
-            // "is the entity currently standing on a floor surface?"
-            //
-            // The bump loop cannot reliably answer this because when the entity
-            // is at rest (vel.y ≈ 0) the sweep produces no hit — it isn't
-            // moving toward the plane — so grounded would flip false every
-            // other tick, causing gravity to kick in and producing a visible
-            // bounce / oscillation.
-            //
-            // The fix: after movement is resolved, cast the AABB straight down
-            // by k_groundProbeDistance. If a floor surface is within that
-            // distance, the entity is grounded. The probe never moves the
-            // entity or clips velocity — it only sets the flag.
+            // Phase 2 — Slope sticking
+            // ----------------------------------------------------------------
+            if (k_wasGrounded) {
+                const float k_horizSpeed = glm::length(glm::vec3{vel.value.x, 0.0f, vel.value.z});
+                if (k_horizSpeed > 0.001f)
+                    snapToGround(pos.value, vel.value, shape.halfExtents, planes);
+            }
+
+            // ----------------------------------------------------------------
+            // Phase 3 — Ground probe
             // ----------------------------------------------------------------
             const glm::vec3 k_probeTarget = pos.value - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
 

@@ -28,7 +28,8 @@ private:
     Registry registry;
     Client client;
 
-    Uint64 prevTime = 0;      // SDL performance counter at last iterate() call
-    float accumulator = 0.0f; // seconds of unprocessed physics time
-    int tickCount = 0;        // total physics ticks since start
+    Uint64 prevTime = 0;       // SDL performance counter at last iterate() call
+    float accumulator = 0.0f;  // seconds of unprocessed physics time
+    int tickCount = 0;         // total physics ticks since start
+    bool mouseCaptured = true; // whether relative mouse mode is active
 };

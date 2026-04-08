@@ -204,6 +204,7 @@ add_executable(group2
         src/ecs/components/PlayerState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/LocalPlayer.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
         src/ecs/physics/Movement.cpp
@@ -271,6 +272,7 @@ add_executable(server
         src/ecs/components/PlayerState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/LocalPlayer.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
         src/ecs/physics/Movement.cpp

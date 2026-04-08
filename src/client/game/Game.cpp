@@ -1,12 +1,15 @@
 #include "Game.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "systems/InputSampleSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -60,34 +63,65 @@ bool Game::init()
         return false;
     }
 
-    // Spawn a local test entity: starts at y=200, not grounded — will fall and land.
+    // Grab the mouse into relative mode so camera look works immediately.
+    SDL_SetWindowRelativeMouseMode(window, true);
+    mouseCaptured = true;
+
+    // Spawn the local player entity with all physics and input components.
     const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
-    const entt::entity k_testEntity = registry.create();
-    registry.emplace<Position>(k_testEntity, k_startPos);
-    registry.emplace<PreviousPosition>(k_testEntity, k_startPos);
-    registry.emplace<Velocity>(k_testEntity);
-    registry.emplace<CollisionShape>(k_testEntity);
-    registry.emplace<PlayerState>(k_testEntity);
+    const entt::entity k_player = registry.create();
+    registry.emplace<Position>(k_player, k_startPos);
+    registry.emplace<PreviousPosition>(k_player, k_startPos);
+    registry.emplace<Velocity>(k_player);
+    registry.emplace<CollisionShape>(k_player);
+    registry.emplace<PlayerState>(k_player);
+    registry.emplace<InputSnapshot>(k_player);
+    registry.emplace<LocalPlayer>(k_player); // marks this as the locally controlled entity
 
     prevTime = SDL_GetPerformanceCounter();
-    SDL_Log("[client] spawned test entity, physicsHz=%d", k_physicsHz);
+    SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
 }
 
 SDL_AppResult Game::event(SDL_Event* event)
 {
     // Forward every event to ImGui first so it can capture keyboard/mouse
-    // when the cursor is over a window.
+    // when the cursor is hovering over a window.
     debugUI.processEvent(event);
 
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
-    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE)
-        return SDL_APP_SUCCESS;
-    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_SPACE) {
-        static constexpr char k_helloMsg[] = "Hello from client!";
-        client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
-        SDL_Log("Sent message to server");
+
+    if (event->type == SDL_EVENT_KEY_DOWN) {
+        switch (event->key.key) {
+        // Q — quit
+        case SDLK_Q:
+            return SDL_APP_SUCCESS;
+
+        // ESC — toggle mouse capture so the player can reach the ImGui window.
+        // Re-press ESC (or click the window) to re-capture.
+        case SDLK_ESCAPE:
+            mouseCaptured = !mouseCaptured;
+            SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
+            break;
+
+        // F1 — send a test hello packet to the server
+        case SDLK_F1: {
+            static constexpr char k_helloMsg[] = "Hello from client!";
+            client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
+            SDL_Log("Sent test packet to server");
+            break;
+        }
+
+        default:
+            break;
+        }
+    }
+
+    // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
+    if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouseCaptured) {
+        mouseCaptured = true;
+        SDL_SetWindowRelativeMouseMode(window, true);
     }
 
     return SDL_APP_CONTINUE;
@@ -99,6 +133,14 @@ SDL_AppResult Game::iterate()
     // Must happen before any ImGui calls this frame, including buildUI().
     debugUI.newFrame();
 
+    // --- Sample input -------------------------------------------------------
+    // Run once per frame before the physics loop. Mouse deltas are consumed
+    // here; running this inside the physics loop would accumulate them multiple
+    // times per frame, making the camera too sensitive at high frame rates.
+    // Input is NOT sampled when the mouse is uncaptured (ImGui is being used).
+    if (mouseCaptured)
+        systems::runInputSample(registry);
+
     // --- Compute frame time -------------------------------------------------
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
@@ -106,13 +148,11 @@ SDL_AppResult Game::iterate()
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
     prevTime = k_now;
 
-    // Guard against lag spikes causing physics to spiral.
     frameTime = std::min(frameTime, 0.25f);
     accumulator += frameTime;
 
     // --- Fixed-step physics -------------------------------------------------
     while (accumulator >= k_physicsDt) {
-        // Save positions so the renderer can interpolate between ticks.
         registry.view<Position, PreviousPosition>().each(
             [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
@@ -127,12 +167,8 @@ SDL_AppResult Game::iterate()
     while (client.poll()) {
     }
 
-    // --- Build debug UI -----------------------------------------------------
+    // --- Build debug UI and render ------------------------------------------
     debugUI.buildUI(registry, tickCount);
-
-    // --- Finalise ImGui + render --------------------------------------------
-    // debugUI.render() calls ImGui::Render(), producing the draw list.
-    // renderer.drawFrame() submits the scene triangle then the ImGui overlay.
     debugUI.render();
     renderer.drawFrame();
 
@@ -141,9 +177,8 @@ SDL_AppResult Game::iterate()
 
 void Game::quit()
 {
-    // Shutdown order is the reverse of init order.
-    renderer.quit();    // GPU backend shutdown first
-    debugUI.shutdown(); // Context destroyed last
+    renderer.quit();
+    debugUI.shutdown();
     client.shutdown();
     SDL_DestroyWindow(window);
     NET_Quit();

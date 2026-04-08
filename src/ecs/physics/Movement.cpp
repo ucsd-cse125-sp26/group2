@@ -3,7 +3,9 @@
 #include "PhysicsConstants.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
 
 namespace physics
 {
@@ -48,6 +50,33 @@ glm::vec3 clipVelocity(glm::vec3 vel, glm::vec3 normal, float overbounce)
 {
     const float k_backoff = glm::dot(vel, normal) * overbounce;
     return vel - normal * k_backoff; // anti wall sticking
+}
+
+glm::vec3 computeWishDir(float yaw, bool forward, bool back, bool left, bool right)
+{
+    // Build a local XZ move vector from key state.
+    // +Z is the forward direction in world space at yaw=0.
+    float moveX = 0.0f;
+    float moveZ = 0.0f;
+    if (forward)
+        moveZ += 1.0f;
+    if (back)
+        moveZ -= 1.0f;
+    if (left)
+        moveX -= 1.0f;
+    if (right)
+        moveX += 1.0f;
+
+    if (moveX == 0.0f && moveZ == 0.0f)
+        return glm::vec3{0.0f};
+
+    // Rotate the local move vector by the player's yaw to get world-space direction.
+    const float k_cosYaw = std::cos(yaw);
+    const float k_sinYaw = std::sin(yaw);
+
+    const glm::vec3 k_wish{moveX * k_cosYaw + moveZ * k_sinYaw, 0.0f, -moveX * k_sinYaw + moveZ * k_cosYaw};
+
+    return glm::normalize(k_wish);
 }
 
 } // namespace physics
