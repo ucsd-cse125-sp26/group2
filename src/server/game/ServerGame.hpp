@@ -3,20 +3,21 @@
 #include "ecs/registry/Registry.hpp"
 #include "network/Server.hpp"
 
-#include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL.h>
 
 // ---------------------------------------------------------------------------
 // ServerGame — top-level server game loop.
 //
-// Owns the ECS registry and the network server.  Each tick it drains
+// Owns the ECS registry and the network server. Each tick it drains
 // incoming datagrams, runs all ECS systems, and broadcasts state.
 // ---------------------------------------------------------------------------
 
 class ServerGame
 {
 public:
-    // Bind to addr:port and set the tick period (milliseconds).
-    bool init(const char* addr, Uint16 port, Uint32 tickRateMs);
+    // Bind to addr:port. tickRateHz controls how many physics ticks run per
+    // second — 128 is a good default for a LAN game.
+    bool init(const char* addr, Uint16 port, int tickRateHz = 128);
 
     // Block and run the game loop until shutdown() is requested.
     void run();
@@ -30,5 +31,6 @@ private:
     Server server;
     Registry registry;
     bool running = false;
-    Uint32 tickRateMs = 30;
+    int tickRateHz = 128;
+    int tickCount = 0; // total ticks since start, used for periodic logging
 };

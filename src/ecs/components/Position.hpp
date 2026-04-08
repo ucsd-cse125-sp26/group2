@@ -1,8 +1,9 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_POSITION_HPP
-#define GROUP2_POSITION_HPP
+#include <glm/vec3.hpp>
 
-#endif // GROUP2_POSITION_HPP
+// World-space position of an entity, in game units.
+struct Position
+{
+    glm::vec3 value{0.0f, 0.0f, 0.0f};
+};

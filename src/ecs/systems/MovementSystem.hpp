@@ -1,8 +1,16 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_MOVEMENTSYSTEM_HPP
-#define GROUP2_MOVEMENTSYSTEM_HPP
+#include "ecs/registry/Registry.hpp"
 
-#endif // GROUP2_MOVEMENTSYSTEM_HPP
+// Shared system — compiled identically on client and server.
+// Any divergence between the two sides is a bug.
+namespace systems
+{
+
+// For every entity with [Position, Velocity, PlayerState]:
+//   - airborne → applyGravity
+//   - grounded → applyGroundFriction
+//   - always   → pos += vel * dt
+void runMovement(Registry& registry, float dt);
+
+} // namespace systems

@@ -1,8 +1,11 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_PLAYERSTATE_HPP
-#define GROUP2_PLAYERSTATE_HPP
-
-#endif // GROUP2_PLAYERSTATE_HPP
+// Locomotion state flags for a player entity.
+// Read by MovementSystem to select the correct physics constants,
+// and written by CollisionSystem (grounded) and MovementSystem (crouching/sliding).
+struct PlayerState
+{
+    bool grounded{false};  // touching a floor surface this tick
+    bool crouching{false}; // crouch input held; CollisionShape.halfExtents.y is reduced
+    bool sliding{false};   // momentum slide active (crouch at speed)
+};
