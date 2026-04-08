@@ -22,32 +22,20 @@
 class DebugUI
 {
 public:
-    // Create the ImGui context and initialise the SDL3 input backend.
     bool init(SDL_Window* window);
-
-    // Shutdown SDL3 backend and destroy the ImGui context.
     void shutdown();
-
-    // Forward one SDL event to ImGui. Call at the top of Game::event().
     void processEvent(const SDL_Event* event);
-
-    // Start a new ImGui frame. Call at the top of Game::iterate().
     void newFrame();
-
-    // Build the ECS inspector window for this frame.
-    // tickCount is shown as a live counter so physics rate is visible.
     void buildUI(const Registry& registry, int tickCount);
-
-    // Finalise ImGui rendering (calls ImGui::Render).
-    // Must be called after buildUI() and before Renderer::drawFrame().
     void render();
 
 private:
     // Per-component visibility toggles — persistent across frames.
     bool showPosition = true;
-    bool showPrevPosition = false; // off by default — rarely useful at a glance
+    bool showPrevPosition = false;
     bool showVelocity = true;
     bool showCollisionShape = true;
     bool showPlayerState = true;
     bool showInputSnapshot = true;
+    bool showViewAngles = true; // yaw/pitch displayed in degrees for readability
 };

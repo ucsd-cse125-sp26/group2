@@ -7,6 +7,7 @@
 // Constants come from PhysicsConstants.hpp.
 namespace physics
 {
+
 // Apply gravity: subtract k_gravity * dt from the Y component.
 // Call every tick when the entity is airborne (not grounded).
 glm::vec3 applyGravity(glm::vec3 vel, float dt);
@@ -32,4 +33,10 @@ glm::vec3 accelerate(glm::vec3 vel, glm::vec3 wishDir, float wishSpeed, float ac
 // overbounce: k_overbounceFloor for floors,
 //             k_overbounceWall  for walls/ceilings.
 glm::vec3 clipVelocity(glm::vec3 vel, glm::vec3 normal, float overbounce);
+
+// Compute the horizontal wish direction from yaw angle and WASD booleans.
+// Returns a normalised XZ vector, or (0,0,0) if no keys are pressed.
+// Y component is always 0 — vertical movement is handled separately.
+glm::vec3 computeWishDir(float yaw, bool forward, bool back, bool left, bool right);
+
 } // namespace physics
