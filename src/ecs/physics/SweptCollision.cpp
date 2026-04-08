@@ -22,9 +22,10 @@ HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::
         const float k_distStart = glm::dot(plane.normal, start) - plane.distance;
         const float k_distEnd = glm::dot(plane.normal, end) - plane.distance;
 
-        // Skip if the entity starts touching or inside the plane — depenetration
-        // is handled by CollisionSystem, not here.
-        if (k_distStart <= k_r)
+        // Skip only if the entity is clearly inside the solid (not just touching).
+        // Entities exactly AT the surface (k_distStart == k_r) must NOT be skipped —
+        // they need a t=0 hit so grounded is set and velocity is clipped.
+        if (k_distStart < k_r)
             continue;
 
         // Skip if not moving toward the plane (moving away or parallel).
