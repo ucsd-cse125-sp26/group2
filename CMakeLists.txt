@@ -22,7 +22,6 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake")
 option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
-option(USE_ENTT     "Use EnTT ECS library (OFF = minimal stub)"        OFF)
 
 # ---- Dependencies ----
 
@@ -62,16 +61,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
-# EnTT — fast header-only ECS library (optional)
-if(USE_ENTT)
-    FetchContent_Declare(
-        EnTT
-        GIT_REPOSITORY https://github.com/skypjack/entt.git
-        GIT_TAG        v3.14.0
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(EnTT)
-endif()
+# EnTT — fast header-only ECS library
+FetchContent_Declare(
+    EnTT
+    GIT_REPOSITORY https://github.com/skypjack/entt.git
+    GIT_TAG        v3.14.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(EnTT)
 
 # ---- Shaders: GLSL → SPIR-V (→ MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
@@ -199,12 +196,8 @@ target_link_libraries(group2 PRIVATE
     SDL3::SDL3-static
     glm::glm
     SDL3_net::SDL3_net
+    EnTT::EnTT
 )
-
-if(USE_ENTT)
-    target_link_libraries(group2 PRIVATE EnTT::EnTT)
-    target_compile_definitions(group2 PRIVATE USE_ENTT)
-endif()
 
 # ===========================================================================
 # Server executable
@@ -228,12 +221,8 @@ target_include_directories(server PRIVATE
 target_link_libraries(server PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
+    EnTT::EnTT
 )
-
-if(USE_ENTT)
-    target_link_libraries(server PRIVATE EnTT::EnTT)
-    target_compile_definitions(server PRIVATE USE_ENTT)
-endif()
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
