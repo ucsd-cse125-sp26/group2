@@ -1,5 +1,6 @@
 #pragma once
 
+#include "debug/DebugUI.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
 #include "renderer/Renderer.hpp"
@@ -22,11 +23,12 @@ private:
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz);
 
     SDL_Window* window = nullptr;
+    DebugUI debugUI;
     Renderer renderer;
     Registry registry;
     Client client;
 
-    Uint64 prevTime = 0;      // SDL performance counter at the last iterate() call
+    Uint64 prevTime = 0;      // SDL performance counter at last iterate() call
     float accumulator = 0.0f; // seconds of unprocessed physics time
     int tickCount = 0;        // total physics ticks since start
 };

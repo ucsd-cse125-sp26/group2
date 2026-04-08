@@ -70,6 +70,37 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT)
 
+# ImGui — immediate-mode debug UI (client only).
+# ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
+# the source tree without calling add_subdirectory. We compile it ourselves
+# as imgui_lib below.
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.92.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui_lib STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp
+)
+target_include_directories(imgui_lib PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_link_libraries(imgui_lib PUBLIC SDL3::SDL3-static)
+# Suppress warnings coming from ImGui's own code — not our problem to fix.
+target_compile_options(imgui_lib PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
+    $<$<CXX_COMPILER_ID:MSVC>:/W0>
+)
+
 # ---- Shaders: GLSL → SPIR-V (→ MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
 #   Prefers glslc (shaderc); falls back to glslangValidator.
@@ -186,6 +217,8 @@ add_executable(group2
         src/client/systems/PredictionSystem.hpp
         src/client/systems/InputSendSystem.hpp
         src/client/systems/ReconciliationSystem.hpp
+        src/client/debug/DebugUI.hpp
+        src/client/debug/DebugUI.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -218,6 +251,7 @@ target_link_libraries(group2 PRIVATE
     glm::glm
     SDL3_net::SDL3_net
     EnTT::EnTT
+    imgui_lib
 )
 
 # ===========================================================================

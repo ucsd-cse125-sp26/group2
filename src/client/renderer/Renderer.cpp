@@ -1,11 +1,14 @@
 #include "Renderer.hpp"
 
-// Helpers
+#include <backends/imgui_impl_sdlgpu3.h>
+#include <imgui.h>
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 namespace
 {
-// Load a shader from disk.
-// path   — full path to the .spv or .msl file
-// stage  — vertex or fragment
+// Load a compiled shader from disk and create a GPU shader object.
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
                           const char* path,
                           SDL_GPUShaderFormat format,
@@ -45,14 +48,13 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
 }
 } // namespace
 
+// ---------------------------------------------------------------------------
 // Renderer implementation
+// ---------------------------------------------------------------------------
 bool Renderer::init(SDL_Window* win)
 {
     window = win;
 
-    // Advertise every shader format we have compiled shaders for.
-    // SDL3 picks the best available backend (Vulkan on Linux/Windows → SPIR-V,
-    // Metal on macOS → MSL).
     constexpr SDL_GPUShaderFormat k_wantedFormats = SDL_GPU_SHADERFORMAT_SPIRV
 #ifdef HAVE_MSL_SHADERS
                                                     | SDL_GPU_SHADERFORMAT_MSL
@@ -71,31 +73,43 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // Determine which single format the chosen backend actually uses.
     const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
     SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
 
-    if (k_available & SDL_GPU_SHADERFORMAT_SPIRV) {
+    if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
         activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
-    }
 #ifdef HAVE_MSL_SHADERS
     else if (k_available & SDL_GPU_SHADERFORMAT_MSL)
-    {
         activeFormat = SDL_GPU_SHADERFORMAT_MSL;
-    }
 #endif
 
     if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
-        SDL_Log("Renderer: no supported shader format available (got 0x%x)", static_cast<unsigned>(k_available));
+        SDL_Log("Renderer: no supported shader format (got 0x%x)", static_cast<unsigned>(k_available));
         return false;
     }
 
-    // Build paths to compiled shaders next to the binary.
-    const char* base = SDL_GetBasePath();
-    const char* ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    // ---- ImGui GPU backend -------------------------------------------------
+    // The ImGui context and SDL3 input backend were already initialised by
+    // DebugUI::init(). We just need to hook up the GPU render backend here.
+    const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
+
+    ImGui_ImplSDLGPU3_InitInfo imguiInfo{};
+    imguiInfo.Device = device;
+    imguiInfo.ColorTargetFormat = k_colorFmt;
+    imguiInfo.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+
+    if (!ImGui_ImplSDLGPU3_Init(&imguiInfo)) {
+        SDL_Log("Renderer: ImGui_ImplSDLGPU3_Init failed");
+        return false;
+    }
+
+    // ---- Scene pipeline (triangle) -----------------------------------------
+    const char* const k_base = SDL_GetBasePath();
+    const char* const k_ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+
     char vertPath[512], fragPath[512];
-    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/triangle.vert%s", base ? base : "", ext);
-    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/triangle.frag%s", base ? base : "", ext);
+    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/triangle.vert%s", k_base ? k_base : "", k_ext);
+    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/triangle.frag%s", k_base ? k_base : "", k_ext);
 
     SDL_GPUShader* vert = loadShader(device, vertPath, activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
     SDL_GPUShader* frag = loadShader(device, fragPath, activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
@@ -106,7 +120,7 @@ bool Renderer::init(SDL_Window* win)
     }
 
     SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
+    colorTarget.format = k_colorFmt;
 
     SDL_GPUGraphicsPipelineCreateInfo pci{};
     pci.vertex_shader = vert;
@@ -119,7 +133,6 @@ bool Renderer::init(SDL_Window* win)
 
     pipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
 
-    // Shaders are baked into the pipeline — release our references.
     SDL_ReleaseGPUShader(device, vert);
     SDL_ReleaseGPUShader(device, frag);
 
@@ -144,6 +157,12 @@ void Renderer::drawFrame()
         return;
     }
 
+    // Upload ImGui vertex/index buffers via an internal copy pass.
+    // This must happen BEFORE the render pass begins.
+    ImDrawData* const k_drawData = ImGui::GetDrawData();
+    if (k_drawData)
+        ImGui_ImplSDLGPU3_PrepareDrawData(k_drawData, cmd);
+
     SDL_GPUColorTargetInfo ct{};
     ct.texture = swapchain;
     ct.clear_color = {.r = 0.10f, .g = 0.10f, .b = 0.10f, .a = 1.0f};
@@ -151,10 +170,16 @@ void Renderer::drawFrame()
     ct.store_op = SDL_GPU_STOREOP_STORE;
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, nullptr);
-    SDL_BindGPUGraphicsPipeline(pass, pipeline);
-    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0); // 3 verts, 1 instance
-    SDL_EndGPURenderPass(pass);
 
+    // Scene geometry
+    SDL_BindGPUGraphicsPipeline(pass, pipeline);
+    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+
+    // ImGui overlay — drawn last so it sits on top of everything
+    if (k_drawData)
+        ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
+
+    SDL_EndGPURenderPass(pass);
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
@@ -162,6 +187,7 @@ void Renderer::quit()
 {
     if (device) {
         SDL_WaitForGPUIdle(device);
+        ImGui_ImplSDLGPU3_Shutdown();
         if (pipeline)
             SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
         SDL_ReleaseWindowFromGPUDevice(device, window);
