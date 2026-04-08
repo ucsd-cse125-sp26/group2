@@ -215,6 +215,8 @@ jobs:
             cxx: clang++
             binary_src: build/release/group2
             artifact: group2-linux-x86_64
+            server_binary_src: build/release/server
+            server_artifact: server-linux-x86_64
 
           - name: macOS
             os: macos-latest
@@ -223,6 +225,8 @@ jobs:
             cxx: clang++
             binary_src: build/release/group2
             artifact: group2-macos
+            server_binary_src: build/release/server
+            server_artifact: server-macos
 
           - name: Windows
             os: windows-latest
@@ -231,6 +235,8 @@ jobs:
             cxx: cl
             binary_src: build\release-win\group2.exe
             artifact: group2-windows-x86_64.exe
+            server_binary_src: build\release-win\server.exe
+            server_artifact: server-windows-x86_64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -308,20 +314,31 @@ jobs:
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
-      - name: Stage binary (Linux / macOS)
+      - name: Stage binaries (Linux / macOS)
         if: runner.os != 'Windows'
-        run: cp ${{ matrix.binary_src }} ${{ matrix.artifact }}
+        run: |
+          cp ${{ matrix.binary_src }} ${{ matrix.artifact }}
+          cp ${{ matrix.server_binary_src }} ${{ matrix.server_artifact }}
 
-      - name: Stage binary (Windows)
+      - name: Stage binaries (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item ${{ matrix.binary_src }} ${{ matrix.artifact }}
+        run: |
+          Copy-Item ${{ matrix.binary_src }} ${{ matrix.artifact }}
+          Copy-Item ${{ matrix.server_binary_src }} ${{ matrix.server_artifact }}
 
-      - name: Upload binary
+      - name: Upload client binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
+          retention-days: 7
+
+      - name: Upload server binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.server_artifact }}
+          path: ${{ matrix.server_artifact }}
           retention-days: 7
 
   # ------------------------------------------------------------------ #
@@ -385,4 +402,7 @@ jobs:
             $PRERELEASE_FLAG \
             group2-linux-x86_64 \
             group2-macos \
-            group2-windows-x86_64.exe
+            group2-windows-x86_64.exe \
+            server-linux-x86_64 \
+            server-macos \
+            server-windows-x86_64.exe

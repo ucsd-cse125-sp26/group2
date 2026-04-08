@@ -1,5 +1,7 @@
 #include "Game.hpp"
 
+#include <SDL3/SDL_video.h>
+
 #include <SDL3_net/SDL_net.h>
 
 bool Game::init()
@@ -28,6 +30,12 @@ bool Game::init()
         return false;
     }
 
+    if (!client.init("127.0.0.1", 9999)) {
+        SDL_Log("Failed to connect to server");
+        SDL_DestroyWindow(window);
+        return false;
+    }
+
     return true;
 }
 
@@ -37,12 +45,19 @@ SDL_AppResult Game::event(SDL_Event* event)
         return SDL_APP_SUCCESS;
     if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE)
         return SDL_APP_SUCCESS;
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_SPACE) {
+        const char* msg = "Hello from client!";
+        client.send(msg, static_cast<int>(strlen(msg)));
+        SDL_Log("Sent message to server");
+    }
 
     return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult Game::iterate()
 {
+    while (client.poll()) {
+    }
     renderer.drawFrame();
     return SDL_APP_CONTINUE;
 }
@@ -50,6 +65,7 @@ SDL_AppResult Game::iterate()
 void Game::quit()
 {
     renderer.quit();
+    client.shutdown();
     SDL_DestroyWindow(window);
     NET_Quit();
     SDL_Quit();

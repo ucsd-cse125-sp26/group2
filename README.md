@@ -159,6 +159,13 @@ one-time allocations that ASan flags as leaks. Suppress them with:
 LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/group2
 ```
 
+### Running Server
+
+```bash
+./build/debug/server      # Linux / macOS
+.\build\debug-win\server  # Windows
+```
+
 ---
 
 ## CMake options
