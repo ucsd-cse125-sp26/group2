@@ -54,7 +54,10 @@ AlignTrailingComments:
   OverEmptyLines:  1
 
 # Short forms — keep them readable
-AllowShortBlocksOnASingleLine:     Empty
+# AllowShortBlocksOnASingleLine: "Empty" causes clang-format 18 vs 22 to disagree
+# on empty loop bodies (while (x) {}).  "Never" is consistent across both versions;
+# empty function/record bodies are already governed by BraceWrapping above.
+AllowShortBlocksOnASingleLine:     Never
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortFunctionsOnASingleLine:  Inline
 AllowShortIfStatementsOnASingleLine: Never
