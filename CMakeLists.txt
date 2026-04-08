@@ -157,28 +157,24 @@ endforeach()
 
 add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
 
-# ---- Sources ----
-set(SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/Client.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Game.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/Game.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Renderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/Renderer.hpp"
+# ===========================================================================
+# Client executable (group2)
+# ===========================================================================
+add_executable(group2
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/main/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
 )
 
-# ===========================================================================
-# Executable
-# ===========================================================================
-add_executable(group2 ${SOURCES})
-
+# src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
+# src/client/ — for client-local headers (game/Game.hpp, network/Client.hpp, etc.)
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
-)
-
-add_executable(server
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/server_main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/Server.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
 )
 
 # Compile shaders before linking the binary.
@@ -198,7 +194,7 @@ if(SPIRV_CROSS)
     target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
 endif()
 
-# ---- Link libraries ----
+# ---- Client link libraries ----
 target_link_libraries(group2 PRIVATE
     SDL3::SDL3-static
     glm::glm
@@ -210,8 +206,34 @@ if(USE_ENTT)
     target_compile_definitions(group2 PRIVATE USE_ENTT)
 endif()
 
-target_include_directories(server PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(server PRIVATE SDL3::SDL3-static SDL3_net::SDL3_net)
+# ===========================================================================
+# Server executable
+# ===========================================================================
+add_executable(server
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/main/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
+)
+
+# src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
+# src/server/ — for server-local headers (game/ServerGame.hpp, network/Server.hpp, etc.)
+target_include_directories(server PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server"
+)
+
+# ---- Server link libraries ----
+target_link_libraries(server PRIVATE
+    SDL3::SDL3-static
+    SDL3_net::SDL3_net
+)
+
+if(USE_ENTT)
+    target_link_libraries(server PRIVATE EnTT::EnTT)
+    target_compile_definitions(server PRIVATE USE_ENTT)
+endif()
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
