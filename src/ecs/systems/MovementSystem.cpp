@@ -10,13 +10,12 @@ namespace systems
 
 void runMovement(Registry& registry, float dt)
 {
-    registry.view<Position, Velocity, PlayerState>().each([dt](Position& pos, Velocity& vel, PlayerState& state) {
+    // Velocity only — position integration is done by CollisionSystem via swept AABB.
+    registry.view<Position, Velocity, PlayerState>().each([dt](Position& /*pos*/, Velocity& vel, PlayerState& state) {
         if (state.grounded)
             vel.value = physics::applyGroundFriction(vel.value, dt);
         else
             vel.value = physics::applyGravity(vel.value, dt);
-
-        pos.value += vel.value * dt;
     });
 }
 
