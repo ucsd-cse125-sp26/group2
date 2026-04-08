@@ -1,0 +1,8 @@
+//
+// Created by user on 4/8/26.
+//
+
+#ifndef GROUP2_INPUTSENDSYSTEM_HPP
+#define GROUP2_INPUTSENDSYSTEM_HPP
+
+#endif // GROUP2_INPUTSENDSYSTEM_HPP

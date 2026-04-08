@@ -1,0 +1,8 @@
+//
+// Created by user on 4/8/26.
+//
+
+#ifndef GROUP2_INPUTSAMPLESYSTEM_HPP
+#define GROUP2_INPUTSAMPLESYSTEM_HPP
+
+#endif // GROUP2_INPUTSAMPLESYSTEM_HPP
