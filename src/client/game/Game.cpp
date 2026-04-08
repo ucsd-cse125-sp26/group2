@@ -47,7 +47,7 @@ SDL_AppResult Game::event(SDL_Event* event)
         return SDL_APP_SUCCESS;
     if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_SPACE) {
         const char* msg = "Hello from client!";
-        client.send(msg, (int)strlen(msg));
+        client.send(msg, static_cast<int>(strlen(msg)));
         SDL_Log("Sent message to server");
     }
 

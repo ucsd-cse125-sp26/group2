@@ -13,11 +13,11 @@ bool ServerGame::init(const char* addr, Uint16 port, Uint32 tickMs)
 void ServerGame::run()
 {
     running = true;
-    const float dt = static_cast<float>(tickRateMs) / 1000.0f;
+    const float k_dt = static_cast<float>(tickRateMs) / 1000.0f;
 
     while (running) {
         server.poll();
-        tick(dt);
+        tick(k_dt);
         SDL_Delay(tickRateMs);
     }
 }
