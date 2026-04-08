@@ -19,10 +19,10 @@ constexpr float k_maxGroundSpeed = 400.0f; ///< Maximum horizontal speed on grou
 constexpr float k_groundAccel = 15.0f;     ///< Ground acceleration constant. Higher = reaches max speed faster.
 
 // Air movement
-/// @brief Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
-constexpr float k_airAccel = 2.0f;
-/// @brief Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
-constexpr float k_airMaxSpeed = 30.0f;
+constexpr float k_airAccel =
+    2.0f;  ///< Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
+constexpr float k_airMaxSpeed =
+    30.0f; ///< Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
 
 // Friction
 constexpr float k_friction = 4.0f;    ///< Ground friction coefficient (Quake default).
