@@ -165,6 +165,19 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/components/Position.hpp
+        src/ecs/components/Velocity.hpp
+        src/ecs/components/CollisionShape.hpp
+        src/ecs/components/PlayerState.hpp
+        src/ecs/components/InputSnapshot.hpp
+        src/ecs/physics/Movement.hpp
+        src/ecs/physics/SweptCollision.hpp
+        src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.cpp
+        src/ecs/systems/CollisionSystem.cpp
+        src/ecs/systems/MovementSystem.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -208,6 +221,19 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/components/Position.hpp
+        src/ecs/components/Velocity.hpp
+        src/ecs/components/CollisionShape.hpp
+        src/ecs/components/PlayerState.hpp
+        src/ecs/components/InputSnapshot.hpp
+        src/ecs/physics/Movement.hpp
+        src/ecs/physics/SweptCollision.hpp
+        src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.cpp
+        src/ecs/systems/CollisionSystem.cpp
+        src/ecs/systems/MovementSystem.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

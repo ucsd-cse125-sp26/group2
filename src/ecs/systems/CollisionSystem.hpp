@@ -1,0 +1,8 @@
+//
+// Created by user on 4/8/26.
+//
+
+#ifndef GROUP2_COLLISIONSYSTEM_HPP
+#define GROUP2_COLLISIONSYSTEM_HPP
+
+#endif // GROUP2_COLLISIONSYSTEM_HPP

@@ -1,0 +1,8 @@
+//
+// Created by user on 4/8/26.
+//
+
+#ifndef GROUP2_SWEPTCOLLISION_HPP
+#define GROUP2_SWEPTCOLLISION_HPP
+
+#endif // GROUP2_SWEPTCOLLISION_HPP
