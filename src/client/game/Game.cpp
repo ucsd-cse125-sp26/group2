@@ -56,8 +56,7 @@ SDL_AppResult Game::event(SDL_Event* event)
 
 SDL_AppResult Game::iterate()
 {
-    while (client.poll()) {
-    }
+    while (client.poll()) {}
     renderer.drawFrame();
     return SDL_APP_CONTINUE;
 }
