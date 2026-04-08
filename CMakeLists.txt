@@ -17,6 +17,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(FetchContent)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Doxygen.cmake")
 
 # ---- Options ----
 option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
