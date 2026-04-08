@@ -172,12 +172,16 @@ add_executable(group2
         src/ecs/components/CollisionShape.hpp
         src/ecs/components/PlayerState.hpp
         src/ecs/components/InputSnapshot.hpp
+        src/ecs/components/PreviousPosition.hpp
+        src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
-        src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
-        src/ecs/systems/CollisionSystem.cpp
+        src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/systems/CollisionSystem.cpp
         src/client/systems/InputSampleSystem.hpp
         src/client/systems/PredictionSystem.hpp
         src/client/systems/InputSendSystem.hpp
@@ -232,12 +236,16 @@ add_executable(server
         src/ecs/components/CollisionShape.hpp
         src/ecs/components/PlayerState.hpp
         src/ecs/components/InputSnapshot.hpp
+        src/ecs/components/PreviousPosition.hpp
+        src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
-        src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
-        src/ecs/systems/CollisionSystem.cpp
+        src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/systems/CollisionSystem.cpp
         src/server/systems/InputReceiveSystem.hpp
         src/server/systems/BroadcastSystem.hpp
 )

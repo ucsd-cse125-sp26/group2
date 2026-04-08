@@ -1,8 +1,9 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_VELOCITY_HPP
-#define GROUP2_VELOCITY_HPP
+#include <glm/vec3.hpp>
 
-#endif // GROUP2_VELOCITY_HPP
+// Linear velocity of an entity, in game units per second.
+struct Velocity
+{
+    glm::vec3 value{0.0f, 0.0f, 0.0f};
+};
