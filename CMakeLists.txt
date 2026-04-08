@@ -178,6 +178,10 @@ add_executable(group2
         src/ecs/physics/SweptCollision.cpp
         src/ecs/systems/CollisionSystem.cpp
         src/ecs/systems/MovementSystem.cpp
+        src/client/systems/InputSampleSystem.hpp
+        src/client/systems/PredictionSystem.hpp
+        src/client/systems/InputSendSystem.hpp
+        src/client/systems/ReconciliationSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -234,6 +238,8 @@ add_executable(server
         src/ecs/physics/SweptCollision.cpp
         src/ecs/systems/CollisionSystem.cpp
         src/ecs/systems/MovementSystem.cpp
+        src/server/systems/InputReceiveSystem.hpp
+        src/server/systems/BroadcastSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
