@@ -1,6 +1,6 @@
 #include "Game.hpp"
 
-#include "SDL3/SDL_video.h"
+#include <SDL3/SDL_video.h>
 
 #include <SDL3_net/SDL_net.h>
 

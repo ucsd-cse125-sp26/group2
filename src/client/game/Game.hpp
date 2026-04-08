@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ecs/Registry.hpp"
-#include "net/Client.hpp"
+#include "ecs/registry/Registry.hpp"
+#include "network/Client.hpp"
 #include "renderer/Renderer.hpp"
 
 #include <SDL3/SDL.h>
