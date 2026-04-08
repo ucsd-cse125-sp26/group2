@@ -49,7 +49,7 @@ glm::vec3 accelerate(glm::vec3 vel, glm::vec3 wishDir, float wishSpeed, float ac
 glm::vec3 clipVelocity(glm::vec3 vel, glm::vec3 normal, float overbounce)
 {
     const float k_backoff = glm::dot(vel, normal) * overbounce;
-    return vel - normal * k_backoff; // anti wall sticking
+    return vel - normal * k_backoff;
 }
 
 glm::vec3 computeWishDir(float yaw, bool forward, bool back, bool left, bool right)

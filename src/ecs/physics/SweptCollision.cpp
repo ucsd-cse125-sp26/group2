@@ -10,10 +10,8 @@ HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::
     HitResult result; // hit=false, tFirst=1.0 by default
 
     for (const Plane& plane : planes) {
-        // Expand the plane outward by the AABB's extent in the plane's normal
-        // direction (Minkowski sum). This lets us treat the sweep as a point
-        // moving against the expanded plane.
-        //
+        // Expand the plane outward by the AABB's extent in the plane's normal direction
+        // (Minkowski sum). This lets us treat the sweep as a point vs. expanded plane.
         // r = how far the AABB "sticks out" in the normal direction.
         const float k_r = std::abs(plane.normal.x) * halfExtents.x + std::abs(plane.normal.y) * halfExtents.y +
                           std::abs(plane.normal.z) * halfExtents.z;
@@ -33,7 +31,7 @@ HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::
             continue;
 
         // Time at which the front face of the AABB reaches the expanded plane.
-        // Derivation: solve (k_distStart - k_r) + t * (k_distEnd - k_distStart) = 0
+        // Derivation: solve (k_distStart - k_r) + t*(k_distEnd - k_distStart) = 0
         const float k_t = (k_distStart - k_r) / (k_distStart - k_distEnd);
 
         if (k_t >= 0.0f && k_t < result.tFirst) {
