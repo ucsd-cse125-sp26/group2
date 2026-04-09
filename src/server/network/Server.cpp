@@ -1,5 +1,6 @@
 #include "Server.hpp"
 
+#include "network/InputPacket.hpp"
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL.h>
@@ -83,20 +84,35 @@ void Server::readClients()
 
 void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 {
+    if (len != sizeof(InputPacket)) {
+        SDL_Log("Server: received packet of invalid size %u (expected %zu)", len, sizeof(InputPacket));
+        return;
+    }
 
-    SDL_Log("Server: received %d bytes", len);
-    SDL_Log("Server: data: %.*s", len, static_cast<const char*>(data));
-
-    // echo
-    conn.msgStream.send(data, len);
-
-    // temp enqueue of events
-    Event event;
-    event.clientId = 0;
-    event.movementIntent.forward = true;
-
+    auto* pkt = static_cast<const InputPacket*>(data);
+    Event event = deserializePacket(*pkt);
     eventQueue.enqueue(event);
-    SDL_Log("Server: event queue size: %d", eventQueue.size());
+    conn.msgStream.send("Message received", 16);
+
+    SDL_Log("Server: received input packet:\n"
+            "\tforward=%d\n"
+            "\tback=%d\n"
+            "\tleft=%d\n"
+            "\tright=%d\n"
+            "\tjump=%d\n"
+            "\tcrouch=%d\n"
+            "\tyaw=%.2f\n"
+            "\tpitch=%.2f\n"
+            "\troll=%.2f",
+            event.movementIntent.forward,
+            event.movementIntent.back,
+            event.movementIntent.left,
+            event.movementIntent.right,
+            event.movementIntent.jump,
+            event.movementIntent.crouch,
+            event.movementIntent.yaw,
+            event.movementIntent.pitch,
+            event.movementIntent.roll);
 }
 
 bool Server::isEmpty()
@@ -107,4 +123,21 @@ bool Server::isEmpty()
 Event Server::dequeueEvent()
 {
     return eventQueue.dequeue();
+}
+
+Event Server::deserializePacket(const InputPacket& pkt)
+{
+    Event event;
+
+    event.movementIntent.forward = pkt.forward;
+    event.movementIntent.back = pkt.back;
+    event.movementIntent.left = pkt.left;
+    event.movementIntent.right = pkt.right;
+    event.movementIntent.jump = pkt.jump;
+    event.movementIntent.crouch = pkt.crouch;
+    event.movementIntent.yaw = pkt.yaw;
+    event.movementIntent.pitch = pkt.pitch;
+    event.movementIntent.roll = pkt.roll;
+
+    return event;
 }
