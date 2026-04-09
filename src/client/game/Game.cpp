@@ -76,7 +76,7 @@ bool Game::init()
     registry.emplace<CollisionShape>(k_player);
     registry.emplace<PlayerState>(k_player);
     registry.emplace<InputSnapshot>(k_player);
-    registry.emplace<LocalPlayer>(k_player); // marks this as the locally controlled entity
+    registry.emplace<LocalPlayer>(k_player);
 
     prevTime = SDL_GetPerformanceCounter();
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
@@ -94,18 +94,16 @@ SDL_AppResult Game::event(SDL_Event* event)
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
-        // Q — quit
         case SDLK_Q:
             return SDL_APP_SUCCESS;
 
         // ESC — toggle mouse capture so the player can reach the ImGui window.
-        // Re-press ESC (or click the window) to re-capture.
         case SDLK_ESCAPE:
             mouseCaptured = !mouseCaptured;
             SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
             break;
 
-        // F1 — send a test hello packet to the server
+        // F1 — send a test hello packet to the server.
         case SDLK_F1: {
             static constexpr char k_helloMsg[] = "Hello from client!";
             client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
@@ -129,29 +127,25 @@ SDL_AppResult Game::event(SDL_Event* event)
 
 SDL_AppResult Game::iterate()
 {
-    // --- ImGui frame start --------------------------------------------------
-    // Must happen before any ImGui calls this frame, including buildUI().
+    // ImGui frame start — must happen before any ImGui calls this frame.
     debugUI.newFrame();
 
-    // --- Sample input -------------------------------------------------------
-    // Run once per frame before the physics loop. Mouse deltas are consumed
-    // here; running this inside the physics loop would accumulate them multiple
-    // times per frame, making the camera too sensitive at high frame rates.
-    // Input is NOT sampled when the mouse is uncaptured (ImGui is being used).
+    // Sample input once per frame before the physics loop.
+    // Mouse deltas are consumed here; running inside the loop would
+    // accumulate them multiple times per frame at high frame rates.
     if (mouseCaptured)
         systems::runInputSample(registry);
 
-    // --- Compute frame time -------------------------------------------------
+    // Compute frame time.
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
     prevTime = k_now;
-
-    frameTime = std::min(frameTime, 0.25f);
+    frameTime = std::min(frameTime, 0.25f); // clamp to avoid spiral-of-death
     accumulator += frameTime;
 
-    // --- Fixed-step physics -------------------------------------------------
+    // Fixed-step physics loop.
     while (accumulator >= k_physicsDt) {
         registry.view<Position, PreviousPosition>().each(
             [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
@@ -163,11 +157,11 @@ SDL_AppResult Game::iterate()
         ++tickCount;
     }
 
-    // --- Network ------------------------------------------------------------
+    // Network receive.
     while (client.poll()) {
     }
 
-    // --- Build debug UI and render ------------------------------------------
+    // Build debug UI and render.
     debugUI.buildUI(registry, tickCount);
     debugUI.render();
     renderer.drawFrame();

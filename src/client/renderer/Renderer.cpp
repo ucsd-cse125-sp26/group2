@@ -3,12 +3,19 @@
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <imgui.h>
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 namespace
 {
-// Load a compiled shader from disk and create a GPU shader object.
+
+/// @brief Load a compiled shader from disk and create an SDL GPU shader object.
+/// @param dev                  The GPU device.
+/// @param path                 Path to the compiled shader file (.spv or .msl).
+/// @param format               Shader format (SPIR-V or MSL).
+/// @param stage                Vertex or fragment stage.
+/// @param samplerCount         Number of texture samplers declared in the shader.
+/// @param uniformBufferCount   Number of uniform buffers declared in the shader.
+/// @param storageBufferCount   Number of storage buffers declared in the shader.
+/// @param storageTextureCount  Number of storage textures declared in the shader.
+/// @return The created shader, or nullptr on failure (error logged via SDL_Log).
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
                           const char* path,
                           SDL_GPUShaderFormat format,
@@ -46,11 +53,9 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
         SDL_Log("Renderer: SDL_CreateGPUShader(%s) failed: %s", path, SDL_GetError());
     return shader;
 }
+
 } // namespace
 
-// ---------------------------------------------------------------------------
-// Renderer implementation
-// ---------------------------------------------------------------------------
 bool Renderer::init(SDL_Window* win)
 {
     window = win;
@@ -88,9 +93,9 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // ---- ImGui GPU backend -------------------------------------------------
+    // ImGui GPU backend setup.
     // The ImGui context and SDL3 input backend were already initialised by
-    // DebugUI::init(). We just need to hook up the GPU render backend here.
+    // DebugUI::init(). We just hook up the GPU render backend here.
     const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
 
     ImGui_ImplSDLGPU3_InitInfo imguiInfo{};
@@ -103,7 +108,7 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // ---- Scene pipeline (triangle) -----------------------------------------
+    // Scene pipeline (triangle).
     const char* const k_base = SDL_GetBasePath();
     const char* const k_ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
 
@@ -171,11 +176,11 @@ void Renderer::drawFrame()
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, nullptr);
 
-    // Scene geometry
+    // Scene geometry.
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 
-    // ImGui overlay — drawn last so it sits on top of everything
+    // ImGui overlay — drawn last so it sits on top of scene geometry.
     if (k_drawData)
         ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
 
