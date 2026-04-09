@@ -1,5 +1,7 @@
 #include "Renderer.hpp"
 
+#include "Camera.hpp"
+
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
@@ -144,7 +146,13 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    view = glm::lookAt(eye, target, up);
+    camera = Camera(eye,
+                    target,
+                    up,
+                    glm::degrees(fovy), // only if your fovy is currently radians
+                    1.0f,
+                    near,
+                    far);
 
     return true;
 }
@@ -177,9 +185,10 @@ void Renderer::drawFrame()
     float aspect = (h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f;
 
     Matrices mats{};
-    mats.model = glm::rotate(glm::mat4(1.0f), static_cast<float>(SDL_GetTicks()) * 0.001f, glm::vec3(0.0f, 1.0f, 0.0f));
-    mats.view = view;
-    mats.projection = glm::perspective(fovy, aspect, near, far);
+    mats.model = glm::mat4(1.0f);
+    camera.setAspect(aspect);
+    mats.view = camera.getView();
+    mats.projection = camera.getProjection();
 
     SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
 

@@ -39,6 +39,8 @@ bool Game::init()
     return true;
 }
 
+#define ANGLE 5.0f
+
 SDL_AppResult Game::event(SDL_Event* event)
 {
     if (event->type == SDL_EVENT_QUIT)
@@ -50,6 +52,16 @@ SDL_AppResult Game::event(SDL_Event* event)
         client.send(msg, static_cast<int>(strlen(msg)));
         SDL_Log("Sent message to server");
     }
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_W)
+        renderer.rotateCameraUp(ANGLE);
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_A)
+        renderer.rotateCameraRight(-ANGLE);
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_S)
+        renderer.rotateCameraUp(-ANGLE);
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_D)
+        renderer.rotateCameraRight(ANGLE);
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_R)
+        renderer.resetCamera();
 
     return SDL_APP_CONTINUE;
 }
