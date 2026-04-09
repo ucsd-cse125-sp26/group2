@@ -44,12 +44,12 @@ public:
     void render();
 
 private:
-    // Per-component visibility toggles — persistent across frames.
-    bool showPosition = true;
-    bool showPrevPosition = false;
-    bool showVelocity = true;
-    bool showCollisionShape = true;
-    bool showPlayerState = true;
-    bool showInputSnapshot = true;
-    bool showViewAngles = true; ///< Yaw/pitch displayed in degrees for readability.
+    /// Per-component visibility toggles — persistent across frames.
+    bool showPosition = true;       ///< Show Position component row.
+    bool showPrevPosition = false;  ///< Show PreviousPosition component row.
+    bool showVelocity = true;       ///< Show Velocity component row.
+    bool showCollisionShape = true; ///< Show CollisionShape half-extents row.
+    bool showPlayerState = true;    ///< Show PlayerState flags row.
+    bool showInputSnapshot = true;  ///< Show InputSnapshot key-state row.
+    bool showViewAngles = true;     ///< Show yaw/pitch/roll in degrees (easier to read than radians).
 };
