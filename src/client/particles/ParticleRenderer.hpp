@@ -86,6 +86,10 @@ private:
     SDL_GPUTexture* smokeNoise_ = nullptr;
     SDL_GPUSampler* smokeSampler_ = nullptr;
 
+    // ── Bullet hole / decal atlas (R8G8B8A8, procedural) ──────────────────
+    SDL_GPUTexture* decalTex_ = nullptr;
+    SDL_GPUSampler* decalSamp_ = nullptr;
+
     // ── SDF atlas (registered from outside after SdfAtlas::init) ──────────
     SDL_GPUTexture* sdfAtlasTex_ = nullptr;
     SDL_GPUSampler* sdfAtlasSamp_ = nullptr;
@@ -112,6 +116,7 @@ private:
                        SDL_GPUPrimitiveType prim = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST);
     void buildQuadIndexBuffer();
     void buildSmokeNoise();
+    void buildDecalTexture();
 
     static SDL_GPUColorTargetBlendState additiveBlend();
     static SDL_GPUColorTargetBlendState premulAlphaBlend();

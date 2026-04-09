@@ -10,5 +10,14 @@ layout(location = 0) out vec4 outColor;
 void main()
 {
     vec4 tex = texture(decalAtlas, vUV);
-    outColor = tex * vOpacity;
+
+    // tex.a encodes the circular mask (0 outside, 1 inside) + alpha-faded scorch.
+    // Multiply by per-decal fade opacity (ages toward 0 over time).
+    float alpha = tex.a * vOpacity;
+
+    // Discard near-invisible fragments so depth-biased quads don't waste fill rate.
+    if (alpha < 0.01)
+        discard;
+
+    outColor = vec4(tex.rgb, alpha);
 }

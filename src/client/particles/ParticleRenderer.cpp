@@ -323,6 +323,149 @@ void ParticleRenderer::buildSmokeNoise()
 }
 
 // ---------------------------------------------------------------------------
+// Bullet hole decal texture (R8G8B8A8, 128×128, procedural)
+// ---------------------------------------------------------------------------
+
+void ParticleRenderer::buildDecalTexture()
+{
+    constexpr int W = 128, H = 128;
+    // RGBA8: 4 bytes per pixel
+    std::vector<uint8_t> pixels(W * H * 4, 0);
+
+    const float cx = W * 0.5f;
+    const float cy = H * 0.5f;
+    const float outerR = W * 0.46f;  // outer edge of scorch fade
+    const float scorchR = W * 0.34f; // inner scorch / crater rim
+    const float craterR = W * 0.22f; // bullet hole proper
+    const float holeR = W * 0.14f;   // solid black centre
+
+    // Simple integer hash for procedural roughness
+    auto hash = [](int x, int y) -> float {
+        uint32_t h = static_cast<uint32_t>(x) * 1664525u + static_cast<uint32_t>(y) * 214013u + 2531011u;
+        h ^= (h >> 16);
+        h *= 0x45d9f3bu;
+        h ^= (h >> 16);
+        return static_cast<float>(h & 0xFFu) / 255.f;
+    };
+    // 3-sample smooth noise (very cheap)
+    auto noise = [&](float fx, float fy) -> float {
+        return (hash(static_cast<int>(fx), static_cast<int>(fy)) +
+                hash(static_cast<int>(fx) + 1, static_cast<int>(fy)) +
+                hash(static_cast<int>(fx), static_cast<int>(fy) + 1)) *
+               (1.f / 3.f);
+    };
+
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const float dx = static_cast<float>(x) - cx;
+            const float dy = static_cast<float>(y) - cy;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            // Procedural roughness displaces the radius boundary so edges look
+            // irregular rather than perfectly circular
+            const float n = noise(static_cast<float>(x) * 0.35f, static_cast<float>(y) * 0.35f);
+            const float roughR = r - n * 5.f; // wiggle up to 5 px
+
+            uint8_t* p = &pixels[(y * W + x) * 4];
+
+            if (roughR > outerR) {
+                // Fully transparent outside the decal circle
+                p[0] = p[1] = p[2] = p[3] = 0;
+
+            } else if (roughR < holeR) {
+                // Solid black bullet hole
+                const uint8_t dark = static_cast<uint8_t>(8 + n * 12);
+                p[0] = dark;
+                p[1] = dark;
+                p[2] = dark;
+                p[3] = 240;
+
+            } else if (roughR < craterR) {
+                // Crater: very dark grey with subtle radial gradient
+                const float t = (roughR - holeR) / (craterR - holeR);
+                const uint8_t col = static_cast<uint8_t>(15 + t * 25 + n * 20);
+                p[0] = col;
+                p[1] = static_cast<uint8_t>(col * 0.9f);
+                p[2] = static_cast<uint8_t>(col * 0.8f);
+                p[3] = 230;
+
+            } else if (roughR < scorchR) {
+                // Scorch ring: dark brown/grey with heat tint
+                const float t = (roughR - craterR) / (scorchR - craterR);
+                const uint8_t r8 = static_cast<uint8_t>(30 + t * 45 + n * 25);
+                const uint8_t g8 = static_cast<uint8_t>(22 + t * 32 + n * 18);
+                const uint8_t b8 = static_cast<uint8_t>(18 + t * 24 + n * 14);
+                p[0] = r8;
+                p[1] = g8;
+                p[2] = b8;
+                p[3] = static_cast<uint8_t>(200 + t * 30);
+
+            } else {
+                // Outer scorch fade — chips and soot, alpha tapers to 0
+                const float t = (roughR - scorchR) / (outerR - scorchR);
+                const float alpha = (1.f - t) * (0.6f + n * 0.4f);
+                const uint8_t col = static_cast<uint8_t>(55 + n * 40);
+                p[0] = col;
+                p[1] = static_cast<uint8_t>(col * 0.8f);
+                p[2] = static_cast<uint8_t>(col * 0.65f);
+                p[3] = static_cast<uint8_t>(alpha * 180.f);
+            }
+        }
+    }
+
+    SDL_GPUTextureCreateInfo tci{};
+    tci.type = SDL_GPU_TEXTURETYPE_2D;
+    tci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    tci.width = W;
+    tci.height = H;
+    tci.layer_count_or_depth = 1;
+    tci.num_levels = 1;
+    tci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    decalTex_ = SDL_CreateGPUTexture(device_, &tci);
+    if (!decalTex_) {
+        SDL_Log("ParticleRenderer: decal texture creation failed: %s", SDL_GetError());
+        return;
+    }
+
+    const uint32_t byteCount = W * H * 4;
+    SDL_GPUTransferBufferCreateInfo ti{};
+    ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    ti.size = byteCount;
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device_, &ti);
+    void* mapped = SDL_MapGPUTransferBuffer(device_, tb, false);
+    std::memcpy(mapped, pixels.data(), byteCount);
+    SDL_UnmapGPUTransferBuffer(device_, tb);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = tb;
+    src.offset = 0;
+    src.pixels_per_row = W;
+    src.rows_per_layer = H;
+
+    SDL_GPUTextureRegion dst{};
+    dst.texture = decalTex_;
+    dst.w = W;
+    dst.h = H;
+    dst.d = 1;
+
+    SDL_UploadToGPUTexture(cp, &src, &dst, false);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(device_, tb);
+
+    SDL_GPUSamplerCreateInfo sci{};
+    sci.min_filter = SDL_GPU_FILTER_LINEAR;
+    sci.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    decalSamp_ = SDL_CreateGPUSampler(device_, &sci);
+}
+
+// ---------------------------------------------------------------------------
 // init / quit
 // ---------------------------------------------------------------------------
 
@@ -345,6 +488,7 @@ bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
 
     buildQuadIndexBuffer();
     buildSmokeNoise();
+    buildDecalTexture();
 
     return buildPipelines();
 }
@@ -471,6 +615,14 @@ void ParticleRenderer::quit()
         SDL_ReleaseGPUTexture(device_, smokeNoise_);
         smokeNoise_ = nullptr;
     }
+    if (decalTex_) {
+        SDL_ReleaseGPUTexture(device_, decalTex_);
+        decalTex_ = nullptr;
+    }
+    if (decalSamp_) {
+        SDL_ReleaseGPUSampler(device_, decalSamp_);
+        decalSamp_ = nullptr;
+    }
     if (smokeSampler_) {
         SDL_ReleaseGPUSampler(device_, smokeSampler_);
         smokeSampler_ = nullptr;
@@ -571,14 +723,12 @@ void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cm
     };
 
     // 1. Decals (depth bias, alpha blend)
-    if (decalPipeline_ && decalBuf_.liveCount() > 0) {
+    if (decalPipeline_ && decalBuf_.liveCount() > 0 && decalTex_ && decalSamp_) {
         SDL_BindGPUGraphicsPipeline(pass, decalPipeline_);
         bindIndex();
         decalBuf_.bindAsVertexStorage(pass, 0);
-        if (smokeSampler_ && smokeNoise_) {
-            // decal uses its own atlas texture — smoke sampler is a placeholder
-            // until atlas is wired; for now bind smoke noise so frag doesn't crash
-            SDL_GPUTextureSamplerBinding tsb{smokeNoise_, smokeSampler_};
+        if (decalTex_ && decalSamp_) {
+            SDL_GPUTextureSamplerBinding tsb{decalTex_, decalSamp_};
             SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
         }
         drawQuads(decalBuf_.liveCount());
