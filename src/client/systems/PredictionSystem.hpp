@@ -1,8 +1,14 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_PREDICTIONSYSTEM_HPP
-#define GROUP2_PREDICTIONSYSTEM_HPP
+#include "ecs/registry/Registry.hpp"
 
-#endif // GROUP2_PREDICTIONSYSTEM_HPP
+/// @brief Client-side prediction system (not yet implemented).
+///
+/// Will apply local input immediately without waiting for server confirmation,
+/// storing snapshots in a ring buffer for reconciliation.
+namespace systems
+{
+
+// TODO: implement runPrediction()
+
+} // namespace systems

@@ -1,8 +1,11 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_INPUTSENDSYSTEM_HPP
-#define GROUP2_INPUTSENDSYSTEM_HPP
+#include "ecs/registry/Registry.hpp"
 
-#endif // GROUP2_INPUTSENDSYSTEM_HPP
+/// @brief Serialises and sends the local player's InputSnapshot to the server (not yet implemented).
+namespace systems
+{
+
+// TODO: implement runInputSend()
+
+} // namespace systems
