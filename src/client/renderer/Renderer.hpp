@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Camera.hpp"
+
 #include <SDL3/SDL.h>
 
 #include <glm/glm.hpp>
@@ -25,6 +27,10 @@ public:
     // Called before the window is destroyed. Waits for GPU idle, frees all resources.
     void quit();
 
+    void rotateCameraRight(float degrees) { camera.rotateRight(degrees); }
+    void rotateCameraUp(float degrees) { camera.rotateUp(degrees); }
+    void resetCamera() { camera.reset(); }
+
 private:
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
@@ -46,4 +52,6 @@ private:
     Uint32 depthHeight = 0;
 
     bool ensureDepthTexture(Uint32 w, Uint32 h);
+
+    Camera camera;
 };
