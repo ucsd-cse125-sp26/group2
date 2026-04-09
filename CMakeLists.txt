@@ -155,7 +155,7 @@ set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-set(SHADER_SOURCES triangle.vert triangle.frag)
+set(SHADER_SOURCES projective.vert normal.frag)
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
     # GLSL → SPIR-V
@@ -197,6 +197,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp

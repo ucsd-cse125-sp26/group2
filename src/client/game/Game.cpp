@@ -93,6 +93,8 @@ SDL_AppResult Game::event(SDL_Event* event)
         return SDL_APP_SUCCESS;
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
+        static constexpr float k_cameraAngle = 5.0f;
+
         switch (event->key.key) {
         case SDLK_Q:
             return SDL_APP_SUCCESS;
@@ -110,6 +112,25 @@ SDL_AppResult Game::event(SDL_Event* event)
             SDL_Log("Sent test packet to server");
             break;
         }
+
+        // WASD — orbit the 3D camera around the scene origin.
+        case SDLK_W:
+            renderer.rotateCameraUp(k_cameraAngle);
+            break;
+        case SDLK_S:
+            renderer.rotateCameraUp(-k_cameraAngle);
+            break;
+        case SDLK_A:
+            renderer.rotateCameraRight(-k_cameraAngle);
+            break;
+        case SDLK_D:
+            renderer.rotateCameraRight(k_cameraAngle);
+            break;
+
+        // R — reset camera to default position.
+        case SDLK_R:
+            renderer.resetCamera();
+            break;
 
         default:
             break;
