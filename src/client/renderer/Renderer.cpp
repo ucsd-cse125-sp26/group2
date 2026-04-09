@@ -1,5 +1,8 @@
 #include "Renderer.hpp"
 
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -100,10 +103,10 @@ bool Renderer::init(SDL_Window* win)
     const char* base = SDL_GetBasePath();
     const char* ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
     char vertPath[512], fragPath[512];
-    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/triangle.vert%s", base ? base : "", ext);
-    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/triangle.frag%s", base ? base : "", ext);
+    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/projective.vert%s", base ? base : "", ext);
+    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/normal.frag%s", base ? base : "", ext);
 
-    SDL_GPUShader* vert = loadShader(device, vertPath, activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0);
+    SDL_GPUShader* vert = loadShader(device, vertPath, activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
     SDL_GPUShader* frag = loadShader(device, fragPath, activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
@@ -120,8 +123,15 @@ bool Renderer::init(SDL_Window* win)
     pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pci.target_info.color_target_descriptions = &colorTarget;
     pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 
     pipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
 
@@ -134,8 +144,17 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
+    view = glm::lookAt(eye, target, up);
+
     return true;
 }
+
+struct Matrices
+{
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 projection;
+};
 
 void Renderer::drawFrame()
 {
@@ -150,29 +169,93 @@ void Renderer::drawFrame()
         return;
     }
 
+    if (!ensureDepthTexture(w, h)) {
+        SDL_SubmitGPUCommandBuffer(cmd);
+        return;
+    }
+
+    float aspect = (h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f;
+
+    Matrices mats{};
+    mats.model = glm::rotate(glm::mat4(1.0f), static_cast<float>(SDL_GetTicks()) * 0.001f, glm::vec3(0.0f, 1.0f, 0.0f));
+    mats.view = view;
+    mats.projection = glm::perspective(fovy, aspect, near, far);
+
+    SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
+
     SDL_GPUColorTargetInfo ct{};
     ct.texture = swapchain;
     ct.clear_color = {.r = 0.10f, .g = 0.10f, .b = 0.10f, .a = 1.0f};
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
     ct.store_op = SDL_GPU_STOREOP_STORE;
 
-    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, nullptr);
+    SDL_GPUDepthStencilTargetInfo dt{};
+    dt.texture = depthTexture;
+    dt.clear_depth = 1.0f;
+    dt.load_op = SDL_GPU_LOADOP_CLEAR;
+    dt.store_op = SDL_GPU_STOREOP_DONT_CARE;
+    dt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    dt.cycle = false;
+    dt.clear_stencil = 0;
+    // dt.mip_level = 0;
+    // dt.layer = 0;
+
+    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
-    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0); // 3 verts, 1 instance
+    SDL_DrawGPUPrimitives(pass, 36, 1, 0, 0);
     SDL_EndGPURenderPass(pass);
 
     SDL_SubmitGPUCommandBuffer(cmd);
+}
+
+bool Renderer::ensureDepthTexture(Uint32 w, Uint32 h)
+{
+    if (depthTexture && depthWidth == w && depthHeight == h)
+        return true;
+
+    if (depthTexture) {
+        SDL_ReleaseGPUTexture(device, depthTexture);
+        depthTexture = nullptr;
+    }
+
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    info.width = w;
+    info.height = h;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+
+    depthTexture = SDL_CreateGPUTexture(device, &info);
+    if (!depthTexture) {
+        SDL_Log("Renderer: failed to create depth texture: %s", SDL_GetError());
+        return false;
+    }
+
+    depthWidth = w;
+    depthHeight = h;
+    return true;
 }
 
 void Renderer::quit()
 {
     if (device) {
         SDL_WaitForGPUIdle(device);
+
+        if (depthTexture)
+            SDL_ReleaseGPUTexture(device, depthTexture);
+
         if (pipeline)
             SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+
         SDL_ReleaseWindowFromGPUDevice(device, window);
         SDL_DestroyGPUDevice(device);
     }
+
+    depthTexture = nullptr;
     pipeline = nullptr;
     device = nullptr;
     window = nullptr;
