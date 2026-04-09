@@ -148,8 +148,19 @@ SDL_AppResult Game::iterate()
 
     // Fixed-step physics loop.
     while (accumulator >= k_physicsDt) {
+        // Snapshot positions for sub-tick interpolation.
         registry.view<Position, PreviousPosition>().each(
             [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+        // Snapshot yaw/pitch for sub-tick interpolation.
+        // Mirrors the PreviousPosition pattern: prevTickYaw/Pitch hold the
+        // orientation at the START of this tick so the renderer can interpolate
+        // orientation with the same alpha as position — keeping eye and look-
+        // direction on the same timebase and eliminating strafe+rotate jitter.
+        registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
+            snap.prevTickYaw = snap.yaw;
+            snap.prevTickPitch = snap.pitch;
+        });
 
         systems::runMovement(registry, k_physicsDt);
         systems::runCollision(registry, k_physicsDt, k_worldPlanes);
@@ -174,6 +185,9 @@ SDL_AppResult Game::iterate()
             const InputSnapshot& input,
             const CollisionShape& shape) {
             // Sub-tick render interpolation: smooths motion at any framerate.
+            // Both position AND orientation are interpolated with the same alpha
+            // so the camera eye and look-direction advance in lockstep, eliminating
+            // the jitter that appears when strafing and rotating simultaneously.
             const float alpha = accumulator / k_physicsDt;
             const glm::vec3 interp = glm::mix(prev.value, pos.value, alpha);
 
@@ -182,8 +196,8 @@ SDL_AppResult Game::iterate()
             // This adapts automatically to crouching (halfExtents.y shrinks to 22).
             const float eyeOffset = shape.halfExtents.y * 0.77f;
             renderEye = interp + glm::vec3{0.0f, eyeOffset, 0.0f};
-            renderYaw = input.yaw;
-            renderPitch = input.pitch;
+            renderYaw = glm::mix(input.prevTickYaw, input.yaw, alpha);
+            renderPitch = glm::mix(input.prevTickPitch, input.pitch, alpha);
         });
 
     // Build debug UI and render.
