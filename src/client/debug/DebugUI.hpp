@@ -52,4 +52,10 @@ private:
     bool showPlayerState = true;    ///< Show PlayerState flags row.
     bool showInputSnapshot = true;  ///< Show InputSnapshot key-state row.
     bool showViewAngles = true;     ///< Show yaw/pitch/roll in degrees (easier to read than radians).
+    bool showMovementChart = true;  ///< Show the 2-D overhead movement chart window.
+
+    /// @brief Draw the standalone 2-D overhead movement chart window.
+    /// Shows the local player dot on a 3 000 × 3 000 unit grid together with
+    /// view-direction, velocity, and wish-velocity arrows.
+    void buildMovementChart(const Registry& registry);
 };
