@@ -287,6 +287,8 @@ add_executable(server
         src/ecs/systems/MovementSystem.cpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/systems/CollisionSystem.cpp
+        src/server/systems/EventQueue.hpp
+        src/server/systems/EventQueue.cpp
         src/server/systems/InputReceiveSystem.hpp
         src/server/systems/BroadcastSystem.hpp
         src/network/MessageStream.hpp
