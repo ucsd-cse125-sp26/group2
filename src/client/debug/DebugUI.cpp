@@ -255,8 +255,8 @@ void DebugUI::buildMovementChart(const Registry& registry)
 
     // ── coordinate helpers ────────────────────────────────────────────────────
     // World space:  ±1 500 units in X and Z, centred at the spawn origin.
-    // Chart axes:   world +X  → screen right
-    //               world +Z  → screen up  (flip, because screen Y grows downward)
+    // Chart axes:   world -X  → screen right  (camera right = world -X)
+    //               world +Z  → screen up     (flip, because screen Y grows downward)
     constexpr float k_worldHalf = 1500.0f;
     const float k_posScale = k_side / (2.0f * k_worldHalf); // px per world unit
 
@@ -265,7 +265,8 @@ void DebugUI::buildMovementChart(const Registry& registry)
     const float k_velScale = (k_side * 0.28f) / physics::k_maxGroundSpeed;
 
     const auto worldToScreen = [&](float wx, float wz) -> ImVec2 {
-        return {k_cursor.x + k_side * 0.5f + wx * k_posScale, k_cursor.y + k_side * 0.5f - wz * k_posScale};
+        return {k_cursor.x + k_side * 0.5f - wx * k_posScale, // negate X: world -X = screen right
+                k_cursor.y + k_side * 0.5f - wz * k_posScale};
     };
 
     // ── background ────────────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     // Axis labels at the edge of the canvas
     const auto labelOffset = 14.0f;
     dl->AddText(worldToScreen(-4.0f, k_worldHalf - labelOffset), IM_COL32(110, 110, 155, 200), "+Z");
-    dl->AddText(worldToScreen(k_worldHalf - labelOffset - 4.0f, -4.0f), IM_COL32(110, 110, 155, 200), "+X");
+    dl->AddText(worldToScreen(k_worldHalf - labelOffset - 4.0f, -4.0f), IM_COL32(110, 110, 155, 200), "-X");
 
     // Small origin marker
     const ImVec2 k_orig = worldToScreen(0.0f, 0.0f);
@@ -309,12 +310,13 @@ void DebugUI::buildMovementChart(const Registry& registry)
         {
             const float sy = std::sin(input.yaw);
             const float cy = std::cos(input.yaw);
-            drawArrow(dl,
-                      k_pScreen,
-                      {k_pScreen.x + sy * k_viewScreenLen, k_pScreen.y - cy * k_viewScreenLen}, // flip Z
-                      IM_COL32(255, 225, 70, 215),
-                      2.0f,
-                      9.0f);
+            drawArrow(
+                dl,
+                k_pScreen,
+                {k_pScreen.x - sy * k_viewScreenLen, k_pScreen.y - cy * k_viewScreenLen}, // -X: world -X = screen right
+                IM_COL32(255, 225, 70, 215),
+                2.0f,
+                9.0f);
         }
 
         // 2. Wish-velocity arrow — direction + magnitude relative to velocity scale.
@@ -325,7 +327,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
             drawArrow(
                 dl,
                 k_pScreen,
-                {k_pScreen.x + wishDir.x * wishSpeed * k_velScale, k_pScreen.y - wishDir.z * wishSpeed * k_velScale},
+                {k_pScreen.x - wishDir.x * wishSpeed * k_velScale, k_pScreen.y - wishDir.z * wishSpeed * k_velScale},
                 IM_COL32(70, 255, 130, 215),
                 2.0f,
                 8.0f);
@@ -334,7 +336,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
         // 3. Velocity arrow — actual XZ velocity at the same velocity scale.
         drawArrow(dl,
                   k_pScreen,
-                  {k_pScreen.x + vel.x * k_velScale, k_pScreen.y - vel.z * k_velScale},
+                  {k_pScreen.x - vel.x * k_velScale, k_pScreen.y - vel.z * k_velScale},
                   IM_COL32(75, 175, 255, 215),
                   2.5f,
                   10.0f);
