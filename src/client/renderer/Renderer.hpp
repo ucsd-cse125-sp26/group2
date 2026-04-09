@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <glm/glm.hpp>
+
 // ---------------------------------------------------------------------------
 // Renderer — SDL3 GPU pipeline (Vulkan · Metal · DX12).
 //
@@ -27,4 +29,21 @@ private:
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
+
+    // Camera stuff
+    glm::vec3 eye = glm::vec3(5.0f, 0.0f, 0.0f);
+    glm::vec3 target = glm::vec3(0.0f, 0.0f, 0.0f);
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    float fovy = glm::radians(60.0f);
+    float near = 0.01f;
+    float far = 100.0f;
+
+    glm::mat4 view = glm::mat4(1.0f); // view matrix
+    glm::mat4 proj = glm::mat4(1.0f); // projection matrix
+
+    SDL_GPUTexture* depthTexture = nullptr;
+    Uint32 depthWidth = 0;
+    Uint32 depthHeight = 0;
+
+    bool ensureDepthTexture(Uint32 w, Uint32 h);
 };

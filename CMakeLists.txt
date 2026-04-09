@@ -126,7 +126,7 @@ set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-set(SHADER_SOURCES triangle.vert triangle.frag)
+set(SHADER_SOURCES projective.vert normal.frag)
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
     # GLSL → SPIR-V
