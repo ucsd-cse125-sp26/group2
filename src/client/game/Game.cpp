@@ -9,6 +9,7 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
 
 #include <SDL3/SDL_video.h>
@@ -18,7 +19,6 @@
 #include <glm/glm.hpp>
 
 // World geometry for the current test scene: a single floor plane at y=0.
-// Will be replaced by a proper World object when map loading is implemented.
 static const std::array k_worldPlanes{physics::Plane{.normal = glm::vec3{0.0f, 1.0f, 0.0f}, .distance = 0.0f}};
 
 bool Game::init()
@@ -56,6 +56,19 @@ bool Game::init()
         return false;
     }
 
+    // Particle system needs the device + formats from the renderer.
+    if (!particleSystem.init(renderer.getDevice(), renderer.colorFormat, renderer.shaderFormat)) {
+        SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
+        // Non-fatal: game can run without particles
+    } else {
+        renderer.setParticleSystem(&particleSystem);
+
+        // Wire dispatcher events to particle system
+        dispatcher.sink<WeaponFiredEvent>().connect<&ParticleSystem::onWeaponFired>(particleSystem);
+        dispatcher.sink<ProjectileImpactEvent>().connect<&ParticleSystem::onImpact>(particleSystem);
+        dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
+    }
+
     if (!client.init("127.0.0.1", 9999)) {
         SDL_Log("Failed to connect to server");
         renderer.quit();
@@ -86,8 +99,6 @@ bool Game::init()
 
 SDL_AppResult Game::event(SDL_Event* event)
 {
-    // Forward every event to ImGui first so it can capture keyboard/mouse
-    // when the cursor is hovering over a window.
     debugUI.processEvent(event);
 
     if (event->type == SDL_EVENT_QUIT)
@@ -98,17 +109,48 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_Q:
             return SDL_APP_SUCCESS;
 
-        // ESC — toggle mouse capture so the player can reach the ImGui windows.
         case SDLK_ESCAPE:
             mouseCaptured = !mouseCaptured;
             SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
             break;
 
-        // F1 — send a test hello packet to the server.
         case SDLK_F1: {
             static constexpr char k_helloMsg[] = "Hello from client!";
             client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
             SDL_Log("Sent test packet to server");
+            break;
+        }
+
+        // ── Particle system test keys ───────────────────────────────────────
+        // cachedEye/camFwd are updated every iterate() frame; at worst one frame stale.
+        case SDLK_T: {
+            // Hitscan energy beam from hip-fire position
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            particleSystem.spawnHitscanBeam(hip, hip + cachedCamFwd_ * 400.f, WeaponType::EnergyRifle);
+            particleSystem.spawnImpactEffect(
+                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Energy, WeaponType::EnergyRifle);
+            break;
+        }
+        case SDLK_Y: {
+            // Bullet tracer from hip-fire position
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            particleSystem.spawnBulletTracer(hip, cachedCamFwd_, 400.f);
+            particleSystem.spawnImpactEffect(
+                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Metal, WeaponType::Rifle);
+            break;
+        }
+        case SDLK_U: {
+            particleSystem.spawnSmoke(cachedEye_ + cachedCamFwd_ * 200.f, 40.f);
+            break;
+        }
+        case SDLK_I: {
+            particleSystem.spawnExplosion(cachedEye_ + cachedCamFwd_ * 300.f, 100.f);
+            break;
+        }
+        case SDLK_O: {
+            particleSystem.drawScreenText({10.f, 40.f}, "HP 100  AMMO 30", {1.f, 1.f, 1.f, 1.f}, 24.f);
             break;
         }
 
@@ -117,7 +159,6 @@ SDL_AppResult Game::event(SDL_Event* event)
         }
     }
 
-    // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouseCaptured) {
         mouseCaptured = true;
         SDL_SetWindowRelativeMouseMode(window, true);
@@ -132,8 +173,6 @@ SDL_AppResult Game::iterate()
     debugUI.newFrame();
 
     // Sample input once per frame before the physics loop.
-    // Mouse deltas are consumed here; running inside the loop would
-    // accumulate them multiple times per frame at high frame rates.
     if (mouseCaptured)
         systems::runInputSample(registry);
 
@@ -143,7 +182,7 @@ SDL_AppResult Game::iterate()
 
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
     prevTime = k_now;
-    frameTime = std::min(frameTime, 0.25f); // clamp to avoid spiral-of-death
+    frameTime = std::min(frameTime, 0.25f);
     accumulator += frameTime;
 
     // Fixed-step physics loop.
@@ -158,12 +197,14 @@ SDL_AppResult Game::iterate()
         ++tickCount;
     }
 
+    // Flush dispatcher events (weapon fired, impact, explosion).
+    dispatcher.update();
+
     // Network receive.
     while (client.poll()) {
     }
 
-    // ── resolve first-person camera from local player ──────────────────────
-    // Default eye position used before the player entity is available.
+    // ── Resolve first-person camera from local player ──────────────────────
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
@@ -173,21 +214,29 @@ SDL_AppResult Game::iterate()
             const PreviousPosition& prev,
             const InputSnapshot& input,
             const CollisionShape& shape) {
-            // Sub-tick render interpolation: smooths motion at any framerate.
             const float alpha = accumulator / k_physicsDt;
             const glm::vec3 interp = glm::mix(prev.value, pos.value, alpha);
-
-            // Eye sits at ~77 % of the AABB half-height above the centre
-            // (≈ 64 units from feet for a standing player — standard FPS height).
-            // This adapts automatically to crouching (halfExtents.y shrinks to 22).
             const float eyeOffset = shape.halfExtents.y * 0.77f;
             renderEye = interp + glm::vec3{0.0f, eyeOffset, 0.0f};
             renderYaw = input.yaw;
             renderPitch = input.pitch;
         });
 
+    // ── Update particle system (render-rate, not physics-rate) ────────────
+    particleSystem.update(frameTime, renderer.getCamera(), registry);
+
+    // Draw persistent HUD text each frame
+    particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
+
+    // Compute camera forward and cache for event() key shortcuts
+    const float cosPitch = std::cos(renderPitch);
+    const glm::vec3 camFwd{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+    cachedEye_ = renderEye;
+    cachedCamFwd_ = camFwd;
+
     // Build debug UI and render.
     debugUI.buildUI(registry, tickCount);
+    debugUI.buildParticleUI(particleSystem, renderEye, camFwd);
     debugUI.render();
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
 
@@ -196,6 +245,7 @@ SDL_AppResult Game::iterate()
 
 void Game::quit()
 {
+    particleSystem.quit();
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();

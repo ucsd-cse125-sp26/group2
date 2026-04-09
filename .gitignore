@@ -2,7 +2,9 @@
 build/
 out/
 cmake-build-debug/
-.cache/
+.cache
+
+assets/
 
 # CMake artifacts (keep cmake/ module directory)
 CMakeFiles/

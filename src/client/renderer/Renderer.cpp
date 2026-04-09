@@ -1,65 +1,14 @@
 #include "Renderer.hpp"
 
 #include "Camera.hpp"
+#include "ShaderUtils.hpp"
+#include "particles/ParticleSystem.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <imgui.h>
-
-namespace
-{
-
-/// @brief Load a compiled shader from disk and create an SDL GPU shader object.
-/// @param dev                  The GPU device.
-/// @param path                 Path to the compiled shader file (.spv or .msl).
-/// @param format               Shader format (SPIR-V or MSL).
-/// @param stage                Vertex or fragment stage.
-/// @param samplerCount         Number of texture samplers declared in the shader.
-/// @param uniformBufferCount   Number of uniform buffers declared in the shader.
-/// @param storageBufferCount   Number of storage buffers declared in the shader.
-/// @param storageTextureCount  Number of storage textures declared in the shader.
-/// @return The created shader, or nullptr on failure (error logged via SDL_Log).
-SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
-                          const char* path,
-                          SDL_GPUShaderFormat format,
-                          SDL_GPUShaderStage stage,
-                          Uint32 samplerCount,
-                          Uint32 uniformBufferCount,
-                          Uint32 storageBufferCount,
-                          Uint32 storageTextureCount)
-{
-    size_t codeSize = 0;
-    void* code = SDL_LoadFile(path, &codeSize);
-    if (!code) {
-        SDL_Log("Renderer: failed to load shader %s: %s", path, SDL_GetError());
-        return nullptr;
-    }
-
-    SDL_GPUShaderCreateInfo info{};
-    info.code = static_cast<const Uint8*>(code);
-    info.code_size = static_cast<Uint32>(codeSize);
-    info.format = format;
-    info.stage = stage;
-    info.num_samplers = samplerCount;
-    info.num_uniform_buffers = uniformBufferCount;
-    info.num_storage_buffers = storageBufferCount;
-    info.num_storage_textures = storageTextureCount;
-
-    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL
-    // (Metal forbids a function literally named "main").
-    info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
-
-    SDL_GPUShader* shader = SDL_CreateGPUShader(dev, &info);
-    SDL_free(code);
-
-    if (!shader)
-        SDL_Log("Renderer: SDL_CreateGPUShader(%s) failed: %s", path, SDL_GetError());
-    return shader;
-}
-
-} // namespace
 
 bool Renderer::init(SDL_Window* win)
 {
@@ -84,28 +33,26 @@ bool Renderer::init(SDL_Window* win)
     }
 
     const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
-    SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
+    shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
 
     if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
-        activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
+        shaderFormat = SDL_GPU_SHADERFORMAT_SPIRV;
 #ifdef HAVE_MSL_SHADERS
     else if (k_available & SDL_GPU_SHADERFORMAT_MSL)
-        activeFormat = SDL_GPU_SHADERFORMAT_MSL;
+        shaderFormat = SDL_GPU_SHADERFORMAT_MSL;
 #endif
 
-    if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
+    if (shaderFormat == SDL_GPU_SHADERFORMAT_INVALID) {
         SDL_Log("Renderer: no supported shader format (got 0x%x)", static_cast<unsigned>(k_available));
         return false;
     }
 
     // ImGui GPU backend setup.
-    // The ImGui context and SDL3 input backend were already initialised by
-    // DebugUI::init(). We just hook up the GPU render backend here.
-    const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
+    colorFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
 
     ImGui_ImplSDLGPU3_InitInfo imguiInfo{};
     imguiInfo.Device = device;
-    imguiInfo.ColorTargetFormat = k_colorFmt;
+    imguiInfo.ColorTargetFormat = colorFormat;
     imguiInfo.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
 
     if (!ImGui_ImplSDLGPU3_Init(&imguiInfo)) {
@@ -113,16 +60,16 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // Scene pipeline (triangle).
+    // Scene pipeline (projective.vert + normal.frag).
     const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
 
     char vertPath[512], fragPath[512];
     SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/projective.vert%s", k_base ? k_base : "", k_ext);
     SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/normal.frag%s", k_base ? k_base : "", k_ext);
 
-    SDL_GPUShader* vert = loadShader(device, vertPath, activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
-    SDL_GPUShader* frag = loadShader(device, fragPath, activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
+    SDL_GPUShader* vert = loadShader(device, vertPath, shaderFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
+    SDL_GPUShader* frag = loadShader(device, fragPath, shaderFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
         SDL_ReleaseGPUShader(device, frag);
@@ -130,7 +77,7 @@ bool Renderer::init(SDL_Window* win)
     }
 
     SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = k_colorFmt;
+    colorTarget.format = colorFormat;
 
     SDL_GPUGraphicsPipelineCreateInfo pci{};
     pci.vertex_shader = vert;
@@ -159,10 +106,9 @@ bool Renderer::init(SDL_Window* win)
     }
 
     // Initial camera — eye/target are overridden every frame by drawFrame().
-    // near/far must be set correctly here; they persist across setAspect() calls.
-    camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f}, // eye  (overridden each frame)
-                    glm::vec3{0.0f, 100.0f, 1.0f}, // target
-                    glm::vec3{0.0f, 1.0f, 0.0f},   // up
+    camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},
+                    glm::vec3{0.0f, 100.0f, 1.0f},
+                    glm::vec3{0.0f, 1.0f, 0.0f},
                     fovyDegrees,
                     1.0f,
                     nearPlane,
@@ -171,6 +117,7 @@ bool Renderer::init(SDL_Window* win)
     return true;
 }
 
+// Uniform block layout shared with projective.vert (set=1, binding=0).
 struct Matrices
 {
     glm::mat4 model;
@@ -178,11 +125,23 @@ struct Matrices
     glm::mat4 projection;
 };
 
+// Uniform block layout shared with all particle shaders (set=1, binding=0).
+// Must match ParticleUniforms in every particle vertex shader.
+struct alignas(16) ParticleUniforms
+{
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::vec3 camPos;
+    float _p0;
+    glm::vec3 camRight;
+    float _p1;
+    glm::vec3 camUp;
+    float _p2;
+};
+
 void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
 {
     // ── first-person camera ─────────────────────────────────────────────────
-    // Forward vector from yaw (horizontal) and pitch (vertical).
-    // Convention matches InputSnapshot: yaw=0 → +Z, pitch>0 → looking down.
     const float cosPitch = std::cos(pitch);
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
     camera.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
@@ -206,23 +165,19 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
-    // All geometry is pre-positioned in world space, so model = identity.
-    Matrices mats{};
-    mats.model = glm::mat4(1.0f);
-    mats.view = camera.getView();
-    mats.projection = camera.getProjection();
+    // ── particle GPU upload (copy pass must happen BEFORE render pass) ──────
+    if (particleSystem)
+        particleSystem->uploadToGpu(cmd);
 
-    SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
-
-    // Upload ImGui vertex/index buffers via an internal copy pass.
-    // This must happen BEFORE the render pass begins.
+    // ── ImGui vertex/index upload (also before render pass) ─────────────────
     ImDrawData* const k_drawData = ImGui::GetDrawData();
     if (k_drawData)
         ImGui_ImplSDLGPU3_PrepareDrawData(k_drawData, cmd);
 
+    // ── render pass ─────────────────────────────────────────────────────────
     SDL_GPUColorTargetInfo ct{};
     ct.texture = swapchain;
-    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}; // dark-blue sky
+    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f};
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
     ct.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -238,14 +193,31 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
 
-    // Scene geometry:
-    //   verts  0-35  — reference cube (64-unit cube at world pos (0,0,400))
-    //   verts 36-41  — floor quad (4000×4000 units at y=0)
-    // One draw call; model = identity; checkerboard applied in fragment shader.
+    // ── 1. Scene geometry (cube + floor, model = identity) ──────────────────
+    Matrices mats{};
+    mats.model = glm::mat4(1.0f);
+    mats.view = camera.getView();
+    mats.projection = camera.getProjection();
+    SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
+
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
     SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
 
-    // ImGui overlay — drawn last so it sits on top of scene geometry.
+    // ── 2. Particles ─────────────────────────────────────────────────────────
+    if (particleSystem) {
+        // Re-push ParticleUniforms at slot 0 — overrides the Matrices push above.
+        ParticleUniforms pu{};
+        pu.view = camera.getView();
+        pu.proj = camera.getProjection();
+        pu.camPos = camera.getEye();
+        pu.camRight = camera.getRight();
+        pu.camUp = camera.getUp();
+        SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+
+        particleSystem->render(pass, cmd);
+    }
+
+    // ── 3. ImGui overlay ─────────────────────────────────────────────────────
     if (k_drawData)
         ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
 

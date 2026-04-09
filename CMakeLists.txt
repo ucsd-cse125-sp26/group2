@@ -71,6 +71,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT)
 
+# stb — single-header libraries (stb_truetype for SDF font baking)
+FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(stb)
+
 # ImGui — immediate-mode debug UI (client only).
 # ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
 # the source tree without calling add_subdirectory. We compile it ourselves
@@ -155,7 +164,26 @@ set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-set(SHADER_SOURCES projective.vert normal.frag)
+set(SHADER_SOURCES
+    projective.vert
+    normal.frag
+    particle_billboard.vert
+    particle_billboard.frag
+    tracer.vert
+    tracer.frag
+    ribbon.vert
+    ribbon.frag
+    hitscan_beam.vert
+    hitscan_beam.frag
+    lightning_arc.vert
+    lightning_arc.frag
+    smoke.vert
+    smoke.frag
+    decal.vert
+    decal.frag
+    sdf_text.vert
+    sdf_text.frag
+)
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
     # GLSL → SPIR-V
@@ -225,13 +253,53 @@ add_executable(group2
         src/client/debug/DebugUI.cpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        # ── Renderer utilities ──────────────────────────────────────────────
+        src/client/renderer/ShaderUtils.hpp
+        src/client/renderer/ShaderUtils.cpp
+        # ── Particle system ─────────────────────────────────────────────────
+        src/client/particles/GpuParticleBuffer.hpp
+        src/client/particles/GpuParticleBuffer.cpp
+        src/client/particles/ParticlePool.hpp
+        src/client/particles/ParticleTypes.hpp
+        src/client/particles/ParticleEvents.hpp
+        src/client/particles/ParticleRenderer.hpp
+        src/client/particles/ParticleRenderer.cpp
+        src/client/particles/ParticleSystem.hpp
+        src/client/particles/ParticleSystem.cpp
+        src/client/particles/effects/TracerEffect.hpp
+        src/client/particles/effects/TracerEffect.cpp
+        src/client/particles/effects/RibbonTrail.hpp
+        src/client/particles/effects/RibbonTrail.cpp
+        src/client/particles/effects/HitscanEffect.hpp
+        src/client/particles/effects/HitscanEffect.cpp
+        src/client/particles/effects/SmokeEffect.hpp
+        src/client/particles/effects/SmokeEffect.cpp
+        src/client/particles/effects/ImpactEffect.hpp
+        src/client/particles/effects/ImpactEffect.cpp
+        src/client/particles/effects/BulletHoleDecal.hpp
+        src/client/particles/effects/BulletHoleDecal.cpp
+        src/client/particles/effects/ExplosionEffect.hpp
+        src/client/particles/effects/ExplosionEffect.cpp
+        src/client/particles/sdf/SdfFont.hpp
+        src/client/particles/sdf/SdfAtlas.hpp
+        src/client/particles/sdf/SdfAtlas.cpp
+        src/client/particles/sdf/SdfRenderer.hpp
+        src/client/particles/sdf/SdfRenderer.cpp
+        # ── New ECS components ──────────────────────────────────────────────
+        src/ecs/components/Projectile.hpp
+        src/ecs/components/WeaponState.hpp
+        src/ecs/components/TracerEmitter.hpp
+        src/ecs/components/RibbonEmitter.hpp
+        src/ecs/components/ParticleEmitterTag.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
 # src/client/ — for client-local headers (game/Game.hpp, network/Client.hpp, etc.)
+# stb_SOURCE_DIR — for stb_truetype.h
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+    "${stb_SOURCE_DIR}"
 )
 
 # Compile shaders before linking the binary.
