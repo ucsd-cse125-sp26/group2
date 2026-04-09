@@ -11,6 +11,22 @@
 namespace
 {
 
+/// @brief Select active format, prefer SPIR-V, fallback to MSL if avaliable
+SDL_GPUShaderFormat selectFormat(SDL_GPUDevice* device)
+{
+    const SDL_GPUShaderFormat kAvailableFormats = SDL_GetGPUShaderFormats(device);
+
+    if (kAvailableFormats & SDL_GPU_SHADERFORMAT_SPIRV)
+        return SDL_GPU_SHADERFORMAT_SPIRV;
+
+#ifdef HAVE_MSL_SHADERS
+    if (kAvailableFormats & SDL_GPU_SHADERFORMAT_MSL)
+        return SDL_GPU_SHADERFORMAT_MSL;
+#endif
+
+    return SDL_GPU_SHADERFORMAT_INVALID;
+}
+
 /// @brief Load a compiled shader from disk and create an SDL GPU shader object.
 /// @param dev                  The GPU device.
 /// @param path                 Path to the compiled shader file (.spv or .msl).
@@ -63,38 +79,28 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
 
 bool Renderer::init(SDL_Window* win)
 {
+    // Register window
     window = win;
 
-    constexpr SDL_GPUShaderFormat k_wantedFormats = SDL_GPU_SHADERFORMAT_SPIRV
-#ifdef HAVE_MSL_SHADERS
-                                                    | SDL_GPU_SHADERFORMAT_MSL
-#endif
-        ;
-
-    device = SDL_CreateGPUDevice(k_wantedFormats, /*debug_mode=*/false, nullptr);
+    // Register device
+    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, false, nullptr);
     if (!device) {
         SDL_Log("Renderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
     }
     SDL_Log("Renderer: GPU driver = %s", SDL_GetGPUDeviceDriver(device));
 
+    // Register window to device
     if (!SDL_ClaimWindowForGPUDevice(device, window)) {
         SDL_Log("Renderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
         return false;
     }
 
-    const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
-    SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
-
-    if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
-        activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
-#ifdef HAVE_MSL_SHADERS
-    else if (k_available & SDL_GPU_SHADERFORMAT_MSL)
-        activeFormat = SDL_GPU_SHADERFORMAT_MSL;
-#endif
-
+    // Select shader format
+    SDL_GPUShaderFormat activeFormat = selectFormat(device);
     if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
-        SDL_Log("Renderer: no supported shader format (got 0x%x)", static_cast<unsigned>(k_available));
+        SDL_Log("Renderer: no supported shader format (got 0x%x)",
+                static_cast<unsigned>(SDL_GetGPUShaderFormats(device)));
         return false;
     }
 
