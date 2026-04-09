@@ -1,7 +1,5 @@
 #pragma once
 
-#include "ecs/registry/Registry.hpp"
-
 /// @brief Reconciles server state against the client's predicted history (not yet implemented).
 ///
 /// When the server sends a correction, this system rewinds the ring buffer to the
