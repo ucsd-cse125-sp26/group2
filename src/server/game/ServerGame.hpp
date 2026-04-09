@@ -16,7 +16,7 @@ public:
     /// @param addr       Hostname or IP to bind to (e.g. "127.0.0.1").
     /// @param port       UDP port to listen on.
     /// @param tickRateHz Physics tick rate in Hz (default 128).
-    /// @return False on network or initialisation failure.
+    /// @return True on success, false on network or initialisation failure.
     bool init(const char* addr, Uint16 port, int tickRateHz = 128);
 
     /// @brief Block and run the game loop until shutdown() is called.
@@ -30,8 +30,8 @@ private:
     /// @param dt Fixed delta time in seconds (1 / tickRateHz).
     void tick(float dt);
 
-    Server server;
-    Registry registry;
+    Server server;        ///< Owns the UDP socket and network I/O.
+    Registry registry;    ///< ECS entity/component store.
     bool running = false; ///< Loop continues while true.
     int tickRateHz = 128; ///< Physics ticks per second.
     int tickCount = 0;    ///< Total ticks since start, used for periodic logging.
