@@ -55,10 +55,16 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
                           Uint32 storageBufferCount,
                           Uint32 storageTextureCount)
 {
+    const char* const k_base = SDL_GetBasePath();
+    const char* const k_ext = (format == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+
+    char fullPath[512];
+    SDL_snprintf(fullPath, sizeof(fullPath), "%s%s%s", k_base ? k_base : "", path, k_ext);
+
     size_t codeSize = 0;
-    void* code = SDL_LoadFile(path, &codeSize);
+    void* code = SDL_LoadFile(fullPath, &codeSize);
     if (!code) {
-        SDL_Log("Renderer: failed to load shader %s: %s", path, SDL_GetError());
+        SDL_Log("Renderer: failed to load shader %s: %s", fullPath, SDL_GetError());
         return nullptr;
     }
 
@@ -82,6 +88,76 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     if (!shader)
         SDL_Log("Renderer: SDL_CreateGPUShader(%s) failed: %s", path, SDL_GetError());
     return shader;
+}
+
+SDL_GPUGraphicsPipeline*
+createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderFormat shaderFormat)
+{
+    // --- Geometry Shaders
+    // --- If you change the shader names/locations or
+    // --- buffer/texture counts, then update them here
+    // Vertex Shader
+    const char* const vertexShaderPath = "shaders/projective.vert";
+    Uint32 vertexShaderSamplerCount = 0;
+    Uint32 vertexShaderUniformBufferCount = 1;
+    Uint32 vertexShaderStorageBufferCount = 0;
+    Uint32 vertexShaderStorageTextureCount = 0;
+    // Fragment Shader
+    const char* const fragmentShaderPath = "shaders/normal.frag";
+    Uint32 fragmentShaderSamplerCount = 0;
+    Uint32 fragmentShaderUniformBufferCount = 0;
+    Uint32 fragmentShaderStorageBufferCount = 0;
+    Uint32 fragmentShaderStorageTextureCount = 0;
+    // ---
+
+    SDL_GPUShader* vertexShader = loadShader(device,
+                                             vertexShaderPath,
+                                             shaderFormat,
+                                             SDL_GPU_SHADERSTAGE_VERTEX,
+                                             vertexShaderSamplerCount,
+                                             vertexShaderUniformBufferCount,
+                                             vertexShaderStorageBufferCount,
+                                             vertexShaderStorageTextureCount);
+    SDL_GPUShader* fragmentShader = loadShader(device,
+                                               fragmentShaderPath,
+                                               shaderFormat,
+                                               SDL_GPU_SHADERSTAGE_FRAGMENT,
+                                               fragmentShaderSamplerCount,
+                                               fragmentShaderUniformBufferCount,
+                                               fragmentShaderStorageBufferCount,
+                                               fragmentShaderStorageTextureCount);
+
+    if (!vertexShader || !fragmentShader) {
+        SDL_ReleaseGPUShader(device, vertexShader);
+        SDL_ReleaseGPUShader(device, fragmentShader);
+        return nullptr; // false
+    }
+
+    SDL_GPUColorTargetDescription colorTarget{};
+    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vertexShader;
+    pci.fragment_shader = fragmentShader;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.target_info.color_target_descriptions = &colorTarget;
+    pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+
+    SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+
+    SDL_ReleaseGPUShader(device, vertexShader);
+    SDL_ReleaseGPUShader(device, fragmentShader);
+
+    return pipeline;
 }
 
 } // namespace
@@ -122,46 +198,8 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // Scene pipeline (triangle).
-    const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
-
-    char vertPath[512], fragPath[512];
-    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/projective.vert%s", k_base ? k_base : "", k_ext);
-    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/normal.frag%s", k_base ? k_base : "", k_ext);
-
-    SDL_GPUShader* vert = loadShader(device, vertPath, activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
-    SDL_GPUShader* frag = loadShader(device, fragPath, activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
-    if (!vert || !frag) {
-        SDL_ReleaseGPUShader(device, vert);
-        SDL_ReleaseGPUShader(device, frag);
-        return false;
-    }
-
-    SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
-
-    SDL_GPUGraphicsPipelineCreateInfo pci{};
-    pci.vertex_shader = vert;
-    pci.fragment_shader = frag;
-    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pci.target_info.color_target_descriptions = &colorTarget;
-    pci.target_info.num_color_targets = 1;
-    pci.target_info.has_depth_stencil_target = true;
-    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-
-    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
-    pci.depth_stencil_state.enable_depth_test = true;
-    pci.depth_stencil_state.enable_depth_write = true;
-
-    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
-
-    pipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
-
-    SDL_ReleaseGPUShader(device, vert);
-    SDL_ReleaseGPUShader(device, frag);
-
+    // Geometry pipeline
+    pipeline = createGeometryPipeline(device, window, activeFormat);
     if (!pipeline) {
         SDL_Log("Renderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
         return false;
