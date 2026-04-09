@@ -179,41 +179,14 @@ SDL_AppResult Game::iterate()
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
 
-    // ── velocity extrapolation ────────────────────────────────────────────────
-    // Why not interpolation (mix(prev, pos, alpha))?
-    //
-    // Interpolation has a discontinuous jump of magnitude V*frameTime at every
-    // physics-tick boundary.  Here's the math:
-    //
-    //   Frame N  (no tick fires): renderEye = mix(prev, pos, α₀)        e.g. α₀ = 0.64
-    //   Frame N+1 (tick fires):   renderEye = mix(pos,  pos', α₁)       e.g. α₁ = 0.28
-    //     jump = pos + α₁·Δ − (prev + α₀·Δ)  =  Δ·(1 + α₁ − α₀)  =  V·frameTime
-    //
-    // At 400 u/s strafe speed and 5 ms frames that's ~2 world-units sideways
-    // every 7.8 ms (128 Hz physics tick) — clearly visible when orbiting because
-    // the eye is expected to stay fixed relative to the object.
-    //
-    // Velocity extrapolation — renderEye(t) = pos + vel·(t − t_lastTick) — is a
-    // continuous linear function of time.  Proof that it has no tick-boundary jump:
-    //
-    //   Before tick:  pos_T  + vel·acc
-    //   After tick:   pos_T+1 + vel·(acc + frameTime − dt)
-    //               = (pos_T + vel·dt) + vel·(acc + frameTime − dt)
-    //               = pos_T + vel·acc + vel·frameTime   ← same up to vel·frameTime
-    //
-    // Both frames add exactly vel·frameTime, so the position advances smoothly and
-    // there is no backwards snap.  The yaw is the frame's current value (no lag),
-    // which is consistent: both eye and look-direction are at "now".
-    registry.view<LocalPlayer, Position, Velocity, InputSnapshot, CollisionShape>().each(
-        [&](const Position& pos, const Velocity& vel, const InputSnapshot& input, const CollisionShape& shape) {
-            // Extrapolate position forward from last physics tick using current velocity.
-            const glm::vec3 extrapolated = pos.value + vel.value * accumulator;
-
-            // Eye sits at ~77 % of the AABB half-height above the centre
-            // (≈ 64 units from feet for a standing player — standard FPS height).
-            // This adapts automatically to crouching (halfExtents.y shrinks to 22).
+    // Use the physics position directly — no interpolation, no extrapolation.
+    // The position is updated at 128 Hz by the physics loop; the renderer just
+    // reads whatever the last completed tick produced.  Mouse look still updates
+    // at the full frame rate so camera rotation stays responsive.
+    registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape>().each(
+        [&](const Position& pos, const InputSnapshot& input, const CollisionShape& shape) {
             const float eyeOffset = shape.halfExtents.y * 0.77f;
-            renderEye = extrapolated + glm::vec3{0.0f, eyeOffset, 0.0f};
+            renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
             renderYaw = input.yaw;
             renderPitch = input.pitch;
         });
