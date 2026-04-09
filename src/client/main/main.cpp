@@ -1,11 +1,8 @@
 #define SDL_MAIN_USE_CALLBACKS // For using callbacks instead of a main() entrypoint
+
 #include "game/Game.hpp"
 
 #include <SDL3/SDL_main.h>
-
-// ---------------------------------------------------------------------------
-// SDL3 app callbacks
-// ---------------------------------------------------------------------------
 
 SDL_AppResult SDL_AppInit(void** appstate, int /*argc*/, char* /*argv*/[])
 {

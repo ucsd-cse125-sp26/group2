@@ -10,7 +10,8 @@ int main()
     NET_Init();
 
     ServerGame game;
-    if (!game.init("127.0.0.1", 9999, /*tickRateMs=*/30)) {
+    if (!game.init("127.0.0.1", 9999)) // default 128 Hz
+    {
         NET_Quit();
         SDL_Quit();
         return 1;

@@ -17,12 +17,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(FetchContent)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Doxygen.cmake")
 
 # ---- Options ----
 option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
-option(USE_ENTT     "Use EnTT ECS library (OFF = minimal stub)"        OFF)
 
 # ---- Dependencies ----
 
@@ -62,16 +62,45 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
-# EnTT — fast header-only ECS library (optional)
-if(USE_ENTT)
-    FetchContent_Declare(
-        EnTT
-        GIT_REPOSITORY https://github.com/skypjack/entt.git
-        GIT_TAG        v3.14.0
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(EnTT)
-endif()
+# EnTT — fast header-only ECS library
+FetchContent_Declare(
+    EnTT
+    GIT_REPOSITORY https://github.com/skypjack/entt.git
+    GIT_TAG        v3.14.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(EnTT)
+
+# ImGui — immediate-mode debug UI (client only).
+# ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
+# the source tree without calling add_subdirectory. We compile it ourselves
+# as imgui_lib below.
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.92.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui_lib STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp
+)
+target_include_directories(imgui_lib PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_link_libraries(imgui_lib PUBLIC SDL3::SDL3-static)
+# Suppress warnings coming from ImGui's own code — not our problem to fix.
+target_compile_options(imgui_lib PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
+    $<$<CXX_COMPILER_ID:MSVC>:/W0>
+)
 
 # ---- Shaders: GLSL → SPIR-V (→ MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
@@ -170,6 +199,30 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/components/Position.hpp
+        src/ecs/components/Velocity.hpp
+        src/ecs/components/CollisionShape.hpp
+        src/ecs/components/PlayerState.hpp
+        src/ecs/components/InputSnapshot.hpp
+        src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/LocalPlayer.hpp
+        src/ecs/physics/PhysicsConstants.hpp
+        src/ecs/physics/Movement.hpp
+        src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.hpp
+        src/ecs/physics/SweptCollision.cpp
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/systems/CollisionSystem.cpp
+        src/client/systems/InputSampleSystem.hpp
+        src/client/systems/PredictionSystem.hpp
+        src/client/systems/InputSendSystem.hpp
+        src/client/systems/ReconciliationSystem.hpp
+        src/client/debug/DebugUI.hpp
+        src/client/debug/DebugUI.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -201,12 +254,9 @@ target_link_libraries(group2 PRIVATE
     SDL3::SDL3-static
     glm::glm
     SDL3_net::SDL3_net
+    EnTT::EnTT
+    imgui_lib
 )
-
-if(USE_ENTT)
-    target_link_libraries(group2 PRIVATE EnTT::EnTT)
-    target_compile_definitions(group2 PRIVATE USE_ENTT)
-endif()
 
 # ===========================================================================
 # Server executable
@@ -217,6 +267,26 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/components/Position.hpp
+        src/ecs/components/Velocity.hpp
+        src/ecs/components/CollisionShape.hpp
+        src/ecs/components/PlayerState.hpp
+        src/ecs/components/InputSnapshot.hpp
+        src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/LocalPlayer.hpp
+        src/ecs/physics/PhysicsConstants.hpp
+        src/ecs/physics/Movement.hpp
+        src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.hpp
+        src/ecs/physics/SweptCollision.cpp
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/systems/CollisionSystem.cpp
+        src/server/systems/InputReceiveSystem.hpp
+        src/server/systems/BroadcastSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -230,12 +300,8 @@ target_include_directories(server PRIVATE
 target_link_libraries(server PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
+    EnTT::EnTT
 )
-
-if(USE_ENTT)
-    target_link_libraries(server PRIVATE EnTT::EnTT)
-    target_compile_definitions(server PRIVATE USE_ENTT)
-endif()
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
