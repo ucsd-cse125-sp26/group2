@@ -1,8 +1,11 @@
 #pragma once
 
+#include "network/MessageStream.hpp"
+
 #include <SDL3/SDL_stdinc.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <vector>
 
 /// @brief UDP datagram socket — receives client packets and echoes them back.
 ///
@@ -23,10 +26,18 @@ public:
     /// @brief Drain all pending datagrams for this tick.
     void poll();
 
-private:
-    /// @brief Process a single received datagram (currently echo-back only).
-    /// @param dgram  The received datagram (caller retains ownership).
-    void handleDatagram(NET_Datagram* dgram);
+    void acceptClients();
+    void readClients();
 
-    NET_DatagramSocket* sock = nullptr; ///< Bound UDP socket.
+private:
+    struct Connection
+    {
+        MessageStream msgStream;
+    };
+
+    void handleMessage(const Connection& client, const Uint8* data, Uint32 len);
+
+    NET_Server* server = nullptr;
+
+    std::vector<Connection> clients;
 };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "network/MessageStream.hpp"
+
 #include <SDL3/SDL_stdinc.h>
 
 #include <SDL3_net/SDL_net.h>
@@ -28,7 +30,6 @@ public:
     bool poll();
 
 private:
-    NET_DatagramSocket* sock = nullptr; ///< Bound UDP socket.
-    NET_Address* serverAddr = nullptr;  ///< Resolved server address.
-    Uint16 serverPort = 0;              ///< Server UDP port.
+    MessageStream msgStream;
+    NET_Address* serverAddr = nullptr; ///< Resolved server address.
 };
