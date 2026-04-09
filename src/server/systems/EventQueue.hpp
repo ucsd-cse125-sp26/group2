@@ -2,12 +2,26 @@
 #include <glm/vec2.hpp>
 #include <queue>
 
+class MovementIntent
+{
+public:
+    bool forward;
+    bool back;
+    bool left;
+    bool right;
+    bool jump;
+    bool crouch;
+
+    float yaw;
+    float pitch;
+    float roll;
+};
+
 class Event
 {
 public:
     int clientId;
-    glm::vec2 moveIntentVector;
-    bool jumpIntent;
+    MovementIntent movementIntent;
     bool shootIntent;
 };
 
