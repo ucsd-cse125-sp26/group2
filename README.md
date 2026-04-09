@@ -2,6 +2,9 @@
 
 CSE 125 Spring 2026 — Quake-style FPS in C++23, SDL3 GPU, ECS.
 
+https://cse125.ucsd.edu/2026/cse125g2/
+https://cse125.ucsd.edu/2026/cse125g2/docs/annotated.html
+
 ```bash
 # Linux
 bash scripts/setup-linux.sh
