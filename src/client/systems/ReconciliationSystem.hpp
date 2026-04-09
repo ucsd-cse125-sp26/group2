@@ -1,8 +1,14 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_RECONCILIATIONSYSTEM_HPP
-#define GROUP2_RECONCILIATIONSYSTEM_HPP
+#include "ecs/registry/Registry.hpp"
 
-#endif // GROUP2_RECONCILIATIONSYSTEM_HPP
+/// @brief Reconciles server state against the client's predicted history (not yet implemented).
+///
+/// When the server sends a correction, this system rewinds the ring buffer to the
+/// authoritative tick and re-simulates forward to the current tick.
+namespace systems
+{
+
+// TODO: implement runReconciliation()
+
+} // namespace systems

@@ -10,16 +10,19 @@
 #include <cmath>
 #include <glm/trigonometric.hpp>
 
-// Samples SDL keyboard and mouse state each frame and writes the result into
-// the InputSnapshot component of the LocalPlayer entity.
-//
-// Must be called once per frame, before the physics accumulator loop, so the
-// snapshot is fresh for every physics tick that fires that frame.
-//
-// Mouse sensitivity is in radians per pixel.
+/// @brief Client-only input sampling system.
+///
+/// Reads SDL keyboard and mouse state each frame and writes the result into
+/// the InputSnapshot component of the LocalPlayer entity.
+///
+/// @note Must be called **once per frame**, before the physics accumulator loop,
+///       so the snapshot is fresh for every physics tick that fires that frame.
 namespace systems
 {
 
+/// @brief Sample keyboard and mouse state into the local player's InputSnapshot.
+/// @param registry          The ECS registry.
+/// @param mouseSensitivity  Mouse sensitivity in radians per pixel (default 0.002).
 inline void runInputSample(Registry& registry, float mouseSensitivity = 0.002f)
 {
     const bool* const k_keys = SDL_GetKeyboardState(nullptr);
@@ -36,7 +39,7 @@ inline void runInputSample(Registry& registry, float mouseSensitivity = 0.002f)
         snap.jump = k_keys[SDL_SCANCODE_SPACE];
         snap.crouch = k_keys[SDL_SCANCODE_LCTRL];
 
-        // Accumulate mouse deltas into absolute orientation.
+        // Accumulate mouse deltas into absolute yaw.
         snap.yaw += mdx * mouseSensitivity;
 
         // Keep yaw in [-π, π] to avoid float precision drift over time.
