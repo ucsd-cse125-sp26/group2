@@ -19,3 +19,8 @@ Event EventQueue::dequeue()
     events.pop();
     return event;
 }
+
+int EventQueue::size()
+{
+    return static_cast<int>(events.size());
+}
