@@ -56,11 +56,11 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
     ImGui::SetNextWindowSize({480.0f, 580.0f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("ECS Inspector");
 
-    // ---- Key bindings reminder ---------------------------------------------
+    // Key bindings reminder
     ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F1: test packet");
     ImGui::Separator();
 
-    // ---- Component toggles -------------------------------------------------
+    // Component visibility toggles
     ImGui::SeparatorText("Components");
     ImGui::Checkbox("Position", &showPosition);
     ImGui::SameLine();
@@ -73,7 +73,7 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
     ImGui::Checkbox("InputSnapshot", &showInputSnapshot);
     ImGui::Checkbox("View Angles", &showViewAngles);
 
-    // ---- Stats bar ---------------------------------------------------------
+    // Stats bar
     ImGui::Separator();
     ImGui::Text("Physics tick: %d", tickCount);
 
@@ -94,14 +94,14 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
         return;
     }
 
-    // ---- Per-entity sections -----------------------------------------------
+    // Per-entity sections
     for (const entt::entity entity : *k_entityStorage) {
         if (!registry.valid(entity))
             continue;
 
         ImGui::PushID(static_cast<int>(entt::to_integral(entity)));
 
-        // Build label — append [LOCAL] tag for the locally controlled player.
+        // Build label — append [LOCAL PLAYER] tag for the locally controlled entity.
         char entityLabel[48];
         const bool k_isLocal = registry.all_of<LocalPlayer>(entity);
         SDL_snprintf(entityLabel,
@@ -110,7 +110,7 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
                      static_cast<unsigned>(entt::to_integral(entity)));
 
         if (ImGui::CollapsingHeader(entityLabel, ImGuiTreeNodeFlags_DefaultOpen)) {
-            // -- Vec3 table --------------------------------------------------
+            // Vec3 component table
             constexpr ImGuiTableFlags k_tableFlags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg;
 
             if (ImGui::BeginTable("##vec3", 4, k_tableFlags)) {
@@ -134,20 +134,17 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
 
                 if (showPosition && registry.all_of<Position>(entity))
                     vec3Row("Position", registry.get<Position>(entity).value);
-
                 if (showPrevPosition && registry.all_of<PreviousPosition>(entity))
                     vec3Row("PrevPosition", registry.get<PreviousPosition>(entity).value);
-
                 if (showVelocity && registry.all_of<Velocity>(entity))
                     vec3Row("Velocity", registry.get<Velocity>(entity).value);
-
                 if (showCollisionShape && registry.all_of<CollisionShape>(entity))
                     vec3Row("CollisionShape he", registry.get<CollisionShape>(entity).halfExtents);
 
                 ImGui::EndTable();
             }
 
-            // -- View angles (degrees — easier to read than radians) ----------
+            // View angles (degrees — easier to read than radians)
             if (showViewAngles && registry.all_of<InputSnapshot>(entity)) {
                 const auto& c = registry.get<InputSnapshot>(entity);
                 ImGui::Text("View Angles   yaw: %7.2f°   pitch: %7.2f°   roll: %6.2f°",
@@ -156,7 +153,7 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
                             static_cast<double>(glm::degrees(c.roll)));
             }
 
-            // -- PlayerState -------------------------------------------------
+            // PlayerState
             if (showPlayerState && registry.all_of<PlayerState>(entity)) {
                 const auto& c = registry.get<PlayerState>(entity);
                 ImGui::Text("PlayerState   grounded:%-3s  crouching:%-3s  sliding:%-3s",
@@ -165,12 +162,11 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
                             c.sliding ? "YES" : "NO");
             }
 
-            // -- InputSnapshot -----------------------------------------------
+            // InputSnapshot
             if (showInputSnapshot && registry.all_of<InputSnapshot>(entity)) {
                 const auto& c = registry.get<InputSnapshot>(entity);
                 ImGui::Text("InputSnapshot  tick: %u", c.tick);
-                ImGui::Text("  fwd:%-3s  back:%-3s  left:%-3s  right:%-3s"
-                            "  jump:%-3s  crouch:%-3s",
+                ImGui::Text("  fwd:%-3s  back:%-3s  left:%-3s  right:%-3s  jump:%-3s  crouch:%-3s",
                             c.forward ? "Y" : "N",
                             c.back ? "Y" : "N",
                             c.left ? "Y" : "N",
