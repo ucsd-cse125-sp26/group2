@@ -7,21 +7,26 @@
 
 bool Client::init(const char* addr, Uint16 port)
 {
-    serverPort = port;
-    sock = NET_CreateDatagramSocket(nullptr, 0);
+    serverAddr = NET_ResolveHostname(addr);
+    if (NET_WaitUntilResolved(serverAddr, -1) == NET_FAILURE) {
+        SDL_Log("Failed to resolve server address: %s", SDL_GetError());
+        return false;
+    }
+
+    auto sock = NET_CreateClient(serverAddr, port);
     if (!sock) {
         SDL_Log("Failed to create client %s", SDL_GetError());
         return false;
     }
 
-    serverAddr = NET_ResolveHostname(addr);
-    while (NET_GetAddressStatus(serverAddr) == NET_WAITING) {
-        SDL_Delay(100);
-    }
-    if (NET_GetAddressStatus(serverAddr) == NET_FAILURE) {
-        SDL_Log("Failed to resolve server address: %s", SDL_GetError());
+    if (NET_WaitUntilConnected(sock, -1) == NET_FAILURE) {
+        SDL_Log("Client: connection failed: %s", SDL_GetError());
+        NET_DestroyStreamSocket(sock);
+        sock = nullptr;
         return false;
     }
+
+    msgStream.socket = sock;
 
     SDL_Log("Client created, server address is %s", NET_GetAddressString(serverAddr));
     return true;
@@ -29,9 +34,9 @@ bool Client::init(const char* addr, Uint16 port)
 
 void Client::shutdown()
 {
-    if (sock) {
-        NET_DestroyDatagramSocket(sock);
-        sock = nullptr;
+    if (msgStream.socket) {
+        NET_DestroyStreamSocket(msgStream.socket);
+        msgStream.socket = nullptr;
     }
 
     if (serverAddr) {
@@ -42,18 +47,15 @@ void Client::shutdown()
 
 bool Client::send(const void* data, int len)
 {
-    return NET_SendDatagram(sock, serverAddr, serverPort, data, len);
+    auto msgLen = static_cast<Uint32>(len);
+    NET_WriteToStreamSocket(msgStream.socket, &msgLen, sizeof(msgLen));
+    return NET_WriteToStreamSocket(msgStream.socket, data, len);
 }
 
 bool Client::poll()
 {
-    NET_Datagram* dgram = nullptr;
-    NET_ReceiveDatagram(sock, &dgram);
-    if (dgram) {
-        SDL_Log("Received (%d bytes): %.*s", dgram->buflen, dgram->buflen, reinterpret_cast<const char*>(dgram->buf));
-        NET_DestroyDatagram(dgram);
-        return true;
-    }
-
+    msgStream.poll([](const void* data, Uint32 size) {
+        SDL_Log("Received (%d bytes): %.*s", size, size, reinterpret_cast<const char*>(data));
+    });
     return false;
 }

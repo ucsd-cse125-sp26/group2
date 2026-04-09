@@ -7,19 +7,16 @@
 bool Server::init(const char* addr, Uint16 port)
 {
     NET_Address* netAddr = NET_ResolveHostname(addr);
-    while (NET_GetAddressStatus(netAddr) == NET_WAITING) {
-        SDL_Delay(100);
-    }
-    if (NET_GetAddressStatus(netAddr) == NET_FAILURE) {
+    if (NET_WaitUntilResolved(netAddr, -1) == NET_FAILURE) {
         SDL_Log("Server: failed to resolve address: %s", SDL_GetError());
         NET_UnrefAddress(netAddr);
         return false;
     }
 
-    sock = NET_CreateDatagramSocket(netAddr, port);
+    server = NET_CreateServer(netAddr, port);
     NET_UnrefAddress(netAddr);
-    if (!sock) {
-        SDL_Log("Server: failed to create socket: %s", SDL_GetError());
+    if (!server) {
+        SDL_Log("Server: failed to create server: %s", SDL_GetError());
         return false;
     }
 
@@ -29,29 +26,67 @@ bool Server::init(const char* addr, Uint16 port)
 
 void Server::shutdown()
 {
-    if (sock) {
+    if (server) {
         SDL_Log("Server: shutting down");
-        NET_DestroyDatagramSocket(sock);
-        sock = nullptr;
+        NET_DestroyServer(server);
+        server = nullptr;
     }
+    for (auto& client : clients) {
+        NET_DestroyStreamSocket(client.msgStream.socket);
+    }
+    clients.clear();
 }
 
 void Server::poll()
 {
-    NET_Datagram* dgram = nullptr;
-    while (NET_ReceiveDatagram(sock, &dgram) && dgram) {
-        handleDatagram(dgram);
-        NET_DestroyDatagram(dgram);
-        dgram = nullptr;
+    acceptClients();
+    readClients();
+}
+
+void Server::acceptClients()
+{
+    // Accept up to one new client per tick, should be good enough.
+
+    NET_StreamSocket* socket = nullptr;
+    if (!NET_AcceptClient(server, &socket)) {
+        SDL_Log("NET_AcceptClient failed: %s", SDL_GetError());
+        return;
+    } else if (socket) {
+        SDL_Log("Server: accepted new client");
+        clients.emplace_back();
+        clients.back().msgStream.socket = socket;
     }
 }
 
-void Server::handleDatagram(NET_Datagram* dgram)
+void Server::readClients()
 {
-    const char* addr = NET_GetAddressString(dgram->addr);
-    SDL_Log("Server: received %d bytes from %s:%d", dgram->buflen, addr, dgram->port);
-    SDL_Log("Server: data: %.*s", dgram->buflen, reinterpret_cast<const char*>(dgram->buf));
+    // packet format is 4 byte length prefix
+    for (auto it = clients.begin(); it != clients.end();) {
+        auto& conn = *it;
 
-    // Echo back to sender.
-    NET_SendDatagram(sock, dgram->addr, dgram->port, dgram->buf, dgram->buflen);
+        bool ok = conn.msgStream.poll([&conn](const void* data, Uint32 size) {
+            SDL_Log("Server: received %d bytes from", size);
+            SDL_Log("Server: data: %.*s", size, data);
+
+            // echo
+            conn.msgStream.send(data, size);
+        });
+
+        if (!ok) {
+            SDL_Log("Server: client dead");
+            NET_DestroyStreamSocket(conn.msgStream.socket);
+            it = clients.erase(it);
+            continue;
+        }
+
+        ++it;
+    }
+}
+
+void Server::handleMessage(const Connection& client, const Uint8* data, Uint32 len)
+{
+    // SDL_Log("Server: received %d bytes from %s", len,
+    // NET_GetAddressString(NET_GetStreamSocketAddress(client.socket))); SDL_Log("Server: data: %.*s", len, data);
+    // // Echo back to sender.
+    // NET_SendDatagram(sock, dgram->addr, dgram->port, dgram->buf, dgram->buflen);
 }
