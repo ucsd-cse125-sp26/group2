@@ -30,6 +30,9 @@ public:
     void acceptClients();
     void readClients();
 
+    bool isEmpty();
+    Event dequeueEvent();
+
 private:
     struct Connection
     {
