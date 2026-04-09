@@ -15,6 +15,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <glm/glm.hpp>
 
 // World geometry for the current test scene: a single floor plane at y=0.
 // Will be replaced by a proper World object when map loading is implemented.
@@ -93,13 +94,11 @@ SDL_AppResult Game::event(SDL_Event* event)
         return SDL_APP_SUCCESS;
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
-        static constexpr float k_cameraAngle = 5.0f;
-
         switch (event->key.key) {
         case SDLK_Q:
             return SDL_APP_SUCCESS;
 
-        // ESC — toggle mouse capture so the player can reach the ImGui window.
+        // ESC — toggle mouse capture so the player can reach the ImGui windows.
         case SDLK_ESCAPE:
             mouseCaptured = !mouseCaptured;
             SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
@@ -112,25 +111,6 @@ SDL_AppResult Game::event(SDL_Event* event)
             SDL_Log("Sent test packet to server");
             break;
         }
-
-        // WASD — orbit the 3D camera around the scene origin.
-        case SDLK_W:
-            renderer.rotateCameraUp(k_cameraAngle);
-            break;
-        case SDLK_S:
-            renderer.rotateCameraUp(-k_cameraAngle);
-            break;
-        case SDLK_A:
-            renderer.rotateCameraRight(-k_cameraAngle);
-            break;
-        case SDLK_D:
-            renderer.rotateCameraRight(k_cameraAngle);
-            break;
-
-        // R — reset camera to default position.
-        case SDLK_R:
-            renderer.resetCamera();
-            break;
 
         default:
             break;
@@ -182,10 +162,34 @@ SDL_AppResult Game::iterate()
     while (client.poll()) {
     }
 
+    // ── resolve first-person camera from local player ──────────────────────
+    // Default eye position used before the player entity is available.
+    glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
+    float renderYaw = 0.0f;
+    float renderPitch = 0.0f;
+
+    registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape>().each(
+        [&](const Position& pos,
+            const PreviousPosition& prev,
+            const InputSnapshot& input,
+            const CollisionShape& shape) {
+            // Sub-tick render interpolation: smooths motion at any framerate.
+            const float alpha = accumulator / k_physicsDt;
+            const glm::vec3 interp = glm::mix(prev.value, pos.value, alpha);
+
+            // Eye sits at ~77 % of the AABB half-height above the centre
+            // (≈ 64 units from feet for a standing player — standard FPS height).
+            // This adapts automatically to crouching (halfExtents.y shrinks to 22).
+            const float eyeOffset = shape.halfExtents.y * 0.77f;
+            renderEye = interp + glm::vec3{0.0f, eyeOffset, 0.0f};
+            renderYaw = input.yaw;
+            renderPitch = input.pitch;
+        });
+
     // Build debug UI and render.
     debugUI.buildUI(registry, tickCount);
     debugUI.render();
-    renderer.drawFrame();
+    renderer.drawFrame(renderEye, renderYaw, renderPitch);
 
     return SDL_APP_CONTINUE;
 }
