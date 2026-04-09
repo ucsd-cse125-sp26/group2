@@ -1,8 +1,7 @@
 #version 450
 
-layout(location = 0) out vec3  fragColor;
-layout(location = 1) out vec3  fragWorldPos;
-layout(location = 2) out float fragIsFloor;
+layout(location = 0) out vec3 diffuse;
+layout(location = 1) flat out vec3 fragNormal;
 
 layout(set = 1, binding = 0) uniform Matrices
 {
@@ -11,72 +10,108 @@ layout(set = 1, binding = 0) uniform Matrices
     mat4 projection;
 } ubo;
 
-// ---------------------------------------------------------------------------
-// All geometry is stored in world space so model = identity each frame.
-//
-// Vertices 0-35  : reference cube (64-unit cube, bottom at y=0, centred at
-//                  x=0,z=400 — visible straight ahead from spawn).
-// Vertices 36-41 : floor quad (4000x4000 units at y=0, centred at origin).
-// ---------------------------------------------------------------------------
+const float width = 1.0f;
+const float width_over_2 = width * 0.5f;
 
-const vec3 positions[42] = vec3[](
+const vec3 cubeMin = -vec3(width_over_2,width_over_2,width_over_2);
+const vec3 cubeMax = -cubeMin;
+    const vec3 positions[24] = vec3[](
+        // Front
+        vec3(cubeMin.x, cubeMin.y, cubeMax.z),
+        vec3(cubeMax.x, cubeMin.y, cubeMax.z),
+        vec3(cubeMax.x, cubeMax.y, cubeMax.z),
+        vec3(cubeMin.x, cubeMax.y, cubeMax.z),
 
-    // --- Cube (36 verts, 6 faces × 2 tris × 3 verts) ---
-    // Each original ±0.5 vertex is scaled ×64 then offset by (0,+32,+400)
-    // so the cube sits on the floor (bottom y=0) at world (0,32,400).
+        // Back
+        vec3(cubeMax.x, cubeMin.y, cubeMin.z),
+        vec3(cubeMin.x, cubeMin.y, cubeMin.z),
+        vec3(cubeMin.x, cubeMax.y, cubeMin.z),
+        vec3(cubeMax.x, cubeMax.y, cubeMin.z),
 
-    // Front face  (z = 432)
-    vec3(-32,  0, 432), vec3( 32,  0, 432), vec3( 32, 64, 432),
-    vec3(-32,  0, 432), vec3( 32, 64, 432), vec3(-32, 64, 432),
+        // Top
+        vec3(cubeMin.x, cubeMax.y, cubeMax.z),
+        vec3(cubeMax.x, cubeMax.y, cubeMax.z),
+        vec3(cubeMax.x, cubeMax.y, cubeMin.z),
+        vec3(cubeMin.x, cubeMax.y, cubeMin.z),
 
-    // Back face   (z = 368)
-    vec3( 32,  0, 368), vec3(-32,  0, 368), vec3(-32, 64, 368),
-    vec3( 32,  0, 368), vec3(-32, 64, 368), vec3( 32, 64, 368),
+        // Bottom
+        vec3(cubeMin.x, cubeMin.y, cubeMin.z),
+        vec3(cubeMax.x, cubeMin.y, cubeMin.z),
+        vec3(cubeMax.x, cubeMin.y, cubeMax.z),
+        vec3(cubeMin.x, cubeMin.y, cubeMax.z),
 
-    // Left face   (x = -32)
-    vec3(-32,  0, 368), vec3(-32,  0, 432), vec3(-32, 64, 432),
-    vec3(-32,  0, 368), vec3(-32, 64, 432), vec3(-32, 64, 368),
+        // Left
+        vec3(cubeMin.x, cubeMin.y, cubeMin.z),
+        vec3(cubeMin.x, cubeMin.y, cubeMax.z),
+        vec3(cubeMin.x, cubeMax.y, cubeMax.z),
+        vec3(cubeMin.x, cubeMax.y, cubeMin.z),
 
-    // Right face  (x = +32)
-    vec3( 32,  0, 432), vec3( 32,  0, 368), vec3( 32, 64, 368),
-    vec3( 32,  0, 432), vec3( 32, 64, 368), vec3( 32, 64, 432),
+        // Right
+        vec3(cubeMax.x, cubeMin.y, cubeMax.z),
+        vec3(cubeMax.x, cubeMin.y, cubeMin.z),
+        vec3(cubeMax.x, cubeMax.y, cubeMin.z),
+        vec3(cubeMax.x, cubeMax.y, cubeMax.z)
+    );
 
-    // Top face    (y = 64)
-    vec3(-32, 64, 432), vec3( 32, 64, 432), vec3( 32, 64, 368),
-    vec3(-32, 64, 432), vec3( 32, 64, 368), vec3(-32, 64, 368),
+    // Specify normals
+    const vec3 normals[24] = vec3[](
+        // Front
+        vec3(0, 0, 1),
+        vec3(0, 0, 1),
+        vec3(0, 0, 1),
+        vec3(0, 0, 1),
 
-    // Bottom face (y = 0) — back-face culled when viewed from above
-    vec3(-32,  0, 368), vec3( 32,  0, 368), vec3( 32,  0, 432),
-    vec3(-32,  0, 368), vec3( 32,  0, 432), vec3(-32,  0, 432),
+        // Back
+        vec3(0, 0, -1),
+        vec3(0, 0, -1),
+        vec3(0, 0, -1),
+        vec3(0, 0, -1),
 
-    // --- Floor quad (6 verts) ---
-    // Covers ±2000 units in XZ, centred at world origin, flat at y = 0.
-    vec3(-2000, 0, -2000), vec3( 2000, 0, -2000), vec3( 2000, 0,  2000),
-    vec3(-2000, 0, -2000), vec3( 2000, 0,  2000), vec3(-2000, 0,  2000)
-);
+        // Top
+        vec3(0, 1, 0),
+        vec3(0, 1, 0),
+        vec3(0, 1, 0),
+        vec3(0, 1, 0),
 
-// One colour per face-group (every 6 consecutive verts share a colour).
-// Index = gl_VertexIndex / 6:
-//   0-5 → face 0 (front,  red)      30-35 → face 5 (bottom, cyan)
-//   6-11→ face 1 (back,   green)    36-41 → index 6 (floor – overridden
-//  12-17→ face 2 (left,   blue)                       by checkerboard)
-//  18-23→ face 3 (right,  yellow)
-//  24-29→ face 4 (top,    magenta)
-const vec3 colors[7] = vec3[](
-    vec3(1.0, 0.2, 0.2),   // front  — red
-    vec3(0.2, 1.0, 0.2),   // back   — green
-    vec3(0.2, 0.2, 1.0),   // left   — blue
-    vec3(1.0, 1.0, 0.2),   // right  — yellow
-    vec3(1.0, 0.2, 1.0),   // top    — magenta
-    vec3(0.2, 1.0, 1.0),   // bottom — cyan
-    vec3(0.4, 0.4, 0.4)    // floor  — mid-grey (checkerboard applied in frag)
+        // Bottom
+        vec3(0, -1, 0),
+        vec3(0, -1, 0),
+        vec3(0, -1, 0),
+        vec3(0, -1, 0),
+
+        // Left
+        vec3(-1, 0, 0),
+        vec3(-1, 0, 0),
+        vec3(-1, 0, 0),
+        vec3(-1, 0, 0),
+
+        // Right
+        vec3(1, 0, 0),
+        vec3(1, 0, 0),
+        vec3(1, 0, 0),
+        vec3(1, 0, 0)
+    );
+
+    // Specify indices
+    const uint indices[36] = uint[](
+        0, 1, 2, 0, 2, 3,        // Front
+        4, 5, 6, 4, 6, 7,        // Back
+        8, 9, 10, 8, 10, 11,     // Top
+        12, 13, 14, 12, 14, 15,  // Bottom
+        16, 17, 18, 16, 18, 19,  // Left
+        20, 21, 22, 20, 22, 23   // Right
+    );
+
+const vec3 colors[6] = vec3[](
+    vec3(1,0,0), vec3(0,1,0), vec3(0,0,1),
+    vec3(1,1,0), vec3(1,0,1), vec3(0,1,1)
 );
 
 void main()
 {
-    vec4 worldPos  = ubo.model * vec4(positions[gl_VertexIndex], 1.0);
-    gl_Position    = ubo.projection * ubo.view * worldPos;
-    fragColor      = colors[gl_VertexIndex / 6];
-    fragWorldPos   = worldPos.xyz;
-    fragIsFloor    = (gl_VertexIndex >= 36) ? 1.0 : 0.0;
+    vec4 p = vec4(positions[indices[gl_VertexIndex]], 1.0f);
+    mat4 mvp = ubo.projection * ubo.view * ubo.model;
+    gl_Position = mvp * p;
+    diffuse = colors[gl_VertexIndex / 6];
+    fragNormal = vec3(ubo.model * vec4(normals[indices[gl_VertexIndex]],0.0f));
 }
