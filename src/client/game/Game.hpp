@@ -31,15 +31,15 @@ public:
     void quit();
 
 private:
-    /// @brief Physics tick rate. The renderer interpolates between ticks using the accumulator.
-    static constexpr int k_physicsHz = 128;
+    static constexpr int k_physicsHz =
+        128; ///< Physics tick rate. The renderer interpolates between ticks using the accumulator.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per physics tick.
 
-    SDL_Window* window = nullptr;
-    DebugUI debugUI;
-    Renderer renderer;
-    Registry registry;
-    Client client;
+    SDL_Window* window = nullptr;                                                ///< The application window.
+    DebugUI debugUI;           ///< Owns the ImGui context and SDL3 input backend.
+    Renderer renderer;         ///< Owns the GPU pipeline and ImGui render backend.
+    Registry registry;         ///< The shared ECS registry.
+    Client client;             ///< UDP network client.
 
     Uint64 prevTime = 0;       ///< SDL performance counter at the last iterate() call.
     float accumulator = 0.0f;  ///< Unprocessed physics time in seconds.
