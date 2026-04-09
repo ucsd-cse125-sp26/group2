@@ -6,8 +6,9 @@
 ///
 /// Any divergence between client and server builds is a bug (breaks prediction).
 ///
-/// **Reads:** InputSnapshot (optional), PlayerState, CollisionShape
-/// **Writes:** Velocity, PlayerState (crouching/sliding), CollisionShape (crouch resize)
+/// **Reads:**  InputSnapshot (optional), Position, PlayerState, CollisionShape
+/// **Writes:** Position (crouch centre shift), Velocity, PlayerState (crouching/sliding), CollisionShape (crouch
+/// resize)
 ///
 /// @note Position integration is NOT done here — CollisionSystem owns that via swept AABB.
 namespace systems
