@@ -8,13 +8,13 @@
 /// @brief Top-level server game loop.
 ///
 /// Owns the ECS registry and the network Server. Each tick it drains
-/// incoming datagrams, runs all ECS systems, and broadcasts state.
+/// incoming messages, runs all ECS systems, and broadcasts state.
 class ServerGame
 {
 public:
     /// @brief Bind to the given address and port, spawn test entities.
     /// @param addr       Hostname or IP to bind to (e.g. "127.0.0.1").
-    /// @param port       UDP port to listen on.
+    /// @param port       TCP port to listen on.
     /// @param tickRateHz Physics tick rate in Hz (default 128).
     /// @return True on success, false on network or initialisation failure.
     bool init(const char* addr, Uint16 port, int tickRateHz = 128);
@@ -30,7 +30,7 @@ private:
     /// @param dt Fixed delta time in seconds (1 / tickRateHz).
     void tick(float dt);
 
-    Server server;        ///< Owns the UDP socket and network I/O.
+    Server server;        ///< Owns the TCP socket and network I/O.
     Registry registry;    ///< ECS entity/component store.
     bool running = false; ///< Loop continues while true.
     int tickRateHz = 128; ///< Physics ticks per second.
