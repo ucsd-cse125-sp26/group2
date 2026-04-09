@@ -1,8 +1,11 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_INPUTRECEIVESYSTEM_HPP
-#define GROUP2_INPUTRECEIVESYSTEM_HPP
+#include "ecs/registry/Registry.hpp"
 
-#endif // GROUP2_INPUTRECEIVESYSTEM_HPP
+/// @brief Deserialises incoming client InputSnapshot packets and writes them into the registry (not yet implemented).
+namespace systems
+{
+
+// TODO: implement runInputReceive()
+
+} // namespace systems

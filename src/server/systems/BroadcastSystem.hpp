@@ -1,8 +1,11 @@
-//
-// Created by user on 4/8/26.
-//
+#pragma once
 
-#ifndef GROUP2_BROADCASTSYSTEM_HPP
-#define GROUP2_BROADCASTSYSTEM_HPP
+#include "ecs/registry/Registry.hpp"
 
-#endif // GROUP2_BROADCASTSYSTEM_HPP
+/// @brief Serialises ECS state and broadcasts it to all connected clients (not yet implemented).
+namespace systems
+{
+
+// TODO: implement runBroadcast()
+
+} // namespace systems
