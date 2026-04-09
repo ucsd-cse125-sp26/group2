@@ -7,23 +7,23 @@
 #include <SDL3_net/SDL_net.h>
 #include <vector>
 
-/// @brief UDP datagram socket — receives client packets and echoes them back.
+/// @brief TCP stream socket — receives client packets and echoes them back.
 ///
-/// Call poll() every tick to drain incoming datagrams.
-/// Extend handleDatagram() with proper packet dispatch as the game protocol grows.
+/// Call poll() every tick to drain incoming messages.
+/// Extend handleMessage() with proper packet dispatch as the game protocol grows.
 class Server
 {
 public:
-    /// @brief Bind a UDP socket to the given address and port.
+    /// @brief Bind a TCP socket to the given address and port.
     /// @param addr  Hostname or IP to bind to (e.g. "127.0.0.1").
-    /// @param port  UDP port to listen on.
+    /// @param port  TCP port to listen on.
     /// @return False on DNS or socket creation failure.
     bool init(const char* addr, Uint16 port);
 
     /// @brief Close the socket and release resources.
     void shutdown();
 
-    /// @brief Drain all pending datagrams for this tick.
+    /// @brief Drain all pending messages for this tick.
     void poll();
 
     void acceptClients();
