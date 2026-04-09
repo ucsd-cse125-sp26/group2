@@ -62,10 +62,12 @@ glm::vec3 computeWishDir(float yaw, bool forward, bool back, bool left, bool rig
         moveZ += 1.0f;
     if (back)
         moveZ -= 1.0f;
+    // Camera right in world space is −X (glm::lookAt uses cross(forward,up)).
+    // Negate moveX so that A/D strafe in the direction the camera calls "right".
     if (left)
-        moveX -= 1.0f;
-    if (right)
         moveX += 1.0f;
+    if (right)
+        moveX -= 1.0f;
 
     if (moveX == 0.0f && moveZ == 0.0f)
         return glm::vec3{0.0f};

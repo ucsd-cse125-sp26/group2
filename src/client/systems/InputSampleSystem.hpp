@@ -40,7 +40,11 @@ inline void runInputSample(Registry& registry, float mouseSensitivity = 0.002f)
         snap.crouch = k_keys[SDL_SCANCODE_LCTRL];
 
         // Accumulate mouse deltas into absolute yaw.
-        snap.yaw += mdx * mouseSensitivity;
+        // Negate: SDL mdx is positive when moving right, but positive yaw
+        // rotates toward +X which maps to screen-left via glm::lookAt's
+        // cross(forward, up) convention.  Negating gives the standard
+        // "mouse right = look right" behaviour.
+        snap.yaw -= mdx * mouseSensitivity;
 
         // Wrap yaw to [-π, π] to avoid float precision drift over time.
         snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
