@@ -30,8 +30,12 @@ bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL
         if (sdf_.init(dev, fontPaths[i]))
             break;
     }
-    if (!sdf_.ready())
+    if (!sdf_.ready()) {
         SDL_Log("ParticleSystem: SDF font not loaded — text rendering disabled");
+    } else {
+        // Register atlas texture+sampler with the renderer so drawAll() can bind it.
+        renderer_.setSdfAtlas(sdf_.atlas().gpuTexture(), sdf_.atlas().gpuSampler());
+    }
 
     return true;
 }
@@ -113,6 +117,12 @@ void ParticleSystem::spawnRibbonTrail(entt::entity e, Registry& reg)
 {
     if (!reg.all_of<RibbonEmitter>(e))
         reg.emplace<RibbonEmitter>(e);
+}
+
+void ParticleSystem::spawnBulletTracer(glm::vec3 origin, glm::vec3 dir, float range)
+{
+    // tip = hit point (front of streak), tail = muzzle (back of streak)
+    tracers_.spawnFree(origin + dir * range, origin);
 }
 
 void ParticleSystem::spawnHitscanBeam(glm::vec3 origin, glm::vec3 hitPos, WeaponType wt)

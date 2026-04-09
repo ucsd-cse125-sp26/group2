@@ -482,15 +482,25 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
 
     ImGui::SliderFloat("Dist ahead (units)", &particleSpawnDist_, 30.f, 800.f, "%.0f");
 
-    // Compute spawn position = eye + forward * dist
+    // World-space right vector (used for hip-fire offset)
+    const glm::vec3 worldUp = {0.f, 1.f, 0.f};
+    const glm::vec3 camRight = glm::normalize(glm::cross(forward, worldUp));
+
+    // Hip-fire origin: offset right 15 u, down 8 u, forward 5 u — realistic gun muzzle position
+    const glm::vec3 hipfireOrigin = eyePos + camRight * 15.f - worldUp * 8.f + forward * 5.f;
+
+    // Generic spawn point for non-weapon effects (straight ahead)
     const glm::vec3 spawnPos = eyePos + forward * particleSpawnDist_;
     const glm::vec3 floorNorm = {0.f, 1.f, 0.f};
-    const glm::vec3 wallNorm = -forward; // facing the camera
+    const glm::vec3 wallNorm = -forward;
 
-    ImGui::TextDisabled("Spawn pos: (%.0f, %.0f, %.0f)",
-                        static_cast<double>(spawnPos.x),
-                        static_cast<double>(spawnPos.y),
-                        static_cast<double>(spawnPos.z));
+    ImGui::TextDisabled("Eye: (%.0f,%.0f,%.0f)  Hipfire: (%.0f,%.0f,%.0f)",
+                        static_cast<double>(eyePos.x),
+                        static_cast<double>(eyePos.y),
+                        static_cast<double>(eyePos.z),
+                        static_cast<double>(hipfireOrigin.x),
+                        static_cast<double>(hipfireOrigin.y),
+                        static_cast<double>(hipfireOrigin.z));
 
     ImGui::Spacing();
 
@@ -530,8 +540,19 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         return hit;
     };
 
-    spawnBtn("Hitscan Beam", 130.f, [&] { ps.spawnHitscanBeam(eyePos, spawnPos, WeaponType::EnergyRifle); });
+    // Weapon effects use hipfire origin so they look like they came from a gun
+    spawnBtn("Shoot Bullet (R301)", 160.f, [&] {
+        ps.spawnBulletTracer(hipfireOrigin, forward, particleSpawnDist_);
+        ps.spawnImpactEffect(
+            hipfireOrigin + forward * particleSpawnDist_, wallNorm, SurfaceType::Metal, WeaponType::Rifle);
+    });
     ImGui::SameLine();
+    spawnBtn("Energy Shot", 110.f, [&] {
+        const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
+        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyRifle);
+        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyRifle);
+    });
+
     spawnBtn("Smoke Cloud", 120.f, [&] { ps.spawnSmoke(spawnPos, 40.f); });
     ImGui::SameLine();
     spawnBtn("Explosion", 100.f, [&] { ps.spawnExplosion(spawnPos, 100.f); });

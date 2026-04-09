@@ -122,32 +122,35 @@ SDL_AppResult Game::event(SDL_Event* event)
         }
 
         // ── Particle system test keys ───────────────────────────────────────
+        // cachedEye/camFwd are updated every iterate() frame; at worst one frame stale.
         case SDLK_T: {
-            // Test hitscan beam from player toward +Z
-            const glm::vec3 origin{0.f, 100.f, 0.f};
-            const glm::vec3 hitPos{0.f, 100.f, 400.f};
-            particleSystem.spawnHitscanBeam(origin, hitPos, WeaponType::EnergyRifle);
+            // Hitscan energy beam from hip-fire position
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            particleSystem.spawnHitscanBeam(hip, hip + cachedCamFwd_ * 400.f, WeaponType::EnergyRifle);
+            particleSystem.spawnImpactEffect(
+                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Energy, WeaponType::EnergyRifle);
             break;
         }
         case SDLK_Y: {
-            // Test spark impact at cube location
+            // Bullet tracer from hip-fire position
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            particleSystem.spawnBulletTracer(hip, cachedCamFwd_, 400.f);
             particleSystem.spawnImpactEffect(
-                {0.f, 32.f, 368.f}, {0.f, 0.f, -1.f}, SurfaceType::Metal, WeaponType::Rifle);
+                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Metal, WeaponType::Rifle);
             break;
         }
         case SDLK_U: {
-            // Test smoke
-            particleSystem.spawnSmoke({0.f, 10.f, 200.f}, 40.f);
+            particleSystem.spawnSmoke(cachedEye_ + cachedCamFwd_ * 200.f, 40.f);
             break;
         }
         case SDLK_I: {
-            // Test explosion
-            particleSystem.spawnExplosion({0.f, 32.f, 400.f}, 100.f);
+            particleSystem.spawnExplosion(cachedEye_ + cachedCamFwd_ * 300.f, 100.f);
             break;
         }
         case SDLK_O: {
-            // Test HUD text
-            particleSystem.drawScreenText({10.f, 10.f}, "HP 100  AMMO 30", {1.f, 1.f, 1.f, 1.f}, 24.f);
+            particleSystem.drawScreenText({10.f, 40.f}, "HP 100  AMMO 30", {1.f, 1.f, 1.f, 1.f}, 24.f);
             break;
         }
 
@@ -225,9 +228,11 @@ SDL_AppResult Game::iterate()
     // Draw persistent HUD text each frame
     particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
 
-    // Compute camera forward for particle spawn direction
+    // Compute camera forward and cache for event() key shortcuts
     const float cosPitch = std::cos(renderPitch);
     const glm::vec3 camFwd{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+    cachedEye_ = renderEye;
+    cachedCamFwd_ = camFwd;
 
     // Build debug UI and render.
     debugUI.buildUI(registry, tickCount);

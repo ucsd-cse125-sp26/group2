@@ -43,5 +43,5 @@ private:
     expandArcToVerts(const std::vector<glm::vec3>& pts, float arcRadius, glm::vec4 color, std::vector<ArcVertex>& out);
 
     static constexpr float k_beamLifetime = 0.12f;
-    static constexpr float k_arcRadius = 1.2f;
+    static constexpr float k_arcRadius = 0.35f; // narrow — subtle electrical discharge
 };

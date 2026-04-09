@@ -36,6 +36,11 @@ public:
 
     [[nodiscard]] bool ready() const { return texture_ != nullptr; }
 
+    /// @brief GPU texture containing the baked SDF atlas (R8_UNORM, 1024×1024).
+    [[nodiscard]] SDL_GPUTexture* gpuTexture() const { return texture_; }
+    /// @brief Linear-clamp sampler for the SDF atlas.
+    [[nodiscard]] SDL_GPUSampler* gpuSampler() const { return sampler_; }
+
 private:
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUTexture* texture_ = nullptr;

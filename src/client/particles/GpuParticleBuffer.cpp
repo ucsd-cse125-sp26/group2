@@ -52,7 +52,9 @@ void GpuParticleBuffer::upload(SDL_GPUCommandBuffer* cmd, const void* data, uint
         return;
     }
 
-    void* mapped = SDL_MapGPUTransferBuffer(device_, transfer_, /*cycle=*/false);
+    // cycle=true: SDL_GPU allocates a fresh staging region each frame so the GPU
+    // can still be reading from the previous frame's copy without a stall.
+    void* mapped = SDL_MapGPUTransferBuffer(device_, transfer_, /*cycle=*/true);
     if (!mapped) {
         SDL_Log("GpuParticleBuffer::upload: SDL_MapGPUTransferBuffer failed: %s", SDL_GetError());
         return;

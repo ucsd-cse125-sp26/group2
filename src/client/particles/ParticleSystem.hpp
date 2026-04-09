@@ -42,6 +42,12 @@ public:
     /// @brief Attach a ribbon trail to a slow/arcing projectile entity (rocket).
     void spawnRibbonTrail(entt::entity e, Registry& reg);
 
+    /// @brief Spawn a one-shot bullet-tracer streak (no ECS entity needed).
+    /// @param origin  Muzzle world position (e.g. hip-fire offset from eye).
+    /// @param dir     Normalised fire direction.
+    /// @param range   Streak length in world units.
+    void spawnBulletTracer(glm::vec3 origin, glm::vec3 dir, float range = 500.f);
+
     /// @brief Spawn an instant energy beam from origin to hitPos.
     void spawnHitscanBeam(glm::vec3 origin, glm::vec3 hitPos, WeaponType wt);
 

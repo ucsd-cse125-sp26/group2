@@ -85,20 +85,20 @@ void HitscanEffect::generateArcs(
     arc.lifetime = maxLifetime;
     arc.maxLifetime = maxLifetime;
 
-    // Main arc
+    // Main arc — tight displacement, stays close to the beam axis
     std::vector<glm::vec3> pts = {origin, hitPos};
-    displaceSegment(pts, 4, 0.12f, camForward);
+    displaceSegment(pts, 4, 0.055f, camForward);
     expandArcToVerts(pts, k_arcRadius, color, arc.verts);
 
-    // Branch arcs: 2–3 off random midpoints
+    // Branch arcs: 2–3 off random midpoints, tight spread
     const int branches = 2 + (std::rand() % 2);
     for (int b = 0; b < branches; ++b) {
         if (pts.size() < 3)
             break;
         const size_t pivot = 1 + std::rand() % (pts.size() - 2);
         const glm::vec3 branchEnd = pts[pivot] +
-                                    glm::normalize(hitPos - origin) * (glm::length(hitPos - origin) * 0.3f) +
-                                    glm::vec3{randSigned(), randSigned(), randSigned()} * 80.f;
+                                    glm::normalize(hitPos - origin) * (glm::length(hitPos - origin) * 0.18f) +
+                                    glm::vec3{randSigned(), randSigned(), randSigned()} * 22.f;
 
         std::vector<glm::vec3> bpts = {pts[pivot], branchEnd};
         displaceSegment(bpts, 2, 0.15f, camForward);
@@ -119,7 +119,7 @@ void HitscanEffect::spawn(glm::vec3 origin, glm::vec3 hitPos, WeaponType wt, glm
     auto* beam = beamPool_.spawn();
     if (beam) {
         beam->origin = origin;
-        beam->radius = 1.5f;
+        beam->radius = 0.8f; // narrower glow quad
         beam->hitPos = hitPos;
         beam->lifetime = k_beamLifetime;
         beam->coreColor = {0.5f, 0.9f, 1.0f, 1.0f};

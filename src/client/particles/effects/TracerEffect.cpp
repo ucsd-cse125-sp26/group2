@@ -30,6 +30,21 @@ void TracerEffect::attach(entt::entity e, Registry& registry)
     entityToIdx_[static_cast<uint32_t>(e)] = idx;
 }
 
+void TracerEffect::spawnFree(glm::vec3 tip, glm::vec3 tail, float lifetime)
+{
+    auto* slot = pool_.spawn();
+    if (!slot)
+        return;
+
+    slot->tip = tip;
+    slot->tail = tail;
+    slot->radius = 0.6f;
+    slot->brightness = 1.f;
+    slot->coreColor = {1.f, 0.95f, 0.7f, 1.f};
+    slot->edgeColor = {1.f, 0.40f, 0.05f, 0.f};
+    slot->lifetime = lifetime; // < 9990 → picked up by the decay loop
+}
+
 void TracerEffect::detach(entt::entity e)
 {
     auto it = entityToIdx_.find(static_cast<uint32_t>(e));

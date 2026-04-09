@@ -23,6 +23,12 @@ public:
     /// @brief Detach the tracer from an entity (entity dying); tracer fades out.
     void detach(entt::entity e);
 
+    /// @brief Spawn a standalone one-shot tracer streak not tied to any ECS entity.
+    /// @param tip      World-space hit/end point.
+    /// @param tail     World-space origin/start point.
+    /// @param lifetime Seconds before the streak fully fades.
+    void spawnFree(glm::vec3 tip, glm::vec3 tail, float lifetime = 0.12f);
+
     [[nodiscard]] const TracerParticle* data() const { return pool_.rawData(); }
     [[nodiscard]] uint32_t count() const { return pool_.liveCount(); }
 

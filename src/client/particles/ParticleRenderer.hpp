@@ -43,6 +43,14 @@ public:
     [[nodiscard]] SDL_GPUTexture* smokeNoiseTex() const { return smokeNoise_; }
     [[nodiscard]] SDL_GPUSampler* smokeSampler() const { return smokeSampler_; }
 
+    /// @brief Register the SDF glyph atlas so drawAll() can bind it before drawing text.
+    /// Call this once after SdfAtlas::init() succeeds.
+    void setSdfAtlas(SDL_GPUTexture* tex, SDL_GPUSampler* samp)
+    {
+        sdfAtlasTex_ = tex;
+        sdfAtlasSamp_ = samp;
+    }
+
 private:
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUShaderFormat shaderFmt_ = SDL_GPU_SHADERFORMAT_INVALID;
@@ -77,6 +85,10 @@ private:
     // ── Smoke noise texture ────────────────────────────────────────────────
     SDL_GPUTexture* smokeNoise_ = nullptr;
     SDL_GPUSampler* smokeSampler_ = nullptr;
+
+    // ── SDF atlas (registered from outside after SdfAtlas::init) ──────────
+    SDL_GPUTexture* sdfAtlasTex_ = nullptr;
+    SDL_GPUSampler* sdfAtlasSamp_ = nullptr;
 
     // ── Internal helpers ───────────────────────────────────────────────────
     [[nodiscard]] bool buildPipelines();

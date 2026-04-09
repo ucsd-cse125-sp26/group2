@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <vector>
 
@@ -540,17 +542,26 @@ void ParticleRenderer::uploadSdfHud(SDL_GPUCommandBuffer* cmd, const SdfGlyphGPU
 // drawAll — ordered render pass draw calls
 // ---------------------------------------------------------------------------
 
-// HUD uniform pushed before sdf_hud_pipeline
-struct alignas(16) HudUniforms
+// std140-compatible uniform block pushed before every particle pipeline.
+// Must match layout(set=1, binding=0) in all particle vertex shaders.
+struct alignas(16) ParticleUniforms
 {
-    glm::vec2 invScreenSize;
-    float _p[2];
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::vec3 camPos;
+    float _p0;
+    glm::vec3 camRight;
+    float _p1;
+    glm::vec3 camUp;
+    float _p2;
 };
 
 void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, float screenW, float screenH)
 {
     // Helper lambdas
     auto bindIndex = [&]() {
+        if (!quadIndexBuf_)
+            return; // guard against failed buffer init
         SDL_GPUBufferBinding ib{quadIndexBuf_, 0};
         SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_16BIT);
     };
@@ -621,22 +632,41 @@ void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cm
         drawQuads(smokeBuf_.liveCount());
     }
 
-    // 8. World SDF text (alpha, depth test)
-    if (sdfWorldPipeline_ && sdfWorldBuf_.liveCount() > 0) {
+    // 8. World SDF text (alpha, depth test) — only draw if atlas is registered
+    if (sdfWorldPipeline_ && sdfWorldBuf_.liveCount() > 0 && sdfAtlasTex_ && sdfAtlasSamp_) {
         SDL_BindGPUGraphicsPipeline(pass, sdfWorldPipeline_);
         bindIndex();
         sdfWorldBuf_.bindAsVertexStorage(pass, 0);
+        SDL_GPUTextureSamplerBinding tsb{sdfAtlasTex_, sdfAtlasSamp_};
+        SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
         drawQuads(sdfWorldBuf_.liveCount());
     }
 
-    // 9. HUD SDF text (alpha, no depth, ortho)
-    if (sdfHudPipeline_ && sdfHudBuf_.liveCount() > 0) {
-        HudUniforms hu{};
-        hu.invScreenSize = (screenW > 0 && screenH > 0) ? glm::vec2{1.f / screenW, 1.f / screenH} : glm::vec2{1.f};
-        SDL_PushGPUVertexUniformData(cmd, 0, &hu, sizeof(hu));
+    // 9. HUD SDF text (alpha, no depth, orthographic)
+    // Push a ParticleUniforms-shaped block with an ortho projection so the
+    // vertex shader can use the same proj*view*vec4(pixelPos, 1.0) path
+    // with pixel coordinates in worldPos/right/up.
+    if (sdfHudPipeline_ && sdfHudBuf_.liveCount() > 0 && sdfAtlasTex_ && sdfAtlasSamp_) {
+        const float sw = (screenW > 0) ? screenW : 1280.f;
+        const float sh = (screenH > 0) ? screenH : 720.f;
+
+        // ortho(left, right, bottom, top): pixel (0,0)=top-left → NDC (+y=up convention)
+        ParticleUniforms hpu{};
+        hpu.view = glm::mat4(1.0f);
+        hpu.proj = glm::ortho(0.f, sw, sh, 0.f, -1.f, 1.f);
+        hpu.camPos = {};
+        hpu._p0 = 0;
+        hpu.camRight = {1.f, 0.f, 0.f};
+        hpu._p1 = 0;
+        hpu.camUp = {0.f, 1.f, 0.f};
+        hpu._p2 = 0;
+        SDL_PushGPUVertexUniformData(cmd, 0, &hpu, sizeof(hpu));
+
         SDL_BindGPUGraphicsPipeline(pass, sdfHudPipeline_);
         bindIndex();
         sdfHudBuf_.bindAsVertexStorage(pass, 0);
+        SDL_GPUTextureSamplerBinding tsb{sdfAtlasTex_, sdfAtlasSamp_};
+        SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
         drawQuads(sdfHudBuf_.liveCount());
     }
 }
