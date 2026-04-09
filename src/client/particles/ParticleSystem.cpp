@@ -60,7 +60,7 @@ void ParticleSystem::update(float dt, const Camera& cam, Registry& reg)
 
     tracers_.update(dt, reg);
     ribbons_.update(dt, reg, camPos_);
-    hitscan_.update(dt);
+    hitscan_.update(dt, camForward_);
     smoke_.update(dt, reg, camPos_, camForward_);
     impact_.update(dt);
     decals_.update(dt);
