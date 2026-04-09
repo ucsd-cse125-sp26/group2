@@ -27,5 +27,26 @@ WARN_IF_UNDOCUMENTED    = NO
 WARN_IF_DOC_ERROR       = YES
 WARN_NO_PARAMDOC        = NO
 
-HAVE_DOT            = NO
+# ---------------------------------------------------------------------------
+# Diagrams (requires Graphviz — cmake/Doxygen.cmake sets HAVE_DOT automatically)
+# ---------------------------------------------------------------------------
+HAVE_DOT            = @DOXYGEN_HAVE_DOT@
+DOT_PATH            = @DOXYGEN_DOT_PATH@
+
+# Use SVG so diagrams are sharp at any zoom level and are interactive.
+DOT_IMAGE_FORMAT    = svg
+INTERACTIVE_SVG     = YES
+
+# Which diagrams to generate:
+INCLUDE_GRAPH       = YES   # which headers each file includes
+INCLUDED_BY_GRAPH   = YES   # reverse: who includes this file
+CALL_GRAPH          = YES   # functions called by each function
+CALLER_GRAPH        = YES   # functions that call each function
+CLASS_GRAPH         = YES   # inheritance / struct relationships
+COLLABORATION_GRAPH = YES   # what types each class uses
+DIRECTORY_GRAPH     = YES   # directory-level dependency overview
+
+# Cap diagram complexity so they stay readable.
+DOT_GRAPH_MAX_NODES = 50
+
 QUIET               = NO
