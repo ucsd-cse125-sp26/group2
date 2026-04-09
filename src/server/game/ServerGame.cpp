@@ -10,8 +10,8 @@
 #include <SDL3/SDL.h>
 
 // World geometry for the current test scene: a single floor plane at y=0.
-// The normal (0,1,0) points upward into free space; distance=0 places it at origin.
-// This will be replaced by a proper World object when map loading is implemented.
+// The normal (0,1,0) points upward into free space; distance=0 places it at the origin.
+// Will be replaced by a proper World object when map loading is implemented.
 static const std::array k_worldPlanes{physics::Plane{.normal = glm::vec3{0.0f, 1.0f, 0.0f}, .distance = 0.0f}};
 
 bool ServerGame::init(const char* addr, Uint16 port, int hz)
@@ -25,7 +25,7 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
     const entt::entity k_testEntity = registry.create();
     registry.emplace<Position>(k_testEntity, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(k_testEntity);
-    registry.emplace<CollisionShape>(k_testEntity); // default: 32x72x32 standing AABB
+    registry.emplace<CollisionShape>(k_testEntity); // default: 32×72×32 standing AABB
     registry.emplace<PlayerState>(k_testEntity);
 
     SDL_Log("[server] spawned test entity at (0, 200, 0), tickRateHz=%d", tickRateHz);
@@ -52,6 +52,7 @@ void ServerGame::run()
             if (k_sleepMs > 0)
                 SDL_Delay(static_cast<Uint32>(k_sleepMs));
 
+            // Spin-wait for the remaining sub-millisecond.
             while (SDL_GetPerformanceCounter() < nextTick) {
             }
         }
@@ -69,7 +70,7 @@ void ServerGame::tick(float dt)
     systems::runMovement(registry, dt);
     systems::runCollision(registry, dt, k_worldPlanes);
 
-    // Log once per second so we can watch the entity fall and land.
+    // Log once per second so we can watch the test entity fall and land.
     ++tickCount;
     if (tickCount % tickRateHz == 0) {
         registry.view<Position>().each([this](const Position& pos) {

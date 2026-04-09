@@ -5,32 +5,34 @@
 
 #include <SDL3/SDL.h>
 
-// ---------------------------------------------------------------------------
-// ServerGame — top-level server game loop.
-//
-// Owns the ECS registry and the network server. Each tick it drains
-// incoming datagrams, runs all ECS systems, and broadcasts state.
-// ---------------------------------------------------------------------------
-
+/// @brief Top-level server game loop.
+///
+/// Owns the ECS registry and the network Server. Each tick it drains
+/// incoming datagrams, runs all ECS systems, and broadcasts state.
 class ServerGame
 {
 public:
-    // Bind to addr:port. tickRateHz controls how many physics ticks run per
-    // second — 128 is a good default for a LAN game.
+    /// @brief Bind to the given address and port, spawn test entities.
+    /// @param addr       Hostname or IP to bind to (e.g. "127.0.0.1").
+    /// @param port       UDP port to listen on.
+    /// @param tickRateHz Physics tick rate in Hz (default 128).
+    /// @return False on network or initialisation failure.
     bool init(const char* addr, Uint16 port, int tickRateHz = 128);
 
-    // Block and run the game loop until shutdown() is requested.
+    /// @brief Block and run the game loop until shutdown() is called.
     void run();
 
-    // Signal the loop to stop and release all resources.
+    /// @brief Signal the loop to stop and release all resources.
     void shutdown();
 
 private:
+    /// @brief Advance one physics tick.
+    /// @param dt Fixed delta time in seconds (1 / tickRateHz).
     void tick(float dt);
 
     Server server;
     Registry registry;
-    bool running = false;
-    int tickRateHz = 128;
-    int tickCount = 0; // total ticks since start, used for periodic logging
+    bool running = false; ///< Loop continues while true.
+    int tickRateHz = 128; ///< Physics ticks per second.
+    int tickCount = 0;    ///< Total ticks since start, used for periodic logging.
 };
