@@ -105,13 +105,13 @@ SDL_AppResult Game::event(SDL_Event* event)
             SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
             break;
 
-        // F1 — send a test hello packet to the server.
-        case SDLK_F1: {
-            static constexpr char k_helloMsg[] = "Hello from client!";
-            client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
-            SDL_Log("Sent test packet to server");
-            break;
-        }
+            // F1 — send a test hello packet to the server.
+            // case SDLK_F1: {
+            //     static constexpr char k_helloMsg[] = "Hello from client!";
+            //     client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
+            //     SDL_Log("Sent test packet to server");
+            //     break;
+            // }
 
         default:
             break;
