@@ -14,6 +14,10 @@ namespace systems
 /// @brief Placeholder system — replace with real logic.
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
-inline void update(Registry& /*registry*/, float /*dt*/) {}
+inline void update(Registry& registry, float dt)
+{
+    (void)registry;
+    (void)dt;
+}
 
 } // namespace systems
