@@ -93,9 +93,7 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
     // temp enqueue of events
     Event event;
     event.clientId = 0;
-    event.moveIntentVector = {1.0f, 1.0f};
-    event.jumpIntent = false;
-    event.shootIntent = false;
+    event.movementIntent.forward = true;
 
     eventQueue.enqueue(event);
     SDL_Log("Server: event queue size: %d", eventQueue.size());
