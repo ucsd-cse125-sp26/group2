@@ -27,15 +27,31 @@ struct MeshData
 {
     std::vector<ModelVertex> vertices;
     std::vector<uint32_t> indices;
+    int diffuseTexIndex = -1; ///< Index into LoadedModel::textures, or -1 if none.
 };
 
-/// @brief Load a model file via Assimp and populate @p outMeshes.
+/// @brief RGBA pixel data for one texture (decoded from embedded PNG/JPEG).
+struct TextureData
+{
+    std::vector<uint8_t> pixels; ///< Row-major RGBA, 4 bytes per pixel.
+    int width = 0;
+    int height = 0;
+};
+
+/// @brief Everything returned by loadModel().
+struct LoadedModel
+{
+    std::vector<MeshData> meshes;
+    std::vector<TextureData> textures;
+};
+
+/// @brief Load a model file via Assimp and decode its embedded textures.
 ///
-/// All meshes are triangulated, normals are (re-)generated if missing, and
-/// duplicate vertices are merged.  UV coordinates are V-flipped for SDL3 GPU
-/// conventions.
+/// Each mesh in @p outModel.meshes has a @c diffuseTexIndex pointing into
+/// @p outModel.textures, or -1 when no base-colour texture is available.
+/// Textures are decoded to RGBA via stb_image.
 ///
-/// @param path      Absolute path to the model file.
-/// @param outMeshes Receives one MeshData per mesh found in the file.
+/// @param path     Absolute path to the model file (GLB, OBJ, FBX, …).
+/// @param outModel Filled on success.
 /// @return True on success; false on failure (error logged via SDL_Log).
-bool loadModel(const std::string& path, std::vector<MeshData>& outMeshes);
+bool loadModel(const std::string& path, LoadedModel& outModel);

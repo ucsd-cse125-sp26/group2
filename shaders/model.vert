@@ -14,6 +14,7 @@ layout(location = 2) in vec2 inTexCoord;
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec3 fragWorldPos;
+layout(location = 2) out vec2 fragTexCoord;
 
 layout(set = 1, binding = 0) uniform Matrices
 {
@@ -27,8 +28,8 @@ void main()
     vec4 worldPos  = ubo.model * vec4(inPosition, 1.0);
     gl_Position    = ubo.projection * ubo.view * worldPos;
 
-    // Transform normal into world space using the normal matrix
-    // (inverse-transpose of the model matrix).
+    // Normal in world space via the normal matrix (inverse-transpose of model).
     fragNormal   = normalize(mat3(transpose(inverse(ubo.model))) * inNormal);
     fragWorldPos = worldPos.xyz;
+    fragTexCoord = inTexCoord;
 }

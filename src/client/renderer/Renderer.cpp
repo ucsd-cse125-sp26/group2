@@ -40,8 +40,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     info.num_storage_buffers = storageBufferCount;
     info.num_storage_textures = storageTextureCount;
 
-    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL
-    // (Metal forbids a function literally named "main").
+    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL.
     info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(dev, &info);
@@ -159,7 +158,7 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // ---- Model pipeline (vertex-buffer driven, Assimp meshes) -------------
+    // ---- Model pipeline (vertex-buffer driven, Assimp meshes + textures) --
     if (!initModelPipeline(activeFormat, k_colorFmt))
         return false;
 
@@ -167,20 +166,20 @@ bool Renderer::init(SDL_Window* win)
     char modelPath[512];
     SDL_snprintf(modelPath, sizeof(modelPath), "%sassets/Apex_Legend_Wraith.glb", k_base ? k_base : "");
 
-    std::vector<MeshData> meshes;
-    if (loadModel(modelPath, meshes)) {
-        if (!uploadModel(meshes))
+    LoadedModel loadedModel;
+    if (loadModel(modelPath, loadedModel)) {
+        if (!uploadModel(loadedModel))
             SDL_Log("Renderer: model GPU upload failed — model will not be drawn");
     } else {
         SDL_Log("Renderer: model load failed — model will not be drawn");
     }
 
     // Place the model to the right of the reference cube.
-    // The cube sits at world (0, 0..64, 368..432).  We park the model at
-    // x = +200, y = 0 (ground), z = 400 with a scale of 40 units/metre
-    // (assumes the GLB is authored in metres; tweak as needed).
+    // Cube sits at world (0, 0..64, 368..432).  Model goes at
+    // x=+200, y=0 (ground), z=400.  Scale of 8 units/metre gives ~14 units
+    // per foot — plausible for a Quake-unit world (tweak as needed).
     modelTransform = glm::translate(glm::mat4(1.0f), glm::vec3(200.0f, 0.0f, 400.0f));
-    modelTransform = glm::scale(modelTransform, glm::vec3(40.0f));
+    modelTransform = glm::scale(modelTransform, glm::vec3(8.0f));
 
     // Camera — eye/target overridden every frame by drawFrame().
     camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},
@@ -207,8 +206,10 @@ bool Renderer::initModelPipeline(const SDL_GPUShaderFormat fmt, const SDL_GPUTex
     SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/model.vert%s", k_base ? k_base : "", k_ext);
     SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/model.frag%s", k_base ? k_base : "", k_ext);
 
+    // Vertex shader: 0 samplers, 1 UBO.
+    // Fragment shader: 1 sampler (texDiffuse), 0 UBOs.
     SDL_GPUShader* vert = loadShader(device, vertPath, fmt, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
-    SDL_GPUShader* frag = loadShader(device, fragPath, fmt, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
+    SDL_GPUShader* frag = loadShader(device, fragPath, fmt, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 0, 0);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
         SDL_ReleaseGPUShader(device, frag);
@@ -254,7 +255,7 @@ bool Renderer::initModelPipeline(const SDL_GPUShaderFormat fmt, const SDL_GPUTex
     pci.depth_stencil_state.enable_depth_test = true;
     pci.depth_stencil_state.enable_depth_write = true;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    // Disable back-face culling: GLB winding order varies by exporter.
+    // GLB materials are double-sided; disable culling to match.
     pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
 
     modelPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
@@ -271,15 +272,113 @@ bool Renderer::initModelPipeline(const SDL_GPUShaderFormat fmt, const SDL_GPUTex
 }
 
 // ---------------------------------------------------------------------------
+// Renderer::uploadTexture
+// ---------------------------------------------------------------------------
+
+SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height)
+{
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    info.width = static_cast<Uint32>(width);
+    info.height = static_cast<Uint32>(height);
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    SDL_GPUTexture* tex = SDL_CreateGPUTexture(device, &info);
+    if (!tex) {
+        SDL_Log("Renderer: SDL_CreateGPUTexture failed: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    const Uint32 dataSize = static_cast<Uint32>(width) * static_cast<Uint32>(height) * 4u;
+
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = dataSize;
+
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!tb) {
+        SDL_Log("Renderer: failed to create texture transfer buffer: %s", SDL_GetError());
+        SDL_ReleaseGPUTexture(device, tex);
+        return nullptr;
+    }
+
+    void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
+    SDL_memcpy(ptr, pixels, dataSize);
+    SDL_UnmapGPUTransferBuffer(device, tb);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = tb;
+    src.offset = 0;
+    src.pixels_per_row = 0; // 0 = tightly packed (width pixels per row)
+    src.rows_per_layer = 0; // 0 = tightly packed (height rows per layer)
+
+    SDL_GPUTextureRegion dst{};
+    dst.texture = tex;
+    dst.mip_level = 0;
+    dst.layer = 0;
+    dst.x = dst.y = dst.z = 0;
+    dst.w = static_cast<Uint32>(width);
+    dst.h = static_cast<Uint32>(height);
+    dst.d = 1;
+
+    SDL_UploadToGPUTexture(cp, &src, &dst, false);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_WaitForGPUIdle(device);
+    SDL_ReleaseGPUTransferBuffer(device, tb);
+
+    return tex;
+}
+
+// ---------------------------------------------------------------------------
 // Renderer::uploadModel
 // ---------------------------------------------------------------------------
 
-bool Renderer::uploadModel(const std::vector<MeshData>& meshes)
+bool Renderer::uploadModel(const LoadedModel& model)
 {
-    if (meshes.empty())
+    if (model.meshes.empty())
         return false;
 
-    // Collect per-mesh GPU buffer sizes so we can size the transfer buffer.
+    // ---- Create the shared sampler -------------------------------------------
+    SDL_GPUSamplerCreateInfo sampInfo{};
+    sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    sampInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.min_lod = 0.0f;
+    sampInfo.max_lod = 0.0f;
+    sampInfo.enable_anisotropy = false;
+    sampInfo.enable_compare = false;
+
+    modelSampler = SDL_CreateGPUSampler(device, &sampInfo);
+    if (!modelSampler) {
+        SDL_Log("Renderer: failed to create model sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    // ---- 1×1 opaque-white fallback texture -----------------------------------
+    const uint8_t k_white[4] = {255, 255, 255, 255};
+    defaultTexture = uploadTexture(k_white, 1, 1);
+    if (!defaultTexture)
+        return false;
+
+    // ---- Upload each model texture -------------------------------------------
+    modelTextures.reserve(model.textures.size());
+    for (const auto& td : model.textures) {
+        SDL_GPUTexture* gpuTex = uploadTexture(td.pixels.data(), td.width, td.height);
+        modelTextures.push_back(gpuTex); // nullptr means "use default" at draw time
+    }
+
+    // ---- Collect per-mesh vertex/index sizes then upload all in one pass ----
     struct MeshSizes
     {
         Uint32 vbBytes;
@@ -287,17 +386,16 @@ bool Renderer::uploadModel(const std::vector<MeshData>& meshes)
     };
 
     std::vector<MeshSizes> sizes;
-    sizes.reserve(meshes.size());
+    sizes.reserve(model.meshes.size());
     Uint32 totalBytes = 0;
 
-    for (const auto& m : meshes) {
+    for (const auto& m : model.meshes) {
         const Uint32 vb = static_cast<Uint32>(m.vertices.size() * sizeof(ModelVertex));
         const Uint32 ib = static_cast<Uint32>(m.indices.size() * sizeof(uint32_t));
-        sizes.push_back({vb, ib});
+        sizes.push_back({.vbBytes = vb, .ibBytes = ib});
         totalBytes += vb + ib;
     }
 
-    // One transfer (staging) buffer holds all mesh data.
     SDL_GPUTransferBufferCreateInfo tbInfo{};
     tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     tbInfo.size = totalBytes;
@@ -308,26 +406,23 @@ bool Renderer::uploadModel(const std::vector<MeshData>& meshes)
         return false;
     }
 
-    // Map, write all meshes sequentially, then unmap.
     auto* dst = static_cast<char*>(SDL_MapGPUTransferBuffer(device, tb, false));
     Uint32 writeOffset = 0;
-    for (size_t i = 0; i < meshes.size(); ++i) {
-        SDL_memcpy(dst + writeOffset, meshes[i].vertices.data(), sizes[i].vbBytes);
+    for (size_t i = 0; i < model.meshes.size(); ++i) {
+        SDL_memcpy(dst + writeOffset, model.meshes[i].vertices.data(), sizes[i].vbBytes);
         writeOffset += sizes[i].vbBytes;
-        SDL_memcpy(dst + writeOffset, meshes[i].indices.data(), sizes[i].ibBytes);
+        SDL_memcpy(dst + writeOffset, model.meshes[i].indices.data(), sizes[i].ibBytes);
         writeOffset += sizes[i].ibBytes;
     }
     SDL_UnmapGPUTransferBuffer(device, tb);
 
-    // Create GPU-resident vertex + index buffers for each mesh, then issue
-    // all uploads in a single copy pass.
     SDL_GPUCommandBuffer* uploadCmd = SDL_AcquireGPUCommandBuffer(device);
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(uploadCmd);
 
     Uint32 readOffset = 0;
-    modelMeshes.reserve(meshes.size());
+    modelMeshes.reserve(model.meshes.size());
 
-    for (size_t i = 0; i < meshes.size(); ++i) {
+    for (size_t i = 0; i < model.meshes.size(); ++i) {
         SDL_GPUBufferCreateInfo vbInfo{};
         vbInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
         vbInfo.size = sizes[i].vbBytes;
@@ -349,35 +444,39 @@ bool Renderer::uploadModel(const std::vector<MeshData>& meshes)
         }
 
         SDL_GPUTransferBufferLocation src{};
-        SDL_GPUBufferRegion dst2{};
+        SDL_GPUBufferRegion dstReg{};
 
-        // Vertex data
         src.transfer_buffer = tb;
         src.offset = readOffset;
-        dst2.buffer = vb;
-        dst2.offset = 0;
-        dst2.size = sizes[i].vbBytes;
-        SDL_UploadToGPUBuffer(copyPass, &src, &dst2, false);
+        dstReg.buffer = vb;
+        dstReg.offset = 0;
+        dstReg.size = sizes[i].vbBytes;
+        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
         readOffset += sizes[i].vbBytes;
 
-        // Index data
         src.offset = readOffset;
-        dst2.buffer = ib;
-        dst2.size = sizes[i].ibBytes;
-        SDL_UploadToGPUBuffer(copyPass, &src, &dst2, false);
+        dstReg.buffer = ib;
+        dstReg.size = sizes[i].ibBytes;
+        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
         readOffset += sizes[i].ibBytes;
 
-        modelMeshes.push_back({vb, ib, static_cast<Uint32>(meshes[i].indices.size())});
+        modelMeshes.push_back({
+            .vertexBuffer = vb,
+            .indexBuffer = ib,
+            .indexCount = static_cast<Uint32>(model.meshes[i].indices.size()),
+            .textureIndex = model.meshes[i].diffuseTexIndex,
+        });
     }
 
     SDL_EndGPUCopyPass(copyPass);
     SDL_SubmitGPUCommandBuffer(uploadCmd);
-
-    // Wait for the upload to finish before we start rendering.
     SDL_WaitForGPUIdle(device);
     SDL_ReleaseGPUTransferBuffer(device, tb);
 
-    SDL_Log("Renderer: uploaded %zu mesh(es) to GPU (%u bytes total)", modelMeshes.size(), totalBytes);
+    SDL_Log("Renderer: uploaded %zu mesh(es), %zu texture(s) to GPU (%u bytes geometry)",
+            modelMeshes.size(),
+            modelTextures.size(),
+            totalBytes);
     return true;
 }
 
@@ -411,7 +510,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
-    // Scene matrices — model = identity (geometry is in world space already).
+    // Scene matrices — model = identity (geometry is already in world space).
     Matrices sceneMats{};
     sceneMats.model = glm::mat4(1.0f);
     sceneMats.view = camera.getView();
@@ -442,13 +541,12 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
 
-    // ── Scene geometry: cube (verts 0-35) + floor quad (verts 36-41) ────────
+    // ── Scene geometry: cube (verts 0–35) + floor quad (verts 36–41) ────────
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
     SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
 
     // ── Assimp model ─────────────────────────────────────────────────────────
-    if (!modelMeshes.empty()) {
-        // Switch to the model pipeline and push the model-specific transform.
+    if (!modelMeshes.empty() && modelPipeline && modelSampler && defaultTexture) {
         SDL_BindGPUGraphicsPipeline(pass, modelPipeline);
 
         Matrices modelMats{};
@@ -458,15 +556,23 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
 
         for (const auto& mesh : modelMeshes) {
-            SDL_GPUBufferBinding vbBind{};
-            vbBind.buffer = mesh.vertexBuffer;
-            vbBind.offset = 0;
+            // Vertex + index buffers
+            const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
             SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
 
-            SDL_GPUBufferBinding ibBind{};
-            ibBind.buffer = mesh.indexBuffer;
-            ibBind.offset = 0;
+            const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
             SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+            // Base-colour texture (fall back to 1×1 white if none loaded)
+            SDL_GPUTexture* tex = defaultTexture;
+            if (mesh.textureIndex >= 0 && static_cast<size_t>(mesh.textureIndex) < modelTextures.size() &&
+                modelTextures[static_cast<size_t>(mesh.textureIndex)] != nullptr)
+            {
+                tex = modelTextures[static_cast<size_t>(mesh.textureIndex)];
+            }
+
+            const SDL_GPUTextureSamplerBinding tsb = {.texture = tex, .sampler = modelSampler};
+            SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
 
             SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
         }
@@ -531,6 +637,16 @@ void Renderer::quit()
         }
         modelMeshes.clear();
 
+        for (auto* tex : modelTextures)
+            SDL_ReleaseGPUTexture(device, tex);
+        modelTextures.clear();
+
+        if (defaultTexture)
+            SDL_ReleaseGPUTexture(device, defaultTexture);
+
+        if (modelSampler)
+            SDL_ReleaseGPUSampler(device, modelSampler);
+
         if (modelPipeline)
             SDL_ReleaseGPUGraphicsPipeline(device, modelPipeline);
 
@@ -546,9 +662,11 @@ void Renderer::quit()
         SDL_DestroyGPUDevice(device);
     }
 
+    defaultTexture = nullptr;
+    modelSampler = nullptr;
+    modelPipeline = nullptr;
     depthTexture = nullptr;
     pipeline = nullptr;
-    modelPipeline = nullptr;
     device = nullptr;
     window = nullptr;
 }
