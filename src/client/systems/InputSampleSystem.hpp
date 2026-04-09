@@ -42,8 +42,8 @@ inline void runInputSample(Registry& registry, float mouseSensitivity = 0.002f)
         // Accumulate mouse deltas into absolute yaw.
         snap.yaw += mdx * mouseSensitivity;
 
-        // Keep yaw in [-π, π] to avoid float precision drift over time.
-        snap.yaw = std::fmod(snap.yaw, glm::radians(360.0f));
+        // Wrap yaw to [-π, π] to avoid float precision drift over time.
+        snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
 
         // Clamp pitch to avoid gimbal-lock at the poles.
         snap.pitch = std::clamp(snap.pitch + mdy * mouseSensitivity, -glm::radians(89.0f), glm::radians(89.0f));
