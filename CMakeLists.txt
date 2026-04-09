@@ -221,6 +221,8 @@ add_executable(group2
         src/client/systems/ReconciliationSystem.hpp
         src/client/debug/DebugUI.hpp
         src/client/debug/DebugUI.cpp
+        src/network/MessageStream.hpp
+        src/network/MessageStream.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -285,6 +287,8 @@ add_executable(server
         src/ecs/systems/CollisionSystem.cpp
         src/server/systems/InputReceiveSystem.hpp
         src/server/systems/BroadcastSystem.hpp
+        src/network/MessageStream.hpp
+        src/network/MessageStream.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -299,6 +303,7 @@ target_link_libraries(server PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
     EnTT::EnTT
+    glm::glm
 )
 
 # ---- Compiler warnings ----

@@ -71,7 +71,8 @@ void runMovement(Registry& registry, float dt)
                         vel.value, k_wishDir, physics::k_maxGroundSpeed, physics::k_groundAccel, dt);
             }
             // Air movement.
-            else {
+            else
+            {
                 vel.value = physics::applyGravity(vel.value, dt);
                 if (glm::length(k_wishDir) > 0.001f)
                     vel.value =
