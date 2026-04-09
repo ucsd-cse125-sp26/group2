@@ -3,6 +3,7 @@
 #include "Camera.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
+#include <cmath>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <imgui.h>
@@ -157,13 +158,15 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    camera = Camera(eye,
-                    target,
-                    up,
-                    glm::degrees(fovy), // only if your fovy is currently radians
+    // Initial camera — eye/target are overridden every frame by drawFrame().
+    // near/far must be set correctly here; they persist across setAspect() calls.
+    camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f}, // eye  (overridden each frame)
+                    glm::vec3{0.0f, 100.0f, 1.0f}, // target
+                    glm::vec3{0.0f, 1.0f, 0.0f},   // up
+                    fovyDegrees,
                     1.0f,
-                    near,
-                    far);
+                    nearPlane,
+                    farPlane);
 
     return true;
 }
@@ -175,8 +178,16 @@ struct Matrices
     glm::mat4 projection;
 };
 
-void Renderer::drawFrame()
+void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
 {
+    // ── first-person camera ─────────────────────────────────────────────────
+    // Forward vector from yaw (horizontal) and pitch (vertical).
+    // Convention matches InputSnapshot: yaw=0 → +Z, pitch>0 → looking down.
+    const float cosPitch = std::cos(pitch);
+    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
+    camera.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
+
+    // ── GPU frame ───────────────────────────────────────────────────────────
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
     if (!cmd)
         return;
@@ -193,11 +204,11 @@ void Renderer::drawFrame()
         return;
     }
 
-    float aspect = (h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f;
+    camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
+    // All geometry is pre-positioned in world space, so model = identity.
     Matrices mats{};
     mats.model = glm::mat4(1.0f);
-    camera.setAspect(aspect);
     mats.view = camera.getView();
     mats.projection = camera.getProjection();
 
@@ -211,7 +222,7 @@ void Renderer::drawFrame()
 
     SDL_GPUColorTargetInfo ct{};
     ct.texture = swapchain;
-    ct.clear_color = {.r = 0.10f, .g = 0.10f, .b = 0.10f, .a = 1.0f};
+    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}; // dark-blue sky
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
     ct.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -227,9 +238,12 @@ void Renderer::drawFrame()
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
 
-    // Scene geometry — 3D cube (36 vertices, 6 faces × 2 triangles × 3 verts).
+    // Scene geometry:
+    //   verts  0-35  — reference cube (64-unit cube at world pos (0,0,400))
+    //   verts 36-41  — floor quad (4000×4000 units at y=0)
+    // One draw call; model = identity; checkerboard applied in fragment shader.
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
-    SDL_DrawGPUPrimitives(pass, 36, 1, 0, 0);
+    SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
 
     // ImGui overlay — drawn last so it sits on top of scene geometry.
     if (k_drawData)
