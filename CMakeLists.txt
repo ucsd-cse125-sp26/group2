@@ -17,6 +17,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(FetchContent)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Doxygen.cmake")
 
 # ---- Options ----
 option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
@@ -69,6 +70,37 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(EnTT)
+
+# ImGui — immediate-mode debug UI (client only).
+# ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
+# the source tree without calling add_subdirectory. We compile it ourselves
+# as imgui_lib below.
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.92.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui_lib STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp
+)
+target_include_directories(imgui_lib PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_link_libraries(imgui_lib PUBLIC SDL3::SDL3-static)
+# Suppress warnings coming from ImGui's own code — not our problem to fix.
+target_compile_options(imgui_lib PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
+    $<$<CXX_COMPILER_ID:MSVC>:/W0>
+)
 
 # ---- Shaders: GLSL → SPIR-V (→ MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
@@ -165,6 +197,30 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/components/Position.hpp
+        src/ecs/components/Velocity.hpp
+        src/ecs/components/CollisionShape.hpp
+        src/ecs/components/PlayerState.hpp
+        src/ecs/components/InputSnapshot.hpp
+        src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/LocalPlayer.hpp
+        src/ecs/physics/PhysicsConstants.hpp
+        src/ecs/physics/Movement.hpp
+        src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.hpp
+        src/ecs/physics/SweptCollision.cpp
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/systems/CollisionSystem.cpp
+        src/client/systems/InputSampleSystem.hpp
+        src/client/systems/PredictionSystem.hpp
+        src/client/systems/InputSendSystem.hpp
+        src/client/systems/ReconciliationSystem.hpp
+        src/client/debug/DebugUI.hpp
+        src/client/debug/DebugUI.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -197,6 +253,7 @@ target_link_libraries(group2 PRIVATE
     glm::glm
     SDL3_net::SDL3_net
     EnTT::EnTT
+    imgui_lib
 )
 
 # ===========================================================================
@@ -208,6 +265,26 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/components/Position.hpp
+        src/ecs/components/Velocity.hpp
+        src/ecs/components/CollisionShape.hpp
+        src/ecs/components/PlayerState.hpp
+        src/ecs/components/InputSnapshot.hpp
+        src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/LocalPlayer.hpp
+        src/ecs/physics/PhysicsConstants.hpp
+        src/ecs/physics/Movement.hpp
+        src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.hpp
+        src/ecs/physics/SweptCollision.cpp
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/systems/CollisionSystem.cpp
+        src/server/systems/InputReceiveSystem.hpp
+        src/server/systems/BroadcastSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
