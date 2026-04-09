@@ -23,30 +23,26 @@ public:
     bool init(SDL_Window* window);
 
     /// @brief Submit the scene geometry and ImGui draw data for one frame.
-    void drawFrame();
+    /// @param eye    World-space camera eye position (interpolated, in Quake units).
+    /// @param yaw    Horizontal look angle in radians (matches InputSnapshot::yaw).
+    /// @param pitch  Vertical look angle in radians (positive = looking down).
+    void drawFrame(glm::vec3 eye, float yaw, float pitch);
 
     /// @brief Release all GPU resources. Waits for GPU idle before freeing.
     /// @pre Call before the SDL window is destroyed.
     void quit();
-
-    void rotateCameraRight(float degrees) { camera.rotateRight(degrees); }
-    void rotateCameraUp(float degrees) { camera.rotateUp(degrees); }
-    void resetCamera() { camera.reset(); }
 
 private:
     SDL_Window* window = nullptr;                ///< The SDL window being rendered into.
     SDL_GPUDevice* device = nullptr;             ///< The SDL GPU device.
     SDL_GPUGraphicsPipeline* pipeline = nullptr; ///< The scene graphics pipeline.
 
-    // Camera initial parameters (passed to Camera constructor in init()).
-    glm::vec3 eye = glm::vec3(5.0f, 0.0f, 0.0f);
-    glm::vec3 target = glm::vec3(0.0f, 0.0f, 0.0f);
-    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
-    float fovy = glm::radians(60.0f); ///< Field of view in radians (converted to degrees for Camera).
-    float near = 0.01f;
-    float far = 100.0f;
+    // Camera parameters used during init. Near/far are sized for Quake units.
+    float fovyDegrees = 60.0f;
+    float nearPlane = 5.0f;                 ///< Near clip (Quake units); 5 ≈ half a foot.
+    float farPlane = 15000.0f;              ///< Far clip; covers the 4 000-unit play area with margin.
 
-    Camera camera;                          ///< Orbiting camera — rotate with W/A/S/D, reset with R.
+    Camera camera;                          ///< First-person camera — driven by player position + yaw/pitch each frame.
 
     SDL_GPUTexture* depthTexture = nullptr; ///< Depth buffer, recreated on resize.
     Uint32 depthWidth = 0;
