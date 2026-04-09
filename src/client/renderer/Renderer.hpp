@@ -12,7 +12,7 @@
 ///
 /// Renders two layers of geometry each frame:
 ///   1. Scene geometry — hard-coded cube + floor via `projective.vert` / `normal.frag`.
-///   2. Loaded model   — Assimp-imported GLB uploaded to GPU vertex/index buffers,
+///   2. Loaded model   — Assimp-imported GLB with per-mesh base-colour textures,
 ///                       rendered via `model.vert` / `model.frag`.
 ///
 /// Also owns the `imgui_impl_sdlgpu3` render backend.  The ImGui context and
@@ -20,7 +20,7 @@
 class Renderer
 {
 public:
-    /// @brief Initialise the GPU device, both pipelines, upload the model, and init ImGui GPU.
+    /// @brief Initialise the GPU device, both pipelines, upload model + textures, init ImGui GPU.
     /// @param window  The SDL window to render into.
     /// @return False on any fatal GPU error.
     /// @pre An ImGui context must already exist (created by DebugUI::init).
@@ -59,10 +59,14 @@ private:
         SDL_GPUBuffer* vertexBuffer = nullptr;
         SDL_GPUBuffer* indexBuffer = nullptr;
         Uint32 indexCount = 0;
+        int textureIndex = -1; ///< Index into modelTextures, or -1 → defaultTexture.
     };
 
-    SDL_GPUGraphicsPipeline* modelPipeline = nullptr; ///< Pipeline with vertex-input layout.
+    SDL_GPUGraphicsPipeline* modelPipeline = nullptr; ///< Pipeline with vertex-input layout + sampler.
     std::vector<GpuMesh> modelMeshes;                 ///< One entry per mesh in the loaded file.
+    std::vector<SDL_GPUTexture*> modelTextures;       ///< Decoded textures uploaded to GPU.
+    SDL_GPUTexture* defaultTexture = nullptr;         ///< 1×1 opaque-white fallback texture.
+    SDL_GPUSampler* modelSampler = nullptr;           ///< Shared linear sampler for all model textures.
     glm::mat4 modelTransform{1.0f};                   ///< World transform applied to the model.
 
     // ---- Private helpers -----------------------------------------------
@@ -70,12 +74,16 @@ private:
     /// @brief (Re-)create the depth texture when the swapchain size changes.
     bool ensureDepthTexture(Uint32 w, Uint32 h);
 
-    /// @brief Create the model graphics pipeline (vertex inputs + depth test).
+    /// @brief Create the model graphics pipeline (vertex inputs + fragment sampler + depth test).
     /// @param fmt       Active shader format (SPIR-V or MSL).
     /// @param colorFmt  Swapchain colour target format.
     bool initModelPipeline(SDL_GPUShaderFormat fmt, SDL_GPUTextureFormat colorFmt);
 
-    /// @brief Upload all mesh data to GPU vertex/index buffers.
-    /// Populates @c modelMeshes.  Blocks until upload is complete.
-    bool uploadModel(const std::vector<MeshData>& meshes);
+    /// @brief Upload all mesh vertex/index data and textures to the GPU.
+    /// Populates @c modelMeshes, @c modelTextures, @c defaultTexture, and @c modelSampler.
+    bool uploadModel(const LoadedModel& model);
+
+    /// @brief Upload one RGBA texture to a new GPU texture object.
+    /// @return The created GPU texture, or nullptr on failure.
+    SDL_GPUTexture* uploadTexture(const uint8_t* pixels, int width, int height);
 };

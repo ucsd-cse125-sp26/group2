@@ -1,11 +1,18 @@
 // model.frag — fragment shader for Assimp-loaded mesh geometry.
 //
-// Applies a two-light diffuse + ambient shading model in world space.
-// No textures yet; base colour is a warm grey.
+// Samples the per-mesh base-colour texture and applies two-light diffuse + ambient.
+//
+// SDL3 GPU SPIR-V resource layout for fragment shaders:
+//   set = 2 → sampled textures / storage textures / storage buffers  ← texDiffuse here
+//   set = 3 → uniform buffers
 #version 450
 
-layout(location = 0) in  vec3 fragNormal;
-layout(location = 1) in  vec3 fragWorldPos;
+layout(location = 0) in vec3 fragNormal;
+layout(location = 1) in vec3 fragWorldPos;
+layout(location = 2) in vec2 fragTexCoord;
+
+// Fragment-stage sampler slot 0: base-colour texture (or 1×1 white fallback).
+layout(set = 2, binding = 0) uniform sampler2D texDiffuse;
 
 layout(location = 0) out vec4 outColor;
 
@@ -21,10 +28,9 @@ void main()
     vec3  dir1  = normalize(vec3(-0.5,  0.3, -0.8));
     float diff1 = max(dot(n, dir1), 0.0) * 0.35;
 
-    float ambient  = 0.25;
-    float lighting = ambient + diff0 * 0.65 + diff1;
+    float ambient  = 0.35;
+    float lighting = ambient + diff0 * 0.55 + diff1;
 
-    // Warm grey base colour
-    vec3 baseColor = vec3(0.76, 0.73, 0.70);
-    outColor = vec4(baseColor * lighting, 1.0);
+    vec4 texColor = texture(texDiffuse, fragTexCoord);
+    outColor      = vec4(texColor.rgb * lighting, texColor.a);
 }

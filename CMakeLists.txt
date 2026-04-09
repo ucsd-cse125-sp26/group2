@@ -98,6 +98,20 @@ block()
     FetchContent_MakeAvailable(assimp)
 endblock()
 
+# stb — single-header image decoding (used by ModelLoader to decompress the
+# PNG/JPEG textures embedded in GLB files).  stb ships no CMakeLists.txt, so
+# FetchContent just populates the source directory; we expose it as a simple
+# INTERFACE library so callers get -isystem suppression.
+FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(stb)
+add_library(stb_image INTERFACE)
+target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
+
 # Suppress warnings that fire when our code includes Assimp headers.
 # Using SYSTEM marks those include paths as "system" so -Wall / -Wextra
 # diagnostics are silenced for Assimp's own headers.
@@ -298,6 +312,7 @@ target_link_libraries(group2 PRIVATE
     EnTT::EnTT
     imgui_lib
     assimp
+    stb_image
 )
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
