@@ -27,6 +27,15 @@ SDL_GPUShaderFormat selectFormat(SDL_GPUDevice* device)
     return SDL_GPU_SHADERFORMAT_INVALID;
 }
 
+ImGui_ImplSDLGPU3_InitInfo createImGuiInfo(SDL_GPUDevice* device, SDL_Window* window)
+{
+    ImGui_ImplSDLGPU3_InitInfo imguiInfo{};
+    imguiInfo.Device = device;
+    imguiInfo.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
+    imguiInfo.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+    return imguiInfo;
+}
+
 /// @brief Load a compiled shader from disk and create an SDL GPU shader object.
 /// @param dev                  The GPU device.
 /// @param path                 Path to the compiled shader file (.spv or .msl).
@@ -107,13 +116,7 @@ bool Renderer::init(SDL_Window* win)
     // ImGui GPU backend setup.
     // The ImGui context and SDL3 input backend were already initialised by
     // DebugUI::init(). We just hook up the GPU render backend here.
-    const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
-
-    ImGui_ImplSDLGPU3_InitInfo imguiInfo{};
-    imguiInfo.Device = device;
-    imguiInfo.ColorTargetFormat = k_colorFmt;
-    imguiInfo.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
-
+    ImGui_ImplSDLGPU3_InitInfo imguiInfo = createImGuiInfo(device, window);
     if (!ImGui_ImplSDLGPU3_Init(&imguiInfo)) {
         SDL_Log("Renderer: ImGui_ImplSDLGPU3_Init failed");
         return false;
@@ -136,7 +139,7 @@ bool Renderer::init(SDL_Window* win)
     }
 
     SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = k_colorFmt;
+    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
 
     SDL_GPUGraphicsPipelineCreateInfo pci{};
     pci.vertex_shader = vert;
