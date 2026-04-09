@@ -97,13 +97,13 @@ createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderF
     // --- If you change the shader names/locations or
     // --- buffer/texture counts, then update them here
     // Vertex Shader
-    const char* const vertexShaderPath = "shaders/projective.vert";
+    const char* const vertexShaderPath = "shaders/geometry.vert";
     Uint32 vertexShaderSamplerCount = 0;
     Uint32 vertexShaderUniformBufferCount = 1;
     Uint32 vertexShaderStorageBufferCount = 0;
     Uint32 vertexShaderStorageTextureCount = 0;
     // Fragment Shader
-    const char* const fragmentShaderPath = "shaders/normal.frag";
+    const char* const fragmentShaderPath = "shaders/geometry.frag";
     Uint32 fragmentShaderSamplerCount = 0;
     Uint32 fragmentShaderUniformBufferCount = 0;
     Uint32 fragmentShaderStorageBufferCount = 0;
