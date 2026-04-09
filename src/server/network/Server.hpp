@@ -1,6 +1,7 @@
 #pragma once
 
 #include "network/MessageStream.hpp"
+#include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
@@ -35,9 +36,10 @@ private:
         MessageStream msgStream;
     };
 
-    void handleMessage(const Connection& client, const Uint8* data, Uint32 len);
+    void handleMessage(Connection& client, const void* data, Uint32 len);
 
     NET_Server* server = nullptr;
 
     std::vector<Connection> clients;
+    EventQueue eventQueue;
 };
