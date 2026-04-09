@@ -10,6 +10,7 @@
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "systems/InputSampleSystem.hpp"
+#include "systems/InputSendSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -136,6 +137,9 @@ SDL_AppResult Game::iterate()
     // accumulate them multiple times per frame at high frame rates.
     if (mouseCaptured)
         systems::runInputSample(registry);
+
+    // Send local player input to the server.
+    systems::runInputSet(registry, client);
 
     // Compute frame time.
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();

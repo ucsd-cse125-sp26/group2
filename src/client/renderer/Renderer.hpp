@@ -39,10 +39,10 @@ private:
 
     // Camera parameters used during init. Near/far are sized for Quake units.
     float fovyDegrees = 60.0f;
-    float nearPlane = 5.0f;                 ///< Near clip (Quake units); 5 ≈ half a foot.
-    float farPlane = 15000.0f;              ///< Far clip; covers the 4 000-unit play area with margin.
+    float nearPlane = 5.0f;    ///< Near clip (Quake units); 5 ≈ half a foot.
+    float farPlane = 15000.0f; ///< Far clip; covers the 4 000-unit play area with margin.
 
-    Camera camera;                          ///< First-person camera — driven by player position + yaw/pitch each frame.
+    Camera camera;             ///< First-person camera — driven by player position + yaw/pitch each frame.
 
     SDL_GPUTexture* depthTexture = nullptr; ///< Depth buffer, recreated on resize.
     Uint32 depthWidth = 0;
