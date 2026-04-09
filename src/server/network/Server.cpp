@@ -100,3 +100,13 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
     eventQueue.enqueue(event);
     SDL_Log("Server: event queue size: %d", eventQueue.size());
 }
+
+bool Server::isEmpty()
+{
+    return eventQueue.isEmpty();
+}
+
+Event Server::dequeueEvent()
+{
+    return eventQueue.dequeue();
+}
