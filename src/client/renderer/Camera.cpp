@@ -94,3 +94,13 @@ void Camera::computeMatrices()
     view = glm::lookAt(eye, target, up);
     proj = glm::perspective(glm::radians(fovy), aspect, nearPlane, farPlane);
 }
+
+glm::vec3 Camera::getForward() const
+{
+    return glm::normalize(target - eye);
+}
+
+glm::vec3 Camera::getRight() const
+{
+    return glm::normalize(glm::cross(getForward(), up));
+}

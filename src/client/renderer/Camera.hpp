@@ -33,6 +33,11 @@ public:
     [[nodiscard]] const glm::vec3& getTarget() const { return target; }
     [[nodiscard]] const glm::vec3& getUp() const { return up; }
 
+    /// @brief World-space unit vector pointing from eye toward target.
+    [[nodiscard]] glm::vec3 getForward() const;
+    /// @brief World-space unit vector pointing to the camera's right (forward × up).
+    [[nodiscard]] glm::vec3 getRight() const;
+
 private:
     glm::vec3 eye{0.0f, 0.0f, 3.0f};
     glm::vec3 target{0.0f, 0.0f, 0.0f};
