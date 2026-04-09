@@ -1,5 +1,7 @@
 #include "Server.hpp"
 
+#include "systems/EventQueue.hpp"
+
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
@@ -20,6 +22,7 @@ bool Server::init(const char* addr, Uint16 port)
         return false;
     }
 
+    eventQueue = EventQueue();
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
     return true;
 }
@@ -64,13 +67,8 @@ void Server::readClients()
     for (auto it = clients.begin(); it != clients.end();) {
         auto& conn = *it;
 
-        bool ok = conn.msgStream.poll([&conn](const void* data, Uint32 size) {
-            SDL_Log("Server: received %d bytes from", size);
-            SDL_Log("Server: data: %.*s", size, data);
-
-            // echo
-            conn.msgStream.send(data, size);
-        });
+        bool ok =
+            conn.msgStream.poll([this, &conn](const void* data, Uint32 size) { handleMessage(conn, data, size); });
 
         if (!ok) {
             SDL_Log("Server: client dead");
@@ -83,10 +81,22 @@ void Server::readClients()
     }
 }
 
-void Server::handleMessage(const Connection& client, const Uint8* data, Uint32 len)
+void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 {
-    // SDL_Log("Server: received %d bytes from %s", len,
-    // NET_GetAddressString(NET_GetStreamSocketAddress(client.socket))); SDL_Log("Server: data: %.*s", len, data);
-    // // Echo back to sender.
-    // NET_SendDatagram(sock, dgram->addr, dgram->port, dgram->buf, dgram->buflen);
+
+    SDL_Log("Server: received %d bytes", len);
+    SDL_Log("Server: data: %.*s", len, static_cast<const char*>(data));
+
+    // echo
+    conn.msgStream.send(data, len);
+
+    // temp enqueue of events
+    Event event;
+    event.clientId = 0;
+    event.moveIntentVector = {1.0f, 1.0f};
+    event.jumpIntent = false;
+    event.shootIntent = false;
+
+    eventQueue.enqueue(event);
+    SDL_Log("Server: event queue size: %d", eventQueue.size());
 }

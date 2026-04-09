@@ -1,10 +1,12 @@
+#pragma once
+#include <glm/vec2.hpp>
 #include <queue>
-#include <utility>
 
-struct Event
+class Event
 {
+public:
     int clientId;
-    std::pair<float, float> moveIntentVector;
+    glm::vec2 moveIntentVector;
     bool jumpIntent;
     bool shootIntent;
 };
@@ -15,6 +17,7 @@ public:
     bool isEmpty();
     void enqueue(Event event);
     Event dequeue();
+    int size();
 
 private:
     std::queue<Event> events;
