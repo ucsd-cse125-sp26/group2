@@ -6,9 +6,11 @@
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "particles/ParticleSystem.hpp"
 
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
@@ -402,4 +404,162 @@ void DebugUI::buildMovementChart(const Registry& registry)
 void DebugUI::render()
 {
     ImGui::Render();
+}
+
+// ─── Particle System debug/control window ─────────────────────────────────────
+
+void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward)
+{
+    // Toggle via checkbox in ECS inspector is handled separately; also show a
+    // small button here to allow re-opening if closed.
+    if (!showParticleWindow_) {
+        ImGui::SetNextWindowPos({10.f, 620.f}, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Particles##btn", &showParticleWindow_, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextDisabled("(window closed — check title bar X)");
+        }
+        ImGui::End();
+        return;
+    }
+
+    ImGui::SetNextWindowPos({10.f, 620.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({440.f, 520.f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Particle System", &showParticleWindow_)) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Status ────────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Status");
+    if (ps.sdfReady())
+        ImGui::TextColored({0.4f, 1.f, 0.4f, 1.f}, "SDF Font: LOADED");
+    else
+        ImGui::TextColored({1.f, 0.5f, 0.3f, 1.f}, "SDF Font: not loaded (text rendering disabled)");
+
+    // ── Live counts ───────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Live Counts");
+
+    struct PoolRow
+    {
+        const char* name;
+        uint32_t live;
+        uint32_t maxN;
+    };
+    const PoolRow rows[] = {
+        {"Sparks / Impact", ps.impactCount(), 4096},
+        {"Tracers (caps.)", ps.tracerCount(), 512},
+        {"Ribbon verts", ps.ribbonVertexCount(), 24576},
+        {"Hitscan beams", ps.hitscanBeamCount(), 64},
+        {"Arc verts", ps.arcVertexCount(), 2048},
+        {"Smoke", ps.smokeCount(), 1024},
+        {"Decals", ps.decalCount(), 512},
+    };
+
+    constexpr ImGuiTableFlags kTF =
+        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
+    if (ImGui::BeginTable("##counts", 3, kTF)) {
+        ImGui::TableSetupColumn("Effect", ImGuiTableColumnFlags_WidthFixed, 150.f);
+        ImGui::TableSetupColumn("Live/Max", ImGuiTableColumnFlags_WidthFixed, 88.f);
+        ImGui::TableSetupColumn("Fill", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto& r : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(r.name);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u / %u", r.live, r.maxN);
+            ImGui::TableSetColumnIndex(2);
+            const float fraction = (r.maxN > 0) ? static_cast<float>(r.live) / static_cast<float>(r.maxN) : 0.f;
+            char overlay[16];
+            SDL_snprintf(overlay, sizeof(overlay), "%.0f%%", static_cast<double>(fraction * 100.f));
+            ImGui::ProgressBar(fraction, {-FLT_MIN, 0.f}, overlay);
+        }
+        ImGui::EndTable();
+    }
+
+    // ── Spawn Controls ────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Spawn Controls");
+
+    ImGui::SliderFloat("Dist ahead (units)", &particleSpawnDist_, 30.f, 800.f, "%.0f");
+
+    // Compute spawn position = eye + forward * dist
+    const glm::vec3 spawnPos = eyePos + forward * particleSpawnDist_;
+    const glm::vec3 floorNorm = {0.f, 1.f, 0.f};
+    const glm::vec3 wallNorm = -forward; // facing the camera
+
+    ImGui::TextDisabled("Spawn pos: (%.0f, %.0f, %.0f)",
+                        static_cast<double>(spawnPos.x),
+                        static_cast<double>(spawnPos.y),
+                        static_cast<double>(spawnPos.z));
+
+    ImGui::Spacing();
+
+    // Impact effects — one button per surface type
+    ImGui::TextUnformatted("Impact Effects:");
+    struct SurfBtn
+    {
+        const char* label;
+        SurfaceType surf;
+        ImVec4 col;
+    };
+    constexpr SurfBtn k_surfs[] = {
+        {"Metal", SurfaceType::Metal, {0.9f, 0.9f, 0.5f, 1.f}},
+        {"Concrete", SurfaceType::Concrete, {0.6f, 0.6f, 0.5f, 1.f}},
+        {"Flesh", SurfaceType::Flesh, {0.9f, 0.4f, 0.4f, 1.f}},
+        {"Wood", SurfaceType::Wood, {0.7f, 0.5f, 0.3f, 1.f}},
+        {"Energy", SurfaceType::Energy, {0.3f, 0.8f, 1.0f, 1.f}},
+    };
+    for (const auto& s : k_surfs) {
+        ImGui::PushStyleColor(ImGuiCol_Button, s.col);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {s.col.x * 1.2f, s.col.y * 1.2f, s.col.z * 1.2f, 1.f});
+        ImGui::PushStyleColor(ImGuiCol_Text, {0.05f, 0.05f, 0.05f, 1.f});
+        if (ImGui::Button(s.label, {76.f, 0.f}))
+            ps.spawnImpactEffect(spawnPos, wallNorm, s.surf, WeaponType::Rifle);
+        ImGui::PopStyleColor(3);
+        ImGui::SameLine();
+    }
+    ImGui::NewLine();
+
+    ImGui::Spacing();
+
+    // Other effects — 2-column layout
+    auto spawnBtn = [&](const char* label, float width, auto fn) -> bool {
+        const bool hit = ImGui::Button(label, {width, 0.f});
+        if (hit)
+            fn();
+        return hit;
+    };
+
+    spawnBtn("Hitscan Beam", 130.f, [&] { ps.spawnHitscanBeam(eyePos, spawnPos, WeaponType::EnergyRifle); });
+    ImGui::SameLine();
+    spawnBtn("Smoke Cloud", 120.f, [&] { ps.spawnSmoke(spawnPos, 40.f); });
+    ImGui::SameLine();
+    spawnBtn("Explosion", 100.f, [&] { ps.spawnExplosion(spawnPos, 100.f); });
+
+    spawnBtn("Bullet Hole (floor)", 160.f, [&] {
+        // Place on floor beneath the spawn point
+        const glm::vec3 floorPos{spawnPos.x, 0.f, spawnPos.z};
+        ps.spawnBulletHole(floorPos, floorNorm, WeaponType::Rifle);
+    });
+    ImGui::SameLine();
+    spawnBtn("Bullet Hole (wall)", 150.f, [&] { ps.spawnBulletHole(spawnPos, wallNorm, WeaponType::Rifle); });
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("SDF Text Test");
+
+    spawnBtn("World Text (above spawn)", 190.f, [&] {
+        ps.drawWorldText(spawnPos + glm::vec3{0.f, 60.f, 0.f}, "Hello World", {0.3f, 1.f, 0.9f, 1.f}, 30.f);
+    });
+    ImGui::SameLine();
+    spawnBtn("HUD Text", 90.f, [&] {
+        // Just queues it; it only appears for one frame so press repeatedly to see it
+        ps.drawScreenText({10.f, 40.f}, "SDF HUD TEST 123", {1.f, 0.9f, 0.3f, 1.f}, 28.f);
+    });
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Keyboard Shortcuts");
+    ImGui::TextDisabled("T: Hitscan beam    Y: Metal impact");
+    ImGui::TextDisabled("U: Smoke cloud     I: Explosion");
+
+    ImGui::End();
 }

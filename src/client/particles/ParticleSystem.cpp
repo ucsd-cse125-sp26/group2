@@ -16,10 +16,15 @@ bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL
         return false;
     }
 
-    // SDF font — try a common system font path; silently skip if not found
-    const char* fontPaths[] = {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                               "/usr/share/fonts/TTF/DejaVuSans.ttf",
-                               "/System/Library/Fonts/Helvetica.ttc",
+    // SDF font — scan common system font paths; silently skip if none found
+    const char* fontPaths[] = {"/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf",       // Fedora / modern GNOME
+                               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",        // Debian/Ubuntu
+                               "/usr/share/fonts/TTF/DejaVuSans.ttf",                    // Arch
+                               "/usr/share/fonts/noto/NotoSans-Regular.ttf",             // Noto (various distros)
+                               "/usr/share/fonts/liberation/LiberationSans-Regular.ttf", // Liberation
+                               "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                               "/System/Library/Fonts/Helvetica.ttc",                    // macOS
+                               "C:/Windows/Fonts/segoeui.ttf",                           // Windows
                                nullptr};
     for (int i = 0; fontPaths[i]; ++i) {
         if (sdf_.init(dev, fontPaths[i]))

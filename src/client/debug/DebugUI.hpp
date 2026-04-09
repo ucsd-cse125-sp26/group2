@@ -4,6 +4,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <glm/vec3.hpp>
+
+class ParticleSystem; ///< Forward-declared to avoid pulling in heavy particle headers.
+
 /// @brief Live ECS inspector overlay powered by Dear ImGui.
 ///
 /// **Ownership split:**
@@ -40,22 +44,30 @@ public:
     /// @param tickCount  Total physics ticks elapsed (displayed in the stats bar).
     void buildUI(const Registry& registry, int tickCount);
 
+    /// @brief Build the Particle System debug/control window.
+    /// @param ps       The particle system to inspect and control.
+    /// @param eyePos   Camera eye position (used to compute spawn position).
+    /// @param forward  Camera forward unit vector.
+    void buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward);
+
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
 private:
-    /// Per-component visibility toggles — persistent across frames.
-    bool showPosition = true;       ///< Show Position component row.
-    bool showPrevPosition = false;  ///< Show PreviousPosition component row.
-    bool showVelocity = true;       ///< Show Velocity component row.
-    bool showCollisionShape = true; ///< Show CollisionShape half-extents row.
-    bool showPlayerState = true;    ///< Show PlayerState flags row.
-    bool showInputSnapshot = true;  ///< Show InputSnapshot key-state row.
-    bool showViewAngles = true;     ///< Show yaw/pitch/roll in degrees (easier to read than radians).
-    bool showMovementChart = true;  ///< Show the 2-D overhead movement chart window.
+    // ── ECS Inspector state ────────────────────────────────────────────────
+    bool showPosition = true;
+    bool showPrevPosition = false;
+    bool showVelocity = true;
+    bool showCollisionShape = true;
+    bool showPlayerState = true;
+    bool showInputSnapshot = true;
+    bool showViewAngles = true;
+    bool showMovementChart = true;
 
     /// @brief Draw the standalone 2-D overhead movement chart window.
-    /// Shows the local player dot on a 3 000 × 3 000 unit grid together with
-    /// view-direction, velocity, and wish-velocity arrows.
     void buildMovementChart(const Registry& registry);
+
+    // ── Particle UI state ──────────────────────────────────────────────────
+    float particleSpawnDist_ = 200.f; ///< Units ahead of camera to spawn effects.
+    bool showParticleWindow_ = true;
 };

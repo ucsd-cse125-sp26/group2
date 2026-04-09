@@ -225,8 +225,13 @@ SDL_AppResult Game::iterate()
     // Draw persistent HUD text each frame
     particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
 
+    // Compute camera forward for particle spawn direction
+    const float cosPitch = std::cos(renderPitch);
+    const glm::vec3 camFwd{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+
     // Build debug UI and render.
     debugUI.buildUI(registry, tickCount);
+    debugUI.buildParticleUI(particleSystem, renderEye, camFwd);
     debugUI.render();
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
 

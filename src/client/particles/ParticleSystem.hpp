@@ -78,6 +78,16 @@ public:
     void onImpact(const ProjectileImpactEvent& e);
     void onExplosion(const ExplosionEvent& e);
 
+    // ── Live-count accessors (for debug UI) ───────────────────────────────
+    [[nodiscard]] uint32_t impactCount() const { return impact_.count(); }
+    [[nodiscard]] uint32_t tracerCount() const { return tracers_.count(); }
+    [[nodiscard]] uint32_t ribbonVertexCount() const { return ribbons_.count(); }
+    [[nodiscard]] uint32_t hitscanBeamCount() const { return hitscan_.beamCount(); }
+    [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount(); }
+    [[nodiscard]] uint32_t smokeCount() const { return smoke_.count(); }
+    [[nodiscard]] uint32_t decalCount() const { return decals_.count(); }
+    [[nodiscard]] bool sdfReady() const { return sdf_.ready(); }
+
 private:
     ParticleRenderer renderer_;
     TracerEffect tracers_;
