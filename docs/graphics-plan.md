@@ -8,6 +8,17 @@ The renderer uses SDL3 GPU (Vulkan/Metal/DX12 abstraction) with GLSL → SPIR-V 
 
 **Architecture decision: Enhanced Forward rendering** (not deferred). Reasons: simpler to debug, handles transparency naturally, sufficient for moderate light counts (8–16), and avoids the G-buffer complexity. A depth pre-pass is added for early-Z and screen-space effects.
 
+## Known Pitfalls
+
+### UV coordinate convention (V-flip)
+Vulkan expects V=0 at the **top** of the image. Models from Blender, OBJ, and many Sketchfab exports use V=0 at the **bottom** (OpenGL convention). If a model's textures appear vertically flipped — upside-down text on license plates, inverted logos, seeing the "inside" of textured parts — load it with `flipUVs=true` which applies `aiProcess_FlipUVs` (V → 1−V). Models authored natively for glTF (V=0 at top) should NOT need this flag.
+
+### sRGB texture format
+Color textures (albedo, emissive) must be uploaded as `R8G8B8A8_UNORM_SRGB` so the GPU converts sRGB→linear on sampling. Data textures (normal maps, metallic-roughness) must use `R8G8B8A8_UNORM` (linear). Getting this wrong makes dark surfaces appear washed out/white.
+
+### Vulkan Y-flip
+We flip Y in the projection matrix (`proj[1][1] *= -1`) to match Vulkan's Y-down NDC. This reverses screen-space winding, so all pipelines set `front_face = SDL_GPU_FRONTFACE_CLOCKWISE`.
+
 ## Phase Dependency Graph
 
 ```
