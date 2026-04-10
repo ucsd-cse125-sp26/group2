@@ -36,9 +36,16 @@ public:
     void newFrame();
 
     /// @brief Build the ECS inspector window contents.
-    /// @param registry   The ECS registry to inspect.
-    /// @param tickCount  Total physics ticks elapsed (displayed in the stats bar).
-    void buildUI(const Registry& registry, int tickCount);
+    /// @param registry              The ECS registry to inspect.
+    /// @param tickCount             Total physics ticks elapsed (displayed in the stats bar).
+    /// @param mouseSensitivity      Radians per pixel; displayed and modified via a slider.
+    /// @param unlimitedFPS          Render every frame (interpolated) vs only on physics ticks.
+    /// @param inputSyncedWithPhysics Sample input once per tick vs every frame.
+    void buildUI(const Registry& registry,
+                 int tickCount,
+                 float& mouseSensitivity,
+                 bool& unlimitedFPS,
+                 bool& inputSyncedWithPhysics);
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
