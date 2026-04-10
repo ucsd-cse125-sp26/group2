@@ -14,6 +14,11 @@ layout(location = 0) out vec4 outColor;
 layout(set = 2, binding = 0) uniform sampler2D texAlbedo;
 layout(set = 2, binding = 1) uniform sampler2D texMetallicRoughness;
 layout(set = 2, binding = 2) uniform sampler2D texEmissive;
+layout(set = 2, binding = 3) uniform sampler2D texNormal;
+// IBL textures (Phase 6).
+layout(set = 2, binding = 4) uniform samplerCube irradianceMap;
+layout(set = 2, binding = 5) uniform samplerCube prefilterMap;
+layout(set = 2, binding = 6) uniform sampler2D   brdfLUT;
 
 // ── Material parameters (pushed per-mesh) ───────────────────────────────────
 layout(set = 3, binding = 0) uniform Material
@@ -79,6 +84,12 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0)
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+// Roughness-aware Fresnel for IBL (reduces rim glow on rough surfaces).
+vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 void main()
 {
@@ -97,7 +108,16 @@ void main()
     // at load time (ModelLoader::processNode detects negative-determinant
     // transforms and flips index order), so gl_FrontFacing is reliable and
     // no runtime flip is needed here.
-    vec3 N = normalize(fragNormal);
+    // Sample normal map if present (flat-normal fallback texture = (0.5, 0.5, 1.0)
+    // which produces N = (0, 0, 1) in tangent space = no perturbation).
+    vec3 tangentN = texture(texNormal, fragTexCoord).rgb * 2.0 - 1.0;
+    tangentN.xy *= mat.normalScale;
+    tangentN = normalize(tangentN);
+
+    // TBN matrix: transform tangent-space normal to world space.
+    mat3 TBN = mat3(normalize(fragTangent), normalize(fragBitangent), normalize(fragNormal));
+    vec3 N = normalize(TBN * tangentN);
+
     vec3 V = normalize(lighting.cameraPos.xyz - fragWorldPos);
 
     // ── Fresnel reflectance at normal incidence ─────────────────────────────
@@ -146,12 +166,27 @@ void main()
         }
     }
 
-    // ── Ambient (placeholder — real IBL in Phase 6) ────────────────────────
-    // Simple ambient tinted by albedo.  Metallic surfaces with high roughness
-    // will appear dark without IBL — this is physically correct (nothing to
-    // reflect).  Phase 6 adds environment cubemap reflections that give
-    // metallic surfaces their characteristic silver/gold appearance.
-    vec3 ambient = lighting.ambientColor.rgb * albedo;
+    // ── Image-Based Lighting (IBL) ─────────────────────────────────────────
+    // Split-sum approximation: the integral of incoming environment radiance
+    // is split into a pre-filtered specular term and a diffuse irradiance term.
+    float NdotV_ibl = max(dot(N, V), 0.0);
+    vec3 F_ibl = fresnelSchlickRoughness(NdotV_ibl, F0, roughness);
+
+    // Metallic surfaces don't diffuse; dielectrics do.
+    vec3 kD_ibl = (1.0 - F_ibl) * (1.0 - metallic);
+
+    // Diffuse IBL: irradiance cubemap sampled along the normal direction.
+    vec3 irradiance = texture(irradianceMap, N).rgb;
+    vec3 diffuseIBL = kD_ibl * albedo * irradiance;
+
+    // Specular IBL: pre-filtered environment map sampled along reflection.
+    vec3 R = reflect(-V, N);
+    const float MAX_REFLECTION_LOD = 4.0; // matches the number of prefilter mip levels
+    vec3 prefilteredColor = textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
+    vec2 brdf = texture(brdfLUT, vec2(NdotV_ibl, roughness)).rg;
+    vec3 specularIBL = prefilteredColor * (F_ibl * brdf.x + brdf.y);
+
+    vec3 ambient = diffuseIBL + specularIBL;
 
     // ── Emissive ────────────────────────────────────────────────────────────
     // Only use emissive when the material's emissiveFactor is non-zero.
