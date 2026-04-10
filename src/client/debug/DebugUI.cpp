@@ -119,8 +119,9 @@ void DebugUI::buildUI(const Registry& registry,
 
     ImGui::Checkbox("Input Synced w/ Physics", &inputSyncedWithPhysics);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("ON:  mouse sampled once per physics tick — no jitter\n"
-                          "OFF: mouse sampled every frame (yaw at frame rate)");
+        ImGui::SetTooltip("ON:  movement keys (WASD) sampled once per tick (server-consistent)\n"
+                          "OFF: movement keys sampled every frame\n"
+                          "Mouse look is always per-frame regardless of this toggle");
 
     ImGui::Checkbox("Limit FPS to Monitor Refresh", &limitFPSToMonitor);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))

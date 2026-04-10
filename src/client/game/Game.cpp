@@ -152,19 +152,37 @@ SDL_AppResult Game::event(SDL_Event* event)
 // ═══════════════════════════════════════════════════════════════════════════
 // iterate() — decoupled physics / render loop.
 //
-// Physics runs at a fixed 128 Hz behind an accumulator gate.  Up to
-// k_maxTicksPerFrame ticks are processed per call so physics catches up
-// even when the OS only calls iterate() at monitor refresh rate (e.g. 60 Hz).
+// Physics ALWAYS runs at exactly 128 Hz (k_physicsHz) using an accumulator
+// with a multi-tick catch-up loop (up to k_maxTicksPerFrame per call).
+// This is non-negotiable: it must match the server tick rate.
+//
+// Input is split into two independent streams:
+//
+//   Mouse look (yaw / pitch) — sampled EVERY iterate() call so camera
+//       rotation is perfectly smooth at whatever frame rate the renderer
+//       produces.  The camera always uses the latest yaw directly (never
+//       interpolated).  Interpolating yaw with the physics alpha creates a
+//       timebase mismatch on multi-tick or zero-tick frames, producing
+//       visible jitter.
+//
+//   Movement keys (WASD / jump / crouch) — sampled once per physics tick
+//       group when inputSyncedWithPhysics is true (the default) so
+//       movement calculations match the server.  When the toggle is off,
+//       keys are also sampled every iterate() call.
+//
+// Position interpolation uses alpha = accumulator / k_physicsDt across the
+// LAST physics tick (PreviousPosition is saved inside the while loop before
+// each tick).
 //
 // Three ImGui-tunable flags:
 //
 //   renderSeparateFromPhysics — render every iterate() call with position
 //       interpolated between the last two physics ticks (true, default) vs.
-//       render only after a physics tick (false, caps fps at 128 Hz).
+//       render only after a physics tick (false, caps render fps at 128 Hz).
 //
-//   inputSyncedWithPhysics — sample SDL mouse once per physics frame-group
-//       so yaw and position share the same timebase (true, default, no jitter)
-//       vs. sample every iterate() call (false, yaw at frame rate).
+//   inputSyncedWithPhysics — sample movement keys once per tick group
+//       (true, default, server-consistent) vs. every iterate() call (false).
+//       Mouse look is always per-frame regardless of this toggle.
 //
 //   limitFPSToMonitor — VSync on (true) / off (false, default).
 // ═══════════════════════════════════════════════════════════════════════════
@@ -210,25 +228,30 @@ SDL_AppResult Game::iterate()
         statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
     }
 
-    // ── 3. Input — sample every frame when NOT synced with physics ────────
-    if (!inputSyncedWithPhysics && mouseCaptured)
-        systems::runInputSample(registry, mouseSensitivity);
+    // ── 3. Input ───────────────────────────────────────────────────────────
+    //
+    // Mouse look runs EVERY iterate() call — this keeps camera rotation
+    // perfectly smooth at whatever frame rate the renderer is producing.
+    // SDL_GetRelativeMouseState returns accumulated delta since last call,
+    // so total rotation is identical regardless of call frequency.
+    //
+    // Movement keys run once per physics tick group (when inputSyncedWithPhysics
+    // is true) so WASD movement calculations match the server.  When the
+    // sync toggle is off, movement keys also run every frame.
+    if (mouseCaptured) {
+        systems::runMouseLook(registry, mouseSensitivity);
+        if (!inputSyncedWithPhysics)
+            systems::runMovementKeys(registry);
+    }
 
-    // ── 4. Physics — run up to k_maxTicksPerFrame ticks to catch up ───────
+    // ── 4. Physics — always 128 Hz, up to k_maxTicksPerFrame catch-up ─────
     bool physicsRan = false;
     int ticksThisFrame = 0;
 
     if (accumulator >= k_physicsDt) {
-        // Snapshot orientation BEFORE this frame's input so prevTickYaw holds
-        // the end-of-previous-frame yaw — needed for correct view interpolation.
-        registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
-            snap.prevTickYaw = snap.yaw;
-            snap.prevTickPitch = snap.pitch;
-        });
-
-        // Input synced with physics: sample once for this whole group of ticks.
+        // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured)
-            systems::runInputSample(registry, mouseSensitivity);
+            systems::runMovementKeys(registry);
 
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
@@ -273,15 +296,18 @@ SDL_AppResult Game::iterate()
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
 
-                if (inputSyncedWithPhysics) {
-                    // Yaw changes only at tick boundaries — lerp across the sub-tick gap.
-                    renderYaw = input.prevTickYaw + (input.yaw - input.prevTickYaw) * alpha;
-                    renderPitch = input.prevTickPitch + (input.pitch - input.prevTickPitch) * alpha;
-                } else {
-                    // Yaw already updated every frame — use directly.
-                    renderYaw = input.yaw;
-                    renderPitch = input.pitch;
-                }
+                // Yaw is always used directly — no interpolation.
+                //
+                // When inputSyncedWithPhysics, yaw updates once per frame-group
+                // (whenever the physics gate fires).  Interpolating yaw with the
+                // *position* alpha is incorrect: position alpha spans one physics
+                // tick, but yaw spans one frame of mouse input.  On multi-tick
+                // or zero-tick frames the two timebases diverge, causing objects
+                // to visually jitter.  Using yaw directly gives a consistent
+                // per-frame rotation rate at the input sample rate (≥128 Hz with
+                // VSync, or frame rate without), which is already smooth.
+                renderYaw = input.yaw;
+                renderPitch = input.pitch;
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
