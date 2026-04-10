@@ -159,9 +159,21 @@ SDL_AppResult Game::iterate()
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
-    float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
+    float frameTime = 0.0f;
+    if (recorder.isRecording()) {
+        // During recording, lock frameTime to exactly one physics tick.
+        // Screenshot saves (SDL_WaitForGPUIdle + PNG encode) can take 20–30 ms;
+        // if that wall-clock delay leaked into the accumulator it would fire
+        // 3–4 ticks instead of 1, making the player lurch between captured
+        // frames and producing a completely different jitter pattern.
+        // With a fixed dt the game slows down in wall time but every rendered
+        // frame gets identical physics treatment to a normal ~128 fps frame.
+        frameTime = k_physicsDt;
+    } else {
+        frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
+        frameTime = std::min(frameTime, 0.25f); // clamp to avoid spiral-of-death
+    }
     prevTime = k_now;
-    frameTime = std::min(frameTime, 0.25f); // clamp to avoid spiral-of-death
     accumulator += frameTime;
 
     // Fixed-step physics loop.
