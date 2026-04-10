@@ -15,6 +15,9 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <cstdio>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 
 // World geometry for the current test scene: a single floor plane at y=0.
@@ -80,6 +83,11 @@ bool Game::init()
     registry.emplace<LocalPlayer>(k_player);
 
     prevTime = SDL_GetPerformanceCounter();
+    statsPrevTime = prevTime;
+
+    // Apply the default VSync setting now that the renderer is ready.
+    renderer.setVSync(limitFPSToMonitor);
+
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
 }
@@ -97,6 +105,21 @@ SDL_AppResult Game::event(SDL_Event* event)
         switch (event->key.key) {
         case SDLK_Q:
             return SDL_APP_SUCCESS;
+
+        // R — toggle frame recording (state CSV + per-frame PNG screenshots).
+        // Output lands in <binary_dir>/recordings/<timestamp>/ next to the game.
+        case SDLK_R: {
+            if (recorder.isRecording()) {
+                recorder.stopRecording();
+                SDL_Log("[client] recording stopped");
+            } else {
+                const char* base = SDL_GetBasePath();
+                std::string baseDir = std::string(base ? base : "") + "recordings";
+                recorder.startRecording(baseDir);
+                SDL_Log("[client] recording started → %s", recorder.sessionDir().c_str());
+            }
+            break;
+        }
 
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
         case SDLK_ESCAPE:
@@ -126,76 +149,275 @@ SDL_AppResult Game::event(SDL_Event* event)
     return SDL_APP_CONTINUE;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// iterate() — decoupled physics / render loop.
+//
+// Physics ALWAYS runs at exactly 128 Hz (k_physicsHz) using an accumulator
+// with a multi-tick catch-up loop (up to k_maxTicksPerFrame per call).
+// This is non-negotiable: it must match the server tick rate.
+//
+// Input is split into two independent streams:
+//
+//   Mouse look (yaw / pitch) — sampled EVERY iterate() call so camera
+//       rotation is perfectly smooth at whatever frame rate the renderer
+//       produces.  The camera always uses the latest yaw directly (never
+//       interpolated).  Interpolating yaw with the physics alpha creates a
+//       timebase mismatch on multi-tick or zero-tick frames, producing
+//       visible jitter.
+//
+//   Movement keys (WASD / jump / crouch) — sampled once per physics tick
+//       group when inputSyncedWithPhysics is true (the default) so
+//       movement calculations match the server.  When the toggle is off,
+//       keys are also sampled every iterate() call.
+//
+// Position interpolation uses alpha = accumulator / k_physicsDt across the
+// LAST physics tick (PreviousPosition is saved inside the while loop before
+// each tick).
+//
+// Three ImGui-tunable flags:
+//
+//   renderSeparateFromPhysics — render every iterate() call with position
+//       interpolated between the last two physics ticks (true, default) vs.
+//       render only after a physics tick (false, caps render fps at 128 Hz).
+//
+//   inputSyncedWithPhysics — sample movement keys once per tick group
+//       (true, default, server-consistent) vs. every iterate() call (false).
+//       Mouse look is always per-frame regardless of this toggle.
+//
+//   limitFPSToMonitor — VSync on (true) / off (false, default).
+// ═══════════════════════════════════════════════════════════════════════════
+
 SDL_AppResult Game::iterate()
 {
-    // ImGui frame start — must happen before any ImGui calls this frame.
-    debugUI.newFrame();
-
-    // Sample input once per frame before the physics loop.
-    // Mouse deltas are consumed here; running inside the loop would
-    // accumulate them multiple times per frame at high frame rates.
-    if (mouseCaptured)
-        systems::runInputSample(registry);
-
-    // Compute frame time.
+    // ── 1. Accumulate real elapsed time ──────────────────────────────────
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
+    frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
     prevTime = k_now;
-    frameTime = std::min(frameTime, 0.25f); // clamp to avoid spiral-of-death
     accumulator += frameTime;
 
-    // Fixed-step physics loop.
-    while (accumulator >= k_physicsDt) {
-        registry.view<Position, PreviousPosition>().each(
-            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+    // ── 2. Refresh performance stats every 0.5 s ─────────────────────────
+    static constexpr float k_statsPeriod = 0.5f;
+    const float statsDt = static_cast<float>(k_now - statsPrevTime) / static_cast<float>(k_perfFreq);
+    if (statsDt >= k_statsPeriod && fpsHistoryCount > 0) {
+        // Physics rate: tick count / elapsed.
+        measuredPhysicsHz = static_cast<float>(statsPhysTicks) / statsDt;
+        statsPhysTicks = 0;
+        statsPrevTime = k_now;
 
-        systems::runMovement(registry, k_physicsDt);
-        systems::runCollision(registry, k_physicsDt, k_worldPlanes);
+        // FPS percentile stats from the ring buffer.
+        const int count = fpsHistoryCount; // may be < k_fpsHistorySize
+        float sorted[k_fpsHistorySize];
+        if (count < k_fpsHistorySize) {
+            for (int i = 0; i < count; ++i)
+                sorted[i] = fpsHistory[i];
+        } else {
+            // Full ring: oldest sample is at fpsHistoryHead.
+            for (int i = 0; i < k_fpsHistorySize; ++i)
+                sorted[i] = fpsHistory[(fpsHistoryHead + i) % k_fpsHistorySize];
+        }
+        std::sort(sorted, sorted + count); // ascending: worst fps first
 
-        accumulator -= k_physicsDt;
-        ++tickCount;
+        statsFPSMin = sorted[0];
+        statsFPSMax = sorted[count - 1];
+        statsFPS1pLow = sorted[static_cast<int>(static_cast<float>(count) * 0.01f)]; // 1st percentile
+        statsFPS5pLow = sorted[static_cast<int>(static_cast<float>(count) * 0.05f)]; // 5th percentile
+        // Most-recent sample (last written = head - 1).
+        statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
     }
 
-    // Network receive.
-    while (client.poll()) {
+    // ── 3. Input ───────────────────────────────────────────────────────────
+    //
+    // Mouse look runs EVERY iterate() call — this keeps camera rotation
+    // perfectly smooth at whatever frame rate the renderer is producing.
+    // SDL_GetRelativeMouseState returns accumulated delta since last call,
+    // so total rotation is identical regardless of call frequency.
+    //
+    // Movement keys run once per physics tick group (when inputSyncedWithPhysics
+    // is true) so WASD movement calculations match the server.  When the
+    // sync toggle is off, movement keys also run every frame.
+    if (mouseCaptured) {
+        systems::runMouseLook(registry, mouseSensitivity);
+        if (!inputSyncedWithPhysics)
+            systems::runMovementKeys(registry);
     }
 
-    // ── resolve first-person camera from local player ──────────────────────
-    // Default eye position used before the player entity is available.
+    // ── 4. Physics — always 128 Hz, up to k_maxTicksPerFrame catch-up ─────
+    bool physicsRan = false;
+    int ticksThisFrame = 0;
+
+    if (accumulator >= k_physicsDt) {
+        // Movement keys: sample once for this whole group of ticks.
+        if (inputSyncedWithPhysics && mouseCaptured)
+            systems::runMovementKeys(registry);
+
+        while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
+            accumulator -= k_physicsDt;
+
+            // Snapshot position before each tick so the last tick's delta is
+            // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
+            registry.view<Position, PreviousPosition>().each(
+                [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+            systems::runMovement(registry, k_physicsDt);
+            systems::runCollision(registry, k_physicsDt, k_worldPlanes);
+            ++tickCount;
+            ++ticksThisFrame;
+            ++statsPhysTicks;
+        }
+
+        while (client.poll()) {
+        }
+
+        physicsRan = true;
+    }
+
+    // ── 5. Bail out early if there is nothing new to render ───────────────
+    if (!renderSeparateFromPhysics && !physicsRan)
+        return SDL_APP_CONTINUE;
+
+    // ── 6. Resolve camera ─────────────────────────────────────────────────
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
 
-    registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape>().each(
-        [&](const Position& pos,
-            const PreviousPosition& prev,
-            const InputSnapshot& input,
-            const CollisionShape& shape) {
-            // Sub-tick render interpolation: smooths motion at any framerate.
-            const float alpha = accumulator / k_physicsDt;
-            const glm::vec3 interp = glm::mix(prev.value, pos.value, alpha);
+    if (renderSeparateFromPhysics) {
+        // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
+        const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
-            // Eye sits at ~77 % of the AABB half-height above the centre
-            // (≈ 64 units from feet for a standing player — standard FPS height).
-            // This adapts automatically to crouching (halfExtents.y shrinks to 22).
-            const float eyeOffset = shape.halfExtents.y * 0.77f;
-            renderEye = interp + glm::vec3{0.0f, eyeOffset, 0.0f};
-            renderYaw = input.yaw;
-            renderPitch = input.pitch;
-        });
+        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape>().each(
+            [&](const Position& pos,
+                const PreviousPosition& prev,
+                const InputSnapshot& input,
+                const CollisionShape& shape) {
+                const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
+                const float eyeOffset = shape.halfExtents.y * 0.77f;
+                renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
 
-    // Build debug UI and render.
-    debugUI.buildUI(registry, tickCount);
+                // Yaw is always used directly — no interpolation.
+                //
+                // When inputSyncedWithPhysics, yaw updates once per frame-group
+                // (whenever the physics gate fires).  Interpolating yaw with the
+                // *position* alpha is incorrect: position alpha spans one physics
+                // tick, but yaw spans one frame of mouse input.  On multi-tick
+                // or zero-tick frames the two timebases diverge, causing objects
+                // to visually jitter.  Using yaw directly gives a consistent
+                // per-frame rotation rate at the input sample rate (≥128 Hz with
+                // VSync, or frame rate without), which is already smooth.
+                renderYaw = input.yaw;
+                renderPitch = input.pitch;
+            });
+    } else {
+        // Sequential mode: use post-tick state directly (no interpolation).
+        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape>().each(
+            [&](const Position& pos, const InputSnapshot& input, const CollisionShape& shape) {
+                const float eyeOffset = shape.halfExtents.y * 0.77f;
+                renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
+                renderYaw = input.yaw;
+                renderPitch = input.pitch;
+            });
+    }
+
+    // ── 7. Frame recording (R key) — anchored to physics ticks ───────────
+    if (physicsRan && recorder.isRecording()) {
+        FrameState state;
+        state.frameNumber = frameCount;
+        state.timestamp = static_cast<double>(SDL_GetTicks()) / 1000.0 - recorder.startTimeSecs();
+        state.tickCount = tickCount;
+        state.renderEye = renderEye;
+        state.renderYaw = renderYaw;
+        state.renderPitch = renderPitch;
+
+        registry.view<LocalPlayer, Position, Velocity, InputSnapshot>().each(
+            [&](const Position& pos, const Velocity& vel, const InputSnapshot& input) {
+                state.physPos = pos.value;
+                state.physVel = vel.value;
+                state.yaw = input.yaw;
+                state.pitch = input.pitch;
+            });
+
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        const float winWf = static_cast<float>(winW);
+        const float winHf = static_cast<float>(winH);
+
+        const float cosPitch = std::cos(renderPitch);
+        const glm::vec3 fwd{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+        const glm::mat4 view = glm::lookAt(renderEye, renderEye + fwd, glm::vec3{0, 1, 0});
+        const glm::mat4 proj =
+            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+        const glm::mat4 vp = proj * view;
+
+        const auto toScreen = [&](glm::vec3 p) -> glm::vec2 {
+            const glm::vec4 clip = vp * glm::vec4(p, 1.0f);
+            if (clip.w <= 0.0f)
+                return {-1.0f, -1.0f};
+            const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            return {(ndc.x * 0.5f + 0.5f) * winWf, (1.0f - (ndc.y * 0.5f + 0.5f)) * winHf};
+        };
+        state.cubeScreen = toScreen(glm::vec3{0.0f, 32.0f, 400.0f});
+        state.modelScreen = toScreen(glm::vec3{200.0f, 0.0f, 400.0f});
+
+        char capPath[512];
+        std::snprintf(capPath,
+                      sizeof(capPath),
+                      "%s/frame_%06llu.png",
+                      recorder.sessionDir().c_str(),
+                      static_cast<unsigned long long>(frameCount));
+        state.screenshotPath = capPath;
+        renderer.requestScreenshot(capPath);
+
+        recorder.recordFrame(state);
+    }
+
+    // ── 8. FPS sample — record inter-render delta into ring buffer ────────
+    if (prevRenderTime != 0) {
+        const float renderDt = static_cast<float>(k_now - prevRenderTime) / static_cast<float>(k_perfFreq);
+        if (renderDt > 0.0f && renderDt < 1.0f) { // ignore startup / minimised outliers
+            fpsHistory[fpsHistoryHead] = 1.0f / renderDt;
+            fpsHistoryHead = (fpsHistoryHead + 1) % k_fpsHistorySize;
+            if (fpsHistoryCount < k_fpsHistorySize)
+                ++fpsHistoryCount;
+        }
+    }
+    prevRenderTime = k_now;
+
+    ++frameCount;
+
+    // ── 9. VSync toggle — apply when limitFPSToMonitor changes ───────────
+    // buildUI may modify limitFPSToMonitor, so we snapshot it before and
+    // call setVSync only when it actually flips (avoids per-frame API calls).
+    const bool prevLimitFPS = limitFPSToMonitor;
+
+    // ── 10. Render ────────────────────────────────────────────────────────
+    debugUI.newFrame();
+    debugUI.buildUI(registry,
+                    tickCount,
+                    mouseSensitivity,
+                    renderSeparateFromPhysics,
+                    inputSyncedWithPhysics,
+                    limitFPSToMonitor,
+                    measuredPhysicsHz,
+                    statsFPSCurrent,
+                    statsFPSMin,
+                    statsFPSMax,
+                    statsFPS1pLow,
+                    statsFPS5pLow);
     debugUI.render();
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
+
+    if (limitFPSToMonitor != prevLimitFPS)
+        renderer.setVSync(limitFPSToMonitor);
 
     return SDL_APP_CONTINUE;
 }
 
 void Game::quit()
 {
+    if (recorder.isRecording())
+        recorder.stopRecording();
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();

@@ -4,6 +4,8 @@ out/
 cmake-build-debug/
 .cache/
 
+assets/
+
 # CMake artifacts (keep cmake/ module directory)
 CMakeFiles/
 CMakeCache.txt
