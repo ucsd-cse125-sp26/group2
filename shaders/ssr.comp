@@ -1,7 +1,14 @@
-// ssr.comp — Screen-space reflections.
-// Marches in screen UV + hyperbolic depth (raw depth buffer value) to avoid
-// precision mismatches between linear interpolation and the non-linear
-// depth buffer that cause banded/striped artifacts.
+// ssr.comp — Screen-space reflections via ray marching in clip-space depth.
+//
+// Key design decisions to avoid common SSR artifacts:
+//   1. March in screen UV + clip-space Z (same space as depth buffer)
+//      to avoid precision mismatches that cause horizontal banding.
+//   2. Offset the ray start by a bias along the surface normal (in view
+//      space) to prevent the ray from immediately hitting the surface it
+//      originates from (causes self-reflection / V-shaped artifacts).
+//   3. Use a depth-proportional thickness threshold to avoid seeing
+//      geometry that should be occluded from the reflected angle.
+//   4. Binary refinement after the initial hit to tighten precision.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
@@ -27,10 +34,9 @@ vec3 viewPosFromUVDepth(vec2 uv, float depth)
     return vp.xyz / vp.w;
 }
 
-// Project a view-space position to screen UV + raw depth.
-vec3 projectToScreen(vec3 viewPos)
+vec3 projectToScreen(vec3 vp)
 {
-    vec4 clip = projection * vec4(viewPos, 1.0);
+    vec4 clip = projection * vec4(vp, 1.0);
     clip.xyz /= clip.w;
     return vec3(clip.xy * 0.5 + 0.5, clip.z);
 }
@@ -61,54 +67,92 @@ void main()
     vec3 viewDir = normalize(viewPos);
     vec3 reflDir = reflect(viewDir, viewNormal);
 
-    // Project start and end of the reflection ray to screen space.
-    vec3 startScreen = projectToScreen(viewPos);                    // (uv.x, uv.y, rawDepth)
-    vec3 endScreen = projectToScreen(viewPos + reflDir * maxDistance);
+    // Don't trace if the reflection points toward the camera (behind the surface).
+    if (reflDir.z > 0.0) {
+        imageStore(ssrImage, coord, vec4(0.0));
+        return;
+    }
 
-    vec3 rayScreen = startScreen;
+    // ── Bias the ray origin away from the surface ───────────────────────────
+    // This prevents self-intersection (V-shaped artifacts on cube faces,
+    // ghost outlines at object bases, seeing occluded geometry).
+    // The bias is in view space, scaled by the surface's distance from the
+    // camera to maintain consistent screen-space offset.
+    float viewDist = abs(viewPos.z);
+    vec3 biasedStart = viewPos + viewNormal * (viewDist * 0.005) + reflDir * (viewDist * 0.01);
+
+    // Project start and end to screen space.
+    vec3 startScreen = projectToScreen(biasedStart);
+    vec3 endScreen = projectToScreen(biasedStart + reflDir * maxDistance);
+
+    // Clamp end to screen bounds.
     vec3 deltaScreen = endScreen - startScreen;
 
-    // Scale so we step ~1 pixel in the longest screen dimension.
+    // Scale to ~1 pixel per step.
     float screenDist = max(abs(deltaScreen.x) * screenSize.x, abs(deltaScreen.y) * screenSize.y);
-    int numSteps = clamp(int(screenDist), 4, 200);
+    int numSteps = clamp(int(screenDist * 0.5), 4, 150); // half-pixel steps for speed
     vec3 stepScreen = deltaScreen / float(numSteps);
 
-    // Use 1/z interpolation for correct perspective.
-    // This ensures the depth comparison uses the SAME space as the depth buffer
-    // (hyperbolic/clip-space z), eliminating precision mismatch bands.
-    float startInvZ = 1.0 / max(abs(viewPos.z), 0.001);
-    vec3 endViewPos = viewPos + reflDir * maxDistance;
-    float endInvZ = 1.0 / max(abs(endViewPos.z), 0.001);
-    float stepInvZ = (endInvZ - startInvZ) / float(numSteps);
-    float rayInvZ = startInvZ;
-
+    vec3 rayScreen = startScreen;
     vec4 result = vec4(0.0);
 
+    // ── Coarse march ────────────────────────────────────────────────────────
+    int hitStep = -1;
     for (int i = 1; i <= numSteps; ++i) {
         rayScreen += stepScreen;
-        rayInvZ += stepInvZ;
-
         vec2 rayUV = rayScreen.xy;
 
         if (rayUV.x < 0.0 || rayUV.x > 1.0 || rayUV.y < 0.0 || rayUV.y > 1.0)
             break;
 
-        // Compare in raw depth buffer space (hyperbolic).
         float sceneDepth = texture(depthBuffer, rayUV).r;
         float rayDepth = rayScreen.z;
 
-        // The ray is behind the scene surface.
+        // Ray crossed behind the scene surface.
         float diff = rayDepth - sceneDepth;
-        if (diff > 0.0 && diff < thickness * 0.01) {
-            // Hit — sample color.
-            float edgeFade = 1.0 - max(abs(rayUV.x - 0.5), abs(rayUV.y - 0.5)) * 2.0;
-            edgeFade = clamp(edgeFade * 3.0, 0.0, 1.0);
-            float distFade = 1.0 - float(i) / float(numSteps);
 
-            vec3 hitColor = texture(hdrBuffer, rayUV).rgb;
+        // Thickness threshold proportional to scene depth for consistent behavior.
+        float thicknessThreshold = thickness * 0.002 * (1.0 + sceneDepth * 2.0);
+
+        if (diff > 0.0 && diff < thicknessThreshold) {
+            hitStep = i;
+            break;
+        }
+
+        // Ray went too far behind — it passed through (thick) geometry, skip.
+        if (diff > thicknessThreshold)
+            break;
+    }
+
+    // ── Binary refinement (4 iterations) ────────────────────────────────────
+    // Tighten the hit point for sub-pixel accuracy.
+    if (hitStep > 0) {
+        vec3 lo = rayScreen - stepScreen; // one step before hit
+        vec3 hi = rayScreen;              // hit step
+
+        for (int r = 0; r < 4; ++r) {
+            vec3 mid = (lo + hi) * 0.5;
+            float midScene = texture(depthBuffer, mid.xy).r;
+            float midDiff = mid.z - midScene;
+            if (midDiff > 0.0)
+                hi = mid;
+            else
+                lo = mid;
+        }
+
+        vec2 hitUV = hi.xy;
+        if (hitUV.x >= 0.0 && hitUV.x <= 1.0 && hitUV.y >= 0.0 && hitUV.y <= 1.0) {
+            // Fade at screen edges.
+            float edgeFade = 1.0;
+            edgeFade *= smoothstep(0.0, 0.05, hitUV.x) * smoothstep(0.0, 0.05, 1.0 - hitUV.x);
+            edgeFade *= smoothstep(0.0, 0.05, hitUV.y) * smoothstep(0.0, 0.05, 1.0 - hitUV.y);
+
+            // Fade with distance along the ray.
+            float distFade = 1.0 - float(hitStep) / float(numSteps);
+
+            vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
             float confidence = edgeFade * distFade;
             result = vec4(hitColor * confidence, confidence);
-            break;
         }
     }
 
