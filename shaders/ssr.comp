@@ -170,50 +170,25 @@ void main()
 
         vec2 hitUV = hi.xy;
         if (hitUV.x > 0.01 && hitUV.x < 0.99 && hitUV.y > 0.01 && hitUV.y < 0.99) {
-            // ── Back-face rejection ─────────────────────────────────────────
-            // Reconstruct the normal at the hit point.  If it faces the same
-            // direction as the reflection ray, the ray hit a back-face (e.g.,
-            // the underside of a car).  Reject these — they produce vertical
-            // smear artifacts under overhanging geometry.
-            float hd = texture(depthBuffer, hitUV).r;
-            vec3 hitViewPos = viewPosFromDepth(hitUV, hd);
-            vec3 hitDdx, hitDdy;
-            {
-                float hdL = texture(depthBuffer, hitUV - vec2(ts.x, 0)).r;
-                float hdR = texture(depthBuffer, hitUV + vec2(ts.x, 0)).r;
-                float hdU = texture(depthBuffer, hitUV - vec2(0, ts.y)).r;
-                float hdD = texture(depthBuffer, hitUV + vec2(0, ts.y)).r;
-                vec3 hpL = viewPosFromDepth(hitUV - vec2(ts.x, 0), hdL);
-                vec3 hpR = viewPosFromDepth(hitUV + vec2(ts.x, 0), hdR);
-                vec3 hpU = viewPosFromDepth(hitUV - vec2(0, ts.y), hdU);
-                vec3 hpD = viewPosFromDepth(hitUV + vec2(0, ts.y), hdD);
-                hitDdx = (abs(hdR - hd) < abs(hd - hdL)) ? (hpR - hitViewPos) : (hitViewPos - hpL);
-                hitDdy = (abs(hdD - hd) < abs(hd - hdU)) ? (hpD - hitViewPos) : (hitViewPos - hpU);
-            }
-            vec3 hitNormal = normalize(cross(hitDdx, hitDdy));
+            // ── Proximity rejection ─────────────────────────────────────────
+            // If the hit UV is very close to the origin UV, the ray hit
+            // geometry right next to the reflective surface (e.g., the
+            // underside of a car sitting on the floor).  These produce
+            // vertical smear artifacts.  Fade out based on screen-space
+            // distance traveled — short rays = low confidence.
+            float screenTravelDist = length((hitUV - uv) * screenSize);
+            float travelFade = smoothstep(3.0, 15.0, screenTravelDist);
 
-            // Dot(hitNormal, reflDir) measures how much the hit surface faces
-            // the same direction as the ray.  Values near +1 mean the surface
-            // is facing away (back-face, e.g., car undercarriage from below).
-            // Only reject strongly back-facing hits (> 0.5) — surfaces at
-            // moderate angles should still be accepted as valid reflections.
-            float backFaceDot = dot(hitNormal, reflDir);
-            if (backFaceDot < 0.5) {
-                // Accept this hit.
-                float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
-                               * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
+            float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
+                           * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
 
-                float distFade = 1.0 - float(hitStep) / float(numSteps);
-                float horizFade = smoothstep(0.5, 0.85, horizontalness);
+            float distFade = 1.0 - float(hitStep) / float(numSteps);
+            float horizFade = smoothstep(0.5, 0.85, horizontalness);
 
-                // Fade hits that are nearly back-facing (approaching the 0.5 threshold).
-                float facingFade = 1.0 - smoothstep(0.0, 0.5, backFaceDot);
+            vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
+            float confidence = edgeFade * distFade * horizFade * travelFade;
 
-                vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
-                float confidence = edgeFade * distFade * horizFade * facingFade;
-
-                result = vec4(hitColor, confidence);
-            }
+            result = vec4(hitColor, confidence);
         }
     }
 
