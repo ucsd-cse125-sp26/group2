@@ -76,12 +76,19 @@ private:
         int albedoTexIndex = -1;
         int normalTexIndex = -1;
         int metallicRoughnessTexIndex = -1;
+        int emissiveTexIndex = -1;
         MaterialData material;
     };
 
-    std::vector<GpuMesh> modelMeshes;
-    std::vector<SDL_GPUTexture*> modelTextures;
-    glm::mat4 modelTransform{1.0f};
+    /// One loaded model instance in the scene.
+    struct ModelInstance
+    {
+        std::vector<GpuMesh> meshes;
+        std::vector<SDL_GPUTexture*> textures;
+        glm::mat4 transform{1.0f};
+    };
+
+    std::vector<ModelInstance> models;
 
     // Fallback 1×1 textures for missing PBR maps.
     SDL_GPUTexture* fallbackWhite = nullptr;      ///< Albedo / AO default.
@@ -106,7 +113,7 @@ private:
     bool ensureHDRTarget(Uint32 w, Uint32 h);
     bool ensureCaptureRT(Uint32 w, Uint32 h, SDL_GPUTextureFormat fmt);
 
-    bool uploadModel(const LoadedModel& model);
+    bool uploadModel(const LoadedModel& model, ModelInstance& outInstance);
     SDL_GPUTexture* uploadTexture(const uint8_t* pixels, int width, int height, bool sRGB = true);
 
     void downloadAndSaveCapture(Uint32 w, Uint32 h);

@@ -29,8 +29,8 @@ static_assert(offsetof(ModelVertex, tangent) == 32, "ModelVertex tangent offset 
 struct MaterialData
 {
     glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
-    float metallicFactor = 1.0f;
-    float roughnessFactor = 1.0f;
+    float metallicFactor = 0.0f;  ///< Default dielectric (non-metal).
+    float roughnessFactor = 0.5f; ///< Default mid-roughness.
     float aoStrength = 1.0f;
     float normalScale = 1.0f;
     glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 0.0f}; ///< rgb in xyz, w unused.
@@ -55,6 +55,7 @@ struct TextureData
     std::vector<uint8_t> pixels; ///< Row-major RGBA, 4 bytes per pixel.
     int width = 0;
     int height = 0;
+    bool isSRGB = true; ///< True for color textures (albedo, emissive); false for data (normal, MR).
 };
 
 /// @brief Everything returned by loadModel().

@@ -166,6 +166,8 @@ bool Renderer::initScenePipeline()
     pci.depth_stencil_state.enable_depth_write = true;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    // Y-flip in projection reverses screen-space winding; tell the GPU that CW = front.
+    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
 
     scenePipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
     SDL_ReleaseGPUShader(device, vert);
@@ -181,9 +183,9 @@ bool Renderer::initScenePipeline()
 bool Renderer::initPBRPipeline()
 {
     // pbr.vert: 0 samplers, 1 UBO (Matrices).
-    // pbr.frag: 2 samplers (albedo, metallicRoughness), 2 UBOs (Material, LightData).
+    // pbr.frag: 3 samplers (albedo, metallicRoughness, emissive), 2 UBOs (Material, LightData).
     SDL_GPUShader* vert = loadShaderFromFile("pbr.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-    SDL_GPUShader* frag = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 2);
+    SDL_GPUShader* frag = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
         SDL_ReleaseGPUShader(device, frag);
@@ -228,6 +230,7 @@ bool Renderer::initPBRPipeline()
     pci.depth_stencil_state.enable_depth_write = true;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE; // GLB double-sided
+    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
 
     pbrPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
     SDL_ReleaseGPUShader(device, vert);
@@ -353,6 +356,7 @@ bool Renderer::initShadowPipeline()
     pci.depth_stencil_state.enable_depth_write = true;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
     // Depth bias to reduce shadow acne.
     pci.rasterizer_state.depth_bias_constant_factor = 1.25f;
     pci.rasterizer_state.depth_bias_slope_factor = 1.75f;
@@ -373,11 +377,14 @@ bool Renderer::initShadowPipeline()
 // Texture upload
 // ═══════════════════════════════════════════════════════════════════════════
 
-SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height, bool /*sRGB*/)
+SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height, bool sRGB)
 {
     SDL_GPUTextureCreateInfo info{};
     info.type = SDL_GPU_TEXTURETYPE_2D;
-    info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    // Color textures (albedo, emissive) are sRGB-encoded; data textures
+    // (normal, metallic-roughness) are linear.  Using the _SRGB format lets
+    // the GPU hardware convert sRGB → linear on sampling automatically.
+    info.format = sRGB ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     info.width = static_cast<Uint32>(width);
     info.height = static_cast<Uint32>(height);
     info.layer_count_or_depth = 1;
@@ -432,12 +439,12 @@ SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, 
 // Model upload
 // ═══════════════════════════════════════════════════════════════════════════
 
-bool Renderer::uploadModel(const LoadedModel& model)
+bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
 {
     if (model.meshes.empty())
         return false;
 
-    // ── Sampler ──────────────────────────────────────────────────────────────
+    // ── Sampler (created once, shared across all models) ────────────────────
     SDL_GPUSamplerCreateInfo sampInfo{};
     sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
     sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
@@ -458,22 +465,22 @@ bool Renderer::uploadModel(const LoadedModel& model)
     // ── Fallback textures ───────────────────────────────────────────────────
     const uint8_t white[4] = {255, 255, 255, 255};
     const uint8_t flatNormal[4] = {128, 128, 255, 255}; // (0.5, 0.5, 1.0) tangent-space up
-    const uint8_t defaultMR[4] = {255, 128, 0, 255};    // metallic=1, roughness=0.5
+    const uint8_t defaultMR[4] = {0, 128, 0, 255};      // metallic=0 (B), roughness=0.5 (G) — dielectric default
     const uint8_t black[4] = {0, 0, 0, 255};
 
-    fallbackWhite = uploadTexture(white, 1, 1);
-    fallbackFlatNormal = uploadTexture(flatNormal, 1, 1);
-    fallbackMR = uploadTexture(defaultMR, 1, 1);
-    fallbackBlack = uploadTexture(black, 1, 1);
+    fallbackWhite = uploadTexture(white, 1, 1, true);            // sRGB color
+    fallbackFlatNormal = uploadTexture(flatNormal, 1, 1, false); // linear data
+    fallbackMR = uploadTexture(defaultMR, 1, 1, false);          // linear data
+    fallbackBlack = uploadTexture(black, 1, 1, true);            // sRGB color
 
     if (!fallbackWhite || !fallbackFlatNormal || !fallbackMR || !fallbackBlack)
         return false;
 
     // ── Upload textures ─────────────────────────────────────────────────────
-    modelTextures.reserve(model.textures.size());
+    outInstance.textures.reserve(model.textures.size());
     for (const auto& td : model.textures) {
-        SDL_GPUTexture* gpuTex = uploadTexture(td.pixels.data(), td.width, td.height);
-        modelTextures.push_back(gpuTex);
+        SDL_GPUTexture* gpuTex = uploadTexture(td.pixels.data(), td.width, td.height, td.isSRGB);
+        outInstance.textures.push_back(gpuTex);
     }
 
     // ── Upload geometry ─────────────────────────────────────────────────────
@@ -515,7 +522,7 @@ bool Renderer::uploadModel(const LoadedModel& model)
     SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(uploadCmd);
 
     Uint32 readOffset = 0;
-    modelMeshes.reserve(model.meshes.size());
+    outInstance.meshes.reserve(model.meshes.size());
 
     for (size_t i = 0; i < model.meshes.size(); ++i) {
         SDL_GPUBufferCreateInfo vbInfo{};
@@ -553,14 +560,16 @@ bool Renderer::uploadModel(const LoadedModel& model)
         SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
         readOffset += sizes[i].ibBytes;
 
-        modelMeshes.push_back({
+        const auto& md = model.meshes[i];
+        outInstance.meshes.push_back({
             .vertexBuffer = vb,
             .indexBuffer = ib,
-            .indexCount = static_cast<Uint32>(model.meshes[i].indices.size()),
-            .albedoTexIndex = model.meshes[i].diffuseTexIndex,
-            .normalTexIndex = model.meshes[i].normalTexIndex,
-            .metallicRoughnessTexIndex = model.meshes[i].metallicRoughnessTexIndex,
-            .material = model.meshes[i].material,
+            .indexCount = static_cast<Uint32>(md.indices.size()),
+            .albedoTexIndex = md.diffuseTexIndex,
+            .normalTexIndex = md.normalTexIndex,
+            .metallicRoughnessTexIndex = md.metallicRoughnessTexIndex,
+            .emissiveTexIndex = md.emissiveTexIndex,
+            .material = md.material,
         });
     }
 
@@ -570,8 +579,8 @@ bool Renderer::uploadModel(const LoadedModel& model)
     SDL_ReleaseGPUTransferBuffer(device, tb);
 
     SDL_Log("Renderer: uploaded %zu mesh(es), %zu texture(s) (%u bytes geometry)",
-            modelMeshes.size(),
-            modelTextures.size(),
+            outInstance.meshes.size(),
+            outInstance.textures.size(),
             totalBytes);
     return true;
 }
@@ -649,20 +658,31 @@ bool Renderer::init(SDL_Window* win)
     tonemapSampler = SDL_CreateGPUSampler(device, &sampInfo);
 
     // ── Load model ──────────────────────────────────────────────────────────
+    // ── Load scene models ──────────────────────────────────────────────────
     const char* const k_base = SDL_GetBasePath();
-    char modelPath[512];
-    SDL_snprintf(modelPath, sizeof(modelPath), "%sassets/Apex_Legend_Wraith.glb", k_base ? k_base : "");
 
-    LoadedModel loadedModel;
-    if (loadModel(modelPath, loadedModel)) {
-        if (!uploadModel(loadedModel))
-            SDL_Log("Renderer: model GPU upload failed");
-    } else {
-        SDL_Log("Renderer: model load failed");
-    }
+    // Helper to load a model and place it in the scene.
+    auto loadAndPlace = [&](const char* filename, glm::vec3 pos, float scale) {
+        char path[512];
+        SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
 
-    modelTransform = glm::translate(glm::mat4(1.0f), glm::vec3(200.0f, 0.0f, 400.0f));
-    modelTransform = glm::scale(modelTransform, glm::vec3(8.0f));
+        LoadedModel loaded;
+        if (!loadModel(path, loaded)) {
+            SDL_Log("Renderer: failed to load '%s'", filename);
+            return;
+        }
+
+        ModelInstance inst;
+        inst.transform = glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(scale));
+
+        if (!uploadModel(loaded, inst))
+            SDL_Log("Renderer: GPU upload failed for '%s'", filename);
+        else
+            models.push_back(std::move(inst));
+    };
+
+    loadAndPlace("Apex_Legend_Wraith.glb", glm::vec3(200.0f, 0.0f, 400.0f), 8.0f);
+    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 0.0f, 400.0f), 40.0f);
 
     // Camera — overridden every frame by drawFrame().
     camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},
@@ -820,19 +840,11 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
         }
 
-        // ── PBR model ───────────────────────────────────────────────────────
-        if (pbrPipeline && !modelMeshes.empty() && pbrSampler) {
+        // ── PBR models ──────────────────────────────────────────────────────
+        if (pbrPipeline && pbrSampler && !models.empty()) {
             SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
 
-            // Vertex UBO: Matrices (with normalMatrix).
-            Matrices modelMats{};
-            modelMats.model = modelTransform;
-            modelMats.view = camera.getView();
-            modelMats.projection = camera.getProjection();
-            modelMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(modelTransform)));
-            SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
-
-            // Fragment UBO slot 1: LightData (once per frame).
+            // Fragment UBO slot 1: LightData (once per frame, shared by all models).
             LightDataUBO lightData{};
             lightData.cameraPos = glm::vec4(eye, 1.0f);
             lightData.ambientColor = glm::vec4(0.03f, 0.03f, 0.04f, 1.0f);
@@ -848,38 +860,49 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
             SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
 
-            for (const auto& mesh : modelMeshes) {
-                // Fragment UBO slot 0: Material.
-                MaterialUBO matUBO{};
-                matUBO.baseColorFactor = mesh.material.baseColorFactor;
-                matUBO.metallicFactor = mesh.material.metallicFactor;
-                matUBO.roughnessFactor = mesh.material.roughnessFactor;
-                matUBO.aoStrength = mesh.material.aoStrength;
-                matUBO.normalScale = mesh.material.normalScale;
-                matUBO.emissiveFactor = mesh.material.emissiveFactor;
-                SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+            for (const auto& model : models) {
+                // Per-model vertex UBO: Matrices (with normalMatrix).
+                Matrices modelMats{};
+                modelMats.model = model.transform;
+                modelMats.view = camera.getView();
+                modelMats.projection = camera.getProjection();
+                modelMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(model.transform)));
+                SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
 
-                // Bind vertex/index buffers.
-                const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
-                SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
-                const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
-                SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                for (const auto& mesh : model.meshes) {
+                    // Fragment UBO slot 0: Material.
+                    MaterialUBO matUBO{};
+                    matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                    matUBO.metallicFactor = mesh.material.metallicFactor;
+                    matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                    matUBO.aoStrength = mesh.material.aoStrength;
+                    matUBO.normalScale = mesh.material.normalScale;
+                    matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                    SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
 
-                // Bind textures: albedo (slot 0), metallic-roughness (slot 1).
-                auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
-                    if (idx >= 0 && static_cast<size_t>(idx) < modelTextures.size() &&
-                        modelTextures[static_cast<size_t>(idx)])
-                        return modelTextures[static_cast<size_t>(idx)];
-                    return fallback;
-                };
+                    // Bind vertex/index buffers.
+                    const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                    SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                    SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-                const SDL_GPUTextureSamplerBinding samplers[2] = {
-                    {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
-                    {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
-                };
-                SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
+                    // Bind textures: albedo (slot 0), MR (slot 1), emissive (slot 2).
+                    auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                        if (idx >= 0 && static_cast<size_t>(idx) < model.textures.size() &&
+                            model.textures[static_cast<size_t>(idx)])
+                            return model.textures[static_cast<size_t>(idx)];
+                        return fallback;
+                    };
 
-                SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+                    const SDL_GPUTextureSamplerBinding samplers[3] = {
+                        {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                        {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                        {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                    };
+                    SDL_BindGPUFragmentSamplers(pass, 0, samplers, 3);
+
+                    SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+                }
             }
         }
 
@@ -1063,16 +1086,16 @@ void Renderer::quit()
         SDL_ReleaseGPUTexture(device, shadowMap);
 
     // Release model resources.
-    for (auto& mesh : modelMeshes) {
-        SDL_ReleaseGPUBuffer(device, mesh.vertexBuffer);
-        SDL_ReleaseGPUBuffer(device, mesh.indexBuffer);
+    for (auto& inst : models) {
+        for (auto& mesh : inst.meshes) {
+            SDL_ReleaseGPUBuffer(device, mesh.vertexBuffer);
+            SDL_ReleaseGPUBuffer(device, mesh.indexBuffer);
+        }
+        for (auto* tex : inst.textures)
+            if (tex)
+                SDL_ReleaseGPUTexture(device, tex);
     }
-    modelMeshes.clear();
-
-    for (auto* tex : modelTextures)
-        if (tex)
-            SDL_ReleaseGPUTexture(device, tex);
-    modelTextures.clear();
+    models.clear();
 
     // Release fallback textures.
     if (fallbackWhite)
