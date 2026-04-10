@@ -2,10 +2,11 @@
 
 #include "ecs/registry/Registry.hpp"
 #include "network/Server.hpp"
-#include <entt/entity/entity.hpp>
-#include <unordered_map>
 
 #include <SDL3/SDL.h>
+
+#include <entt/entity/entity.hpp>
+#include <unordered_map>
 
 /// @brief Top-level server game loop.
 ///
