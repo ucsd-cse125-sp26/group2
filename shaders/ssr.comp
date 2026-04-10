@@ -170,16 +170,47 @@ void main()
 
         vec2 hitUV = hi.xy;
         if (hitUV.x > 0.01 && hitUV.x < 0.99 && hitUV.y > 0.01 && hitUV.y < 0.99) {
-            float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
-                           * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
+            // ── Back-face rejection ─────────────────────────────────────────
+            // Reconstruct the normal at the hit point.  If it faces the same
+            // direction as the reflection ray, the ray hit a back-face (e.g.,
+            // the underside of a car).  Reject these — they produce vertical
+            // smear artifacts under overhanging geometry.
+            float hd = texture(depthBuffer, hitUV).r;
+            vec3 hitViewPos = viewPosFromDepth(hitUV, hd);
+            vec3 hitDdx, hitDdy;
+            {
+                float hdL = texture(depthBuffer, hitUV - vec2(ts.x, 0)).r;
+                float hdR = texture(depthBuffer, hitUV + vec2(ts.x, 0)).r;
+                float hdU = texture(depthBuffer, hitUV - vec2(0, ts.y)).r;
+                float hdD = texture(depthBuffer, hitUV + vec2(0, ts.y)).r;
+                vec3 hpL = viewPosFromDepth(hitUV - vec2(ts.x, 0), hdL);
+                vec3 hpR = viewPosFromDepth(hitUV + vec2(ts.x, 0), hdR);
+                vec3 hpU = viewPosFromDepth(hitUV - vec2(0, ts.y), hdU);
+                vec3 hpD = viewPosFromDepth(hitUV + vec2(0, ts.y), hdD);
+                hitDdx = (abs(hdR - hd) < abs(hd - hdL)) ? (hpR - hitViewPos) : (hitViewPos - hpL);
+                hitDdy = (abs(hdD - hd) < abs(hd - hdU)) ? (hpD - hitViewPos) : (hitViewPos - hpU);
+            }
+            vec3 hitNormal = normalize(cross(hitDdx, hitDdy));
 
-            float distFade = 1.0 - float(hitStep) / float(numSteps);
-            float horizFade = smoothstep(0.5, 0.85, horizontalness);
+            // Dot(hitNormal, reflDir) > 0 means the surface faces away from
+            // the incoming ray — it's a back-face.  Skip it.
+            float backFaceDot = dot(hitNormal, reflDir);
+            if (backFaceDot < 0.0) {
+                // Front-face hit — accept it.
+                float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
+                               * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
 
-            vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
-            float confidence = edgeFade * distFade * horizFade;
+                float distFade = 1.0 - float(hitStep) / float(numSteps);
+                float horizFade = smoothstep(0.5, 0.85, horizontalness);
 
-            result = vec4(hitColor, confidence);
+                // Fade hits that are nearly parallel to the surface (grazing).
+                float facingFade = smoothstep(0.0, -0.3, backFaceDot);
+
+                vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
+                float confidence = edgeFade * distFade * horizFade * facingFade;
+
+                result = vec4(hitColor, confidence);
+            }
         }
     }
 
