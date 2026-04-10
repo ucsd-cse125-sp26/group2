@@ -34,6 +34,11 @@ public:
     [[nodiscard]] const glm::vec3& getTarget() const { return target; }
     [[nodiscard]] const glm::vec3& getUp() const { return up; }
 
+    /// @brief World-space unit vector pointing from eye toward target.
+    [[nodiscard]] glm::vec3 getForward() const;
+    /// @brief World-space unit vector pointing to the camera's right (forward × up).
+    [[nodiscard]] glm::vec3 getRight() const;
+
     [[nodiscard]] float getFovy() const { return fovy; }
     [[nodiscard]] float getAspect() const { return aspect; }
     [[nodiscard]] float getNear() const { return nearPlane; }

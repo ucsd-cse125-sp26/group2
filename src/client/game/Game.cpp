@@ -6,9 +6,12 @@
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponState.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
 
 #include <SDL3/SDL_video.h>
@@ -19,6 +22,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 // World geometry for the current test scene: a single floor plane at y=0.
 // Will be replaced by a proper World object when map loading is implemented.
@@ -59,8 +63,24 @@ bool Game::init()
         return false;
     }
 
+    // Particle system needs the device + formats from the renderer.
+    // colorFmt must match the render target particles draw into (HDR = RGBA16F),
+    // NOT the swapchain format.  shaderFmt must be the single format the
+    // renderer selected, not the bitmask of all supported formats.
+    if (!particleSystem.init(renderer.getDevice(), Renderer::getHdrFormat(), renderer.getShaderFormat())) {
+        SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
+    } else {
+        renderer.setParticleSystem(&particleSystem);
+
+        // Wire dispatcher events to particle system
+        dispatcher.sink<WeaponFiredEvent>().connect<&ParticleSystem::onWeaponFired>(particleSystem);
+        dispatcher.sink<ProjectileImpactEvent>().connect<&ParticleSystem::onImpact>(particleSystem);
+        dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
+    }
+
     if (!client.init("127.0.0.1", 9999)) {
         SDL_Log("Failed to connect to server");
+        particleSystem.quit();
         renderer.quit();
         debugUI.shutdown();
         SDL_DestroyWindow(window);
@@ -70,6 +90,15 @@ bool Game::init()
     // Grab the mouse into relative mode so camera look works immediately.
     SDL_SetWindowRelativeMouseMode(window, true);
     mouseCaptured = true;
+
+    // ── Load models for entity rendering ────────────────────────────────────
+    wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+    if (wraithModelIdx < 0)
+        SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
+
+    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f);
+    if (weaponModelIdx < 0)
+        SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
 
     // Spawn the local player entity with all physics and input components.
     const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
@@ -81,6 +110,12 @@ bool Game::init()
     registry.emplace<PlayerState>(k_player);
     registry.emplace<InputSnapshot>(k_player);
     registry.emplace<LocalPlayer>(k_player);
+    registry.emplace<WeaponState>(k_player);
+
+    // Attach a Renderable for the player model (Wraith).
+    // The local player's model is rendered for other clients (skipped for self in 1P mode).
+    if (wraithModelIdx >= 0)
+        registry.emplace<Renderable>(k_player, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
 
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
@@ -135,9 +170,58 @@ SDL_AppResult Game::event(SDL_Event* event)
             break;
         }
 
+        // ── Particle system test keys ───────────────────────────────────────
+        case SDLK_T: {
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            particleSystem.spawnHitscanBeam(hip, hip + cachedCamFwd_ * 400.f, WeaponType::EnergyRifle);
+            particleSystem.spawnImpactEffect(
+                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Energy, WeaponType::EnergyRifle);
+            break;
+        }
+        case SDLK_Y: {
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            particleSystem.spawnBulletTracer(hip, cachedCamFwd_, 400.f);
+            particleSystem.spawnImpactEffect(
+                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Metal, WeaponType::Rifle);
+            break;
+        }
+        case SDLK_U: {
+            particleSystem.spawnSmoke(cachedEye_ + cachedCamFwd_ * 200.f, 40.f);
+            break;
+        }
+        case SDLK_I: {
+            particleSystem.spawnExplosion(cachedEye_ + cachedCamFwd_ * 300.f, 100.f);
+            break;
+        }
+        case SDLK_O: {
+            particleSystem.drawScreenText({10.f, 40.f}, "HP 100  AMMO 30", {1.f, 1.f, 1.f, 1.f}, 24.f);
+            break;
+        }
+
         default:
             break;
         }
+    }
+
+    // ── Left-click fires weapon (dispatches WeaponFiredEvent) ────────────
+    if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT && mouseCaptured) {
+        const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+        const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+        const glm::vec3 hitPos = hip + cachedCamFwd_ * 500.f;
+
+        WeaponFiredEvent wfe;
+        wfe.type = WeaponType::Rifle;
+        wfe.origin = hip;
+        wfe.direction = cachedCamFwd_;
+        wfe.isHitscan = true;
+        wfe.hitPos = hitPos;
+        dispatcher.enqueue(wfe);
+
+        // Also spawn tracers and impact directly for visual feedback.
+        particleSystem.spawnBulletTracer(hip, cachedCamFwd_, 500.f);
+        particleSystem.spawnImpactEffect(hitPos, -cachedCamFwd_, SurfaceType::Metal, WeaponType::Rifle);
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
@@ -328,6 +412,88 @@ SDL_AppResult Game::iterate()
             });
     }
 
+    // ── Flush dispatcher events (weapon fired, impact, explosion) ─────────
+    dispatcher.update();
+
+    // ── Update particle system (render-rate, not physics-rate) ────────────
+    particleSystem.update(frameTime, renderer.getCamera(), registry);
+
+    // Draw persistent HUD text each frame
+    particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
+
+    // Compute camera forward and cache for event() key shortcuts
+    {
+        const float cosPitch = std::cos(renderPitch);
+        cachedCamFwd_ =
+            glm::vec3{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+        cachedEye_ = renderEye;
+    }
+
+    // ── Build entity render list ────────────────────────────────────────────
+    {
+        std::vector<EntityRenderCmd> entityCmds;
+        registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
+            if (!rend.visible || rend.modelIndex < 0)
+                return;
+            // Skip local player model in first-person (Option A from the plan).
+            if (registry.all_of<LocalPlayer>(e))
+                return;
+
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value);
+            world *= glm::mat4_cast(rend.orientation);
+            world = glm::scale(world, rend.scale);
+
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world});
+        });
+        renderer.setEntityRenderList(std::move(entityCmds));
+    }
+
+    // ── Build weapon viewmodel ──────────────────────────────────────────────
+    {
+        WeaponViewmodel vm;
+        if (weaponModelIdx >= 0) {
+            vm.modelIndex = weaponModelIdx;
+            vm.visible = true;
+
+            // Position the weapon in front of the camera, offset right and down.
+            const float cosPitch = std::cos(renderPitch);
+            const glm::vec3 forward{
+                std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+            const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
+            const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+            // Weapon bob: subtle sinusoidal offset based on movement
+            float bobPhase = 0.0f;
+            float bobAmplitude = 0.0f;
+            registry.view<LocalPlayer, Velocity>().each([&](const Velocity& vel) {
+                const float hSpeed = std::sqrt(vel.value.x * vel.value.x + vel.value.z * vel.value.z);
+                if (hSpeed > 10.0f) {
+                    bobAmplitude = std::min(hSpeed / 800.0f, 1.5f);
+                    bobPhase = static_cast<float>(SDL_GetTicks()) * 0.008f;
+                }
+            });
+
+            const float bobX = std::sin(bobPhase) * bobAmplitude;
+            const float bobY = std::sin(bobPhase * 2.0f) * bobAmplitude * 0.5f;
+
+            glm::vec3 weaponPos = renderEye + forward * 20.f + right * 8.f - up * 10.f;
+            weaponPos += right * bobX + up * bobY;
+
+            // Weapon rotation: align with camera look direction
+            glm::mat4 weaponWorld = glm::translate(glm::mat4(1.0f), weaponPos);
+            // Rotate weapon to face the same direction as the camera
+            const glm::mat4 rotMat = glm::mat4(glm::vec4(right, 0.0f),
+                                               glm::vec4(up, 0.0f),
+                                               glm::vec4(-forward, 0.0f), // Negative because models typically face -Z
+                                               glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+            weaponWorld *= rotMat;
+            weaponWorld = glm::scale(weaponWorld, glm::vec3(1.0f));
+
+            vm.transform = weaponWorld;
+        }
+        renderer.setWeaponViewmodel(vm);
+    }
+
     // ── 7. Frame recording (R key) — anchored to physics ticks ───────────
     if (physicsRan && recorder.isRecording()) {
         FrameState state;
@@ -414,6 +580,7 @@ SDL_AppResult Game::iterate()
                     statsFPSMax,
                     statsFPS1pLow,
                     statsFPS5pLow);
+    debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     debugUI.render();
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
 
@@ -427,6 +594,7 @@ void Game::quit()
 {
     if (recorder.isRecording())
         recorder.stopRecording();
+    particleSystem.quit();
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();

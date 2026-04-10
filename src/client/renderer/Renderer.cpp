@@ -2,6 +2,7 @@
 
 #include "Camera.hpp"
 #include "ModelLoader.hpp"
+#include "particles/ParticleSystem.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
@@ -1594,6 +1595,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
+    // ── Upload particle data (BEFORE any render pass) ────────────────────
+    if (particleSystem)
+        particleSystem->uploadToGpu(cmd);
+
     // ── Prepare ImGui ───────────────────────────────────────────────────────
     ImDrawData* const drawData = ImGui::GetDrawData();
     if (drawData)
@@ -1624,8 +1629,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_GPURenderPass* shadowPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &sdt);
         SDL_BindGPUGraphicsPipeline(shadowPass, shadowPipeline);
 
-        // Render all opaque model meshes into the shadow map.
+        // Render all opaque scene model meshes into the shadow map.
         for (const auto& model : models) {
+            if (!model.drawInScenePass)
+                continue; // entity/weapon models are not part of the static scene shadow
             ShadowUBO shadowUBO{};
             shadowUBO.lightVP = lightVP;
             shadowUBO.model = model.transform;
@@ -1689,9 +1696,12 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             lightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
             lightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
 
-            // Helper: draw all meshes matching the transparency filter.
+            // Helper: draw all scene-placed meshes matching the transparency filter.
+            // Entity/weapon models (drawInScenePass==false) are handled separately.
             auto drawMeshes = [&](bool wantTransparent) {
                 for (const auto& model : models) {
+                    if (!model.drawInScenePass)
+                        continue;
                     Matrices modelMats{};
                     modelMats.model = model.transform;
                     modelMats.view = camera.getView();
@@ -1772,6 +1782,70 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 SDL_DrawGPUPrimitives(pass, 36, 1, 0, 0);
             }
 
+            // ── Entity render commands (PBR models at entity positions) ─────
+            // These are driven by the ECS — each entity with Renderable + Position
+            // contributes an EntityRenderCmd built by Game::iterate().
+            if (pbrPipeline && !entityRenderCmds.empty()) {
+                SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
+                SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
+
+                for (const auto& ecmd : entityRenderCmds) {
+                    if (ecmd.modelIndex < 0 || ecmd.modelIndex >= static_cast<int>(models.size()))
+                        continue;
+
+                    const auto& emodel = models[static_cast<size_t>(ecmd.modelIndex)];
+
+                    Matrices entMats{};
+                    entMats.model = ecmd.worldTransform;
+                    entMats.view = camera.getView();
+                    entMats.projection = camera.getProjection();
+                    entMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(ecmd.worldTransform)));
+                    SDL_PushGPUVertexUniformData(cmd, 0, &entMats, sizeof(entMats));
+
+                    for (const auto& mesh : emodel.meshes) {
+                        if (mesh.isTransparent)
+                            continue;
+
+                        MaterialUBO matUBO{};
+                        matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                        matUBO.metallicFactor = mesh.material.metallicFactor;
+                        matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                        matUBO.aoStrength = mesh.material.aoStrength;
+                        matUBO.normalScale = mesh.material.normalScale;
+                        matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                        SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+
+                        const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                        SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+                        const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                        SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+                        auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                            if (idx >= 0 && static_cast<size_t>(idx) < emodel.textures.size() &&
+                                emodel.textures[static_cast<size_t>(idx)])
+                                return emodel.textures[static_cast<size_t>(idx)];
+                            return fallback;
+                        };
+
+                        const SDL_GPUTextureSamplerBinding samplers[8] = {
+                            {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                            {.texture = irradianceMap, .sampler = iblSampler},
+                            {.texture = prefilterMap, .sampler = iblSampler},
+                            {.texture = brdfLUT, .sampler = iblSampler},
+                            {.texture = shadowMap ? shadowMap : fallbackWhite,
+                             .sampler = shadowSampler ? shadowSampler : pbrSampler},
+                        };
+                        SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
+
+                        SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+                    }
+                }
+            }
+
             // Pass 3: Transparent meshes (alpha blending, no depth write).
             // Rendered after skybox so they blend with the sky background.
             if (pbrTransparentPipeline) {
@@ -1779,6 +1853,109 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
                 SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
                 drawMeshes(true);
+            }
+        }
+
+        // ── Particle rendering (inside HDR pass, after opaques + skybox) ─────
+        // Push ParticleUniforms matching the layout expected by all particle
+        // vertex shaders (set=1, binding=0): view, proj, camPos, camRight, camUp.
+        if (particleSystem) {
+            struct alignas(16) ParticleUniforms
+            {
+                glm::mat4 view;
+                glm::mat4 proj;
+                glm::vec3 camPos;
+                float _p0;
+                glm::vec3 camRight;
+                float _p1;
+                glm::vec3 camUp;
+                float _p2;
+            };
+
+            ParticleUniforms pu{};
+            pu.view = camera.getView();
+            pu.proj = camera.getProjection();
+            pu.camPos = camera.getEye();
+            pu.camRight = camera.getRight();
+            pu.camUp = camera.getUp();
+            SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+
+            particleSystem->setScreenSize(static_cast<float>(w), static_cast<float>(h));
+            particleSystem->render(pass, cmd);
+        }
+
+        // ── First-person weapon viewmodel ────────────────────────────────────
+        // Rendered last in the HDR pass. The weapon should always be in front,
+        // so we don't clear depth — it just draws over the scene at close range.
+        if (weaponVM.visible && weaponVM.modelIndex >= 0 && weaponVM.modelIndex < static_cast<int>(models.size()) &&
+            pbrPipeline)
+        {
+
+            SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
+
+            const auto& wmodel = models[static_cast<size_t>(weaponVM.modelIndex)];
+
+            Matrices vmMats{};
+            vmMats.model = weaponVM.transform;
+            vmMats.view = camera.getView();
+            vmMats.projection = camera.getProjection();
+            vmMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(weaponVM.transform)));
+            SDL_PushGPUVertexUniformData(cmd, 0, &vmMats, sizeof(vmMats));
+
+            // Light data for weapon (same as scene).
+            LightDataUBO weaponLightData{};
+            weaponLightData.cameraPos = glm::vec4(eye, 1.0f);
+            weaponLightData.ambientColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
+            weaponLightData.numLights = 2;
+            weaponLightData.lights[0].position = glm::vec4(glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f)), 0.0f);
+            weaponLightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, 3.0f);
+            weaponLightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
+            weaponLightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
+            SDL_PushGPUFragmentUniformData(cmd, 1, &weaponLightData, sizeof(weaponLightData));
+
+            ShadowDataFragUBO weaponShadow{};
+            weaponShadow.shadowMapSize = 0.0f; // No shadows for weapon viewmodel.
+            SDL_PushGPUFragmentUniformData(cmd, 2, &weaponShadow, sizeof(weaponShadow));
+
+            for (const auto& mesh : wmodel.meshes) {
+                if (mesh.isTransparent)
+                    continue;
+
+                MaterialUBO matUBO{};
+                matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                matUBO.metallicFactor = mesh.material.metallicFactor;
+                matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                matUBO.aoStrength = mesh.material.aoStrength;
+                matUBO.normalScale = mesh.material.normalScale;
+                matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+
+                const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+                const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+                auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                    if (idx >= 0 && static_cast<size_t>(idx) < wmodel.textures.size() &&
+                        wmodel.textures[static_cast<size_t>(idx)])
+                        return wmodel.textures[static_cast<size_t>(idx)];
+                    return fallback;
+                };
+
+                const SDL_GPUTextureSamplerBinding samplers[8] = {
+                    {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                    {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                    {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                    {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                    {.texture = irradianceMap, .sampler = iblSampler},
+                    {.texture = prefilterMap, .sampler = iblSampler},
+                    {.texture = brdfLUT, .sampler = iblSampler},
+                    {.texture = shadowMap ? shadowMap : fallbackWhite,
+                     .sampler = shadowSampler ? shadowSampler : pbrSampler},
+                };
+                SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
+
+                SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
             }
         }
 
@@ -2167,6 +2344,31 @@ void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
 // ═══════════════════════════════════════════════════════════════════════════
 // Misc
 // ═══════════════════════════════════════════════════════════════════════════
+
+int Renderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs)
+{
+    const char* const k_base = SDL_GetBasePath();
+    char path[512];
+    SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
+
+    LoadedModel loaded;
+    if (!loadModel(path, loaded, flipUVs)) {
+        SDL_Log("Renderer::loadSceneModel: failed to load '%s'", filename);
+        return -1;
+    }
+
+    ModelInstance inst;
+    inst.transform = glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(scale));
+    inst.drawInScenePass = false; // Only drawn via EntityRenderCmd or WeaponViewmodel.
+
+    if (!uploadModel(loaded, inst)) {
+        SDL_Log("Renderer::loadSceneModel: GPU upload failed for '%s'", filename);
+        return -1;
+    }
+
+    models.push_back(std::move(inst));
+    return static_cast<int>(models.size()) - 1;
+}
 
 void Renderer::requestScreenshot(const std::string& path)
 {
