@@ -6,28 +6,47 @@
 #include <string>
 #include <vector>
 
-/// @brief One vertex in a loaded 3-D model.
-/// Layout (32 bytes, no padding):
+/// @brief One vertex in a loaded 3-D model (PBR-ready).
+/// Layout (48 bytes, no padding):
 ///   offset  0 — position  (vec3, 12 B)
 ///   offset 12 — normal    (vec3, 12 B)
 ///   offset 24 — texCoord  (vec2,  8 B)
+///   offset 32 — tangent   (vec4, 16 B)  w = bitangent sign (±1)
 struct ModelVertex
 {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texCoord;
+    glm::vec4 tangent; ///< xyz = tangent direction, w = bitangent handedness (±1).
 };
 
-static_assert(sizeof(ModelVertex) == 32, "ModelVertex size mismatch — check padding");
+static_assert(sizeof(ModelVertex) == 48, "ModelVertex size mismatch — check padding");
 static_assert(offsetof(ModelVertex, normal) == 12, "ModelVertex normal offset mismatch");
 static_assert(offsetof(ModelVertex, texCoord) == 24, "ModelVertex texCoord offset mismatch");
+static_assert(offsetof(ModelVertex, tangent) == 32, "ModelVertex tangent offset mismatch");
+
+/// @brief PBR material scalar parameters extracted from Assimp/glTF.
+struct MaterialData
+{
+    glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
+    float metallicFactor = 1.0f;
+    float roughnessFactor = 1.0f;
+    float aoStrength = 1.0f;
+    float normalScale = 1.0f;
+    glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 0.0f}; ///< rgb in xyz, w unused.
+};
 
 /// @brief CPU-side mesh data ready for GPU upload.
 struct MeshData
 {
     std::vector<ModelVertex> vertices;
     std::vector<uint32_t> indices;
-    int diffuseTexIndex = -1; ///< Index into LoadedModel::textures, or -1 if none.
+    int diffuseTexIndex = -1;           ///< Base colour / albedo texture.
+    int normalTexIndex = -1;            ///< Normal map texture.
+    int metallicRoughnessTexIndex = -1; ///< Combined metallic-roughness (glTF convention).
+    int aoTexIndex = -1;                ///< Ambient occlusion texture.
+    int emissiveTexIndex = -1;          ///< Emissive texture.
+    MaterialData material;              ///< Scalar PBR factors.
 };
 
 /// @brief RGBA pixel data for one texture (decoded from embedded PNG/JPEG).
@@ -47,9 +66,8 @@ struct LoadedModel
 
 /// @brief Load a model file via Assimp and decode its embedded textures.
 ///
-/// Each mesh in @p outModel.meshes has a @c diffuseTexIndex pointing into
-/// @p outModel.textures, or -1 when no base-colour texture is available.
-/// Textures are decoded to RGBA via stb_image.
+/// Extracts PBR material properties (metallic, roughness, emissive factors)
+/// and tangent vectors for normal mapping.
 ///
 /// @param path     Absolute path to the model file (GLB, OBJ, FBX, …).
 /// @param outModel Filled on success.
