@@ -9,6 +9,7 @@
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -23,10 +24,6 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
-
-// World geometry for the current test scene: a single floor plane at y=0.
-// Will be replaced by a proper World object when map loading is implemented.
-static const std::array k_worldPlanes{physics::Plane{.normal = glm::vec3{0.0f, 1.0f, 0.0f}, .distance = 0.0f}};
 
 bool Game::init()
 {
@@ -100,6 +97,22 @@ bool Game::init()
     if (weaponModelIdx < 0)
         SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
 
+    // ── Load animated model (Mixamo FBX) ──────────────────────────────────
+    {
+        const char* base = SDL_GetBasePath();
+        std::string fbxPath = std::string(base ? base : "") + "assets/Standard_Run.fbx";
+        if (runAnimation.load(fbxPath)) {
+            animatedModelIdx = renderer.uploadSceneModel(runAnimation.getLoadedModel());
+            if (animatedModelIdx >= 0) {
+                SDL_Log("[client] animated model uploaded — index=%d, duration=%.2fs",
+                        animatedModelIdx,
+                        static_cast<double>(runAnimation.duration()));
+            }
+        } else {
+            SDL_Log("[client] WARNING: animated model failed to load — animation disabled");
+        }
+    }
+
     // Spawn the local player entity with all physics and input components.
     const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
     const entt::entity k_player = registry.create();
@@ -116,6 +129,15 @@ bool Game::init()
     // The local player's model is rendered for other clients (skipped for self in 1P mode).
     if (wraithModelIdx >= 0)
         registry.emplace<Renderable>(k_player, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
+
+    // Spawn a visible animated character in the world (Mixamo run animation).
+    if (animatedModelIdx >= 0) {
+        const glm::vec3 animPos{0.0f, 0.0f, 400.0f};
+        const entt::entity animEntity = registry.create();
+        registry.emplace<Position>(animEntity, animPos);
+        registry.emplace<PreviousPosition>(animEntity, animPos);
+        registry.emplace<Renderable>(animEntity, Renderable{.modelIndex = animatedModelIdx, .scale = glm::vec3(1.0f)});
+    }
 
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
@@ -423,7 +445,7 @@ SDL_AppResult Game::iterate()
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
             systems::runMovement(registry, k_physicsDt);
-            systems::runCollision(registry, k_physicsDt, k_worldPlanes);
+            systems::runCollision(registry, k_physicsDt, physics::testWorld());
             ++tickCount;
             ++ticksThisFrame;
             ++statsPhysTicks;
@@ -496,6 +518,16 @@ SDL_AppResult Game::iterate()
         cachedCamFwd_ =
             glm::vec3{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
         cachedEye_ = renderEye;
+    }
+
+    // ── Update skeletal animation (CPU skinning) ─────────────────────────
+    if (runAnimation.isLoaded() && animatedModelIdx >= 0) {
+        runAnimation.update(frameTime);
+        for (size_t m = 0; m < runAnimation.meshCount(); ++m) {
+            const auto& sv = runAnimation.getSkinnedVertices(m);
+            renderer.updateModelMeshVertices(
+                animatedModelIdx, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
+        }
     }
 
     // ── Build entity render list ────────────────────────────────────────────

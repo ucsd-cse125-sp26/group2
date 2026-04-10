@@ -5,15 +5,11 @@
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 
 #include <SDL3/SDL.h>
-
-// World geometry for the current test scene: a single floor plane at y=0.
-// The normal (0,1,0) points upward into free space; distance=0 places it at the origin.
-// Will be replaced by a proper World object when map loading is implemented.
-static const std::array k_worldPlanes{physics::Plane{.normal = glm::vec3{0.0f, 1.0f, 0.0f}, .distance = 0.0f}};
 
 bool ServerGame::init(const char* addr, Uint16 port, int hz)
 {
@@ -116,7 +112,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     }
 
     systems::runMovement(registry, dt);
-    systems::runCollision(registry, dt, k_worldPlanes);
+    systems::runCollision(registry, dt, physics::testWorld());
     ++tickCount;
 
     // Log once per second so we can watch the test entity fall and land.

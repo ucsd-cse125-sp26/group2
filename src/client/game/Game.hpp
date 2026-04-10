@@ -1,5 +1,6 @@
 #pragma once
 
+#include "animation/SkinnedModel.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -70,8 +71,10 @@ private:
     glm::vec3 cachedCamFwd_{0.f, 0.f, 1.f};
 
     // Model indices for entity rendering (loaded at init).
-    int wraithModelIdx = -1; ///< Wraith player model index.
-    int weaponModelIdx = -1; ///< R-301 weapon model index.
+    int wraithModelIdx = -1;   ///< Wraith player model index.
+    int weaponModelIdx = -1;   ///< R-301 weapon model index.
+    SkinnedModel runAnimation; ///< Mixamo animated character (skeletal animation).
+    int animatedModelIdx = -1; ///< Renderer model index for the animated character.
 
     // ── FPS ring buffer — inter-render deltas, newest at (head-1) % size ─────
     float fpsHistory[k_fpsHistorySize] = {}; ///< Circular buffer of per-frame FPS samples.
