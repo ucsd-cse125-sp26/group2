@@ -62,7 +62,6 @@ void Server::acceptClients()
         clients.emplace_back();
         clients.back().msgStream.socket = socket;
         clients.back().clientId = clientId;
-
     }
 }
 
