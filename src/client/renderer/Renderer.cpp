@@ -1958,6 +1958,61 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_EndGPUComputePass(volPass);
     }
 
+    // ── TAA (Phase 11) — motion vectors + temporal resolve ────────────────
+    if (motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] && depthTexture) {
+        const glm::mat4 currentVP = camera.getViewProjection();
+
+        // Motion vectors.
+        struct
+        {
+            glm::mat4 curInvVP;
+            glm::mat4 prevVP;
+            glm::vec2 screenSize;
+            glm::vec2 jitter;
+        } mvUBO{};
+        mvUBO.curInvVP = glm::inverse(currentVP);
+        mvUBO.prevVP = previousVP;
+        mvUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+
+        SDL_GPUStorageTextureReadWriteBinding mvWrite = {.texture = motionVectorTexture, .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* mvPass = SDL_BeginGPUComputePass(cmd, &mvWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(mvPass, motionVectorPipeline);
+        SDL_GPUTextureSamplerBinding mvSamp = {.texture = depthTexture, .sampler = tonemapSampler};
+        SDL_BindGPUComputeSamplers(mvPass, 0, &mvSamp, 1);
+        SDL_PushGPUComputeUniformData(cmd, 0, &mvUBO, sizeof(mvUBO));
+        SDL_DispatchGPUCompute(mvPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_EndGPUComputePass(mvPass);
+
+        // TAA temporal resolve.
+        const int srcIdx = taaCurrentIdx;
+        const int dstIdx = 1 - taaCurrentIdx;
+
+        struct
+        {
+            glm::vec2 screenSize;
+            float blendFactor;
+            float _p;
+        } taaUBO{};
+        taaUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        taaUBO.blendFactor = 0.1f;
+
+        SDL_GPUStorageTextureReadWriteBinding taaWrite = {.texture = taaHistory[dstIdx], .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* taaPass = SDL_BeginGPUComputePass(cmd, &taaWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(taaPass, taaPipeline);
+        SDL_GPUTextureSamplerBinding taaSamplers[3] = {
+            {.texture = hdrTarget, .sampler = tonemapSampler},
+            {.texture = taaHistory[srcIdx], .sampler = tonemapSampler},
+            {.texture = motionVectorTexture, .sampler = tonemapSampler},
+        };
+        SDL_BindGPUComputeSamplers(taaPass, 0, taaSamplers, 3);
+        SDL_PushGPUComputeUniformData(cmd, 0, &taaUBO, sizeof(taaUBO));
+        SDL_DispatchGPUCompute(taaPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_EndGPUComputePass(taaPass);
+
+        taaCurrentIdx = dstIdx;
+        previousVP = currentVP;
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     // PASS 2: Tone mapping → swapchain (or captureRT for screenshots)
     // ════════════════════════════════════════════════════════════════════════
