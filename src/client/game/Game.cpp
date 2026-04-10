@@ -407,6 +407,7 @@ SDL_AppResult Game::iterate()
                     renderSeparateFromPhysics,
                     inputSyncedWithPhysics,
                     limitFPSToMonitor,
+                    renderer.ssrMode,
                     measuredPhysicsHz,
                     statsFPSCurrent,
                     statsFPSMin,
