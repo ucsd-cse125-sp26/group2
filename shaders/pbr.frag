@@ -93,6 +93,11 @@ void main()
 
     // ── Surface vectors ─────────────────────────────────────────────────────
     vec3 N = normalize(fragNormal);
+    // For double-sided / mirrored geometry: ensure normal faces the camera.
+    // Models like cars mirror geometry via negative-scale nodes, reversing
+    // face winding.  Without this flip, mirrored faces look inside-out.
+    if (!gl_FrontFacing)
+        N = -N;
     vec3 V = normalize(lighting.cameraPos.xyz - fragWorldPos);
 
     // ── Fresnel reflectance at normal incidence ─────────────────────────────

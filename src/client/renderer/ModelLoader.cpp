@@ -4,7 +4,6 @@
 
 // ---------------------------------------------------------------------------
 // stb_image — single-header PNG/JPEG/etc. decoder.
-// Define the implementation in exactly this one translation unit.
 // ---------------------------------------------------------------------------
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -19,7 +18,7 @@
 #endif
 
 // ---------------------------------------------------------------------------
-// Assimp headers — suppress clang/gcc warnings from third-party code.
+// Assimp headers
 // ---------------------------------------------------------------------------
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -35,8 +34,6 @@
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
-
-#include <glm/gtc/type_ptr.hpp>
 
 namespace
 {
@@ -142,9 +139,9 @@ MaterialData extractMaterial(const aiMaterial* mat)
     MaterialData out;
 
     aiColor4D baseColor;
-    if (mat->Get(AI_MATKEY_BASE_COLOR, baseColor) == AI_SUCCESS) {
+    if (mat->Get(AI_MATKEY_BASE_COLOR, baseColor) == AI_SUCCESS)
         out.baseColorFactor = glm::vec4(baseColor.r, baseColor.g, baseColor.b, baseColor.a);
-    } else {
+    else {
         aiColor4D diffuse;
         if (mat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS)
             out.baseColorFactor = glm::vec4(diffuse.r, diffuse.g, diffuse.b, diffuse.a);
@@ -169,30 +166,36 @@ MaterialData extractMaterial(const aiMaterial* mat)
     return out;
 }
 
-// ── Assimp mat4 → glm::mat4 ────────────────────────────────────────────────
+} // namespace
 
-glm::mat4 aiToGlm(const aiMatrix4x4& m)
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool loadModel(const std::string& path, LoadedModel& outModel)
 {
-    // Assimp is row-major, GLM is column-major — transpose on copy.
-    return glm::transpose(glm::make_mat4(&m.a1));
-}
+    Assimp::Importer importer;
 
-// ── Recursive scene graph traversal ─────────────────────────────────────────
+    // aiProcess_PreTransformVertices bakes the full node hierarchy (position,
+    // rotation, scale, mirroring) into vertex data.  This correctly handles
+    // mirrored geometry (negative-scale nodes), re-wound faces, and normal
+    // transforms — critical for models like the Porsche that assemble parts
+    // via the scene graph.
+    const aiScene* scene = importer.ReadFile(
+        path,
+        static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace |
+                                  aiProcess_JoinIdenticalVertices | aiProcess_PreTransformVertices));
 
-void processNode(const aiNode* node,
-                 const aiScene* scene,
-                 const glm::mat4& parentTransform,
-                 LoadedModel& outModel,
-                 std::vector<int>& embTexToDataIdx)
-{
-    const glm::mat4 globalTransform = parentTransform * aiToGlm(node->mTransformation);
+    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
+        SDL_Log("ModelLoader: failed to load '%s': %s", path.c_str(), importer.GetErrorString());
+        return false;
+    }
 
-    // Compute the normal matrix (inverse-transpose of upper-left 3×3).
-    const glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(globalTransform)));
+    std::vector<int> embTexToDataIdx(scene->mNumTextures, -1);
+    outModel.meshes.reserve(scene->mNumMeshes);
 
-    for (unsigned int i = 0; i < node->mNumMeshes; ++i) {
-        const unsigned int meshIdx = node->mMeshes[i];
-        const aiMesh* mesh = scene->mMeshes[meshIdx];
+    // With PreTransformVertices, all meshes are already in world space.
+    // Simple flat iteration is correct.
+    for (unsigned int m = 0; m < scene->mNumMeshes; ++m) {
+        const aiMesh* mesh = scene->mMeshes[m];
         if (!mesh->HasPositions() || mesh->mNumFaces == 0)
             continue;
 
@@ -203,25 +206,18 @@ void processNode(const aiNode* node,
 
         for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
             ModelVertex vert{};
+            vert.position = {mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z};
 
-            // Bake the node hierarchy transform into vertex positions and normals.
-            glm::vec4 localPos = glm::vec4(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
-            vert.position = glm::vec3(globalTransform * localPos);
-
-            if (mesh->HasNormals()) {
-                glm::vec3 localNormal = {mesh->mNormals[v].x, mesh->mNormals[v].y, mesh->mNormals[v].z};
-                vert.normal = glm::normalize(normalMat * localNormal);
-            }
+            if (mesh->HasNormals())
+                vert.normal = {mesh->mNormals[v].x, mesh->mNormals[v].y, mesh->mNormals[v].z};
 
             if (mesh->mTextureCoords[0] != nullptr)
                 vert.texCoord = {mesh->mTextureCoords[0][v].x, mesh->mTextureCoords[0][v].y};
 
             if (hasTangents) {
-                glm::vec3 localT = {mesh->mTangents[v].x, mesh->mTangents[v].y, mesh->mTangents[v].z};
-                glm::vec3 localB = {mesh->mBitangents[v].x, mesh->mBitangents[v].y, mesh->mBitangents[v].z};
-                glm::vec3 T = glm::normalize(normalMat * localT);
-                float w =
-                    (glm::dot(glm::cross(vert.normal, T), glm::normalize(normalMat * localB)) < 0.0f) ? -1.0f : 1.0f;
+                glm::vec3 T = {mesh->mTangents[v].x, mesh->mTangents[v].y, mesh->mTangents[v].z};
+                glm::vec3 B = {mesh->mBitangents[v].x, mesh->mBitangents[v].y, mesh->mBitangents[v].z};
+                float w = (glm::dot(glm::cross(vert.normal, T), B) < 0.0f) ? -1.0f : 1.0f;
                 vert.tangent = glm::vec4(T, w);
             } else {
                 vert.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
@@ -233,8 +229,8 @@ void processNode(const aiNode* node,
         data.indices.reserve(static_cast<size_t>(mesh->mNumFaces) * 3);
         for (unsigned int f = 0; f < mesh->mNumFaces; ++f) {
             const aiFace& face = mesh->mFaces[f];
-            for (unsigned int j = 0; j < face.mNumIndices; ++j)
-                data.indices.push_back(face.mIndices[j]);
+            for (unsigned int i = 0; i < face.mNumIndices; ++i)
+                data.indices.push_back(face.mIndices[i]);
         }
 
         // Resolve textures and material.
@@ -268,60 +264,6 @@ void processNode(const aiNode* node,
         }
 
         outModel.meshes.push_back(std::move(data));
-    }
-
-    // Recurse into children.
-    for (unsigned int c = 0; c < node->mNumChildren; ++c)
-        processNode(node->mChildren[c], scene, globalTransform, outModel, embTexToDataIdx);
-}
-
-} // namespace
-
-// ═══════════════════════════════════════════════════════════════════════════
-
-bool loadModel(const std::string& path, LoadedModel& outModel)
-{
-    Assimp::Importer importer;
-
-    const aiScene* scene =
-        importer.ReadFile(path,
-                          static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals |
-                                                    aiProcess_CalcTangentSpace | aiProcess_JoinIdenticalVertices));
-
-    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
-        SDL_Log("ModelLoader: failed to load '%s': %s", path.c_str(), importer.GetErrorString());
-        return false;
-    }
-
-    std::vector<int> embTexToDataIdx(scene->mNumTextures, -1);
-
-    // Traverse the full node hierarchy, baking transforms into vertex positions.
-    processNode(scene->mRootNode, scene, glm::mat4(1.0f), outModel, embTexToDataIdx);
-
-    // Diagnostic: sample a few pixels from each albedo texture.
-    for (size_t m = 0; m < outModel.meshes.size(); ++m) {
-        const auto& md = outModel.meshes[m];
-        if (md.diffuseTexIndex >= 0 && static_cast<size_t>(md.diffuseTexIndex) < outModel.textures.size()) {
-            const auto& tex = outModel.textures[static_cast<size_t>(md.diffuseTexIndex)];
-            if (tex.width > 0 && tex.height > 0) {
-                // Sample center pixel.
-                int cx = tex.width / 2;
-                int cy = tex.height / 2;
-                size_t idx = (static_cast<size_t>(cy) * static_cast<size_t>(tex.width) + static_cast<size_t>(cx)) * 4;
-                if (idx + 3 < tex.pixels.size()) {
-                    SDL_Log("  mesh[%zu] albedoTex[%d] %dx%d center=(%u,%u,%u,%u) sRGB=%d",
-                            m,
-                            md.diffuseTexIndex,
-                            tex.width,
-                            tex.height,
-                            tex.pixels[idx],
-                            tex.pixels[idx + 1],
-                            tex.pixels[idx + 2],
-                            tex.pixels[idx + 3],
-                            tex.isSRGB ? 1 : 0);
-                }
-            }
-        }
     }
 
     SDL_Log("ModelLoader: loaded '%s' — %u mesh(es), %u texture(s)",
