@@ -2035,9 +2035,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             params.gamma = 2.2f;
             params.tonemapMode = 0; // ACES
             params.bloomStrength = bloomMips[0] ? 0.3f : 0.0f;
-            params.ssaoStrength = ssaoBlurTexture ? 0.8f : 0.0f;
+            params.ssaoStrength = ssaoBlurTexture ? 0.5f : 0.0f;
             params.ssrStrength = ssrTexture ? 0.4f : 0.0f;
-            params.volumetricStrength = volumetricTexture ? 1.0f : 0.0f;
+            params.volumetricStrength = volumetricTexture ? 0.5f : 0.0f;
             SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
 
             // Bind all 5 post-process textures for compositing.
