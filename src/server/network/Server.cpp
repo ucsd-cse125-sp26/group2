@@ -24,6 +24,8 @@ bool Server::init(const char* addr, Uint16 port)
 
     eventQueue = EventQueue();
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
+
+    nextClientId = 0;
     return true;
 }
 
@@ -56,8 +58,11 @@ void Server::acceptClients()
         return;
     } else if (socket) {
         SDL_Log("Server: accepted new client");
+        auto clientId = nextClientId++;
         clients.emplace_back();
         clients.back().msgStream.socket = socket;
+        clients.back().clientId = clientId;
+
     }
 }
 
@@ -92,7 +97,7 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     // temp enqueue of events
     Event event;
-    event.clientId = 0;
+    event.clientId = conn.clientId;
     event.movementIntent.forward = true;
 
     eventQueue.enqueue(event);

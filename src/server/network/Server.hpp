@@ -37,6 +37,7 @@ private:
     struct Connection
     {
         MessageStream msgStream;
+        uint8_t clientId;
     };
 
     void handleMessage(Connection& client, const void* data, Uint32 len);
@@ -45,4 +46,6 @@ private:
 
     std::vector<Connection> clients;
     EventQueue eventQueue;
+
+    uint8_t nextClientId = 0;
 };
