@@ -47,6 +47,13 @@ private:
     int tickCount = 0;         ///< Total physics ticks elapsed since start.
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
 
-    FrameRecorder recorder;    ///< R-key toggled frame-state + screenshot recorder.
-    uint64_t frameCount = 0;   ///< Monotonic render-frame counter.
+    // ── runtime-tunable loop settings (exposed via ImGui) ────────────────────
+    float mouseSensitivity = 0.002f;    ///< Radians of view rotation per pixel of mouse movement.
+    bool unlimitedFPS = true;           ///< When true, render every iterate() call using interpolated
+                                        ///  PreviousPosition; when false, render only on physics ticks.
+    bool inputSyncedWithPhysics = true; ///< When true, mouse is sampled once per physics tick (no
+                                        ///  jitter); when false, mouse is sampled every iterate() call.
+
+    FrameRecorder recorder;             ///< R-key toggled frame-state + screenshot recorder.
+    uint64_t frameCount = 0;            ///< Monotonic render-frame counter.
 };

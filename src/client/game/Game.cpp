@@ -145,21 +145,32 @@ SDL_AppResult Game::event(SDL_Event* event)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// iterate() — fully synchronised: input → physics → render, all at 128 Hz.
+// iterate() — decoupled physics / render loop.
 //
-// Every rendered frame corresponds to exactly one physics tick.  Mouse deltas
-// accumulate via SDL between ticks and are applied in the same step as the
-// position update, so yaw and position are always on the same timebase.
-// This eliminates the jitter caused by yaw advancing at the frame rate while
-// position only updates at the tick rate.
+// Physics always runs at a fixed 128 Hz behind an accumulator gate.
 //
-// SDL calls iterate() as fast as possible; if the accumulator hasn't reached
-// k_physicsDt yet, we return immediately (no render, no physics).
+// Two runtime-tunable flags (exposed in ImGui) control the other systems:
+//
+//   unlimitedFPS          — when true  the renderer fires every iterate() call
+//                           using position interpolated between the last two
+//                           physics ticks (smooth at any frame rate).
+//                           When false the renderer only fires after a physics
+//                           tick, capping frame rate at 128 fps.
+//
+//   inputSyncedWithPhysics — when true  SDL_GetRelativeMouseState is called
+//                            once per physics tick so yaw and position always
+//                            share the same timebase (no jitter).
+//                            When false mouse is sampled every iterate() call
+//                            (yaw at frame rate, position at tick rate).
+//
+// For orientation interpolation to work correctly in unlimited-fps + synced
+// mode, prevTickYaw/Pitch are saved BEFORE this tick's input is applied, so
+// they hold the orientation from the END of the previous tick.
 // ═══════════════════════════════════════════════════════════════════════════
 
 SDL_AppResult Game::iterate()
 {
-    // ── accumulate real elapsed time ──────────────────────────────────────
+    // ── 1. Accumulate real elapsed time ──────────────────────────────────
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
@@ -168,59 +179,91 @@ SDL_AppResult Game::iterate()
     prevTime = k_now;
     accumulator += frameTime;
 
-    // ── gate: wait until a full tick has elapsed ─────────────────────────
-    if (accumulator < k_physicsDt)
-        return SDL_APP_CONTINUE;
+    // ── 2. Input — sample every frame when NOT synced with physics ────────
+    // SDL_GetRelativeMouseState accumulates deltas between calls; calling it
+    // here (before the gate) means each iterate() gets only that frame's delta.
+    if (!inputSyncedWithPhysics && mouseCaptured)
+        systems::runInputSample(registry, mouseSensitivity);
 
-    // Consume exactly one tick.  Discard any backlog beyond one extra tick
-    // so we never run two ticks in a single iterate() call.
-    accumulator -= k_physicsDt;
-    if (accumulator > k_physicsDt)
-        accumulator = k_physicsDt;
+    // ── 3. Physics gate — consume at most one tick per iterate() call ─────
+    bool physicsRan = false;
+    if (accumulator >= k_physicsDt) {
+        accumulator -= k_physicsDt;
+        if (accumulator > k_physicsDt)
+            accumulator = k_physicsDt; // discard backlog beyond one extra tick
 
-    // ── 1. ImGui frame start ─────────────────────────────────────────────
-    debugUI.newFrame();
+        // Save previous state for interpolation.
+        // Positions: snapshot before movement + collision advance them.
+        registry.view<Position, PreviousPosition>().each(
+            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
-    // ── 2. Sample input ──────────────────────────────────────────────────
-    // SDL_GetRelativeMouseState returns the accumulated mouse delta since the
-    // last call.  Because we only call it here (once per tick), the delta
-    // naturally covers the full period since the previous tick — no partial
-    // or duplicate deltas.  Yaw and position now update in the same step.
-    if (mouseCaptured)
-        systems::runInputSample(registry);
+        // Orientations: snapshot BEFORE this tick's input so that prevTickYaw
+        // holds the end-of-previous-tick value — required for correct lerp.
+        registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
+            snap.prevTickYaw = snap.yaw;
+            snap.prevTickPitch = snap.pitch;
+        });
 
-    // ── 3. Physics tick ──────────────────────────────────────────────────
-    registry.view<Position, PreviousPosition>().each(
-        [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+        // Input — sample once per tick when synced with physics.
+        if (inputSyncedWithPhysics && mouseCaptured)
+            systems::runInputSample(registry, mouseSensitivity);
 
-    registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
-        snap.prevTickYaw = snap.yaw;
-        snap.prevTickPitch = snap.pitch;
-    });
+        systems::runMovement(registry, k_physicsDt);
+        systems::runCollision(registry, k_physicsDt, k_worldPlanes);
+        ++tickCount;
 
-    systems::runMovement(registry, k_physicsDt);
-    systems::runCollision(registry, k_physicsDt, k_worldPlanes);
-    ++tickCount;
+        while (client.poll()) {
+        }
 
-    // ── 4. Network ───────────────────────────────────────────────────────
-    while (client.poll()) {
+        physicsRan = true;
     }
 
-    // ── 5. Resolve camera from local player ──────────────────────────────
+    // ── 4. Bail out early if there is nothing new to render ───────────────
+    if (!unlimitedFPS && !physicsRan)
+        return SDL_APP_CONTINUE;
+
+    // ── 5. Resolve camera ─────────────────────────────────────────────────
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
 
-    registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape>().each(
-        [&](const Position& pos, const InputSnapshot& input, const CollisionShape& shape) {
-            const float eyeOffset = shape.halfExtents.y * 0.77f;
-            renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
-            renderYaw = input.yaw;
-            renderPitch = input.pitch;
-        });
+    if (unlimitedFPS) {
+        // Interpolation alpha: 0 = just ran a tick, 1 = about to run the next one.
+        const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
-    // ── 6. Frame recording (R key) ───────────────────────────────────────
-    if (recorder.isRecording()) {
+        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape>().each(
+            [&](const Position& pos,
+                const PreviousPosition& prev,
+                const InputSnapshot& input,
+                const CollisionShape& shape) {
+                const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
+                const float eyeOffset = shape.halfExtents.y * 0.77f;
+                renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
+
+                if (inputSyncedWithPhysics) {
+                    // Yaw only updates on tick boundaries — interpolate between
+                    // prevTickYaw (end of last tick) and yaw (end of this tick).
+                    renderYaw = input.prevTickYaw + (input.yaw - input.prevTickYaw) * alpha;
+                    renderPitch = input.prevTickPitch + (input.pitch - input.prevTickPitch) * alpha;
+                } else {
+                    // Yaw is already updated every frame — use it directly.
+                    renderYaw = input.yaw;
+                    renderPitch = input.pitch;
+                }
+            });
+    } else {
+        // Sequential mode: render directly from post-tick physics state.
+        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape>().each(
+            [&](const Position& pos, const InputSnapshot& input, const CollisionShape& shape) {
+                const float eyeOffset = shape.halfExtents.y * 0.77f;
+                renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
+                renderYaw = input.yaw;
+                renderPitch = input.pitch;
+            });
+    }
+
+    // ── 6. Frame recording (R key) — anchored to physics ticks ───────────
+    if (physicsRan && recorder.isRecording()) {
         FrameState state;
         state.frameNumber = frameCount;
         state.timestamp = static_cast<double>(SDL_GetTicks()) / 1000.0 - recorder.startTimeSecs();
@@ -273,8 +316,9 @@ SDL_AppResult Game::iterate()
 
     ++frameCount;
 
-    // ── 7. Render ────────────────────────────────────────────────────────
-    debugUI.buildUI(registry, tickCount);
+    // ── 7. Render ─────────────────────────────────────────────────────────
+    debugUI.newFrame();
+    debugUI.buildUI(registry, tickCount, mouseSensitivity, unlimitedFPS, inputSyncedWithPhysics);
     debugUI.render();
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
 

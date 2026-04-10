@@ -85,14 +85,38 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
-void DebugUI::buildUI(const Registry& registry, const int tickCount)
+void DebugUI::buildUI(const Registry& registry,
+                      const int tickCount,
+                      float& mouseSensitivity,
+                      bool& unlimitedFPS,
+                      bool& inputSyncedWithPhysics)
 {
     ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({480.0f, 580.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({480.0f, 660.0f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("ECS Inspector");
 
     // Key bindings reminder
     ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F1: test packet");
+    ImGui::Separator();
+
+    // ── Settings ─────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Settings");
+
+    // Logarithmic slider so low and high sensitivities are equally reachable.
+    ImGui::SliderFloat("Mouse Sensitivity", &mouseSensitivity, 0.0001f, 0.0200f, "%.4f", ImGuiSliderFlags_Logarithmic);
+
+    ImGui::Checkbox("Unlimited FPS", &unlimitedFPS);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("ON: render every frame using interpolated PreviousPosition\n"
+                          "OFF: render only on physics ticks (max 128 fps)");
+
+    ImGui::SameLine();
+
+    ImGui::Checkbox("Input Synced w/ Physics", &inputSyncedWithPhysics);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("ON: mouse sampled once per physics tick — no jitter\n"
+                          "OFF: mouse sampled every frame (yaw at frame rate)");
+
     ImGui::Separator();
 
     // Component visibility toggles
