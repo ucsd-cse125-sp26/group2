@@ -4,6 +4,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <glm/vec3.hpp>
+
+class ParticleSystem; ///< Forward-declared to avoid pulling in heavy particle headers.
+
 /// @brief Live ECS inspector overlay powered by Dear ImGui.
 ///
 /// **Ownership split:**
@@ -62,6 +66,12 @@ public:
                  float fps1pLow,
                  float fps5pLow);
 
+    /// @brief Build the Particle System debug/control window.
+    /// @param ps       The particle system to inspect and control.
+    /// @param eyePos   Camera eye position (used to compute spawn position).
+    /// @param forward  Camera forward unit vector.
+    void buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward);
+
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
@@ -80,4 +90,8 @@ private:
     /// Shows the local player dot on a 3 000 × 3 000 unit grid together with
     /// view-direction, velocity, and wish-velocity arrows.
     void buildMovementChart(const Registry& registry);
+
+    // ── Particle UI state ──────────────────────────────────────────────────
+    float particleSpawnDist_ = 200.f; ///< Units ahead of camera to spawn effects.
+    bool showParticleWindow_ = true;
 };

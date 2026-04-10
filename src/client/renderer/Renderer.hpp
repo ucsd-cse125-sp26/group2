@@ -6,8 +6,11 @@
 #include <SDL3/SDL.h>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <string>
 #include <vector>
+
+class ParticleSystem; ///< Forward-declared to avoid circular includes.
 
 /// @brief SDL3 GPU renderer — forward PBR pipeline with HDR + tone mapping.
 ///
@@ -21,6 +24,21 @@
 ///
 /// Also owns the `imgui_impl_sdlgpu3` render backend.  The ImGui context and
 /// SDL3 input backend are owned by DebugUI — initialise DebugUI first.
+/// @brief Per-entity render command — built by Game, consumed by Renderer::drawFrame.
+struct EntityRenderCmd
+{
+    int32_t modelIndex = -1;        ///< Index into Renderer::models[].
+    glm::mat4 worldTransform{1.0f}; ///< Full world transform (position × rotation × scale).
+};
+
+/// @brief First-person weapon viewmodel descriptor.
+struct WeaponViewmodel
+{
+    int32_t modelIndex = -1;   ///< Index into Renderer::models[].
+    glm::mat4 transform{1.0f}; ///< Transform in viewmodel space (relative to camera).
+    bool visible = false;
+};
+
 class Renderer
 {
 public:
@@ -29,6 +47,38 @@ public:
     void requestScreenshot(const std::string& path);
     bool setVSync(bool enabled);
     void quit();
+
+    // ── Particle system integration ────────────────────────────────────────
+    /// @brief Register a particle system to be rendered each frame (after scene, before ImGui).
+    void setParticleSystem(ParticleSystem* ps) { particleSystem = ps; }
+
+    /// @brief Returns the SDL GPU device. Valid between init() and quit().
+    [[nodiscard]] SDL_GPUDevice* getDevice() const { return device; }
+
+    /// @brief Returns the current camera (updated every drawFrame call).
+    [[nodiscard]] const Camera& getCamera() const { return camera; }
+
+    /// @brief Shader format selected during init() (SPIR-V or MSL).
+    [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const { return shaderFormat; }
+
+    /// @brief HDR render target format (RGBA16F). Particle pipelines must match this.
+    [[nodiscard]] static constexpr SDL_GPUTextureFormat getHdrFormat()
+    {
+        return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+    }
+
+    // ── Entity rendering ───────────────────────────────────────────────────
+    /// @brief Set the list of entity render commands for this frame.
+    void setEntityRenderList(std::vector<EntityRenderCmd> cmds) { entityRenderCmds = std::move(cmds); }
+
+    /// @brief Set the first-person weapon viewmodel for this frame.
+    void setWeaponViewmodel(const WeaponViewmodel& vm) { weaponVM = vm; }
+
+    /// @brief Load a model and return its index in the models[] vector, or -1 on failure.
+    int loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs = false);
+
+    /// @brief Returns the number of loaded models.
+    [[nodiscard]] int modelCount() const { return static_cast<int>(models.size()); }
 
 private:
     // ── Core GPU state ──────────────────────────────────────────────────────
@@ -94,6 +144,7 @@ private:
         std::vector<GpuMesh> meshes;
         std::vector<SDL_GPUTexture*> textures;
         glm::mat4 transform{1.0f};
+        bool drawInScenePass = true; ///< False for models only used via EntityRenderCmd / WeaponViewmodel.
     };
 
     std::vector<ModelInstance> models;
@@ -103,6 +154,13 @@ private:
     SDL_GPUTexture* fallbackFlatNormal = nullptr; ///< (0.5, 0.5, 1.0, 1.0).
     SDL_GPUTexture* fallbackMR = nullptr;         ///< (1.0, 0.5, 0, 0) = metallic=1, roughness=0.5.
     SDL_GPUTexture* fallbackBlack = nullptr;      ///< Emissive default.
+
+    // ── Particle system ──────────────────────────────────────────────────────
+    ParticleSystem* particleSystem = nullptr; ///< Optional; renders after scene geometry.
+
+    // ── Entity rendering ────────────────────────────────────────────────────
+    std::vector<EntityRenderCmd> entityRenderCmds; ///< Per-frame list from Game.
+    WeaponViewmodel weaponVM;                      ///< First-person weapon, rendered after depth clear.
 
     // ── Screen capture ──────────────────────────────────────────────────────
     SDL_GPUTexture* captureRT = nullptr;

@@ -97,3 +97,13 @@ void Camera::computeMatrices()
     // OpenGL-style projection, so flip Y to avoid rendering upside-down.
     proj[1][1] *= -1.0f;
 }
+
+glm::vec3 Camera::getForward() const
+{
+    return glm::normalize(target - eye);
+}
+
+glm::vec3 Camera::getRight() const
+{
+    return glm::normalize(glm::cross(getForward(), up));
+}

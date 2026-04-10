@@ -9,6 +9,7 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "particles/ParticleSystem.hpp"
 
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
@@ -446,6 +447,110 @@ void DebugUI::buildMovementChart(const Registry& registry)
         legendSwatch("Wish vel", IM_COL32(70, 255, 130, 215));
         ImGui::NewLine();
     }
+
+    ImGui::End();
+}
+
+// ─── Particle System debug/control window ─────────────────────────────────────
+
+void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward)
+{
+    if (!showParticleWindow_)
+        return;
+
+    ImGui::SetNextWindowPos({10.f, 620.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({440.f, 520.f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Particle System", &showParticleWindow_)) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Status ────────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Status");
+    if (ps.sdfReady())
+        ImGui::TextColored({0.4f, 1.f, 0.4f, 1.f}, "SDF Font: LOADED");
+    else
+        ImGui::TextColored({1.f, 0.5f, 0.3f, 1.f}, "SDF Font: not loaded (text rendering disabled)");
+
+    // ── Live counts ───────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Live Counts");
+
+    struct PoolRow
+    {
+        const char* name;
+        uint32_t live;
+        uint32_t maxN;
+    };
+    const PoolRow rows[] = {
+        {"Sparks / Impact", ps.impactCount(), 4096},
+        {"Tracers (caps.)", ps.tracerCount(), 512},
+        {"Ribbon verts", ps.ribbonVertexCount(), 24576},
+        {"Hitscan beams", ps.hitscanBeamCount(), 64},
+        {"Arc verts", ps.arcVertexCount(), 2048},
+        {"Smoke", ps.smokeCount(), 1024},
+        {"Decals", ps.decalCount(), 512},
+    };
+
+    constexpr ImGuiTableFlags kTF =
+        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
+    if (ImGui::BeginTable("##counts", 3, kTF)) {
+        ImGui::TableSetupColumn("Effect", ImGuiTableColumnFlags_WidthFixed, 150.f);
+        ImGui::TableSetupColumn("Live/Max", ImGuiTableColumnFlags_WidthFixed, 88.f);
+        ImGui::TableSetupColumn("Fill", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto& r : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(r.name);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u / %u", r.live, r.maxN);
+            ImGui::TableSetColumnIndex(2);
+            const float fraction = (r.maxN > 0) ? static_cast<float>(r.live) / static_cast<float>(r.maxN) : 0.f;
+            char overlay[16];
+            SDL_snprintf(overlay, sizeof(overlay), "%.0f%%", static_cast<double>(fraction * 100.f));
+            ImGui::ProgressBar(fraction, {-FLT_MIN, 0.f}, overlay);
+        }
+        ImGui::EndTable();
+    }
+
+    // ── Spawn Controls ────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Spawn Controls");
+
+    ImGui::SliderFloat("Dist ahead (units)", &particleSpawnDist_, 30.f, 800.f, "%.0f");
+
+    const glm::vec3 worldUp = {0.f, 1.f, 0.f};
+    const glm::vec3 camRight = glm::normalize(glm::cross(forward, worldUp));
+    const glm::vec3 hipfireOrigin = eyePos + camRight * 15.f - worldUp * 8.f + forward * 5.f;
+    const glm::vec3 spawnPos = eyePos + forward * particleSpawnDist_;
+    const glm::vec3 wallNorm = -forward;
+
+    ImGui::Spacing();
+
+    // Weapon effects
+    if (ImGui::Button("Shoot Bullet (R301)", {160.f, 0.f})) {
+        ps.spawnBulletTracer(hipfireOrigin, forward, particleSpawnDist_);
+        ps.spawnImpactEffect(
+            hipfireOrigin + forward * particleSpawnDist_, wallNorm, SurfaceType::Metal, WeaponType::Rifle);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Energy Shot", {110.f, 0.f})) {
+        const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
+        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyRifle);
+        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyRifle);
+    }
+
+    if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))
+        ps.spawnSmoke(spawnPos, 40.f);
+    ImGui::SameLine();
+    if (ImGui::Button("Explosion", {100.f, 0.f}))
+        ps.spawnExplosion(spawnPos, 100.f);
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Keyboard Shortcuts");
+    ImGui::TextDisabled("T: Hitscan beam    Y: Metal impact");
+    ImGui::TextDisabled("U: Smoke cloud     I: Explosion");
+    ImGui::TextDisabled("Left-click: Fire weapon");
 
     ImGui::End();
 }
