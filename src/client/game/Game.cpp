@@ -245,6 +245,8 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry);
     }
 
+    systems::runInputSend(registry, client);
+
     // ── 4. Physics — always 128 Hz, up to k_maxTicksPerFrame catch-up ─────
     bool physicsRan = false;
     int ticksThisFrame = 0;

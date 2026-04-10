@@ -1,6 +1,5 @@
 #pragma once
 
-#include "network/InputPacket.hpp"
 #include "network/MessageStream.hpp"
 #include "systems/EventQueue.hpp"
 
@@ -42,7 +41,6 @@ private:
     };
 
     void handleMessage(Connection& client, const void* data, Uint32 len);
-    Event deserializePacket(const InputPacket& pkt);
 
     NET_Server* server = nullptr;
 
