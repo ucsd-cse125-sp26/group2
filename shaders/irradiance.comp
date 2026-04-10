@@ -1,0 +1,104 @@
+// irradiance.comp — Convolve the environment into a diffuse irradiance cubemap.
+// Each texel stores the cosine-weighted integral of incoming radiance over the
+// hemisphere aligned with that texel's direction.
+// Dispatch: (faceSize/16, faceSize/16, 6) — one workgroup per tile, 6 faces.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// The procedural sky is evaluated inline (same math as skybox.frag)
+// instead of reading from a cubemap texture — avoids needing to render
+// the sky to a cubemap first.
+
+layout(set = 0, binding = 0, rgba16f) writeonly uniform imageCube outIrradiance;
+
+const float PI = 3.14159265359;
+
+// ── Procedural sky (duplicated from skybox.frag) ────────────────────────────
+vec3 proceduralSky(vec3 dir)
+{
+    float y = dir.y;
+    vec3 zenith  = vec3(0.08, 0.16, 0.45);
+    vec3 horizon = vec3(0.6,  0.45, 0.35);
+    vec3 nadir   = vec3(0.03, 0.03, 0.05);
+
+    vec3 sky;
+    if (y > 0.0) {
+        float t = pow(y, 0.4);
+        sky = mix(horizon, zenith, t);
+    } else {
+        float t = pow(-y, 0.6);
+        sky = mix(horizon, nadir, t);
+    }
+
+    vec3 sunDir = normalize(vec3(0.5, 0.3, 0.8));
+    float sunAngle = dot(dir, sunDir);
+    float sunDisc = smoothstep(0.9975, 0.999, sunAngle);
+    float sunGlow = pow(max(sunAngle, 0.0), 256.0);
+    vec3 sunColor = vec3(1.0, 0.95, 0.85) * 8.0;
+    sky += sunColor * sunDisc + vec3(1.0, 0.8, 0.5) * sunGlow * 0.5;
+
+    float horizonGlow = exp(-abs(y) * 4.0);
+    sky += vec3(0.3, 0.2, 0.1) * horizonGlow * 0.3;
+
+    return sky;
+}
+
+// Convert cubemap face + UV to a world-space direction.
+vec3 cubeDir(int face, vec2 uv)
+{
+    // uv in [-1, 1]
+    switch (face) {
+        case 0: return normalize(vec3( 1.0, -uv.y, -uv.x)); // +X
+        case 1: return normalize(vec3(-1.0, -uv.y,  uv.x)); // -X
+        case 2: return normalize(vec3( uv.x,  1.0,  uv.y)); // +Y
+        case 3: return normalize(vec3( uv.x, -1.0, -uv.y)); // -Y
+        case 4: return normalize(vec3( uv.x, -uv.y,  1.0)); // +Z
+        case 5: return normalize(vec3(-uv.x, -uv.y, -1.0)); // -Z
+    }
+    return vec3(0.0);
+}
+
+void main()
+{
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+    int face = coord.z;
+    ivec2 size = imageSize(outIrradiance);
+
+    if (coord.x >= size.x || coord.y >= size.y || face >= 6)
+        return;
+
+    // Direction for this texel.
+    vec2 uv = (vec2(coord.xy) + 0.5) / vec2(size) * 2.0 - 1.0;
+    vec3 N = cubeDir(face, uv);
+
+    // Build a tangent frame around N.
+    vec3 up = abs(N.y) < 0.999 ? vec3(0, 1, 0) : vec3(1, 0, 0);
+    vec3 right = normalize(cross(up, N));
+    up = cross(N, right);
+
+    // Monte Carlo integration over the hemisphere.
+    vec3 irradiance = vec3(0.0);
+    float sampleCount = 0.0;
+    const float deltaPhi = 0.025;
+    const float deltaTheta = 0.025;
+
+    for (float phi = 0.0; phi < 2.0 * PI; phi += deltaPhi) {
+        for (float theta = 0.0; theta < 0.5 * PI; theta += deltaTheta) {
+            // Spherical to cartesian (tangent space).
+            vec3 tangentSample = vec3(sin(theta) * cos(phi),
+                                      sin(theta) * sin(phi),
+                                      cos(theta));
+            // Tangent space → world.
+            vec3 sampleVec = tangentSample.x * right +
+                             tangentSample.y * up +
+                             tangentSample.z * N;
+
+            irradiance += proceduralSky(sampleVec) * cos(theta) * sin(theta);
+            sampleCount += 1.0;
+        }
+    }
+
+    irradiance = PI * irradiance / sampleCount;
+    imageStore(outIrradiance, coord, vec4(irradiance, 1.0));
+}
