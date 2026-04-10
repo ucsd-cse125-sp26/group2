@@ -132,8 +132,9 @@ private:
     SDL_GPUTexture* motionVectorTexture = nullptr; ///< RG16F screen-res.
     SDL_GPUComputePipeline* motionVectorPipeline = nullptr;
 
-    // SSR (Phase 9)
-    SDL_GPUTexture* ssrTexture = nullptr; ///< RGBA16F.
+    // SSR (Phase 9) — ping-pong for temporal accumulation.
+    SDL_GPUTexture* ssrTexture[2] = {}; ///< RGBA16F, ping-pong.
+    int ssrCurrentIdx = 0;
     SDL_GPUComputePipeline* ssrPipeline = nullptr;
 
     // Volumetrics (Phase 10)
