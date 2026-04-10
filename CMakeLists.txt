@@ -225,6 +225,7 @@ add_executable(group2
         src/client/debug/DebugUI.cpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/ecs/components/ClientId.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -293,6 +294,7 @@ add_executable(server
         src/server/systems/BroadcastSystem.hpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/ecs/components/ClientId.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
