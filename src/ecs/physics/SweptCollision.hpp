@@ -22,6 +22,32 @@ struct Plane
     float distance;   ///< Signed offset: `dot(normal, p) == distance` for points on the plane.
 };
 
+/// @brief An axis-aligned box in world space, used as static collision geometry.
+struct WorldAABB
+{
+    glm::vec3 min; ///< Minimum corner (lowest x, y, z).
+    glm::vec3 max; ///< Maximum corner (highest x, y, z).
+};
+
+/// @brief A convex volume defined by bounding planes (for ramps, angled walls, etc.).
+///
+/// The solid interior is the intersection of all half-spaces: `dot(normal, p) < distance`.
+/// Normals point outward (into free space), same as the Plane convention.
+struct WorldBrush
+{
+    static constexpr int k_maxPlanes = 8;
+    Plane planes[k_maxPlanes];
+    int planeCount{0};
+};
+
+/// @brief All world collision geometry for one tick.
+struct WorldGeometry
+{
+    std::span<const Plane> planes;
+    std::span<const WorldAABB> boxes;
+    std::span<const WorldBrush> brushes;
+};
+
 /// @brief Result of a swept AABB collision query.
 struct HitResult
 {
@@ -43,5 +69,21 @@ struct HitResult
 /// @note               Entities that start already inside a plane are skipped.
 ///                     Depenetration is handled separately by CollisionSystem before calling this.
 HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::span<const Plane> planes);
+
+/// @brief Sweep an AABB against a static axis-aligned box.
+///
+/// Expands the static box by the moving AABB's half-extents (Minkowski sum) and
+/// performs a ray-slab intersection test on the swept centre point.
+/// Entities starting inside the box are skipped (depenetration handles that).
+HitResult sweepAABBvsBox(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldAABB& box);
+
+/// @brief Sweep an AABB against a convex brush (set of bounding planes).
+///
+/// Finds the time at which the AABB enters all half-spaces simultaneously.
+/// Entities starting inside the brush are skipped (depenetration handles that).
+HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldBrush& brush);
+
+/// @brief Sweep an AABB against all world geometry, returning the earliest hit.
+HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
 
 } // namespace physics

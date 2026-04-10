@@ -81,6 +81,7 @@ set(ASSIMP_NO_EXPORT                     ON  CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_GLTF_IMPORTER           ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FBX_IMPORTER            ON  CACHE BOOL "" FORCE)
 # Use Assimp's own bundled minizip — avoids needing system unzip.h in a
 # non-standard include path (e.g. /usr/include/minizip/ on Ubuntu 24.04).
 set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)
@@ -112,6 +113,26 @@ FetchContent_MakeAvailable(stb)
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
+# ozz-animation — runtime skeletal animation (CPU skinning, sampling, blending).
+# We only need the runtime + offline builders; disable all extras.
+set(ozz_build_tests     OFF CACHE BOOL "" FORCE)
+set(ozz_build_samples   OFF CACHE BOOL "" FORCE)
+set(ozz_build_howtos    OFF CACHE BOOL "" FORCE)
+set(ozz_build_tools     OFF CACHE BOOL "" FORCE)
+set(ozz_build_fbx       OFF CACHE BOOL "" FORCE)
+set(ozz_build_gltf      OFF CACHE BOOL "" FORCE)
+set(ozz_build_data      OFF CACHE BOOL "" FORCE)
+block()
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_Declare(
+        ozz-animation
+        GIT_REPOSITORY https://github.com/guillaumeblanc/ozz-animation.git
+        GIT_TAG        0.15.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(ozz-animation)
+endblock()
+
 # Suppress warnings that fire when our code includes Assimp headers.
 # Using SYSTEM marks those include paths as "system" so -Wall / -Wextra
 # diagnostics are silenced for Assimp's own headers.
@@ -121,6 +142,20 @@ if(TARGET assimp)
         target_include_directories(assimp SYSTEM INTERFACE ${_assimp_inc})
     endif()
 endif()
+
+# Suppress warnings from ozz-animation headers and its own compilation.
+foreach(_ozz_target ozz_base ozz_animation ozz_animation_offline)
+    if(TARGET ${_ozz_target})
+        target_compile_options(${_ozz_target} PRIVATE
+            $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
+            $<$<CXX_COMPILER_ID:MSVC>:/W0>
+        )
+        get_target_property(_ozz_inc ${_ozz_target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_ozz_inc)
+            target_include_directories(${_ozz_target} SYSTEM INTERFACE ${_ozz_inc})
+        endif()
+    endif()
+endforeach()
 
 # ImGui — immediate-mode debug UI (client only).
 # ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
@@ -312,6 +347,9 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
+    # Skeletal animation
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -380,6 +418,9 @@ target_link_libraries(group2 PRIVATE
     imgui_lib
     assimp
     stb_image
+    ozz_animation_offline
+    ozz_animation
+    ozz_base
 )
 
 # Copy assets (models, textures, …) next to the binary so the renderer can

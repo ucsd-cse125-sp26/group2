@@ -1672,7 +1672,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
         SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
 
-        // ── Scene geometry (cube + floor) ───────────────────────────────────
+        // ── Scene geometry (physics playground) ──────────────────────────────
         if (scenePipeline) {
             SceneMatrices sceneMats{};
             sceneMats.model = glm::mat4(1.0f);
@@ -1681,7 +1681,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
 
             SDL_BindGPUGraphicsPipeline(pass, scenePipeline);
-            SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
+            SDL_DrawGPUPrimitives(pass, 498, 1, 0, 0);
         }
 
         // ── PBR models (two-pass: opaques first, then transparents) ────────
@@ -2368,6 +2368,64 @@ int Renderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, b
 
     models.push_back(std::move(inst));
     return static_cast<int>(models.size()) - 1;
+}
+
+int Renderer::uploadSceneModel(const LoadedModel& model)
+{
+    ModelInstance inst;
+    inst.transform = glm::mat4(1.0f);
+    inst.drawInScenePass = false; // Only drawn via EntityRenderCmd.
+
+    if (!uploadModel(model, inst)) {
+        SDL_Log("Renderer::uploadSceneModel: GPU upload failed");
+        return -1;
+    }
+
+    models.push_back(std::move(inst));
+    return static_cast<int>(models.size()) - 1;
+}
+
+void Renderer::updateModelMeshVertices(int modelIndex, int meshIndex, const ModelVertex* vertices, Uint32 vertexCount)
+{
+    if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= models.size())
+        return;
+    auto& model = models[static_cast<size_t>(modelIndex)];
+    if (meshIndex < 0 || static_cast<size_t>(meshIndex) >= model.meshes.size())
+        return;
+
+    const Uint32 bytes = vertexCount * static_cast<Uint32>(sizeof(ModelVertex));
+
+    // Staging transfer buffer — created per call, released after GPU copy.
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = bytes;
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!tb)
+        return;
+
+    void* mapped = SDL_MapGPUTransferBuffer(device, tb, false);
+    SDL_memcpy(mapped, vertices, bytes);
+    SDL_UnmapGPUTransferBuffer(device, tb);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
+
+    SDL_GPUTransferBufferLocation src{};
+    src.transfer_buffer = tb;
+    src.offset = 0;
+
+    SDL_GPUBufferRegion dst{};
+    dst.buffer = model.meshes[static_cast<size_t>(meshIndex)].vertexBuffer;
+    dst.offset = 0;
+    dst.size = bytes;
+
+    SDL_UploadToGPUBuffer(copyPass, &src, &dst, false);
+
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(cmd);
+
+    // Safe to release immediately — SDL defers actual free until the GPU is done.
+    SDL_ReleaseGPUTransferBuffer(device, tb);
 }
 
 void Renderer::requestScreenshot(const std::string& path)

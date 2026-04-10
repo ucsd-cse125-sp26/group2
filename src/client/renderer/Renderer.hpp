@@ -77,6 +77,13 @@ public:
     /// @brief Load a model and return its index in the models[] vector, or -1 on failure.
     int loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs = false);
 
+    /// @brief Upload a pre-built LoadedModel (e.g. from SkinnedModel) and return its index.
+    int uploadSceneModel(const LoadedModel& model);
+
+    /// @brief Re-upload skinned vertex data for one mesh of an animated model.
+    /// Called each frame after CPU skinning to push new positions/normals to the GPU.
+    void updateModelMeshVertices(int modelIndex, int meshIndex, const ModelVertex* vertices, Uint32 vertexCount);
+
     /// @brief Returns the number of loaded models.
     [[nodiscard]] int modelCount() const { return static_cast<int>(models.size()); }
 
