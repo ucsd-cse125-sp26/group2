@@ -144,75 +144,73 @@ SDL_AppResult Game::event(SDL_Event* event)
     return SDL_APP_CONTINUE;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// iterate() — fully synchronised: input → physics → render, all at 128 Hz.
+//
+// Every rendered frame corresponds to exactly one physics tick.  Mouse deltas
+// accumulate via SDL between ticks and are applied in the same step as the
+// position update, so yaw and position are always on the same timebase.
+// This eliminates the jitter caused by yaw advancing at the frame rate while
+// position only updates at the tick rate.
+//
+// SDL calls iterate() as fast as possible; if the accumulator hasn't reached
+// k_physicsDt yet, we return immediately (no render, no physics).
+// ═══════════════════════════════════════════════════════════════════════════
+
 SDL_AppResult Game::iterate()
 {
-    // ImGui frame start — must happen before any ImGui calls this frame.
-    debugUI.newFrame();
-
-    // Sample input once per frame before the physics loop.
-    // Mouse deltas are consumed here; running inside the loop would
-    // accumulate them multiple times per frame at high frame rates.
-    if (mouseCaptured)
-        systems::runInputSample(registry);
-
-    // Compute frame time.
+    // ── accumulate real elapsed time ──────────────────────────────────────
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
-    float frameTime = 0.0f;
-    if (recorder.isRecording()) {
-        // During recording, lock frameTime to exactly one physics tick.
-        // Screenshot saves (SDL_WaitForGPUIdle + PNG encode) can take 20–30 ms;
-        // if that wall-clock delay leaked into the accumulator it would fire
-        // 3–4 ticks instead of 1, making the player lurch between captured
-        // frames and producing a completely different jitter pattern.
-        // With a fixed dt the game slows down in wall time but every rendered
-        // frame gets identical physics treatment to a normal ~128 fps frame.
-        frameTime = k_physicsDt;
-    } else {
-        frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
-        frameTime = std::min(frameTime, 0.25f); // clamp to avoid spiral-of-death
-    }
+    float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
+    frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
     prevTime = k_now;
     accumulator += frameTime;
 
-    // Fixed-step physics loop.
-    while (accumulator >= k_physicsDt) {
-        // Snapshot positions for sub-tick interpolation.
-        registry.view<Position, PreviousPosition>().each(
-            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+    // ── gate: wait until a full tick has elapsed ─────────────────────────
+    if (accumulator < k_physicsDt)
+        return SDL_APP_CONTINUE;
 
-        // Snapshot yaw/pitch for sub-tick interpolation.
-        // Mirrors the PreviousPosition pattern: prevTickYaw/Pitch hold the
-        // orientation at the START of this tick so the renderer can interpolate
-        // orientation with the same alpha as position — keeping eye and look-
-        // direction on the same timebase and eliminating strafe+rotate jitter.
-        registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
-            snap.prevTickYaw = snap.yaw;
-            snap.prevTickPitch = snap.pitch;
-        });
+    // Consume exactly one tick.  Discard any backlog beyond one extra tick
+    // so we never run two ticks in a single iterate() call.
+    accumulator -= k_physicsDt;
+    if (accumulator > k_physicsDt)
+        accumulator = k_physicsDt;
 
-        systems::runMovement(registry, k_physicsDt);
-        systems::runCollision(registry, k_physicsDt, k_worldPlanes);
+    // ── 1. ImGui frame start ─────────────────────────────────────────────
+    debugUI.newFrame();
 
-        accumulator -= k_physicsDt;
-        ++tickCount;
-    }
+    // ── 2. Sample input ──────────────────────────────────────────────────
+    // SDL_GetRelativeMouseState returns the accumulated mouse delta since the
+    // last call.  Because we only call it here (once per tick), the delta
+    // naturally covers the full period since the previous tick — no partial
+    // or duplicate deltas.  Yaw and position now update in the same step.
+    if (mouseCaptured)
+        systems::runInputSample(registry);
 
-    // Network receive.
+    // ── 3. Physics tick ──────────────────────────────────────────────────
+    registry.view<Position, PreviousPosition>().each(
+        [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+    registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
+        snap.prevTickYaw = snap.yaw;
+        snap.prevTickPitch = snap.pitch;
+    });
+
+    systems::runMovement(registry, k_physicsDt);
+    systems::runCollision(registry, k_physicsDt, k_worldPlanes);
+    ++tickCount;
+
+    // ── 4. Network ───────────────────────────────────────────────────────
     while (client.poll()) {
     }
 
-    // ── resolve first-person camera from local player ──────────────────────
-    // Default eye position used before the player entity is available.
+    // ── 5. Resolve camera from local player ──────────────────────────────
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
 
-    // Use the physics position directly — no interpolation, no extrapolation.
-    // The position is updated at 128 Hz by the physics loop; the renderer just
-    // reads whatever the last completed tick produced.  Mouse look still updates
-    // at the full frame rate so camera rotation stays responsive.
     registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape>().each(
         [&](const Position& pos, const InputSnapshot& input, const CollisionShape& shape) {
             const float eyeOffset = shape.halfExtents.y * 0.77f;
@@ -221,7 +219,7 @@ SDL_AppResult Game::iterate()
             renderPitch = input.pitch;
         });
 
-    // ── frame recording (R key) ───────────────────────────────────────────────
+    // ── 6. Frame recording (R key) ───────────────────────────────────────
     if (recorder.isRecording()) {
         FrameState state;
         state.frameNumber = frameCount;
@@ -231,7 +229,6 @@ SDL_AppResult Game::iterate()
         state.renderYaw = renderYaw;
         state.renderPitch = renderPitch;
 
-        // Pull physics pos/vel and raw yaw/pitch from the registry.
         registry.view<LocalPlayer, Position, Velocity, InputSnapshot>().each(
             [&](const Position& pos, const Velocity& vel, const InputSnapshot& input) {
                 state.physPos = pos.value;
@@ -240,8 +237,6 @@ SDL_AppResult Game::iterate()
                 state.pitch = input.pitch;
             });
 
-        // Compute screen-space (pixel) coords of key world objects so the CSV
-        // directly shows oscillation without manual projection math.
         int winW = 0, winH = 0;
         SDL_GetWindowSizeInPixels(window, &winW, &winH);
         const float winWf = static_cast<float>(winW);
@@ -264,7 +259,6 @@ SDL_AppResult Game::iterate()
         state.cubeScreen = toScreen(glm::vec3{0.0f, 32.0f, 400.0f});
         state.modelScreen = toScreen(glm::vec3{200.0f, 0.0f, 400.0f});
 
-        // Request a screenshot from the renderer (saved synchronously at drawFrame).
         char capPath[512];
         std::snprintf(capPath,
                       sizeof(capPath),
@@ -279,7 +273,7 @@ SDL_AppResult Game::iterate()
 
     ++frameCount;
 
-    // Build debug UI and render.
+    // ── 7. Render ────────────────────────────────────────────────────────
     debugUI.buildUI(registry, tickCount);
     debugUI.render();
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
@@ -289,6 +283,8 @@ SDL_AppResult Game::iterate()
 
 void Game::quit()
 {
+    if (recorder.isRecording())
+        recorder.stopRecording();
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();
