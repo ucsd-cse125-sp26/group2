@@ -15,6 +15,9 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <cstdio>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 
 // World geometry for the current test scene: a single floor plane at y=0.
@@ -97,6 +100,21 @@ SDL_AppResult Game::event(SDL_Event* event)
         switch (event->key.key) {
         case SDLK_Q:
             return SDL_APP_SUCCESS;
+
+        // R — toggle frame recording (state CSV + per-frame PNG screenshots).
+        // Output lands in <binary_dir>/recordings/<timestamp>/ next to the game.
+        case SDLK_R: {
+            if (recorder.isRecording()) {
+                recorder.stopRecording();
+                SDL_Log("[client] recording stopped");
+            } else {
+                const char* base = SDL_GetBasePath();
+                std::string baseDir = std::string(base ? base : "") + "recordings";
+                recorder.startRecording(baseDir);
+                SDL_Log("[client] recording started → %s", recorder.sessionDir().c_str());
+            }
+            break;
+        }
 
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
         case SDLK_ESCAPE:
@@ -190,6 +208,64 @@ SDL_AppResult Game::iterate()
             renderYaw = input.yaw;
             renderPitch = input.pitch;
         });
+
+    // ── frame recording (R key) ───────────────────────────────────────────────
+    if (recorder.isRecording()) {
+        FrameState state;
+        state.frameNumber = frameCount;
+        state.timestamp = static_cast<double>(SDL_GetTicks()) / 1000.0 - recorder.startTimeSecs();
+        state.tickCount = tickCount;
+        state.renderEye = renderEye;
+        state.renderYaw = renderYaw;
+        state.renderPitch = renderPitch;
+
+        // Pull physics pos/vel and raw yaw/pitch from the registry.
+        registry.view<LocalPlayer, Position, Velocity, InputSnapshot>().each(
+            [&](const Position& pos, const Velocity& vel, const InputSnapshot& input) {
+                state.physPos = pos.value;
+                state.physVel = vel.value;
+                state.yaw = input.yaw;
+                state.pitch = input.pitch;
+            });
+
+        // Compute screen-space (pixel) coords of key world objects so the CSV
+        // directly shows oscillation without manual projection math.
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        const float winWf = static_cast<float>(winW);
+        const float winHf = static_cast<float>(winH);
+
+        const float cosPitch = std::cos(renderPitch);
+        const glm::vec3 fwd{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+        const glm::mat4 view = glm::lookAt(renderEye, renderEye + fwd, glm::vec3{0, 1, 0});
+        const glm::mat4 proj =
+            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+        const glm::mat4 vp = proj * view;
+
+        const auto toScreen = [&](glm::vec3 p) -> glm::vec2 {
+            const glm::vec4 clip = vp * glm::vec4(p, 1.0f);
+            if (clip.w <= 0.0f)
+                return {-1.0f, -1.0f};
+            const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            return {(ndc.x * 0.5f + 0.5f) * winWf, (1.0f - (ndc.y * 0.5f + 0.5f)) * winHf};
+        };
+        state.cubeScreen = toScreen(glm::vec3{0.0f, 32.0f, 400.0f});
+        state.modelScreen = toScreen(glm::vec3{200.0f, 0.0f, 400.0f});
+
+        // Request a screenshot from the renderer (saved synchronously at drawFrame).
+        char capPath[512];
+        std::snprintf(capPath,
+                      sizeof(capPath),
+                      "%s/frame_%06llu.png",
+                      recorder.sessionDir().c_str(),
+                      static_cast<unsigned long long>(frameCount));
+        state.screenshotPath = capPath;
+        renderer.requestScreenshot(capPath);
+
+        recorder.recordFrame(state);
+    }
+
+    ++frameCount;
 
     // Build debug UI and render.
     debugUI.buildUI(registry, tickCount);

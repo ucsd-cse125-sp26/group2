@@ -10,6 +10,18 @@
 #include <imgui.h>
 #include <vector>
 
+// stb_image_write — declaration only (implementation is in FrameRecorder.cpp).
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-declarations"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+#include <stb_image_write.h>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
 namespace
 {
 
@@ -523,8 +535,15 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     if (k_drawData)
         ImGui_ImplSDLGPU3_PrepareDrawData(k_drawData, cmd);
 
+    // When a screenshot is pending, render to an intermediate texture so we can
+    // download pixels later.  Then blit captureRT → swapchain for display.
+    // When not recording, render straight to swapchain (no overhead).
+    const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
+    const bool capturing = !pendingCapPath.empty() && ensureCaptureRT(w, h, k_colorFmt);
+    SDL_GPUTexture* const renderTarget = capturing ? captureRT : swapchain;
+
     SDL_GPUColorTargetInfo ct{};
-    ct.texture = swapchain;
+    ct.texture = renderTarget;
     ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f};
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
     ct.store_op = SDL_GPU_STOREOP_STORE;
@@ -583,7 +602,158 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
 
     SDL_EndGPURenderPass(pass);
+
+    // If we rendered to the intermediate captureRT, blit it to the swapchain
+    // so the player actually sees the frame.
+    if (capturing) {
+        SDL_GPUBlitInfo blitInfo{};
+        blitInfo.source.texture = captureRT;
+        blitInfo.source.mip_level = 0;
+        blitInfo.source.layer_or_depth_plane = 0;
+        blitInfo.source.x = 0;
+        blitInfo.source.y = 0;
+        blitInfo.source.w = w;
+        blitInfo.source.h = h;
+        blitInfo.destination.texture = swapchain;
+        blitInfo.destination.mip_level = 0;
+        blitInfo.destination.layer_or_depth_plane = 0;
+        blitInfo.destination.x = 0;
+        blitInfo.destination.y = 0;
+        blitInfo.destination.w = w;
+        blitInfo.destination.h = h;
+        blitInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        blitInfo.flip_mode = SDL_FLIP_NONE;
+        blitInfo.filter = SDL_GPU_FILTER_NEAREST;
+        blitInfo.cycle = false;
+        SDL_BlitGPUTexture(cmd, &blitInfo);
+    }
+
     SDL_SubmitGPUCommandBuffer(cmd);
+
+    // Download captureRT → CPU → PNG (blocks until GPU is idle).
+    if (capturing)
+        downloadAndSaveCapture(w, h);
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::requestScreenshot
+// ---------------------------------------------------------------------------
+
+void Renderer::requestScreenshot(const std::string& path)
+{
+    pendingCapPath = path;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::ensureCaptureRT
+// ---------------------------------------------------------------------------
+
+bool Renderer::ensureCaptureRT(const Uint32 w, const Uint32 h, const SDL_GPUTextureFormat fmt)
+{
+    if (captureRT && captureRTW == w && captureRTH == h && captureRTFmt == fmt)
+        return true;
+
+    if (captureRT)
+        SDL_ReleaseGPUTexture(device, captureRT);
+
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = fmt;
+    info.width = w;
+    info.height = h;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    // COLOR_TARGET: render to it; SAMPLER: required source for SDL_BlitGPUTexture.
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    captureRT = SDL_CreateGPUTexture(device, &info);
+    if (!captureRT) {
+        SDL_Log("Renderer: failed to create captureRT (%ux%u): %s", w, h, SDL_GetError());
+        return false;
+    }
+
+    captureRTW = w;
+    captureRTH = h;
+    captureRTFmt = fmt;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::downloadAndSaveCapture
+// ---------------------------------------------------------------------------
+
+void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
+{
+    if (!captureRT || pendingCapPath.empty())
+        return;
+
+    const Uint32 dataSize = w * h * 4u;
+
+    // Create a download (CPU-readable) transfer buffer.
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+    tbInfo.size = dataSize;
+    SDL_GPUTransferBuffer* dlBuf = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!dlBuf) {
+        SDL_Log("Renderer: failed to create download buffer: %s", SDL_GetError());
+        pendingCapPath.clear();
+        return;
+    }
+
+    // Issue the GPU → transfer-buffer copy in its own command buffer.
+    SDL_GPUCommandBuffer* dlCmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(dlCmd);
+
+    SDL_GPUTextureRegion srcRegion{};
+    srcRegion.texture = captureRT;
+    srcRegion.mip_level = 0;
+    srcRegion.layer = 0;
+    srcRegion.x = srcRegion.y = srcRegion.z = 0;
+    srcRegion.w = w;
+    srcRegion.h = h;
+    srcRegion.d = 1;
+
+    SDL_GPUTextureTransferInfo dstTransfer{};
+    dstTransfer.transfer_buffer = dlBuf;
+    dstTransfer.offset = 0;
+    dstTransfer.pixels_per_row = 0; // 0 = tightly packed (= w)
+    dstTransfer.rows_per_layer = 0; // 0 = tightly packed (= h)
+
+    SDL_DownloadFromGPUTexture(cp, &srcRegion, &dstTransfer);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(dlCmd);
+
+    // Block until the GPU has finished writing to the transfer buffer.
+    SDL_WaitForGPUIdle(device);
+
+    // Map the buffer, convert BGRA→RGBA if the swapchain uses BGRA, then save PNG.
+    void* mapped = SDL_MapGPUTransferBuffer(device, dlBuf, false);
+    if (mapped) {
+        std::vector<uint8_t> pixels(dataSize);
+        SDL_memcpy(pixels.data(), mapped, dataSize);
+        SDL_UnmapGPUTransferBuffer(device, dlBuf);
+
+        // On most platforms (Linux/Vulkan, macOS/Metal) the swapchain is BGRA8.
+        // stbi_write_png expects RGBA8, so swap R and B when needed.
+        const bool swapRB = (captureRTFmt == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
+        if (swapRB) {
+            for (Uint32 i = 0; i < w * h; ++i)
+                std::swap(pixels[i * 4 + 0], pixels[i * 4 + 2]);
+        }
+
+        stbi_write_png(pendingCapPath.c_str(),
+                       static_cast<int>(w),
+                       static_cast<int>(h),
+                       4,
+                       pixels.data(),
+                       static_cast<int>(w) * 4);
+    } else {
+        SDL_UnmapGPUTransferBuffer(device, dlBuf);
+    }
+
+    SDL_ReleaseGPUTransferBuffer(device, dlBuf);
+    pendingCapPath.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -630,6 +800,10 @@ void Renderer::quit()
     if (device) {
         SDL_WaitForGPUIdle(device);
 
+        // Release capture render-target if it was created.
+        if (captureRT)
+            SDL_ReleaseGPUTexture(device, captureRT);
+
         // Release model GPU resources.
         for (auto& mesh : modelMeshes) {
             SDL_ReleaseGPUBuffer(device, mesh.vertexBuffer);
@@ -662,6 +836,7 @@ void Renderer::quit()
         SDL_DestroyGPUDevice(device);
     }
 
+    captureRT = nullptr;
     defaultTexture = nullptr;
     modelSampler = nullptr;
     modelPipeline = nullptr;
