@@ -36,16 +36,30 @@ public:
     void newFrame();
 
     /// @brief Build the ECS inspector window contents.
-    /// @param registry              The ECS registry to inspect.
-    /// @param tickCount             Total physics ticks elapsed (displayed in the stats bar).
-    /// @param mouseSensitivity      Radians per pixel; displayed and modified via a slider.
-    /// @param unlimitedFPS          Render every frame (interpolated) vs only on physics ticks.
-    /// @param inputSyncedWithPhysics Sample input once per tick vs every frame.
+    /// @param registry                The ECS registry to inspect.
+    /// @param tickCount               Total physics ticks elapsed.
+    /// @param mouseSensitivity        Radians per pixel; slider (read/write).
+    /// @param renderSeparateFromPhysics Interpolated unlimited-fps mode toggle (read/write).
+    /// @param inputSyncedWithPhysics  Sample input once per tick vs every frame (read/write).
+    /// @param limitFPSToMonitor       VSync on/off toggle (read/write).
+    /// @param physicsHz               Measured physics tick rate (Hz).
+    /// @param fpsCurrent              Most-recent render FPS sample.
+    /// @param fpsMin                  Minimum FPS in the rolling window.
+    /// @param fpsMax                  Maximum FPS in the rolling window.
+    /// @param fps1pLow                1st-percentile FPS (1 % low).
+    /// @param fps5pLow                5th-percentile FPS (5 % low).
     void buildUI(const Registry& registry,
                  int tickCount,
                  float& mouseSensitivity,
-                 bool& unlimitedFPS,
-                 bool& inputSyncedWithPhysics);
+                 bool& renderSeparateFromPhysics,
+                 bool& inputSyncedWithPhysics,
+                 bool& limitFPSToMonitor,
+                 float physicsHz,
+                 float fpsCurrent,
+                 float fpsMin,
+                 float fpsMax,
+                 float fps1pLow,
+                 float fps5pLow);
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();

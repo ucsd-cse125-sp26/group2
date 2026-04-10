@@ -792,6 +792,28 @@ bool Renderer::ensureDepthTexture(const Uint32 w, const Uint32 h)
 }
 
 // ---------------------------------------------------------------------------
+// Renderer::setVSync
+// ---------------------------------------------------------------------------
+
+bool Renderer::setVSync(const bool enabled)
+{
+    SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
+    if (!enabled) {
+        // Prefer mailbox (no tearing) over immediate (may tear).
+        if (SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX))
+            mode = SDL_GPU_PRESENTMODE_MAILBOX;
+        else
+            mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+    }
+
+    if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
+        SDL_Log("Renderer: SDL_SetGPUSwapchainParameters failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Renderer::quit
 // ---------------------------------------------------------------------------
 

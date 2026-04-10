@@ -88,11 +88,18 @@ void DebugUI::newFrame()
 void DebugUI::buildUI(const Registry& registry,
                       const int tickCount,
                       float& mouseSensitivity,
-                      bool& unlimitedFPS,
-                      bool& inputSyncedWithPhysics)
+                      bool& renderSeparateFromPhysics,
+                      bool& inputSyncedWithPhysics,
+                      bool& limitFPSToMonitor,
+                      const float physicsHz,
+                      const float fpsCurrent,
+                      const float fpsMin,
+                      const float fpsMax,
+                      const float fps1pLow,
+                      const float fps5pLow)
 {
     ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({480.0f, 660.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({480.0f, 700.0f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("ECS Inspector");
 
     // Key bindings reminder
@@ -102,21 +109,45 @@ void DebugUI::buildUI(const Registry& registry,
     // ── Settings ─────────────────────────────────────────────────────────────
     ImGui::SeparatorText("Settings");
 
-    // Logarithmic slider so low and high sensitivities are equally reachable.
+    // Logarithmic slider so both ends of the range are equally reachable.
     ImGui::SliderFloat("Mouse Sensitivity", &mouseSensitivity, 0.0001f, 0.0200f, "%.4f", ImGuiSliderFlags_Logarithmic);
 
-    ImGui::Checkbox("Unlimited FPS", &unlimitedFPS);
+    ImGui::Checkbox("Render Separately from Physics", &renderSeparateFromPhysics);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("ON: render every frame using interpolated PreviousPosition\n"
-                          "OFF: render only on physics ticks (max 128 fps)");
-
-    ImGui::SameLine();
+        ImGui::SetTooltip("ON:  render every frame with position interpolated between ticks\n"
+                          "OFF: render only after a physics tick (fps capped at 128)");
 
     ImGui::Checkbox("Input Synced w/ Physics", &inputSyncedWithPhysics);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("ON: mouse sampled once per physics tick — no jitter\n"
+        ImGui::SetTooltip("ON:  mouse sampled once per physics tick — no jitter\n"
                           "OFF: mouse sampled every frame (yaw at frame rate)");
 
+    ImGui::Checkbox("Limit FPS to Monitor Refresh", &limitFPSToMonitor);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("ON:  VSync on — fps locked to monitor refresh rate\n"
+                          "OFF: VSync off — uncapped fps (may use mailbox present)");
+
+    ImGui::Separator();
+
+    // ── Performance ───────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Performance");
+    ImGui::Text("Phys: %5.1f Hz    Tick: %d", static_cast<double>(physicsHz), tickCount);
+    ImGui::Text("FPS  cur:%5.0f  1%%:%5.0f  5%%:%5.0f  min:%5.0f  max:%5.0f",
+                static_cast<double>(fpsCurrent),
+                static_cast<double>(fps1pLow),
+                static_cast<double>(fps5pLow),
+                static_cast<double>(fpsMin),
+                static_cast<double>(fpsMax));
+
+    const auto* const k_entityStorage = registry.storage<entt::entity>();
+
+    int entityCount = 0;
+    if (k_entityStorage)
+        for (const auto entity : *k_entityStorage)
+            if (registry.valid(entity))
+                ++entityCount;
+
+    ImGui::Text("Entities: %d", entityCount);
     ImGui::Separator();
 
     // Component visibility toggles
@@ -133,22 +164,6 @@ void DebugUI::buildUI(const Registry& registry,
     ImGui::Checkbox("View Angles", &showViewAngles);
     ImGui::SameLine();
     ImGui::Checkbox("Movement Chart", &showMovementChart);
-
-    // Stats bar
-    ImGui::Separator();
-    ImGui::Text("Physics tick: %d", tickCount);
-
-    const auto* const k_entityStorage = registry.storage<entt::entity>();
-
-    int entityCount = 0;
-    if (k_entityStorage)
-        for (const auto entity : *k_entityStorage)
-            if (registry.valid(entity))
-                ++entityCount;
-
-    ImGui::SameLine(0.0f, 20.0f);
-    ImGui::Text("Entities: %d", entityCount);
-    ImGui::Separator();
 
     if (!k_entityStorage) {
         ImGui::End();
