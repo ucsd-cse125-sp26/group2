@@ -1895,8 +1895,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     ++ssrFrameCounter;
 
     if (ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
-        const int ssrDst = ssrCurrentIdx;
-        const int ssrSrc = 1 - ssrCurrentIdx;
+        // Ping-pong: write to current, read history from previous.
+        const int ssrSrc = ssrCurrentIdx;     // previous frame's result
+        const int ssrDst = 1 - ssrCurrentIdx; // this frame's output
         struct
         {
             glm::mat4 proj;
