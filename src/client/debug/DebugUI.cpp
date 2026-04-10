@@ -85,14 +85,70 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
-void DebugUI::buildUI(const Registry& registry, const int tickCount)
+void DebugUI::buildUI(const Registry& registry,
+                      const int tickCount,
+                      float& mouseSensitivity,
+                      bool& renderSeparateFromPhysics,
+                      bool& inputSyncedWithPhysics,
+                      bool& limitFPSToMonitor,
+                      const float physicsHz,
+                      const float fpsCurrent,
+                      const float fpsMin,
+                      const float fpsMax,
+                      const float fps1pLow,
+                      const float fps5pLow)
 {
     ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({480.0f, 580.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({480.0f, 700.0f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("ECS Inspector");
 
     // Key bindings reminder
     ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F1: test packet");
+    ImGui::Separator();
+
+    // ── Settings ─────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Settings");
+
+    // Logarithmic slider so both ends of the range are equally reachable.
+    ImGui::SliderFloat("Mouse Sensitivity", &mouseSensitivity, 0.0001f, 0.0200f, "%.4f", ImGuiSliderFlags_Logarithmic);
+
+    ImGui::Checkbox("Render Separately from Physics", &renderSeparateFromPhysics);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("ON:  render every frame with position interpolated between ticks\n"
+                          "OFF: render only after a physics tick (fps capped at 128)");
+
+    ImGui::Checkbox("Input Synced w/ Physics", &inputSyncedWithPhysics);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("ON:  movement keys (WASD) sampled once per tick (server-consistent)\n"
+                          "OFF: movement keys sampled every frame\n"
+                          "Mouse look is always per-frame regardless of this toggle");
+
+    ImGui::Checkbox("Limit FPS to Monitor Refresh", &limitFPSToMonitor);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("ON:  VSync on — fps locked to monitor refresh rate\n"
+                          "OFF: VSync off — uncapped fps (may use mailbox present)");
+
+    ImGui::Separator();
+
+    // ── Performance ───────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Performance");
+    ImGui::Text("Phys: %5.1f Hz    Tick: %d", static_cast<double>(physicsHz), tickCount);
+    ImGui::Text("FPS  cur:%5.0f  1%%:%5.0f  5%%:%5.0f  min:%5.0f  max:%5.0f",
+                static_cast<double>(fpsCurrent),
+                static_cast<double>(fps1pLow),
+                static_cast<double>(fps5pLow),
+                static_cast<double>(fpsMin),
+                static_cast<double>(fpsMax));
+
+    const auto* const k_entityStorage = registry.storage<entt::entity>();
+
+    int entityCount = 0;
+    if (k_entityStorage)
+        for (const auto entity : *k_entityStorage)
+            if (registry.valid(entity))
+                ++entityCount;
+
+    ImGui::Text("Entities: %d", entityCount);
     ImGui::Separator();
 
     // Component visibility toggles
@@ -109,22 +165,6 @@ void DebugUI::buildUI(const Registry& registry, const int tickCount)
     ImGui::Checkbox("View Angles", &showViewAngles);
     ImGui::SameLine();
     ImGui::Checkbox("Movement Chart", &showMovementChart);
-
-    // Stats bar
-    ImGui::Separator();
-    ImGui::Text("Physics tick: %d", tickCount);
-
-    const auto* const k_entityStorage = registry.storage<entt::entity>();
-
-    int entityCount = 0;
-    if (k_entityStorage)
-        for (const auto entity : *k_entityStorage)
-            if (registry.valid(entity))
-                ++entityCount;
-
-    ImGui::SameLine(0.0f, 20.0f);
-    ImGui::Text("Entities: %d", entityCount);
-    ImGui::Separator();
 
     if (!k_entityStorage) {
         ImGui::End();
