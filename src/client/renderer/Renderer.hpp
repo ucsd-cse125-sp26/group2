@@ -43,11 +43,12 @@ private:
     Camera camera;
 
     // ── Pipelines ───────────────────────────────────────────────────────────
-    SDL_GPUGraphicsPipeline* scenePipeline = nullptr;   ///< Hard-coded cube + floor (PBR lit).
-    SDL_GPUGraphicsPipeline* pbrPipeline = nullptr;     ///< Assimp model (PBR + textures).
-    SDL_GPUGraphicsPipeline* skyboxPipeline = nullptr;  ///< Procedural/cubemap skybox.
-    SDL_GPUGraphicsPipeline* tonemapPipeline = nullptr; ///< Fullscreen HDR → LDR.
-    SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;  ///< Depth-only shadow map.
+    SDL_GPUGraphicsPipeline* scenePipeline = nullptr;          ///< Hard-coded cube + floor (PBR lit).
+    SDL_GPUGraphicsPipeline* pbrPipeline = nullptr;            ///< Assimp model — opaque meshes.
+    SDL_GPUGraphicsPipeline* pbrTransparentPipeline = nullptr; ///< Same PBR — alpha-blended meshes.
+    SDL_GPUGraphicsPipeline* skyboxPipeline = nullptr;         ///< Procedural/cubemap skybox.
+    SDL_GPUGraphicsPipeline* tonemapPipeline = nullptr;        ///< Fullscreen HDR → LDR.
+    SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;         ///< Depth-only shadow map.
 
     // ── Render targets ──────────────────────────────────────────────────────
     SDL_GPUTexture* depthTexture = nullptr; ///< Scene depth, D32_FLOAT.
@@ -84,6 +85,7 @@ private:
         int metallicRoughnessTexIndex = -1;
         int emissiveTexIndex = -1;
         MaterialData material;
+        bool isTransparent = false; ///< True when alphaMode is BLEND or MASK.
     };
 
     /// One loaded model instance in the scene.

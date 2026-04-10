@@ -154,7 +154,9 @@ void main()
             vec3  F = fresnelSchlick(max(dot(H, V), 0.0), F0);
 
             vec3 numerator   = D * G * F;
-            float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
+            // Clamp NdotV in the denominator to prevent specular blow-up at
+            // grazing angles (exaggerated by normal maps at mesh edges).
+            float denominator = 4.0 * max(dot(N, V), 0.1) * NdotL + 0.0001;
             vec3 specular    = numerator / denominator;
 
             // Energy-conserving diffuse: only non-metallic surfaces diffuse.
@@ -198,7 +200,11 @@ void main()
     if (emissive.r + emissive.g + emissive.b > 0.01)
         emissive *= texture(texEmissive, fragTexCoord).rgb;
 
-    // ── Final colour (linear HDR — no clamp, always opaque) ────────────────
+    // ── Final colour ────────────────────────────────────────────────────────
+    // The opaque pipeline ignores alpha (blending off).
+    // The transparent pipeline uses it (alpha blending on, no depth write).
+    // Alpha comes from baseColorFactor.a × albedo texture alpha.
     vec3 color = ambient + Lo + emissive;
-    outColor = vec4(color, 1.0);
+    float alpha = mat.baseColorFactor.a * albedoSample.a;
+    outColor = vec4(color, alpha);
 }

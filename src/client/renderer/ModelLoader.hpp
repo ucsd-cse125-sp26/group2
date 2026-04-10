@@ -26,6 +26,14 @@ static_assert(offsetof(ModelVertex, texCoord) == 24, "ModelVertex texCoord offse
 static_assert(offsetof(ModelVertex, tangent) == 32, "ModelVertex tangent offset mismatch");
 
 /// @brief PBR material scalar parameters extracted from Assimp/glTF.
+/// glTF alpha mode.
+enum class AlphaMode
+{
+    Opaque,
+    Mask,
+    Blend
+};
+
 struct MaterialData
 {
     glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
@@ -34,6 +42,8 @@ struct MaterialData
     float aoStrength = 1.0f;
     float normalScale = 1.0f;
     glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 0.0f}; ///< rgb in xyz, w unused.
+    AlphaMode alphaMode = AlphaMode::Opaque;
+    float alphaCutoff = 0.5f;                         ///< Threshold for AlphaMode::Mask.
 };
 
 /// @brief CPU-side mesh data ready for GPU upload.

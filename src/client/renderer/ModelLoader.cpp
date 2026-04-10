@@ -21,6 +21,7 @@
 #pragma GCC diagnostic ignored "-Wpedantic"
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
 #endif
+#include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
@@ -178,6 +179,23 @@ MaterialData extractMaterial(const aiMaterial* mat)
     aiColor3D emissive;
     if (mat->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == AI_SUCCESS)
         out.emissiveFactor = glm::vec4(emissive.r, emissive.g, emissive.b, 0.0f);
+
+    // glTF alphaMode: "OPAQUE" (default), "MASK", or "BLEND".
+    aiString alphaMode;
+    if (mat->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == AI_SUCCESS) {
+        if (std::string(alphaMode.C_Str()) == "MASK")
+            out.alphaMode = AlphaMode::Mask;
+        else if (std::string(alphaMode.C_Str()) == "BLEND")
+            out.alphaMode = AlphaMode::Blend;
+    }
+    // Also detect transparency from opacity < 1 (non-glTF models).
+    float opacity = 1.0f;
+    if (mat->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS && opacity < 0.99f)
+        out.alphaMode = AlphaMode::Blend;
+
+    float cutoff = 0.5f;
+    if (mat->Get(AI_MATKEY_GLTF_ALPHACUTOFF, cutoff) == AI_SUCCESS)
+        out.alphaCutoff = cutoff;
 
     return out;
 }
