@@ -19,6 +19,8 @@ layout(set = 2, binding = 3) uniform sampler2D texNormal;
 layout(set = 2, binding = 4) uniform samplerCube irradianceMap;
 layout(set = 2, binding = 5) uniform samplerCube prefilterMap;
 layout(set = 2, binding = 6) uniform sampler2D   brdfLUT;
+// Shadow map (Phase 2).
+layout(set = 2, binding = 7) uniform sampler2DShadow shadowMap;
 
 // ── Material parameters (pushed per-mesh) ───────────────────────────────────
 layout(set = 3, binding = 0) uniform Material
@@ -48,8 +50,46 @@ layout(set = 3, binding = 1) uniform LightData
     Light lights[8];
 } lighting;
 
+// ── Shadow data (pushed once per frame) ─────────────────────────────────────
+layout(set = 3, binding = 2) uniform ShadowData
+{
+    mat4  lightVP;
+    float shadowBias;
+    float shadowNormalBias;
+    float shadowMapSize;
+    float _shadowPad;
+} shadow;
+
 // ── Constants ───────────────────────────────────────────────────────────────
 const float PI = 3.14159265359;
+
+// ── Shadow sampling (3×3 PCF) ───────────────────────────────────────────────
+float calcShadow(vec3 worldPos, vec3 N)
+{
+    // Transform world position to light clip space.
+    vec4 lightClip = shadow.lightVP * vec4(worldPos, 1.0);
+    vec3 lightNDC = lightClip.xyz / lightClip.w;
+
+    // NDC [-1,1] → UV [0,1].  Vulkan depth is already [0,1].
+    vec2 shadowUV = lightNDC.xy * 0.5 + 0.5;
+    float currentDepth = lightNDC.z;
+
+    // Outside shadow map → fully lit.
+    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 || shadowUV.y < 0.0 || shadowUV.y > 1.0)
+        return 1.0;
+
+    // 3×3 PCF with comparison sampler.
+    float texelSize = 1.0 / shadow.shadowMapSize;
+    float total = 0.0;
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            vec2 offset = vec2(float(x), float(y)) * texelSize;
+            // sampler2DShadow: texture() returns 0.0 (in shadow) or 1.0 (lit).
+            total += texture(shadowMap, vec3(shadowUV + offset, currentDepth - shadow.shadowBias));
+        }
+    }
+    return total / 9.0;
+}
 
 // ── GGX Normal Distribution Function (Trowbridge-Reitz) ────────────────────
 float distributionGGX(vec3 N, vec3 H, float roughness)
@@ -164,7 +204,13 @@ void main()
             vec3 diffuse = kD * albedo / PI;
 
             vec3 radiance = light.color.rgb * attenuation;
-            Lo += (diffuse + specular) * radiance * NdotL;
+
+            // Apply shadow only to the primary directional light (index 0).
+            float shadowFactor = 1.0;
+            if (i == 0 && shadow.shadowMapSize > 0.0)
+                shadowFactor = calcShadow(fragWorldPos, N);
+
+            Lo += (diffuse + specular) * radiance * NdotL * shadowFactor;
         }
     }
 

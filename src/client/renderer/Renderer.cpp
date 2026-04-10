@@ -81,6 +81,23 @@ struct SkyboxMatricesUBO
     glm::mat4 projection;
 };
 
+/// Shadow map vertex UBO — matches shadow.vert LightMatrices.
+struct ShadowUBO
+{
+    glm::mat4 lightVP;
+    glm::mat4 model;
+};
+
+/// Shadow data pushed to pbr.frag for shadow sampling.
+struct ShadowDataFragUBO
+{
+    glm::mat4 lightVP; ///< Light's view-projection matrix.
+    float shadowBias;
+    float shadowNormalBias;
+    float shadowMapSize;
+    float _pad;
+};
+
 /// Tonemap fragment UBO.
 struct TonemapParamsUBO
 {
@@ -186,7 +203,7 @@ bool Renderer::initPBRPipeline()
     // pbr.frag: 7 samplers (albedo, MR, emissive, normal, irradiance, prefilter, brdfLUT),
     //           2 UBOs (Material, LightData).
     SDL_GPUShader* vert = loadShaderFromFile("pbr.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-    SDL_GPUShader* frag = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2);
+    SDL_GPUShader* frag = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 8, 3);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
         SDL_ReleaseGPUShader(device, frag);
@@ -1193,8 +1210,34 @@ bool Renderer::init(SDL_Window* win)
         return false;
     if (!initTonemapPipeline())
         return false;
-    // Shadow pipeline is optional — don't fail init if it doesn't work.
+    // Shadow pipeline + shadow map texture + comparison sampler.
     initShadowPipeline();
+    {
+        // Shadow map: D32_FLOAT, 2048×2048, single layer (no cascades yet).
+        SDL_GPUTextureCreateInfo smInfo{};
+        smInfo.type = SDL_GPU_TEXTURETYPE_2D;
+        smInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+        smInfo.width = k_shadowMapSize;
+        smInfo.height = k_shadowMapSize;
+        smInfo.layer_count_or_depth = 1;
+        smInfo.num_levels = 1;
+        smInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        smInfo.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        shadowMap = SDL_CreateGPUTexture(device, &smInfo);
+        if (!shadowMap)
+            SDL_Log("Renderer: shadow map creation failed: %s", SDL_GetError());
+
+        // Comparison sampler for PCF shadow sampling.
+        SDL_GPUSamplerCreateInfo ssInfo{};
+        ssInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+        ssInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+        ssInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        ssInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        ssInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        ssInfo.enable_compare = true;
+        ssInfo.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+        shadowSampler = SDL_CreateGPUSampler(device, &ssInfo);
+    }
 
     // Generate IBL textures (BRDF LUT, irradiance map, prefilter map).
     if (!initIBL())
@@ -1367,6 +1410,52 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
 
     // ════════════════════════════════════════════════════════════════════════
+    // PASS 0: Shadow map — depth-only from directional light's perspective
+    // ════════════════════════════════════════════════════════════════════════
+    glm::mat4 lightVP(1.0f);
+    if (shadowPipeline && shadowMap) {
+        // Light direction matches the primary directional light.
+        const glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
+        // Place the light "camera" far along the light direction, looking at scene center.
+        const glm::vec3 lightPos = lightDir * 1500.0f;
+        const glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f, 0.0f, 400.0f), glm::vec3(0, 1, 0));
+        // Orthographic projection covering the scene.
+        const glm::mat4 lightProj = glm::ortho(-600.0f, 600.0f, -300.0f, 300.0f, 0.1f, 3000.0f);
+        lightVP = lightProj * lightView;
+
+        SDL_GPUDepthStencilTargetInfo sdt{};
+        sdt.texture = shadowMap;
+        sdt.clear_depth = 1.0f;
+        sdt.load_op = SDL_GPU_LOADOP_CLEAR;
+        sdt.store_op = SDL_GPU_STOREOP_STORE;
+        sdt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        sdt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+
+        SDL_GPURenderPass* shadowPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &sdt);
+        SDL_BindGPUGraphicsPipeline(shadowPass, shadowPipeline);
+
+        // Render all opaque model meshes into the shadow map.
+        for (const auto& model : models) {
+            ShadowUBO shadowUBO{};
+            shadowUBO.lightVP = lightVP;
+            shadowUBO.model = model.transform;
+            SDL_PushGPUVertexUniformData(cmd, 0, &shadowUBO, sizeof(shadowUBO));
+
+            for (const auto& mesh : model.meshes) {
+                if (mesh.isTransparent)
+                    continue; // skip transparent meshes for shadows
+                const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                SDL_BindGPUVertexBuffers(shadowPass, 0, &vbBind, 1);
+                const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                SDL_BindGPUIndexBuffer(shadowPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
+            }
+        }
+
+        SDL_EndGPURenderPass(shadowPass);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     // PASS 1: Main colour pass → HDR render target
     // ════════════════════════════════════════════════════════════════════════
     {
@@ -1445,7 +1534,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                             return fallback;
                         };
 
-                        const SDL_GPUTextureSamplerBinding samplers[7] = {
+                        const SDL_GPUTextureSamplerBinding samplers[8] = {
                             {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
                             {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
                             {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
@@ -1453,18 +1542,28 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                             {.texture = irradianceMap, .sampler = iblSampler},
                             {.texture = prefilterMap, .sampler = iblSampler},
                             {.texture = brdfLUT, .sampler = iblSampler},
+                            {.texture = shadowMap ? shadowMap : fallbackWhite,
+                             .sampler = shadowSampler ? shadowSampler : pbrSampler},
                         };
-                        SDL_BindGPUFragmentSamplers(pass, 0, samplers, 7);
+                        SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
 
                         SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
                     }
                 }
             };
 
+            // Shadow data UBO (shared by all meshes).
+            ShadowDataFragUBO shadowData{};
+            shadowData.lightVP = lightVP;
+            shadowData.shadowBias = 0.002f;
+            shadowData.shadowNormalBias = 0.01f;
+            shadowData.shadowMapSize = (shadowMap && shadowPipeline) ? static_cast<float>(k_shadowMapSize) : 0.0f;
+
             // Pass 1: Opaque meshes (writes depth, no blending).
             if (pbrPipeline) {
                 SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
                 SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
                 drawMeshes(false);
             }
 
@@ -1488,6 +1587,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             if (pbrTransparentPipeline) {
                 SDL_BindGPUGraphicsPipeline(pass, pbrTransparentPipeline);
                 SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
                 drawMeshes(true);
             }
         }
