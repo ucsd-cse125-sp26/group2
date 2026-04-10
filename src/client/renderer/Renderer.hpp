@@ -39,6 +39,11 @@ public:
     /// @param pitch  Vertical look angle in radians (positive = looking down).
     void drawFrame(glm::vec3 eye, float yaw, float pitch);
 
+    /// @brief Switch VSync on or off by changing the swapchain present mode.
+    /// When disabled, prefers mailbox (no tearing) and falls back to immediate.
+    /// @return False if the requested mode is unsupported on this device/platform.
+    bool setVSync(bool enabled);
+
     /// @brief Release all GPU resources.  Waits for GPU idle before freeing.
     /// @pre Call before the SDL window is destroyed.
     void quit();
