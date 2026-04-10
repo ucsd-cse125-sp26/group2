@@ -29,6 +29,7 @@
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
 #endif
 #include <assimp/Importer.hpp>
+#include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 #ifdef __GNUC__
@@ -39,7 +40,6 @@ namespace
 {
 
 /// @brief Try to decode an Assimp embedded texture into RGBA pixels.
-/// @return True on success (pushes one TextureData into @p textures).
 bool decodeEmbeddedTexture(const aiTexture* embTex, std::vector<TextureData>& textures)
 {
     if (!embTex)
@@ -55,8 +55,7 @@ bool decodeEmbeddedTexture(const aiTexture* embTex, std::vector<TextureData>& te
                                              &td.width,
                                              &td.height,
                                              &ch,
-                                             4); // force RGBA output
-
+                                             4);
         if (!raw) {
             SDL_Log("ModelLoader: stb_image failed to decode embedded texture: %s", stbi_failure_reason());
             return false;
@@ -83,59 +82,96 @@ bool decodeEmbeddedTexture(const aiTexture* embTex, std::vector<TextureData>& te
     return true;
 }
 
-/// @brief Resolve the base-colour texture for @p mat and return its index
-///        inside @p textures (loading it if not already cached).
-/// @return The TextureData index, or -1 if the material has no colour texture.
+/// @brief Resolve an embedded texture of the given type from a material.
+/// @return Index into textures vector, or -1 if not found.
+int resolveTexture(const aiMaterial* mat,
+                   aiTextureType type,
+                   const aiScene* scene,
+                   std::vector<TextureData>& textures,
+                   std::vector<int>& embTexToDataIdx)
+{
+    if (mat->GetTextureCount(type) == 0)
+        return -1;
+
+    aiString texPath;
+    if (mat->GetTexture(type, 0, &texPath) != AI_SUCCESS)
+        return -1;
+
+    const aiTexture* embTex = scene->GetEmbeddedTexture(texPath.C_Str());
+    if (!embTex)
+        return -1;
+
+    // Compute the embedded-texture slot index for caching.
+    int embIdx = -1;
+    for (unsigned int i = 0; i < scene->mNumTextures; ++i) {
+        if (scene->mTextures[i] == embTex) {
+            embIdx = static_cast<int>(i);
+            break;
+        }
+    }
+
+    // Return cached entry if already decoded.
+    if (embIdx >= 0 && embIdx < static_cast<int>(embTexToDataIdx.size()) &&
+        embTexToDataIdx[static_cast<size_t>(embIdx)] >= 0)
+    {
+        return embTexToDataIdx[static_cast<size_t>(embIdx)];
+    }
+
+    // Decode and store.
+    const int dataIdx = static_cast<int>(textures.size());
+    if (decodeEmbeddedTexture(embTex, textures)) {
+        if (embIdx >= 0) {
+            if (static_cast<size_t>(embIdx) >= embTexToDataIdx.size())
+                embTexToDataIdx.resize(static_cast<size_t>(embIdx) + 1, -1);
+            embTexToDataIdx[static_cast<size_t>(embIdx)] = dataIdx;
+        }
+        return dataIdx;
+    }
+
+    return -1;
+}
+
+/// @brief Resolve base-colour texture (tries BASE_COLOR first, then DIFFUSE).
 int resolveDiffuseTex(const aiMaterial* mat,
                       const aiScene* scene,
                       std::vector<TextureData>& textures,
                       std::vector<int>& embTexToDataIdx)
 {
-    // GLTF 2.0 PBR base colour lives at aiTextureType_BASE_COLOR (Assimp 5+).
-    // Older/fallback path is aiTextureType_DIFFUSE.
     for (aiTextureType type : {aiTextureType_BASE_COLOR, aiTextureType_DIFFUSE}) {
-        if (mat->GetTextureCount(type) == 0)
-            continue;
+        int idx = resolveTexture(mat, type, scene, textures, embTexToDataIdx);
+        if (idx >= 0)
+            return idx;
+    }
+    return -1;
+}
 
-        aiString texPath;
-        if (mat->GetTexture(type, 0, &texPath) != AI_SUCCESS)
-            continue;
+/// @brief Extract scalar PBR material factors from an Assimp material.
+MaterialData extractMaterial(const aiMaterial* mat)
+{
+    MaterialData out;
 
-        // Embedded textures use path "*N" where N is the scene texture index.
-        const aiTexture* embTex = scene->GetEmbeddedTexture(texPath.C_Str());
-        if (!embTex)
-            continue;
-
-        // Compute the embedded-texture slot index so we can cache/deduplicate.
-        int embIdx = -1;
-        for (unsigned int i = 0; i < scene->mNumTextures; ++i) {
-            if (scene->mTextures[i] == embTex) {
-                embIdx = static_cast<int>(i);
-                break;
-            }
-        }
-
-        // Return cached entry if already decoded.
-        if (embIdx >= 0 && embIdx < static_cast<int>(embTexToDataIdx.size()) &&
-            embTexToDataIdx[static_cast<size_t>(embIdx)] >= 0)
-        {
-            return embTexToDataIdx[static_cast<size_t>(embIdx)];
-        }
-
-        // Decode and store.
-        const int dataIdx = static_cast<int>(textures.size());
-        if (decodeEmbeddedTexture(embTex, textures)) {
-            if (embIdx >= 0) {
-                if (static_cast<size_t>(embIdx) >= embTexToDataIdx.size())
-                    embTexToDataIdx.resize(static_cast<size_t>(embIdx) + 1, -1);
-                embTexToDataIdx[static_cast<size_t>(embIdx)] = dataIdx;
-            }
-            return dataIdx;
-        }
-        break;
+    aiColor4D baseColor;
+    if (mat->Get(AI_MATKEY_BASE_COLOR, baseColor) == AI_SUCCESS) {
+        out.baseColorFactor = glm::vec4(baseColor.r, baseColor.g, baseColor.b, baseColor.a);
+    } else {
+        aiColor4D diffuse;
+        if (mat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS)
+            out.baseColorFactor = glm::vec4(diffuse.r, diffuse.g, diffuse.b, diffuse.a);
     }
 
-    return -1;
+    float metallic = 0.0f;
+    if (mat->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == AI_SUCCESS)
+        out.metallicFactor = metallic;
+
+    float roughness = 0.5f;
+    if (mat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == AI_SUCCESS)
+        out.roughnessFactor = roughness;
+
+    aiColor3D emissive;
+    if (mat->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == AI_SUCCESS)
+        out.emissiveFactor = glm::vec4(emissive.r, emissive.g, emissive.b, 0.0f);
+
+    return out;
 }
 
 } // namespace
@@ -144,24 +180,17 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
 {
     Assimp::Importer importer;
 
-    // aiProcess_Triangulate         — convert n-gons to triangles
-    // aiProcess_GenSmoothNormals     — generate normals only when missing
-    // aiProcess_JoinIdenticalVertices — de-duplicate vertices
-    // NOTE: aiProcess_FlipUVs is intentionally omitted — GLTF 2.0 and Vulkan
-    //       both use top-left (0,0) UV convention, so no flip is needed.
     const aiScene* scene =
         importer.ReadFile(path,
                           static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals |
-                                                    aiProcess_JoinIdenticalVertices));
+                                                    aiProcess_CalcTangentSpace | aiProcess_JoinIdenticalVertices));
 
     if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
         SDL_Log("ModelLoader: failed to load '%s': %s", path.c_str(), importer.GetErrorString());
         return false;
     }
 
-    // Cache: embeddedTextureIndex → TextureData array index (-1 = not loaded yet)
     std::vector<int> embTexToDataIdx(scene->mNumTextures, -1);
-
     outModel.meshes.reserve(scene->mNumMeshes);
 
     for (unsigned int m = 0; m < scene->mNumMeshes; ++m) {
@@ -171,6 +200,8 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
 
         MeshData data;
         data.vertices.reserve(mesh->mNumVertices);
+
+        const bool hasTangents = mesh->HasTangentsAndBitangents();
 
         for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
             ModelVertex vert{};
@@ -182,6 +213,17 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
             if (mesh->mTextureCoords[0] != nullptr)
                 vert.texCoord = {mesh->mTextureCoords[0][v].x, mesh->mTextureCoords[0][v].y};
 
+            if (hasTangents) {
+                glm::vec3 T = {mesh->mTangents[v].x, mesh->mTangents[v].y, mesh->mTangents[v].z};
+                glm::vec3 B = {mesh->mBitangents[v].x, mesh->mBitangents[v].y, mesh->mBitangents[v].z};
+                glm::vec3 N = vert.normal;
+                // Compute handedness: sign of dot(cross(N, T), B).
+                float w = (glm::dot(glm::cross(N, T), B) < 0.0f) ? -1.0f : 1.0f;
+                vert.tangent = glm::vec4(T, w);
+            } else {
+                vert.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f); // default tangent along +X
+            }
+
             data.vertices.push_back(vert);
         }
 
@@ -192,10 +234,31 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
                 data.indices.push_back(face.mIndices[i]);
         }
 
-        // Resolve base-colour texture for this mesh's material.
+        // Resolve textures and material for this mesh.
         if (mesh->mMaterialIndex < scene->mNumMaterials) {
-            data.diffuseTexIndex =
-                resolveDiffuseTex(scene->mMaterials[mesh->mMaterialIndex], scene, outModel.textures, embTexToDataIdx);
+            const aiMaterial* mat = scene->mMaterials[mesh->mMaterialIndex];
+
+            data.diffuseTexIndex = resolveDiffuseTex(mat, scene, outModel.textures, embTexToDataIdx);
+
+            data.normalTexIndex = resolveTexture(mat, aiTextureType_NORMALS, scene, outModel.textures, embTexToDataIdx);
+
+            // glTF metallic-roughness is often stored under aiTextureType_UNKNOWN index 0.
+            data.metallicRoughnessTexIndex =
+                resolveTexture(mat, aiTextureType_UNKNOWN, scene, outModel.textures, embTexToDataIdx);
+            if (data.metallicRoughnessTexIndex < 0)
+                data.metallicRoughnessTexIndex =
+                    resolveTexture(mat, aiTextureType_METALNESS, scene, outModel.textures, embTexToDataIdx);
+
+            data.aoTexIndex =
+                resolveTexture(mat, aiTextureType_AMBIENT_OCCLUSION, scene, outModel.textures, embTexToDataIdx);
+            if (data.aoTexIndex < 0)
+                data.aoTexIndex =
+                    resolveTexture(mat, aiTextureType_LIGHTMAP, scene, outModel.textures, embTexToDataIdx);
+
+            data.emissiveTexIndex =
+                resolveTexture(mat, aiTextureType_EMISSIVE, scene, outModel.textures, embTexToDataIdx);
+
+            data.material = extractMaterial(mat);
         }
 
         outModel.meshes.push_back(std::move(data));

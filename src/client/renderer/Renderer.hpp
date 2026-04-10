@@ -9,107 +9,113 @@
 #include <string>
 #include <vector>
 
-/// @brief SDL3 GPU pipeline (Vulkan · Metal · DX12).
+/// @brief SDL3 GPU renderer — forward PBR pipeline with HDR + tone mapping.
 ///
-/// Renders two layers of geometry each frame:
-///   1. Scene geometry — hard-coded cube + floor via `projective.vert` / `normal.frag`.
-///   2. Loaded model   — Assimp-imported GLB with per-mesh base-colour textures,
-///                       rendered via `model.vert` / `model.frag`.
+/// Render-pass architecture:
+///   Pass 0 — Shadow map (depth-only from directional light, cascaded)
+///   Pass 1 — Main colour pass (forward PBR into HDR render target)
+///             ├ Skybox (procedural gradient / cubemap)
+///             ├ Scene geometry (hard-coded cube + floor)
+///             └ Loaded model (Assimp GLB meshes)
+///   Pass 2 — Tone mapping (HDR → LDR swapchain) + ImGui overlay
 ///
 /// Also owns the `imgui_impl_sdlgpu3` render backend.  The ImGui context and
-/// SDL3 input backend are owned by DebugUI — initialise DebugUI first, shut it down last.
+/// SDL3 input backend are owned by DebugUI — initialise DebugUI first.
 class Renderer
 {
 public:
-    /// @brief Initialise the GPU device, both pipelines, upload model + textures, init ImGui GPU.
-    /// @param window  The SDL window to render into.
-    /// @return False on any fatal GPU error.
-    /// @pre An ImGui context must already exist (created by DebugUI::init).
     bool init(SDL_Window* window);
-
-    /// @brief Request a PNG screenshot of the next rendered frame.
-    /// The screenshot is saved synchronously at the end of that drawFrame() call,
-    /// so it reflects exactly the pixels that appear on screen.
-    /// @param path  Absolute path for the output PNG (parent directory must exist).
-    void requestScreenshot(const std::string& path);
-
-    /// @brief Submit the scene geometry, loaded model, and ImGui draw data for one frame.
-    /// @param eye    World-space camera eye position (interpolated, in Quake units).
-    /// @param yaw    Horizontal look angle in radians (matches InputSnapshot::yaw).
-    /// @param pitch  Vertical look angle in radians (positive = looking down).
     void drawFrame(glm::vec3 eye, float yaw, float pitch);
-
-    /// @brief Switch VSync on or off by changing the swapchain present mode.
-    /// When disabled, prefers mailbox (no tearing) and falls back to immediate.
-    /// @return False if the requested mode is unsupported on this device/platform.
+    void requestScreenshot(const std::string& path);
     bool setVSync(bool enabled);
-
-    /// @brief Release all GPU resources.  Waits for GPU idle before freeing.
-    /// @pre Call before the SDL window is destroyed.
     void quit();
 
 private:
-    SDL_Window* window = nullptr;                ///< The SDL window being rendered into.
-    SDL_GPUDevice* device = nullptr;             ///< The SDL GPU device.
-    SDL_GPUGraphicsPipeline* pipeline = nullptr; ///< Scene pipeline (hard-coded geometry).
+    // ── Core GPU state ──────────────────────────────────────────────────────
+    SDL_Window* window = nullptr;
+    SDL_GPUDevice* device = nullptr;
+    SDL_GPUTextureFormat swapchainFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+    SDL_GPUShaderFormat shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
 
     float fovyDegrees = 60.0f;
-    float nearPlane = 5.0f;                 ///< Near clip (Quake units); 5 ≈ half a foot.
-    float farPlane = 15000.0f;              ///< Far clip; covers the 4 000-unit play area with margin.
+    float nearPlane = 5.0f;
+    float farPlane = 15000.0f;
+    Camera camera;
 
-    Camera camera;                          ///< First-person camera driven by player position + yaw/pitch each frame.
+    // ── Pipelines ───────────────────────────────────────────────────────────
+    SDL_GPUGraphicsPipeline* scenePipeline = nullptr;   ///< Hard-coded cube + floor (PBR lit).
+    SDL_GPUGraphicsPipeline* pbrPipeline = nullptr;     ///< Assimp model (PBR + textures).
+    SDL_GPUGraphicsPipeline* skyboxPipeline = nullptr;  ///< Procedural/cubemap skybox.
+    SDL_GPUGraphicsPipeline* tonemapPipeline = nullptr; ///< Fullscreen HDR → LDR.
+    SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;  ///< Depth-only shadow map.
 
-    SDL_GPUTexture* depthTexture = nullptr; ///< Depth buffer, recreated on resize.
+    // ── Render targets ──────────────────────────────────────────────────────
+    SDL_GPUTexture* depthTexture = nullptr; ///< Scene depth, D32_FLOAT.
     Uint32 depthWidth = 0;
     Uint32 depthHeight = 0;
 
-    // ---- Assimp model rendering ----------------------------------------
+    SDL_GPUTexture* hdrTarget = nullptr; ///< Main colour target, RGBA16F.
+    Uint32 hdrWidth = 0;
+    Uint32 hdrHeight = 0;
 
-    /// @brief Per-mesh GPU resources for the loaded model.
+    static constexpr int k_shadowCascades = 4;
+    static constexpr int k_shadowMapSize = 2048;
+    SDL_GPUTexture* shadowMap = nullptr; ///< D32_FLOAT, 2D_ARRAY, 4 cascades.
+
+    // ── Samplers ────────────────────────────────────────────────────────────
+    SDL_GPUSampler* pbrSampler = nullptr;     ///< Linear, repeat, aniso 8×, mipmapped.
+    SDL_GPUSampler* shadowSampler = nullptr;  ///< Comparison, border.
+    SDL_GPUSampler* tonemapSampler = nullptr; ///< Linear, clamp-to-edge (for fullscreen pass).
+
+    // ── Model rendering ─────────────────────────────────────────────────────
     struct GpuMesh
     {
         SDL_GPUBuffer* vertexBuffer = nullptr;
         SDL_GPUBuffer* indexBuffer = nullptr;
         Uint32 indexCount = 0;
-        int textureIndex = -1; ///< Index into modelTextures, or -1 → defaultTexture.
+        int albedoTexIndex = -1;
+        int normalTexIndex = -1;
+        int metallicRoughnessTexIndex = -1;
+        MaterialData material;
     };
 
-    SDL_GPUGraphicsPipeline* modelPipeline = nullptr; ///< Pipeline with vertex-input layout + sampler.
-    std::vector<GpuMesh> modelMeshes;                 ///< One entry per mesh in the loaded file.
-    std::vector<SDL_GPUTexture*> modelTextures;       ///< Decoded textures uploaded to GPU.
-    SDL_GPUTexture* defaultTexture = nullptr;         ///< 1×1 opaque-white fallback texture.
-    SDL_GPUSampler* modelSampler = nullptr;           ///< Shared linear sampler for all model textures.
-    glm::mat4 modelTransform{1.0f};                   ///< World transform applied to the model.
+    std::vector<GpuMesh> modelMeshes;
+    std::vector<SDL_GPUTexture*> modelTextures;
+    glm::mat4 modelTransform{1.0f};
 
-    // ---- Screen capture (recording) ------------------------------------
+    // Fallback 1×1 textures for missing PBR maps.
+    SDL_GPUTexture* fallbackWhite = nullptr;      ///< Albedo / AO default.
+    SDL_GPUTexture* fallbackFlatNormal = nullptr; ///< (0.5, 0.5, 1.0, 1.0).
+    SDL_GPUTexture* fallbackMR = nullptr;         ///< (1.0, 0.5, 0, 0) = metallic=1, roughness=0.5.
+    SDL_GPUTexture* fallbackBlack = nullptr;      ///< Emissive default.
 
-    SDL_GPUTexture* captureRT = nullptr; ///< Intermediate render target for screenshots.
-    Uint32 captureRTW = 0;
-    Uint32 captureRTH = 0;
-    SDL_GPUTextureFormat captureRTFmt = SDL_GPU_TEXTUREFORMAT_INVALID; ///< Format mirrors swapchain.
-    std::string pendingCapPath;                                        ///< Non-empty = save next frame here.
+    // ── Screen capture ──────────────────────────────────────────────────────
+    SDL_GPUTexture* captureRT = nullptr;
+    Uint32 captureRTW = 0, captureRTH = 0;
+    SDL_GPUTextureFormat captureRTFmt = SDL_GPU_TEXTUREFORMAT_INVALID;
+    std::string pendingCapPath;
 
-    // ---- Private helpers -----------------------------------------------
+    // ── Private helpers ─────────────────────────────────────────────────────
+    bool initScenePipeline();
+    bool initPBRPipeline();
+    bool initSkyboxPipeline();
+    bool initTonemapPipeline();
+    bool initShadowPipeline();
 
-    /// @brief (Re-)create the depth texture when the swapchain size changes.
     bool ensureDepthTexture(Uint32 w, Uint32 h);
-
-    /// @brief (Re-)create the intermediate capture render-target if size/format changed.
+    bool ensureHDRTarget(Uint32 w, Uint32 h);
     bool ensureCaptureRT(Uint32 w, Uint32 h, SDL_GPUTextureFormat fmt);
 
-    /// @brief Download captureRT to CPU and write a PNG to pendingCapPath, then clear it.
+    bool uploadModel(const LoadedModel& model);
+    SDL_GPUTexture* uploadTexture(const uint8_t* pixels, int width, int height, bool sRGB = true);
+
     void downloadAndSaveCapture(Uint32 w, Uint32 h);
 
-    /// @brief Create the model graphics pipeline (vertex inputs + fragment sampler + depth test).
-    /// @param fmt       Active shader format (SPIR-V or MSL).
-    /// @param colorFmt  Swapchain colour target format.
-    bool initModelPipeline(SDL_GPUShaderFormat fmt, SDL_GPUTextureFormat colorFmt);
-
-    /// @brief Upload all mesh vertex/index data and textures to the GPU.
-    /// Populates @c modelMeshes, @c modelTextures, @c defaultTexture, and @c modelSampler.
-    bool uploadModel(const LoadedModel& model);
-
-    /// @brief Upload one RGBA texture to a new GPU texture object.
-    /// @return The created GPU texture, or nullptr on failure.
-    SDL_GPUTexture* uploadTexture(const uint8_t* pixels, int width, int height);
+    /// @brief Helper: load a compiled shader from the shaders/ directory.
+    SDL_GPUShader* loadShaderFromFile(const char* name,
+                                      SDL_GPUShaderStage stage,
+                                      Uint32 samplerCount,
+                                      Uint32 uniformBufferCount,
+                                      Uint32 storageBufferCount = 0,
+                                      Uint32 storageTextureCount = 0);
 };
