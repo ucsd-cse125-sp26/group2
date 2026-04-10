@@ -72,7 +72,8 @@ bool Game::init()
     mouseCaptured = true;
 
     // Spawn the local player entity with all physics and input components.
-    const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
+    // Start close to the models for testing. Wraith at (200,0,400), Porsche at (-200,0,400).
+    const glm::vec3 k_startPos{0.0f, 50.0f, 200.0f};
     const entt::entity k_player = registry.create();
     registry.emplace<Position>(k_player, k_startPos);
     registry.emplace<PreviousPosition>(k_player, k_startPos);
@@ -197,6 +198,14 @@ SDL_AppResult Game::iterate()
     frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
     prevTime = k_now;
     accumulator += frameTime;
+
+    static int iterCount = 0;
+    if (++iterCount <= 3)
+        SDL_Log("[ITERATE] call=%d frameTime=%.4f acc=%.4f renderSep=%d",
+                iterCount,
+                static_cast<double>(frameTime),
+                static_cast<double>(accumulator),
+                renderSeparateFromPhysics);
 
     // ── 2. Refresh performance stats every 0.5 s ─────────────────────────
     static constexpr float k_statsPeriod = 0.5f;
@@ -385,6 +394,12 @@ SDL_AppResult Game::iterate()
     prevRenderTime = k_now;
 
     ++frameCount;
+
+    // Auto-screenshot for debugging.
+    if (frameCount == 10) {
+        SDL_Log("[DEBUG] Requesting auto-screenshot at frame %llu", static_cast<unsigned long long>(frameCount));
+        renderer.requestScreenshot("/tmp/debug_screenshot.png");
+    }
 
     // ── 9. VSync toggle — apply when limitFPSToMonitor changes ───────────
     // buildUI may modify limitFPSToMonitor, so we snapshot it before and

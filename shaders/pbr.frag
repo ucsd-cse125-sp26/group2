@@ -145,7 +145,12 @@ void main()
     vec3 ambient = lighting.ambientColor.rgb * albedo;
 
     // ── Emissive ────────────────────────────────────────────────────────────
-    vec3 emissive = texture(texEmissive, fragTexCoord).rgb + mat.emissiveFactor.rgb;
+    // Only use emissive when the material's emissiveFactor is non-zero.
+    // Some game-ripped models store full color detail in "emissive" textures
+    // that aren't actually meant to glow — using them blindly washes out the image.
+    vec3 emissive = mat.emissiveFactor.rgb;
+    if (emissive.r + emissive.g + emissive.b > 0.01)
+        emissive *= texture(texEmissive, fragTexCoord).rgb;
 
     // ── Final colour (linear HDR — no clamp) ────────────────────────────────
     vec3 color = ambient + Lo + emissive;
