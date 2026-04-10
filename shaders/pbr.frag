@@ -13,6 +13,7 @@ layout(location = 0) out vec4 outColor;
 // ── Texture samplers ────────────────────────────────────────────────────────
 layout(set = 2, binding = 0) uniform sampler2D texAlbedo;
 layout(set = 2, binding = 1) uniform sampler2D texMetallicRoughness;
+layout(set = 2, binding = 2) uniform sampler2D texEmissive;
 
 // ── Material parameters (pushed per-mesh) ───────────────────────────────────
 layout(set = 3, binding = 0) uniform Material
@@ -144,7 +145,7 @@ void main()
     vec3 ambient = lighting.ambientColor.rgb * albedo;
 
     // ── Emissive ────────────────────────────────────────────────────────────
-    vec3 emissive = mat.emissiveFactor.rgb;
+    vec3 emissive = texture(texEmissive, fragTexCoord).rgb + mat.emissiveFactor.rgb;
 
     // ── Final colour (linear HDR — no clamp) ────────────────────────────────
     vec3 color = ambient + Lo + emissive;

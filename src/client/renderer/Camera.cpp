@@ -93,4 +93,7 @@ void Camera::computeMatrices()
 {
     view = glm::lookAt(eye, target, up);
     proj = glm::perspective(glm::radians(fovy), aspect, nearPlane, farPlane);
+    // Vulkan NDC has Y pointing downward (opposite of OpenGL).  GLM generates
+    // OpenGL-style projection, so flip Y to avoid rendering upside-down.
+    proj[1][1] *= -1.0f;
 }
