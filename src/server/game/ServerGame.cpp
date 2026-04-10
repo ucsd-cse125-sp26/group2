@@ -1,12 +1,12 @@
 #include "ServerGame.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
-#include "ecs/components/InputSnapshot.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -23,7 +23,6 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
 
     if (!server.init(addr, port))
         return false;
-
 
     // // Spawn a test entity: starts at y=200, not grounded — will fall and land.
     // const int k_testClientId = 0;
@@ -54,7 +53,6 @@ void ServerGame::run()
         // Server needs to map connection to clientId and return that to the game
         // Game can then init entity and map to clientId in private map
 
-
         nextTick += k_tickDuration;
         tick(k_dt, nextTick);
 
@@ -79,7 +77,7 @@ void ServerGame::shutdown()
 
 void ServerGame::eventHandler(Event event)
 {
-    //Handle input snapshot
+    // Handle input snapshot
     const auto entityIt = clientEntities.find(event.clientId);
     if (entityIt == clientEntities.end())
         return;
@@ -101,7 +99,6 @@ void ServerGame::eventHandler(Event event)
     input.pitch = movement.pitch;
     input.roll = movement.roll;
     input.shooting = event.shootIntent;
-
 }
 
 void ServerGame::tick(float dt, Uint64 nextTick)
@@ -146,5 +143,4 @@ void ServerGame::initNewPlayer(int clientId)
     registry.emplace<CollisionShape>(player);
     registry.emplace<PlayerState>(player);
     SDL_Log("[server] spawned player entity for client %d", clientId);
-
 }
