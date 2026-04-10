@@ -699,19 +699,57 @@ bool Renderer::initIBL()
     // which is the correct limit for a rough surface.  This is a crude
     // approximation but better than zero.
     {
+        // Hammersley low-discrepancy sequence for Monte Carlo integration.
+        auto radicalInverseVdC = [](uint32_t bits) -> float {
+            bits = (bits << 16u) | (bits >> 16u);
+            bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+            bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+            bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+            bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+            return static_cast<float>(bits) * 2.3283064365386963e-10f;
+        };
+
         const int sz = 512;
         std::vector<uint16_t> lutData(static_cast<size_t>(sz * sz * 2));
         for (int y = 0; y < sz; ++y) {
             for (int x = 0; x < sz; ++x) {
-                float NdotV = (static_cast<float>(x) + 0.5f) / static_cast<float>(sz);
-                float rough = (static_cast<float>(y) + 0.5f) / static_cast<float>(sz);
+                float NdotV = std::max((static_cast<float>(x) + 0.5f) / static_cast<float>(sz), 0.001f);
+                float rough = std::max((static_cast<float>(y) + 0.5f) / static_cast<float>(sz), 0.001f);
 
-                // Analytical approximation (Karis 2014).
-                float a = rough;
-                float k = (a * a) / 2.0f;
-                float vis = NdotV / (NdotV * (1.0f - k) + k);
-                float scale = vis;
-                float bias = (1.0f - vis) * std::pow(1.0f - NdotV, 5.0f);
+                // Proper Monte Carlo integration of the split-sum BRDF.
+                glm::vec3 V(std::sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV);
+                float A = 0.0f, B = 0.0f;
+                constexpr int NUM_SAMPLES = 256;
+                for (int i = 0; i < NUM_SAMPLES; ++i) {
+                    float xi1 = static_cast<float>(i) / static_cast<float>(NUM_SAMPLES);
+                    float xi2 = radicalInverseVdC(static_cast<uint32_t>(i));
+
+                    // Importance-sample GGX.
+                    float a2 = rough * rough * rough * rough; // a = rough², a² = rough⁴
+                    float phi = 6.28318f * xi1;
+                    float cosTheta = std::sqrt((1.0f - xi2) / (1.0f + (a2 - 1.0f) * xi2));
+                    float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
+                    glm::vec3 H(std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta);
+                    glm::vec3 L = 2.0f * glm::dot(V, H) * H - V;
+
+                    float NdotL = std::max(L.z, 0.0f);
+                    float NdotH = std::max(H.z, 0.0f);
+                    float VdotH = std::max(glm::dot(V, H), 0.0f);
+
+                    if (NdotL > 0.0f) {
+                        // Smith-GGX geometry with IBL remapping: k = rough²/2.
+                        float k = (rough * rough) / 2.0f;
+                        float G1V = NdotV / (NdotV * (1.0f - k) + k);
+                        float G1L = NdotL / (NdotL * (1.0f - k) + k);
+                        float G = G1V * G1L;
+                        float GVis = (G * VdotH) / (NdotH * NdotV + 0.0001f);
+                        float Fc = std::pow(1.0f - VdotH, 5.0f);
+                        A += (1.0f - Fc) * GVis;
+                        B += Fc * GVis;
+                    }
+                }
+                float scale = A / static_cast<float>(NUM_SAMPLES);
+                float bias = B / static_cast<float>(NUM_SAMPLES);
 
                 size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(sz) + static_cast<size_t>(x)) * 2;
                 // Convert float to float16 (half). Use a simple truncation.
@@ -783,9 +821,11 @@ bool Renderer::initIBL()
         // Procedural sky evaluation (matches skybox.frag).
         auto sky = [](glm::vec3 dir) -> glm::vec3 {
             float y = dir.y;
-            glm::vec3 zenith(0.08f, 0.16f, 0.45f);
-            glm::vec3 horizon(0.6f, 0.45f, 0.35f);
-            glm::vec3 nadir(0.03f, 0.03f, 0.05f);
+            // Sky values are multiplied 4× vs the skybox shader to approximate
+            // the brightness of a real outdoor environment for IBL.
+            glm::vec3 zenith(0.32f, 0.64f, 1.8f);
+            glm::vec3 horizon(2.4f, 1.8f, 1.4f);
+            glm::vec3 nadir(0.12f, 0.12f, 0.2f);
             glm::vec3 c;
             if (y > 0.0f) {
                 float t = std::pow(y, 0.4f);
@@ -897,9 +937,11 @@ bool Renderer::initIBL()
 
         auto sky = [](glm::vec3 dir) -> glm::vec3 {
             float y = dir.y;
-            glm::vec3 zenith(0.08f, 0.16f, 0.45f);
-            glm::vec3 horizon(0.6f, 0.45f, 0.35f);
-            glm::vec3 nadir(0.03f, 0.03f, 0.05f);
+            // Sky values are multiplied 4× vs the skybox shader to approximate
+            // the brightness of a real outdoor environment for IBL.
+            glm::vec3 zenith(0.32f, 0.64f, 1.8f);
+            glm::vec3 horizon(2.4f, 1.8f, 1.4f);
+            glm::vec3 nadir(0.12f, 0.12f, 0.2f);
             glm::vec3 c;
             if (y > 0.0f)
                 c = glm::mix(horizon, zenith, std::pow(y, 0.4f));
