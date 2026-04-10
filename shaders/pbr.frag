@@ -146,7 +146,11 @@ void main()
         }
     }
 
-    // ── Ambient (will be replaced by IBL in Phase 6) ────────────────────────
+    // ── Ambient (placeholder — real IBL in Phase 6) ────────────────────────
+    // Simple ambient tinted by albedo.  Metallic surfaces with high roughness
+    // will appear dark without IBL — this is physically correct (nothing to
+    // reflect).  Phase 6 adds environment cubemap reflections that give
+    // metallic surfaces their characteristic silver/gold appearance.
     vec3 ambient = lighting.ambientColor.rgb * albedo;
 
     // ── Emissive ────────────────────────────────────────────────────────────
@@ -157,7 +161,7 @@ void main()
     if (emissive.r + emissive.g + emissive.b > 0.01)
         emissive *= texture(texEmissive, fragTexCoord).rgb;
 
-    // ── Final colour (linear HDR — no clamp) ────────────────────────────────
+    // ── Final colour (linear HDR — no clamp, always opaque) ────────────────
     vec3 color = ambient + Lo + emissive;
-    outColor = vec4(color, albedoSample.a * mat.baseColorFactor.a);
+    outColor = vec4(color, 1.0);
 }

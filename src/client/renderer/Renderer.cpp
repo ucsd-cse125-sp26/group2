@@ -213,8 +213,13 @@ bool Renderer::initPBRPipeline()
     vertexInput.vertex_attributes = attrs;
     vertexInput.num_vertex_attributes = 4;
 
+    // NOTE: Alpha blending is deliberately OFF.  Many car/model textures
+    // use the albedo alpha channel for non-transparency data (clearcoat masks,
+    // specular weight, etc.).  Enabling blend makes entire bodies transparent.
+    // Proper transparency requires reading the glTF material alphaMode and
+    // rendering transparent meshes in a separate pass — a future improvement.
     SDL_GPUColorTargetDescription ct{};
-    ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT; // render to HDR
+    ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 
     SDL_GPUGraphicsPipelineCreateInfo pci{};
     pci.vertex_shader = vert;
@@ -686,7 +691,7 @@ bool Renderer::init(SDL_Window* win)
     loadAndPlace("Apex_Legend_Wraith.glb", glm::vec3(200.0f, 0.0f, 400.0f), 8.0f);
     // flipUVs=true: Porsche GLB uses V=0 at bottom (Sketchfab/Blender export).
     loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 0.0f, 400.0f), 40.0f, true);
-    loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 5.0f);
+    loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
 
     // Camera — overridden every frame by drawFrame().
     camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},

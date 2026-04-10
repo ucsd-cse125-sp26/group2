@@ -327,9 +327,17 @@ bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs)
     unsigned int flags = static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals |
                                                    aiProcess_CalcTangentSpace | aiProcess_JoinIdenticalVertices);
 
-    // FlipUVs: V = 1 − V.  Required for models from tools that use V=0 at
-    // the bottom (Blender, OBJ, many Sketchfab exports) when rendering in
-    // Vulkan which expects V=0 at the top.
+    // ── UV coordinate convention ────────────────────────────────────────────
+    // Vulkan (and DirectX) expect V=0 at the TOP of the image.
+    // OpenGL, Blender, and many Sketchfab exports use V=0 at the BOTTOM.
+    //
+    // If a model's textures appear vertically flipped (upside-down text on
+    // license plates, inverted logos, seeing the "inside" of textured parts),
+    // set flipUVs=true when loading that model.  This applies Assimp's
+    // aiProcess_FlipUVs which transforms V → (1 − V) at import time.
+    //
+    // Models authored for glTF (which specifies V=0 at top) should NOT need
+    // this flag.  Models converted from OBJ/FBX/Blender formats often DO.
     if (flipUVs)
         flags |= aiProcess_FlipUVs;
 
@@ -344,8 +352,8 @@ bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs)
 
     processNode(scene->mRootNode, scene, glm::mat4(1.0f), outModel, embTexToDataIdx);
 
-    // Log material summary for the first few meshes (debugging aid).
-    for (size_t m = 0; m < outModel.meshes.size() && m < 5; ++m) {
+    // Log material summary for all meshes (debugging aid).
+    for (size_t m = 0; m < outModel.meshes.size(); ++m) {
         const auto& md = outModel.meshes[m];
         SDL_Log("  mesh[%zu] albedo=%d mr=%d metallic=%.2f roughness=%.2f",
                 m,
