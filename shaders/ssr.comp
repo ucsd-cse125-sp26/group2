@@ -1,18 +1,12 @@
 // ssr.comp — Screen-space reflections.
 //
-// Design:
-//   - Only processes pixels whose surface normal has a significant upward
-//     component (dot(N, up) > threshold), restricting SSR to mostly-horizontal
-//     surfaces like floors.  Vertical walls and arbitrary geometry are left
-//     to IBL/cubemap reflections, which are far more reliable than SSR for
-//     those cases.
-//   - Normals reconstructed from depth derivatives with central differences
-//     (more stable than forward differences at edges).
-//   - Marches in clip-space UV+Z with an adaptive step count based on the
-//     projected ray length.
-//   - Binary refinement (5 iterations) for sub-pixel hit accuracy.
-//   - Reversed depth comparison direction for Vulkan's [0,1] depth range
-//     where 0=near, 1=far.
+// Marches in screen UV + clip-space Z.  Key artifact prevention:
+//   1. Central-difference normals with min-depth-delta selection.
+//   2. Only processes mostly-horizontal surfaces (floors/tables).
+//   3. Minimum ray travel distance prevents self/adjacent-geometry hits.
+//   4. Does NOT early-exit on "passed through" geometry — continues
+//      marching past objects to find reflections behind them.
+//   5. Binary refinement for sub-pixel hit accuracy.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
@@ -31,7 +25,7 @@ layout(set = 2, binding = 0) uniform SSRParams {
     float thickness;
 };
 
-vec3 viewPosFromUVDepth(vec2 uv, float depth)
+vec3 viewPosFromDepth(vec2 uv, float depth)
 {
     vec4 clip = vec4(uv * 2.0 - 1.0, depth, 1.0);
     vec4 vp = invProjection * clip;
@@ -54,78 +48,74 @@ void main()
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);
     float rawDepth = texture(depthBuffer, uv).r;
 
+    // Sky — no reflection.
     if (rawDepth >= 0.9999) {
         imageStore(ssrImage, coord, vec4(0.0));
         return;
     }
 
-    vec3 viewPos = viewPosFromUVDepth(uv, rawDepth);
+    vec3 viewPos = viewPosFromDepth(uv, rawDepth);
 
-    // ── Reconstruct normal using central differences ────────────────────────
-    // Central differences are more stable than forward differences at edges.
+    // ── Central-difference normal reconstruction ────────────────────────────
     vec2 ts = 1.0 / screenSize;
+
     float dL = texture(depthBuffer, uv - vec2(ts.x, 0)).r;
     float dR = texture(depthBuffer, uv + vec2(ts.x, 0)).r;
     float dU = texture(depthBuffer, uv - vec2(0, ts.y)).r;
     float dD = texture(depthBuffer, uv + vec2(0, ts.y)).r;
 
-    vec3 pL = viewPosFromUVDepth(uv - vec2(ts.x, 0), dL);
-    vec3 pR = viewPosFromUVDepth(uv + vec2(ts.x, 0), dR);
-    vec3 pU = viewPosFromUVDepth(uv - vec2(0, ts.y), dU);
-    vec3 pD = viewPosFromUVDepth(uv + vec2(0, ts.y), dD);
+    vec3 pL = viewPosFromDepth(uv - vec2(ts.x, 0), dL);
+    vec3 pR = viewPosFromDepth(uv + vec2(ts.x, 0), dR);
+    vec3 pU = viewPosFromDepth(uv - vec2(0, ts.y), dU);
+    vec3 pD = viewPosFromDepth(uv + vec2(0, ts.y), dD);
 
-    // Use the smaller of left/right and up/down to avoid spanning depth edges.
-    vec3 dxA = pR - viewPos;
-    vec3 dxB = viewPos - pL;
-    vec3 ddx = (abs(dxA.z) < abs(dxB.z)) ? dxA : dxB;
-
-    vec3 dyA = pD - viewPos;
-    vec3 dyB = viewPos - pU;
-    vec3 ddy = (abs(dyA.z) < abs(dyB.z)) ? dyA : dyB;
+    vec3 ddx = (abs(dR - rawDepth) < abs(rawDepth - dL)) ? (pR - viewPos) : (viewPos - pL);
+    vec3 ddy = (abs(dD - rawDepth) < abs(rawDepth - dU)) ? (pD - viewPos) : (viewPos - pU);
 
     vec3 viewNormal = normalize(cross(ddx, ddy));
 
-    // ── Only apply SSR to mostly-horizontal surfaces ────────────────────────
-    // Vertical faces get unreliable normals from depth reconstruction and
-    // produce artifacts (floor reflection on cube faces, etc.).
-    // The view-space "up" direction is (0, -1, 0) in our Y-flipped Vulkan
-    // coordinate system.  Dot with the normal to check how horizontal it is.
-    // A floor normal in view space points roughly toward (0, -1, 0) when
-    // the camera looks forward.  We accept surfaces where the normal has
-    // a significant component along the view Y axis (roughly horizontal).
+    // ── Only mostly-horizontal surfaces ─────────────────────────────────────
     float horizontalness = abs(viewNormal.y);
     if (horizontalness < 0.5) {
         imageStore(ssrImage, coord, vec4(0.0));
         return;
     }
 
-    // Reflection direction.
+    // ── Reflection ray ──────────────────────────────────────────────────────
     vec3 viewDir = normalize(viewPos);
     vec3 reflDir = reflect(viewDir, viewNormal);
 
-    // ── Bias ray origin ─────────────────────────────────────────────────────
-    // Push start point away from surface to prevent self-intersection.
+    // Bias: push start along reflection direction (NOT along normal).
+    // Normal-direction bias causes the ray to start inside adjacent objects
+    // sitting on the floor.  Reflection-direction bias moves the ray along
+    // its travel path, which is away from the floor surface.
     float viewDist = abs(viewPos.z);
-    float bias = viewDist * 0.02;
-    vec3 biasedStart = viewPos + viewNormal * bias;
+    vec3 biasedStart = viewPos + reflDir * (viewDist * 0.03);
 
-    // ── Project to screen space and march ───────────────────────────────────
-    vec3 rayEnd = biasedStart + reflDir * maxDistance;
-
+    // ── Screen-space march ──────────────────────────────────────────────────
     vec3 startScreen = projectToScreen(biasedStart);
-    vec3 endScreen = projectToScreen(rayEnd);
+    vec3 endScreen = projectToScreen(biasedStart + reflDir * maxDistance);
     vec3 deltaScreen = endScreen - startScreen;
 
-    // Adaptive step count: ~0.5 pixels per step, capped.
     float screenPixelDist = max(abs(deltaScreen.x) * screenSize.x,
                                 abs(deltaScreen.y) * screenSize.y);
-    int numSteps = clamp(int(screenPixelDist * 0.5), 8, 256);
+    int numSteps = clamp(int(screenPixelDist * 0.5), 8, 300);
     vec3 stepScreen = deltaScreen / float(numSteps);
+
+    // Minimum number of steps before accepting a hit.
+    // This prevents the ray from immediately hitting objects sitting ON the
+    // reflective surface (e.g., a car on the floor).  The ray must travel
+    // at least this many steps away from the origin.
+    int minSteps = max(numSteps / 10, 3);
 
     vec3 rayScreen = startScreen;
     int hitStep = -1;
     vec3 hitPos = vec3(0.0);
     vec3 prevPos = startScreen;
+
+    // Track whether we're currently "inside" geometry (ray behind scene depth).
+    // Used to skip through objects and find reflections beyond them.
+    bool wasInside = false;
 
     for (int i = 1; i <= numSteps; ++i) {
         prevPos = rayScreen;
@@ -136,23 +126,36 @@ void main()
             break;
 
         float sceneDepth = texture(depthBuffer, rayUV).r;
-        float diff = rayScreen.z - sceneDepth;
 
-        // Depth-proportional thickness (tighter for near, looser for far).
-        float thk = thickness * 0.003 * max(sceneDepth, 0.1);
-
-        if (diff > 0.0 && diff < thk) {
-            hitStep = i;
-            hitPos = rayScreen;
-            break;
+        // Skip sky pixels in the depth buffer.
+        if (sceneDepth >= 0.9999) {
+            wasInside = false;
+            continue;
         }
-        if (diff >= thk)
-            break; // passed through
+
+        float diff = rayScreen.z - sceneDepth;
+        float thk = thickness * 0.005 * max(sceneDepth, 0.05);
+
+        if (diff > 0.0) {
+            if (diff < thk && i >= minSteps && !wasInside) {
+                // Valid hit: ray just crossed behind the surface,
+                // has traveled far enough, and wasn't already inside geometry.
+                hitStep = i;
+                hitPos = rayScreen;
+                break;
+            }
+            // Mark that we're inside geometry — don't accept the next
+            // surface exit as a hit (it's the back face of the same object).
+            wasInside = true;
+        } else {
+            // Ray is in front of geometry again — we've passed through.
+            wasInside = false;
+        }
     }
 
     vec4 result = vec4(0.0);
 
-    // ── Binary refinement ───────────────────────────────────────────────────
+    // ── Binary refinement (5 iterations) ────────────────────────────────────
     if (hitStep > 0) {
         vec3 lo = prevPos;
         vec3 hi = hitPos;
@@ -167,19 +170,16 @@ void main()
         }
 
         vec2 hitUV = hi.xy;
-        if (hitUV.x >= 0.0 && hitUV.x <= 1.0 && hitUV.y >= 0.0 && hitUV.y <= 1.0) {
-            // Smooth edge fade.
-            float edgeFade = smoothstep(0.0, 0.08, hitUV.x) * smoothstep(0.0, 0.08, 1.0 - hitUV.x)
-                           * smoothstep(0.0, 0.08, hitUV.y) * smoothstep(0.0, 0.08, 1.0 - hitUV.y);
+        if (hitUV.x > 0.01 && hitUV.x < 0.99 && hitUV.y > 0.01 && hitUV.y < 0.99) {
+            float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
+                           * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
 
             float distFade = 1.0 - float(hitStep) / float(numSteps);
-
-            // Reduce contribution for less horizontal surfaces (soft rolloff).
-            float horizFade = smoothstep(0.5, 0.8, horizontalness);
+            float horizFade = smoothstep(0.5, 0.85, horizontalness);
 
             vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
             float confidence = edgeFade * distFade * horizFade;
-            // Store NON-premultiplied: RGB = reflection color, A = blend weight.
+
             result = vec4(hitColor, confidence);
         }
     }
