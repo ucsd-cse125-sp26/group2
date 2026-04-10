@@ -1,6 +1,7 @@
-// ssr.comp — Screen-space reflections via screen-space ray marching.
-// Marches in UV + linear depth space (not view space) to ensure every
-// pixel along the ray is checked, eliminating horizontal stripe artifacts.
+// ssr.comp — Screen-space reflections.
+// Marches in screen UV + hyperbolic depth (raw depth buffer value) to avoid
+// precision mismatches between linear interpolation and the non-linear
+// depth buffer that cause banded/striped artifacts.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
@@ -19,11 +20,19 @@ layout(set = 2, binding = 0) uniform SSRParams {
     float thickness;
 };
 
-vec3 reconstructViewPos(vec2 uv, float depth)
+vec3 viewPosFromUVDepth(vec2 uv, float depth)
 {
     vec4 clip = vec4(uv * 2.0 - 1.0, depth, 1.0);
     vec4 vp = invProjection * clip;
     return vp.xyz / vp.w;
+}
+
+// Project a view-space position to screen UV + raw depth.
+vec3 projectToScreen(vec3 viewPos)
+{
+    vec4 clip = projection * vec4(viewPos, 1.0);
+    clip.xyz /= clip.w;
+    return vec3(clip.xy * 0.5 + 0.5, clip.z);
 }
 
 void main()
@@ -33,72 +42,67 @@ void main()
     if (coord.x >= size.x || coord.y >= size.y) return;
 
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);
-    float depth = texture(depthBuffer, uv).r;
+    float rawDepth = texture(depthBuffer, uv).r;
 
-    // Skip sky.
-    if (depth >= 0.9999) {
+    if (rawDepth >= 0.9999) {
         imageStore(ssrImage, coord, vec4(0.0));
         return;
     }
 
-    vec3 viewPos = reconstructViewPos(uv, depth);
+    vec3 viewPos = viewPosFromUVDepth(uv, rawDepth);
 
-    // Reconstruct view-space normal from depth derivatives.
+    // Reconstruct view-space normal from depth neighbors.
     vec2 ts = 1.0 / screenSize;
-    vec3 dPdx = reconstructViewPos(uv + vec2(ts.x, 0), texture(depthBuffer, uv + vec2(ts.x, 0)).r) - viewPos;
-    vec3 dPdy = reconstructViewPos(uv + vec2(0, ts.y), texture(depthBuffer, uv + vec2(0, ts.y)).r) - viewPos;
+    vec3 dPdx = viewPosFromUVDepth(uv + vec2(ts.x, 0), texture(depthBuffer, uv + vec2(ts.x, 0)).r) - viewPos;
+    vec3 dPdy = viewPosFromUVDepth(uv + vec2(0, ts.y), texture(depthBuffer, uv + vec2(0, ts.y)).r) - viewPos;
     vec3 viewNormal = normalize(cross(dPdx, dPdy));
 
+    // Reflection direction in view space.
     vec3 viewDir = normalize(viewPos);
     vec3 reflDir = reflect(viewDir, viewNormal);
 
-    // ── Screen-space ray march ──────────────────────────────────────────────
-    // Project the reflection start and a point along the reflection ray to
-    // screen space, then march linearly in UV + depth to check every pixel.
+    // Project start and end of the reflection ray to screen space.
+    vec3 startScreen = projectToScreen(viewPos);                    // (uv.x, uv.y, rawDepth)
+    vec3 endScreen = projectToScreen(viewPos + reflDir * maxDistance);
 
-    // Start point (already known).
-    vec2 startUV = uv;
-    float startZ = viewPos.z;
+    vec3 rayScreen = startScreen;
+    vec3 deltaScreen = endScreen - startScreen;
 
-    // End point: advance along the reflection ray in view space.
+    // Scale so we step ~1 pixel in the longest screen dimension.
+    float screenDist = max(abs(deltaScreen.x) * screenSize.x, abs(deltaScreen.y) * screenSize.y);
+    int numSteps = clamp(int(screenDist), 4, 200);
+    vec3 stepScreen = deltaScreen / float(numSteps);
+
+    // Use 1/z interpolation for correct perspective.
+    // This ensures the depth comparison uses the SAME space as the depth buffer
+    // (hyperbolic/clip-space z), eliminating precision mismatch bands.
+    float startInvZ = 1.0 / max(abs(viewPos.z), 0.001);
     vec3 endViewPos = viewPos + reflDir * maxDistance;
-    vec4 endClip = projection * vec4(endViewPos, 1.0);
-    vec2 endUV = endClip.xy / endClip.w * 0.5 + 0.5;
-    float endZ = endViewPos.z;
+    float endInvZ = 1.0 / max(abs(endViewPos.z), 0.001);
+    float stepInvZ = (endInvZ - startInvZ) / float(numSteps);
+    float rayInvZ = startInvZ;
 
-    // Direction in screen space.
-    vec2 deltaUV = endUV - startUV;
-    float deltaZ = endZ - startZ;
-
-    // Scale steps so we march ~1 pixel per step in the longest screen dimension.
-    float maxScreenDist = max(abs(deltaUV.x) * screenSize.x, abs(deltaUV.y) * screenSize.y);
-    int numSteps = clamp(int(maxScreenDist), 1, 128);
-
-    vec2 stepUV = deltaUV / float(numSteps);
-    float stepZ = deltaZ / float(numSteps);
-
-    vec2 rayUV = startUV;
-    float rayZ = startZ;
     vec4 result = vec4(0.0);
 
     for (int i = 1; i <= numSteps; ++i) {
-        rayUV += stepUV;
-        rayZ += stepZ;
+        rayScreen += stepScreen;
+        rayInvZ += stepInvZ;
 
-        // Out of screen bounds.
+        vec2 rayUV = rayScreen.xy;
+
         if (rayUV.x < 0.0 || rayUV.x > 1.0 || rayUV.y < 0.0 || rayUV.y > 1.0)
             break;
 
-        float sampleDepth = texture(depthBuffer, rayUV).r;
-        vec3 sampleViewPos = reconstructViewPos(rayUV, sampleDepth);
+        // Compare in raw depth buffer space (hyperbolic).
+        float sceneDepth = texture(depthBuffer, rayUV).r;
+        float rayDepth = rayScreen.z;
 
-        // Check if the ray is behind the scene geometry at this pixel.
-        float depthDiff = rayZ - sampleViewPos.z;
-        if (depthDiff > 0.0 && depthDiff < thickness) {
-            // Hit! Sample the HDR color at this screen position.
-            // Fade at screen edges and with distance.
+        // The ray is behind the scene surface.
+        float diff = rayDepth - sceneDepth;
+        if (diff > 0.0 && diff < thickness * 0.01) {
+            // Hit — sample color.
             float edgeFade = 1.0 - max(abs(rayUV.x - 0.5), abs(rayUV.y - 0.5)) * 2.0;
-            edgeFade = clamp(edgeFade * 4.0, 0.0, 1.0);  // sharper fade at edges
+            edgeFade = clamp(edgeFade * 3.0, 0.0, 1.0);
             float distFade = 1.0 - float(i) / float(numSteps);
 
             vec3 hitColor = texture(hdrBuffer, rayUV).rgb;
