@@ -1,0 +1,125 @@
+// prefilter.comp — Pre-filter the environment map for specular IBL.
+// Each mip level corresponds to a roughness value (mip 0 = mirror, max mip = rough).
+// Dispatch per mip level: (mipSize/16, mipSize/16, 6).
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba16f) writeonly uniform imageCube outPrefilter;
+
+layout(set = 1, binding = 0) uniform PrefilterParams {
+    float roughness;
+    float _pad1, _pad2, _pad3;
+};
+
+const float PI = 3.14159265359;
+
+// ── Procedural sky (same as skybox.frag / irradiance.comp) ──────────────────
+vec3 proceduralSky(vec3 dir)
+{
+    float y = dir.y;
+    vec3 zenith  = vec3(0.08, 0.16, 0.45);
+    vec3 horizon = vec3(0.6,  0.45, 0.35);
+    vec3 nadir   = vec3(0.03, 0.03, 0.05);
+
+    vec3 sky;
+    if (y > 0.0) {
+        float t = pow(y, 0.4);
+        sky = mix(horizon, zenith, t);
+    } else {
+        float t = pow(-y, 0.6);
+        sky = mix(horizon, nadir, t);
+    }
+
+    vec3 sunDir = normalize(vec3(0.5, 0.3, 0.8));
+    float sunAngle = dot(dir, sunDir);
+    float sunDisc = smoothstep(0.9975, 0.999, sunAngle);
+    float sunGlow = pow(max(sunAngle, 0.0), 256.0);
+    vec3 sunColor = vec3(1.0, 0.95, 0.85) * 8.0;
+    sky += sunColor * sunDisc + vec3(1.0, 0.8, 0.5) * sunGlow * 0.5;
+
+    float horizonGlow = exp(-abs(y) * 4.0);
+    sky += vec3(0.3, 0.2, 0.1) * horizonGlow * 0.3;
+
+    return sky;
+}
+
+// Hammersley sequence.
+float radicalInverse_VdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10;
+}
+
+vec2 hammersley(uint i, uint N)
+{
+    return vec2(float(i) / float(N), radicalInverse_VdC(i));
+}
+
+vec3 importanceSampleGGX(vec2 Xi, vec3 N, float a)
+{
+    float a2 = a * a;
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a2 - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+    vec3 H = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+
+    vec3 up = abs(N.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+    vec3 tangent = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+
+    return normalize(tangent * H.x + bitangent * H.y + N * H.z);
+}
+
+// Cubemap face + UV → direction.
+vec3 cubeDir(int face, vec2 uv)
+{
+    switch (face) {
+        case 0: return normalize(vec3( 1.0, -uv.y, -uv.x));
+        case 1: return normalize(vec3(-1.0, -uv.y,  uv.x));
+        case 2: return normalize(vec3( uv.x,  1.0,  uv.y));
+        case 3: return normalize(vec3( uv.x, -1.0, -uv.y));
+        case 4: return normalize(vec3( uv.x, -uv.y,  1.0));
+        case 5: return normalize(vec3(-uv.x, -uv.y, -1.0));
+    }
+    return vec3(0.0);
+}
+
+void main()
+{
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+    int face = coord.z;
+    ivec2 size = imageSize(outPrefilter);
+
+    if (coord.x >= size.x || coord.y >= size.y || face >= 6)
+        return;
+
+    vec2 uv = (vec2(coord.xy) + 0.5) / vec2(size) * 2.0 - 1.0;
+    vec3 N = cubeDir(face, uv);
+    vec3 R = N;
+    vec3 V = R;
+
+    const uint SAMPLE_COUNT = 512u;
+    vec3 prefilteredColor = vec3(0.0);
+    float totalWeight = 0.0;
+
+    for (uint i = 0u; i < SAMPLE_COUNT; ++i) {
+        vec2 Xi = hammersley(i, SAMPLE_COUNT);
+        vec3 H = importanceSampleGGX(Xi, N, roughness);
+        vec3 L = normalize(2.0 * dot(V, H) * H - V);
+
+        float NdotL = max(dot(N, L), 0.0);
+        if (NdotL > 0.0) {
+            prefilteredColor += proceduralSky(L) * NdotL;
+            totalWeight += NdotL;
+        }
+    }
+
+    prefilteredColor /= max(totalWeight, 0.001);
+    imageStore(outPrefilter, coord, vec4(prefilteredColor, 1.0));
+}
