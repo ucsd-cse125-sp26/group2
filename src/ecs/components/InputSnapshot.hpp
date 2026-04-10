@@ -21,6 +21,7 @@ struct InputSnapshot
     bool right{false};   ///< D key.
     bool jump{false};    ///< Space key.
     bool crouch{false};  ///< Left Ctrl key.
+    bool shooting{false};
 
     float yaw{0.0f};     ///< Horizontal look angle in radians (accumulated from mouse X deltas).
     float pitch{0.0f};   ///< Vertical look angle in radians, clamped to [-89°, +89°] by InputSampleSystem.
