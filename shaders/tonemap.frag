@@ -46,7 +46,7 @@ void main()
     vec3 bloom = texture(bloomBuffer, fragTexCoord).rgb;
     hdr += bloom * bloomStrength;
 
-    // Composite SSR (additive, alpha-weighted).
+    // Composite SSR.  RGB = reflection color, A = confidence/blend weight.
     vec4 ssr = texture(ssrBuffer, fragTexCoord);
     hdr = mix(hdr, ssr.rgb, ssr.a * ssrStrength);
 

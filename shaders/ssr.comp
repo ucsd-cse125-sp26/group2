@@ -179,7 +179,8 @@ void main()
 
             vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
             float confidence = edgeFade * distFade * horizFade;
-            result = vec4(hitColor * confidence, confidence);
+            // Store NON-premultiplied: RGB = reflection color, A = blend weight.
+            result = vec4(hitColor, confidence);
         }
     }
 
