@@ -1393,7 +1393,9 @@ bool Renderer::init(SDL_Window* win)
 
     loadAndPlace("Apex_Legend_Wraith.glb", glm::vec3(200.0f, 0.0f, 400.0f), 8.0f);
     // flipUVs=true: Porsche GLB uses V=0 at bottom (Sketchfab/Blender export).
-    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 0.0f, 400.0f), 40.0f, true);
+    // Y offset +1.3 compensates for the model's wheels extending below its origin.
+    // Without this, the wheels clip through the floor and reflections appear detached.
+    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
     loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
     loadAndPlace("bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
 
