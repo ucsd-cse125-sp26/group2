@@ -2,9 +2,6 @@
 
 #include <SDL3/SDL_log.h>
 
-// ---------------------------------------------------------------------------
-// stb_image — single-header PNG/JPEG/etc. decoder.
-// ---------------------------------------------------------------------------
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -17,9 +14,6 @@
 #pragma GCC diagnostic pop
 #endif
 
-// ---------------------------------------------------------------------------
-// Assimp headers
-// ---------------------------------------------------------------------------
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -34,6 +28,8 @@
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
+
+#include <glm/gtc/type_ptr.hpp>
 
 namespace
 {
@@ -134,6 +130,26 @@ int resolveDiffuseTex(const aiMaterial* mat,
     return -1;
 }
 
+/// Try multiple Assimp texture types for the glTF metallic-roughness map.
+/// glTF stores metallic-roughness combined (B=metallic, G=roughness).
+/// Assimp maps it to different types depending on version and importer path.
+int resolveMetallicRoughnessTex(const aiMaterial* mat,
+                                const aiScene* scene,
+                                std::vector<TextureData>& textures,
+                                std::vector<int>& embTexToDataIdx)
+{
+    // Try every known Assimp slot for PBR metallic-roughness (ordered by likelihood).
+    for (aiTextureType type : {aiTextureType_UNKNOWN,           // type 18 — glTF importer default
+                               aiTextureType_METALNESS,         // type 15 — explicit metallic
+                               aiTextureType_DIFFUSE_ROUGHNESS, // type 16 — explicit roughness
+                               aiTextureType_SPECULAR}) {       // type 2  — some exporters put ORM here
+        int idx = resolveTexture(mat, type, scene, textures, embTexToDataIdx);
+        if (idx >= 0)
+            return idx;
+    }
+    return -1;
+}
+
 MaterialData extractMaterial(const aiMaterial* mat)
 {
     MaterialData out;
@@ -166,36 +182,45 @@ MaterialData extractMaterial(const aiMaterial* mat)
     return out;
 }
 
-} // namespace
+// ── glm / Assimp matrix conversion ─────────────────────────────────────────
 
-// ═══════════════════════════════════════════════════════════════════════════
-
-bool loadModel(const std::string& path, LoadedModel& outModel)
+/// Assimp is row-major; GLM is column-major — transpose on copy.
+glm::mat4 aiToGlm(const aiMatrix4x4& m)
 {
-    Assimp::Importer importer;
+    return glm::transpose(glm::make_mat4(&m.a1));
+}
 
-    // aiProcess_PreTransformVertices bakes the full node hierarchy (position,
-    // rotation, scale, mirroring) into vertex data.  This correctly handles
-    // mirrored geometry (negative-scale nodes), re-wound faces, and normal
-    // transforms — critical for models like the Porsche that assemble parts
-    // via the scene graph.
-    const aiScene* scene = importer.ReadFile(
-        path,
-        static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace |
-                                  aiProcess_JoinIdenticalVertices | aiProcess_PreTransformVertices));
+// ── Recursive scene-graph traversal ─────────────────────────────────────────
+//
+// Key rules:
+//   • Positions and normals are transformed by each node's accumulated world
+//     matrix, with normals using the correct normal matrix (inverse-transpose
+//     of the upper-left 3×3 of the world matrix).
+//   • When a node's transform has a NEGATIVE determinant (mirror / reflection),
+//     all face windings for its meshes are reversed so the geometry remains
+//     front-facing after the reflection.
+//   • UV coordinates are NOT transformed — they are 2D and independent of the
+//     3D node hierarchy.
 
-    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
-        SDL_Log("ModelLoader: failed to load '%s': %s", path.c_str(), importer.GetErrorString());
-        return false;
-    }
+void processNode(const aiNode* node,
+                 const aiScene* scene,
+                 const glm::mat4& parentTransform,
+                 LoadedModel& outModel,
+                 std::vector<int>& embTexToDataIdx)
+{
+    const glm::mat4 worldTransform = parentTransform * aiToGlm(node->mTransformation);
 
-    std::vector<int> embTexToDataIdx(scene->mNumTextures, -1);
-    outModel.meshes.reserve(scene->mNumMeshes);
+    // Normal matrix: inverse-transpose of the upper-left 3×3.
+    const glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(worldTransform)));
 
-    // With PreTransformVertices, all meshes are already in world space.
-    // Simple flat iteration is correct.
-    for (unsigned int m = 0; m < scene->mNumMeshes; ++m) {
-        const aiMesh* mesh = scene->mMeshes[m];
+    // Negative determinant → the transform includes a reflection.
+    // Reflections reverse face winding, so we must reverse index order
+    // to keep front-faces correct for our CW-is-front-face convention.
+    const bool negativeScale = (glm::determinant(glm::mat3(worldTransform)) < 0.0f);
+
+    for (unsigned int ni = 0; ni < node->mNumMeshes; ++ni) {
+        const unsigned int meshIdx = node->mMeshes[ni];
+        const aiMesh* mesh = scene->mMeshes[meshIdx];
         if (!mesh->HasPositions() || mesh->mNumFaces == 0)
             continue;
 
@@ -206,18 +231,28 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
 
         for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
             ModelVertex vert{};
-            vert.position = {mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z};
 
-            if (mesh->HasNormals())
-                vert.normal = {mesh->mNormals[v].x, mesh->mNormals[v].y, mesh->mNormals[v].z};
+            // Transform position to world space.
+            const glm::vec4 localPos(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
+            vert.position = glm::vec3(worldTransform * localPos);
+
+            // Transform normal via the normal matrix (handles non-uniform scale
+            // and reflections correctly).
+            if (mesh->HasNormals()) {
+                const glm::vec3 localN(mesh->mNormals[v].x, mesh->mNormals[v].y, mesh->mNormals[v].z);
+                vert.normal = glm::normalize(normalMat * localN);
+            }
 
             if (mesh->mTextureCoords[0] != nullptr)
                 vert.texCoord = {mesh->mTextureCoords[0][v].x, mesh->mTextureCoords[0][v].y};
 
             if (hasTangents) {
-                glm::vec3 T = {mesh->mTangents[v].x, mesh->mTangents[v].y, mesh->mTangents[v].z};
-                glm::vec3 B = {mesh->mBitangents[v].x, mesh->mBitangents[v].y, mesh->mBitangents[v].z};
-                float w = (glm::dot(glm::cross(vert.normal, T), B) < 0.0f) ? -1.0f : 1.0f;
+                const glm::vec3 localT(mesh->mTangents[v].x, mesh->mTangents[v].y, mesh->mTangents[v].z);
+                const glm::vec3 localB(mesh->mBitangents[v].x, mesh->mBitangents[v].y, mesh->mBitangents[v].z);
+                glm::vec3 T = glm::normalize(normalMat * localT);
+                // Handedness: sign of triple product (N×T)·B
+                const float w =
+                    (glm::dot(glm::cross(vert.normal, T), glm::normalize(normalMat * localB)) < 0.0f) ? -1.0f : 1.0f;
                 vert.tangent = glm::vec4(T, w);
             } else {
                 vert.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
@@ -226,11 +261,24 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
             data.vertices.push_back(vert);
         }
 
+        // Collect indices.  If the node has a reflection transform, reverse
+        // each triangle's winding so faces remain front-facing.
         data.indices.reserve(static_cast<size_t>(mesh->mNumFaces) * 3);
         for (unsigned int f = 0; f < mesh->mNumFaces; ++f) {
             const aiFace& face = mesh->mFaces[f];
-            for (unsigned int i = 0; i < face.mNumIndices; ++i)
-                data.indices.push_back(face.mIndices[i]);
+            if (face.mNumIndices != 3)
+                continue; // skip degenerate faces
+
+            if (negativeScale) {
+                // Reverse winding: swap vertex 1 and 2.
+                data.indices.push_back(face.mIndices[0]);
+                data.indices.push_back(face.mIndices[2]);
+                data.indices.push_back(face.mIndices[1]);
+            } else {
+                data.indices.push_back(face.mIndices[0]);
+                data.indices.push_back(face.mIndices[1]);
+                data.indices.push_back(face.mIndices[2]);
+            }
         }
 
         // Resolve textures and material.
@@ -244,10 +292,7 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
                 outModel.textures[static_cast<size_t>(data.normalTexIndex)].isSRGB = false;
 
             data.metallicRoughnessTexIndex =
-                resolveTexture(mat, aiTextureType_UNKNOWN, scene, outModel.textures, embTexToDataIdx);
-            if (data.metallicRoughnessTexIndex < 0)
-                data.metallicRoughnessTexIndex =
-                    resolveTexture(mat, aiTextureType_METALNESS, scene, outModel.textures, embTexToDataIdx);
+                resolveMetallicRoughnessTex(mat, scene, outModel.textures, embTexToDataIdx);
             if (data.metallicRoughnessTexIndex >= 0)
                 outModel.textures[static_cast<size_t>(data.metallicRoughnessTexIndex)].isSRGB = false;
 
@@ -264,6 +309,50 @@ bool loadModel(const std::string& path, LoadedModel& outModel)
         }
 
         outModel.meshes.push_back(std::move(data));
+    }
+
+    // Recurse into children.
+    for (unsigned int c = 0; c < node->mNumChildren; ++c)
+        processNode(node->mChildren[c], scene, worldTransform, outModel, embTexToDataIdx);
+}
+
+} // namespace
+
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs)
+{
+    Assimp::Importer importer;
+
+    unsigned int flags = static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals |
+                                                   aiProcess_CalcTangentSpace | aiProcess_JoinIdenticalVertices);
+
+    // FlipUVs: V = 1 − V.  Required for models from tools that use V=0 at
+    // the bottom (Blender, OBJ, many Sketchfab exports) when rendering in
+    // Vulkan which expects V=0 at the top.
+    if (flipUVs)
+        flags |= aiProcess_FlipUVs;
+
+    const aiScene* scene = importer.ReadFile(path, flags);
+
+    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
+        SDL_Log("ModelLoader: failed to load '%s': %s", path.c_str(), importer.GetErrorString());
+        return false;
+    }
+
+    std::vector<int> embTexToDataIdx(scene->mNumTextures, -1);
+
+    processNode(scene->mRootNode, scene, glm::mat4(1.0f), outModel, embTexToDataIdx);
+
+    // Log material summary for the first few meshes (debugging aid).
+    for (size_t m = 0; m < outModel.meshes.size() && m < 5; ++m) {
+        const auto& md = outModel.meshes[m];
+        SDL_Log("  mesh[%zu] albedo=%d mr=%d metallic=%.2f roughness=%.2f",
+                m,
+                md.diffuseTexIndex,
+                md.metallicRoughnessTexIndex,
+                static_cast<double>(md.material.metallicFactor),
+                static_cast<double>(md.material.roughnessFactor));
     }
 
     SDL_Log("ModelLoader: loaded '%s' — %u mesh(es), %u texture(s)",

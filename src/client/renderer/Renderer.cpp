@@ -662,12 +662,14 @@ bool Renderer::init(SDL_Window* win)
     const char* const k_base = SDL_GetBasePath();
 
     // Helper to load a model and place it in the scene.
-    auto loadAndPlace = [&](const char* filename, glm::vec3 pos, float scale) {
+    // flipWinding=true for models exported with CW winding (DirectX/Unity/
+    // many Sketchfab downloads) that appear inside-out in our CCW pipeline.
+    auto loadAndPlace = [&](const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
         char path[512];
         SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
 
         LoadedModel loaded;
-        if (!loadModel(path, loaded)) {
+        if (!loadModel(path, loaded, flipUVs)) {
             SDL_Log("Renderer: failed to load '%s'", filename);
             return;
         }
@@ -682,7 +684,9 @@ bool Renderer::init(SDL_Window* win)
     };
 
     loadAndPlace("Apex_Legend_Wraith.glb", glm::vec3(200.0f, 0.0f, 400.0f), 8.0f);
-    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 0.0f, 400.0f), 40.0f);
+    // flipUVs=true: Porsche GLB uses V=0 at bottom (Sketchfab/Blender export).
+    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 0.0f, 400.0f), 40.0f, true);
+    loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 5.0f);
 
     // Camera — overridden every frame by drawFrame().
     camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},

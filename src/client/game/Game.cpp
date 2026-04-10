@@ -199,7 +199,7 @@ SDL_AppResult Game::iterate()
     accumulator += frameTime;
 
     static int iterCount = 0;
-    if (false && ++iterCount <= 3) // disabled debug log
+    if (false && ++iterCount <= 3)
         SDL_Log("[ITERATE] call=%d frameTime=%.4f acc=%.4f renderSep=%d",
                 iterCount,
                 static_cast<double>(frameTime),
@@ -393,12 +393,6 @@ SDL_AppResult Game::iterate()
     prevRenderTime = k_now;
 
     ++frameCount;
-
-    // Auto-screenshot for debugging.
-    if (frameCount == 10) {
-        SDL_Log("[DEBUG] Requesting auto-screenshot at frame %llu", static_cast<unsigned long long>(frameCount));
-        renderer.requestScreenshot("/tmp/debug_screenshot.png");
-    }
 
     // ── 9. VSync toggle — apply when limitFPSToMonitor changes ───────────
     // buildUI may modify limitFPSToMonitor, so we snapshot it before and
