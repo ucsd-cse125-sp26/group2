@@ -137,6 +137,9 @@ private:
     int ssrCurrentIdx = 0;
     SDL_GPUComputePipeline* ssrPipeline = nullptr;
 
+public:
+    int ssrMode = 2; ///< 0=Sharp, 1=Stochastic, 2=Masked (default).
+private:
     // Volumetrics (Phase 10)
     SDL_GPUTexture* volumetricTexture = nullptr; ///< RGBA16F half-res.
     SDL_GPUComputePipeline* volumetricPipeline = nullptr;

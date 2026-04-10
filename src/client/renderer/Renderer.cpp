@@ -1908,8 +1908,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             float thickness;
             float frameIndex;
             float jitterStrength;
-            float _pad1;
-            float _pad2;
+            int ssrModeVal;
+            float _pad1, _pad2, _pad3;
         } ssrUBO{};
         ssrUBO.proj = camera.getProjection();
         ssrUBO.invProj = glm::inverse(camera.getProjection());
@@ -1918,7 +1918,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ssrUBO.maxDist = 500.0f;
         ssrUBO.thickness = 5.0f;
         ssrUBO.frameIndex = static_cast<float>(ssrFrameCounter % 64);
-        ssrUBO.jitterStrength = 0.06f; // Subtle — enough to scatter undercarriage hits.
+        ssrUBO.jitterStrength = 0.06f;
+        ssrUBO.ssrModeVal = ssrMode;
 
         SDL_GPUStorageTextureReadWriteBinding ssrWrite = {.texture = ssrTexture[ssrDst], .mip_level = 0, .layer = 0};
         SDL_GPUComputePass* ssrPass = SDL_BeginGPUComputePass(cmd, &ssrWrite, 1, nullptr, 0);

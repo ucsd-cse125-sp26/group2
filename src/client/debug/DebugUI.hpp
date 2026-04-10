@@ -54,6 +54,7 @@ public:
                  bool& renderSeparateFromPhysics,
                  bool& inputSyncedWithPhysics,
                  bool& limitFPSToMonitor,
+                 int& ssrMode,
                  float physicsHz,
                  float fpsCurrent,
                  float fpsMin,

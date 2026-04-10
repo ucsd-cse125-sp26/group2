@@ -91,6 +91,7 @@ void DebugUI::buildUI(const Registry& registry,
                       bool& renderSeparateFromPhysics,
                       bool& inputSyncedWithPhysics,
                       bool& limitFPSToMonitor,
+                      int& ssrMode,
                       const float physicsHz,
                       const float fpsCurrent,
                       const float fpsMin,
@@ -127,6 +128,16 @@ void DebugUI::buildUI(const Registry& registry,
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
         ImGui::SetTooltip("ON:  VSync on — fps locked to monitor refresh rate\n"
                           "OFF: VSync off — uncapped fps (may use mailbox present)");
+
+    // SSR mode selector.
+    {
+        const char* ssrModes[] = {"Sharp (proximity fade)", "Stochastic (temporal)", "Masked (world-space fade)"};
+        ImGui::Combo("SSR Mode", &ssrMode, ssrModes, 3);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Sharp: deterministic rays, proximity fade near objects\n"
+                              "Stochastic: jittered rays + temporal accumulation (softer)\n"
+                              "Masked: deterministic rays, world-space distance fade (IBL fills contact zone)");
+    }
 
     ImGui::Separator();
 
