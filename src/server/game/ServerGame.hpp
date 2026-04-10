@@ -5,6 +5,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <entt/entity/entity.hpp>
+#include <unordered_map>
+
 /// @brief Top-level server game loop.
 ///
 /// Owns the ECS registry and the network Server. Each tick it drains
@@ -24,14 +27,18 @@ public:
 
     /// @brief Signal the loop to stop and release all resources.
     void shutdown();
+    void initNewPlayer(int clientId);
 
 private:
+    void eventHandler(Event event);
+
     /// @brief Advance one physics tick.
     /// @param dt Fixed delta time in seconds (1 / tickRateHz).
-    void tick(float dt);
+    void tick(float dt, Uint64 nextTick);
 
     Server server;        ///< Owns the TCP socket and network I/O.
     Registry registry;    ///< ECS entity/component store.
+    std::unordered_map<int, entt::entity> clientEntities;
     bool running = false; ///< Loop continues while true.
     int tickRateHz = 128; ///< Physics ticks per second.
     int tickCount = 0;    ///< Total ticks since start, used for periodic logging.

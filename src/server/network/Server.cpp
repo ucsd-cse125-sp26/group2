@@ -25,6 +25,8 @@ bool Server::init(const char* addr, Uint16 port)
 
     eventQueue = EventQueue();
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
+
+    nextClientId = 0;
     return true;
 }
 
@@ -57,8 +59,10 @@ void Server::acceptClients()
         return;
     } else if (socket) {
         SDL_Log("Server: accepted new client");
+        auto clientId = nextClientId++;
         clients.emplace_back();
         clients.back().msgStream.socket = socket;
+        clients.back().clientId = clientId;
     }
 }
 
@@ -84,13 +88,18 @@ void Server::readClients()
 
 void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 {
-    if (len != sizeof(InputPacket)) {
-        SDL_Log("Server: received packet of invalid size %u (expected %zu)", len, sizeof(InputPacket));
-        return;
-    }
 
-    auto* pkt = static_cast<const InputPacket*>(data);
-    Event event = deserializePacket(*pkt);
+    SDL_Log("Server: received %d bytes", len);
+    SDL_Log("Server: data: %.*s", len, static_cast<const char*>(data));
+
+    // echo
+    conn.msgStream.send(data, len);
+
+    // temp enqueue of events
+    Event event;
+    event.clientId = conn.clientId;
+    event.movementIntent.forward = true;
+
     eventQueue.enqueue(event);
     conn.msgStream.send("Message received", 16);
 

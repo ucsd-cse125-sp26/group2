@@ -1,26 +1,31 @@
 #include "Renderer.hpp"
 
 #include "Camera.hpp"
+#include "ModelLoader.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <imgui.h>
+#include <vector>
+
+// stb_image_write — declaration only (implementation is in FrameRecorder.cpp).
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-declarations"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+#include <stb_image_write.h>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 namespace
 {
 
 /// @brief Load a compiled shader from disk and create an SDL GPU shader object.
-/// @param dev                  The GPU device.
-/// @param path                 Path to the compiled shader file (.spv or .msl).
-/// @param format               Shader format (SPIR-V or MSL).
-/// @param stage                Vertex or fragment stage.
-/// @param samplerCount         Number of texture samplers declared in the shader.
-/// @param uniformBufferCount   Number of uniform buffers declared in the shader.
-/// @param storageBufferCount   Number of storage buffers declared in the shader.
-/// @param storageTextureCount  Number of storage textures declared in the shader.
-/// @return The created shader, or nullptr on failure (error logged via SDL_Log).
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
                           const char* path,
                           SDL_GPUShaderFormat format,
@@ -47,8 +52,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     info.num_storage_buffers = storageBufferCount;
     info.num_storage_textures = storageTextureCount;
 
-    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL
-    // (Metal forbids a function literally named "main").
+    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL.
     info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(dev, &info);
@@ -59,7 +63,19 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     return shader;
 }
 
+/// @brief Matrices UBO — shared by both the scene and model pipelines.
+struct Matrices
+{
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 projection;
+};
+
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Renderer::init
+// ---------------------------------------------------------------------------
 
 bool Renderer::init(SDL_Window* win)
 {
@@ -99,8 +115,6 @@ bool Renderer::init(SDL_Window* win)
     }
 
     // ImGui GPU backend setup.
-    // The ImGui context and SDL3 input backend were already initialised by
-    // DebugUI::init(). We just hook up the GPU render backend here.
     const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
 
     ImGui_ImplSDLGPU3_InitInfo imguiInfo{};
@@ -113,7 +127,7 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // Scene pipeline (triangle).
+    // ---- Scene pipeline (cube + floor, hard-coded vertex positions) --------
     const char* const k_base = SDL_GetBasePath();
     const char* const k_ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
 
@@ -140,11 +154,9 @@ bool Renderer::init(SDL_Window* win)
     pci.target_info.num_color_targets = 1;
     pci.target_info.has_depth_stencil_target = true;
     pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-
     pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
     pci.depth_stencil_state.enable_depth_test = true;
     pci.depth_stencil_state.enable_depth_write = true;
-
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 
@@ -154,15 +166,37 @@ bool Renderer::init(SDL_Window* win)
     SDL_ReleaseGPUShader(device, frag);
 
     if (!pipeline) {
-        SDL_Log("Renderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
+        SDL_Log("Renderer: SDL_CreateGPUGraphicsPipeline (scene) failed: %s", SDL_GetError());
         return false;
     }
 
-    // Initial camera — eye/target are overridden every frame by drawFrame().
-    // near/far must be set correctly here; they persist across setAspect() calls.
-    camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f}, // eye  (overridden each frame)
-                    glm::vec3{0.0f, 100.0f, 1.0f}, // target
-                    glm::vec3{0.0f, 1.0f, 0.0f},   // up
+    // ---- Model pipeline (vertex-buffer driven, Assimp meshes + textures) --
+    if (!initModelPipeline(activeFormat, k_colorFmt))
+        return false;
+
+    // Load the model from the assets directory next to the binary.
+    char modelPath[512];
+    SDL_snprintf(modelPath, sizeof(modelPath), "%sassets/Apex_Legend_Wraith.glb", k_base ? k_base : "");
+
+    LoadedModel loadedModel;
+    if (loadModel(modelPath, loadedModel)) {
+        if (!uploadModel(loadedModel))
+            SDL_Log("Renderer: model GPU upload failed — model will not be drawn");
+    } else {
+        SDL_Log("Renderer: model load failed — model will not be drawn");
+    }
+
+    // Place the model to the right of the reference cube.
+    // Cube sits at world (0, 0..64, 368..432).  Model goes at
+    // x=+200, y=0 (ground), z=400.  Scale of 8 units/metre gives ~14 units
+    // per foot — plausible for a Quake-unit world (tweak as needed).
+    modelTransform = glm::translate(glm::mat4(1.0f), glm::vec3(200.0f, 0.0f, 400.0f));
+    modelTransform = glm::scale(modelTransform, glm::vec3(8.0f));
+
+    // Camera — eye/target overridden every frame by drawFrame().
+    camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},
+                    glm::vec3{0.0f, 100.0f, 1.0f},
+                    glm::vec3{0.0f, 1.0f, 0.0f},
                     fovyDegrees,
                     1.0f,
                     nearPlane,
@@ -171,18 +205,300 @@ bool Renderer::init(SDL_Window* win)
     return true;
 }
 
-struct Matrices
+// ---------------------------------------------------------------------------
+// Renderer::initModelPipeline
+// ---------------------------------------------------------------------------
+
+bool Renderer::initModelPipeline(const SDL_GPUShaderFormat fmt, const SDL_GPUTextureFormat colorFmt)
 {
-    glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 projection;
-};
+    const char* const k_base = SDL_GetBasePath();
+    const char* const k_ext = (fmt == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+
+    char vertPath[512], fragPath[512];
+    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/model.vert%s", k_base ? k_base : "", k_ext);
+    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/model.frag%s", k_base ? k_base : "", k_ext);
+
+    // Vertex shader: 0 samplers, 1 UBO.
+    // Fragment shader: 1 sampler (texDiffuse), 0 UBOs.
+    SDL_GPUShader* vert = loadShader(device, vertPath, fmt, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
+    SDL_GPUShader* frag = loadShader(device, fragPath, fmt, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 0, 0);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    // Vertex layout — must match ModelVertex (32 bytes, no padding):
+    //   location 0 → position  (vec3, offset  0)
+    //   location 1 → normal    (vec3, offset 12)
+    //   location 2 → texCoord  (vec2, offset 24)
+    const SDL_GPUVertexBufferDescription k_vbDesc = {
+        .slot = 0,
+        .pitch = sizeof(ModelVertex),
+        .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+        .instance_step_rate = 0,
+    };
+
+    const SDL_GPUVertexAttribute k_attrs[3] = {
+        {.location = 0, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 0},
+        {.location = 1, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 12},
+        {.location = 2, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = 24},
+    };
+
+    SDL_GPUVertexInputState vertexInput{};
+    vertexInput.vertex_buffer_descriptions = &k_vbDesc;
+    vertexInput.num_vertex_buffers = 1;
+    vertexInput.vertex_attributes = k_attrs;
+    vertexInput.num_vertex_attributes = 3;
+
+    SDL_GPUColorTargetDescription colorTarget{};
+    colorTarget.format = colorFmt;
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.vertex_input_state = vertexInput;
+    pci.target_info.color_target_descriptions = &colorTarget;
+    pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    // GLB materials are double-sided; disable culling to match.
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    modelPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!modelPipeline) {
+        SDL_Log("Renderer: SDL_CreateGPUGraphicsPipeline (model) failed: %s", SDL_GetError());
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::uploadTexture
+// ---------------------------------------------------------------------------
+
+SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height)
+{
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    info.width = static_cast<Uint32>(width);
+    info.height = static_cast<Uint32>(height);
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    SDL_GPUTexture* tex = SDL_CreateGPUTexture(device, &info);
+    if (!tex) {
+        SDL_Log("Renderer: SDL_CreateGPUTexture failed: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    const Uint32 dataSize = static_cast<Uint32>(width) * static_cast<Uint32>(height) * 4u;
+
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = dataSize;
+
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!tb) {
+        SDL_Log("Renderer: failed to create texture transfer buffer: %s", SDL_GetError());
+        SDL_ReleaseGPUTexture(device, tex);
+        return nullptr;
+    }
+
+    void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
+    SDL_memcpy(ptr, pixels, dataSize);
+    SDL_UnmapGPUTransferBuffer(device, tb);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = tb;
+    src.offset = 0;
+    src.pixels_per_row = 0; // 0 = tightly packed (width pixels per row)
+    src.rows_per_layer = 0; // 0 = tightly packed (height rows per layer)
+
+    SDL_GPUTextureRegion dst{};
+    dst.texture = tex;
+    dst.mip_level = 0;
+    dst.layer = 0;
+    dst.x = dst.y = dst.z = 0;
+    dst.w = static_cast<Uint32>(width);
+    dst.h = static_cast<Uint32>(height);
+    dst.d = 1;
+
+    SDL_UploadToGPUTexture(cp, &src, &dst, false);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_WaitForGPUIdle(device);
+    SDL_ReleaseGPUTransferBuffer(device, tb);
+
+    return tex;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::uploadModel
+// ---------------------------------------------------------------------------
+
+bool Renderer::uploadModel(const LoadedModel& model)
+{
+    if (model.meshes.empty())
+        return false;
+
+    // ---- Create the shared sampler -------------------------------------------
+    SDL_GPUSamplerCreateInfo sampInfo{};
+    sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    sampInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.min_lod = 0.0f;
+    sampInfo.max_lod = 0.0f;
+    sampInfo.enable_anisotropy = false;
+    sampInfo.enable_compare = false;
+
+    modelSampler = SDL_CreateGPUSampler(device, &sampInfo);
+    if (!modelSampler) {
+        SDL_Log("Renderer: failed to create model sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    // ---- 1×1 opaque-white fallback texture -----------------------------------
+    const uint8_t k_white[4] = {255, 255, 255, 255};
+    defaultTexture = uploadTexture(k_white, 1, 1);
+    if (!defaultTexture)
+        return false;
+
+    // ---- Upload each model texture -------------------------------------------
+    modelTextures.reserve(model.textures.size());
+    for (const auto& td : model.textures) {
+        SDL_GPUTexture* gpuTex = uploadTexture(td.pixels.data(), td.width, td.height);
+        modelTextures.push_back(gpuTex); // nullptr means "use default" at draw time
+    }
+
+    // ---- Collect per-mesh vertex/index sizes then upload all in one pass ----
+    struct MeshSizes
+    {
+        Uint32 vbBytes;
+        Uint32 ibBytes;
+    };
+
+    std::vector<MeshSizes> sizes;
+    sizes.reserve(model.meshes.size());
+    Uint32 totalBytes = 0;
+
+    for (const auto& m : model.meshes) {
+        const Uint32 vb = static_cast<Uint32>(m.vertices.size() * sizeof(ModelVertex));
+        const Uint32 ib = static_cast<Uint32>(m.indices.size() * sizeof(uint32_t));
+        sizes.push_back({.vbBytes = vb, .ibBytes = ib});
+        totalBytes += vb + ib;
+    }
+
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = totalBytes;
+
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!tb) {
+        SDL_Log("Renderer: failed to create model transfer buffer: %s", SDL_GetError());
+        return false;
+    }
+
+    auto* dst = static_cast<char*>(SDL_MapGPUTransferBuffer(device, tb, false));
+    Uint32 writeOffset = 0;
+    for (size_t i = 0; i < model.meshes.size(); ++i) {
+        SDL_memcpy(dst + writeOffset, model.meshes[i].vertices.data(), sizes[i].vbBytes);
+        writeOffset += sizes[i].vbBytes;
+        SDL_memcpy(dst + writeOffset, model.meshes[i].indices.data(), sizes[i].ibBytes);
+        writeOffset += sizes[i].ibBytes;
+    }
+    SDL_UnmapGPUTransferBuffer(device, tb);
+
+    SDL_GPUCommandBuffer* uploadCmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(uploadCmd);
+
+    Uint32 readOffset = 0;
+    modelMeshes.reserve(model.meshes.size());
+
+    for (size_t i = 0; i < model.meshes.size(); ++i) {
+        SDL_GPUBufferCreateInfo vbInfo{};
+        vbInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+        vbInfo.size = sizes[i].vbBytes;
+        SDL_GPUBuffer* vb = SDL_CreateGPUBuffer(device, &vbInfo);
+
+        SDL_GPUBufferCreateInfo ibInfo{};
+        ibInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+        ibInfo.size = sizes[i].ibBytes;
+        SDL_GPUBuffer* ib = SDL_CreateGPUBuffer(device, &ibInfo);
+
+        if (!vb || !ib) {
+            SDL_Log("Renderer: failed to create GPU buffer for mesh %zu: %s", i, SDL_GetError());
+            SDL_ReleaseGPUBuffer(device, vb);
+            SDL_ReleaseGPUBuffer(device, ib);
+            SDL_EndGPUCopyPass(copyPass);
+            SDL_SubmitGPUCommandBuffer(uploadCmd);
+            SDL_ReleaseGPUTransferBuffer(device, tb);
+            return false;
+        }
+
+        SDL_GPUTransferBufferLocation src{};
+        SDL_GPUBufferRegion dstReg{};
+
+        src.transfer_buffer = tb;
+        src.offset = readOffset;
+        dstReg.buffer = vb;
+        dstReg.offset = 0;
+        dstReg.size = sizes[i].vbBytes;
+        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
+        readOffset += sizes[i].vbBytes;
+
+        src.offset = readOffset;
+        dstReg.buffer = ib;
+        dstReg.size = sizes[i].ibBytes;
+        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
+        readOffset += sizes[i].ibBytes;
+
+        modelMeshes.push_back({
+            .vertexBuffer = vb,
+            .indexBuffer = ib,
+            .indexCount = static_cast<Uint32>(model.meshes[i].indices.size()),
+            .textureIndex = model.meshes[i].diffuseTexIndex,
+        });
+    }
+
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(uploadCmd);
+    SDL_WaitForGPUIdle(device);
+    SDL_ReleaseGPUTransferBuffer(device, tb);
+
+    SDL_Log("Renderer: uploaded %zu mesh(es), %zu texture(s) to GPU (%u bytes geometry)",
+            modelMeshes.size(),
+            modelTextures.size(),
+            totalBytes);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::drawFrame
+// ---------------------------------------------------------------------------
 
 void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
 {
     // ── first-person camera ─────────────────────────────────────────────────
-    // Forward vector from yaw (horizontal) and pitch (vertical).
-    // Convention matches InputSnapshot: yaw=0 → +Z, pitch>0 → looking down.
     const float cosPitch = std::cos(pitch);
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
     camera.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
@@ -206,23 +522,29 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
-    // All geometry is pre-positioned in world space, so model = identity.
-    Matrices mats{};
-    mats.model = glm::mat4(1.0f);
-    mats.view = camera.getView();
-    mats.projection = camera.getProjection();
+    // Scene matrices — model = identity (geometry is already in world space).
+    Matrices sceneMats{};
+    sceneMats.model = glm::mat4(1.0f);
+    sceneMats.view = camera.getView();
+    sceneMats.projection = camera.getProjection();
 
-    SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
+    SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
 
-    // Upload ImGui vertex/index buffers via an internal copy pass.
-    // This must happen BEFORE the render pass begins.
+    // Upload ImGui vertex/index buffers — must happen before the render pass.
     ImDrawData* const k_drawData = ImGui::GetDrawData();
     if (k_drawData)
         ImGui_ImplSDLGPU3_PrepareDrawData(k_drawData, cmd);
 
+    // When a screenshot is pending, render to an intermediate texture so we can
+    // download pixels later.  Then blit captureRT → swapchain for display.
+    // When not recording, render straight to swapchain (no overhead).
+    const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
+    const bool capturing = !pendingCapPath.empty() && ensureCaptureRT(w, h, k_colorFmt);
+    SDL_GPUTexture* const renderTarget = capturing ? captureRT : swapchain;
+
     SDL_GPUColorTargetInfo ct{};
-    ct.texture = swapchain;
-    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}; // dark-blue sky
+    ct.texture = renderTarget;
+    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f};
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
     ct.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -238,22 +560,207 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
 
-    // Scene geometry:
-    //   verts  0-35  — reference cube (64-unit cube at world pos (0,0,400))
-    //   verts 36-41  — floor quad (4000×4000 units at y=0)
-    // One draw call; model = identity; checkerboard applied in fragment shader.
+    // ── Scene geometry: cube (verts 0–35) + floor quad (verts 36–41) ────────
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
     SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
 
-    // ImGui overlay — drawn last so it sits on top of scene geometry.
+    // ── Assimp model ─────────────────────────────────────────────────────────
+    if (!modelMeshes.empty() && modelPipeline && modelSampler && defaultTexture) {
+        SDL_BindGPUGraphicsPipeline(pass, modelPipeline);
+
+        Matrices modelMats{};
+        modelMats.model = modelTransform;
+        modelMats.view = sceneMats.view;
+        modelMats.projection = sceneMats.projection;
+        SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
+
+        for (const auto& mesh : modelMeshes) {
+            // Vertex + index buffers
+            const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+            SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+
+            const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+            SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+            // Base-colour texture (fall back to 1×1 white if none loaded)
+            SDL_GPUTexture* tex = defaultTexture;
+            if (mesh.textureIndex >= 0 && static_cast<size_t>(mesh.textureIndex) < modelTextures.size() &&
+                modelTextures[static_cast<size_t>(mesh.textureIndex)] != nullptr)
+            {
+                tex = modelTextures[static_cast<size_t>(mesh.textureIndex)];
+            }
+
+            const SDL_GPUTextureSamplerBinding tsb = {.texture = tex, .sampler = modelSampler};
+            SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
+
+            SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+        }
+    }
+
+    // ── ImGui overlay ────────────────────────────────────────────────────────
     if (k_drawData)
         ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
 
     SDL_EndGPURenderPass(pass);
+
+    // If we rendered to the intermediate captureRT, blit it to the swapchain
+    // so the player actually sees the frame.
+    if (capturing) {
+        SDL_GPUBlitInfo blitInfo{};
+        blitInfo.source.texture = captureRT;
+        blitInfo.source.mip_level = 0;
+        blitInfo.source.layer_or_depth_plane = 0;
+        blitInfo.source.x = 0;
+        blitInfo.source.y = 0;
+        blitInfo.source.w = w;
+        blitInfo.source.h = h;
+        blitInfo.destination.texture = swapchain;
+        blitInfo.destination.mip_level = 0;
+        blitInfo.destination.layer_or_depth_plane = 0;
+        blitInfo.destination.x = 0;
+        blitInfo.destination.y = 0;
+        blitInfo.destination.w = w;
+        blitInfo.destination.h = h;
+        blitInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        blitInfo.flip_mode = SDL_FLIP_NONE;
+        blitInfo.filter = SDL_GPU_FILTER_NEAREST;
+        blitInfo.cycle = false;
+        SDL_BlitGPUTexture(cmd, &blitInfo);
+    }
+
     SDL_SubmitGPUCommandBuffer(cmd);
+
+    // Download captureRT → CPU → PNG (blocks until GPU is idle).
+    if (capturing)
+        downloadAndSaveCapture(w, h);
 }
 
-bool Renderer::ensureDepthTexture(Uint32 w, Uint32 h)
+// ---------------------------------------------------------------------------
+// Renderer::requestScreenshot
+// ---------------------------------------------------------------------------
+
+void Renderer::requestScreenshot(const std::string& path)
+{
+    pendingCapPath = path;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::ensureCaptureRT
+// ---------------------------------------------------------------------------
+
+bool Renderer::ensureCaptureRT(const Uint32 w, const Uint32 h, const SDL_GPUTextureFormat fmt)
+{
+    if (captureRT && captureRTW == w && captureRTH == h && captureRTFmt == fmt)
+        return true;
+
+    if (captureRT)
+        SDL_ReleaseGPUTexture(device, captureRT);
+
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = fmt;
+    info.width = w;
+    info.height = h;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    // COLOR_TARGET: render to it; SAMPLER: required source for SDL_BlitGPUTexture.
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    captureRT = SDL_CreateGPUTexture(device, &info);
+    if (!captureRT) {
+        SDL_Log("Renderer: failed to create captureRT (%ux%u): %s", w, h, SDL_GetError());
+        return false;
+    }
+
+    captureRTW = w;
+    captureRTH = h;
+    captureRTFmt = fmt;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::downloadAndSaveCapture
+// ---------------------------------------------------------------------------
+
+void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
+{
+    if (!captureRT || pendingCapPath.empty())
+        return;
+
+    const Uint32 dataSize = w * h * 4u;
+
+    // Create a download (CPU-readable) transfer buffer.
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+    tbInfo.size = dataSize;
+    SDL_GPUTransferBuffer* dlBuf = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!dlBuf) {
+        SDL_Log("Renderer: failed to create download buffer: %s", SDL_GetError());
+        pendingCapPath.clear();
+        return;
+    }
+
+    // Issue the GPU → transfer-buffer copy in its own command buffer.
+    SDL_GPUCommandBuffer* dlCmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(dlCmd);
+
+    SDL_GPUTextureRegion srcRegion{};
+    srcRegion.texture = captureRT;
+    srcRegion.mip_level = 0;
+    srcRegion.layer = 0;
+    srcRegion.x = srcRegion.y = srcRegion.z = 0;
+    srcRegion.w = w;
+    srcRegion.h = h;
+    srcRegion.d = 1;
+
+    SDL_GPUTextureTransferInfo dstTransfer{};
+    dstTransfer.transfer_buffer = dlBuf;
+    dstTransfer.offset = 0;
+    dstTransfer.pixels_per_row = 0; // 0 = tightly packed (= w)
+    dstTransfer.rows_per_layer = 0; // 0 = tightly packed (= h)
+
+    SDL_DownloadFromGPUTexture(cp, &srcRegion, &dstTransfer);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(dlCmd);
+
+    // Block until the GPU has finished writing to the transfer buffer.
+    SDL_WaitForGPUIdle(device);
+
+    // Map the buffer, convert BGRA→RGBA if the swapchain uses BGRA, then save PNG.
+    void* mapped = SDL_MapGPUTransferBuffer(device, dlBuf, false);
+    if (mapped) {
+        std::vector<uint8_t> pixels(dataSize);
+        SDL_memcpy(pixels.data(), mapped, dataSize);
+        SDL_UnmapGPUTransferBuffer(device, dlBuf);
+
+        // On most platforms (Linux/Vulkan, macOS/Metal) the swapchain is BGRA8.
+        // stbi_write_png expects RGBA8, so swap R and B when needed.
+        const bool swapRB = (captureRTFmt == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
+        if (swapRB) {
+            for (Uint32 i = 0; i < w * h; ++i)
+                std::swap(pixels[i * 4 + 0], pixels[i * 4 + 2]);
+        }
+
+        stbi_write_png(pendingCapPath.c_str(),
+                       static_cast<int>(w),
+                       static_cast<int>(h),
+                       4,
+                       pixels.data(),
+                       static_cast<int>(w) * 4);
+    } else {
+        SDL_UnmapGPUTransferBuffer(device, dlBuf);
+    }
+
+    SDL_ReleaseGPUTransferBuffer(device, dlBuf);
+    pendingCapPath.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::ensureDepthTexture
+// ---------------------------------------------------------------------------
+
+bool Renderer::ensureDepthTexture(const Uint32 w, const Uint32 h)
 {
     if (depthTexture && depthWidth == w && depthHeight == h)
         return true;
@@ -284,10 +791,60 @@ bool Renderer::ensureDepthTexture(Uint32 w, Uint32 h)
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Renderer::setVSync
+// ---------------------------------------------------------------------------
+
+bool Renderer::setVSync(const bool enabled)
+{
+    SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
+    if (!enabled) {
+        // Prefer mailbox (no tearing) over immediate (may tear).
+        if (SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX))
+            mode = SDL_GPU_PRESENTMODE_MAILBOX;
+        else
+            mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+    }
+
+    if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
+        SDL_Log("Renderer: SDL_SetGPUSwapchainParameters failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer::quit
+// ---------------------------------------------------------------------------
+
 void Renderer::quit()
 {
     if (device) {
         SDL_WaitForGPUIdle(device);
+
+        // Release capture render-target if it was created.
+        if (captureRT)
+            SDL_ReleaseGPUTexture(device, captureRT);
+
+        // Release model GPU resources.
+        for (auto& mesh : modelMeshes) {
+            SDL_ReleaseGPUBuffer(device, mesh.vertexBuffer);
+            SDL_ReleaseGPUBuffer(device, mesh.indexBuffer);
+        }
+        modelMeshes.clear();
+
+        for (auto* tex : modelTextures)
+            SDL_ReleaseGPUTexture(device, tex);
+        modelTextures.clear();
+
+        if (defaultTexture)
+            SDL_ReleaseGPUTexture(device, defaultTexture);
+
+        if (modelSampler)
+            SDL_ReleaseGPUSampler(device, modelSampler);
+
+        if (modelPipeline)
+            SDL_ReleaseGPUGraphicsPipeline(device, modelPipeline);
 
         if (depthTexture)
             SDL_ReleaseGPUTexture(device, depthTexture);
@@ -301,6 +858,10 @@ void Renderer::quit()
         SDL_DestroyGPUDevice(device);
     }
 
+    captureRT = nullptr;
+    defaultTexture = nullptr;
+    modelSampler = nullptr;
+    modelPipeline = nullptr;
     depthTexture = nullptr;
     pipeline = nullptr;
     device = nullptr;

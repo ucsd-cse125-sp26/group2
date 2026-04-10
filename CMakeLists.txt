@@ -71,6 +71,57 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT)
 
+# Assimp — 3D model loading (GLTF/GLB, OBJ, FBX, …; client only).
+# Keep the build lean: static lib, no install targets, no tools, no tests,
+# and only the GLTF/GLB importer enabled.
+set(ASSIMP_BUILD_TESTS                   OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL                       OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS            OFF CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT                     ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_GLTF_IMPORTER           ON  CACHE BOOL "" FORCE)
+# Use Assimp's own bundled minizip — avoids needing system unzip.h in a
+# non-standard include path (e.g. /usr/include/minizip/ on Ubuntu 24.04).
+set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)
+# Don't let Assimp turn its own -Wall warnings into -Werror; newer Clang
+# emits -Wnontrivial-memcall on Assimp internals that we cannot patch.
+set(ASSIMP_WARNINGS_AS_ERRORS            OFF CACHE BOOL "" FORCE)
+block()
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_Declare(
+        assimp
+        GIT_REPOSITORY https://github.com/assimp/assimp.git
+        GIT_TAG        v5.4.3
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(assimp)
+endblock()
+
+# stb — single-header image decoding (used by ModelLoader to decompress the
+# PNG/JPEG textures embedded in GLB files).  stb ships no CMakeLists.txt, so
+# FetchContent just populates the source directory; we expose it as a simple
+# INTERFACE library so callers get -isystem suppression.
+FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(stb)
+add_library(stb_image INTERFACE)
+target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
+
+# Suppress warnings that fire when our code includes Assimp headers.
+# Using SYSTEM marks those include paths as "system" so -Wall / -Wextra
+# diagnostics are silenced for Assimp's own headers.
+if(TARGET assimp)
+    get_target_property(_assimp_inc assimp INTERFACE_INCLUDE_DIRECTORIES)
+    if(_assimp_inc)
+        target_include_directories(assimp SYSTEM INTERFACE ${_assimp_inc})
+    endif()
+endif()
+
 # ImGui — immediate-mode debug UI (client only).
 # ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
 # the source tree without calling add_subdirectory. We compile it ourselves
@@ -155,7 +206,7 @@ set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-set(SHADER_SOURCES projective.vert normal.frag)
+set(SHADER_SOURCES projective.vert normal.frag model.vert model.frag geometry.vert geometry.frag)
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
     # GLSL → SPIR-V
@@ -199,6 +250,10 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -225,6 +280,7 @@ add_executable(group2
         src/client/debug/DebugUI.cpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/ecs/components/ClientId.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -258,6 +314,18 @@ target_link_libraries(group2 PRIVATE
     SDL3_net::SDL3_net
     EnTT::EnTT
     imgui_lib
+    assimp
+    stb_image
+)
+
+# Copy assets (models, textures, …) next to the binary so the renderer can
+# find them via SDL_GetBasePath().
+add_custom_command(TARGET group2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:group2>/assets"
+    COMMENT "Copying assets to binary directory"
+    VERBATIM
 )
 
 # ===========================================================================
@@ -293,6 +361,7 @@ add_executable(server
         src/server/systems/BroadcastSystem.hpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/ecs/components/ClientId.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
