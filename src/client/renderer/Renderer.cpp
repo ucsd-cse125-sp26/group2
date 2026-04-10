@@ -1230,8 +1230,8 @@ bool Renderer::initSSAO()
 
 bool Renderer::initSSR()
 {
-    // SSR: 2 samplers (hdr + depth), 1 rw storage tex, 1 UBO.
-    ssrPipeline = createComputePipeline("ssr.comp", 2, 0, 0, 1, 0, 1, 16, 16, 1);
+    // SSR: 3 samplers (hdr + depth + prevSSR), 1 rw storage tex, 1 UBO.
+    ssrPipeline = createComputePipeline("ssr.comp", 3, 0, 0, 1, 0, 1, 16, 16, 1);
     return ssrPipeline != nullptr;
 }
 
@@ -1568,8 +1568,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         return SDL_CreateGPUTexture(device, &ci);
     };
 
-    if (!ssrTexture)
-        ssrTexture = makeRGBA16F(w, h);
+    if (!ssrTexture[0]) {
+        ssrTexture[0] = makeRGBA16F(w, h);
+        ssrTexture[1] = makeRGBA16F(w, h);
+    }
     if (!volumetricTexture)
         volumetricTexture = makeRGBA16F(w / 2, h / 2);
     if (!taaHistory[0]) {
@@ -1889,7 +1891,12 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // ── SSR (Phase 9) ───────────────────────────────────────────────────────
-    if (ssrPipeline && ssrTexture && depthTexture && hdrTarget) {
+    static uint64_t ssrFrameCounter = 0;
+    ++ssrFrameCounter;
+
+    if (ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
+        const int ssrDst = ssrCurrentIdx;
+        const int ssrSrc = 1 - ssrCurrentIdx;
         struct
         {
             glm::mat4 proj;
@@ -1898,6 +1905,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             glm::vec2 screenSize;
             float maxDist;
             float thickness;
+            float frameIndex;
+            float jitterStrength;
+            float _pad1;
+            float _pad2;
         } ssrUBO{};
         ssrUBO.proj = camera.getProjection();
         ssrUBO.invProj = glm::inverse(camera.getProjection());
@@ -1905,18 +1916,22 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ssrUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
         ssrUBO.maxDist = 500.0f;
         ssrUBO.thickness = 5.0f;
+        ssrUBO.frameIndex = static_cast<float>(ssrFrameCounter % 64);
+        ssrUBO.jitterStrength = 0.15f;
 
-        SDL_GPUStorageTextureReadWriteBinding ssrWrite = {.texture = ssrTexture, .mip_level = 0, .layer = 0};
+        SDL_GPUStorageTextureReadWriteBinding ssrWrite = {.texture = ssrTexture[ssrDst], .mip_level = 0, .layer = 0};
         SDL_GPUComputePass* ssrPass = SDL_BeginGPUComputePass(cmd, &ssrWrite, 1, nullptr, 0);
         SDL_BindGPUComputePipeline(ssrPass, ssrPipeline);
-        SDL_GPUTextureSamplerBinding ssrSamplers[2] = {
+        SDL_GPUTextureSamplerBinding ssrSamplers[3] = {
             {.texture = hdrTarget, .sampler = tonemapSampler},
             {.texture = depthTexture, .sampler = tonemapSampler},
+            {.texture = ssrTexture[ssrSrc], .sampler = tonemapSampler}, // previous frame SSR
         };
-        SDL_BindGPUComputeSamplers(ssrPass, 0, ssrSamplers, 2);
+        SDL_BindGPUComputeSamplers(ssrPass, 0, ssrSamplers, 3);
         SDL_PushGPUComputeUniformData(cmd, 0, &ssrUBO, sizeof(ssrUBO));
         SDL_DispatchGPUCompute(ssrPass, (w + 15) / 16, (h + 15) / 16, 1);
         SDL_EndGPUComputePass(ssrPass);
+        ssrCurrentIdx = ssrDst;
     }
 
     // ── Volumetrics (Phase 10) ──────────────────────────────────────────────
@@ -2036,7 +2051,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             params.tonemapMode = 0; // ACES
             params.bloomStrength = bloomMips[0] ? 0.3f : 0.0f;
             params.ssaoStrength = ssaoBlurTexture ? 0.5f : 0.0f;
-            params.ssrStrength = ssrTexture ? 0.4f : 0.0f;
+            params.ssrStrength = ssrTexture[0] ? 0.4f : 0.0f;
             params.volumetricStrength = volumetricTexture ? 0.5f : 0.0f;
             SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
 
@@ -2045,7 +2060,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 {.texture = hdrTarget, .sampler = tonemapSampler},
                 {.texture = bloomMips[0] ? bloomMips[0] : fallbackBlack, .sampler = tonemapSampler},
                 {.texture = ssaoBlurTexture ? ssaoBlurTexture : fallbackWhite, .sampler = tonemapSampler},
-                {.texture = ssrTexture ? ssrTexture : fallbackBlack, .sampler = tonemapSampler},
+                {.texture = ssrTexture[ssrCurrentIdx] ? ssrTexture[ssrCurrentIdx] : fallbackBlack,
+                 .sampler = tonemapSampler},
                 {.texture = volumetricTexture ? volumetricTexture : fallbackBlack, .sampler = tonemapSampler},
             };
             SDL_BindGPUFragmentSamplers(pass, 0, tonemapSamplers, 5);
@@ -2205,8 +2221,11 @@ void Renderer::quit()
         SDL_ReleaseGPUTexture(device, ssaoTexture);
     if (ssaoBlurTexture)
         SDL_ReleaseGPUTexture(device, ssaoBlurTexture);
-    if (ssrTexture)
-        SDL_ReleaseGPUTexture(device, ssrTexture);
+    for (auto*& t : ssrTexture) {
+        if (t)
+            SDL_ReleaseGPUTexture(device, t);
+        t = nullptr;
+    }
     if (volumetricTexture)
         SDL_ReleaseGPUTexture(device, volumetricTexture);
     if (motionVectorTexture)

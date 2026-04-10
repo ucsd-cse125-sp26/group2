@@ -1,18 +1,22 @@
-// ssr.comp — Screen-space reflections.
+// ssr.comp — Stochastic screen-space reflections with temporal accumulation.
 //
-// Marches in screen UV + clip-space Z.  Key artifact prevention:
-//   1. Central-difference normals with min-depth-delta selection.
-//   2. Only processes mostly-horizontal surfaces (floors/tables).
-//   3. Minimum ray travel distance prevents self/adjacent-geometry hits.
-//   4. Does NOT early-exit on "passed through" geometry — continues
-//      marching past objects to find reflections behind them.
-//   5. Binary refinement for sub-pixel hit accuracy.
+// Each frame, the reflection ray is jittered by a small random angle.
+// Over multiple frames, TAA accumulates these noisy samples into a smooth,
+// temporally stable reflection.  This naturally handles the undercarriage
+// smear problem: rays that would produce smears are scattered in random
+// directions, and TAA averages them out (most miss the undercarriage,
+// producing correct results on average).
+//
+// The noise pattern changes each frame (driven by a frame counter) using
+// a spatiotemporal blue-noise-like hash so adjacent pixels have different
+// jitter, further improving TAA convergence.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform sampler2D hdrBuffer;
 layout(set = 0, binding = 1) uniform sampler2D depthBuffer;
+layout(set = 0, binding = 2) uniform sampler2D prevSSR;  // previous frame's SSR for temporal accumulation
 
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D ssrImage;
 
@@ -23,6 +27,9 @@ layout(set = 2, binding = 0) uniform SSRParams {
     vec2 screenSize;
     float maxDistance;
     float thickness;
+    float frameIndex;    // monotonic frame counter for temporal noise
+    float jitterStrength; // controls ray spread (0.0 = no jitter, 0.15 = typical)
+    float _pad1, _pad2;
 };
 
 vec3 viewPosFromDepth(vec2 uv, float depth)
@@ -39,6 +46,25 @@ vec3 projectToScreen(vec3 vp)
     return vec3(clip.xy * 0.5 + 0.5, clip.z);
 }
 
+// ── Spatiotemporal hash ─────────────────────────────────────────────────────
+// Returns two pseudo-random values in [0,1) that vary per pixel and per frame.
+// Based on interleaved gradient noise (Jimenez 2014) extended with frame index.
+vec2 spatiotemporalNoise(ivec2 coord, float frame)
+{
+    // Interleaved gradient noise — good screen-space distribution.
+    float n1 = fract(52.9829189 * fract(0.06711056 * float(coord.x) + 0.00583715 * float(coord.y) + frame * 0.1731));
+    float n2 = fract(52.9829189 * fract(0.00583715 * float(coord.x) + 0.06711056 * float(coord.y) + frame * 0.3179));
+    return vec2(n1, n2);
+}
+
+// Build an orthonormal basis around a direction.
+void buildBasis(vec3 N, out vec3 T, out vec3 B)
+{
+    vec3 up = abs(N.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+    T = normalize(cross(up, N));
+    B = cross(N, T);
+}
+
 void main()
 {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
@@ -48,7 +74,6 @@ void main()
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);
     float rawDepth = texture(depthBuffer, uv).r;
 
-    // Sky — no reflection.
     if (rawDepth >= 0.9999) {
         imageStore(ssrImage, coord, vec4(0.0));
         return;
@@ -56,9 +81,8 @@ void main()
 
     vec3 viewPos = viewPosFromDepth(uv, rawDepth);
 
-    // ── Central-difference normal reconstruction ────────────────────────────
+    // ── Normal reconstruction (central differences) ─────────────────────────
     vec2 ts = 1.0 / screenSize;
-
     float dL = texture(depthBuffer, uv - vec2(ts.x, 0)).r;
     float dR = texture(depthBuffer, uv + vec2(ts.x, 0)).r;
     float dU = texture(depthBuffer, uv - vec2(0, ts.y)).r;
@@ -81,18 +105,28 @@ void main()
         return;
     }
 
-    // ── Reflection ray ──────────────────────────────────────────────────────
+    // ── Stochastic reflection ray ───────────────────────────────────────────
     vec3 viewDir = normalize(viewPos);
     vec3 reflDir = reflect(viewDir, viewNormal);
 
-    // Tiny bias along reflection direction — just enough to avoid
-    // self-intersection with the originating surface (1 pixel worth).
-    // The wasInside tracking handles adjacent-object ghosting, so this
-    // bias only needs to clear the floor surface itself.
+    // Jitter the reflection direction within a cone around the true reflection.
+    // This spreads undercarriage hits across many different directions, so on
+    // average most rays miss the undercarriage and find correct geometry.
+    // TAA accumulates the noisy results into a smooth reflection over frames.
+    vec2 noise = spatiotemporalNoise(coord, frameIndex);
+    {
+        vec3 T, B;
+        buildBasis(reflDir, T, B);
+        // Map noise to a cone around reflDir.
+        float angle = noise.x * 6.28318; // azimuth [0, 2π)
+        float radius = noise.y * jitterStrength;
+        reflDir = normalize(reflDir + T * cos(angle) * radius + B * sin(angle) * radius);
+    }
+
+    // ── Bias + march ────────────────────────────────────────────────────────
     float viewDist = abs(viewPos.z);
     vec3 biasedStart = viewPos + reflDir * (viewDist * 0.002);
 
-    // ── Screen-space march ──────────────────────────────────────────────────
     vec3 startScreen = projectToScreen(biasedStart);
     vec3 endScreen = projectToScreen(biasedStart + reflDir * maxDistance);
     vec3 deltaScreen = endScreen - startScreen;
@@ -102,18 +136,10 @@ void main()
     int numSteps = clamp(int(screenPixelDist * 0.5), 8, 300);
     vec3 stepScreen = deltaScreen / float(numSteps);
 
-    // Minimum steps = 1.  The wasInside tracking prevents ghost artifacts
-    // from adjacent geometry, so we don't need a large minimum travel distance.
-    // Keeping this at 1 eliminates the gap between objects and their reflections.
-    int minSteps = 1;
-
     vec3 rayScreen = startScreen;
     int hitStep = -1;
     vec3 hitPos = vec3(0.0);
     vec3 prevPos = startScreen;
-
-    // Track whether we're currently "inside" geometry (ray behind scene depth).
-    // Used to skip through objects and find reflections beyond them.
     bool wasInside = false;
 
     for (int i = 1; i <= numSteps; ++i) {
@@ -125,71 +151,59 @@ void main()
             break;
 
         float sceneDepth = texture(depthBuffer, rayUV).r;
-
-        // Skip sky pixels in the depth buffer.
-        if (sceneDepth >= 0.9999) {
-            wasInside = false;
-            continue;
-        }
+        if (sceneDepth >= 0.9999) { wasInside = false; continue; }
 
         float diff = rayScreen.z - sceneDepth;
         float thk = thickness * 0.005 * max(sceneDepth, 0.05);
 
         if (diff > 0.0) {
-            if (diff < thk && i >= minSteps && !wasInside) {
-                // Valid hit: ray just crossed behind the surface,
-                // has traveled far enough, and wasn't already inside geometry.
+            if (diff < thk && !wasInside) {
                 hitStep = i;
                 hitPos = rayScreen;
                 break;
             }
-            // Mark that we're inside geometry — don't accept the next
-            // surface exit as a hit (it's the back face of the same object).
             wasInside = true;
         } else {
-            // Ray is in front of geometry again — we've passed through.
             wasInside = false;
         }
     }
 
     vec4 result = vec4(0.0);
 
-    // ── Binary refinement (5 iterations) ────────────────────────────────────
     if (hitStep > 0) {
+        // Binary refinement.
         vec3 lo = prevPos;
         vec3 hi = hitPos;
-
         for (int r = 0; r < 5; ++r) {
             vec3 mid = (lo + hi) * 0.5;
             float sd = texture(depthBuffer, mid.xy).r;
-            if (mid.z > sd)
-                hi = mid;
-            else
-                lo = mid;
+            if (mid.z > sd) hi = mid; else lo = mid;
         }
 
         vec2 hitUV = hi.xy;
         if (hitUV.x > 0.01 && hitUV.x < 0.99 && hitUV.y > 0.01 && hitUV.y < 0.99) {
-            // ── Proximity rejection ─────────────────────────────────────────
-            // If the hit UV is very close to the origin UV, the ray hit
-            // geometry right next to the reflective surface (e.g., the
-            // underside of a car sitting on the floor).  These produce
-            // vertical smear artifacts.  Fade out based on screen-space
-            // distance traveled — short rays = low confidence.
-            float screenTravelDist = length((hitUV - uv) * screenSize);
-            float travelFade = smoothstep(3.0, 15.0, screenTravelDist);
-
             float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
                            * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
-
             float distFade = 1.0 - float(hitStep) / float(numSteps);
             float horizFade = smoothstep(0.5, 0.85, horizontalness);
 
             vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
-            float confidence = edgeFade * distFade * horizFade * travelFade;
+            float confidence = edgeFade * distFade * horizFade;
 
             result = vec4(hitColor, confidence);
         }
+    }
+
+    // ── Temporal accumulation ──────────────────────────────────────────────
+    // Blend with previous frame's SSR to smooth out stochastic noise.
+    // Use a high history weight (90%) so noise converges quickly.
+    vec4 history = texture(prevSSR, uv);
+    if (result.a > 0.001) {
+        // New hit this frame — blend with history.
+        result = mix(history, result, 0.15);
+    } else if (history.a > 0.001) {
+        // No hit this frame but history has data — fade out slowly.
+        result = history * 0.92;
     }
 
     imageStore(ssrImage, coord, result);
