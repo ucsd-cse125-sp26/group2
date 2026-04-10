@@ -30,7 +30,7 @@ Phase 0 (Foundation) → Phase 1 (PBR) → Phase 2 (Shadows) → Phase 10 (Volum
           Ph5   Ph7    Ph8    Ph9      Ph11
         Skybox  SSAO  Bloom   SSR      TAA
           ↓
-        Ph6 (IBL)                    Ph12 (SSS, optional)
+        Ph6 (IBL)           Ph12 (OIT)    Ph13 (SSS, optional)
 ```
 
 **Critical path for max visual impact**: 0 → 1 → 4 → 5 → 6 (PBR + HDR + Skybox + IBL).
@@ -257,7 +257,39 @@ Matrices (vert UBO 0):     model view projection normalMatrix = 256B
 
 ---
 
-## Phase 12: Subsurface Scattering (Optional Stretch)
+## Phase 12: Order-Independent Transparency (OIT)
+
+**Goal**: Correct rendering of overlapping transparent surfaces (glass windows seen through other glass, bottles, particles) without draw-order artifacts.
+
+**Current state**: Simple forward alpha blending with a separate transparent pipeline (opaque pass → skybox → transparent pass). Works for single-layer transparency (glass against sky) but fails for multi-layer (looking through two windows — the far window appears opaque because it was rendered before the near one blended on top).
+
+### Approach: Weighted Blended OIT (McGuire & Bavoil 2013)
+The simplest OIT method that doesn't require per-pixel linked lists. Two extra render targets during the transparent pass:
+- **Accumulation buffer** (RGBA16F): `sum(color_i * weight_i * alpha_i)`
+- **Revealage buffer** (R8): `product(1 - alpha_i)`
+
+The weight function biases by depth: `weight = alpha * max(0.01, 3000 * (1-gl_FragCoord.z)^3)`.
+
+A fullscreen resolve pass composites: `final = accum.rgb / max(accum.a, 0.00001)` blended with the opaque+sky background using the revealage value.
+
+### New files
+- `shaders/pbr_wboit.frag` — variant of pbr.frag that writes to the two OIT buffers instead of blending directly.
+- `shaders/oit_resolve.frag` — fullscreen pass that composites the OIT buffers onto the opaque background.
+
+### Files to modify
+- `src/client/renderer/Renderer.hpp/cpp` — add OIT render targets (accumulation + revealage), OIT pipeline (additive blending for accum, multiplicative for revealage), resolve pipeline.
+
+### Verification
+- Looking through two glass windows shows the far window correctly.
+- Bottle is fully visible against all backgrounds (sky, floor, other objects).
+- No draw-order artifacts.
+
+### Alternative: Per-Pixel Linked Lists
+More accurate but requires compute shaders + atomic operations + storage buffers. Higher complexity, better results for many overlapping layers. Consider if WBOIT has visible artifacts.
+
+---
+
+## Phase 13: Subsurface Scattering (Optional Stretch)
 
 **Goal**: Translucent skin/organic look for character models.
 
@@ -282,7 +314,8 @@ Screen-space separable Gaussian diffusion, weighted by material SSS flag + depth
 | 9 | SSR | 4–5 | High |
 | 10 | Volumetrics | 3–4 | High |
 | 11 | TAA | 3–4 | Medium |
-| 12 | SSS | 3–4 | Medium |
-| | **Total** | **35–47** | |
+| 12 | OIT (transparency) | 2–3 | Medium |
+| 13 | SSS | 3–4 | Medium |
+| | **Total** | **38–51** | |
 
-**Recommended milestone**: Phases 0–6 (Foundation through IBL) = dramatic visual upgrade in ~3–4 weeks. Phases 7–8 (SSAO + Bloom) as next tier. Phases 9–12 as stretch goals.
+**Recommended milestone**: Phases 0–6 (Foundation through IBL) = dramatic visual upgrade in ~3–4 weeks. Phases 7–8 (SSAO + Bloom) as next tier. Phase 12 (OIT) if transparency artifacts are a priority. Phases 9–11, 13 as stretch goals.
