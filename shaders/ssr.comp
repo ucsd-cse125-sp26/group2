@@ -85,12 +85,12 @@ void main()
     vec3 viewDir = normalize(viewPos);
     vec3 reflDir = reflect(viewDir, viewNormal);
 
-    // Bias: push start along reflection direction (NOT along normal).
-    // Normal-direction bias causes the ray to start inside adjacent objects
-    // sitting on the floor.  Reflection-direction bias moves the ray along
-    // its travel path, which is away from the floor surface.
+    // Tiny bias along reflection direction — just enough to avoid
+    // self-intersection with the originating surface (1 pixel worth).
+    // The wasInside tracking handles adjacent-object ghosting, so this
+    // bias only needs to clear the floor surface itself.
     float viewDist = abs(viewPos.z);
-    vec3 biasedStart = viewPos + reflDir * (viewDist * 0.03);
+    vec3 biasedStart = viewPos + reflDir * (viewDist * 0.002);
 
     // ── Screen-space march ──────────────────────────────────────────────────
     vec3 startScreen = projectToScreen(biasedStart);
@@ -102,11 +102,10 @@ void main()
     int numSteps = clamp(int(screenPixelDist * 0.5), 8, 300);
     vec3 stepScreen = deltaScreen / float(numSteps);
 
-    // Minimum number of steps before accepting a hit.
-    // This prevents the ray from immediately hitting objects sitting ON the
-    // reflective surface (e.g., a car on the floor).  The ray must travel
-    // at least this many steps away from the origin.
-    int minSteps = max(numSteps / 10, 3);
+    // Minimum steps = 1.  The wasInside tracking prevents ghost artifacts
+    // from adjacent geometry, so we don't need a large minimum travel distance.
+    // Keeping this at 1 eliminates the gap between objects and their reflections.
+    int minSteps = 1;
 
     vec3 rayScreen = startScreen;
     int hitStep = -1;
