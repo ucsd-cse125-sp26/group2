@@ -1230,8 +1230,8 @@ bool Renderer::initSSAO()
 
 bool Renderer::initSSR()
 {
-    // SSR: 3 samplers (hdr + depth + prevSSR), 1 rw storage tex, 1 UBO.
-    ssrPipeline = createComputePipeline("ssr.comp", 3, 0, 0, 1, 0, 1, 16, 16, 1);
+    // SSR: 4 samplers (hdr + depth + prevSSR + motionVectors), 1 rw storage tex, 1 UBO.
+    ssrPipeline = createComputePipeline("ssr.comp", 4, 0, 0, 1, 0, 1, 16, 16, 1);
     return ssrPipeline != nullptr;
 }
 
@@ -1918,17 +1918,18 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ssrUBO.maxDist = 500.0f;
         ssrUBO.thickness = 5.0f;
         ssrUBO.frameIndex = static_cast<float>(ssrFrameCounter % 64);
-        ssrUBO.jitterStrength = 0.15f;
+        ssrUBO.jitterStrength = 0.06f; // Subtle — enough to scatter undercarriage hits.
 
         SDL_GPUStorageTextureReadWriteBinding ssrWrite = {.texture = ssrTexture[ssrDst], .mip_level = 0, .layer = 0};
         SDL_GPUComputePass* ssrPass = SDL_BeginGPUComputePass(cmd, &ssrWrite, 1, nullptr, 0);
         SDL_BindGPUComputePipeline(ssrPass, ssrPipeline);
-        SDL_GPUTextureSamplerBinding ssrSamplers[3] = {
+        SDL_GPUTextureSamplerBinding ssrSamplers[4] = {
             {.texture = hdrTarget, .sampler = tonemapSampler},
             {.texture = depthTexture, .sampler = tonemapSampler},
-            {.texture = ssrTexture[ssrSrc], .sampler = tonemapSampler}, // previous frame SSR
+            {.texture = ssrTexture[ssrSrc], .sampler = tonemapSampler},
+            {.texture = motionVectorTexture ? motionVectorTexture : fallbackBlack, .sampler = tonemapSampler},
         };
-        SDL_BindGPUComputeSamplers(ssrPass, 0, ssrSamplers, 3);
+        SDL_BindGPUComputeSamplers(ssrPass, 0, ssrSamplers, 4);
         SDL_PushGPUComputeUniformData(cmd, 0, &ssrUBO, sizeof(ssrUBO));
         SDL_DispatchGPUCompute(ssrPass, (w + 15) / 16, (h + 15) / 16, 1);
         SDL_EndGPUComputePass(ssrPass);

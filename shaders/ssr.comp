@@ -16,7 +16,8 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform sampler2D hdrBuffer;
 layout(set = 0, binding = 1) uniform sampler2D depthBuffer;
-layout(set = 0, binding = 2) uniform sampler2D prevSSR;  // previous frame's SSR for temporal accumulation
+layout(set = 0, binding = 2) uniform sampler2D prevSSR;       // previous frame's SSR
+layout(set = 0, binding = 3) uniform sampler2D motionVectors;  // screen-space motion for reprojection
 
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D ssrImage;
 
@@ -194,16 +195,24 @@ void main()
         }
     }
 
-    // ── Temporal accumulation ──────────────────────────────────────────────
-    // Blend with previous frame's SSR to smooth out stochastic noise.
-    // Use a high history weight (90%) so noise converges quickly.
-    vec4 history = texture(prevSSR, uv);
+    // ── Temporal accumulation with motion-vector reprojection ──────────────
+    // Reproject the previous frame's SSR to the current frame's screen
+    // position using motion vectors, so reflections stay attached to their
+    // surfaces during camera movement.
+    vec2 motion = texture(motionVectors, uv).rg;
+    vec2 historyUV = uv - motion;
+
+    vec4 history = vec4(0.0);
+    if (historyUV.x > 0.0 && historyUV.x < 1.0 && historyUV.y > 0.0 && historyUV.y < 1.0)
+        history = texture(prevSSR, historyUV);
+
     if (result.a > 0.001) {
-        // New hit this frame — blend with history.
-        result = mix(history, result, 0.15);
+        // New hit this frame — blend with reprojected history.
+        // 30% current = sharper reflections, converges in ~3-4 frames.
+        result = mix(history, result, 0.3);
     } else if (history.a > 0.001) {
-        // No hit this frame but history has data — fade out slowly.
-        result = history * 0.92;
+        // No hit this frame but history has data — fade out.
+        result = history * 0.85;
     }
 
     imageStore(ssrImage, coord, result);
