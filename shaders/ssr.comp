@@ -192,19 +192,22 @@ void main()
             }
             vec3 hitNormal = normalize(cross(hitDdx, hitDdy));
 
-            // Dot(hitNormal, reflDir) > 0 means the surface faces away from
-            // the incoming ray — it's a back-face.  Skip it.
+            // Dot(hitNormal, reflDir) measures how much the hit surface faces
+            // the same direction as the ray.  Values near +1 mean the surface
+            // is facing away (back-face, e.g., car undercarriage from below).
+            // Only reject strongly back-facing hits (> 0.5) — surfaces at
+            // moderate angles should still be accepted as valid reflections.
             float backFaceDot = dot(hitNormal, reflDir);
-            if (backFaceDot < 0.0) {
-                // Front-face hit — accept it.
+            if (backFaceDot < 0.5) {
+                // Accept this hit.
                 float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
                                * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
 
                 float distFade = 1.0 - float(hitStep) / float(numSteps);
                 float horizFade = smoothstep(0.5, 0.85, horizontalness);
 
-                // Fade hits that are nearly parallel to the surface (grazing).
-                float facingFade = smoothstep(0.0, -0.3, backFaceDot);
+                // Fade hits that are nearly back-facing (approaching the 0.5 threshold).
+                float facingFade = 1.0 - smoothstep(0.0, 0.5, backFaceDot);
 
                 vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
                 float confidence = edgeFade * distFade * horizFade * facingFade;
