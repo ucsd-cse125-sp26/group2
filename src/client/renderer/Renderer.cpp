@@ -415,18 +415,31 @@ bool Renderer::initShadowPipeline()
 
 SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height, bool sRGB)
 {
+    // Compute full mip chain levels: floor(log2(max(w,h))) + 1.
+    const Uint32 w = static_cast<Uint32>(width);
+    const Uint32 h = static_cast<Uint32>(height);
+    const Uint32 maxDim = std::max(w, h);
+    Uint32 numLevels = 1;
+    {
+        Uint32 dim = maxDim;
+        while (dim > 1) {
+            dim >>= 1;
+            ++numLevels;
+        }
+    }
+    // For tiny textures (1×1 fallbacks), skip mipmapping.
+    const bool generateMips = (numLevels > 1 && w > 1 && h > 1);
+
     SDL_GPUTextureCreateInfo info{};
     info.type = SDL_GPU_TEXTURETYPE_2D;
-    // Color textures (albedo, emissive) are sRGB-encoded; data textures
-    // (normal, metallic-roughness) are linear.  Using the _SRGB format lets
-    // the GPU hardware convert sRGB → linear on sampling automatically.
     info.format = sRGB ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    info.width = static_cast<Uint32>(width);
-    info.height = static_cast<Uint32>(height);
+    info.width = w;
+    info.height = h;
     info.layer_count_or_depth = 1;
-    info.num_levels = 1;
+    info.num_levels = generateMips ? numLevels : 1;
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    // SAMPLER for sampling in shaders; COLOR_TARGET needed as blit destination for mip generation.
+    info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | (generateMips ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET : 0);
 
     SDL_GPUTexture* tex = SDL_CreateGPUTexture(device, &info);
     if (!tex) {
@@ -434,8 +447,8 @@ SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, 
         return nullptr;
     }
 
-    const Uint32 dataSize = static_cast<Uint32>(width) * static_cast<Uint32>(height) * 4u;
-
+    // Upload base level (mip 0).
+    const Uint32 dataSize = w * h * 4u;
     SDL_GPUTransferBufferCreateInfo tbInfo{};
     tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     tbInfo.size = dataSize;
@@ -458,8 +471,8 @@ SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, 
 
     SDL_GPUTextureRegion dst{};
     dst.texture = tex;
-    dst.w = static_cast<Uint32>(width);
-    dst.h = static_cast<Uint32>(height);
+    dst.w = w;
+    dst.h = h;
     dst.d = 1;
 
     SDL_UploadToGPUTexture(cp, &src, &dst, false);
@@ -467,6 +480,36 @@ SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, 
     SDL_SubmitGPUCommandBuffer(cmd);
     SDL_WaitForGPUIdle(device);
     SDL_ReleaseGPUTransferBuffer(device, tb);
+
+    // Generate mip chain using GPU blit (linear filter downsampling).
+    if (generateMips) {
+        Uint32 mipW = w;
+        Uint32 mipH = h;
+        for (Uint32 mip = 1; mip < numLevels; ++mip) {
+            Uint32 prevW = mipW;
+            Uint32 prevH = mipH;
+            mipW = std::max(mipW >> 1, 1u);
+            mipH = std::max(mipH >> 1, 1u);
+
+            SDL_GPUCommandBuffer* blitCmd = SDL_AcquireGPUCommandBuffer(device);
+
+            SDL_GPUBlitInfo blit{};
+            blit.source.texture = tex;
+            blit.source.mip_level = mip - 1;
+            blit.source.w = prevW;
+            blit.source.h = prevH;
+            blit.destination.texture = tex;
+            blit.destination.mip_level = mip;
+            blit.destination.w = mipW;
+            blit.destination.h = mipH;
+            blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+            blit.filter = SDL_GPU_FILTER_LINEAR;
+
+            SDL_BlitGPUTexture(blitCmd, &blit);
+            SDL_SubmitGPUCommandBuffer(blitCmd);
+        }
+        SDL_WaitForGPUIdle(device);
+    }
 
     return tex;
 }
@@ -489,7 +532,7 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
     sampInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
     sampInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
     sampInfo.min_lod = 0.0f;
-    sampInfo.max_lod = 1.0f;
+    sampInfo.max_lod = 13.0f; // Allow up to 8192×8192 mip chain (log2(8192)+1=13).
     sampInfo.enable_anisotropy = true;
     sampInfo.max_anisotropy = 8.0f;
     sampInfo.enable_compare = false;
