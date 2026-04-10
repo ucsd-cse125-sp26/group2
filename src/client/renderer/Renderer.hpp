@@ -62,6 +62,12 @@ private:
     static constexpr int k_shadowMapSize = 2048;
     SDL_GPUTexture* shadowMap = nullptr; ///< D32_FLOAT, 2D_ARRAY, 4 cascades.
 
+    // ── IBL textures (Phase 6) ──────────────────────────────────────────────
+    SDL_GPUTexture* brdfLUT = nullptr;       ///< 512×512 RG16F split-sum LUT.
+    SDL_GPUTexture* irradianceMap = nullptr; ///< 32×32 per face, RGBA16F cubemap.
+    SDL_GPUTexture* prefilterMap = nullptr;  ///< 128×128 per face, 5 mip levels, RGBA16F cubemap.
+    SDL_GPUSampler* iblSampler = nullptr;    ///< Linear, clamp-to-edge, mipmapped.
+
     // ── Samplers ────────────────────────────────────────────────────────────
     SDL_GPUSampler* pbrSampler = nullptr;     ///< Linear, repeat, aniso 8×, mipmapped.
     SDL_GPUSampler* shadowSampler = nullptr;  ///< Comparison, border.
@@ -109,6 +115,7 @@ private:
     bool initTonemapPipeline();
     bool initShadowPipeline();
 
+    bool initIBL(); ///< Generate BRDF LUT, irradiance map, and prefilter map via compute.
     bool ensureDepthTexture(Uint32 w, Uint32 h);
     bool ensureHDRTarget(Uint32 w, Uint32 h);
     bool ensureCaptureRT(Uint32 w, Uint32 h, SDL_GPUTextureFormat fmt);
