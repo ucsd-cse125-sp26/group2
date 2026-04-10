@@ -1,6 +1,7 @@
 #pragma once
 
 #include "debug/DebugUI.hpp"
+#include "debug/FrameRecorder.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
 #include "renderer/Renderer.hpp"
@@ -45,4 +46,7 @@ private:
     float accumulator = 0.0f;  ///< Unprocessed physics time in seconds.
     int tickCount = 0;         ///< Total physics ticks elapsed since start.
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
+
+    FrameRecorder recorder;    ///< R-key toggled frame-state + screenshot recorder.
+    uint64_t frameCount = 0;   ///< Monotonic render-frame counter.
 };

@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include <glm/glm.hpp>
+#include <string>
 #include <vector>
 
 /// @brief SDL3 GPU pipeline (Vulkan · Metal · DX12).
@@ -25,6 +26,12 @@ public:
     /// @return False on any fatal GPU error.
     /// @pre An ImGui context must already exist (created by DebugUI::init).
     bool init(SDL_Window* window);
+
+    /// @brief Request a PNG screenshot of the next rendered frame.
+    /// The screenshot is saved synchronously at the end of that drawFrame() call,
+    /// so it reflects exactly the pixels that appear on screen.
+    /// @param path  Absolute path for the output PNG (parent directory must exist).
+    void requestScreenshot(const std::string& path);
 
     /// @brief Submit the scene geometry, loaded model, and ImGui draw data for one frame.
     /// @param eye    World-space camera eye position (interpolated, in Quake units).
@@ -69,10 +76,24 @@ private:
     SDL_GPUSampler* modelSampler = nullptr;           ///< Shared linear sampler for all model textures.
     glm::mat4 modelTransform{1.0f};                   ///< World transform applied to the model.
 
+    // ---- Screen capture (recording) ------------------------------------
+
+    SDL_GPUTexture* captureRT = nullptr; ///< Intermediate render target for screenshots.
+    Uint32 captureRTW = 0;
+    Uint32 captureRTH = 0;
+    SDL_GPUTextureFormat captureRTFmt = SDL_GPU_TEXTUREFORMAT_INVALID; ///< Format mirrors swapchain.
+    std::string pendingCapPath;                                        ///< Non-empty = save next frame here.
+
     // ---- Private helpers -----------------------------------------------
 
     /// @brief (Re-)create the depth texture when the swapchain size changes.
     bool ensureDepthTexture(Uint32 w, Uint32 h);
+
+    /// @brief (Re-)create the intermediate capture render-target if size/format changed.
+    bool ensureCaptureRT(Uint32 w, Uint32 h, SDL_GPUTextureFormat fmt);
+
+    /// @brief Download captureRT to CPU and write a PNG to pendingCapPath, then clear it.
+    void downloadAndSaveCapture(Uint32 w, Uint32 h);
 
     /// @brief Create the model graphics pipeline (vertex inputs + fragment sampler + depth test).
     /// @param fmt       Active shader format (SPIR-V or MSL).
