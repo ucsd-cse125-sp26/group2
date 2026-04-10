@@ -172,19 +172,39 @@ SDL_AppResult Game::event(SDL_Event* event)
 
         // ── Particle system test keys ───────────────────────────────────────
         case SDLK_T: {
+            // Energy beam — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
-            particleSystem.spawnHitscanBeam(hip, hip + cachedCamFwd_ * 400.f, WeaponType::EnergyRifle);
-            particleSystem.spawnImpactEffect(
-                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Energy, WeaponType::EnergyRifle);
+            float dist = 500.f;
+            glm::vec3 hitN = -cachedCamFwd_;
+            if (cachedCamFwd_.y < -0.001f) {
+                const float t = -cachedEye_.y / cachedCamFwd_.y;
+                if (t > 0.f && t < dist) {
+                    dist = t;
+                    hitN = {0, 1, 0};
+                }
+            }
+            const glm::vec3 hitP = cachedEye_ + cachedCamFwd_ * dist;
+            particleSystem.spawnHitscanBeam(hip, hitP, WeaponType::EnergyRifle);
+            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Energy, WeaponType::EnergyRifle);
             break;
         }
         case SDLK_Y: {
+            // Bullet tracer — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
-            particleSystem.spawnBulletTracer(hip, cachedCamFwd_, 400.f);
-            particleSystem.spawnImpactEffect(
-                hip + cachedCamFwd_ * 400.f, -cachedCamFwd_, SurfaceType::Metal, WeaponType::Rifle);
+            float dist = 500.f;
+            glm::vec3 hitN = -cachedCamFwd_;
+            if (cachedCamFwd_.y < -0.001f) {
+                const float t = -cachedEye_.y / cachedCamFwd_.y;
+                if (t > 0.f && t < dist) {
+                    dist = t;
+                    hitN = {0, 1, 0};
+                }
+            }
+            const glm::vec3 hitP = cachedEye_ + cachedCamFwd_ * dist;
+            particleSystem.spawnBulletTracer(hip, cachedCamFwd_, dist);
+            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Metal, WeaponType::Rifle);
             break;
         }
         case SDLK_U: {
@@ -209,7 +229,56 @@ SDL_AppResult Game::event(SDL_Event* event)
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT && mouseCaptured) {
         const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
         const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
-        const glm::vec3 hitPos = hip + cachedCamFwd_ * 500.f;
+
+        // ── Ray-scene intersection for hit position ─────────────────────
+        // Test against the floor plane (y=0) and use the nearest hit.
+        constexpr float k_maxRange = 5000.f;
+        float hitDist = k_maxRange; // fallback: max range
+        glm::vec3 hitNormal = -cachedCamFwd_;
+        SurfaceType hitSurface = SurfaceType::Concrete;
+
+        // Floor plane: y = 0, normal = (0, 1, 0)
+        if (cachedCamFwd_.y < -0.001f) { // looking downward at all
+            const float t = -cachedEye_.y / cachedCamFwd_.y;
+            if (t > 0.f && t < hitDist) {
+                hitDist = t;
+                hitNormal = glm::vec3{0.f, 1.f, 0.f};
+                hitSurface = SurfaceType::Concrete;
+            }
+        }
+
+        // Test against scene objects as rough spheres.
+        struct SceneObj
+        {
+            glm::vec3 center;
+            float radius;
+            SurfaceType surface;
+        };
+        static const SceneObj k_sceneObjects[] = {
+            {{200.f, 60.f, 400.f}, 80.f, SurfaceType::Flesh},   // Wraith
+            {{-200.f, 40.f, 400.f}, 100.f, SurfaceType::Metal}, // Porsche
+            {{0.f, 50.f, 600.f}, 60.f, SurfaceType::Metal},     // Pallet
+            {{100.f, 30.f, 400.f}, 30.f, SurfaceType::Metal},   // Bottle
+        };
+        for (const auto& obj : k_sceneObjects) {
+            // Ray-sphere intersection: |origin + t*dir - center|² = r²
+            const glm::vec3 oc = cachedEye_ - obj.center;
+            const float b = glm::dot(oc, cachedCamFwd_);
+            const float c = glm::dot(oc, oc) - obj.radius * obj.radius;
+            const float disc = b * b - c;
+            if (disc >= 0.f) {
+                const float t = -b - std::sqrt(disc);
+                if (t > 0.f && t < hitDist) {
+                    hitDist = t;
+                    const glm::vec3 p = cachedEye_ + cachedCamFwd_ * t;
+                    hitNormal = glm::normalize(p - obj.center);
+                    hitSurface = obj.surface;
+                }
+            }
+        }
+
+        const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
+        const float tracerRange = hitDist; // tracer ends at the hit point
 
         WeaponFiredEvent wfe;
         wfe.type = WeaponType::Rifle;
@@ -219,9 +288,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         wfe.hitPos = hitPos;
         dispatcher.enqueue(wfe);
 
-        // Also spawn tracers and impact directly for visual feedback.
-        particleSystem.spawnBulletTracer(hip, cachedCamFwd_, 500.f);
-        particleSystem.spawnImpactEffect(hitPos, -cachedCamFwd_, SurfaceType::Metal, WeaponType::Rifle);
+        // Spawn tracers from muzzle to hit, impact at the hit surface.
+        particleSystem.spawnBulletTracer(hip, cachedCamFwd_, tracerRange);
+        particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, WeaponType::Rifle);
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
@@ -449,20 +518,21 @@ SDL_AppResult Game::iterate()
     }
 
     // ── Build weapon viewmodel ──────────────────────────────────────────────
+    // R-301 model bounds: X ±0.6, Y −3.4..+1.3, Z −8.4..+7.2
+    // Model's +Z axis is the barrel direction.  Origin is near the grip.
     {
         WeaponViewmodel vm;
         if (weaponModelIdx >= 0) {
             vm.modelIndex = weaponModelIdx;
             vm.visible = true;
 
-            // Position the weapon in front of the camera, offset right and down.
             const float cosPitch = std::cos(renderPitch);
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
             const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
             const glm::vec3 up = glm::normalize(glm::cross(right, forward));
 
-            // Weapon bob: subtle sinusoidal offset based on movement
+            // Weapon bob: subtle sinusoidal offset based on movement speed
             float bobPhase = 0.0f;
             float bobAmplitude = 0.0f;
             registry.view<LocalPlayer, Velocity>().each([&](const Velocity& vel) {
@@ -476,18 +546,24 @@ SDL_AppResult Game::iterate()
             const float bobX = std::sin(bobPhase) * bobAmplitude;
             const float bobY = std::sin(bobPhase * 2.0f) * bobAmplitude * 0.5f;
 
-            glm::vec3 weaponPos = renderEye + forward * 20.f + right * 8.f - up * 10.f;
+            // FPS weapon position: lower-right of screen, slightly forward.
+            // The model at scale 5 is ~75 units long, realistic for a rifle
+            // in Quake-unit scale (1 unit ≈ 1 inch).
+            constexpr float k_weaponScale = 5.0f;
+            glm::vec3 weaponPos = renderEye + forward * 25.f + right * 18.f - up * 18.f;
             weaponPos += right * bobX + up * bobY;
 
-            // Weapon rotation: align with camera look direction
+            // Build world transform: translate → rotate → scale.
+            // Rotation: model +Z (barrel) → camera forward,
+            //           model +Y (rail)   → camera up,
+            //           model +X (side)   → camera right.
             glm::mat4 weaponWorld = glm::translate(glm::mat4(1.0f), weaponPos);
-            // Rotate weapon to face the same direction as the camera
-            const glm::mat4 rotMat = glm::mat4(glm::vec4(right, 0.0f),
-                                               glm::vec4(up, 0.0f),
-                                               glm::vec4(-forward, 0.0f), // Negative because models typically face -Z
+            const glm::mat4 rotMat = glm::mat4(glm::vec4(right, 0.0f),   // column 0: model X → right
+                                               glm::vec4(up, 0.0f),      // column 1: model Y → up
+                                               glm::vec4(forward, 0.0f), // column 2: model Z → forward (barrel)
                                                glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
             weaponWorld *= rotMat;
-            weaponWorld = glm::scale(weaponWorld, glm::vec3(1.0f));
+            weaponWorld = glm::scale(weaponWorld, glm::vec3(k_weaponScale));
 
             vm.transform = weaponWorld;
         }
