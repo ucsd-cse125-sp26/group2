@@ -169,7 +169,9 @@ void main()
     // ── Image-Based Lighting (IBL) ─────────────────────────────────────────
     // Split-sum approximation: the integral of incoming environment radiance
     // is split into a pre-filtered specular term and a diffuse irradiance term.
-    float NdotV_ibl = max(dot(N, V), 0.0);
+    // Clamp NdotV to avoid extreme Fresnel rim glow from normal maps
+    // that push normals nearly perpendicular to the view direction.
+    float NdotV_ibl = max(dot(N, V), 0.05);
     vec3 F_ibl = fresnelSchlickRoughness(NdotV_ibl, F0, roughness);
 
     // Metallic surfaces don't diffuse; dielectrics do.
