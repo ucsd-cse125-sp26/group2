@@ -214,11 +214,9 @@ bool Renderer::initPBRPipeline()
     vertexInput.vertex_attributes = attrs;
     vertexInput.num_vertex_attributes = 4;
 
-    // NOTE: Alpha blending is deliberately OFF.  Many car/model textures
-    // use the albedo alpha channel for non-transparency data (clearcoat masks,
-    // specular weight, etc.).  Enabling blend makes entire bodies transparent.
-    // Proper transparency requires reading the glTF material alphaMode and
-    // rendering transparent meshes in a separate pass — a future improvement.
+    // No alpha blending on the opaque PBR pipeline.
+    // Transparency will be handled by a SEPARATE transparent pipeline that
+    // renders after opaques with alpha blending + no depth write.
     SDL_GPUColorTargetDescription ct{};
     ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 
@@ -246,6 +244,38 @@ bool Renderer::initPBRPipeline()
         SDL_Log("Renderer: PBR pipeline creation failed: %s", SDL_GetError());
         return false;
     }
+
+    // ── Transparent PBR pipeline (same shaders, alpha blend, no depth write) ─
+    {
+        SDL_GPUColorTargetDescription ctBlend{};
+        ctBlend.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ctBlend.blend_state.enable_blend = true;
+        ctBlend.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+        ctBlend.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        ctBlend.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+        ctBlend.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+        ctBlend.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        ctBlend.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+
+        // Reload shaders for the second pipeline (SDL requires separate shader objects).
+        SDL_GPUShader* vertT = loadShaderFromFile("pbr.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+        SDL_GPUShader* fragT = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2);
+
+        SDL_GPUGraphicsPipelineCreateInfo pciT = pci; // copy from opaque
+        pciT.vertex_shader = vertT;
+        pciT.fragment_shader = fragT;
+        pciT.target_info.color_target_descriptions = &ctBlend;
+        // Read depth (test) but don't write — transparent surfaces don't occlude.
+        pciT.depth_stencil_state.enable_depth_write = false;
+
+        pbrTransparentPipeline = SDL_CreateGPUGraphicsPipeline(device, &pciT);
+        SDL_ReleaseGPUShader(device, vertT);
+        SDL_ReleaseGPUShader(device, fragT);
+
+        if (!pbrTransparentPipeline)
+            SDL_Log("Renderer: transparent PBR pipeline creation failed: %s", SDL_GetError());
+    }
+
     return true;
 }
 
@@ -576,6 +606,7 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
             .metallicRoughnessTexIndex = md.metallicRoughnessTexIndex,
             .emissiveTexIndex = md.emissiveTexIndex,
             .material = md.material,
+            .isTransparent = (md.material.alphaMode != AlphaMode::Opaque),
         });
     }
 
@@ -1166,6 +1197,7 @@ bool Renderer::init(SDL_Window* win)
     // flipUVs=true: Porsche GLB uses V=0 at bottom (Sketchfab/Blender export).
     loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 0.0f, 400.0f), 40.0f, true);
     loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
+    loadAndPlace("bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
 
     // Camera — overridden every frame by drawFrame().
     camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},
@@ -1323,74 +1355,81 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
         }
 
-        // ── PBR models ──────────────────────────────────────────────────────
-        if (pbrPipeline && pbrSampler && !models.empty()) {
-            SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
-
-            // Fragment UBO slot 1: LightData (once per frame, shared by all models).
+        // ── PBR models (two-pass: opaques first, then transparents) ────────
+        if (pbrSampler && !models.empty()) {
+            // Light data shared by both passes.
             LightDataUBO lightData{};
             lightData.cameraPos = glm::vec4(eye, 1.0f);
             lightData.ambientColor = glm::vec4(0.03f, 0.03f, 0.04f, 1.0f);
             lightData.numLights = 2;
-
-            // Primary directional light (matches skybox sun direction).
             lightData.lights[0].position = glm::vec4(glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f)), 0.0f);
             lightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, 3.0f);
-
-            // Fill light — softer, from opposite side.
             lightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
             lightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
 
-            SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+            // Helper: draw all meshes matching the transparency filter.
+            auto drawMeshes = [&](bool wantTransparent) {
+                for (const auto& model : models) {
+                    Matrices modelMats{};
+                    modelMats.model = model.transform;
+                    modelMats.view = camera.getView();
+                    modelMats.projection = camera.getProjection();
+                    modelMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(model.transform)));
+                    SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
 
-            for (const auto& model : models) {
-                // Per-model vertex UBO: Matrices (with normalMatrix).
-                Matrices modelMats{};
-                modelMats.model = model.transform;
-                modelMats.view = camera.getView();
-                modelMats.projection = camera.getProjection();
-                modelMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(model.transform)));
-                SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
+                    for (const auto& mesh : model.meshes) {
+                        if (mesh.isTransparent != wantTransparent)
+                            continue;
 
-                for (const auto& mesh : model.meshes) {
-                    // Fragment UBO slot 0: Material.
-                    MaterialUBO matUBO{};
-                    matUBO.baseColorFactor = mesh.material.baseColorFactor;
-                    matUBO.metallicFactor = mesh.material.metallicFactor;
-                    matUBO.roughnessFactor = mesh.material.roughnessFactor;
-                    matUBO.aoStrength = mesh.material.aoStrength;
-                    matUBO.normalScale = mesh.material.normalScale;
-                    matUBO.emissiveFactor = mesh.material.emissiveFactor;
-                    SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+                        MaterialUBO matUBO{};
+                        matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                        matUBO.metallicFactor = mesh.material.metallicFactor;
+                        matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                        matUBO.aoStrength = mesh.material.aoStrength;
+                        matUBO.normalScale = mesh.material.normalScale;
+                        matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                        SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
 
-                    // Bind vertex/index buffers.
-                    const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
-                    SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
-                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
-                    SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                        const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                        SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+                        const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                        SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-                    // Bind textures: albedo (slot 0), MR (slot 1), emissive (slot 2).
-                    auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
-                        if (idx >= 0 && static_cast<size_t>(idx) < model.textures.size() &&
-                            model.textures[static_cast<size_t>(idx)])
-                            return model.textures[static_cast<size_t>(idx)];
-                        return fallback;
-                    };
+                        auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                            if (idx >= 0 && static_cast<size_t>(idx) < model.textures.size() &&
+                                model.textures[static_cast<size_t>(idx)])
+                                return model.textures[static_cast<size_t>(idx)];
+                            return fallback;
+                        };
 
-                    const SDL_GPUTextureSamplerBinding samplers[7] = {
-                        {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
-                        {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
-                        {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
-                        {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
-                        // IBL textures (shared across all meshes).
-                        {.texture = irradianceMap, .sampler = iblSampler},
-                        {.texture = prefilterMap, .sampler = iblSampler},
-                        {.texture = brdfLUT, .sampler = iblSampler},
-                    };
-                    SDL_BindGPUFragmentSamplers(pass, 0, samplers, 7);
+                        const SDL_GPUTextureSamplerBinding samplers[7] = {
+                            {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                            {.texture = irradianceMap, .sampler = iblSampler},
+                            {.texture = prefilterMap, .sampler = iblSampler},
+                            {.texture = brdfLUT, .sampler = iblSampler},
+                        };
+                        SDL_BindGPUFragmentSamplers(pass, 0, samplers, 7);
 
-                    SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+                        SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+                    }
                 }
+            };
+
+            // Pass 1: Opaque meshes (writes depth, no blending).
+            if (pbrPipeline) {
+                SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
+                SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                drawMeshes(false);
+            }
+
+            // Pass 2: Transparent meshes (reads depth, alpha blending).
+            if (pbrTransparentPipeline) {
+                SDL_BindGPUGraphicsPipeline(pass, pbrTransparentPipeline);
+                SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                drawMeshes(true);
             }
         }
 
@@ -1619,6 +1658,8 @@ void Renderer::quit()
         SDL_ReleaseGPUGraphicsPipeline(device, scenePipeline);
     if (pbrPipeline)
         SDL_ReleaseGPUGraphicsPipeline(device, pbrPipeline);
+    if (pbrTransparentPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, pbrTransparentPipeline);
     if (skyboxPipeline)
         SDL_ReleaseGPUGraphicsPipeline(device, skyboxPipeline);
     if (tonemapPipeline)
