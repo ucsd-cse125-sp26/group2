@@ -72,8 +72,7 @@ bool Game::init()
     mouseCaptured = true;
 
     // Spawn the local player entity with all physics and input components.
-    // Start close to the models for testing. Wraith at (200,0,400), Porsche at (-200,0,400).
-    const glm::vec3 k_startPos{0.0f, 50.0f, 200.0f};
+    const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
     const entt::entity k_player = registry.create();
     registry.emplace<Position>(k_player, k_startPos);
     registry.emplace<PreviousPosition>(k_player, k_startPos);
@@ -200,7 +199,7 @@ SDL_AppResult Game::iterate()
     accumulator += frameTime;
 
     static int iterCount = 0;
-    if (++iterCount <= 3)
+    if (false && ++iterCount <= 3) // disabled debug log
         SDL_Log("[ITERATE] call=%d frameTime=%.4f acc=%.4f renderSep=%d",
                 iterCount,
                 static_cast<double>(frameTime),
