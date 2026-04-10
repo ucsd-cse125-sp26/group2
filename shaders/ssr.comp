@@ -1,0 +1,84 @@
+// ssr.comp — Screen-space reflections via ray marching in screen space.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D hdrBuffer;
+layout(set = 0, binding = 1) uniform sampler2D depthBuffer;
+
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D ssrImage;
+
+layout(set = 2, binding = 0) uniform SSRParams {
+    mat4 projection;
+    mat4 invProjection;
+    mat4 view;
+    vec2 screenSize;
+    float maxDistance;
+    float thickness;
+};
+
+vec3 reconstructViewPos(vec2 uv, float depth)
+{
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 vp = invProjection * clip;
+    return vp.xyz / vp.w;
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(ssrImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    float depth = texture(depthBuffer, uv).r;
+
+    // Skip sky.
+    if (depth >= 0.9999) {
+        imageStore(ssrImage, coord, vec4(0.0));
+        return;
+    }
+
+    vec3 viewPos = reconstructViewPos(uv, depth);
+
+    // Reconstruct view-space normal from depth.
+    vec2 ts = 1.0 / screenSize;
+    vec3 dPdx = reconstructViewPos(uv + vec2(ts.x, 0), texture(depthBuffer, uv + vec2(ts.x, 0)).r) - viewPos;
+    vec3 dPdy = reconstructViewPos(uv + vec2(0, ts.y), texture(depthBuffer, uv + vec2(0, ts.y)).r) - viewPos;
+    vec3 viewNormal = normalize(cross(dPdx, dPdy));
+
+    vec3 viewDir = normalize(viewPos);
+    vec3 reflDir = reflect(viewDir, viewNormal);
+
+    // Ray march in screen space.
+    const int MAX_STEPS = 32;
+    const float stepSize = maxDistance / float(MAX_STEPS);
+
+    vec3 rayPos = viewPos;
+    vec4 result = vec4(0.0);
+
+    for (int i = 0; i < MAX_STEPS; ++i) {
+        rayPos += reflDir * stepSize;
+
+        // Project to screen.
+        vec4 clipPos = projection * vec4(rayPos, 1.0);
+        vec2 rayUV = clipPos.xy / clipPos.w * 0.5 + 0.5;
+
+        if (rayUV.x < 0.0 || rayUV.x > 1.0 || rayUV.y < 0.0 || rayUV.y > 1.0)
+            break;
+
+        float sampleDepth = texture(depthBuffer, rayUV).r;
+        vec3 samplePos = reconstructViewPos(rayUV, sampleDepth);
+
+        if (rayPos.z < samplePos.z && rayPos.z > samplePos.z - thickness) {
+            // Hit! Fade based on distance from screen edge.
+            float edgeFade = 1.0 - max(abs(rayUV.x - 0.5), abs(rayUV.y - 0.5)) * 2.0;
+            edgeFade = clamp(edgeFade, 0.0, 1.0);
+            float distFade = 1.0 - float(i) / float(MAX_STEPS);
+            result = vec4(texture(hdrBuffer, rayUV).rgb * edgeFade * distFade, edgeFade * distFade);
+            break;
+        }
+    }
+
+    imageStore(ssrImage, coord, result);
+}

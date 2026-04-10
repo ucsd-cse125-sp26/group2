@@ -110,6 +110,41 @@ private:
     SDL_GPUTextureFormat captureRTFmt = SDL_GPU_TEXTUREFORMAT_INVALID;
     std::string pendingCapPath;
 
+    // ── Post-processing (Phases 7-12) ─────────────────────────────────────
+    // Bloom (Phase 8)
+    static constexpr int k_bloomMips = 6;
+    SDL_GPUTexture* bloomMips[k_bloomMips] = {}; ///< Downsample chain, RGBA16F.
+    SDL_GPUComputePipeline* bloomDownsamplePipeline = nullptr;
+    SDL_GPUComputePipeline* bloomUpsamplePipeline = nullptr;
+
+    // SSAO (Phase 7)
+    SDL_GPUTexture* ssaoTexture = nullptr;     ///< R8_UNORM, screen-res.
+    SDL_GPUTexture* ssaoBlurTexture = nullptr; ///< R8_UNORM, blurred.
+    SDL_GPUComputePipeline* ssaoPipeline = nullptr;
+    SDL_GPUComputePipeline* ssaoBlurPipeline = nullptr;
+    SDL_GPUTexture* ssaoNoiseTexture = nullptr; ///< 4×4 random rotations.
+
+    // TAA (Phase 11)
+    SDL_GPUTexture* taaHistory[2] = {}; ///< Ping-pong RGBA16F.
+    int taaCurrentIdx = 0;
+    SDL_GPUComputePipeline* taaPipeline = nullptr;
+    SDL_GPUTexture* motionVectorTexture = nullptr; ///< RG16F screen-res.
+    SDL_GPUComputePipeline* motionVectorPipeline = nullptr;
+
+    // SSR (Phase 9)
+    SDL_GPUTexture* ssrTexture = nullptr; ///< RGBA16F.
+    SDL_GPUComputePipeline* ssrPipeline = nullptr;
+
+    // Volumetrics (Phase 10)
+    SDL_GPUTexture* volumetricTexture = nullptr; ///< RGBA16F half-res.
+    SDL_GPUComputePipeline* volumetricPipeline = nullptr;
+
+    // OIT (Phase 12)
+    SDL_GPUTexture* oitAccumTexture = nullptr;  ///< RGBA16F.
+    SDL_GPUTexture* oitRevealTexture = nullptr; ///< R8_UNORM.
+    SDL_GPUGraphicsPipeline* oitPipeline = nullptr;
+    SDL_GPUGraphicsPipeline* oitResolvePipeline = nullptr;
+
     // ── Private helpers ─────────────────────────────────────────────────────
     bool initScenePipeline();
     bool initPBRPipeline();
@@ -117,7 +152,24 @@ private:
     bool initTonemapPipeline();
     bool initShadowPipeline();
 
-    bool initIBL(); ///< Generate BRDF LUT, irradiance map, and prefilter map via compute.
+    bool initIBL();
+    bool initBloom();
+    bool initSSAO();
+    bool initTAA();
+    bool initSSR();
+    bool initVolumetrics();
+
+    /// @brief Helper: create a compute pipeline from a compiled shader file.
+    SDL_GPUComputePipeline* createComputePipeline(const char* shaderName,
+                                                  Uint32 numSamplers,
+                                                  Uint32 numReadonlyStorageTextures,
+                                                  Uint32 numReadonlyStorageBuffers,
+                                                  Uint32 numReadwriteStorageTextures,
+                                                  Uint32 numReadwriteStorageBuffers,
+                                                  Uint32 numUniformBuffers,
+                                                  Uint32 threadCountX,
+                                                  Uint32 threadCountY,
+                                                  Uint32 threadCountZ);
     bool ensureDepthTexture(Uint32 w, Uint32 h);
     bool ensureHDRTarget(Uint32 w, Uint32 h);
     bool ensureCaptureRT(Uint32 w, Uint32 h, SDL_GPUTextureFormat fmt);
