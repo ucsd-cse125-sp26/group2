@@ -1329,7 +1329,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     {
         SDL_GPUColorTargetInfo ct{};
         ct.texture = hdrTarget;
-        ct.clear_color = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
+        ct.clear_color = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
         ct.load_op = SDL_GPU_LOADOP_CLEAR;
         ct.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -1425,27 +1425,28 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 drawMeshes(false);
             }
 
-            // Pass 2: Transparent meshes (reads depth, alpha blending).
+            // Pass 2: Skybox — BEFORE transparents so transparent fragments
+            // blend with the sky colour, not the black clear colour.
+            if (skyboxPipeline) {
+                SDL_BindGPUGraphicsPipeline(pass, skyboxPipeline);
+
+                SkyboxMatricesUBO skyMats{};
+                glm::mat4 viewRot = camera.getView();
+                viewRot[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                skyMats.viewRotation = viewRot;
+                skyMats.projection = camera.getProjection();
+                SDL_PushGPUVertexUniformData(cmd, 0, &skyMats, sizeof(skyMats));
+
+                SDL_DrawGPUPrimitives(pass, 36, 1, 0, 0);
+            }
+
+            // Pass 3: Transparent meshes (alpha blending, no depth write).
+            // Rendered after skybox so they blend with the sky background.
             if (pbrTransparentPipeline) {
                 SDL_BindGPUGraphicsPipeline(pass, pbrTransparentPipeline);
                 SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
                 drawMeshes(true);
             }
-        }
-
-        // ── Skybox ──────────────────────────────────────────────────────────
-        if (skyboxPipeline) {
-            SDL_BindGPUGraphicsPipeline(pass, skyboxPipeline);
-
-            // View matrix with translation removed (rotation only).
-            SkyboxMatricesUBO skyMats{};
-            glm::mat4 viewRot = camera.getView();
-            viewRot[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f); // zero translation column
-            skyMats.viewRotation = viewRot;
-            skyMats.projection = camera.getProjection();
-            SDL_PushGPUVertexUniformData(cmd, 0, &skyMats, sizeof(skyMats));
-
-            SDL_DrawGPUPrimitives(pass, 36, 1, 0, 0);
         }
 
         SDL_EndGPURenderPass(pass);
