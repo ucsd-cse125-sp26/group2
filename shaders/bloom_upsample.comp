@@ -1,0 +1,40 @@
+// bloom_upsample.comp — 9-tap tent filter upsample with additive blend.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D srcTexture;  // smaller mip
+layout(set = 1, binding = 0, rgba16f) uniform image2D dstImage;  // larger mip (read+write)
+
+layout(set = 2, binding = 0) uniform Params {
+    vec2 srcResolution;
+    float bloomIntensity;
+    float _pad;
+};
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dstSize = imageSize(dstImage);
+    if (coord.x >= dstSize.x || coord.y >= dstSize.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(dstSize);
+    vec2 ts = 1.0 / srcResolution;
+
+    // 9-tap tent filter for smooth upsampling.
+    vec3 s = vec3(0.0);
+    s += texture(srcTexture, uv + ts * vec2(-1,-1)).rgb * 1.0;
+    s += texture(srcTexture, uv + ts * vec2( 0,-1)).rgb * 2.0;
+    s += texture(srcTexture, uv + ts * vec2( 1,-1)).rgb * 1.0;
+    s += texture(srcTexture, uv + ts * vec2(-1, 0)).rgb * 2.0;
+    s += texture(srcTexture, uv).rgb * 4.0;
+    s += texture(srcTexture, uv + ts * vec2( 1, 0)).rgb * 2.0;
+    s += texture(srcTexture, uv + ts * vec2(-1, 1)).rgb * 1.0;
+    s += texture(srcTexture, uv + ts * vec2( 0, 1)).rgb * 2.0;
+    s += texture(srcTexture, uv + ts * vec2( 1, 1)).rgb * 1.0;
+    s /= 16.0;
+
+    // Add to existing content (progressive upsample accumulation).
+    vec3 existing = imageLoad(dstImage, coord).rgb;
+    imageStore(dstImage, coord, vec4(existing + s * bloomIntensity, 1.0));
+}
