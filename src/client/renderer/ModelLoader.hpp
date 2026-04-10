@@ -68,9 +68,12 @@ struct LoadedModel
 /// @brief Load a model file via Assimp and decode its embedded textures.
 ///
 /// Extracts PBR material properties (metallic, roughness, emissive factors)
-/// and tangent vectors for normal mapping.
+/// and tangent vectors for normal mapping.  Traverses the full scene-graph
+/// and bakes per-node transforms into vertex data.
 ///
-/// @param path     Absolute path to the model file (GLB, OBJ, FBX, …).
-/// @param outModel Filled on success.
+/// @param path        Absolute path to the model file (GLB, OBJ, FBX, …).
+/// @param outModel    Filled on success.
+/// @param flipUVs     Flip V texture coordinates (V = 1 − V).  Set true for
+///                    models from tools that use V=0 at bottom (Blender, OBJ).
 /// @return True on success; false on failure (error logged via SDL_Log).
-bool loadModel(const std::string& path, LoadedModel& outModel);
+bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs = false);

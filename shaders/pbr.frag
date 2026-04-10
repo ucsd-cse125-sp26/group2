@@ -92,12 +92,12 @@ void main()
     float roughness = clamp(mrSample.y * mat.roughnessFactor, 0.04, 1.0);
 
     // ── Surface vectors ─────────────────────────────────────────────────────
+    // Normals are pre-transformed in the vertex shader by the correct normal
+    // matrix (inverse-transpose).  Mirrored geometry has its winding corrected
+    // at load time (ModelLoader::processNode detects negative-determinant
+    // transforms and flips index order), so gl_FrontFacing is reliable and
+    // no runtime flip is needed here.
     vec3 N = normalize(fragNormal);
-    // For double-sided / mirrored geometry: ensure normal faces the camera.
-    // Models like cars mirror geometry via negative-scale nodes, reversing
-    // face winding.  Without this flip, mirrored faces look inside-out.
-    if (!gl_FrontFacing)
-        N = -N;
     vec3 V = normalize(lighting.cameraPos.xyz - fragWorldPos);
 
     // ── Fresnel reflectance at normal incidence ─────────────────────────────
