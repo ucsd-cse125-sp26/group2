@@ -125,8 +125,9 @@ private:
     SDL_GPUTexture* ssaoNoiseTexture = nullptr; ///< 4×4 random rotations.
 
     // TAA (Phase 11)
-    SDL_GPUTexture* taaHistory[2] = {}; ///< Ping-pong RGBA16F.
+    SDL_GPUTexture* taaHistory[2] = {};            ///< Ping-pong RGBA16F.
     int taaCurrentIdx = 0;
+    glm::mat4 previousVP{1.0f};                    ///< Previous frame's view-projection for motion vectors.
     SDL_GPUComputePipeline* taaPipeline = nullptr;
     SDL_GPUTexture* motionVectorTexture = nullptr; ///< RG16F screen-res.
     SDL_GPUComputePipeline* motionVectorPipeline = nullptr;
