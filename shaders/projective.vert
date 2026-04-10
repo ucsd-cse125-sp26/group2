@@ -1,8 +1,9 @@
 #version 450
 
-layout(location = 0) out vec3  fragColor;
-layout(location = 1) out vec3  fragWorldPos;
-layout(location = 2) out float fragIsFloor;
+layout(location = 0) out vec3       fragColor;
+layout(location = 1) out vec3       fragWorldPos;
+layout(location = 2) out float      fragIsFloor;
+layout(location = 3) flat out vec3  fragNormal;
 
 layout(set = 1, binding = 0) uniform Matrices
 {
@@ -51,8 +52,9 @@ const vec3 positions[42] = vec3[](
 
     // --- Floor quad (6 verts) ---
     // Covers ±2000 units in XZ, centred at world origin, flat at y = 0.
-    vec3(-2000, 0, -2000), vec3( 2000, 0, -2000), vec3( 2000, 0,  2000),
-    vec3(-2000, 0, -2000), vec3( 2000, 0,  2000), vec3(-2000, 0,  2000)
+    // Counter-clockwise when viewed from above (+Y) so back-face culling keeps it.
+    vec3(-2000, 0, -2000), vec3( 2000, 0,  2000), vec3( 2000, 0, -2000),
+    vec3(-2000, 0, -2000), vec3(-2000, 0,  2000), vec3( 2000, 0,  2000)
 );
 
 // One colour per face-group (every 6 consecutive verts share a colour).
@@ -72,6 +74,19 @@ const vec3 colors[7] = vec3[](
     vec3(0.4, 0.4, 0.4)    // floor  — mid-grey (checkerboard applied in frag)
 );
 
+// Per-face outward normals — 7 entries matching the color table layout:
+//   0 front (+Z), 1 back (-Z), 2 left (-X), 3 right (+X),
+//   4 top (+Y),   5 bottom (-Y), 6 floor (+Y).
+const vec3 normals[7] = vec3[](
+    vec3( 0,  0,  1),   // front
+    vec3( 0,  0, -1),   // back
+    vec3(-1,  0,  0),   // left
+    vec3( 1,  0,  0),   // right
+    vec3( 0,  1,  0),   // top
+    vec3( 0, -1,  0),   // bottom
+    vec3( 0,  1,  0)    // floor
+);
+
 void main()
 {
     vec4 worldPos  = ubo.model * vec4(positions[gl_VertexIndex], 1.0);
@@ -79,4 +94,5 @@ void main()
     fragColor      = colors[gl_VertexIndex / 6];
     fragWorldPos   = worldPos.xyz;
     fragIsFloor    = (gl_VertexIndex >= 36) ? 1.0 : 0.0;
+    fragNormal     = normals[gl_VertexIndex / 6];
 }
