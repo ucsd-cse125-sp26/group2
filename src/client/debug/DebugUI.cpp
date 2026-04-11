@@ -674,10 +674,12 @@ void DebugUI::buildLightingUI(Renderer& renderer)
     ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");
 
-    // ── Shadow ─────────────────────────────────────────────────────────────
-    ImGui::SeparatorText("Shadow");
+    // ── Cascaded Shadow Maps ──────────────────────────────────────────────
+    ImGui::SeparatorText("Cascaded Shadows");
     ImGui::SliderFloat("Depth Bias", &renderer.shadowBiasVal, 0.0f, 0.01f, "%.5f");
     ImGui::SliderFloat("Normal Bias", &renderer.shadowNormalBiasVal, 0.0f, 5.0f, "%.2f");
+    ImGui::SliderFloat("Shadow Distance", &renderer.shadowDistance, 500.0f, 10000.0f, "%.0f");
+    ImGui::SliderFloat("Cascade Lambda", &renderer.cascadeLambda, 0.0f, 1.0f, "%.2f");
 
     ImGui::End();
 }

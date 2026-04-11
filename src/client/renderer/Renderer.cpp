@@ -92,10 +92,22 @@ struct ShadowUBO
     glm::mat4 model;
 };
 
-/// Shadow data pushed to pbr.frag / normal.frag for shadow sampling.
+/// Per-cascade data computed each frame.
+struct CascadeInfo
+{
+    glm::mat4 lightView;
+    glm::mat4 lightProj;
+    glm::mat4 lightVP;
+    float splitDistance; ///< View-space far plane of this cascade.
+};
+
+/// Shadow data pushed to pbr.frag / normal.frag for cascade shadow sampling.
+/// The fragment shader selects the cascade based on the fragment's view-space Z.
 struct ShadowDataFragUBO
 {
-    glm::mat4 lightVP; ///< Light's view-projection matrix.
+    glm::mat4 lightVP[4];    ///< Per-cascade light view-projection matrices.
+    glm::vec4 cascadeSplits; ///< View-space far distances for each cascade.
+    glm::mat4 cameraView;    ///< Camera view matrix (for computing view-space Z in shader).
     float shadowBias;
     float shadowNormalBias;
     float shadowMapSize;
@@ -471,8 +483,10 @@ bool Renderer::initShadowPipeline()
     pci.depth_stencil_state.enable_depth_test = true;
     pci.depth_stencil_state.enable_depth_write = true;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
-    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+    // No culling in shadow pass — the camera Y-flip reverses winding in the
+    // main pass but the shadow projection has no flip, so BACK culling would
+    // actually cull the FRONT faces.  Disabling culling is the standard fix.
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     // Depth bias to reduce shadow acne.
     pci.rasterizer_state.depth_bias_constant_factor = 0.75f;
     pci.rasterizer_state.depth_bias_slope_factor = 1.0f;
@@ -512,8 +526,7 @@ bool Renderer::initSceneShadowPipeline()
     pci.depth_stencil_state.enable_depth_test = true;
     pci.depth_stencil_state.enable_depth_write = true;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
-    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE; // No culling — same reason as shadowPipeline.
     // Same depth bias as shadow pipeline.
     pci.rasterizer_state.depth_bias_constant_factor = 0.75f;
     pci.rasterizer_state.depth_bias_slope_factor = 1.0f;
@@ -1748,12 +1761,13 @@ bool Renderer::init(SDL_Window* win)
     initShadowPipeline();
     initSceneShadowPipeline();
     {
-        // Shadow map: D32_FLOAT, 2048×2048, single layer (no cascades yet).
+        // Shadow atlas: D32_FLOAT, (2*k_shadowMapSize)² with 4 cascade viewports
+        // in a 2×2 grid.  Each cascade occupies one quadrant at k_shadowMapSize².
         SDL_GPUTextureCreateInfo smInfo{};
         smInfo.type = SDL_GPU_TEXTURETYPE_2D;
         smInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-        smInfo.width = k_shadowMapSize;
-        smInfo.height = k_shadowMapSize;
+        smInfo.width = k_shadowMapSize * 2;
+        smInfo.height = k_shadowMapSize * 2;
         smInfo.layer_count_or_depth = 1;
         smInfo.num_levels = 1;
         smInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -1945,6 +1959,129 @@ glm::vec3 Renderer::getSunDirection() const
     return glm::normalize(glm::vec3(cosEl * std::sin(azRad), std::sin(elRad), cosEl * std::cos(azRad)));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Cascaded Shadow Map computation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Compute per-cascade light view-projection matrices that tightly fit the
+/// camera's sub-frustum from the light's perspective.  Uses the practical
+/// split scheme (blend of logarithmic and linear) and texel-snaps the ortho
+/// projection to prevent shadow swimming.
+static std::array<CascadeInfo, 4> computeCascades(
+    const Camera& cam, const glm::vec3& lightDir, int numCascades, int shadowMapSize, float shadowMaxDist, float lambda)
+{
+    std::array<CascadeInfo, 4> cascades{};
+
+    const float camNear = cam.getNear();
+
+    // ── Compute split distances (practical split scheme) ────────────────────
+    float splits[5];
+    splits[0] = camNear;
+    for (int i = 0; i < numCascades; ++i) {
+        const float p = static_cast<float>(i + 1) / static_cast<float>(numCascades);
+        const float logSplit = camNear * std::pow(shadowMaxDist / camNear, p);
+        const float linSplit = camNear + (shadowMaxDist - camNear) * p;
+        splits[i + 1] = lambda * logSplit + (1.0f - lambda) * linSplit;
+    }
+
+    // ── Camera basis ────────────────────────────────────────────────────────
+    const glm::vec3 camPos = cam.getEye();
+    const glm::vec3 camFwd = cam.getForward();
+    const glm::vec3 camRight = cam.getRight();
+    const glm::vec3 camUp = cam.getUp();
+
+    const float fovY = glm::radians(cam.getFovy());
+    const float aspect = cam.getAspect();
+    const float tanHalfY = std::tan(fovY * 0.5f);
+    const float tanHalfX = tanHalfY * aspect;
+
+    // Stable up vector — avoid degenerate lookAt when light is directly vertical.
+    const glm::vec3 upVec = (std::abs(lightDir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+
+    for (int c = 0; c < numCascades; ++c) {
+        const float nearDist = splits[c];
+        const float farDist = splits[c + 1];
+        cascades[static_cast<size_t>(c)].splitDistance = farDist;
+
+        // ── 8 frustum corners for this sub-frustum ──────────────────────────
+        const float nH = tanHalfY * nearDist;
+        const float nW = tanHalfX * nearDist;
+        const float fH = tanHalfY * farDist;
+        const float fW = tanHalfX * farDist;
+
+        const glm::vec3 nc = camPos + camFwd * nearDist;
+        const glm::vec3 fc = camPos + camFwd * farDist;
+
+        const glm::vec3 corners[8] = {
+            nc - camRight * nW + camUp * nH,
+            nc + camRight * nW + camUp * nH,
+            nc - camRight * nW - camUp * nH,
+            nc + camRight * nW - camUp * nH,
+            fc - camRight * fW + camUp * fH,
+            fc + camRight * fW + camUp * fH,
+            fc - camRight * fW - camUp * fH,
+            fc + camRight * fW - camUp * fH,
+        };
+
+        // ── Sub-frustum center ──────────────────────────────────────────────
+        glm::vec3 center(0.0f);
+        for (const auto& corner : corners)
+            center += corner;
+        center /= 8.0f;
+
+        // ── Light view matrix ───────────────────────────────────────────────
+        // Place the eye far enough behind the center to encompass all
+        // potential shadow casters (buildings, terrain behind the camera, etc.).
+        constexpr float k_lightDistance = 5000.0f;
+        const glm::mat4 lightView = glm::lookAt(center + lightDir * k_lightDistance, center, upVec);
+
+        // ── AABB of sub-frustum in light space ──────────────────────────────
+        float minX = std::numeric_limits<float>::max();
+        float maxX = std::numeric_limits<float>::lowest();
+        float minY = std::numeric_limits<float>::max();
+        float maxY = std::numeric_limits<float>::lowest();
+        float minZ = std::numeric_limits<float>::max();
+        float maxZ = std::numeric_limits<float>::lowest();
+
+        for (const auto& corner : corners) {
+            const glm::vec3 ls = glm::vec3(lightView * glm::vec4(corner, 1.0f));
+            minX = std::min(minX, ls.x);
+            maxX = std::max(maxX, ls.x);
+            minY = std::min(minY, ls.y);
+            maxY = std::max(maxY, ls.y);
+            minZ = std::min(minZ, ls.z);
+            maxZ = std::max(maxZ, ls.z);
+        }
+
+        // ── Texel-snap XY (prevents shadow swimming on camera movement) ────
+        const float texelX = (maxX - minX) / static_cast<float>(shadowMapSize);
+        const float texelY = (maxY - minY) / static_cast<float>(shadowMapSize);
+
+        minX = std::floor(minX / texelX) * texelX;
+        maxX = std::ceil(maxX / texelX) * texelX;
+        minY = std::floor(minY / texelY) * texelY;
+        maxY = std::ceil(maxY / texelY) * texelY;
+
+        // ── Orthographic projection (RH, zero-to-one depth for Vulkan) ─────
+        // Near/far derived from the frustum Z AABB.  The near plane is extended
+        // significantly backward to capture shadow casters (buildings, terrain)
+        // behind the camera sub-frustum that still cast into it.
+        // In light view space (RH), objects in front of the eye have Z < 0.
+        //   near = -maxZ  (closest point to eye, smallest positive distance)
+        //   far  = -minZ  (farthest point, largest positive distance)
+        constexpr float k_casterPadding = 2000.0f; // catch casters behind frustum
+        const float orthoNear = std::max(0.1f, -maxZ - k_casterPadding);
+        const float orthoFar = -minZ + 500.0f;     // small forward padding
+        const glm::mat4 lightProj = glm::orthoRH_ZO(minX, maxX, minY, maxY, orthoNear, orthoFar);
+
+        cascades[static_cast<size_t>(c)].lightView = lightView;
+        cascades[static_cast<size_t>(c)].lightProj = lightProj;
+        cascades[static_cast<size_t>(c)].lightVP = lightProj * lightView;
+    }
+
+    return cascades;
+}
+
 void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
 {
     // ── Camera setup ────────────────────────────────────────────────────────
@@ -2102,24 +2239,15 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
 
     // ════════════════════════════════════════════════════════════════════════
-    // PASS 0: Shadow map — depth-only from directional light's perspective
+    // PASS 0: Cascaded Shadow Maps — 4 depth-only passes, one per cascade
     // ════════════════════════════════════════════════════════════════════════
-    glm::mat4 lightVP(1.0f);
+    std::array<CascadeInfo, 4> cascades{};
     if (toggles.shadows && shadowPipeline && shadowMap) {
-        // Light direction = direction TO the sun.  Shadow camera looks the opposite way.
-        const glm::vec3 lightDir = getSunDirection();
-        // Center the shadow map on the camera's XZ position (follows the player).
-        const glm::vec3 shadowCenter = glm::vec3(eye.x, 0.0f, eye.z);
-        // Place the light "camera" far along the sun direction from the center.
-        const glm::vec3 lightPos = shadowCenter + lightDir * 2000.0f;
-        // Stable up vector: avoid degenerate lookAt when sun is directly overhead.
-        const glm::vec3 upVec = (std::abs(lightDir.y) > 0.99f) ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
-        const glm::mat4 lightView = glm::lookAt(lightPos, shadowCenter, upVec);
-        // Orthographic projection covering the play area.
-        // RH_ZO for Vulkan [0,1] depth range.
-        const glm::mat4 lightProj = glm::orthoRH_ZO(-1200.0f, 1200.0f, -800.0f, 800.0f, 0.1f, 4000.0f);
-        lightVP = lightProj * lightView;
+        cascades = computeCascades(
+            camera, getSunDirection(), k_shadowCascades, k_shadowMapSize, shadowDistance, cascadeLambda);
 
+        // One render pass for the whole atlas — clear to depth=1.0, then
+        // viewport/scissor per cascade quadrant.
         SDL_GPUDepthStencilTargetInfo sdt{};
         sdt.texture = shadowMap;
         sdt.clear_depth = 1.0f;
@@ -2129,37 +2257,72 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         sdt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 
         SDL_GPURenderPass* shadowPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &sdt);
-        SDL_BindGPUGraphicsPipeline(shadowPass, shadowPipeline);
 
-        // Render all opaque scene model meshes into the shadow map.
-        for (const auto& model : models) {
-            if (!model.drawInScenePass)
-                continue; // entity/weapon models are not part of the static scene shadow
-            ShadowUBO shadowUBO{};
-            shadowUBO.lightVP = lightVP;
-            shadowUBO.model = model.transform;
-            SDL_PushGPUVertexUniformData(cmd, 0, &shadowUBO, sizeof(shadowUBO));
+        for (int c = 0; c < k_shadowCascades; ++c) {
+            const auto& cascade = cascades[static_cast<size_t>(c)];
 
-            for (const auto& mesh : model.meshes) {
-                if (mesh.isTransparent)
-                    continue; // skip transparent meshes for shadows
-                const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
-                SDL_BindGPUVertexBuffers(shadowPass, 0, &vbBind, 1);
-                const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
-                SDL_BindGPUIndexBuffer(shadowPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-                SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
+            // ── Viewport + scissor for this cascade's atlas quadrant ────────
+            const auto vx = static_cast<float>((c % 2) * k_shadowMapSize);
+            const auto vy = static_cast<float>((c / 2) * k_shadowMapSize);
+            const auto vs = static_cast<float>(k_shadowMapSize);
+            const SDL_GPUViewport viewport = {vx, vy, vs, vs, 0.0f, 1.0f};
+            SDL_SetGPUViewport(shadowPass, &viewport);
+            const SDL_Rect scissor = {
+                (c % 2) * k_shadowMapSize, (c / 2) * k_shadowMapSize, k_shadowMapSize, k_shadowMapSize};
+            SDL_SetGPUScissor(shadowPass, &scissor);
+
+            // ── Scene models (Assimp-loaded) ────────────────────────────────
+            SDL_BindGPUGraphicsPipeline(shadowPass, shadowPipeline);
+            for (const auto& model : models) {
+                if (!model.drawInScenePass)
+                    continue;
+                ShadowUBO shadowUBO{};
+                shadowUBO.lightVP = cascade.lightVP;
+                shadowUBO.model = model.transform;
+                SDL_PushGPUVertexUniformData(cmd, 0, &shadowUBO, sizeof(shadowUBO));
+
+                for (const auto& mesh : model.meshes) {
+                    if (mesh.isTransparent)
+                        continue;
+                    const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                    SDL_BindGPUVertexBuffers(shadowPass, 0, &vbBind, 1);
+                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                    SDL_BindGPUIndexBuffer(shadowPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
+                }
             }
-        }
 
-        // Also render scene geometry (procedural boxes + floor) into shadow map.
-        if (sceneShadowPipeline) {
-            SDL_BindGPUGraphicsPipeline(shadowPass, sceneShadowPipeline);
-            SceneMatrices sceneShadowMats{};
-            sceneShadowMats.model = glm::mat4(1.0f);
-            sceneShadowMats.view = lightView;
-            sceneShadowMats.projection = lightProj;
-            SDL_PushGPUVertexUniformData(cmd, 0, &sceneShadowMats, sizeof(sceneShadowMats));
-            SDL_DrawGPUPrimitives(shadowPass, 1002, 1, 0, 0);
+            // ── Entity models (ECS-driven — now cast shadows) ───────────────
+            for (const auto& ecmd : entityRenderCmds) {
+                if (ecmd.modelIndex < 0 || ecmd.modelIndex >= static_cast<int>(models.size()))
+                    continue;
+                const auto& emodel = models[static_cast<size_t>(ecmd.modelIndex)];
+                ShadowUBO shadowUBO{};
+                shadowUBO.lightVP = cascade.lightVP;
+                shadowUBO.model = ecmd.worldTransform;
+                SDL_PushGPUVertexUniformData(cmd, 0, &shadowUBO, sizeof(shadowUBO));
+
+                for (const auto& mesh : emodel.meshes) {
+                    if (mesh.isTransparent)
+                        continue;
+                    const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                    SDL_BindGPUVertexBuffers(shadowPass, 0, &vbBind, 1);
+                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                    SDL_BindGPUIndexBuffer(shadowPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
+                }
+            }
+
+            // ── Scene geometry (procedural boxes + floor) ───────────────────
+            if (sceneShadowPipeline) {
+                SDL_BindGPUGraphicsPipeline(shadowPass, sceneShadowPipeline);
+                SceneMatrices sceneShadowMats{};
+                sceneShadowMats.model = glm::mat4(1.0f);
+                sceneShadowMats.view = cascade.lightView;
+                sceneShadowMats.projection = cascade.lightProj;
+                SDL_PushGPUVertexUniformData(cmd, 0, &sceneShadowMats, sizeof(sceneShadowMats));
+                SDL_DrawGPUPrimitives(shadowPass, 1002, 1, 0, 0);
+            }
         }
 
         SDL_EndGPURenderPass(shadowPass);
@@ -2195,9 +2358,15 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             sceneMats.projection = camera.getProjection();
             SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
 
-            // Push shadow data for the scene fragment shader.
+            // Push cascade shadow data for the scene fragment shader.
             ShadowDataFragUBO sceneShadow{};
-            sceneShadow.lightVP = lightVP;
+            for (int ci = 0; ci < k_shadowCascades; ++ci)
+                sceneShadow.lightVP[ci] = cascades[static_cast<size_t>(ci)].lightVP;
+            sceneShadow.cascadeSplits = glm::vec4(cascades[0].splitDistance,
+                                                  cascades[1].splitDistance,
+                                                  cascades[2].splitDistance,
+                                                  cascades[3].splitDistance);
+            sceneShadow.cameraView = camera.getView();
             sceneShadow.shadowBias = shadowBiasVal;
             sceneShadow.shadowNormalBias = shadowNormalBiasVal;
             sceneShadow.lightDirWorld = glm::vec4(getSunDirection(), 0.0f);
@@ -2287,9 +2456,15 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 }
             };
 
-            // Shadow data UBO (shared by all meshes).
+            // Cascade shadow data UBO (shared by all PBR meshes).
             ShadowDataFragUBO shadowData{};
-            shadowData.lightVP = lightVP;
+            for (int ci = 0; ci < k_shadowCascades; ++ci)
+                shadowData.lightVP[ci] = cascades[static_cast<size_t>(ci)].lightVP;
+            shadowData.cascadeSplits = glm::vec4(cascades[0].splitDistance,
+                                                 cascades[1].splitDistance,
+                                                 cascades[2].splitDistance,
+                                                 cascades[3].splitDistance);
+            shadowData.cameraView = camera.getView();
             shadowData.shadowBias = shadowBiasVal;
             shadowData.shadowNormalBias = shadowNormalBiasVal;
             shadowData.lightDirWorld = glm::vec4(getSunDirection(), 0.0f);
@@ -2688,25 +2863,32 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         struct
         {
             glm::mat4 invViewProj;
-            glm::mat4 lightVP_vol;
+            glm::mat4 lightVP_vol[4];    ///< Per-cascade light VP.
+            glm::mat4 cameraView_vol;    ///< For view-space Z.
+            glm::vec4 cascadeSplits_vol; ///< Cascade far distances.
             glm::vec4 lightDir_vol;
             glm::vec4 lightColor_vol;
             glm::vec2 screenSize;
             float fogDensity;
             float scatteringG;
             float shadowBias_vol;
+            float shadowMapSize_vol; ///< Per-cascade resolution.
             float maxDistance;
-            float _p1;
             float _p2;
         } volUBO{};
         volUBO.invViewProj = glm::inverse(camera.getViewProjection());
-        volUBO.lightVP_vol = lightVP;
+        for (int ci = 0; ci < k_shadowCascades; ++ci)
+            volUBO.lightVP_vol[ci] = cascades[static_cast<size_t>(ci)].lightVP;
+        volUBO.cameraView_vol = camera.getView();
+        volUBO.cascadeSplits_vol = glm::vec4(
+            cascades[0].splitDistance, cascades[1].splitDistance, cascades[2].splitDistance, cascades[3].splitDistance);
         volUBO.lightDir_vol = glm::vec4(getSunDirection(), 0.0f);
         volUBO.lightColor_vol = glm::vec4(1.0f, 0.95f, 0.85f, 2.0f);
         volUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
         volUBO.fogDensity = 0.0002f;
         volUBO.scatteringG = 0.7f;
         volUBO.shadowBias_vol = 0.002f;
+        volUBO.shadowMapSize_vol = static_cast<float>(k_shadowMapSize);
         volUBO.maxDistance = 2000.0f;
 
         SDL_GPUStorageTextureReadWriteBinding volWrite = {.texture = volumetricTexture, .mip_level = 0, .layer = 0};
