@@ -1,6 +1,8 @@
 #include "Server.hpp"
 
+#include "ecs/components/InputSnapshot.hpp"
 #include "systems/EventQueue.hpp"
+#include "systems/InputReceiveSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -88,19 +90,36 @@ void Server::readClients()
 void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 {
 
-    SDL_Log("Server: received %d bytes", len);
-    SDL_Log("Server: data: %.*s", len, static_cast<const char*>(data));
+    if (len != sizeof(InputSnapshot)) {
+        SDL_Log("Server: received packet of invalid size %u (expected %zu)", len, sizeof(InputSnapshot));
+        return;
+    }
 
-    // echo
-    conn.msgStream.send(data, len);
-
-    // temp enqueue of events
-    Event event;
+    // Deserialise InputSnapshot and enqueue Event for processing
+    Event event = systems::runInputReceive(data);
     event.clientId = conn.clientId;
-    event.movementIntent.forward = true;
-
     eventQueue.enqueue(event);
-    SDL_Log("Server: event queue size: %d", eventQueue.size());
+    conn.msgStream.send("Message received", 16);
+
+    SDL_Log("Server: received input packet:\n"
+            "\tforward=%d\n"
+            "\tback=%d\n"
+            "\tleft=%d\n"
+            "\tright=%d\n"
+            "\tjump=%d\n"
+            "\tcrouch=%d\n"
+            "\tyaw=%.2f\n"
+            "\tpitch=%.2f\n"
+            "\troll=%.2f",
+            event.movementIntent.forward,
+            event.movementIntent.back,
+            event.movementIntent.left,
+            event.movementIntent.right,
+            event.movementIntent.jump,
+            event.movementIntent.crouch,
+            event.movementIntent.yaw,
+            event.movementIntent.pitch,
+            event.movementIntent.roll);
 }
 
 bool Server::isEmpty()
