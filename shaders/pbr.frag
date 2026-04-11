@@ -79,6 +79,7 @@ float sampleCascade(int cascade, vec3 offsetPos)
     vec4 lightClip = shadow.lightVP[cascade] * vec4(offsetPos, 1.0);
     vec3 lightNDC  = lightClip.xyz / lightClip.w;
     vec2 localUV   = lightNDC.xy * 0.5 + 0.5;
+    localUV.y = 1.0 - localUV.y;
 
     // Outside this cascade's local region → no contribution.
     if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0)

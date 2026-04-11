@@ -39,6 +39,7 @@ float sampleCascade(int cascade, vec3 offsetPos)
     vec4 lc  = lightVP[cascade] * vec4(offsetPos, 1.0);
     vec3 ndc = lc.xyz / lc.w;
     vec2 localUV = ndc.xy * 0.5 + 0.5;
+    localUV.y = 1.0 - localUV.y;
 
     if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0)
         return 1.0;
