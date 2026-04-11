@@ -856,10 +856,16 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 break;
             }
 
-            case MoveMode::Sliding:
+            case MoveMode::Sliding: {
                 handleSliding(vel.value, state, shape, pos, input, dt);
-                state.targetCameraTilt = 0.0f;
+                // Slide camera lean: tilt based on lateral velocity relative to look direction.
+                const float k_sinY = std::sin(input.yaw);
+                const float k_cosY = std::cos(input.yaw);
+                const glm::vec3 k_lookRight{k_cosY, 0.0f, -k_sinY};
+                const float k_lateralSpeed = glm::dot(horizVel(vel.value), k_lookRight);
+                state.targetCameraTilt = std::clamp(k_lateralSpeed / 400.0f * 3.0f, -5.0f, 5.0f);
                 break;
+            }
 
             case MoveMode::WallRunning:
                 handleWallRunning(vel.value, state, input, walls, pos.value.y, dt);

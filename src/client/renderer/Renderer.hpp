@@ -72,7 +72,7 @@ class Renderer
 {
 public:
     bool init(SDL_Window* window);
-    void drawFrame(glm::vec3 eye, float yaw, float pitch);
+    void drawFrame(glm::vec3 eye, float yaw, float pitch, float roll = 0.0f);
     void requestScreenshot(const std::string& path);
     bool setVSync(bool enabled);
     void quit();
