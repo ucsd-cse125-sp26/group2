@@ -2337,7 +2337,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 sceneShadowMats.view = cascade.lightView;
                 sceneShadowMats.projection = cascade.lightProj;
                 SDL_PushGPUVertexUniformData(cmd, 0, &sceneShadowMats, sizeof(sceneShadowMats));
-                SDL_DrawGPUPrimitives(shadowPass, 1002, 1, 0, 0);
+                SDL_DrawGPUPrimitives(shadowPass, 1182, 1, 0, 0);
             }
         }
 
@@ -2400,7 +2400,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             };
             SDL_BindGPUFragmentSamplers(pass, 0, &sceneShadowSamp, 1);
 
-            SDL_DrawGPUPrimitives(pass, 1002, 1, 0, 0);
+            SDL_DrawGPUPrimitives(pass, 1182, 1, 0, 0);
         }
 
         // ── PBR models (two-pass: opaques first, then transparents) ────────

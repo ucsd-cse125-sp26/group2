@@ -614,7 +614,7 @@ void handleWallRunning(glm::vec3& vel,
 
     // Camera tilt.
     state.targetCameraTilt =
-        (state.wallRunSide == WallSide::Right) ? -tms::k_wallrunCameraTilt : tms::k_wallrunCameraTilt;
+        (state.wallRunSide == WallSide::Right) ? tms::k_wallrunCameraTilt : -tms::k_wallrunCameraTilt;
 }
 
 } // namespace
@@ -795,17 +795,16 @@ namespace
 /// Try to fire the grapple hook. Raycasts forward to find a surface.
 void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 eye, const physics::WorldGeometry& world)
 {
-    // Rising edge detection on grapple key.
-    const bool k_pressed = input.grapple && !state.grappleInputLastTick;
-
-    if (state.grappleActive && input.grapple && k_pressed) {
-        // Cancel active grapple on re-press.
+    // ── Cancel on E release (hold E to grapple) ─────────────────────────
+    if (state.grappleActive && !input.grapple) {
         state.grappleActive = false;
         state.grappleCooldownActive = true;
         state.grappleCooldownTimer = tms::k_grappleCooldown;
         return;
     }
 
+    // ── Fire on rising edge of E ────────────────────────────────────────
+    const bool k_pressed = input.grapple && !state.grappleInputLastTick;
     if (!k_pressed || state.grappleActive || state.grappleCooldownActive)
         return;
 

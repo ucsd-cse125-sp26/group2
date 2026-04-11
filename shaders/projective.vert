@@ -16,22 +16,22 @@ layout(set = 1, binding = 0) uniform Matrices
 // Physics test playground — all geometry in world space (model = identity).
 //
 // Objects (vertex ranges):
-//   Boxes    [0..899]    25 axis-aligned boxes × 36 verts
-//   Ramps    [900..959]  2 ramps × 30 verts (wedge shapes)
-//   DiagWall [960..995]  1 diagonal wall × 36 verts
-//   Floor    [996..1001] 1 floor quad × 6 verts
+//   Boxes    [0..1079]    30 axis-aligned boxes × 36 verts
+//   Ramps    [1080..1139] 2 ramps × 30 verts (wedge shapes)
+//   DiagWall [1140..1175] 1 diagonal wall × 36 verts
+//   Floor    [1176..1181] 1 floor quad × 6 verts
 //
-// Total: 1002 vertices.
+// Total: 1182 vertices.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────
 // Box geometry — 11 AABBs, procedurally generated from (min, max) pairs.
 // ─────────────────────────────────────────────────────────────────────────
 
-const int NUM_BOXES    = 25;
-const int BOX_VERTS    = NUM_BOXES * 36;   // 900
+const int NUM_BOXES    = 30;
+const int BOX_VERTS    = NUM_BOXES * 36;   // 1080
 
-const vec3 boxMinMax[50] = vec3[](
+const vec3 boxMinMax[60] = vec3[](
     // Box 0: reference cube
     vec3(-32, 0, 368), vec3(32, 64, 432),
     // Box 1: small steppable box
@@ -93,11 +93,23 @@ const vec3 boxMinMax[50] = vec3[](
     // Box 23: ledge platform
     vec3(200, 0, 5500), vec3(328, 100, 5516),
     // Box 24: landing pad
-    vec3(-80, 0, 5550), vec3(80, 16, 5650)
+    vec3(-80, 0, 5550), vec3(80, 16, 5650),
+
+    // ── Grapple test: arch + platforms ──
+    // Box 25: arch left pillar
+    vec3(-116, 0, 6000), vec3(-84, 500, 6032),
+    // Box 26: arch right pillar
+    vec3(84, 0, 6000), vec3(116, 500, 6032),
+    // Box 27: arch crossbar
+    vec3(-116, 460, 6000), vec3(116, 500, 6032),
+    // Box 28: high platform behind arch
+    vec3(-100, 400, 6200), vec3(100, 416, 6300),
+    // Box 29: ultra-high target platform
+    vec3(-48, 580, 6500), vec3(48, 596, 6548)
 );
 
 // Per-box color.  Box 0 (reference cube) uses per-face colors instead.
-const vec3 boxColors[25] = vec3[](
+const vec3 boxColors[30] = vec3[](
     vec3(0.5),              // 0: ref cube (per-face override below)
     vec3(0.9, 0.6, 0.2),   // 1: small step box — orange
     vec3(0.2, 0.7, 0.3),   // 2: large jump box — green
@@ -128,7 +140,13 @@ const vec3 boxColors[25] = vec3[](
     vec3(0.2, 0.6, 0.7),   // 21: right wallrun — teal
     vec3(0.2, 0.3, 0.7),   // 22: climb target — dark blue
     vec3(0.7, 0.5, 0.3),   // 23: ledge platform — brown
-    vec3(0.4, 0.8, 0.4)    // 24: landing pad — green
+    vec3(0.4, 0.8, 0.4),   // 24: landing pad — green
+    // Grapple arch — white marble
+    vec3(0.85, 0.85, 0.9), // 25: arch left pillar
+    vec3(0.85, 0.85, 0.9), // 26: arch right pillar
+    vec3(0.9, 0.9, 0.95),  // 27: arch crossbar
+    vec3(0.9, 0.5, 0.2),   // 28: high platform — orange
+    vec3(1.0, 0.8, 0.0)    // 29: ultra-high target — gold
 );
 
 // Reference cube per-face colours (overrides boxColors[0]).
@@ -198,7 +216,7 @@ vec3 boxVertex(int boxIdx, int lv) {
 // Side triangles are padded to 6 verts (degenerate second triangle).
 // ─────────────────────────────────────────────────────────────────────────
 
-const int RAMP_START   = BOX_VERTS;        // 900
+const int RAMP_START   = BOX_VERTS;        // 1080
 const int RAMP_VERTS   = 60;               // 2 ramps × 30
 
 // Gentle ramp (15 deg): x ∈ [-214,-86], z ∈ [950,1250], h=80
@@ -302,7 +320,7 @@ const vec3 rampNormals[10] = vec3[](
 // Top corners: same XZ at y=120.
 // ─────────────────────────────────────────────────────────────────────────
 
-const int DIAG_START   = RAMP_START + RAMP_VERTS;  // 960
+const int DIAG_START   = RAMP_START + RAMP_VERTS;  // 1140
 const int DIAG_VERTS   = 36;
 
 const vec3 diagPositions[36] = vec3[](
@@ -350,8 +368,8 @@ const vec3 diagNormals[6] = vec3[](
 // Floor quad — 6 verts.
 // ─────────────────────────────────────────────────────────────────────────
 
-const int FLOOR_START  = DIAG_START + DIAG_VERTS;   // 996
-const int TOTAL_VERTS  = FLOOR_START + 6;            // 1002
+const int FLOOR_START  = DIAG_START + DIAG_VERTS;   // 1176
+const int TOTAL_VERTS  = FLOOR_START + 6;            // 1182
 
 const vec3 floorVerts[6] = vec3[](
     vec3(-8000, 0, -8000), vec3( 8000, 0,  8000), vec3( 8000, 0, -8000),
