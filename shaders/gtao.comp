@@ -1,0 +1,167 @@
+// gtao.comp — Ground Truth Ambient Occlusion (XeGTAO-inspired).
+//
+// Horizon-based AO: for each pixel, trace screen-space horizon lines in
+// multiple directions, compute the visible solid angle above each horizon,
+// and integrate the cosine-weighted visibility analytically.
+//
+// Much more stable and artifact-free than random-sample SSAO.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depthTexture;
+layout(set = 1, binding = 0, r8) writeonly uniform image2D aoImage;
+
+layout(set = 2, binding = 0) uniform GTAOParams {
+    mat4 projection;
+    mat4 invProjection;
+    vec2 screenSize;
+    float radius;        // AO radius in view-space units
+    float falloffExp;    // distance falloff exponent
+    int   numSlices;     // directional slices (3-4)
+    int   numSteps;      // march steps per direction (4-8)
+    float _pad1, _pad2;
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+vec3 viewPosFromDepth(vec2 uv, float depth)
+{
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 view = invProjection * clip;
+    return view.xyz / view.w;
+}
+
+// Spatial noise for per-pixel slice rotation (reduces banding).
+float interleavedGradientNoise(vec2 pos)
+{
+    return fract(52.9829189 * fract(0.06711056 * pos.x + 0.00583715 * pos.y));
+}
+
+// GTAO inner integral: cosine-weighted visible area for a single horizon pair.
+// h1, h2 = horizon angles (in radians, measured from the normal plane).
+// n = projected normal angle in the slice.
+float gtaoIntegral(float h1, float h2, float n)
+{
+    float sinN = sin(n);
+    float cosN = cos(n);
+    return 0.25 * (
+        (-cos(2.0 * h1 - n) + cosN + 2.0 * h1 * sinN) +
+        (-cos(2.0 * h2 - n) + cosN + 2.0 * h2 * sinN)
+    );
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(aoImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    float depth = texture(depthTexture, uv).r;
+
+    // Sky → no occlusion.
+    if (depth >= 0.9999) {
+        imageStore(aoImage, coord, vec4(1.0));
+        return;
+    }
+
+    vec3 viewPos = viewPosFromDepth(uv, depth);
+
+    // Reconstruct view-space normal from depth cross-derivatives.
+    vec2 ts = 1.0 / screenSize;
+    float dR = texture(depthTexture, uv + vec2(ts.x, 0)).r;
+    float dL = texture(depthTexture, uv - vec2(ts.x, 0)).r;
+    float dD = texture(depthTexture, uv + vec2(0, ts.y)).r;
+    float dU = texture(depthTexture, uv - vec2(0, ts.y)).r;
+
+    // Pick the smaller delta to avoid sampling across edges.
+    vec3 ddx = (abs(dR - depth) < abs(depth - dL))
+        ? viewPosFromDepth(uv + vec2(ts.x, 0), dR) - viewPos
+        : viewPos - viewPosFromDepth(uv - vec2(ts.x, 0), dL);
+    vec3 ddy = (abs(dD - depth) < abs(depth - dU))
+        ? viewPosFromDepth(uv + vec2(0, ts.y), dD) - viewPos
+        : viewPos - viewPosFromDepth(uv - vec2(0, ts.y), dU);
+    vec3 viewNormal = normalize(cross(ddx, ddy));
+
+    // Project AO radius to screen pixels.
+    float projScale = 0.5 * projection[0][0] * screenSize.x;
+    float screenRadius = (radius * projScale) / (-viewPos.z);
+    screenRadius = clamp(screenRadius, 3.0, 256.0);
+
+    float noise = interleavedGradientNoise(vec2(coord));
+    float ao = 0.0;
+
+    for (int slice = 0; slice < numSlices; ++slice) {
+        // Slice angle with per-pixel noise rotation.
+        float phi = (float(slice) + noise) * 3.14159265 / float(numSlices);
+        vec2 dir = vec2(cos(phi), sin(phi));
+
+        // Project the view-space normal onto this 2D slice.
+        // The slice plane contains the view direction and the screen direction.
+        vec3 dirView = vec3(dir.x, dir.y, 0.0); // screen-space direction in view space
+        vec3 orthoDir = normalize(dirView - dot(dirView, viewNormal) * viewNormal);
+        vec3 sliceTangent = cross(viewNormal, orthoDir);
+        // Projected normal angle in the slice:
+        float projNormalLen = length(vec2(dot(viewNormal, orthoDir), dot(viewNormal, sliceTangent)));
+        float n = -sign(dot(viewNormal, orthoDir)) * acos(clamp(dot(viewNormal, sliceTangent) / max(projNormalLen, 0.001), -1.0, 1.0));
+
+        // Trace horizon in both directions along the slice.
+        float h1 = -n;  // start at the normal plane (minimum occlusion)
+        float h2 = -n;
+
+        for (int step = 1; step <= numSteps; ++step) {
+            float t = (float(step) + noise * 0.5) / float(numSteps);
+            float stepPx = screenRadius * t;
+
+            // +direction
+            {
+                vec2 sampleUV = uv + dir * stepPx * ts;
+                if (sampleUV.x > 0.0 && sampleUV.x < 1.0 && sampleUV.y > 0.0 && sampleUV.y < 1.0) {
+                    float sd = texture(depthTexture, sampleUV).r;
+                    if (sd < 0.9999) {
+                        vec3 samplePos = viewPosFromDepth(sampleUV, sd);
+                        vec3 delta = samplePos - viewPos;
+                        float dist = length(delta);
+                        if (dist > 0.01) {
+                            float horizAngle = atan(delta.z / max(length(delta.xy), 0.001));
+                            // Distance falloff.
+                            float falloff = clamp(1.0 - pow(dist / radius, falloffExp), 0.0, 1.0);
+                            h1 = max(h1, mix(-n, horizAngle, falloff));
+                        }
+                    }
+                }
+            }
+
+            // -direction
+            {
+                vec2 sampleUV = uv - dir * stepPx * ts;
+                if (sampleUV.x > 0.0 && sampleUV.x < 1.0 && sampleUV.y > 0.0 && sampleUV.y < 1.0) {
+                    float sd = texture(depthTexture, sampleUV).r;
+                    if (sd < 0.9999) {
+                        vec3 samplePos = viewPosFromDepth(sampleUV, sd);
+                        vec3 delta = samplePos - viewPos;
+                        float dist = length(delta);
+                        if (dist > 0.01) {
+                            float horizAngle = atan(delta.z / max(length(delta.xy), 0.001));
+                            float falloff = clamp(1.0 - pow(dist / radius, falloffExp), 0.0, 1.0);
+                            h2 = max(h2, mix(-n, horizAngle, falloff));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clamp horizon angles to hemisphere.
+        h1 = clamp(h1, -1.5708, 1.5708);
+        h2 = clamp(h2, -1.5708, 1.5708);
+
+        // Integrate the visible solid angle for this slice.
+        ao += gtaoIntegral(h1, h2, n);
+    }
+
+    ao /= float(numSlices);
+    ao = clamp(ao, 0.0, 1.0);
+
+    imageStore(aoImage, coord, vec4(ao));
+}

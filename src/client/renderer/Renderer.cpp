@@ -2,12 +2,17 @@
 
 #include "Camera.hpp"
 #include "ModelLoader.hpp"
+#include "particles/ParticleSystem.hpp"
 
+#include <algorithm>
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
+#include <filesystem>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <imgui.h>
+#include <stb_image.h>
 #include <vector>
 
 // stb_image_write — declaration only (implementation is in FrameRecorder.cpp).
@@ -25,16 +30,126 @@
 namespace
 {
 
-/// @brief Load a compiled shader from disk and create an SDL GPU shader object.
-SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
-                          const char* path,
-                          SDL_GPUShaderFormat format,
-                          SDL_GPUShaderStage stage,
-                          Uint32 samplerCount,
-                          Uint32 uniformBufferCount,
-                          Uint32 storageBufferCount,
-                          Uint32 storageTextureCount)
+// ── UBO structures (must match shader layouts exactly) ──────────────────────
+
+/// Vertex UBO (set = 1, binding = 0) — shared by scene + PBR pipelines.
+struct Matrices
 {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 projection;
+    glm::mat4 normalMatrix; ///< transpose(inverse(model)), padded to mat4 for std140.
+};
+
+/// Vertex UBO for the old scene pipeline (no normalMatrix).
+struct SceneMatrices
+{
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 projection;
+};
+
+/// Fragment UBO slot 0 — per-mesh PBR material.
+struct MaterialUBO
+{
+    glm::vec4 baseColorFactor;
+    float metallicFactor;
+    float roughnessFactor;
+    float aoStrength;
+    float normalScale;
+    glm::vec4 emissiveFactor;
+};
+
+/// One light in the LightData UBO.
+struct LightGPU
+{
+    glm::vec4 position; // xyz = direction/position, w = type (0 dir, 1 point)
+    glm::vec4 color;    // rgb = colour, a = intensity
+    glm::vec4 params;   // x = range, y = innerCone, z = outerCone, w = castsShadow
+};
+
+/// Fragment UBO slot 1 — scene lighting.
+struct LightDataUBO
+{
+    glm::vec4 cameraPos;
+    glm::vec4 ambientColor;
+    int numLights;
+    float _pad1, _pad2, _pad3;
+    LightGPU lights[8];
+};
+
+/// Skybox vertex UBO.
+struct SkyboxMatricesUBO
+{
+    glm::mat4 viewRotation;
+    glm::mat4 projection;
+};
+
+/// Shadow map vertex UBO — matches shadow.vert LightMatrices.
+struct ShadowUBO
+{
+    glm::mat4 lightVP;
+    glm::mat4 model;
+};
+
+/// Per-cascade data computed each frame.
+struct CascadeInfo
+{
+    glm::mat4 lightView;
+    glm::mat4 lightProj;
+    glm::mat4 lightVP;
+    float splitDistance; ///< View-space far plane of this cascade.
+};
+
+/// Shadow data pushed to pbr.frag / normal.frag for cascade shadow sampling.
+/// The fragment shader selects the cascade based on the fragment's view-space Z.
+struct ShadowDataFragUBO
+{
+    glm::mat4 lightVP[4];    ///< Per-cascade light view-projection matrices.
+    glm::vec4 cascadeSplits; ///< View-space far distances for each cascade.
+    glm::mat4 cameraView;    ///< Camera view matrix (for computing view-space Z in shader).
+    float shadowBias;
+    float shadowNormalBias;
+    float shadowMapSize;
+    float _pad;
+    glm::vec4 lightDirWorld; ///< xyz = direction TO sun.
+    glm::vec4 lightColor;    ///< rgb = sun color, a = sun intensity.
+    glm::vec4 ambientColor;  ///< rgb = ambient (used by normal.frag).
+    glm::vec4 fillColor;     ///< rgb = fill light color, a = fill intensity.
+};
+
+/// Tonemap fragment UBO — matches tonemap.frag TonemapParams.
+struct TonemapParamsUBO
+{
+    float exposure;
+    float gamma;
+    int tonemapMode;
+    float bloomStrength;
+    float ssaoStrength;
+    float ssrStrength;
+    float volumetricStrength;
+    float sharpenStrength;
+};
+
+} // namespace
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shader loading helper
+// ═══════════════════════════════════════════════════════════════════════════
+
+SDL_GPUShader* Renderer::loadShaderFromFile(const char* name,
+                                            SDL_GPUShaderStage stage,
+                                            Uint32 samplerCount,
+                                            Uint32 uniformBufferCount,
+                                            Uint32 storageBufferCount,
+                                            Uint32 storageTextureCount)
+{
+    const char* const k_base = SDL_GetBasePath();
+    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+
+    char path[512];
+    SDL_snprintf(path, sizeof(path), "%sshaders/%s%s", k_base ? k_base : "", name, k_ext);
+
     size_t codeSize = 0;
     void* code = SDL_LoadFile(path, &codeSize);
     if (!code) {
@@ -45,37 +160,1547 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     SDL_GPUShaderCreateInfo info{};
     info.code = static_cast<const Uint8*>(code);
     info.code_size = static_cast<Uint32>(codeSize);
-    info.format = format;
+    info.format = shaderFormat;
     info.stage = stage;
     info.num_samplers = samplerCount;
     info.num_uniform_buffers = uniformBufferCount;
     info.num_storage_buffers = storageBufferCount;
     info.num_storage_textures = storageTextureCount;
+    info.entrypoint = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
 
-    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL.
-    info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
-
-    SDL_GPUShader* shader = SDL_CreateGPUShader(dev, &info);
+    SDL_GPUShader* shader = SDL_CreateGPUShader(device, &info);
     SDL_free(code);
 
     if (!shader)
-        SDL_Log("Renderer: SDL_CreateGPUShader(%s) failed: %s", path, SDL_GetError());
+        SDL_Log("Renderer: SDL_CreateGPUShader(%s) failed: %s", name, SDL_GetError());
     return shader;
 }
 
-/// @brief Matrices UBO — shared by both the scene and model pipelines.
-struct Matrices
+// ═══════════════════════════════════════════════════════════════════════════
+// Compute pipeline helper
+// ═══════════════════════════════════════════════════════════════════════════
+
+SDL_GPUComputePipeline* Renderer::createComputePipeline(const char* shaderName,
+                                                        Uint32 numSamplers,
+                                                        Uint32 numReadonlyStorageTextures,
+                                                        Uint32 numReadonlyStorageBuffers,
+                                                        Uint32 numReadwriteStorageTextures,
+                                                        Uint32 numReadwriteStorageBuffers,
+                                                        Uint32 numUniformBuffers,
+                                                        Uint32 threadCountX,
+                                                        Uint32 threadCountY,
+                                                        Uint32 threadCountZ)
 {
-    glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 projection;
-};
+    const char* const k_base = SDL_GetBasePath();
+    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
 
-} // namespace
+    char path[512];
+    SDL_snprintf(path, sizeof(path), "%sshaders/%s%s", k_base ? k_base : "", shaderName, k_ext);
 
-// ---------------------------------------------------------------------------
-// Renderer::init
-// ---------------------------------------------------------------------------
+    size_t codeSize = 0;
+    void* code = SDL_LoadFile(path, &codeSize);
+    if (!code) {
+        SDL_Log("Renderer: failed to load compute shader %s: %s", path, SDL_GetError());
+        return nullptr;
+    }
+
+    SDL_GPUComputePipelineCreateInfo cpci{};
+    cpci.code_size = codeSize;
+    cpci.code = static_cast<const Uint8*>(code);
+    cpci.entrypoint = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
+    cpci.format = shaderFormat;
+    cpci.num_samplers = numSamplers;
+    cpci.num_readonly_storage_textures = numReadonlyStorageTextures;
+    cpci.num_readonly_storage_buffers = numReadonlyStorageBuffers;
+    cpci.num_readwrite_storage_textures = numReadwriteStorageTextures;
+    cpci.num_readwrite_storage_buffers = numReadwriteStorageBuffers;
+    cpci.num_uniform_buffers = numUniformBuffers;
+    cpci.threadcount_x = threadCountX;
+    cpci.threadcount_y = threadCountY;
+    cpci.threadcount_z = threadCountZ;
+
+    SDL_GPUComputePipeline* pipeline = SDL_CreateGPUComputePipeline(device, &cpci);
+    SDL_free(code);
+
+    if (!pipeline)
+        SDL_Log("Renderer: compute pipeline '%s' creation failed: %s", shaderName, SDL_GetError());
+    return pipeline;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Pipeline creation
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool Renderer::initScenePipeline()
+{
+    // Scene geometry: projective.vert (1 vert UBO) + normal.frag (1 frag sampler + 1 frag UBO).
+    SDL_GPUShader* vert = loadShaderFromFile("projective.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+    SDL_GPUShader* frag = loadShaderFromFile("normal.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    SDL_GPUColorTargetDescription ct{};
+    ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT; // render to HDR
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.target_info.color_target_descriptions = &ct;
+    pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    // Y-flip in projection reverses screen-space winding; tell the GPU that CW = front.
+    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+
+    scenePipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!scenePipeline) {
+        SDL_Log("Renderer: scene pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+bool Renderer::initPBRPipeline()
+{
+    // pbr.vert: 0 samplers, 1 UBO (Matrices).
+    // pbr.frag: 7 samplers (albedo, MR, emissive, normal, irradiance, prefilter, brdfLUT),
+    //           2 UBOs (Material, LightData).
+    SDL_GPUShader* vert = loadShaderFromFile("pbr.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+    SDL_GPUShader* frag = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 8, 3);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    // Vertex layout: position(vec3) + normal(vec3) + texCoord(vec2) + tangent(vec4) = 48 bytes.
+    const SDL_GPUVertexBufferDescription vbDesc = {
+        .slot = 0,
+        .pitch = sizeof(ModelVertex),
+        .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+        .instance_step_rate = 0,
+    };
+
+    const SDL_GPUVertexAttribute attrs[4] = {
+        {.location = 0, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 0},
+        {.location = 1, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 12},
+        {.location = 2, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = 24},
+        {.location = 3, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, .offset = 32},
+    };
+
+    SDL_GPUVertexInputState vertexInput{};
+    vertexInput.vertex_buffer_descriptions = &vbDesc;
+    vertexInput.num_vertex_buffers = 1;
+    vertexInput.vertex_attributes = attrs;
+    vertexInput.num_vertex_attributes = 4;
+
+    // No alpha blending on the opaque PBR pipeline.
+    // Transparency will be handled by a SEPARATE transparent pipeline that
+    // renders after opaques with alpha blending + no depth write.
+    SDL_GPUColorTargetDescription ct{};
+    ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.vertex_input_state = vertexInput;
+    pci.target_info.color_target_descriptions = &ct;
+    pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE; // GLB double-sided
+    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+
+    pbrPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!pbrPipeline) {
+        SDL_Log("Renderer: PBR pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+
+    // ── Transparent PBR pipeline (same shaders, alpha blend, no depth write) ─
+    {
+        SDL_GPUColorTargetDescription ctBlend{};
+        ctBlend.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ctBlend.blend_state.enable_blend = true;
+        ctBlend.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+        ctBlend.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        ctBlend.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+        ctBlend.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+        ctBlend.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        ctBlend.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+
+        // Reload shaders for the second pipeline (SDL requires separate shader objects).
+        SDL_GPUShader* vertT = loadShaderFromFile("pbr.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+        SDL_GPUShader* fragT = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2);
+
+        SDL_GPUGraphicsPipelineCreateInfo pciT = pci; // copy from opaque
+        pciT.vertex_shader = vertT;
+        pciT.fragment_shader = fragT;
+        pciT.target_info.color_target_descriptions = &ctBlend;
+        // Read depth (test) but don't write — transparent surfaces don't occlude.
+        pciT.depth_stencil_state.enable_depth_write = false;
+
+        pbrTransparentPipeline = SDL_CreateGPUGraphicsPipeline(device, &pciT);
+        SDL_ReleaseGPUShader(device, vertT);
+        SDL_ReleaseGPUShader(device, fragT);
+
+        if (!pbrTransparentPipeline)
+            SDL_Log("Renderer: transparent PBR pipeline creation failed: %s", SDL_GetError());
+    }
+
+    return true;
+}
+
+bool Renderer::initSkyboxPipeline()
+{
+    SDL_GPUShader* vert = loadShaderFromFile("skybox.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+    SDL_GPUShader* frag = loadShaderFromFile("skybox.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    SDL_GPUColorTargetDescription ct{};
+    ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.target_info.color_target_descriptions = &ct;
+    pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    // Skybox renders at depth = 1.0; use LESS_OR_EQUAL so it fills where nothing was drawn.
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = false;     // don't overwrite depth
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE; // inside of the cube
+
+    skyboxPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!skyboxPipeline) {
+        SDL_Log("Renderer: skybox pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+bool Renderer::initTonemapPipeline()
+{
+    SDL_GPUShader* vert = loadShaderFromFile("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+    SDL_GPUShader* frag = loadShaderFromFile("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 5, 1);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    SDL_GPUColorTargetDescription ct{};
+    ct.format = swapchainFormat; // output to LDR swapchain
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.target_info.color_target_descriptions = &ct;
+    pci.target_info.num_color_targets = 1;
+    // No depth test for fullscreen pass.
+
+    tonemapPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!tonemapPipeline) {
+        SDL_Log("Renderer: tonemap pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+bool Renderer::initShadowPipeline()
+{
+    // Shadow pass: depth-only.  SDL3 GPU requires a fragment shader even when
+    // only writing depth, so we use a minimal no-op shadow.frag.
+    SDL_GPUShader* vert = loadShaderFromFile("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+    SDL_GPUShader* frag = loadShaderFromFile("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    // Minimal vertex input: position only (first 12 bytes of ModelVertex).
+    const SDL_GPUVertexBufferDescription vbDesc = {
+        .slot = 0,
+        .pitch = sizeof(ModelVertex),
+        .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+        .instance_step_rate = 0,
+    };
+    const SDL_GPUVertexAttribute attr = {
+        .location = 0, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 0};
+
+    SDL_GPUVertexInputState vertexInput{};
+    vertexInput.vertex_buffer_descriptions = &vbDesc;
+    vertexInput.num_vertex_buffers = 1;
+    vertexInput.vertex_attributes = &attr;
+    vertexInput.num_vertex_attributes = 1;
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.vertex_input_state = vertexInput;
+    // No colour targets — depth-only pass.
+    pci.target_info.num_color_targets = 0;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    // No culling in shadow pass — the camera Y-flip reverses winding in the
+    // main pass but the shadow projection has no flip, so BACK culling would
+    // actually cull the FRONT faces.  Disabling culling is the standard fix.
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    // Depth bias to reduce shadow acne.
+    pci.rasterizer_state.depth_bias_constant_factor = 0.75f;
+    pci.rasterizer_state.depth_bias_slope_factor = 1.0f;
+    pci.rasterizer_state.enable_depth_bias = true;
+
+    shadowPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!shadowPipeline) {
+        SDL_Log("Renderer: shadow pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+bool Renderer::initSceneShadowPipeline()
+{
+    // Scene geometry into shadow map: projective.vert (procedural verts) + shadow.frag (no-op).
+    SDL_GPUShader* vert = loadShaderFromFile("projective.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+    SDL_GPUShader* frag = loadShaderFromFile("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    // No vertex input — projective.vert generates all positions from gl_VertexIndex.
+    pci.target_info.num_color_targets = 0;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE; // No culling — same reason as shadowPipeline.
+    // Same depth bias as shadow pipeline.
+    pci.rasterizer_state.depth_bias_constant_factor = 0.75f;
+    pci.rasterizer_state.depth_bias_slope_factor = 1.0f;
+    pci.rasterizer_state.enable_depth_bias = true;
+
+    sceneShadowPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!sceneShadowPipeline) {
+        SDL_Log("Renderer: scene shadow pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Texture upload
+// ═══════════════════════════════════════════════════════════════════════════
+
+SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height, bool sRGB)
+{
+    // Compute full mip chain levels: floor(log2(max(w,h))) + 1.
+    const Uint32 w = static_cast<Uint32>(width);
+    const Uint32 h = static_cast<Uint32>(height);
+    const Uint32 maxDim = std::max(w, h);
+    Uint32 numLevels = 1;
+    {
+        Uint32 dim = maxDim;
+        while (dim > 1) {
+            dim >>= 1;
+            ++numLevels;
+        }
+    }
+    // For tiny textures (1×1 fallbacks), skip mipmapping.
+    const bool generateMips = (numLevels > 1 && w > 1 && h > 1);
+
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = sRGB ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    info.width = w;
+    info.height = h;
+    info.layer_count_or_depth = 1;
+    info.num_levels = generateMips ? numLevels : 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    // SAMPLER for sampling in shaders; COLOR_TARGET needed as blit destination for mip generation.
+    info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | (generateMips ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET : 0);
+
+    SDL_GPUTexture* tex = SDL_CreateGPUTexture(device, &info);
+    if (!tex) {
+        SDL_Log("Renderer: SDL_CreateGPUTexture failed: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    // Upload base level (mip 0).
+    const Uint32 dataSize = w * h * 4u;
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = dataSize;
+
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!tb) {
+        SDL_ReleaseGPUTexture(device, tex);
+        return nullptr;
+    }
+
+    void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
+    SDL_memcpy(ptr, pixels, dataSize);
+    SDL_UnmapGPUTransferBuffer(device, tb);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = tb;
+
+    SDL_GPUTextureRegion dst{};
+    dst.texture = tex;
+    dst.w = w;
+    dst.h = h;
+    dst.d = 1;
+
+    SDL_UploadToGPUTexture(cp, &src, &dst, false);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_WaitForGPUIdle(device);
+    SDL_ReleaseGPUTransferBuffer(device, tb);
+
+    // Generate mip chain using GPU blit (linear filter downsampling).
+    if (generateMips) {
+        Uint32 mipW = w;
+        Uint32 mipH = h;
+        for (Uint32 mip = 1; mip < numLevels; ++mip) {
+            Uint32 prevW = mipW;
+            Uint32 prevH = mipH;
+            mipW = std::max(mipW >> 1, 1u);
+            mipH = std::max(mipH >> 1, 1u);
+
+            SDL_GPUCommandBuffer* blitCmd = SDL_AcquireGPUCommandBuffer(device);
+
+            SDL_GPUBlitInfo blit{};
+            blit.source.texture = tex;
+            blit.source.mip_level = mip - 1;
+            blit.source.w = prevW;
+            blit.source.h = prevH;
+            blit.destination.texture = tex;
+            blit.destination.mip_level = mip;
+            blit.destination.w = mipW;
+            blit.destination.h = mipH;
+            blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+            blit.filter = SDL_GPU_FILTER_LINEAR;
+
+            SDL_BlitGPUTexture(blitCmd, &blit);
+            SDL_SubmitGPUCommandBuffer(blitCmd);
+        }
+        SDL_WaitForGPUIdle(device);
+    }
+
+    return tex;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Model upload
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
+{
+    if (model.meshes.empty())
+        return false;
+
+    // ── Sampler (created once, shared across all models) ────────────────────
+    SDL_GPUSamplerCreateInfo sampInfo{};
+    sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+    sampInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    sampInfo.min_lod = 0.0f;
+    sampInfo.max_lod = 13.0f; // Allow up to 8192×8192 mip chain (log2(8192)+1=13).
+    sampInfo.enable_anisotropy = true;
+    sampInfo.max_anisotropy = 8.0f;
+    sampInfo.enable_compare = false;
+
+    pbrSampler = SDL_CreateGPUSampler(device, &sampInfo);
+    if (!pbrSampler)
+        return false;
+
+    // ── Fallback textures ───────────────────────────────────────────────────
+    const uint8_t white[4] = {255, 255, 255, 255};
+    const uint8_t flatNormal[4] = {128, 128, 255, 255}; // (0.5, 0.5, 1.0) tangent-space up
+    const uint8_t defaultMR[4] = {0, 128, 0, 255};      // metallic=0 (B), roughness=0.5 (G) — dielectric default
+    const uint8_t black[4] = {0, 0, 0, 255};
+
+    fallbackWhite = uploadTexture(white, 1, 1, true);            // sRGB color
+    fallbackFlatNormal = uploadTexture(flatNormal, 1, 1, false); // linear data
+    fallbackMR = uploadTexture(defaultMR, 1, 1, false);          // linear data
+    fallbackBlack = uploadTexture(black, 1, 1, true);            // sRGB color
+
+    if (!fallbackWhite || !fallbackFlatNormal || !fallbackMR || !fallbackBlack)
+        return false;
+
+    // ── Upload textures ─────────────────────────────────────────────────────
+    outInstance.textures.reserve(model.textures.size());
+    for (const auto& td : model.textures) {
+        SDL_GPUTexture* gpuTex = uploadTexture(td.pixels.data(), td.width, td.height, td.isSRGB);
+        outInstance.textures.push_back(gpuTex);
+    }
+
+    // ── Upload geometry ─────────────────────────────────────────────────────
+    struct MeshSizes
+    {
+        Uint32 vbBytes;
+        Uint32 ibBytes;
+    };
+    std::vector<MeshSizes> sizes;
+    sizes.reserve(model.meshes.size());
+    Uint32 totalBytes = 0;
+
+    for (const auto& m : model.meshes) {
+        const Uint32 vb = static_cast<Uint32>(m.vertices.size() * sizeof(ModelVertex));
+        const Uint32 ib = static_cast<Uint32>(m.indices.size() * sizeof(uint32_t));
+        sizes.push_back({vb, ib});
+        totalBytes += vb + ib;
+    }
+
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = totalBytes;
+
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!tb)
+        return false;
+
+    auto* dst = static_cast<char*>(SDL_MapGPUTransferBuffer(device, tb, false));
+    Uint32 writeOffset = 0;
+    for (size_t i = 0; i < model.meshes.size(); ++i) {
+        SDL_memcpy(dst + writeOffset, model.meshes[i].vertices.data(), sizes[i].vbBytes);
+        writeOffset += sizes[i].vbBytes;
+        SDL_memcpy(dst + writeOffset, model.meshes[i].indices.data(), sizes[i].ibBytes);
+        writeOffset += sizes[i].ibBytes;
+    }
+    SDL_UnmapGPUTransferBuffer(device, tb);
+
+    SDL_GPUCommandBuffer* uploadCmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(uploadCmd);
+
+    Uint32 readOffset = 0;
+    outInstance.meshes.reserve(model.meshes.size());
+
+    for (size_t i = 0; i < model.meshes.size(); ++i) {
+        SDL_GPUBufferCreateInfo vbInfo{};
+        vbInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+        vbInfo.size = sizes[i].vbBytes;
+        SDL_GPUBuffer* vb = SDL_CreateGPUBuffer(device, &vbInfo);
+
+        SDL_GPUBufferCreateInfo ibInfo{};
+        ibInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+        ibInfo.size = sizes[i].ibBytes;
+        SDL_GPUBuffer* ib = SDL_CreateGPUBuffer(device, &ibInfo);
+
+        if (!vb || !ib) {
+            SDL_ReleaseGPUBuffer(device, vb);
+            SDL_ReleaseGPUBuffer(device, ib);
+            SDL_EndGPUCopyPass(copyPass);
+            SDL_SubmitGPUCommandBuffer(uploadCmd);
+            SDL_ReleaseGPUTransferBuffer(device, tb);
+            return false;
+        }
+
+        SDL_GPUTransferBufferLocation src{};
+        SDL_GPUBufferRegion dstReg{};
+
+        src.transfer_buffer = tb;
+        src.offset = readOffset;
+        dstReg.buffer = vb;
+        dstReg.size = sizes[i].vbBytes;
+        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
+        readOffset += sizes[i].vbBytes;
+
+        src.offset = readOffset;
+        dstReg.buffer = ib;
+        dstReg.size = sizes[i].ibBytes;
+        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
+        readOffset += sizes[i].ibBytes;
+
+        const auto& md = model.meshes[i];
+        outInstance.meshes.push_back({
+            .vertexBuffer = vb,
+            .indexBuffer = ib,
+            .indexCount = static_cast<Uint32>(md.indices.size()),
+            .albedoTexIndex = md.diffuseTexIndex,
+            .normalTexIndex = md.normalTexIndex,
+            .metallicRoughnessTexIndex = md.metallicRoughnessTexIndex,
+            .emissiveTexIndex = md.emissiveTexIndex,
+            .material = md.material,
+            .isTransparent = (md.material.alphaMode != AlphaMode::Opaque),
+        });
+    }
+
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(uploadCmd);
+    SDL_WaitForGPUIdle(device);
+    SDL_ReleaseGPUTransferBuffer(device, tb);
+
+    SDL_Log("Renderer: uploaded %zu mesh(es), %zu texture(s) (%u bytes geometry)",
+            outInstance.meshes.size(),
+            outInstance.textures.size(),
+            totalBytes);
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IBL — generate BRDF LUT, irradiance map, and pre-filtered specular map
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool Renderer::initIBL()
+{
+    // ── BRDF LUT (512×512 RG16F) ────────────────────────────────────────────
+    {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_2D;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
+        ci.width = 512;
+        ci.height = 512;
+        ci.layer_count_or_depth = 1;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        brdfLUT = SDL_CreateGPUTexture(device, &ci);
+        if (!brdfLUT) {
+            SDL_Log("IBL: failed to create BRDF LUT: %s", SDL_GetError());
+            return false;
+        }
+
+        SDL_GPUShader* cs = loadShaderFromFile("brdf_lut.comp", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 1);
+        // Note: SDL3 GPU uses VERTEX stage enum for compute shaders in some versions.
+        // If that fails, the actual compute pipeline creation below will catch it.
+        if (!cs) {
+            SDL_Log("IBL: brdf_lut.comp shader load failed");
+            return false;
+        }
+
+        SDL_GPUComputePipelineCreateInfo cpci{};
+        cpci.code = nullptr; // already compiled via SDL_GPUShader
+        // Actually, SDL3 GPU compute pipelines are created differently.
+        // Let me use the correct API.
+        SDL_ReleaseGPUShader(device, cs);
+    }
+
+    // For now, generate IBL textures using a simpler approach:
+    // render-to-cubemap with the existing skybox shader, then convolve.
+    // However, SDL3 GPU compute pipeline creation requires specific setup.
+    // Let me check the correct API pattern first.
+
+    // TEMPORARY: Create the IBL textures with solid fallback data so the
+    // shader has valid textures to sample while we implement the compute
+    // pipeline properly.
+
+    // ── Irradiance map (32×32 per face, cubemap, RGBA16F) ───────────────────
+    {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_CUBE;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ci.width = 32;
+        ci.height = 32;
+        ci.layer_count_or_depth = 6;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        irradianceMap = SDL_CreateGPUTexture(device, &ci);
+        if (!irradianceMap) {
+            SDL_Log("IBL: failed to create irradiance map");
+            return false;
+        }
+    }
+
+    // ── Pre-filter map (128×128 per face, 5 mip levels, cubemap, RGBA16F) ───
+    {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_CUBE;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ci.width = 128;
+        ci.height = 128;
+        ci.layer_count_or_depth = 6;
+        ci.num_levels = 5; // mip 0=128, 1=64, 2=32, 3=16, 4=8
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        prefilterMap = SDL_CreateGPUTexture(device, &ci);
+        if (!prefilterMap) {
+            SDL_Log("IBL: failed to create prefilter map");
+            return false;
+        }
+    }
+
+    // ── IBL sampler (linear, clamp, mipmapped) ──────────────────────────────
+    {
+        SDL_GPUSamplerCreateInfo si{};
+        si.min_filter = SDL_GPU_FILTER_LINEAR;
+        si.mag_filter = SDL_GPU_FILTER_LINEAR;
+        si.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+        si.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        si.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        si.max_lod = 5.0f;
+        iblSampler = SDL_CreateGPUSampler(device, &si);
+        if (!iblSampler) {
+            SDL_Log("IBL: failed to create sampler");
+            return false;
+        }
+    }
+
+    // TODO: Run compute shaders to fill brdfLUT, irradianceMap, prefilterMap
+    // with proper IBL data.  For now they're uninitialized (black) which means
+    // IBL contributes zero = same as the old simple ambient.  The compute
+    // pipeline integration is complex and will be done in a follow-up.
+    // For now, fill the BRDF LUT with a reasonable approximation via CPU upload.
+
+    // ── CPU-side BRDF LUT approximation ─────────────────────────────────────
+    // Use Karis's analytical fit: scale ≈ 1, bias ≈ 0 gives F0*1+0 = F0
+    // which is the correct limit for a rough surface.  This is a crude
+    // approximation but better than zero.
+    {
+        // Hammersley low-discrepancy sequence for Monte Carlo integration.
+        auto radicalInverseVdC = [](uint32_t bits) -> float {
+            bits = (bits << 16u) | (bits >> 16u);
+            bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+            bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+            bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+            bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+            return static_cast<float>(bits) * 2.3283064365386963e-10f;
+        };
+
+        const int sz = 512;
+        std::vector<uint16_t> lutData(static_cast<size_t>(sz * sz * 2));
+        for (int y = 0; y < sz; ++y) {
+            for (int x = 0; x < sz; ++x) {
+                float NdotV = std::max((static_cast<float>(x) + 0.5f) / static_cast<float>(sz), 0.001f);
+                float rough = std::max((static_cast<float>(y) + 0.5f) / static_cast<float>(sz), 0.001f);
+
+                // Proper Monte Carlo integration of the split-sum BRDF.
+                glm::vec3 V(std::sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV);
+                float A = 0.0f, B = 0.0f;
+                constexpr int NUM_SAMPLES = 256;
+                for (int i = 0; i < NUM_SAMPLES; ++i) {
+                    float xi1 = static_cast<float>(i) / static_cast<float>(NUM_SAMPLES);
+                    float xi2 = radicalInverseVdC(static_cast<uint32_t>(i));
+
+                    // Importance-sample GGX.
+                    float a2 = rough * rough * rough * rough; // a = rough², a² = rough⁴
+                    float phi = 6.28318f * xi1;
+                    float cosTheta = std::sqrt((1.0f - xi2) / (1.0f + (a2 - 1.0f) * xi2));
+                    float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
+                    glm::vec3 H(std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta);
+                    glm::vec3 L = 2.0f * glm::dot(V, H) * H - V;
+
+                    float NdotL = std::max(L.z, 0.0f);
+                    float NdotH = std::max(H.z, 0.0f);
+                    float VdotH = std::max(glm::dot(V, H), 0.0f);
+
+                    if (NdotL > 0.0f) {
+                        // Smith-GGX geometry with IBL remapping: k = rough²/2.
+                        float k = (rough * rough) / 2.0f;
+                        float G1V = NdotV / (NdotV * (1.0f - k) + k);
+                        float G1L = NdotL / (NdotL * (1.0f - k) + k);
+                        float G = G1V * G1L;
+                        float GVis = (G * VdotH) / (NdotH * NdotV + 0.0001f);
+                        float Fc = std::pow(1.0f - VdotH, 5.0f);
+                        A += (1.0f - Fc) * GVis;
+                        B += Fc * GVis;
+                    }
+                }
+                float scale = A / static_cast<float>(NUM_SAMPLES);
+                float bias = B / static_cast<float>(NUM_SAMPLES);
+
+                size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(sz) + static_cast<size_t>(x)) * 2;
+                // Convert float to float16 (half). Use a simple truncation.
+                auto toHalf = [](float v) -> uint16_t {
+                    // Quick float→half conversion (loses precision but works for [0,1]).
+                    uint32_t f = *reinterpret_cast<uint32_t*>(&v);
+                    uint32_t sign = (f >> 16) & 0x8000;
+                    int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
+                    uint32_t mant = (f >> 13) & 0x03FF;
+                    if (exp <= 0)
+                        return static_cast<uint16_t>(sign);
+                    if (exp >= 31)
+                        return static_cast<uint16_t>(sign | 0x7C00);
+                    return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
+                };
+
+                lutData[idx + 0] = toHalf(glm::clamp(scale, 0.0f, 1.0f));
+                lutData[idx + 1] = toHalf(glm::clamp(bias, 0.0f, 1.0f));
+            }
+        }
+
+        // Upload to GPU.
+        const Uint32 dataSize = static_cast<Uint32>(lutData.size() * sizeof(uint16_t));
+        SDL_GPUTransferBufferCreateInfo tbInfo{};
+        tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        tbInfo.size = dataSize;
+        SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+        if (tb) {
+            void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
+            SDL_memcpy(ptr, lutData.data(), dataSize);
+            SDL_UnmapGPUTransferBuffer(device, tb);
+
+            SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+            SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+            SDL_GPUTextureTransferInfo src{};
+            src.transfer_buffer = tb;
+            SDL_GPUTextureRegion dst{};
+            dst.texture = brdfLUT;
+            dst.w = 512;
+            dst.h = 512;
+            dst.d = 1;
+            SDL_UploadToGPUTexture(cp, &src, &dst, false);
+            SDL_EndGPUCopyPass(cp);
+            SDL_SubmitGPUCommandBuffer(cmd);
+            SDL_WaitForGPUIdle(device);
+            SDL_ReleaseGPUTransferBuffer(device, tb);
+        }
+    }
+
+    // ── CPU-side irradiance map approximation ───────────────────────────────
+    // Sample the procedural sky at low resolution for each cubemap face.
+    {
+        const int sz = 32;
+        const size_t faceBytes = static_cast<size_t>(sz * sz * 4 * sizeof(uint16_t)); // RGBA16F
+        std::vector<uint16_t> faceData(static_cast<size_t>(sz * sz * 4));
+
+        auto toHalf = [](float v) -> uint16_t {
+            uint32_t f = *reinterpret_cast<uint32_t*>(&v);
+            uint32_t sign = (f >> 16) & 0x8000;
+            int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
+            uint32_t mant = (f >> 13) & 0x03FF;
+            if (exp <= 0)
+                return static_cast<uint16_t>(sign);
+            if (exp >= 31)
+                return static_cast<uint16_t>(sign | 0x7C00);
+            return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
+        };
+
+        // Procedural sky evaluation (matches skybox.frag).
+        auto sky = [](glm::vec3 dir) -> glm::vec3 {
+            float y = dir.y;
+            // Sky values are multiplied 4× vs the skybox shader to approximate
+            // the brightness of a real outdoor environment for IBL.
+            glm::vec3 zenith(0.32f, 0.64f, 1.8f);
+            glm::vec3 horizon(2.4f, 1.8f, 1.4f);
+            glm::vec3 nadir(0.12f, 0.12f, 0.2f);
+            glm::vec3 c;
+            if (y > 0.0f) {
+                float t = std::pow(y, 0.4f);
+                c = glm::mix(horizon, zenith, t);
+            } else {
+                float t = std::pow(-y, 0.6f);
+                c = glm::mix(horizon, nadir, t);
+            }
+            // Sun (simplified — no disc, just glow for irradiance).
+            glm::vec3 sunDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
+            float sunGlow = std::pow(std::max(glm::dot(dir, sunDir), 0.0f), 64.0f);
+            c += glm::vec3(1.0f, 0.9f, 0.7f) * sunGlow * 0.5f;
+            return c;
+        };
+
+        auto cubeDir = [](int face, float u, float v) -> glm::vec3 {
+            switch (face) {
+            case 0:
+                return glm::normalize(glm::vec3(1, -v, -u));  // +X
+            case 1:
+                return glm::normalize(glm::vec3(-1, -v, u));  // -X
+            case 2:
+                return glm::normalize(glm::vec3(u, 1, v));    // +Y
+            case 3:
+                return glm::normalize(glm::vec3(u, -1, -v));  // -Y
+            case 4:
+                return glm::normalize(glm::vec3(u, -v, 1));   // +Z
+            case 5:
+                return glm::normalize(glm::vec3(-u, -v, -1)); // -Z
+            }
+            return glm::vec3(0);
+        };
+
+        SDL_GPUTransferBufferCreateInfo tbInfo{};
+        tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        tbInfo.size = static_cast<Uint32>(faceBytes);
+        SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+        if (!tb)
+            return false;
+
+        for (int face = 0; face < 6; ++face) {
+            for (int y = 0; y < sz; ++y) {
+                for (int x = 0; x < sz; ++x) {
+                    float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(sz) * 2.0f - 1.0f;
+                    float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(sz) * 2.0f - 1.0f;
+                    glm::vec3 N = cubeDir(face, u, v);
+
+                    // Simple hemisphere integration (low sample count for speed).
+                    glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+                    glm::vec3 right = glm::normalize(glm::cross(up, N));
+                    up = glm::cross(N, right);
+
+                    glm::vec3 irr(0.0f);
+                    int samples = 0;
+                    for (float phi = 0.0f; phi < 6.2832f; phi += 0.1f) {
+                        for (float theta = 0.0f; theta < 1.5708f; theta += 0.1f) {
+                            glm::vec3 samp = std::sin(theta) * std::cos(phi) * right +
+                                             std::sin(theta) * std::sin(phi) * up + std::cos(theta) * N;
+                            irr += sky(samp) * std::cos(theta) * std::sin(theta);
+                            ++samples;
+                        }
+                    }
+                    irr *= 3.14159f / static_cast<float>(samples);
+
+                    size_t idx = (static_cast<size_t>(y) * sz + x) * 4;
+                    faceData[idx + 0] = toHalf(irr.r);
+                    faceData[idx + 1] = toHalf(irr.g);
+                    faceData[idx + 2] = toHalf(irr.b);
+                    faceData[idx + 3] = toHalf(1.0f);
+                }
+            }
+
+            // Upload this face.
+            void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
+            SDL_memcpy(ptr, faceData.data(), faceBytes);
+            SDL_UnmapGPUTransferBuffer(device, tb);
+
+            SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+            SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+            SDL_GPUTextureTransferInfo src{};
+            src.transfer_buffer = tb;
+            SDL_GPUTextureRegion dst{};
+            dst.texture = irradianceMap;
+            dst.layer = static_cast<Uint32>(face);
+            dst.w = static_cast<Uint32>(sz);
+            dst.h = static_cast<Uint32>(sz);
+            dst.d = 1;
+            SDL_UploadToGPUTexture(cp, &src, &dst, false);
+            SDL_EndGPUCopyPass(cp);
+            SDL_SubmitGPUCommandBuffer(cmd);
+            SDL_WaitForGPUIdle(device);
+        }
+        SDL_ReleaseGPUTransferBuffer(device, tb);
+    }
+
+    // ── CPU-side prefilter map (5 mip levels, roughness = mip/4) ────────────
+    {
+        auto toHalf = [](float v) -> uint16_t {
+            uint32_t f = *reinterpret_cast<uint32_t*>(&v);
+            uint32_t sign = (f >> 16) & 0x8000;
+            int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
+            uint32_t mant = (f >> 13) & 0x03FF;
+            if (exp <= 0)
+                return static_cast<uint16_t>(sign);
+            if (exp >= 31)
+                return static_cast<uint16_t>(sign | 0x7C00);
+            return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
+        };
+
+        auto sky = [](glm::vec3 dir) -> glm::vec3 {
+            float y = dir.y;
+            // Sky values are multiplied 4× vs the skybox shader to approximate
+            // the brightness of a real outdoor environment for IBL.
+            glm::vec3 zenith(0.32f, 0.64f, 1.8f);
+            glm::vec3 horizon(2.4f, 1.8f, 1.4f);
+            glm::vec3 nadir(0.12f, 0.12f, 0.2f);
+            glm::vec3 c;
+            if (y > 0.0f)
+                c = glm::mix(horizon, zenith, std::pow(y, 0.4f));
+            else
+                c = glm::mix(horizon, nadir, std::pow(-y, 0.6f));
+            glm::vec3 sunDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
+            float sa = glm::dot(dir, sunDir);
+            c += glm::vec3(1.0f, 0.95f, 0.85f) * 8.0f * std::max(0.0f, std::pow(std::max(sa, 0.0f), 2048.0f));
+            c += glm::vec3(1.0f, 0.8f, 0.5f) * std::pow(std::max(sa, 0.0f), 256.0f) * 0.5f;
+            return c;
+        };
+
+        auto cubeDir = [](int face, float u, float v) -> glm::vec3 {
+            switch (face) {
+            case 0:
+                return glm::normalize(glm::vec3(1, -v, -u));
+            case 1:
+                return glm::normalize(glm::vec3(-1, -v, u));
+            case 2:
+                return glm::normalize(glm::vec3(u, 1, v));
+            case 3:
+                return glm::normalize(glm::vec3(u, -1, -v));
+            case 4:
+                return glm::normalize(glm::vec3(u, -v, 1));
+            case 5:
+                return glm::normalize(glm::vec3(-u, -v, -1));
+            }
+            return glm::vec3(0);
+        };
+
+        for (int mip = 0; mip < 5; ++mip) {
+            int mipSize = 128 >> mip;             // 128, 64, 32, 16, 8
+            float rough = static_cast<float>(mip) / 4.0f;
+            int numSamples = (mip == 0) ? 1 : 64; // mirror for mip0, blurred for higher
+
+            const size_t faceBytes = static_cast<size_t>(mipSize * mipSize * 4) * sizeof(uint16_t);
+            std::vector<uint16_t> faceData(static_cast<size_t>(mipSize * mipSize * 4));
+
+            SDL_GPUTransferBufferCreateInfo tbInfo{};
+            tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            tbInfo.size = static_cast<Uint32>(faceBytes);
+            SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+            if (!tb)
+                continue;
+
+            for (int face = 0; face < 6; ++face) {
+                for (int y = 0; y < mipSize; ++y) {
+                    for (int x = 0; x < mipSize; ++x) {
+                        float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
+                        float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
+                        glm::vec3 N = cubeDir(face, u, v);
+
+                        glm::vec3 color(0.0f);
+                        if (numSamples == 1) {
+                            color = sky(N);
+                        } else {
+                            // Simple cone sampling (not importance-sampled, but adequate for CPU).
+                            glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+                            glm::vec3 right = glm::normalize(glm::cross(up, N));
+                            up = glm::cross(N, right);
+                            float total = 0.0f;
+                            for (int s = 0; s < numSamples; ++s) {
+                                // Quasi-random hemisphere direction biased by roughness.
+                                float xi1 = static_cast<float>(s) / static_cast<float>(numSamples);
+                                float xi2 =
+                                    static_cast<float>((s * 7 + 1) % numSamples) / static_cast<float>(numSamples);
+                                float phi = 6.2832f * xi1;
+                                float cosTheta = std::pow(1.0f - xi2, 1.0f / (1.0f + rough * rough * 100.0f));
+                                float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
+                                glm::vec3 H =
+                                    sinTheta * std::cos(phi) * right + sinTheta * std::sin(phi) * up + cosTheta * N;
+                                glm::vec3 L = glm::normalize(2.0f * glm::dot(N, H) * H - N);
+                                float NdotL = std::max(glm::dot(N, L), 0.0f);
+                                if (NdotL > 0.0f) {
+                                    color += sky(L) * NdotL;
+                                    total += NdotL;
+                                }
+                            }
+                            if (total > 0.0f)
+                                color /= total;
+                        }
+
+                        size_t idx = (static_cast<size_t>(y) * mipSize + x) * 4;
+                        faceData[idx + 0] = toHalf(color.r);
+                        faceData[idx + 1] = toHalf(color.g);
+                        faceData[idx + 2] = toHalf(color.b);
+                        faceData[idx + 3] = toHalf(1.0f);
+                    }
+                }
+
+                void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
+                SDL_memcpy(ptr, faceData.data(), faceBytes);
+                SDL_UnmapGPUTransferBuffer(device, tb);
+
+                SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+                SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+                SDL_GPUTextureTransferInfo src{};
+                src.transfer_buffer = tb;
+                SDL_GPUTextureRegion dst{};
+                dst.texture = prefilterMap;
+                dst.mip_level = static_cast<Uint32>(mip);
+                dst.layer = static_cast<Uint32>(face);
+                dst.w = static_cast<Uint32>(mipSize);
+                dst.h = static_cast<Uint32>(mipSize);
+                dst.d = 1;
+                SDL_UploadToGPUTexture(cp, &src, &dst, false);
+                SDL_EndGPUCopyPass(cp);
+                SDL_SubmitGPUCommandBuffer(cmd);
+                SDL_WaitForGPUIdle(device);
+            }
+            SDL_ReleaseGPUTransferBuffer(device, tb);
+        }
+    }
+
+    SDL_Log("IBL: generated BRDF LUT (512x512), irradiance (32x32x6), prefilter (128x128x6 + 4 mips)");
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HDR skybox loading (equirectangular → cubemap + IBL regen)
+// ═══════════════════════════════════════════════════════════════════════════
+
+void Renderer::scanHDRFiles()
+{
+    availableHDRFiles.clear();
+    const char* base = SDL_GetBasePath();
+    std::string dir = std::string(base ? base : "") + "assets/uploads_files_812442_HdriFree/";
+    std::error_code ec;
+    if (!std::filesystem::exists(dir, ec))
+        return;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (entry.is_regular_file()) {
+            auto ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".hdr" || ext == ".exr")
+                availableHDRFiles.push_back(entry.path().string());
+        }
+    }
+    std::sort(availableHDRFiles.begin(), availableHDRFiles.end());
+}
+
+bool Renderer::loadHDRSkybox(const std::string& path)
+{
+    // ── Load equirectangular HDR ────────────────────────────────────────────
+    int hdrW = 0, hdrH = 0, hdrC = 0;
+    float* hdrData = stbi_loadf(path.c_str(), &hdrW, &hdrH, &hdrC, 3);
+    if (!hdrData) {
+        SDL_Log("HDR skybox: failed to load %s: %s", path.c_str(), stbi_failure_reason());
+        return false;
+    }
+    SDL_Log("HDR skybox: loaded %s (%dx%d)", path.c_str(), hdrW, hdrH);
+
+    // ── Convert to float16 helpers ──────────────────────────────────────────
+    auto toHalf = [](float v) -> uint16_t {
+        uint32_t f;
+        SDL_memcpy(&f, &v, 4);
+        uint32_t sign = (f >> 16) & 0x8000;
+        int32_t exp = static_cast<int32_t>(((f >> 23) & 0xFF)) - 127 + 15;
+        uint32_t mant = (f >> 13) & 0x03FF;
+        if (exp <= 0)
+            return static_cast<uint16_t>(sign);
+        if (exp >= 31)
+            return static_cast<uint16_t>(sign | 0x7C00);
+        return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
+    };
+
+    auto cubeDir = [](int face, float u, float v) -> glm::vec3 {
+        switch (face) {
+        case 0:
+            return glm::normalize(glm::vec3(1, -v, -u));  // +X
+        case 1:
+            return glm::normalize(glm::vec3(-1, -v, u));  // -X
+        case 2:
+            return glm::normalize(glm::vec3(u, 1, v));    // +Y
+        case 3:
+            return glm::normalize(glm::vec3(u, -1, -v));  // -Y
+        case 4:
+            return glm::normalize(glm::vec3(u, -v, 1));   // +Z
+        case 5:
+            return glm::normalize(glm::vec3(-u, -v, -1)); // -Z
+        default:
+            return glm::vec3(0);
+        }
+    };
+
+    // Bilinear sample the equirectangular HDR image.
+    auto sampleEquirect = [&](glm::vec3 dir) -> glm::vec3 {
+        float theta = std::atan2(dir.z, dir.x);                // [-PI, PI]
+        float phi = std::asin(glm::clamp(dir.y, -1.0f, 1.0f)); // [-PI/2, PI/2]
+        float u = theta / (2.0f * 3.14159265f) + 0.5f;         // [0, 1]
+        float v = phi / 3.14159265f + 0.5f;                    // [0, 1]
+        // Bilinear sampling.
+        float fx = u * static_cast<float>(hdrW) - 0.5f;
+        float fy = (1.0f - v) * static_cast<float>(hdrH) - 0.5f;
+        int x0 = static_cast<int>(std::floor(fx));
+        int y0 = static_cast<int>(std::floor(fy));
+        float sx = fx - static_cast<float>(x0);
+        float sy = fy - static_cast<float>(y0);
+        auto pixel = [&](int px, int py) -> glm::vec3 {
+            px = ((px % hdrW) + hdrW) % hdrW;
+            py = glm::clamp(py, 0, hdrH - 1);
+            const float* p = hdrData + (static_cast<size_t>(py) * hdrW + px) * 3;
+            return glm::vec3(p[0], p[1], p[2]);
+        };
+        return glm::mix(
+            glm::mix(pixel(x0, y0), pixel(x0 + 1, y0), sx), glm::mix(pixel(x0, y0 + 1), pixel(x0 + 1, y0 + 1), sx), sy);
+    };
+
+    // ── Create cubemap faces (512×512, RGBA16F) ─────────────────────────────
+    const int cubeSz = 512;
+    const size_t faceBytes = static_cast<size_t>(cubeSz * cubeSz * 4) * sizeof(uint16_t);
+    std::vector<uint16_t> faceData(static_cast<size_t>(cubeSz * cubeSz * 4));
+
+    // Also store float cubemap data for IBL regeneration.
+    std::vector<std::vector<glm::vec3>> cubeFaces(6);
+    for (auto& f : cubeFaces)
+        f.resize(static_cast<size_t>(cubeSz * cubeSz));
+
+    // Release old cubemap if present.
+    if (envCubemap) {
+        SDL_WaitForGPUIdle(device);
+        SDL_ReleaseGPUTexture(device, envCubemap);
+        envCubemap = nullptr;
+    }
+
+    // Create new cubemap texture.
+    SDL_GPUTextureCreateInfo ci{};
+    ci.type = SDL_GPU_TEXTURETYPE_CUBE;
+    ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+    ci.width = static_cast<Uint32>(cubeSz);
+    ci.height = static_cast<Uint32>(cubeSz);
+    ci.layer_count_or_depth = 6;
+    ci.num_levels = 1;
+    ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    envCubemap = SDL_CreateGPUTexture(device, &ci);
+    if (!envCubemap) {
+        SDL_Log("HDR skybox: failed to create cubemap: %s", SDL_GetError());
+        stbi_image_free(hdrData);
+        return false;
+    }
+
+    // Transfer buffer for uploading faces.
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size = static_cast<Uint32>(faceBytes);
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    if (!tb) {
+        stbi_image_free(hdrData);
+        return false;
+    }
+
+    for (int face = 0; face < 6; ++face) {
+        for (int y = 0; y < cubeSz; ++y) {
+            for (int x = 0; x < cubeSz; ++x) {
+                float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(cubeSz) * 2.0f - 1.0f;
+                float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(cubeSz) * 2.0f - 1.0f;
+                glm::vec3 dir = cubeDir(face, u, v);
+                glm::vec3 color = sampleEquirect(dir);
+
+                // Store for IBL.
+                cubeFaces[static_cast<size_t>(face)][static_cast<size_t>(y * cubeSz + x)] = color;
+
+                // Convert to RGBA16F.
+                size_t idx = (static_cast<size_t>(y) * cubeSz + x) * 4;
+                faceData[idx + 0] = toHalf(color.r);
+                faceData[idx + 1] = toHalf(color.g);
+                faceData[idx + 2] = toHalf(color.b);
+                faceData[idx + 3] = toHalf(1.0f);
+            }
+        }
+
+        // Upload this face.
+        void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
+        SDL_memcpy(ptr, faceData.data(), faceBytes);
+        SDL_UnmapGPUTransferBuffer(device, tb);
+
+        SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+        SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTextureTransferInfo src{};
+        src.transfer_buffer = tb;
+        SDL_GPUTextureRegion dst{};
+        dst.texture = envCubemap;
+        dst.layer = static_cast<Uint32>(face);
+        dst.w = static_cast<Uint32>(cubeSz);
+        dst.h = static_cast<Uint32>(cubeSz);
+        dst.d = 1;
+        SDL_UploadToGPUTexture(cp, &src, &dst, false);
+        SDL_EndGPUCopyPass(cp);
+        SDL_SubmitGPUCommandBuffer(cmd);
+        SDL_WaitForGPUIdle(device);
+    }
+    SDL_ReleaseGPUTransferBuffer(device, tb);
+    stbi_image_free(hdrData);
+
+    // ── Regenerate irradiance map from the loaded cubemap ───────────────────
+    {
+        const int irrSz = 32;
+        const size_t irrFaceBytes = static_cast<size_t>(irrSz * irrSz * 4) * sizeof(uint16_t);
+        std::vector<uint16_t> irrFace(static_cast<size_t>(irrSz * irrSz * 4));
+
+        auto sampleCube = [&](glm::vec3 dir) -> glm::vec3 {
+            // Find which face and UV to sample from the float cubemap data.
+            float ax = std::abs(dir.x), ay = std::abs(dir.y), az = std::abs(dir.z);
+            int faceIdx;
+            float u, v, ma;
+            if (ax >= ay && ax >= az) {
+                ma = ax;
+                faceIdx = dir.x > 0 ? 0 : 1;
+                u = dir.x > 0 ? -dir.z : dir.z;
+                v = -dir.y;
+            } else if (ay >= az) {
+                ma = ay;
+                faceIdx = dir.y > 0 ? 2 : 3;
+                u = dir.x;
+                v = dir.y > 0 ? dir.z : -dir.z;
+            } else {
+                ma = az;
+                faceIdx = dir.z > 0 ? 4 : 5;
+                u = dir.z > 0 ? dir.x : -dir.x;
+                v = -dir.y;
+            }
+            float su = (u / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
+            float sv = (v / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
+            int px = glm::clamp(static_cast<int>(su), 0, cubeSz - 1);
+            int py = glm::clamp(static_cast<int>(sv), 0, cubeSz - 1);
+            return cubeFaces[static_cast<size_t>(faceIdx)][static_cast<size_t>(py * cubeSz + px)];
+        };
+
+        SDL_GPUTransferBufferCreateInfo irrTbInfo{};
+        irrTbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        irrTbInfo.size = static_cast<Uint32>(irrFaceBytes);
+        SDL_GPUTransferBuffer* irrTb = SDL_CreateGPUTransferBuffer(device, &irrTbInfo);
+
+        for (int face = 0; face < 6; ++face) {
+            for (int y = 0; y < irrSz; ++y) {
+                for (int x = 0; x < irrSz; ++x) {
+                    float cu = (static_cast<float>(x) + 0.5f) / static_cast<float>(irrSz) * 2.0f - 1.0f;
+                    float cv = (static_cast<float>(y) + 0.5f) / static_cast<float>(irrSz) * 2.0f - 1.0f;
+                    glm::vec3 N = cubeDir(face, cu, cv);
+
+                    glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+                    glm::vec3 right = glm::normalize(glm::cross(up, N));
+                    up = glm::cross(N, right);
+
+                    glm::vec3 irr(0.0f);
+                    int samples = 0;
+                    for (float p = 0.0f; p < 6.2832f; p += 0.1f) {
+                        for (float t = 0.0f; t < 1.5708f; t += 0.1f) {
+                            glm::vec3 samp =
+                                std::sin(t) * std::cos(p) * right + std::sin(t) * std::sin(p) * up + std::cos(t) * N;
+                            irr += sampleCube(samp) * std::cos(t) * std::sin(t);
+                            ++samples;
+                        }
+                    }
+                    irr *= 3.14159f / static_cast<float>(samples);
+
+                    size_t idx = (static_cast<size_t>(y) * irrSz + x) * 4;
+                    irrFace[idx + 0] = toHalf(irr.r);
+                    irrFace[idx + 1] = toHalf(irr.g);
+                    irrFace[idx + 2] = toHalf(irr.b);
+                    irrFace[idx + 3] = toHalf(1.0f);
+                }
+            }
+
+            void* ptr = SDL_MapGPUTransferBuffer(device, irrTb, false);
+            SDL_memcpy(ptr, irrFace.data(), irrFaceBytes);
+            SDL_UnmapGPUTransferBuffer(device, irrTb);
+
+            SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+            SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+            SDL_GPUTextureTransferInfo src{};
+            src.transfer_buffer = irrTb;
+            SDL_GPUTextureRegion dst{};
+            dst.texture = irradianceMap;
+            dst.layer = static_cast<Uint32>(face);
+            dst.w = static_cast<Uint32>(irrSz);
+            dst.h = static_cast<Uint32>(irrSz);
+            dst.d = 1;
+            SDL_UploadToGPUTexture(cp, &src, &dst, false);
+            SDL_EndGPUCopyPass(cp);
+            SDL_SubmitGPUCommandBuffer(cmd);
+            SDL_WaitForGPUIdle(device);
+        }
+        SDL_ReleaseGPUTransferBuffer(device, irrTb);
+    }
+
+    // ── Regenerate prefilter map (5 mip levels) from loaded cubemap ─────────
+    {
+        for (int mip = 0; mip < 5; ++mip) {
+            int mipSize = 128 >> mip;
+            float rough = static_cast<float>(mip) / 4.0f;
+            int numSamples = (mip == 0) ? 1 : 64;
+
+            const size_t pfFaceBytes = static_cast<size_t>(mipSize * mipSize * 4) * sizeof(uint16_t);
+            std::vector<uint16_t> pfFace(static_cast<size_t>(mipSize * mipSize * 4));
+
+            SDL_GPUTransferBufferCreateInfo pfTbInfo{};
+            pfTbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            pfTbInfo.size = static_cast<Uint32>(pfFaceBytes);
+            SDL_GPUTransferBuffer* pfTb = SDL_CreateGPUTransferBuffer(device, &pfTbInfo);
+            if (!pfTb)
+                continue;
+
+            auto sampleCube = [&](glm::vec3 dir) -> glm::vec3 {
+                float ax = std::abs(dir.x), ay = std::abs(dir.y), az = std::abs(dir.z);
+                int faceIdx;
+                float u, v, ma;
+                if (ax >= ay && ax >= az) {
+                    ma = ax;
+                    faceIdx = dir.x > 0 ? 0 : 1;
+                    u = dir.x > 0 ? -dir.z : dir.z;
+                    v = -dir.y;
+                } else if (ay >= az) {
+                    ma = ay;
+                    faceIdx = dir.y > 0 ? 2 : 3;
+                    u = dir.x;
+                    v = dir.y > 0 ? dir.z : -dir.z;
+                } else {
+                    ma = az;
+                    faceIdx = dir.z > 0 ? 4 : 5;
+                    u = dir.z > 0 ? dir.x : -dir.x;
+                    v = -dir.y;
+                }
+                float su = (u / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
+                float sv = (v / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
+                int px = glm::clamp(static_cast<int>(su), 0, cubeSz - 1);
+                int py = glm::clamp(static_cast<int>(sv), 0, cubeSz - 1);
+                return cubeFaces[static_cast<size_t>(faceIdx)][static_cast<size_t>(py * cubeSz + px)];
+            };
+
+            for (int face = 0; face < 6; ++face) {
+                for (int y = 0; y < mipSize; ++y) {
+                    for (int x = 0; x < mipSize; ++x) {
+                        float cu = (static_cast<float>(x) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
+                        float cv = (static_cast<float>(y) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
+                        glm::vec3 N = cubeDir(face, cu, cv);
+
+                        glm::vec3 color(0.0f);
+                        if (numSamples == 1) {
+                            color = sampleCube(N);
+                        } else {
+                            glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+                            glm::vec3 right = glm::normalize(glm::cross(up, N));
+                            up = glm::cross(N, right);
+                            float total = 0.0f;
+                            for (int s = 0; s < numSamples; ++s) {
+                                float xi1 = static_cast<float>(s) / static_cast<float>(numSamples);
+                                float xi2 =
+                                    static_cast<float>((s * 7 + 1) % numSamples) / static_cast<float>(numSamples);
+                                float cphi = 6.2832f * xi1;
+                                float cosT = std::pow(1.0f - xi2, 1.0f / (1.0f + rough * rough * 100.0f));
+                                float sinT = std::sqrt(1.0f - cosT * cosT);
+                                glm::vec3 H = sinT * std::cos(cphi) * right + sinT * std::sin(cphi) * up + cosT * N;
+                                glm::vec3 L = glm::normalize(2.0f * glm::dot(N, H) * H - N);
+                                float NdotL = std::max(glm::dot(N, L), 0.0f);
+                                if (NdotL > 0.0f) {
+                                    color += sampleCube(L) * NdotL;
+                                    total += NdotL;
+                                }
+                            }
+                            if (total > 0.0f)
+                                color /= total;
+                        }
+
+                        size_t idx = (static_cast<size_t>(y) * mipSize + x) * 4;
+                        pfFace[idx + 0] = toHalf(color.r);
+                        pfFace[idx + 1] = toHalf(color.g);
+                        pfFace[idx + 2] = toHalf(color.b);
+                        pfFace[idx + 3] = toHalf(1.0f);
+                    }
+                }
+
+                void* ptr = SDL_MapGPUTransferBuffer(device, pfTb, false);
+                SDL_memcpy(ptr, pfFace.data(), pfFaceBytes);
+                SDL_UnmapGPUTransferBuffer(device, pfTb);
+
+                SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+                SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+                SDL_GPUTextureTransferInfo src{};
+                src.transfer_buffer = pfTb;
+                SDL_GPUTextureRegion dst{};
+                dst.texture = prefilterMap;
+                dst.mip_level = static_cast<Uint32>(mip);
+                dst.layer = static_cast<Uint32>(face);
+                dst.w = static_cast<Uint32>(mipSize);
+                dst.h = static_cast<Uint32>(mipSize);
+                dst.d = 1;
+                SDL_UploadToGPUTexture(cp, &src, &dst, false);
+                SDL_EndGPUCopyPass(cp);
+                SDL_SubmitGPUCommandBuffer(cmd);
+                SDL_WaitForGPUIdle(device);
+            }
+            SDL_ReleaseGPUTransferBuffer(device, pfTb);
+        }
+    }
+
+    // Update state.
+    currentHDRName = std::filesystem::path(path).stem().string();
+    useHDRSkybox = true;
+    SDL_Log("HDR skybox: cubemap + IBL rebuilt from %s", currentHDRName.c_str());
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Post-processing init (Phases 7-13)
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool Renderer::initBloom()
+{
+    // Bloom downsample: 1 sampler, 1 rw storage tex, 1 UBO, workgroup 16×16.
+    bloomDownsamplePipeline = createComputePipeline("bloom_downsample.comp", 1, 0, 0, 1, 0, 1, 16, 16, 1);
+    // Bloom upsample: 1 sampler, 1 rw storage tex (read+write), 1 UBO.
+    bloomUpsamplePipeline = createComputePipeline("bloom_upsample.comp", 1, 0, 0, 1, 0, 1, 16, 16, 1);
+    return bloomDownsamplePipeline && bloomUpsamplePipeline;
+}
+
+bool Renderer::initSSAO()
+{
+    // GTAO: 1 sampler (depth), 1 rw storage tex (AO output), 1 UBO.
+    ssaoPipeline = createComputePipeline("gtao.comp", 1, 0, 0, 1, 0, 1, 16, 16, 1);
+    // Bilateral blur: 2 samplers (AO + depth), 1 rw storage tex, 1 UBO.
+    ssaoBlurPipeline = createComputePipeline("gtao_blur.comp", 2, 0, 0, 1, 0, 1, 16, 16, 1);
+    return ssaoPipeline && ssaoBlurPipeline;
+}
+
+bool Renderer::initSSR()
+{
+    // SSR: 4 samplers (hdr + depth + prevSSR + motionVectors), 1 rw storage tex, 1 UBO.
+    ssrPipeline = createComputePipeline("ssr.comp", 4, 0, 0, 1, 0, 1, 16, 16, 1);
+    return ssrPipeline != nullptr;
+}
+
+bool Renderer::initVolumetrics()
+{
+    // Volumetric: 2 samplers (depth + shadow), 1 rw storage tex, 1 UBO.
+    volumetricPipeline = createComputePipeline("volumetric.comp", 2, 0, 0, 1, 0, 1, 16, 16, 1);
+    return volumetricPipeline != nullptr;
+}
+
+bool Renderer::initTAA()
+{
+    // Motion vectors: 1 sampler (depth), 1 rw storage tex, 1 UBO.
+    motionVectorPipeline = createComputePipeline("motion_vectors.comp", 1, 0, 0, 1, 0, 1, 16, 16, 1);
+    // TAA: 3 samplers (current + history + motion), 1 rw storage tex, 1 UBO.
+    taaPipeline = createComputePipeline("taa.comp", 3, 0, 0, 1, 0, 1, 16, 16, 1);
+    return motionVectorPipeline && taaPipeline;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// init
+// ═══════════════════════════════════════════════════════════════════════════
 
 bool Renderer::init(SDL_Window* win)
 {
@@ -99,101 +1724,131 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
+    // Detect shader format and cache swapchain format.
     const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
-    SDL_GPUShaderFormat activeFormat = SDL_GPU_SHADERFORMAT_INVALID;
-
+    shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
     if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
-        activeFormat = SDL_GPU_SHADERFORMAT_SPIRV;
+        shaderFormat = SDL_GPU_SHADERFORMAT_SPIRV;
 #ifdef HAVE_MSL_SHADERS
     else if (k_available & SDL_GPU_SHADERFORMAT_MSL)
-        activeFormat = SDL_GPU_SHADERFORMAT_MSL;
+        shaderFormat = SDL_GPU_SHADERFORMAT_MSL;
 #endif
-
-    if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
-        SDL_Log("Renderer: no supported shader format (got 0x%x)", static_cast<unsigned>(k_available));
+    if (shaderFormat == SDL_GPU_SHADERFORMAT_INVALID) {
+        SDL_Log("Renderer: no supported shader format");
         return false;
     }
 
-    // ImGui GPU backend setup.
-    const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
+    swapchainFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
 
+    // ImGui GPU backend.
     ImGui_ImplSDLGPU3_InitInfo imguiInfo{};
     imguiInfo.Device = device;
-    imguiInfo.ColorTargetFormat = k_colorFmt;
+    imguiInfo.ColorTargetFormat = swapchainFormat;
     imguiInfo.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
-
-    if (!ImGui_ImplSDLGPU3_Init(&imguiInfo)) {
-        SDL_Log("Renderer: ImGui_ImplSDLGPU3_Init failed");
+    if (!ImGui_ImplSDLGPU3_Init(&imguiInfo))
         return false;
+
+    // ── Create all pipelines ────────────────────────────────────────────────
+    if (!initScenePipeline())
+        return false;
+    if (!initPBRPipeline())
+        return false;
+    if (!initSkyboxPipeline())
+        return false;
+    if (!initTonemapPipeline())
+        return false;
+    // Shadow pipeline + shadow map texture + comparison sampler.
+    initShadowPipeline();
+    initSceneShadowPipeline();
+    {
+        // Shadow atlas: D32_FLOAT, (2*k_shadowMapSize)² with 4 cascade viewports
+        // in a 2×2 grid.  Each cascade occupies one quadrant at k_shadowMapSize².
+        SDL_GPUTextureCreateInfo smInfo{};
+        smInfo.type = SDL_GPU_TEXTURETYPE_2D;
+        smInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+        smInfo.width = k_shadowMapSize * 2;
+        smInfo.height = k_shadowMapSize * 2;
+        smInfo.layer_count_or_depth = 1;
+        smInfo.num_levels = 1;
+        smInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        smInfo.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        shadowMap = SDL_CreateGPUTexture(device, &smInfo);
+        if (!shadowMap)
+            SDL_Log("Renderer: shadow map creation failed: %s", SDL_GetError());
+
+        // Comparison sampler for PCF shadow sampling.
+        SDL_GPUSamplerCreateInfo ssInfo{};
+        ssInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+        ssInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+        ssInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        ssInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        ssInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        ssInfo.enable_compare = true;
+        ssInfo.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+        shadowSampler = SDL_CreateGPUSampler(device, &ssInfo);
     }
 
-    // ---- Scene pipeline (cube + floor, hard-coded vertex positions) --------
+    // Generate IBL textures (BRDF LUT, irradiance map, prefilter map).
+    if (!initIBL())
+        SDL_Log("Renderer: IBL init failed — metallic surfaces will appear dark");
+
+    // ── Post-processing compute pipelines (Phases 7-13) ─────────────────────
+    if (!initBloom())
+        SDL_Log("Renderer: bloom init failed");
+    if (!initSSAO())
+        SDL_Log("Renderer: SSAO init failed");
+    if (!initSSR())
+        SDL_Log("Renderer: SSR init failed");
+    if (!initVolumetrics())
+        SDL_Log("Renderer: volumetrics init failed");
+    if (!initTAA())
+        SDL_Log("Renderer: TAA init failed");
+
+    // ── Tonemap sampler (linear, clamp-to-edge) ─────────────────────────────
+    SDL_GPUSamplerCreateInfo sampInfo{};
+    sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sampInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    sampInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sampInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sampInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    tonemapSampler = SDL_CreateGPUSampler(device, &sampInfo);
+
+    // ── Load model ──────────────────────────────────────────────────────────
+    // ── Load scene models ──────────────────────────────────────────────────
     const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (activeFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
 
-    char vertPath[512], fragPath[512];
-    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/projective.vert%s", k_base ? k_base : "", k_ext);
-    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/normal.frag%s", k_base ? k_base : "", k_ext);
+    // Helper to load a model and place it in the scene.
+    // flipWinding=true for models exported with CW winding (DirectX/Unity/
+    // many Sketchfab downloads) that appear inside-out in our CCW pipeline.
+    auto loadAndPlace = [&](const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
+        char path[512];
+        SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
 
-    SDL_GPUShader* vert = loadShader(device, vertPath, activeFormat, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
-    SDL_GPUShader* frag = loadShader(device, fragPath, activeFormat, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0);
-    if (!vert || !frag) {
-        SDL_ReleaseGPUShader(device, vert);
-        SDL_ReleaseGPUShader(device, frag);
-        return false;
-    }
+        LoadedModel loaded;
+        if (!loadModel(path, loaded, flipUVs)) {
+            SDL_Log("Renderer: failed to load '%s'", filename);
+            return;
+        }
 
-    SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = k_colorFmt;
+        ModelInstance inst;
+        inst.transform = glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(scale));
 
-    SDL_GPUGraphicsPipelineCreateInfo pci{};
-    pci.vertex_shader = vert;
-    pci.fragment_shader = frag;
-    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pci.target_info.color_target_descriptions = &colorTarget;
-    pci.target_info.num_color_targets = 1;
-    pci.target_info.has_depth_stencil_target = true;
-    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
-    pci.depth_stencil_state.enable_depth_test = true;
-    pci.depth_stencil_state.enable_depth_write = true;
-    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+        if (!uploadModel(loaded, inst))
+            SDL_Log("Renderer: GPU upload failed for '%s'", filename);
+        else
+            models.push_back(std::move(inst));
+    };
 
-    pipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    loadAndPlace("Apex_Legend_Wraith.glb", glm::vec3(200.0f, 0.0f, 400.0f), 8.0f);
+    // flipUVs=true: Porsche GLB uses V=0 at bottom (Sketchfab/Blender export).
+    // Y offset +1.3 compensates for the model's wheels extending below its origin.
+    // Without this, the wheels clip through the floor and reflections appear detached.
+    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
+    loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
+    loadAndPlace("bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
 
-    SDL_ReleaseGPUShader(device, vert);
-    SDL_ReleaseGPUShader(device, frag);
-
-    if (!pipeline) {
-        SDL_Log("Renderer: SDL_CreateGPUGraphicsPipeline (scene) failed: %s", SDL_GetError());
-        return false;
-    }
-
-    // ---- Model pipeline (vertex-buffer driven, Assimp meshes + textures) --
-    if (!initModelPipeline(activeFormat, k_colorFmt))
-        return false;
-
-    // Load the model from the assets directory next to the binary.
-    char modelPath[512];
-    SDL_snprintf(modelPath, sizeof(modelPath), "%sassets/Apex_Legend_Wraith.glb", k_base ? k_base : "");
-
-    LoadedModel loadedModel;
-    if (loadModel(modelPath, loadedModel)) {
-        if (!uploadModel(loadedModel))
-            SDL_Log("Renderer: model GPU upload failed — model will not be drawn");
-    } else {
-        SDL_Log("Renderer: model load failed — model will not be drawn");
-    }
-
-    // Place the model to the right of the reference cube.
-    // Cube sits at world (0, 0..64, 368..432).  Model goes at
-    // x=+200, y=0 (ground), z=400.  Scale of 8 units/metre gives ~14 units
-    // per foot — plausible for a Quake-unit world (tweak as needed).
-    modelTransform = glm::translate(glm::mat4(1.0f), glm::vec3(200.0f, 0.0f, 400.0f));
-    modelTransform = glm::scale(modelTransform, glm::vec3(8.0f));
-
-    // Camera — eye/target overridden every frame by drawFrame().
+    // Camera — overridden every frame by drawFrame().
     camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},
                     glm::vec3{0.0f, 100.0f, 1.0f},
                     glm::vec3{0.0f, 1.0f, 0.0f},
@@ -202,451 +1857,70 @@ bool Renderer::init(SDL_Window* win)
                     nearPlane,
                     farPlane);
 
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Renderer::initModelPipeline
-// ---------------------------------------------------------------------------
-
-bool Renderer::initModelPipeline(const SDL_GPUShaderFormat fmt, const SDL_GPUTextureFormat colorFmt)
-{
-    const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (fmt == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
-
-    char vertPath[512], fragPath[512];
-    SDL_snprintf(vertPath, sizeof(vertPath), "%sshaders/model.vert%s", k_base ? k_base : "", k_ext);
-    SDL_snprintf(fragPath, sizeof(fragPath), "%sshaders/model.frag%s", k_base ? k_base : "", k_ext);
-
-    // Vertex shader: 0 samplers, 1 UBO.
-    // Fragment shader: 1 sampler (texDiffuse), 0 UBOs.
-    SDL_GPUShader* vert = loadShader(device, vertPath, fmt, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
-    SDL_GPUShader* frag = loadShader(device, fragPath, fmt, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 0, 0);
-    if (!vert || !frag) {
-        SDL_ReleaseGPUShader(device, vert);
-        SDL_ReleaseGPUShader(device, frag);
-        return false;
-    }
-
-    // Vertex layout — must match ModelVertex (32 bytes, no padding):
-    //   location 0 → position  (vec3, offset  0)
-    //   location 1 → normal    (vec3, offset 12)
-    //   location 2 → texCoord  (vec2, offset 24)
-    const SDL_GPUVertexBufferDescription k_vbDesc = {
-        .slot = 0,
-        .pitch = sizeof(ModelVertex),
-        .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
-        .instance_step_rate = 0,
-    };
-
-    const SDL_GPUVertexAttribute k_attrs[3] = {
-        {.location = 0, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 0},
-        {.location = 1, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 12},
-        {.location = 2, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = 24},
-    };
-
-    SDL_GPUVertexInputState vertexInput{};
-    vertexInput.vertex_buffer_descriptions = &k_vbDesc;
-    vertexInput.num_vertex_buffers = 1;
-    vertexInput.vertex_attributes = k_attrs;
-    vertexInput.num_vertex_attributes = 3;
-
-    SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = colorFmt;
-
-    SDL_GPUGraphicsPipelineCreateInfo pci{};
-    pci.vertex_shader = vert;
-    pci.fragment_shader = frag;
-    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pci.vertex_input_state = vertexInput;
-    pci.target_info.color_target_descriptions = &colorTarget;
-    pci.target_info.num_color_targets = 1;
-    pci.target_info.has_depth_stencil_target = true;
-    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
-    pci.depth_stencil_state.enable_depth_test = true;
-    pci.depth_stencil_state.enable_depth_write = true;
-    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    // GLB materials are double-sided; disable culling to match.
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-
-    modelPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
-
-    SDL_ReleaseGPUShader(device, vert);
-    SDL_ReleaseGPUShader(device, frag);
-
-    if (!modelPipeline) {
-        SDL_Log("Renderer: SDL_CreateGPUGraphicsPipeline (model) failed: %s", SDL_GetError());
-        return false;
+    // ── Load default HDR skybox ─────────────────────────────────────────────
+    scanHDRFiles();
+    {
+        char hdrPath[512];
+        SDL_snprintf(
+            hdrPath, sizeof(hdrPath), "%sassets/uploads_files_812442_HdriFree/CasualDay4K.hdr", k_base ? k_base : "");
+        if (!loadHDRSkybox(hdrPath))
+            SDL_Log("Renderer: default HDR skybox not loaded — using procedural sky");
     }
 
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Renderer::uploadTexture
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// Render target management
+// ═══════════════════════════════════════════════════════════════════════════
 
-SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height)
+bool Renderer::ensureDepthTexture(const Uint32 w, const Uint32 h)
 {
+    if (depthTexture && depthWidth == w && depthHeight == h)
+        return true;
+
+    if (depthTexture)
+        SDL_ReleaseGPUTexture(device, depthTexture);
+
     SDL_GPUTextureCreateInfo info{};
     info.type = SDL_GPU_TEXTURETYPE_2D;
-    info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    info.width = static_cast<Uint32>(width);
-    info.height = static_cast<Uint32>(height);
+    info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    info.width = w;
+    info.height = h;
     info.layer_count_or_depth = 1;
     info.num_levels = 1;
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
-    SDL_GPUTexture* tex = SDL_CreateGPUTexture(device, &info);
-    if (!tex) {
-        SDL_Log("Renderer: SDL_CreateGPUTexture failed: %s", SDL_GetError());
-        return nullptr;
-    }
-
-    const Uint32 dataSize = static_cast<Uint32>(width) * static_cast<Uint32>(height) * 4u;
-
-    SDL_GPUTransferBufferCreateInfo tbInfo{};
-    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    tbInfo.size = dataSize;
-
-    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
-    if (!tb) {
-        SDL_Log("Renderer: failed to create texture transfer buffer: %s", SDL_GetError());
-        SDL_ReleaseGPUTexture(device, tex);
-        return nullptr;
-    }
-
-    void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
-    SDL_memcpy(ptr, pixels, dataSize);
-    SDL_UnmapGPUTransferBuffer(device, tb);
-
-    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
-
-    SDL_GPUTextureTransferInfo src{};
-    src.transfer_buffer = tb;
-    src.offset = 0;
-    src.pixels_per_row = 0; // 0 = tightly packed (width pixels per row)
-    src.rows_per_layer = 0; // 0 = tightly packed (height rows per layer)
-
-    SDL_GPUTextureRegion dst{};
-    dst.texture = tex;
-    dst.mip_level = 0;
-    dst.layer = 0;
-    dst.x = dst.y = dst.z = 0;
-    dst.w = static_cast<Uint32>(width);
-    dst.h = static_cast<Uint32>(height);
-    dst.d = 1;
-
-    SDL_UploadToGPUTexture(cp, &src, &dst, false);
-    SDL_EndGPUCopyPass(cp);
-    SDL_SubmitGPUCommandBuffer(cmd);
-    SDL_WaitForGPUIdle(device);
-    SDL_ReleaseGPUTransferBuffer(device, tb);
-
-    return tex;
+    depthTexture = SDL_CreateGPUTexture(device, &info);
+    depthWidth = w;
+    depthHeight = h;
+    return depthTexture != nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Renderer::uploadModel
-// ---------------------------------------------------------------------------
-
-bool Renderer::uploadModel(const LoadedModel& model)
+bool Renderer::ensureHDRTarget(const Uint32 w, const Uint32 h)
 {
-    if (model.meshes.empty())
-        return false;
+    if (hdrTarget && hdrWidth == w && hdrHeight == h)
+        return true;
 
-    // ---- Create the shared sampler -------------------------------------------
-    SDL_GPUSamplerCreateInfo sampInfo{};
-    sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
-    sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
-    sampInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-    sampInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    sampInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    sampInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    sampInfo.min_lod = 0.0f;
-    sampInfo.max_lod = 0.0f;
-    sampInfo.enable_anisotropy = false;
-    sampInfo.enable_compare = false;
+    if (hdrTarget)
+        SDL_ReleaseGPUTexture(device, hdrTarget);
 
-    modelSampler = SDL_CreateGPUSampler(device, &sampInfo);
-    if (!modelSampler) {
-        SDL_Log("Renderer: failed to create model sampler: %s", SDL_GetError());
-        return false;
-    }
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+    info.width = w;
+    info.height = h;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
-    // ---- 1×1 opaque-white fallback texture -----------------------------------
-    const uint8_t k_white[4] = {255, 255, 255, 255};
-    defaultTexture = uploadTexture(k_white, 1, 1);
-    if (!defaultTexture)
-        return false;
-
-    // ---- Upload each model texture -------------------------------------------
-    modelTextures.reserve(model.textures.size());
-    for (const auto& td : model.textures) {
-        SDL_GPUTexture* gpuTex = uploadTexture(td.pixels.data(), td.width, td.height);
-        modelTextures.push_back(gpuTex); // nullptr means "use default" at draw time
-    }
-
-    // ---- Collect per-mesh vertex/index sizes then upload all in one pass ----
-    struct MeshSizes
-    {
-        Uint32 vbBytes;
-        Uint32 ibBytes;
-    };
-
-    std::vector<MeshSizes> sizes;
-    sizes.reserve(model.meshes.size());
-    Uint32 totalBytes = 0;
-
-    for (const auto& m : model.meshes) {
-        const Uint32 vb = static_cast<Uint32>(m.vertices.size() * sizeof(ModelVertex));
-        const Uint32 ib = static_cast<Uint32>(m.indices.size() * sizeof(uint32_t));
-        sizes.push_back({.vbBytes = vb, .ibBytes = ib});
-        totalBytes += vb + ib;
-    }
-
-    SDL_GPUTransferBufferCreateInfo tbInfo{};
-    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    tbInfo.size = totalBytes;
-
-    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
-    if (!tb) {
-        SDL_Log("Renderer: failed to create model transfer buffer: %s", SDL_GetError());
-        return false;
-    }
-
-    auto* dst = static_cast<char*>(SDL_MapGPUTransferBuffer(device, tb, false));
-    Uint32 writeOffset = 0;
-    for (size_t i = 0; i < model.meshes.size(); ++i) {
-        SDL_memcpy(dst + writeOffset, model.meshes[i].vertices.data(), sizes[i].vbBytes);
-        writeOffset += sizes[i].vbBytes;
-        SDL_memcpy(dst + writeOffset, model.meshes[i].indices.data(), sizes[i].ibBytes);
-        writeOffset += sizes[i].ibBytes;
-    }
-    SDL_UnmapGPUTransferBuffer(device, tb);
-
-    SDL_GPUCommandBuffer* uploadCmd = SDL_AcquireGPUCommandBuffer(device);
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(uploadCmd);
-
-    Uint32 readOffset = 0;
-    modelMeshes.reserve(model.meshes.size());
-
-    for (size_t i = 0; i < model.meshes.size(); ++i) {
-        SDL_GPUBufferCreateInfo vbInfo{};
-        vbInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-        vbInfo.size = sizes[i].vbBytes;
-        SDL_GPUBuffer* vb = SDL_CreateGPUBuffer(device, &vbInfo);
-
-        SDL_GPUBufferCreateInfo ibInfo{};
-        ibInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
-        ibInfo.size = sizes[i].ibBytes;
-        SDL_GPUBuffer* ib = SDL_CreateGPUBuffer(device, &ibInfo);
-
-        if (!vb || !ib) {
-            SDL_Log("Renderer: failed to create GPU buffer for mesh %zu: %s", i, SDL_GetError());
-            SDL_ReleaseGPUBuffer(device, vb);
-            SDL_ReleaseGPUBuffer(device, ib);
-            SDL_EndGPUCopyPass(copyPass);
-            SDL_SubmitGPUCommandBuffer(uploadCmd);
-            SDL_ReleaseGPUTransferBuffer(device, tb);
-            return false;
-        }
-
-        SDL_GPUTransferBufferLocation src{};
-        SDL_GPUBufferRegion dstReg{};
-
-        src.transfer_buffer = tb;
-        src.offset = readOffset;
-        dstReg.buffer = vb;
-        dstReg.offset = 0;
-        dstReg.size = sizes[i].vbBytes;
-        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
-        readOffset += sizes[i].vbBytes;
-
-        src.offset = readOffset;
-        dstReg.buffer = ib;
-        dstReg.size = sizes[i].ibBytes;
-        SDL_UploadToGPUBuffer(copyPass, &src, &dstReg, false);
-        readOffset += sizes[i].ibBytes;
-
-        modelMeshes.push_back({
-            .vertexBuffer = vb,
-            .indexBuffer = ib,
-            .indexCount = static_cast<Uint32>(model.meshes[i].indices.size()),
-            .textureIndex = model.meshes[i].diffuseTexIndex,
-        });
-    }
-
-    SDL_EndGPUCopyPass(copyPass);
-    SDL_SubmitGPUCommandBuffer(uploadCmd);
-    SDL_WaitForGPUIdle(device);
-    SDL_ReleaseGPUTransferBuffer(device, tb);
-
-    SDL_Log("Renderer: uploaded %zu mesh(es), %zu texture(s) to GPU (%u bytes geometry)",
-            modelMeshes.size(),
-            modelTextures.size(),
-            totalBytes);
-    return true;
+    hdrTarget = SDL_CreateGPUTexture(device, &info);
+    hdrWidth = w;
+    hdrHeight = h;
+    return hdrTarget != nullptr;
 }
-
-// ---------------------------------------------------------------------------
-// Renderer::drawFrame
-// ---------------------------------------------------------------------------
-
-void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
-{
-    // ── first-person camera ─────────────────────────────────────────────────
-    const float cosPitch = std::cos(pitch);
-    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
-    camera.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
-
-    // ── GPU frame ───────────────────────────────────────────────────────────
-    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-    if (!cmd)
-        return;
-
-    SDL_GPUTexture* swapchain = nullptr;
-    Uint32 w = 0, h = 0;
-    if (!SDL_AcquireGPUSwapchainTexture(cmd, window, &swapchain, &w, &h) || !swapchain) {
-        SDL_SubmitGPUCommandBuffer(cmd);
-        return;
-    }
-
-    if (!ensureDepthTexture(w, h)) {
-        SDL_SubmitGPUCommandBuffer(cmd);
-        return;
-    }
-
-    camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
-
-    // Scene matrices — model = identity (geometry is already in world space).
-    Matrices sceneMats{};
-    sceneMats.model = glm::mat4(1.0f);
-    sceneMats.view = camera.getView();
-    sceneMats.projection = camera.getProjection();
-
-    SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
-
-    // Upload ImGui vertex/index buffers — must happen before the render pass.
-    ImDrawData* const k_drawData = ImGui::GetDrawData();
-    if (k_drawData)
-        ImGui_ImplSDLGPU3_PrepareDrawData(k_drawData, cmd);
-
-    // When a screenshot is pending, render to an intermediate texture so we can
-    // download pixels later.  Then blit captureRT → swapchain for display.
-    // When not recording, render straight to swapchain (no overhead).
-    const SDL_GPUTextureFormat k_colorFmt = SDL_GetGPUSwapchainTextureFormat(device, window);
-    const bool capturing = !pendingCapPath.empty() && ensureCaptureRT(w, h, k_colorFmt);
-    SDL_GPUTexture* const renderTarget = capturing ? captureRT : swapchain;
-
-    SDL_GPUColorTargetInfo ct{};
-    ct.texture = renderTarget;
-    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f};
-    ct.load_op = SDL_GPU_LOADOP_CLEAR;
-    ct.store_op = SDL_GPU_STOREOP_STORE;
-
-    SDL_GPUDepthStencilTargetInfo dt{};
-    dt.texture = depthTexture;
-    dt.clear_depth = 1.0f;
-    dt.load_op = SDL_GPU_LOADOP_CLEAR;
-    dt.store_op = SDL_GPU_STOREOP_DONT_CARE;
-    dt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-    dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-    dt.cycle = false;
-    dt.clear_stencil = 0;
-
-    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
-
-    // ── Scene geometry: cube (verts 0–35) + floor quad (verts 36–41) ────────
-    SDL_BindGPUGraphicsPipeline(pass, pipeline);
-    SDL_DrawGPUPrimitives(pass, 42, 1, 0, 0);
-
-    // ── Assimp model ─────────────────────────────────────────────────────────
-    if (!modelMeshes.empty() && modelPipeline && modelSampler && defaultTexture) {
-        SDL_BindGPUGraphicsPipeline(pass, modelPipeline);
-
-        Matrices modelMats{};
-        modelMats.model = modelTransform;
-        modelMats.view = sceneMats.view;
-        modelMats.projection = sceneMats.projection;
-        SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
-
-        for (const auto& mesh : modelMeshes) {
-            // Vertex + index buffers
-            const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
-            SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
-
-            const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
-            SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-            // Base-colour texture (fall back to 1×1 white if none loaded)
-            SDL_GPUTexture* tex = defaultTexture;
-            if (mesh.textureIndex >= 0 && static_cast<size_t>(mesh.textureIndex) < modelTextures.size() &&
-                modelTextures[static_cast<size_t>(mesh.textureIndex)] != nullptr)
-            {
-                tex = modelTextures[static_cast<size_t>(mesh.textureIndex)];
-            }
-
-            const SDL_GPUTextureSamplerBinding tsb = {.texture = tex, .sampler = modelSampler};
-            SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
-
-            SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
-        }
-    }
-
-    // ── ImGui overlay ────────────────────────────────────────────────────────
-    if (k_drawData)
-        ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
-
-    SDL_EndGPURenderPass(pass);
-
-    // If we rendered to the intermediate captureRT, blit it to the swapchain
-    // so the player actually sees the frame.
-    if (capturing) {
-        SDL_GPUBlitInfo blitInfo{};
-        blitInfo.source.texture = captureRT;
-        blitInfo.source.mip_level = 0;
-        blitInfo.source.layer_or_depth_plane = 0;
-        blitInfo.source.x = 0;
-        blitInfo.source.y = 0;
-        blitInfo.source.w = w;
-        blitInfo.source.h = h;
-        blitInfo.destination.texture = swapchain;
-        blitInfo.destination.mip_level = 0;
-        blitInfo.destination.layer_or_depth_plane = 0;
-        blitInfo.destination.x = 0;
-        blitInfo.destination.y = 0;
-        blitInfo.destination.w = w;
-        blitInfo.destination.h = h;
-        blitInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
-        blitInfo.flip_mode = SDL_FLIP_NONE;
-        blitInfo.filter = SDL_GPU_FILTER_NEAREST;
-        blitInfo.cycle = false;
-        SDL_BlitGPUTexture(cmd, &blitInfo);
-    }
-
-    SDL_SubmitGPUCommandBuffer(cmd);
-
-    // Download captureRT → CPU → PNG (blocks until GPU is idle).
-    if (capturing)
-        downloadAndSaveCapture(w, h);
-}
-
-// ---------------------------------------------------------------------------
-// Renderer::requestScreenshot
-// ---------------------------------------------------------------------------
-
-void Renderer::requestScreenshot(const std::string& path)
-{
-    pendingCapPath = path;
-}
-
-// ---------------------------------------------------------------------------
-// Renderer::ensureCaptureRT
-// ---------------------------------------------------------------------------
 
 bool Renderer::ensureCaptureRT(const Uint32 w, const Uint32 h, const SDL_GPUTextureFormat fmt)
 {
@@ -664,24 +1938,1108 @@ bool Renderer::ensureCaptureRT(const Uint32 w, const Uint32 h, const SDL_GPUText
     info.layer_count_or_depth = 1;
     info.num_levels = 1;
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    // COLOR_TARGET: render to it; SAMPLER: required source for SDL_BlitGPUTexture.
     info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
     captureRT = SDL_CreateGPUTexture(device, &info);
-    if (!captureRT) {
-        SDL_Log("Renderer: failed to create captureRT (%ux%u): %s", w, h, SDL_GetError());
-        return false;
-    }
-
     captureRTW = w;
     captureRTH = h;
     captureRTFmt = fmt;
-    return true;
+    return captureRT != nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Renderer::downloadAndSaveCapture
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// drawFrame — main render loop
+// ═══════════════════════════════════════════════════════════════════════════
+
+glm::vec3 Renderer::getSunDirection() const
+{
+    float azRad = glm::radians(sunAzimuth);
+    float elRad = glm::radians(sunElevation);
+    float cosEl = std::cos(elRad);
+    return glm::normalize(glm::vec3(cosEl * std::sin(azRad), std::sin(elRad), cosEl * std::cos(azRad)));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cascaded Shadow Map computation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Compute per-cascade light view-projection matrices that tightly fit the
+/// camera's sub-frustum from the light's perspective.  Uses the practical
+/// split scheme (blend of logarithmic and linear) and texel-snaps the ortho
+/// projection to prevent shadow swimming.
+static std::array<CascadeInfo, 4> computeCascades(
+    const Camera& cam, const glm::vec3& lightDir, int numCascades, int shadowMapSize, float shadowMaxDist, float lambda)
+{
+    std::array<CascadeInfo, 4> cascades{};
+
+    const float camNear = cam.getNear();
+
+    // ── Compute split distances (practical split scheme) ────────────────────
+    float splits[5];
+    splits[0] = camNear;
+    for (int i = 0; i < numCascades; ++i) {
+        const float p = static_cast<float>(i + 1) / static_cast<float>(numCascades);
+        const float logSplit = camNear * std::pow(shadowMaxDist / camNear, p);
+        const float linSplit = camNear + (shadowMaxDist - camNear) * p;
+        splits[i + 1] = lambda * logSplit + (1.0f - lambda) * linSplit;
+    }
+
+    // ── Camera basis ────────────────────────────────────────────────────────
+    // cam.getUp() returns the raw input up (0,1,0), NOT the orthonormalized
+    // up that lookAt computes.  We must derive the actual camera up from
+    // forward × right to match the real frustum orientation — otherwise the
+    // cascade frustum corners are wrong whenever the camera has pitch, causing
+    // shadows to detach from objects and move with the camera.
+    const glm::vec3 camPos = cam.getEye();
+    const glm::vec3 camFwd = cam.getForward();
+    const glm::vec3 camRight = cam.getRight();
+    const glm::vec3 camUp = glm::normalize(glm::cross(camRight, camFwd));
+
+    const float fovY = glm::radians(cam.getFovy());
+    const float aspect = cam.getAspect();
+    const float tanHalfY = std::tan(fovY * 0.5f);
+    const float tanHalfX = tanHalfY * aspect;
+
+    // Stable up vector — avoid degenerate lookAt when light is directly vertical.
+    const glm::vec3 upVec = (std::abs(lightDir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+
+    for (int c = 0; c < numCascades; ++c) {
+        const float nearDist = splits[c];
+        const float farDist = splits[c + 1];
+        cascades[static_cast<size_t>(c)].splitDistance = farDist;
+
+        // ── 8 frustum corners for this sub-frustum ──────────────────────────
+        const float nH = tanHalfY * nearDist;
+        const float nW = tanHalfX * nearDist;
+        const float fH = tanHalfY * farDist;
+        const float fW = tanHalfX * farDist;
+
+        const glm::vec3 nc = camPos + camFwd * nearDist;
+        const glm::vec3 fc = camPos + camFwd * farDist;
+
+        const glm::vec3 corners[8] = {
+            nc - camRight * nW + camUp * nH,
+            nc + camRight * nW + camUp * nH,
+            nc - camRight * nW - camUp * nH,
+            nc + camRight * nW - camUp * nH,
+            fc - camRight * fW + camUp * fH,
+            fc + camRight * fW + camUp * fH,
+            fc - camRight * fW - camUp * fH,
+            fc + camRight * fW - camUp * fH,
+        };
+
+        // ── Sub-frustum center ──────────────────────────────────────────────
+        glm::vec3 center(0.0f);
+        for (const auto& corner : corners)
+            center += corner;
+        center /= 8.0f;
+
+        // ── Light view matrix ───────────────────────────────────────────────
+        // Place the eye far enough behind the center to encompass all
+        // potential shadow casters (buildings, terrain behind the camera, etc.).
+        constexpr float k_lightDistance = 5000.0f;
+        const glm::mat4 lightView = glm::lookAt(center + lightDir * k_lightDistance, center, upVec);
+
+        // ── AABB of sub-frustum in light space ──────────────────────────────
+        float minX = std::numeric_limits<float>::max();
+        float maxX = std::numeric_limits<float>::lowest();
+        float minY = std::numeric_limits<float>::max();
+        float maxY = std::numeric_limits<float>::lowest();
+        float minZ = std::numeric_limits<float>::max();
+        float maxZ = std::numeric_limits<float>::lowest();
+
+        for (const auto& corner : corners) {
+            const glm::vec3 ls = glm::vec3(lightView * glm::vec4(corner, 1.0f));
+            minX = std::min(minX, ls.x);
+            maxX = std::max(maxX, ls.x);
+            minY = std::min(minY, ls.y);
+            maxY = std::max(maxY, ls.y);
+            minZ = std::min(minZ, ls.z);
+            maxZ = std::max(maxZ, ls.z);
+        }
+
+        // ── Texel-snap XY (prevents shadow swimming on camera movement) ────
+        const float texelX = (maxX - minX) / static_cast<float>(shadowMapSize);
+        const float texelY = (maxY - minY) / static_cast<float>(shadowMapSize);
+
+        minX = std::floor(minX / texelX) * texelX;
+        maxX = std::ceil(maxX / texelX) * texelX;
+        minY = std::floor(minY / texelY) * texelY;
+        maxY = std::ceil(maxY / texelY) * texelY;
+
+        // ── Orthographic projection (RH, zero-to-one depth for Vulkan) ─────
+        // Near/far derived from the frustum Z AABB.  The near plane is extended
+        // significantly backward to capture shadow casters (buildings, terrain)
+        // behind the camera sub-frustum that still cast into it.
+        // In light view space (RH), objects in front of the eye have Z < 0.
+        //   near = -maxZ  (closest point to eye, smallest positive distance)
+        //   far  = -minZ  (farthest point, largest positive distance)
+        constexpr float k_casterPadding = 2000.0f; // catch casters behind frustum
+        const float orthoNear = std::max(0.1f, -maxZ - k_casterPadding);
+        const float orthoFar = -minZ + 500.0f;     // small forward padding
+        const glm::mat4 lightProj = glm::orthoRH_ZO(minX, maxX, minY, maxY, orthoNear, orthoFar);
+
+        cascades[static_cast<size_t>(c)].lightView = lightView;
+        cascades[static_cast<size_t>(c)].lightProj = lightProj;
+        cascades[static_cast<size_t>(c)].lightVP = lightProj * lightView;
+    }
+
+    return cascades;
+}
+
+void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
+{
+    // ── Camera setup ────────────────────────────────────────────────────────
+    const float cosPitch = std::cos(pitch);
+    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
+    camera.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
+
+    // ── Acquire GPU resources ───────────────────────────────────────────────
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    if (!cmd)
+        return;
+
+    SDL_GPUTexture* swapchain = nullptr;
+    Uint32 w = 0, h = 0;
+    if (!SDL_AcquireGPUSwapchainTexture(cmd, window, &swapchain, &w, &h) || !swapchain) {
+        SDL_SubmitGPUCommandBuffer(cmd);
+        return;
+    }
+
+    // ── Flush pending skinned-mesh vertex uploads ─────────────────────────
+    // Batched into this frame's command buffer — one copy pass for all meshes,
+    // zero extra SDL_SubmitGPUCommandBuffer calls, zero pipeline stalls.
+    if (!pendingVertexUploads.empty()) {
+        // Find the largest upload to size the transfer buffer.
+        Uint32 maxBytes = 0;
+        for (const auto& up : pendingVertexUploads)
+            maxBytes = std::max(maxBytes, static_cast<Uint32>(up.data.size()));
+
+        // Grow the persistent transfer buffer if needed.
+        if (maxBytes > skinTransferBufSize) {
+            if (skinTransferBuf)
+                SDL_ReleaseGPUTransferBuffer(device, skinTransferBuf);
+            SDL_GPUTransferBufferCreateInfo tbInfo{};
+            tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            tbInfo.size = maxBytes;
+            skinTransferBuf = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+            skinTransferBufSize = skinTransferBuf ? maxBytes : 0;
+        }
+
+        if (skinTransferBuf) {
+            for (const auto& up : pendingVertexUploads) {
+                // cycle=true: SDL allocates a fresh staging region each call so
+                // the GPU can still read from the previous frame's copy without stalling.
+                void* mapped = SDL_MapGPUTransferBuffer(device, skinTransferBuf, /*cycle=*/true);
+                if (!mapped)
+                    continue;
+                SDL_memcpy(mapped, up.data.data(), up.data.size());
+                SDL_UnmapGPUTransferBuffer(device, skinTransferBuf);
+
+                SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+                SDL_GPUTransferBufferLocation src{};
+                src.transfer_buffer = skinTransferBuf;
+                src.offset = 0;
+                SDL_GPUBufferRegion dst{};
+                dst.buffer = up.dstBuffer;
+                dst.offset = 0;
+                dst.size = static_cast<Uint32>(up.data.size());
+                SDL_UploadToGPUBuffer(cp, &src, &dst, /*cycle=*/false);
+                SDL_EndGPUCopyPass(cp);
+            }
+        }
+        pendingVertexUploads.clear();
+    }
+
+    if (!ensureDepthTexture(w, h) || !ensureHDRTarget(w, h)) {
+        SDL_SubmitGPUCommandBuffer(cmd);
+        return;
+    }
+
+    // ── Ensure post-processing textures exist at screen resolution ───────
+    // Bloom mip chain (lazy create/resize).
+    {
+        Uint32 mipW = w / 2, mipH = h / 2;
+        for (int i = 0; i < k_bloomMips; ++i) {
+            if (!bloomMips[i] || true) { // Always recreate for simplicity.
+                if (bloomMips[i])
+                    SDL_ReleaseGPUTexture(device, bloomMips[i]);
+                SDL_GPUTextureCreateInfo ci{};
+                ci.type = SDL_GPU_TEXTURETYPE_2D;
+                ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+                ci.width = std::max(mipW, 1u);
+                ci.height = std::max(mipH, 1u);
+                ci.layer_count_or_depth = 1;
+                ci.num_levels = 1;
+                ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE |
+                           SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
+                bloomMips[i] = SDL_CreateGPUTexture(device, &ci);
+            }
+            mipW = std::max(mipW / 2, 1u);
+            mipH = std::max(mipH / 2, 1u);
+        }
+    }
+
+    // SSAO textures.
+    if (!ssaoTexture) {
+        auto makeR8 = [&](Uint32 tw, Uint32 th) -> SDL_GPUTexture* {
+            SDL_GPUTextureCreateInfo ci{};
+            ci.type = SDL_GPU_TEXTURETYPE_2D;
+            ci.format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+            ci.width = tw;
+            ci.height = th;
+            ci.layer_count_or_depth = 1;
+            ci.num_levels = 1;
+            ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+            return SDL_CreateGPUTexture(device, &ci);
+        };
+        ssaoTexture = makeR8(w, h);
+        ssaoBlurTexture = makeR8(w, h);
+    }
+
+    // SSR, volumetric, TAA, motion vectors (lazy init once).
+    auto makeRGBA16F = [&](Uint32 tw, Uint32 th) -> SDL_GPUTexture* {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_2D;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ci.width = tw;
+        ci.height = th;
+        ci.layer_count_or_depth = 1;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        return SDL_CreateGPUTexture(device, &ci);
+    };
+
+    if (!ssrTexture[0]) {
+        ssrTexture[0] = makeRGBA16F(w, h);
+        ssrTexture[1] = makeRGBA16F(w, h);
+    }
+    if (!volumetricTexture)
+        volumetricTexture = makeRGBA16F(w / 2, h / 2);
+    if (!taaHistory[0]) {
+        taaHistory[0] = makeRGBA16F(w, h);
+        taaHistory[1] = makeRGBA16F(w, h);
+    }
+    if (!motionVectorTexture) {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_2D;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
+        ci.width = w;
+        ci.height = h;
+        ci.layer_count_or_depth = 1;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        motionVectorTexture = SDL_CreateGPUTexture(device, &ci);
+    }
+
+    camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
+
+    // ── Upload particle data (BEFORE any render pass) ────────────────────
+    if (particleSystem && toggles.particles)
+        particleSystem->uploadToGpu(cmd);
+
+    // ── Prepare ImGui ───────────────────────────────────────────────────────
+    ImDrawData* const drawData = ImGui::GetDrawData();
+    if (drawData)
+        ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // PASS 0: Cascaded Shadow Maps — 4 depth-only passes, one per cascade
+    // ════════════════════════════════════════════════════════════════════════
+    std::array<CascadeInfo, 4> cascades{};
+    if (toggles.shadows && shadowPipeline && shadowMap) {
+        cascades = computeCascades(
+            camera, getSunDirection(), k_shadowCascades, k_shadowMapSize, shadowDistance, cascadeLambda);
+
+        // One render pass for the whole atlas — clear to depth=1.0, then
+        // viewport/scissor per cascade quadrant.
+        SDL_GPUDepthStencilTargetInfo sdt{};
+        sdt.texture = shadowMap;
+        sdt.clear_depth = 1.0f;
+        sdt.load_op = SDL_GPU_LOADOP_CLEAR;
+        sdt.store_op = SDL_GPU_STOREOP_STORE;
+        sdt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        sdt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+
+        SDL_GPURenderPass* shadowPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &sdt);
+
+        for (int c = 0; c < k_shadowCascades; ++c) {
+            const auto& cascade = cascades[static_cast<size_t>(c)];
+
+            // ── Viewport + scissor for this cascade's atlas quadrant ────────
+            const auto vx = static_cast<float>((c % 2) * k_shadowMapSize);
+            const auto vy = static_cast<float>((c / 2) * k_shadowMapSize);
+            const auto vs = static_cast<float>(k_shadowMapSize);
+            const SDL_GPUViewport viewport = {vx, vy, vs, vs, 0.0f, 1.0f};
+            SDL_SetGPUViewport(shadowPass, &viewport);
+            const SDL_Rect scissor = {
+                (c % 2) * k_shadowMapSize, (c / 2) * k_shadowMapSize, k_shadowMapSize, k_shadowMapSize};
+            SDL_SetGPUScissor(shadowPass, &scissor);
+
+            // ── Scene models (Assimp-loaded) ────────────────────────────────
+            SDL_BindGPUGraphicsPipeline(shadowPass, shadowPipeline);
+            for (const auto& model : models) {
+                if (!model.drawInScenePass)
+                    continue;
+                ShadowUBO shadowUBO{};
+                shadowUBO.lightVP = cascade.lightVP;
+                shadowUBO.model = model.transform;
+                SDL_PushGPUVertexUniformData(cmd, 0, &shadowUBO, sizeof(shadowUBO));
+
+                for (const auto& mesh : model.meshes) {
+                    if (mesh.isTransparent)
+                        continue;
+                    const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                    SDL_BindGPUVertexBuffers(shadowPass, 0, &vbBind, 1);
+                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                    SDL_BindGPUIndexBuffer(shadowPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
+                }
+            }
+
+            // ── Entity models (ECS-driven — now cast shadows) ───────────────
+            for (const auto& ecmd : entityRenderCmds) {
+                if (ecmd.modelIndex < 0 || ecmd.modelIndex >= static_cast<int>(models.size()))
+                    continue;
+                const auto& emodel = models[static_cast<size_t>(ecmd.modelIndex)];
+                ShadowUBO shadowUBO{};
+                shadowUBO.lightVP = cascade.lightVP;
+                shadowUBO.model = ecmd.worldTransform;
+                SDL_PushGPUVertexUniformData(cmd, 0, &shadowUBO, sizeof(shadowUBO));
+
+                for (const auto& mesh : emodel.meshes) {
+                    if (mesh.isTransparent)
+                        continue;
+                    const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                    SDL_BindGPUVertexBuffers(shadowPass, 0, &vbBind, 1);
+                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                    SDL_BindGPUIndexBuffer(shadowPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
+                }
+            }
+
+            // ── Scene geometry (procedural boxes + floor) ───────────────────
+            if (sceneShadowPipeline) {
+                SDL_BindGPUGraphicsPipeline(shadowPass, sceneShadowPipeline);
+                SceneMatrices sceneShadowMats{};
+                sceneShadowMats.model = glm::mat4(1.0f);
+                sceneShadowMats.view = cascade.lightView;
+                sceneShadowMats.projection = cascade.lightProj;
+                SDL_PushGPUVertexUniformData(cmd, 0, &sceneShadowMats, sizeof(sceneShadowMats));
+                SDL_DrawGPUPrimitives(shadowPass, 1002, 1, 0, 0);
+            }
+        }
+
+        SDL_EndGPURenderPass(shadowPass);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // PASS 1: Main colour pass → HDR render target
+    // ════════════════════════════════════════════════════════════════════════
+    {
+        SDL_GPUColorTargetInfo ct{};
+        ct.texture = hdrTarget;
+        ct.clear_color = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+        ct.load_op = SDL_GPU_LOADOP_CLEAR;
+        ct.store_op = SDL_GPU_STOREOP_STORE;
+
+        SDL_GPUDepthStencilTargetInfo dt{};
+        dt.texture = depthTexture;
+        dt.clear_depth = 1.0f;
+        dt.load_op = SDL_GPU_LOADOP_CLEAR;
+        dt.store_op = SDL_GPU_STOREOP_STORE; // keep for screen-space effects later
+        dt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+
+        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
+
+        // ── Scene geometry (physics playground) ──────────────────────────────
+        if (toggles.sceneGeometry && scenePipeline) {
+            SDL_BindGPUGraphicsPipeline(pass, scenePipeline);
+
+            SceneMatrices sceneMats{};
+            sceneMats.model = glm::mat4(1.0f);
+            sceneMats.view = camera.getView();
+            sceneMats.projection = camera.getProjection();
+            SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
+
+            // Push cascade shadow data for the scene fragment shader.
+            ShadowDataFragUBO sceneShadow{};
+            for (int ci = 0; ci < k_shadowCascades; ++ci)
+                sceneShadow.lightVP[ci] = cascades[static_cast<size_t>(ci)].lightVP;
+            sceneShadow.cascadeSplits = glm::vec4(cascades[0].splitDistance,
+                                                  cascades[1].splitDistance,
+                                                  cascades[2].splitDistance,
+                                                  cascades[3].splitDistance);
+            sceneShadow.cameraView = camera.getView();
+            sceneShadow.shadowBias = shadowBiasVal;
+            sceneShadow.shadowNormalBias = shadowNormalBiasVal;
+            sceneShadow.lightDirWorld = glm::vec4(getSunDirection(), 0.0f);
+            sceneShadow.lightColor = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
+            sceneShadow.ambientColor = glm::vec4(ambientR, ambientG, ambientB, 1.0f);
+            sceneShadow.fillColor = glm::vec4(0.25f, 0.30f, 0.45f, fillIntensity);
+            sceneShadow.shadowMapSize =
+                (shadowMap && shadowPipeline && toggles.shadows) ? static_cast<float>(k_shadowMapSize) : 0.0f;
+            SDL_PushGPUFragmentUniformData(cmd, 0, &sceneShadow, sizeof(sceneShadow));
+
+            // Bind the shadow map for scene geometry shadow receiving.
+            const SDL_GPUTextureSamplerBinding sceneShadowSamp = {
+                .texture = (shadowMap && toggles.shadows) ? shadowMap : fallbackWhite,
+                .sampler = shadowSampler ? shadowSampler : tonemapSampler,
+            };
+            SDL_BindGPUFragmentSamplers(pass, 0, &sceneShadowSamp, 1);
+
+            SDL_DrawGPUPrimitives(pass, 1002, 1, 0, 0);
+        }
+
+        // ── PBR models (two-pass: opaques first, then transparents) ────────
+        if (pbrSampler && !models.empty()) {
+            // Light data shared by both passes.
+            LightDataUBO lightData{};
+            lightData.cameraPos = glm::vec4(eye, 1.0f);
+            lightData.ambientColor = glm::vec4(ambientR, ambientG, ambientB, 1.0f);
+            lightData.numLights = 2;
+            const glm::vec3 sunDir = getSunDirection();
+            lightData.lights[0].position = glm::vec4(sunDir, 0.0f);
+            lightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
+            lightData.lights[1].position = glm::vec4(-sunDir, 0.0f);
+            lightData.lights[1].color = glm::vec4(0.25f, 0.30f, 0.45f, fillIntensity);
+
+            // Helper: draw all scene-placed meshes matching the transparency filter.
+            // Entity/weapon models (drawInScenePass==false) are handled separately.
+            auto drawMeshes = [&](bool wantTransparent) {
+                for (const auto& model : models) {
+                    if (!model.drawInScenePass)
+                        continue;
+                    Matrices modelMats{};
+                    modelMats.model = model.transform;
+                    modelMats.view = camera.getView();
+                    modelMats.projection = camera.getProjection();
+                    modelMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(model.transform)));
+                    SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
+
+                    for (const auto& mesh : model.meshes) {
+                        if (mesh.isTransparent != wantTransparent)
+                            continue;
+
+                        MaterialUBO matUBO{};
+                        matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                        matUBO.metallicFactor = mesh.material.metallicFactor;
+                        matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                        matUBO.aoStrength = mesh.material.aoStrength;
+                        matUBO.normalScale = mesh.material.normalScale;
+                        matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                        SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+
+                        const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                        SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+                        const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                        SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+                        auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                            if (idx >= 0 && static_cast<size_t>(idx) < model.textures.size() &&
+                                model.textures[static_cast<size_t>(idx)])
+                                return model.textures[static_cast<size_t>(idx)];
+                            return fallback;
+                        };
+
+                        const SDL_GPUTextureSamplerBinding samplers[8] = {
+                            {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                            {.texture = irradianceMap, .sampler = iblSampler},
+                            {.texture = prefilterMap, .sampler = iblSampler},
+                            {.texture = brdfLUT, .sampler = iblSampler},
+                            {.texture = shadowMap ? shadowMap : fallbackWhite,
+                             .sampler = shadowSampler ? shadowSampler : pbrSampler},
+                        };
+                        SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
+
+                        SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+                    }
+                }
+            };
+
+            // Cascade shadow data UBO (shared by all PBR meshes).
+            ShadowDataFragUBO shadowData{};
+            for (int ci = 0; ci < k_shadowCascades; ++ci)
+                shadowData.lightVP[ci] = cascades[static_cast<size_t>(ci)].lightVP;
+            shadowData.cascadeSplits = glm::vec4(cascades[0].splitDistance,
+                                                 cascades[1].splitDistance,
+                                                 cascades[2].splitDistance,
+                                                 cascades[3].splitDistance);
+            shadowData.cameraView = camera.getView();
+            shadowData.shadowBias = shadowBiasVal;
+            shadowData.shadowNormalBias = shadowNormalBiasVal;
+            shadowData.lightDirWorld = glm::vec4(getSunDirection(), 0.0f);
+            shadowData.lightColor = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
+            shadowData.ambientColor = glm::vec4(ambientR, ambientG, ambientB, 1.0f);
+            shadowData.fillColor = glm::vec4(0.25f, 0.30f, 0.45f, fillIntensity);
+            shadowData.shadowMapSize = (shadowMap && shadowPipeline) ? static_cast<float>(k_shadowMapSize) : 0.0f;
+
+            // Pass 1: Opaque meshes (writes depth, no blending).
+            if (toggles.pbrModels && pbrPipeline) {
+                SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
+                SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
+                drawMeshes(false);
+            }
+
+            // Pass 2: Skybox — BEFORE transparents so transparent fragments
+            // blend with the sky colour, not the black clear colour.
+            if (toggles.skybox && skyboxPipeline) {
+                SDL_BindGPUGraphicsPipeline(pass, skyboxPipeline);
+
+                SkyboxMatricesUBO skyMats{};
+                glm::mat4 viewRot = camera.getView();
+                viewRot[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                skyMats.viewRotation = viewRot;
+                skyMats.projection = camera.getProjection();
+                SDL_PushGPUVertexUniformData(cmd, 0, &skyMats, sizeof(skyMats));
+
+                // Skybox fragment UBO: cubemap vs procedural selection + sun position.
+                struct
+                {
+                    int useCubemap;
+                    float envExposure;
+                    float _p1, _p2;
+                    glm::vec4 sunDirSky;
+                } skyParams{};
+                skyParams.useCubemap = (useHDRSkybox && envCubemap) ? 1 : 0;
+                skyParams.envExposure = 1.0f;
+                skyParams.sunDirSky = glm::vec4(getSunDirection(), 0.0f);
+                SDL_PushGPUFragmentUniformData(cmd, 0, &skyParams, sizeof(skyParams));
+
+                // Bind environment cubemap (or fallback black cubemap).
+                SDL_GPUTextureSamplerBinding envSamp = {
+                    .texture = (useHDRSkybox && envCubemap) ? envCubemap : irradianceMap,
+                    .sampler = iblSampler ? iblSampler : tonemapSampler,
+                };
+                SDL_BindGPUFragmentSamplers(pass, 0, &envSamp, 1);
+
+                SDL_DrawGPUPrimitives(pass, 36, 1, 0, 0);
+            }
+
+            // ── Entity render commands (PBR models at entity positions) ─────
+            // These are driven by the ECS — each entity with Renderable + Position
+            // contributes an EntityRenderCmd built by Game::iterate().
+            if (toggles.entityModels && pbrPipeline && !entityRenderCmds.empty()) {
+                SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
+                SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
+
+                for (const auto& ecmd : entityRenderCmds) {
+                    if (ecmd.modelIndex < 0 || ecmd.modelIndex >= static_cast<int>(models.size()))
+                        continue;
+
+                    const auto& emodel = models[static_cast<size_t>(ecmd.modelIndex)];
+
+                    Matrices entMats{};
+                    entMats.model = ecmd.worldTransform;
+                    entMats.view = camera.getView();
+                    entMats.projection = camera.getProjection();
+                    entMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(ecmd.worldTransform)));
+                    SDL_PushGPUVertexUniformData(cmd, 0, &entMats, sizeof(entMats));
+
+                    for (const auto& mesh : emodel.meshes) {
+                        if (mesh.isTransparent)
+                            continue;
+
+                        MaterialUBO matUBO{};
+                        matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                        matUBO.metallicFactor = mesh.material.metallicFactor;
+                        matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                        matUBO.aoStrength = mesh.material.aoStrength;
+                        matUBO.normalScale = mesh.material.normalScale;
+                        matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                        SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+
+                        const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                        SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+                        const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                        SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+                        auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                            if (idx >= 0 && static_cast<size_t>(idx) < emodel.textures.size() &&
+                                emodel.textures[static_cast<size_t>(idx)])
+                                return emodel.textures[static_cast<size_t>(idx)];
+                            return fallback;
+                        };
+
+                        const SDL_GPUTextureSamplerBinding samplers[8] = {
+                            {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                            {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                            {.texture = irradianceMap, .sampler = iblSampler},
+                            {.texture = prefilterMap, .sampler = iblSampler},
+                            {.texture = brdfLUT, .sampler = iblSampler},
+                            {.texture = shadowMap ? shadowMap : fallbackWhite,
+                             .sampler = shadowSampler ? shadowSampler : pbrSampler},
+                        };
+                        SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
+
+                        SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+                    }
+                }
+            }
+
+            // Pass 3: Transparent meshes (alpha blending, no depth write).
+            // Rendered after skybox so they blend with the sky background.
+            if (toggles.pbrModels && pbrTransparentPipeline) {
+                SDL_BindGPUGraphicsPipeline(pass, pbrTransparentPipeline);
+                SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
+                drawMeshes(true);
+            }
+        }
+
+        // ── Particle rendering (inside HDR pass, after opaques + skybox) ─────
+        // Push ParticleUniforms matching the layout expected by all particle
+        // vertex shaders (set=1, binding=0): view, proj, camPos, camRight, camUp.
+        if (toggles.particles && particleSystem) {
+            struct alignas(16) ParticleUniforms
+            {
+                glm::mat4 view;
+                glm::mat4 proj;
+                glm::vec3 camPos;
+                float _p0;
+                glm::vec3 camRight;
+                float _p1;
+                glm::vec3 camUp;
+                float _p2;
+            };
+
+            ParticleUniforms pu{};
+            pu.view = camera.getView();
+            pu.proj = camera.getProjection();
+            pu.camPos = camera.getEye();
+            pu.camRight = camera.getRight();
+            pu.camUp = camera.getUp();
+            SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+
+            particleSystem->setScreenSize(static_cast<float>(w), static_cast<float>(h));
+            particleSystem->render(pass, cmd);
+        }
+
+        // ── First-person weapon viewmodel ────────────────────────────────────
+        // Rendered last in the HDR pass. The weapon should always be in front,
+        // so we don't clear depth — it just draws over the scene at close range.
+        if (toggles.weaponViewmodel && weaponVM.visible && weaponVM.modelIndex >= 0 &&
+            weaponVM.modelIndex < static_cast<int>(models.size()) && pbrPipeline)
+        {
+
+            SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
+
+            const auto& wmodel = models[static_cast<size_t>(weaponVM.modelIndex)];
+
+            Matrices vmMats{};
+            vmMats.model = weaponVM.transform;
+            vmMats.view = camera.getView();
+            vmMats.projection = camera.getProjection();
+            vmMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(weaponVM.transform)));
+            SDL_PushGPUVertexUniformData(cmd, 0, &vmMats, sizeof(vmMats));
+
+            // Light data for weapon (same as scene).
+            LightDataUBO weaponLightData{};
+            weaponLightData.cameraPos = glm::vec4(eye, 1.0f);
+            weaponLightData.ambientColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
+            weaponLightData.numLights = 2;
+            weaponLightData.lights[0].position = glm::vec4(getSunDirection(), 0.0f);
+            weaponLightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
+            weaponLightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
+            weaponLightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
+            SDL_PushGPUFragmentUniformData(cmd, 1, &weaponLightData, sizeof(weaponLightData));
+
+            ShadowDataFragUBO weaponShadow{};
+            weaponShadow.shadowMapSize = 0.0f; // No shadows for weapon viewmodel.
+            SDL_PushGPUFragmentUniformData(cmd, 2, &weaponShadow, sizeof(weaponShadow));
+
+            for (const auto& mesh : wmodel.meshes) {
+                if (mesh.isTransparent)
+                    continue;
+
+                MaterialUBO matUBO{};
+                matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                matUBO.metallicFactor = mesh.material.metallicFactor;
+                matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                matUBO.aoStrength = mesh.material.aoStrength;
+                matUBO.normalScale = mesh.material.normalScale;
+                matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+
+                const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+                SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
+                const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+                auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                    if (idx >= 0 && static_cast<size_t>(idx) < wmodel.textures.size() &&
+                        wmodel.textures[static_cast<size_t>(idx)])
+                        return wmodel.textures[static_cast<size_t>(idx)];
+                    return fallback;
+                };
+
+                const SDL_GPUTextureSamplerBinding samplers[8] = {
+                    {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                    {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                    {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                    {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                    {.texture = irradianceMap, .sampler = iblSampler},
+                    {.texture = prefilterMap, .sampler = iblSampler},
+                    {.texture = brdfLUT, .sampler = iblSampler},
+                    {.texture = shadowMap ? shadowMap : fallbackWhite,
+                     .sampler = shadowSampler ? shadowSampler : pbrSampler},
+                };
+                SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
+
+                SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
+            }
+        }
+
+        SDL_EndGPURenderPass(pass);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Compute passes: SSAO, Bloom, SSR, Volumetrics (between HDR and tonemap)
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── GTAO (Phase 7) — Ground Truth Ambient Occlusion ────────────────────
+    if (toggles.ssao && ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
+        // GTAO main pass → ssaoTexture (raw AO).
+        struct
+        {
+            glm::mat4 proj;
+            glm::mat4 invProj;
+            glm::vec2 screenSize;
+            float radius;
+            float falloffExp;
+            int numSlices;
+            int numSteps;
+            float _p1, _p2;
+        } gtaoUBO{};
+        gtaoUBO.proj = camera.getProjection();
+        gtaoUBO.invProj = glm::inverse(camera.getProjection());
+        gtaoUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        gtaoUBO.radius = 40.0f;
+        gtaoUBO.falloffExp = 2.0f;
+        gtaoUBO.numSlices = 3;
+        gtaoUBO.numSteps = 6;
+
+        SDL_GPUStorageTextureReadWriteBinding aoWrite = {.texture = ssaoTexture, .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* aoPass = SDL_BeginGPUComputePass(cmd, &aoWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(aoPass, ssaoPipeline);
+        SDL_GPUTextureSamplerBinding depthSamp = {.texture = depthTexture, .sampler = tonemapSampler};
+        SDL_BindGPUComputeSamplers(aoPass, 0, &depthSamp, 1);
+        SDL_PushGPUComputeUniformData(cmd, 0, &gtaoUBO, sizeof(gtaoUBO));
+        SDL_DispatchGPUCompute(aoPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_EndGPUComputePass(aoPass);
+
+        // Bilateral blur pass → ssaoBlurTexture (clean AO).
+        struct
+        {
+            glm::vec2 screenSize;
+            float depthSigma;
+            float _p;
+        } blurUBO{};
+        blurUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        blurUBO.depthSigma = 100.0f;
+
+        SDL_GPUStorageTextureReadWriteBinding blurWrite = {.texture = ssaoBlurTexture, .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* blurPass = SDL_BeginGPUComputePass(cmd, &blurWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(blurPass, ssaoBlurPipeline);
+        SDL_GPUTextureSamplerBinding blurSamplers[2] = {
+            {.texture = ssaoTexture, .sampler = tonemapSampler},
+            {.texture = depthTexture, .sampler = tonemapSampler},
+        };
+        SDL_BindGPUComputeSamplers(blurPass, 0, blurSamplers, 2);
+        SDL_PushGPUComputeUniformData(cmd, 0, &blurUBO, sizeof(blurUBO));
+        SDL_DispatchGPUCompute(blurPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_EndGPUComputePass(blurPass);
+    }
+
+    // ── Bloom (Phase 8) ─────────────────────────────────────────────────────
+    if (toggles.bloom && bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
+        // Downsample chain.
+        Uint32 srcW = w, srcH = h;
+        for (int i = 0; i < k_bloomMips; ++i) {
+            Uint32 dstW = std::max(srcW / 2, 1u);
+            Uint32 dstH = std::max(srcH / 2, 1u);
+
+            struct
+            {
+                glm::vec2 srcRes;
+                float isFirstPass;
+                float _p;
+            } params{};
+            params.srcRes = glm::vec2(static_cast<float>(srcW), static_cast<float>(srcH));
+            params.isFirstPass = (i == 0) ? 1.0f : 0.0f;
+
+            SDL_GPUStorageTextureReadWriteBinding dstWrite = {.texture = bloomMips[i], .mip_level = 0, .layer = 0};
+            SDL_GPUComputePass* bloomPass = SDL_BeginGPUComputePass(cmd, &dstWrite, 1, nullptr, 0);
+            SDL_BindGPUComputePipeline(bloomPass, bloomDownsamplePipeline);
+            SDL_GPUTextureSamplerBinding srcSamp = {.texture = (i == 0) ? hdrTarget : bloomMips[i - 1],
+                                                    .sampler = tonemapSampler};
+            SDL_BindGPUComputeSamplers(bloomPass, 0, &srcSamp, 1);
+            SDL_PushGPUComputeUniformData(cmd, 0, &params, sizeof(params));
+            SDL_DispatchGPUCompute(bloomPass, (dstW + 15) / 16, (dstH + 15) / 16, 1);
+            SDL_EndGPUComputePass(bloomPass);
+
+            srcW = dstW;
+            srcH = dstH;
+        }
+
+        // Upsample chain (additive blend back up).
+        for (int i = k_bloomMips - 2; i >= 0; --i) {
+            Uint32 mipW = std::max(w >> (i + 1), 1u);
+            Uint32 mipH = std::max(h >> (i + 1), 1u);
+
+            struct
+            {
+                glm::vec2 srcRes;
+                float intensity;
+                float _p;
+            } params{};
+            params.srcRes = glm::vec2(static_cast<float>(std::max(w >> (i + 2), 1u)),
+                                      static_cast<float>(std::max(h >> (i + 2), 1u)));
+            params.intensity = 0.3f;
+
+            SDL_GPUStorageTextureReadWriteBinding dstWrite = {.texture = bloomMips[i], .mip_level = 0, .layer = 0};
+            SDL_GPUComputePass* upPass = SDL_BeginGPUComputePass(cmd, &dstWrite, 1, nullptr, 0);
+            SDL_BindGPUComputePipeline(upPass, bloomUpsamplePipeline);
+            SDL_GPUTextureSamplerBinding srcSamp = {.texture = bloomMips[i + 1], .sampler = tonemapSampler};
+            SDL_BindGPUComputeSamplers(upPass, 0, &srcSamp, 1);
+            SDL_PushGPUComputeUniformData(cmd, 0, &params, sizeof(params));
+            SDL_DispatchGPUCompute(upPass, (mipW + 15) / 16, (mipH + 15) / 16, 1);
+            SDL_EndGPUComputePass(upPass);
+        }
+    }
+
+    // ── SSR (Phase 9) ───────────────────────────────────────────────────────
+    static uint64_t ssrFrameCounter = 0;
+    ++ssrFrameCounter;
+
+    if (toggles.ssr && ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
+        // Ping-pong: write to current, read history from previous.
+        const int ssrSrc = ssrCurrentIdx;     // previous frame's result
+        const int ssrDst = 1 - ssrCurrentIdx; // this frame's output
+        struct
+        {
+            glm::mat4 proj;
+            glm::mat4 invProj;
+            glm::mat4 view;
+            glm::vec2 screenSize;
+            float maxDist;
+            float thickness;
+            float frameIndex;
+            float jitterStrength;
+            int ssrModeVal;
+            float _pad1, _pad2, _pad3;
+        } ssrUBO{};
+        ssrUBO.proj = camera.getProjection();
+        ssrUBO.invProj = glm::inverse(camera.getProjection());
+        ssrUBO.view = camera.getView();
+        ssrUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        ssrUBO.maxDist = 500.0f;
+        ssrUBO.thickness = 5.0f;
+        ssrUBO.frameIndex = static_cast<float>(ssrFrameCounter % 64);
+        ssrUBO.jitterStrength = 0.06f;
+        ssrUBO.ssrModeVal = ssrMode;
+
+        SDL_GPUStorageTextureReadWriteBinding ssrWrite = {.texture = ssrTexture[ssrDst], .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* ssrPass = SDL_BeginGPUComputePass(cmd, &ssrWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(ssrPass, ssrPipeline);
+        SDL_GPUTextureSamplerBinding ssrSamplers[4] = {
+            {.texture = hdrTarget, .sampler = tonemapSampler},
+            {.texture = depthTexture, .sampler = tonemapSampler},
+            {.texture = ssrTexture[ssrSrc], .sampler = tonemapSampler},
+            {.texture = motionVectorTexture ? motionVectorTexture : fallbackBlack, .sampler = tonemapSampler},
+        };
+        SDL_BindGPUComputeSamplers(ssrPass, 0, ssrSamplers, 4);
+        SDL_PushGPUComputeUniformData(cmd, 0, &ssrUBO, sizeof(ssrUBO));
+        SDL_DispatchGPUCompute(ssrPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_EndGPUComputePass(ssrPass);
+        ssrCurrentIdx = ssrDst;
+    }
+
+    // ── Volumetrics (Phase 10) ──────────────────────────────────────────────
+    if (toggles.volumetrics && volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
+        struct
+        {
+            glm::mat4 invViewProj;
+            glm::mat4 lightVP_vol[4];    ///< Per-cascade light VP.
+            glm::mat4 cameraView_vol;    ///< For view-space Z.
+            glm::vec4 cascadeSplits_vol; ///< Cascade far distances.
+            glm::vec4 lightDir_vol;
+            glm::vec4 lightColor_vol;
+            glm::vec2 screenSize;
+            float fogDensity;
+            float scatteringG;
+            float shadowBias_vol;
+            float shadowMapSize_vol; ///< Per-cascade resolution.
+            float maxDistance;
+            float _p2;
+        } volUBO{};
+        volUBO.invViewProj = glm::inverse(camera.getViewProjection());
+        for (int ci = 0; ci < k_shadowCascades; ++ci)
+            volUBO.lightVP_vol[ci] = cascades[static_cast<size_t>(ci)].lightVP;
+        volUBO.cameraView_vol = camera.getView();
+        volUBO.cascadeSplits_vol = glm::vec4(
+            cascades[0].splitDistance, cascades[1].splitDistance, cascades[2].splitDistance, cascades[3].splitDistance);
+        volUBO.lightDir_vol = glm::vec4(getSunDirection(), 0.0f);
+        volUBO.lightColor_vol = glm::vec4(1.0f, 0.95f, 0.85f, 2.0f);
+        volUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        volUBO.fogDensity = 0.0002f;
+        volUBO.scatteringG = 0.7f;
+        volUBO.shadowBias_vol = 0.002f;
+        volUBO.shadowMapSize_vol = static_cast<float>(k_shadowMapSize);
+        volUBO.maxDistance = 2000.0f;
+
+        SDL_GPUStorageTextureReadWriteBinding volWrite = {.texture = volumetricTexture, .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* volPass = SDL_BeginGPUComputePass(cmd, &volWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(volPass, volumetricPipeline);
+        SDL_GPUTextureSamplerBinding volSamplers[2] = {
+            {.texture = depthTexture, .sampler = tonemapSampler},
+            {.texture = shadowMap, .sampler = shadowSampler},
+        };
+        SDL_BindGPUComputeSamplers(volPass, 0, volSamplers, 2);
+        SDL_PushGPUComputeUniformData(cmd, 0, &volUBO, sizeof(volUBO));
+        SDL_DispatchGPUCompute(volPass, (w / 2 + 15) / 16, (h / 2 + 15) / 16, 1);
+        SDL_EndGPUComputePass(volPass);
+    }
+
+    // ── TAA (Phase 11) — motion vectors + temporal resolve ────────────────
+    if (toggles.taa && motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] &&
+        depthTexture)
+    {
+        const glm::mat4 currentVP = camera.getViewProjection();
+
+        // Motion vectors.
+        struct
+        {
+            glm::mat4 curInvVP;
+            glm::mat4 prevVP;
+            glm::vec2 screenSize;
+            glm::vec2 jitter;
+        } mvUBO{};
+        mvUBO.curInvVP = glm::inverse(currentVP);
+        mvUBO.prevVP = previousVP;
+        mvUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+
+        SDL_GPUStorageTextureReadWriteBinding mvWrite = {.texture = motionVectorTexture, .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* mvPass = SDL_BeginGPUComputePass(cmd, &mvWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(mvPass, motionVectorPipeline);
+        SDL_GPUTextureSamplerBinding mvSamp = {.texture = depthTexture, .sampler = tonemapSampler};
+        SDL_BindGPUComputeSamplers(mvPass, 0, &mvSamp, 1);
+        SDL_PushGPUComputeUniformData(cmd, 0, &mvUBO, sizeof(mvUBO));
+        SDL_DispatchGPUCompute(mvPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_EndGPUComputePass(mvPass);
+
+        // TAA temporal resolve.
+        const int srcIdx = taaCurrentIdx;
+        const int dstIdx = 1 - taaCurrentIdx;
+
+        struct
+        {
+            glm::vec2 screenSize;
+            float blendFactor;
+            float _p;
+        } taaUBO{};
+        taaUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        taaUBO.blendFactor = 0.1f;
+
+        SDL_GPUStorageTextureReadWriteBinding taaWrite = {.texture = taaHistory[dstIdx], .mip_level = 0, .layer = 0};
+        SDL_GPUComputePass* taaPass = SDL_BeginGPUComputePass(cmd, &taaWrite, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(taaPass, taaPipeline);
+        SDL_GPUTextureSamplerBinding taaSamplers[3] = {
+            {.texture = hdrTarget, .sampler = tonemapSampler},
+            {.texture = taaHistory[srcIdx], .sampler = tonemapSampler},
+            {.texture = motionVectorTexture, .sampler = tonemapSampler},
+        };
+        SDL_BindGPUComputeSamplers(taaPass, 0, taaSamplers, 3);
+        SDL_PushGPUComputeUniformData(cmd, 0, &taaUBO, sizeof(taaUBO));
+        SDL_DispatchGPUCompute(taaPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_EndGPUComputePass(taaPass);
+
+        taaCurrentIdx = dstIdx;
+        previousVP = currentVP;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // PASS 2: Tone mapping → swapchain (or captureRT for screenshots)
+    // ════════════════════════════════════════════════════════════════════════
+    {
+        const bool capturing = !pendingCapPath.empty() && ensureCaptureRT(w, h, swapchainFormat);
+        SDL_GPUTexture* const renderTarget = capturing ? captureRT : swapchain;
+
+        SDL_GPUColorTargetInfo ct{};
+        ct.texture = renderTarget;
+        ct.load_op = SDL_GPU_LOADOP_DONT_CARE; // fullscreen overwrite
+        ct.store_op = SDL_GPU_STOREOP_STORE;
+
+        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, nullptr);
+
+        if (tonemapPipeline && tonemapSampler && hdrTarget) {
+            SDL_BindGPUGraphicsPipeline(pass, tonemapPipeline);
+
+            TonemapParamsUBO params{};
+            params.exposure = 1.0f;
+            params.gamma = 2.2f;
+            params.tonemapMode = 0; // ACES
+            params.bloomStrength = (toggles.bloom && bloomMips[0]) ? bloomStr : 0.0f;
+            params.ssaoStrength = (toggles.ssao && ssaoBlurTexture) ? ssaoStr : 0.0f;
+            params.ssrStrength = (toggles.ssr && ssrTexture[0]) ? ssrStr : 0.0f;
+            params.volumetricStrength = (toggles.volumetrics && volumetricTexture) ? volStr : 0.0f;
+            params.sharpenStrength = (toggles.taa) ? sharpenStr : 0.0f;
+            SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+            // Bind all 5 post-process textures for compositing.
+            const SDL_GPUTextureSamplerBinding tonemapSamplers[5] = {
+                {.texture = hdrTarget, .sampler = tonemapSampler},
+                {.texture = (toggles.bloom && bloomMips[0]) ? bloomMips[0] : fallbackBlack, .sampler = tonemapSampler},
+                {.texture = (toggles.ssao && ssaoBlurTexture) ? ssaoBlurTexture : fallbackWhite,
+                 .sampler = tonemapSampler},
+                {.texture = (toggles.ssr && ssrTexture[ssrCurrentIdx]) ? ssrTexture[ssrCurrentIdx] : fallbackBlack,
+                 .sampler = tonemapSampler},
+                {.texture = (toggles.volumetrics && volumetricTexture) ? volumetricTexture : fallbackBlack,
+                 .sampler = tonemapSampler},
+            };
+            SDL_BindGPUFragmentSamplers(pass, 0, tonemapSamplers, 5);
+
+            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0); // fullscreen triangle
+        }
+
+        // ── ImGui overlay (in LDR, on top of tone-mapped image) ─────────────
+        if (drawData)
+            ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, pass);
+
+        SDL_EndGPURenderPass(pass);
+
+        // Blit captureRT → swapchain if capturing.
+        if (capturing) {
+            SDL_GPUBlitInfo blitInfo{};
+            blitInfo.source.texture = captureRT;
+            blitInfo.source.w = w;
+            blitInfo.source.h = h;
+            blitInfo.destination.texture = swapchain;
+            blitInfo.destination.w = w;
+            blitInfo.destination.h = h;
+            blitInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
+            blitInfo.filter = SDL_GPU_FILTER_NEAREST;
+            SDL_BlitGPUTexture(cmd, &blitInfo);
+        }
+    }
+
+    SDL_SubmitGPUCommandBuffer(cmd);
+
+    if (!pendingCapPath.empty())
+        downloadAndSaveCapture(w, h);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Screenshot download
+// ═══════════════════════════════════════════════════════════════════════════
 
 void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
 {
@@ -690,52 +3048,38 @@ void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
 
     const Uint32 dataSize = w * h * 4u;
 
-    // Create a download (CPU-readable) transfer buffer.
     SDL_GPUTransferBufferCreateInfo tbInfo{};
     tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
     tbInfo.size = dataSize;
     SDL_GPUTransferBuffer* dlBuf = SDL_CreateGPUTransferBuffer(device, &tbInfo);
     if (!dlBuf) {
-        SDL_Log("Renderer: failed to create download buffer: %s", SDL_GetError());
         pendingCapPath.clear();
         return;
     }
 
-    // Issue the GPU → transfer-buffer copy in its own command buffer.
     SDL_GPUCommandBuffer* dlCmd = SDL_AcquireGPUCommandBuffer(device);
     SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(dlCmd);
 
     SDL_GPUTextureRegion srcRegion{};
     srcRegion.texture = captureRT;
-    srcRegion.mip_level = 0;
-    srcRegion.layer = 0;
-    srcRegion.x = srcRegion.y = srcRegion.z = 0;
     srcRegion.w = w;
     srcRegion.h = h;
     srcRegion.d = 1;
 
     SDL_GPUTextureTransferInfo dstTransfer{};
     dstTransfer.transfer_buffer = dlBuf;
-    dstTransfer.offset = 0;
-    dstTransfer.pixels_per_row = 0; // 0 = tightly packed (= w)
-    dstTransfer.rows_per_layer = 0; // 0 = tightly packed (= h)
 
     SDL_DownloadFromGPUTexture(cp, &srcRegion, &dstTransfer);
     SDL_EndGPUCopyPass(cp);
     SDL_SubmitGPUCommandBuffer(dlCmd);
-
-    // Block until the GPU has finished writing to the transfer buffer.
     SDL_WaitForGPUIdle(device);
 
-    // Map the buffer, convert BGRA→RGBA if the swapchain uses BGRA, then save PNG.
     void* mapped = SDL_MapGPUTransferBuffer(device, dlBuf, false);
     if (mapped) {
         std::vector<uint8_t> pixels(dataSize);
         SDL_memcpy(pixels.data(), mapped, dataSize);
         SDL_UnmapGPUTransferBuffer(device, dlBuf);
 
-        // On most platforms (Linux/Vulkan, macOS/Metal) the swapchain is BGRA8.
-        // stbi_write_png expects RGBA8, so swap R and B when needed.
         const bool swapRB = (captureRTFmt == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
         if (swapRB) {
             for (Uint32 i = 0; i < w * h; ++i)
@@ -756,114 +3100,217 @@ void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
     pendingCapPath.clear();
 }
 
-// ---------------------------------------------------------------------------
-// Renderer::ensureDepthTexture
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// Misc
+// ═══════════════════════════════════════════════════════════════════════════
 
-bool Renderer::ensureDepthTexture(const Uint32 w, const Uint32 h)
+int Renderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs)
 {
-    if (depthTexture && depthWidth == w && depthHeight == h)
-        return true;
+    const char* const k_base = SDL_GetBasePath();
+    char path[512];
+    SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
 
-    if (depthTexture) {
-        SDL_ReleaseGPUTexture(device, depthTexture);
-        depthTexture = nullptr;
+    LoadedModel loaded;
+    if (!loadModel(path, loaded, flipUVs)) {
+        SDL_Log("Renderer::loadSceneModel: failed to load '%s'", filename);
+        return -1;
     }
 
-    SDL_GPUTextureCreateInfo info{};
-    info.type = SDL_GPU_TEXTURETYPE_2D;
-    info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    info.width = w;
-    info.height = h;
-    info.layer_count_or_depth = 1;
-    info.num_levels = 1;
-    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    ModelInstance inst;
+    inst.transform = glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(scale));
+    inst.drawInScenePass = false; // Only drawn via EntityRenderCmd or WeaponViewmodel.
 
-    depthTexture = SDL_CreateGPUTexture(device, &info);
-    if (!depthTexture) {
-        SDL_Log("Renderer: failed to create depth texture: %s", SDL_GetError());
-        return false;
+    if (!uploadModel(loaded, inst)) {
+        SDL_Log("Renderer::loadSceneModel: GPU upload failed for '%s'", filename);
+        return -1;
     }
 
-    depthWidth = w;
-    depthHeight = h;
-    return true;
+    models.push_back(std::move(inst));
+    return static_cast<int>(models.size()) - 1;
 }
 
-// ---------------------------------------------------------------------------
-// Renderer::setVSync
-// ---------------------------------------------------------------------------
+int Renderer::uploadSceneModel(const LoadedModel& model)
+{
+    ModelInstance inst;
+    inst.transform = glm::mat4(1.0f);
+    inst.drawInScenePass = false; // Only drawn via EntityRenderCmd.
+
+    if (!uploadModel(model, inst)) {
+        SDL_Log("Renderer::uploadSceneModel: GPU upload failed");
+        return -1;
+    }
+
+    models.push_back(std::move(inst));
+    return static_cast<int>(models.size()) - 1;
+}
+
+void Renderer::updateModelMeshVertices(int modelIndex, int meshIndex, const ModelVertex* vertices, Uint32 vertexCount)
+{
+    if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= models.size())
+        return;
+    auto& model = models[static_cast<size_t>(modelIndex)];
+    if (meshIndex < 0 || static_cast<size_t>(meshIndex) >= model.meshes.size())
+        return;
+
+    const Uint32 bytes = vertexCount * static_cast<Uint32>(sizeof(ModelVertex));
+
+    // Queue the data — the actual GPU copy happens in drawFrame()'s command
+    // buffer, batched with all other copies.  No separate submit, no stall.
+    PendingVertexUpload upload;
+    upload.dstBuffer = model.meshes[static_cast<size_t>(meshIndex)].vertexBuffer;
+    upload.data.resize(bytes);
+    SDL_memcpy(upload.data.data(), vertices, bytes);
+    pendingVertexUploads.push_back(std::move(upload));
+}
+
+void Renderer::requestScreenshot(const std::string& path)
+{
+    pendingCapPath = path;
+}
 
 bool Renderer::setVSync(const bool enabled)
 {
     SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
     if (!enabled) {
-        // Prefer mailbox (no tearing) over immediate (may tear).
         if (SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX))
             mode = SDL_GPU_PRESENTMODE_MAILBOX;
         else
             mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
     }
-
     if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
-        SDL_Log("Renderer: SDL_SetGPUSwapchainParameters failed: %s", SDL_GetError());
+        SDL_Log("Renderer: setVSync failed: %s", SDL_GetError());
         return false;
     }
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Renderer::quit
-// ---------------------------------------------------------------------------
-
 void Renderer::quit()
 {
-    if (device) {
-        SDL_WaitForGPUIdle(device);
+    if (!device)
+        return;
 
-        // Release capture render-target if it was created.
-        if (captureRT)
-            SDL_ReleaseGPUTexture(device, captureRT);
+    SDL_WaitForGPUIdle(device);
 
-        // Release model GPU resources.
-        for (auto& mesh : modelMeshes) {
+    // Release skinned-mesh staging buffer.
+    if (skinTransferBuf)
+        SDL_ReleaseGPUTransferBuffer(device, skinTransferBuf);
+    skinTransferBuf = nullptr;
+    skinTransferBufSize = 0;
+
+    // Release render targets.
+    if (captureRT)
+        SDL_ReleaseGPUTexture(device, captureRT);
+    if (hdrTarget)
+        SDL_ReleaseGPUTexture(device, hdrTarget);
+    if (depthTexture)
+        SDL_ReleaseGPUTexture(device, depthTexture);
+    if (shadowMap)
+        SDL_ReleaseGPUTexture(device, shadowMap);
+
+    // Release IBL resources.
+    if (brdfLUT)
+        SDL_ReleaseGPUTexture(device, brdfLUT);
+    if (envCubemap)
+        SDL_ReleaseGPUTexture(device, envCubemap);
+    if (irradianceMap)
+        SDL_ReleaseGPUTexture(device, irradianceMap);
+    if (prefilterMap)
+        SDL_ReleaseGPUTexture(device, prefilterMap);
+    if (iblSampler)
+        SDL_ReleaseGPUSampler(device, iblSampler);
+
+    // Release post-processing resources.
+    for (auto*& t : bloomMips) {
+        if (t)
+            SDL_ReleaseGPUTexture(device, t);
+        t = nullptr;
+    }
+    if (ssaoTexture)
+        SDL_ReleaseGPUTexture(device, ssaoTexture);
+    if (ssaoBlurTexture)
+        SDL_ReleaseGPUTexture(device, ssaoBlurTexture);
+    for (auto*& t : ssrTexture) {
+        if (t)
+            SDL_ReleaseGPUTexture(device, t);
+        t = nullptr;
+    }
+    if (volumetricTexture)
+        SDL_ReleaseGPUTexture(device, volumetricTexture);
+    if (motionVectorTexture)
+        SDL_ReleaseGPUTexture(device, motionVectorTexture);
+    for (auto*& t : taaHistory) {
+        if (t)
+            SDL_ReleaseGPUTexture(device, t);
+        t = nullptr;
+    }
+
+    if (bloomDownsamplePipeline)
+        SDL_ReleaseGPUComputePipeline(device, bloomDownsamplePipeline);
+    if (bloomUpsamplePipeline)
+        SDL_ReleaseGPUComputePipeline(device, bloomUpsamplePipeline);
+    if (ssaoPipeline)
+        SDL_ReleaseGPUComputePipeline(device, ssaoPipeline);
+    if (ssaoBlurPipeline)
+        SDL_ReleaseGPUComputePipeline(device, ssaoBlurPipeline);
+    if (ssrPipeline)
+        SDL_ReleaseGPUComputePipeline(device, ssrPipeline);
+    if (volumetricPipeline)
+        SDL_ReleaseGPUComputePipeline(device, volumetricPipeline);
+    if (motionVectorPipeline)
+        SDL_ReleaseGPUComputePipeline(device, motionVectorPipeline);
+    if (taaPipeline)
+        SDL_ReleaseGPUComputePipeline(device, taaPipeline);
+
+    // Release model resources.
+    for (auto& inst : models) {
+        for (auto& mesh : inst.meshes) {
             SDL_ReleaseGPUBuffer(device, mesh.vertexBuffer);
             SDL_ReleaseGPUBuffer(device, mesh.indexBuffer);
         }
-        modelMeshes.clear();
-
-        for (auto* tex : modelTextures)
-            SDL_ReleaseGPUTexture(device, tex);
-        modelTextures.clear();
-
-        if (defaultTexture)
-            SDL_ReleaseGPUTexture(device, defaultTexture);
-
-        if (modelSampler)
-            SDL_ReleaseGPUSampler(device, modelSampler);
-
-        if (modelPipeline)
-            SDL_ReleaseGPUGraphicsPipeline(device, modelPipeline);
-
-        if (depthTexture)
-            SDL_ReleaseGPUTexture(device, depthTexture);
-
-        ImGui_ImplSDLGPU3_Shutdown();
-
-        if (pipeline)
-            SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
-
-        SDL_ReleaseWindowFromGPUDevice(device, window);
-        SDL_DestroyGPUDevice(device);
+        for (auto* tex : inst.textures)
+            if (tex)
+                SDL_ReleaseGPUTexture(device, tex);
     }
+    models.clear();
 
-    captureRT = nullptr;
-    defaultTexture = nullptr;
-    modelSampler = nullptr;
-    modelPipeline = nullptr;
-    depthTexture = nullptr;
-    pipeline = nullptr;
+    // Release fallback textures.
+    if (fallbackWhite)
+        SDL_ReleaseGPUTexture(device, fallbackWhite);
+    if (fallbackFlatNormal)
+        SDL_ReleaseGPUTexture(device, fallbackFlatNormal);
+    if (fallbackMR)
+        SDL_ReleaseGPUTexture(device, fallbackMR);
+    if (fallbackBlack)
+        SDL_ReleaseGPUTexture(device, fallbackBlack);
+
+    // Release samplers.
+    if (pbrSampler)
+        SDL_ReleaseGPUSampler(device, pbrSampler);
+    if (shadowSampler)
+        SDL_ReleaseGPUSampler(device, shadowSampler);
+    if (tonemapSampler)
+        SDL_ReleaseGPUSampler(device, tonemapSampler);
+
+    // Release pipelines.
+    ImGui_ImplSDLGPU3_Shutdown();
+    if (scenePipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, scenePipeline);
+    if (sceneShadowPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, sceneShadowPipeline);
+    if (pbrPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, pbrPipeline);
+    if (pbrTransparentPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, pbrTransparentPipeline);
+    if (skyboxPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, skyboxPipeline);
+    if (tonemapPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, tonemapPipeline);
+    if (shadowPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, shadowPipeline);
+
+    SDL_ReleaseWindowFromGPUDevice(device, window);
+    SDL_DestroyGPUDevice(device);
+
     device = nullptr;
     window = nullptr;
 }

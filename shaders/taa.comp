@@ -1,0 +1,57 @@
+// taa.comp — Temporal anti-aliasing with neighborhood clamping.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D currentFrame;
+layout(set = 0, binding = 1) uniform sampler2D historyFrame;
+layout(set = 0, binding = 2) uniform sampler2D motionVectors;
+
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D outputImage;
+
+layout(set = 2, binding = 0) uniform TAAParams {
+    vec2 screenSize;
+    float blendFactor;  // 0.1 = 10% current, 90% history
+    float _pad;
+};
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(outputImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+
+    // Current frame color.
+    vec3 current = texture(currentFrame, uv).rgb;
+
+    // Motion vector (screen-space velocity).
+    vec2 motion = texture(motionVectors, uv).rg;
+    vec2 historyUV = uv - motion;
+
+    // History color (reprojected).
+    vec3 history = texture(historyFrame, historyUV).rgb;
+
+    // Neighborhood clamping (3×3 min/max) to reduce ghosting.
+    vec3 nbMin = vec3(9999.0);
+    vec3 nbMax = vec3(-9999.0);
+    vec2 ts = 1.0 / screenSize;
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            vec3 s = texture(currentFrame, uv + vec2(float(x), float(y)) * ts).rgb;
+            nbMin = min(nbMin, s);
+            nbMax = max(nbMax, s);
+        }
+    }
+    history = clamp(history, nbMin, nbMax);
+
+    // Blend.
+    vec3 result = mix(history, current, blendFactor);
+
+    // Reject history if motion is too large or UV is off-screen.
+    if (historyUV.x < 0.0 || historyUV.x > 1.0 || historyUV.y < 0.0 || historyUV.y > 1.0)
+        result = current;
+
+    imageStore(outputImage, coord, vec4(result, 1.0));
+}

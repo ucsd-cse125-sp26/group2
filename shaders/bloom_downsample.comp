@@ -1,0 +1,61 @@
+// bloom_downsample.comp — 13-tap Karis-weighted downsample for bloom.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D srcTexture;
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D dstImage;
+
+layout(set = 2, binding = 0) uniform Params {
+    vec2 srcResolution;
+    float isFirstPass;
+    float _pad;
+};
+
+float karisWeight(vec3 c) {
+    return 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722)));
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dstSize = imageSize(dstImage);
+    if (coord.x >= dstSize.x || coord.y >= dstSize.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(dstSize);
+    vec2 ts = 1.0 / srcResolution;
+
+    vec3 a = texture(srcTexture, uv + ts * vec2(-1,-1)).rgb;
+    vec3 b = texture(srcTexture, uv + ts * vec2( 0,-1)).rgb;
+    vec3 c = texture(srcTexture, uv + ts * vec2( 1,-1)).rgb;
+    vec3 d = texture(srcTexture, uv + ts * vec2(-0.5,-0.5)).rgb;
+    vec3 e = texture(srcTexture, uv + ts * vec2( 0.5,-0.5)).rgb;
+    vec3 f = texture(srcTexture, uv + ts * vec2(-1, 0)).rgb;
+    vec3 g = texture(srcTexture, uv).rgb;
+    vec3 h = texture(srcTexture, uv + ts * vec2( 1, 0)).rgb;
+    vec3 i = texture(srcTexture, uv + ts * vec2(-0.5, 0.5)).rgb;
+    vec3 j = texture(srcTexture, uv + ts * vec2( 0.5, 0.5)).rgb;
+    vec3 k = texture(srcTexture, uv + ts * vec2(-1, 1)).rgb;
+    vec3 l = texture(srcTexture, uv + ts * vec2( 0, 1)).rgb;
+    vec3 m = texture(srcTexture, uv + ts * vec2( 1, 1)).rgb;
+
+    vec3 result;
+    if (isFirstPass > 0.5) {
+        vec3 g0 = (a+b+f+g)*0.25, g1 = (b+c+g+h)*0.25;
+        vec3 g2 = (f+g+k+l)*0.25, g3 = (g+h+l+m)*0.25;
+        vec3 g4 = (d+e+i+j)*0.25;
+        float w0=karisWeight(g0), w1=karisWeight(g1), w2=karisWeight(g2);
+        float w3=karisWeight(g3), w4=karisWeight(g4);
+        result = (g0*w0+g1*w1+g2*w2+g3*w3+g4*w4) / (w0+w1+w2+w3+w4);
+    } else {
+        result = g*0.125 + (d+e+i+j)*0.125 + (a+c+k+m)*0.03125 + (b+f+h+l)*0.0625;
+    }
+
+    // Threshold: only keep bright pixels (luminance > 1.0) for bloom.
+    if (isFirstPass > 0.5) {
+        float luma = dot(result, vec3(0.2126, 0.7152, 0.0722));
+        result *= max(luma - 1.0, 0.0) / max(luma, 0.001);
+    }
+
+    imageStore(dstImage, coord, vec4(result, 1.0));
+}

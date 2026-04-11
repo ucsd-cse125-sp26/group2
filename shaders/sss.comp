@@ -1,0 +1,66 @@
+// sss.comp — Screen-space subsurface scattering (separable Gaussian).
+// Blurs the HDR color in screen space for pixels marked as skin/organic.
+// This is a simplified single-pass version that applies a horizontal blur.
+// A second dispatch with swapped direction gives the full separable filter.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D hdrInput;
+layout(set = 0, binding = 1) uniform sampler2D depthBuffer;
+
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D sssOutput;
+
+layout(set = 2, binding = 0) uniform SSSParams {
+    vec2 screenSize;
+    vec2 blurDir;       // (1,0) for horizontal, (0,1) for vertical
+    float sssWidth;     // world-space scattering width
+    float _pad1, _pad2, _pad3;
+};
+
+// Gaussian weights for 7-tap kernel.
+const float weights[4] = float[](0.383, 0.242, 0.061, 0.006);
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(sssOutput);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    vec3 centerColor = texture(hdrInput, uv).rgb;
+    float centerDepth = texture(depthBuffer, uv).r;
+
+    // Skip sky or very far geometry.
+    if (centerDepth >= 0.9999) {
+        imageStore(sssOutput, coord, vec4(centerColor, 1.0));
+        return;
+    }
+
+    // Scale blur radius by depth (closer = wider blur).
+    float linearDepth = 1.0 / (centerDepth * 100.0 + 0.01);
+    float blurScale = sssWidth / linearDepth;
+    vec2 blurStep = blurDir * blurScale / screenSize;
+
+    vec3 result = centerColor * weights[0];
+    float totalWeight = weights[0];
+
+    for (int i = 1; i < 4; ++i) {
+        vec2 offset = blurStep * float(i);
+
+        vec3 c1 = texture(hdrInput, uv + offset).rgb;
+        float d1 = texture(depthBuffer, uv + offset).r;
+        float w1 = weights[i] * (abs(d1 - centerDepth) < 0.01 ? 1.0 : 0.0); // depth-aware
+        result += c1 * w1;
+        totalWeight += w1;
+
+        vec3 c2 = texture(hdrInput, uv - offset).rgb;
+        float d2 = texture(depthBuffer, uv - offset).r;
+        float w2 = weights[i] * (abs(d2 - centerDepth) < 0.01 ? 1.0 : 0.0);
+        result += c2 * w2;
+        totalWeight += w2;
+    }
+
+    result /= totalWeight;
+    imageStore(sssOutput, coord, vec4(result, 1.0));
+}

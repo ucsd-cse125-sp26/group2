@@ -1,0 +1,224 @@
+// ssr.comp — Screen-space reflections with three selectable modes:
+//   Mode 0 (Sharp):      Deterministic ray march, proximity fade, no temporal.
+//   Mode 1 (Stochastic): Jittered rays + temporal accumulation via ping-pong.
+//   Mode 2 (Masked):     Deterministic ray march, world-space distance fade
+//                         at contact zone, IBL fills the gap naturally.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D hdrBuffer;
+layout(set = 0, binding = 1) uniform sampler2D depthBuffer;
+layout(set = 0, binding = 2) uniform sampler2D prevSSR;
+layout(set = 0, binding = 3) uniform sampler2D motionVectors;
+
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D ssrImage;
+
+layout(set = 2, binding = 0) uniform SSRParams {
+    mat4 projection;
+    mat4 invProjection;
+    mat4 view;
+    vec2 screenSize;
+    float maxDistance;
+    float thickness;
+    float frameIndex;
+    float jitterStrength;
+    int   ssrMode;      // 0=Sharp, 1=Stochastic, 2=Masked
+    float _pad1, _pad2, _pad3;
+};
+
+vec3 viewPosFromDepth(vec2 uv, float depth)
+{
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 vp = invProjection * clip;
+    return vp.xyz / vp.w;
+}
+
+vec3 projectToScreen(vec3 vp)
+{
+    vec4 clip = projection * vec4(vp, 1.0);
+    clip.xyz /= clip.w;
+    return vec3(clip.xy * 0.5 + 0.5, clip.z);
+}
+
+vec2 spatiotemporalNoise(ivec2 coord, float frame)
+{
+    float n1 = fract(52.9829189 * fract(0.06711056 * float(coord.x) + 0.00583715 * float(coord.y) + frame * 0.1731));
+    float n2 = fract(52.9829189 * fract(0.00583715 * float(coord.x) + 0.06711056 * float(coord.y) + frame * 0.3179));
+    return vec2(n1, n2);
+}
+
+void buildBasis(vec3 N, out vec3 T, out vec3 B)
+{
+    vec3 up = abs(N.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+    T = normalize(cross(up, N));
+    B = cross(N, T);
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(ssrImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    float rawDepth = texture(depthBuffer, uv).r;
+
+    if (rawDepth >= 0.9999) {
+        imageStore(ssrImage, coord, vec4(0.0));
+        return;
+    }
+
+    vec3 viewPos = viewPosFromDepth(uv, rawDepth);
+
+    // ── Normal reconstruction (central differences) ─────────────────────────
+    vec2 ts = 1.0 / screenSize;
+    float dL = texture(depthBuffer, uv - vec2(ts.x, 0)).r;
+    float dR = texture(depthBuffer, uv + vec2(ts.x, 0)).r;
+    float dU = texture(depthBuffer, uv - vec2(0, ts.y)).r;
+    float dD = texture(depthBuffer, uv + vec2(0, ts.y)).r;
+
+    vec3 pL = viewPosFromDepth(uv - vec2(ts.x, 0), dL);
+    vec3 pR = viewPosFromDepth(uv + vec2(ts.x, 0), dR);
+    vec3 pU = viewPosFromDepth(uv - vec2(0, ts.y), dU);
+    vec3 pD = viewPosFromDepth(uv + vec2(0, ts.y), dD);
+
+    vec3 ddx = (abs(dR - rawDepth) < abs(rawDepth - dL)) ? (pR - viewPos) : (viewPos - pL);
+    vec3 ddy = (abs(dD - rawDepth) < abs(rawDepth - dU)) ? (pD - viewPos) : (viewPos - pU);
+    vec3 viewNormal = normalize(cross(ddx, ddy));
+
+    // Only nearly-vertical surfaces (walls) — skip floors entirely.
+    float horizontalness = abs(viewNormal.y);
+    if (horizontalness < 0.3) {
+        imageStore(ssrImage, coord, vec4(0.0));
+        return;
+    }
+
+    // ── Reflection ray ──────────────────────────────────────────────────────
+    vec3 viewDir = normalize(viewPos);
+    vec3 reflDir = reflect(viewDir, viewNormal);
+
+    // Stochastic jitter (Mode 1 only).
+    if (ssrMode == 1 && jitterStrength > 0.0) {
+        vec2 noise = spatiotemporalNoise(coord, frameIndex);
+        vec3 T, B;
+        buildBasis(reflDir, T, B);
+        float angle = noise.x * 6.28318;
+        float radius = noise.y * jitterStrength;
+        reflDir = normalize(reflDir + T * cos(angle) * radius + B * sin(angle) * radius);
+    }
+
+    // Bias along reflection direction.
+    float viewDist = abs(viewPos.z);
+    vec3 biasedStart = viewPos + reflDir * (viewDist * 0.002);
+
+    // ── Screen-space march ──────────────────────────────────────────────────
+    vec3 startScreen = projectToScreen(biasedStart);
+    vec3 endScreen = projectToScreen(biasedStart + reflDir * maxDistance);
+    vec3 deltaScreen = endScreen - startScreen;
+
+    float screenPixelDist = max(abs(deltaScreen.x) * screenSize.x,
+                                abs(deltaScreen.y) * screenSize.y);
+    int numSteps = clamp(int(screenPixelDist * 0.5), 8, 300);
+    vec3 stepScreen = deltaScreen / float(numSteps);
+
+    vec3 rayScreen = startScreen;
+    int hitStep = -1;
+    vec3 hitPos = vec3(0.0);
+    vec3 prevPos = startScreen;
+    bool wasInside = false;
+
+    for (int i = 1; i <= numSteps; ++i) {
+        prevPos = rayScreen;
+        rayScreen += stepScreen;
+        vec2 rayUV = rayScreen.xy;
+
+        if (rayUV.x < 0.0 || rayUV.x > 1.0 || rayUV.y < 0.0 || rayUV.y > 1.0)
+            break;
+
+        float sceneDepth = texture(depthBuffer, rayUV).r;
+        if (sceneDepth >= 0.9999) { wasInside = false; continue; }
+
+        float diff = rayScreen.z - sceneDepth;
+        float thk = thickness * 0.005 * max(sceneDepth, 0.05);
+
+        if (diff > 0.0) {
+            if (diff < thk && !wasInside) {
+                hitStep = i;
+                hitPos = rayScreen;
+                break;
+            }
+            wasInside = true;
+        } else {
+            wasInside = false;
+        }
+    }
+
+    vec4 result = vec4(0.0);
+
+    if (hitStep > 0) {
+        // Binary refinement.
+        vec3 lo = prevPos;
+        vec3 hi = hitPos;
+        for (int r = 0; r < 5; ++r) {
+            vec3 mid = (lo + hi) * 0.5;
+            float sd = texture(depthBuffer, mid.xy).r;
+            if (mid.z > sd) hi = mid; else lo = mid;
+        }
+
+        vec2 hitUV = hi.xy;
+        if (hitUV.x > 0.01 && hitUV.x < 0.99 && hitUV.y > 0.01 && hitUV.y < 0.99) {
+            float edgeFade = smoothstep(0.0, 0.1, hitUV.x) * smoothstep(0.0, 0.1, 1.0 - hitUV.x)
+                           * smoothstep(0.0, 0.1, hitUV.y) * smoothstep(0.0, 0.1, 1.0 - hitUV.y);
+            float distFade = 1.0 - float(hitStep) / float(numSteps);
+            float horizFade = smoothstep(0.5, 0.85, horizontalness);
+
+            // Suppress mirror-like reflections on flat surfaces (floors).
+            // Only walls get strong SSR; floors are fully matte.
+            float floorSuppress = 1.0 - smoothstep(0.5, 0.75, horizontalness);
+
+            // ── Mode-specific confidence adjustments ────────────────────────
+
+            float confidence = edgeFade * distFade * horizFade * floorSuppress;
+
+            if (ssrMode == 0) {
+                // Sharp: proximity fade (screen-space travel distance).
+                float screenTravelDist = length((hitUV - uv) * screenSize);
+                confidence *= smoothstep(3.0, 15.0, screenTravelDist);
+            }
+            else if (ssrMode == 2) {
+                // Masked: world-space distance fade.
+                // Reconstruct hit view-space position.
+                float hitDepth = texture(depthBuffer, hitUV).r;
+                vec3 hitViewPos = viewPosFromDepth(hitUV, hitDepth);
+                float worldDist = length(hitViewPos - viewPos);
+
+                // Fade out hits that are very close in world space (contact zone).
+                // Objects sitting ON the floor have their undercarriage ~1-5 units
+                // above.  Fade these out so IBL fills the contact zone naturally.
+                confidence *= smoothstep(5.0, 40.0, worldDist);
+            }
+            // Mode 1 (Stochastic): no extra fade — temporal handles it.
+
+            vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
+            result = vec4(hitColor, confidence);
+        }
+    }
+
+    // ── Temporal accumulation (Mode 1 only) ─────────────────────────────────
+    if (ssrMode == 1) {
+        vec2 motion = texture(motionVectors, uv).rg;
+        vec2 historyUV = uv - motion;
+
+        vec4 history = vec4(0.0);
+        if (historyUV.x > 0.0 && historyUV.x < 1.0 && historyUV.y > 0.0 && historyUV.y < 1.0)
+            history = texture(prevSSR, historyUV);
+
+        if (result.a > 0.001)
+            result = mix(history, result, 0.3);
+        else if (history.a > 0.001)
+            result = history * 0.85;
+    }
+
+    imageStore(ssrImage, coord, result);
+}

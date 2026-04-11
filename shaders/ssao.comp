@@ -1,0 +1,82 @@
+// ssao.comp — Screen-space ambient occlusion.
+// Reconstructs view-space position from depth, samples hemisphere, checks occlusion.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depthTexture;
+layout(set = 1, binding = 0, r8) writeonly uniform image2D ssaoImage;
+
+layout(set = 2, binding = 0) uniform SSAOParams {
+    mat4 projection;
+    mat4 invProjection;
+    vec4 kernel[32];  // hemisphere sample offsets
+    vec2 noiseScale;  // screen_size / 4.0
+    float radius;
+    float bias;
+};
+
+// Pseudo-random noise based on screen position (replaces noise texture).
+vec3 hash3(vec2 p) {
+    vec3 q = vec3(dot(p, vec2(127.1, 311.7)),
+                  dot(p, vec2(269.5, 183.3)),
+                  dot(p, vec2(419.2, 371.9)));
+    return fract(sin(q) * 43758.5453) * 2.0 - 1.0;
+}
+
+vec3 reconstructViewPos(vec2 uv, float depth)
+{
+    // NDC → clip → view.
+    vec4 clipPos = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 viewPos = invProjection * clipPos;
+    return viewPos.xyz / viewPos.w;
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(ssaoImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    float depth = texture(depthTexture, uv).r;
+
+    // Skip sky pixels (depth = 1.0).
+    if (depth >= 0.9999) {
+        imageStore(ssaoImage, coord, vec4(1.0));
+        return;
+    }
+
+    vec3 fragPos = reconstructViewPos(uv, depth);
+
+    // Reconstruct normal from depth (avoids needing a normal buffer).
+    vec3 dPdx = reconstructViewPos(uv + vec2(1.0/float(size.x), 0), texture(depthTexture, uv + vec2(1.0/float(size.x), 0)).r) - fragPos;
+    vec3 dPdy = reconstructViewPos(uv + vec2(0, 1.0/float(size.y)), texture(depthTexture, uv + vec2(0, 1.0/float(size.y))).r) - fragPos;
+    vec3 normal = normalize(cross(dPdx, dPdy));
+
+    // Random rotation from screen-space noise.
+    vec3 randomVec = normalize(hash3(vec2(coord) * 0.25));
+    vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
+    vec3 bitangent = cross(normal, tangent);
+    mat3 TBN = mat3(tangent, bitangent, normal);
+
+    float occlusion = 0.0;
+    const int KERNEL_SIZE = 32;
+    for (int i = 0; i < KERNEL_SIZE; ++i) {
+        vec3 samplePos = fragPos + TBN * kernel[i].xyz * radius;
+
+        // Project sample to screen space.
+        vec4 offset = projection * vec4(samplePos, 1.0);
+        offset.xy = offset.xy / offset.w * 0.5 + 0.5;
+
+        float sampleDepth = texture(depthTexture, offset.xy).r;
+        vec3 sampleViewPos = reconstructViewPos(offset.xy, sampleDepth);
+
+        // Range check + occlusion test.
+        float rangeCheck = smoothstep(0.0, 1.0, radius / abs(fragPos.z - sampleViewPos.z));
+        occlusion += (sampleViewPos.z >= samplePos.z + bias ? 1.0 : 0.0) * rangeCheck;
+    }
+
+    occlusion = 1.0 - (occlusion / float(KERNEL_SIZE));
+    imageStore(ssaoImage, coord, vec4(occlusion));
+}

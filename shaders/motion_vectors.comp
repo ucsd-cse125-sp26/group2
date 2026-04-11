@@ -1,0 +1,44 @@
+// motion_vectors.comp — Compute per-pixel screen-space motion vectors.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depthBuffer;
+layout(set = 1, binding = 0, rg16f) writeonly uniform image2D motionImage;
+
+layout(set = 2, binding = 0) uniform MotionParams {
+    mat4 currentInvVP;   // inverse of current frame's ViewProjection
+    mat4 previousVP;     // previous frame's ViewProjection
+    vec2 screenSize;
+    vec2 jitterOffset;   // current frame's sub-pixel jitter
+};
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(motionImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    float depth = texture(depthBuffer, uv).r;
+
+    // Skip sky — no motion.
+    if (depth >= 0.9999) {
+        imageStore(motionImage, coord, vec4(0.0));
+        return;
+    }
+
+    // Reconstruct world position from current depth.
+    vec4 clipPos = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 worldPos = currentInvVP * clipPos;
+    worldPos /= worldPos.w;
+
+    // Project to previous frame's screen space.
+    vec4 prevClip = previousVP * worldPos;
+    vec2 prevUV = prevClip.xy / prevClip.w * 0.5 + 0.5;
+
+    // Motion = current UV - previous UV.
+    vec2 motion = uv - prevUV;
+
+    imageStore(motionImage, coord, vec4(motion, 0.0, 0.0));
+}
