@@ -511,6 +511,53 @@ SDL_AppResult Game::iterate()
     // Draw persistent HUD text each frame
     particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
 
+    // ── Speedometer HUD ─────────────────────────────────────────────────
+    // Shows km/h with a horizontal bar that fills with speed.
+    // 1 Quake unit ≈ 1 inch = 0.0254 m. Speed in u/s → km/h:
+    //   km/h = (u/s) * 0.0254 * 3.6 = u/s * 0.09144
+    {
+        float playerSpeed = 0.0f;
+        registry.view<LocalPlayer, Velocity>().each(
+            [&](const Velocity& pvel) { playerSpeed = glm::length(pvel.value); });
+
+        const float k_kmh = playerSpeed * 0.09144f;
+        const float k_maxKmh = 120.0f; // bar fills fully at this speed
+
+        // Speed number (bottom-right area of screen).
+        char speedText[32];
+        std::snprintf(speedText, sizeof(speedText), "%.0f km/h", static_cast<double>(k_kmh));
+        particleSystem.drawScreenText({10.f, 38.f}, speedText, {0.8f, 0.9f, 1.0f, 1.0f}, 18.f);
+
+        // Speed bar: use block characters to draw a filled bar.
+        const float k_fraction = std::clamp(k_kmh / k_maxKmh, 0.0f, 1.0f);
+        const int k_barLen = static_cast<int>(k_fraction * 20.0f);
+
+        // Color: green → yellow → red as speed increases.
+        glm::vec4 barColor;
+        if (k_fraction < 0.5f)
+            barColor =
+                glm::mix(glm::vec4(0.3f, 0.9f, 0.4f, 0.8f), glm::vec4(1.0f, 0.9f, 0.2f, 0.8f), k_fraction * 2.0f);
+        else
+            barColor = glm::mix(
+                glm::vec4(1.0f, 0.9f, 0.2f, 0.8f), glm::vec4(1.0f, 0.25f, 0.15f, 0.9f), (k_fraction - 0.5f) * 2.0f);
+
+        // Build bar string with block chars.
+        char barStr[64] = {};
+        for (int i = 0; i < k_barLen && i < 20; ++i)
+            barStr[i] = '|';
+
+        // Background (empty portion).
+        char bgStr[64] = {};
+        for (int i = 0; i < 20 - k_barLen && i < 20; ++i)
+            bgStr[i] = '.';
+
+        if (k_barLen > 0)
+            particleSystem.drawScreenText({10.f, 58.f}, barStr, barColor, 16.f);
+        if (k_barLen < 20)
+            particleSystem.drawScreenText(
+                {10.f + static_cast<float>(k_barLen) * 8.f, 58.f}, bgStr, {0.3f, 0.3f, 0.3f, 0.4f}, 16.f);
+    }
+
     // Compute camera forward and cache for event() key shortcuts
     {
         const float cosPitch = std::cos(renderPitch);
