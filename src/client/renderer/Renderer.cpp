@@ -1681,7 +1681,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
 
             SDL_BindGPUGraphicsPipeline(pass, scenePipeline);
-            SDL_DrawGPUPrimitives(pass, 498, 1, 0, 0);
+            SDL_DrawGPUPrimitives(pass, 1002, 1, 0, 0);
         }
 
         // ── PBR models (two-pass: opaques first, then transparents) ────────
