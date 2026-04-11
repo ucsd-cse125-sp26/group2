@@ -136,6 +136,7 @@ private:
     SDL_GPUGraphicsPipeline* skyboxPipeline = nullptr;         ///< Procedural/cubemap skybox.
     SDL_GPUGraphicsPipeline* tonemapPipeline = nullptr;        ///< Fullscreen HDR → LDR.
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;         ///< Depth-only shadow map.
+    SDL_GPUGraphicsPipeline* sceneShadowPipeline = nullptr;    ///< Scene geometry into shadow map.
 
     // ── Render targets ──────────────────────────────────────────────────────
     SDL_GPUTexture* depthTexture = nullptr; ///< Scene depth, D32_FLOAT.
@@ -265,6 +266,7 @@ private:
     bool initSkyboxPipeline();
     bool initTonemapPipeline();
     bool initShadowPipeline();
+    bool initSceneShadowPipeline();
 
     bool initIBL();
     bool initBloom();

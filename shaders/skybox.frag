@@ -38,13 +38,13 @@ void main()
     float sunDisc = smoothstep(0.9975, 0.999, sunAngle);  // sharp disc edge
     float sunGlow = pow(max(sunAngle, 0.0), 256.0);       // tight halo
 
-    // HDR sun: goes well above 1.0 for bloom in later phases.
-    vec3 sunColor = vec3(1.0, 0.95, 0.85) * 8.0;
-    sky += sunColor * sunDisc + vec3(1.0, 0.8, 0.5) * sunGlow * 0.5;
+    // HDR sun: subtle bloom, not scene-dominating.
+    vec3 sunColor = vec3(1.0, 0.95, 0.85) * 4.0;
+    sky += sunColor * sunDisc + vec3(1.0, 0.8, 0.5) * sunGlow * 0.25;
 
-    // ── Horizon glow ────────────────────────────────────────────────────────
+    // ── Horizon glow (subtle) ───────────────────────────────────────────────
     float horizonGlow = exp(-abs(y) * 4.0);
-    sky += vec3(0.3, 0.2, 0.1) * horizonGlow * 0.3;
+    sky += vec3(0.3, 0.2, 0.1) * horizonGlow * 0.15;
 
     outColor = vec4(sky, 1.0);
 }
