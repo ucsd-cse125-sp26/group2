@@ -34,9 +34,11 @@ struct PlayerState
     bool sprinting{false}; ///< True when sprint is active.
 
     // ── Jump state ──────────────────────────────────────────────────────
-    bool canDoubleJump{true};   ///< Reset on land / wallrun / climb.
-    bool jumpedThisTick{false}; ///< Set during the tick a jump occurs (for lurch setup).
-    int jumpCount{0};           ///< 0 = on ground, 1 = first jump, 2 = double jumped.
+    bool canDoubleJump{true};     ///< Reset on land / wallrun / climb.
+    bool jumpedThisTick{false};   ///< Set during the tick a jump occurs (for lurch setup).
+    int jumpCount{0};             ///< 0 = on ground, 1 = first jump, 2 = double jumped.
+    bool jumpHeldLastTick{false}; ///< Was jump key held on the previous tick (for edge detection).
+    float jumpCooldown{0.0f};     ///< Minimum time before double jump is available (s).
 
     // ── Coyote time ─────────────────────────────────────────────────────
     float coyoteTimer{0.0f}; ///< Remaining grace time after leaving ground/wall (s).
