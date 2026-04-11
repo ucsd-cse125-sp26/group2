@@ -444,7 +444,7 @@ SDL_AppResult Game::iterate()
             registry.view<Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
-            systems::runMovement(registry, k_physicsDt);
+            systems::runMovement(registry, k_physicsDt, physics::testWorld());
             systems::runCollision(registry, k_physicsDt, physics::testWorld());
             ++tickCount;
             ++ticksThisFrame;
