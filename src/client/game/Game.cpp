@@ -468,41 +468,37 @@ SDL_AppResult Game::iterate()
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
+    float targetRoll = 0.0f; // degrees, from PlayerState
 
     if (renderSeparateFromPhysics) {
         // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
         const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
-        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape>().each(
+        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerState>().each(
             [&](const Position& pos,
                 const PreviousPosition& prev,
                 const InputSnapshot& input,
-                const CollisionShape& shape) {
+                const CollisionShape& shape,
+                const PlayerState& pstate) {
                 const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
-
-                // Yaw is always used directly — no interpolation.
-                //
-                // When inputSyncedWithPhysics, yaw updates once per frame-group
-                // (whenever the physics gate fires).  Interpolating yaw with the
-                // *position* alpha is incorrect: position alpha spans one physics
-                // tick, but yaw spans one frame of mouse input.  On multi-tick
-                // or zero-tick frames the two timebases diverge, causing objects
-                // to visually jitter.  Using yaw directly gives a consistent
-                // per-frame rotation rate at the input sample rate (≥128 Hz with
-                // VSync, or frame rate without), which is already smooth.
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
+                targetRoll = pstate.targetCameraTilt;
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
-        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape>().each(
-            [&](const Position& pos, const InputSnapshot& input, const CollisionShape& shape) {
+        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerState>().each(
+            [&](const Position& pos,
+                const InputSnapshot& input,
+                const CollisionShape& shape,
+                const PlayerState& pstate) {
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
+                targetRoll = pstate.targetCameraTilt;
             });
     }
 
@@ -697,7 +693,16 @@ SDL_AppResult Game::iterate()
     debugUI.buildSkyboxUI(renderer);
     debugUI.render();
 
-    renderer.drawFrame(renderEye, renderYaw, renderPitch);
+    // Smooth camera roll interpolation (degrees → radians).
+    {
+        const float k_targetRad = glm::radians(targetRoll);
+        const float k_speed = 10.0f; // interpolation speed (higher = snappier)
+        currentCameraRoll_ += (k_targetRad - currentCameraRoll_) * std::min(1.0f, k_speed * frameTime);
+        // Kill tiny residual to avoid permanent micro-tilt.
+        if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
+            currentCameraRoll_ = 0.0f;
+    }
+    renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
 
     if (limitFPSToMonitor != prevLimitFPS)
         renderer.setVSync(limitFPSToMonitor);
