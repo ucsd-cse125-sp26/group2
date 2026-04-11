@@ -161,7 +161,7 @@ private:
 
     static constexpr int k_shadowCascades = 4;
     static constexpr int k_shadowMapSize = 2048;
-    SDL_GPUTexture* shadowMap = nullptr; ///< D32_FLOAT, 2D_ARRAY, 4 cascades.
+    SDL_GPUTexture* shadowMap = nullptr; ///< D32_FLOAT, 2D atlas (2×k_shadowMapSize)², 4 cascade quadrants.
 
     // ── IBL textures (Phase 6) ──────────────────────────────────────────────
     SDL_GPUTexture* brdfLUT = nullptr;       ///< 512×512 RG16F split-sum LUT.
@@ -276,6 +276,8 @@ public:
     float sharpenStr = 0.6f;                                    ///< Post-TAA sharpening strength.
     float shadowBiasVal = 0.0005f;
     float shadowNormalBiasVal = 1.5f;
+    float shadowDistance = 3000.0f; ///< Max shadow range (world units).
+    float cascadeLambda = 0.92f;    ///< Log vs linear cascade split blend (0=linear, 1=log).
 
     /// Compute the sun direction (unit vector TO sun) from azimuth/elevation.
     [[nodiscard]] glm::vec3 getSunDirection() const;

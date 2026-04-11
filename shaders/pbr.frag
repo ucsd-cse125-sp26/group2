@@ -50,51 +50,92 @@ layout(set = 3, binding = 1) uniform LightData
     Light lights[8];
 } lighting;
 
-// ── Shadow data (pushed once per frame) ─────────────────────────────────────
+// ── Cascaded Shadow Map data (pushed once per frame) ────────────────────────
 layout(set = 3, binding = 2) uniform ShadowData
 {
-    mat4  lightVP;
+    mat4  lightVP[4];       // Per-cascade light view-projection matrices.
+    vec4  cascadeSplits;    // View-space far distances for each cascade.
+    mat4  cameraView;       // Camera view matrix (for computing view-space Z).
     float shadowBias;
     float shadowNormalBias;
-    float shadowMapSize;
+    float shadowMapSize;    // Per-cascade resolution (e.g. 2048).
     float _shadowPad;
 } shadow;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 const float PI = 3.14159265359;
 
-// ── Shadow sampling (3×3 PCF with normal-offset bias) ──────────────────────
+// Atlas layout: 2×2 grid, each cascade occupies 0.5 of the atlas per axis.
+//   Cascade 0: (0.0, 0.0)   Cascade 1: (0.5, 0.0)
+//   Cascade 2: (0.0, 0.5)   Cascade 3: (0.5, 0.5)
+const vec2 k_cascadeOffsets[4] = vec2[4](
+    vec2(0.0, 0.0), vec2(0.5, 0.0),
+    vec2(0.0, 0.5), vec2(0.5, 0.5)
+);
+
+// ── Shadow sampling for one cascade (3×3 PCF on atlas) ─────────────────────
+float sampleCascade(int cascade, vec3 offsetPos)
+{
+    vec4 lightClip = shadow.lightVP[cascade] * vec4(offsetPos, 1.0);
+    vec3 lightNDC  = lightClip.xyz / lightClip.w;
+    vec2 localUV   = lightNDC.xy * 0.5 + 0.5;
+
+    // Outside this cascade's local region → no contribution.
+    if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0)
+        return 1.0;
+
+    // Map from cascade-local UV [0,1] to atlas UV.
+    vec2 atlasUV      = localUV * 0.5 + k_cascadeOffsets[cascade];
+    float currentDepth = lightNDC.z;
+
+    // Texel size in atlas coordinates (cascade occupies half the atlas).
+    float texelSize = 1.0 / (shadow.shadowMapSize * 2.0);
+
+    // 3×3 PCF with comparison sampler.
+    float total = 0.0;
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            vec2 off = vec2(float(x), float(y)) * texelSize;
+            total += texture(shadowMap, vec3(atlasUV + off, currentDepth - shadow.shadowBias));
+        }
+    }
+    return total / 9.0;
+}
+
+// ── Cascaded Shadow Map sampling with inter-cascade blending ───────────────
 float calcShadow(vec3 worldPos, vec3 N)
 {
-    // Normal-offset bias (UE-style): push the sample point along the surface
-    // normal to prevent self-shadowing without peter-panning.
-    // Surfaces facing away from the light get more offset.
+    // Normal-offset bias (UE-style).
     vec3 lightDir = normalize(lighting.lights[0].position.xyz);
     float NdotL = dot(N, lightDir);
     float normalOffsetScale = shadow.shadowNormalBias * (1.0 - NdotL);
     vec3 offsetPos = worldPos + N * normalOffsetScale;
 
-    // Transform to light clip space.
-    vec4 lightClip = shadow.lightVP * vec4(offsetPos, 1.0);
-    vec3 lightNDC = lightClip.xyz / lightClip.w;
+    // View-space Z for cascade selection.
+    float viewZ = -(shadow.cameraView * vec4(worldPos, 1.0)).z;
 
-    vec2 shadowUV = lightNDC.xy * 0.5 + 0.5;
-    float currentDepth = lightNDC.z;
-
-    // Outside shadow map → fully lit.
-    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 || shadowUV.y < 0.0 || shadowUV.y > 1.0)
-        return 1.0;
-
-    // 3×3 PCF with comparison sampler.
-    float texelSize = 1.0 / shadow.shadowMapSize;
-    float total = 0.0;
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
-            vec2 offset = vec2(float(x), float(y)) * texelSize;
-            total += texture(shadowMap, vec3(shadowUV + offset, currentDepth - shadow.shadowBias));
-        }
+    // Select cascade based on view-space depth.
+    int cascade = -1;
+    for (int i = 0; i < 4; ++i) {
+        if (viewZ < shadow.cascadeSplits[i]) { cascade = i; break; }
     }
-    return total / 9.0;
+    if (cascade < 0) return 1.0; // Beyond shadow distance.
+
+    float shadowVal = sampleCascade(cascade, offsetPos);
+
+    // Smooth blend in last 10% of each cascade to avoid visible seams.
+    float cascadeStart = (cascade > 0) ? shadow.cascadeSplits[cascade - 1] : 0.0;
+    float cascadeEnd   = shadow.cascadeSplits[cascade];
+    float blendZone    = (cascadeEnd - cascadeStart) * 0.1;
+    float blendStart   = cascadeEnd - blendZone;
+
+    if (viewZ > blendStart && cascade < 3) {
+        float nextVal     = sampleCascade(cascade + 1, offsetPos);
+        float blendFactor = (viewZ - blendStart) / blendZone;
+        shadowVal = mix(shadowVal, nextVal, blendFactor);
+    }
+
+    return shadowVal;
 }
 
 // ── GGX Normal Distribution Function (Trowbridge-Reitz) ────────────────────
