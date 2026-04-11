@@ -1,3 +1,6 @@
+/// @file PreviousPosition.hpp
+/// @brief Previous-tick position component for render interpolation.
+
 #pragma once
 
 #include <glm/vec3.hpp>

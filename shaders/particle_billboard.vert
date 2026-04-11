@@ -1,12 +1,16 @@
+/// @file particle_billboard.vert
+/// @brief Billboard particle vertex shader with velocity-oriented streaks.
 #version 450
 
-// BillboardParticle layout (48 bytes = 12 floats):
-//   [0..2]  pos.xyz   [3] size
-//   [4..7]  color.rgba
-//   [8..10] vel.xyz   [11] lifetime
+/// @brief BillboardParticle layout (48 bytes = 12 floats):
+///   [0..2]  pos.xyz   [3] size
+///   [4..7]  color.rgba
+///   [8..10] vel.xyz   [11] lifetime
 
+/// @brief Per-particle SSBO data.
 layout(set = 0, binding = 0) readonly buffer ParticleData { float data[]; };
 
+/// @brief Per-frame camera uniforms.
 layout(set = 1, binding = 0) uniform ParticleUniforms {
     mat4  view;
     mat4  proj;
@@ -49,14 +53,14 @@ void main()
         const vec3  toEye   = normalize(u.camPos - pos);
         const vec3  sideDir = normalize(cross(velDir, toEye));
 
-        // Streak: longer than wide — length scales with speed
+        // Streak: longer than wide -- length scales with speed
         const float halfLen  = size * (1.5 + speedNorm * 3.5);
         const float halfWide = size * 0.25;
 
         // c.x maps to along-velocity axis, c.y to cross axis
         wpos = pos + velDir * c.x * halfLen + sideDir * c.y * halfWide;
     } else {
-        // Slow / stationary → spherical billboard
+        // Slow / stationary -> spherical billboard
         wpos = pos + u.camRight * c.x * size + u.camUp * c.y * size;
     }
 

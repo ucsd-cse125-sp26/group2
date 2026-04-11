@@ -1,9 +1,13 @@
+/// @file main.cpp
+/// @brief Server application entry point.
+
 #include "game/ServerGame.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
 
+/// @brief Server entry point -- initialises SDL/NET, runs the game loop, and cleans up.
 int main()
 {
     SDL_Init(0);

@@ -1,3 +1,6 @@
+/// @file Systems.hpp
+/// @brief Top-level ECS systems namespace with placeholder update function.
+
 #pragma once
 
 #include "ecs/registry/Registry.hpp"

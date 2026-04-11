@@ -1,5 +1,6 @@
-// normal.frag — Lit scene geometry with shadows, hemisphere ambient.
-// ALL lighting parameters come from the UBO (driven by ImGui sliders).
+/// @file normal.frag
+/// @brief Lit scene geometry with cascaded shadows and hemisphere ambient.
+/// All lighting parameters come from the UBO (driven by ImGui sliders).
 #version 450
 
 layout(location = 0) in  vec3       fragColor;
@@ -9,9 +10,10 @@ layout(location = 3) flat in vec3   fragNormal;
 
 layout(location = 0) out vec4 outColor;
 
+/// @brief Cascaded shadow map atlas with comparison sampler.
 layout(set = 2, binding = 0) uniform sampler2DShadow shadowMap;
 
-// All lighting + cascade shadow data from C++ (matches ShadowDataFragUBO).
+/// @brief All lighting and cascade shadow data from C++ (matches ShadowDataFragUBO).
 layout(set = 3, binding = 0) uniform SceneShadowData
 {
     mat4  lightVP[4];      // Per-cascade light view-projection matrices.
@@ -27,13 +29,13 @@ layout(set = 3, binding = 0) uniform SceneShadowData
     vec4  fillColor;       // rgb = fill color, a = fill intensity
 };
 
-// Atlas layout: 2×2 grid, each cascade occupies 0.5 of the atlas per axis.
+// Atlas layout: 2x2 grid, each cascade occupies 0.5 of the atlas per axis.
 const vec2 k_cascadeOffsets[4] = vec2[4](
     vec2(0.0, 0.0), vec2(0.5, 0.0),
     vec2(0.0, 0.5), vec2(0.5, 0.5)
 );
 
-// ── Shadow sampling for one cascade (3×3 PCF on atlas) ────────────────────
+// Shadow sampling for one cascade (3x3 PCF on atlas)
 float sampleCascade(int cascade, vec3 offsetPos)
 {
     vec4 lc  = lightVP[cascade] * vec4(offsetPos, 1.0);
@@ -58,7 +60,7 @@ float sampleCascade(int cascade, vec3 offsetPos)
     return total / 9.0;
 }
 
-// ── Cascaded shadow sampling with inter-cascade blending ──────────────────
+// Cascaded shadow sampling with inter-cascade blending
 float calcShadow(vec3 worldPos, vec3 N)
 {
     vec3 lightDir = normalize(lightDirWorld.xyz);
@@ -101,7 +103,7 @@ void main()
     float shadow = (shadowMapSize > 0.0) ? calcShadow(fragWorldPos, N) : 1.0;
 
     // Hemisphere ambient from UBO ambient color.
-    // Bias sky/ground from the ambient color — sky gets the full ambient, ground gets dimmer.
+    // Bias sky/ground from the ambient color -- sky gets the full ambient, ground gets dimmer.
     vec3 skyAmb    = ambientColor.rgb * 2.0;
     vec3 groundAmb = ambientColor.rgb * 0.5;
     float hemiFactor = N.y * 0.5 + 0.5;
@@ -117,7 +119,7 @@ void main()
     vec3 lighting = sunLighting + fillLighting + ambient;
 
     if (fragIsFloor > 0.5) {
-        // ── Red matte floor with thin black grid lines ─────────────────────
+        // Red matte floor with thin black grid lines
         vec2 tileUV = fragWorldPos.xz / 100.0;
         vec2 grid   = abs(fract(tileUV) - 0.5);
         float line  = min(grid.x, grid.y);

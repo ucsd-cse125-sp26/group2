@@ -1,3 +1,6 @@
+/// @file CollisionShape.hpp
+/// @brief AABB collision shape component for physics entities.
+
 #pragma once
 
 #include <glm/vec3.hpp>

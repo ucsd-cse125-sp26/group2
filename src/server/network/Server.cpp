@@ -1,3 +1,6 @@
+/// @file Server.cpp
+/// @brief Implementation of the TCP game server.
+
 #include "Server.hpp"
 
 #include "ecs/components/InputSnapshot.hpp"

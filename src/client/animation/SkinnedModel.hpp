@@ -1,3 +1,6 @@
+/// @file SkinnedModel.hpp
+/// @brief Skinned mesh with skeletal animation loaded from FBX via Assimp and ozz-animation.
+
 #pragma once
 
 #include "renderer/ModelLoader.hpp"
@@ -29,30 +32,35 @@ public:
     SkinnedModel(const SkinnedModel&) = delete;
     SkinnedModel& operator=(const SkinnedModel&) = delete;
 
-    /// Load an FBX file containing skeleton, mesh, and animation data.
+    /// @brief Load an FBX file containing skeleton, mesh, and animation data.
     /// @param path  Absolute path to the .fbx file.
     /// @return True on success (skeleton + at least one skinned mesh + animation).
     bool load(const std::string& path);
 
-    /// Advance animation by @p dt seconds (loops automatically) and
+    /// @brief Advance animation by @p dt seconds (loops automatically) and
     /// recompute all CPU-skinned vertices.
+    /// @param dt  Time step in seconds.
     void update(float dt);
 
-    /// Model data for initial GPU upload (first-frame vertices + indices + materials).
-    /// Valid after load() returns true.
+    /// @brief Model data for initial GPU upload (first-frame vertices + indices + materials).
+    /// @return Reference to the loaded model data. Valid after load() returns true.
     [[nodiscard]] const LoadedModel& getLoadedModel() const;
 
-    /// Current frame's skinned vertices for mesh @p meshIndex.
-    /// Updated by update().
+    /// @brief Current frame's skinned vertices for mesh @p meshIndex.
+    /// @param meshIndex  Index of the mesh to query (default 0).
+    /// @return Reference to the skinned vertex buffer, updated by update().
     [[nodiscard]] const std::vector<ModelVertex>& getSkinnedVertices(size_t meshIndex = 0) const;
 
-    /// Number of skinned meshes in the model.
+    /// @brief Number of skinned meshes in the model.
+    /// @return Mesh count.
     [[nodiscard]] size_t meshCount() const;
 
-    /// Animation clip duration in seconds.
+    /// @brief Animation clip duration in seconds.
+    /// @return Duration in seconds, or 0 if no animation is loaded.
     [[nodiscard]] float duration() const;
 
-    /// True after a successful load().
+    /// @brief True after a successful load().
+    /// @return Whether model data is available.
     [[nodiscard]] bool isLoaded() const;
 
 private:

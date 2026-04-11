@@ -1,3 +1,6 @@
+/// @file Renderable.hpp
+/// @brief Renderable component linking ECS entities to renderer model instances.
+
 #pragma once
 
 #include <cstdint>

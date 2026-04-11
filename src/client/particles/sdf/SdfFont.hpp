@@ -1,3 +1,6 @@
+/// @file SdfFont.hpp
+/// @brief Glyph metric types for the SDF text rendering system.
+
 #pragma once
 
 #include <cstdint>
@@ -15,5 +18,5 @@ struct GlyphInfo
     float height{};      ///< Glyph pixel height at bake size.
 };
 
-/// @brief Immutable glyph metrics table.
+/// @brief Immutable glyph metrics table keyed by Unicode codepoint.
 using GlyphMap = std::unordered_map<uint32_t, GlyphInfo>;

@@ -1,17 +1,21 @@
-// gtao.comp — Ground Truth Ambient Occlusion (XeGTAO-inspired).
-//
-// Horizon-based AO: for each pixel, trace screen-space horizon lines in
-// multiple directions, compute the visible solid angle above each horizon,
-// and integrate the cosine-weighted visibility analytically.
-//
-// Much more stable and artifact-free than random-sample SSAO.
+/// @file gtao.comp
+/// @brief Ground Truth Ambient Occlusion (XeGTAO-inspired).
+///
+/// Horizon-based AO: for each pixel, trace screen-space horizon lines in
+/// multiple directions, compute the visible solid angle above each horizon,
+/// and integrate the cosine-weighted visibility analytically.
+///
+/// Much more stable and artifact-free than random-sample SSAO.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Scene depth texture.
 layout(set = 0, binding = 0) uniform sampler2D depthTexture;
+/// @brief Output AO image (single channel).
 layout(set = 1, binding = 0, r8) writeonly uniform image2D aoImage;
 
+/// @brief GTAO algorithm parameters.
 layout(set = 2, binding = 0) uniform GTAOParams {
     mat4 projection;
     mat4 invProjection;
@@ -23,7 +27,7 @@ layout(set = 2, binding = 0) uniform GTAOParams {
     float _pad1, _pad2;
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// Helpers
 
 vec3 viewPosFromDepth(vec2 uv, float depth)
 {
@@ -60,7 +64,7 @@ void main()
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);
     float depth = texture(depthTexture, uv).r;
 
-    // Sky → no occlusion.
+    // Sky -> no occlusion.
     if (depth >= 0.9999) {
         imageStore(aoImage, coord, vec4(1.0));
         return;

@@ -1,3 +1,6 @@
+/// @file ServerGame.cpp
+/// @brief Implementation of the server-side game loop, tick logic, and player management.
+
 #include "ServerGame.hpp"
 
 #include "ecs/components/CollisionShape.hpp"

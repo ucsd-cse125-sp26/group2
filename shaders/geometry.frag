@@ -1,4 +1,5 @@
-// normal.frag
+/// @file geometry.frag
+/// @brief Simple lit fragment shader with single directional light.
 #version 450
 
 layout(location = 0) in vec3 diffuse;

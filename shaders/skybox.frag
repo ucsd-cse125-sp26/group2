@@ -1,13 +1,15 @@
-// skybox.frag — procedural gradient sky OR HDR cubemap environment.
-// Outputs linear HDR colour (tone mapped in a later pass).
+/// @file skybox.frag
+/// @brief Procedural gradient sky or HDR cubemap environment.
+/// Outputs linear HDR colour (tone mapped in a later pass).
 #version 450
 
 layout(location = 0) in vec3 fragDir;
 layout(location = 0) out vec4 outColor;
 
-// HDR environment cubemap (bound even in procedural mode — uses fallback).
+/// @brief HDR environment cubemap (bound even in procedural mode -- uses fallback).
 layout(set = 2, binding = 0) uniform samplerCube envMap;
 
+/// @brief Skybox parameters (cubemap toggle, exposure, sun direction).
 layout(set = 3, binding = 0) uniform SkyboxParams
 {
     int   useCubemap;
@@ -26,7 +28,7 @@ void main()
         return;
     }
 
-    // ── Procedural gradient sky (fallback) ──────────────────────────────────
+    // Procedural gradient sky (fallback)
     float y = dir.y;
 
     vec3 zenith  = vec3(0.08, 0.16, 0.45);
@@ -42,7 +44,7 @@ void main()
         sky = mix(horizon, nadir, t);
     }
 
-    // Sun disc — position follows the sun direction from the UBO.
+    // Sun disc -- position follows the sun direction from the UBO.
     vec3  sd = normalize(sunDir.xyz);
     float sunAngle = dot(dir, sd);
     float sunDisc = smoothstep(0.9975, 0.999, sunAngle);

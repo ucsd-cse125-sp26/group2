@@ -1,3 +1,5 @@
+/// @file particle_billboard.frag
+/// @brief Billboard particle fragment shader with streak and disc modes.
 #version 450
 
 layout(location = 0) in  vec2  vUV;
@@ -12,7 +14,7 @@ void main()
     if (vSpeedNorm > 0.05) {
         // Streak spark: sharp bright core fading to nothing at the tail end
         // vUV.x: -1 = back of streak (tail), +1 = front (tip)
-        // vUV.y: ±1 = cross-section edge
+        // vUV.y: +/-1 = cross-section edge
 
         float crossFade  = 1.0 - smoothstep(0.0, 1.0, abs(vUV.y));    // thin cross-section
         float tailFade   = smoothstep(-1.0, 0.0, vUV.x);               // fade toward tail

@@ -1,3 +1,6 @@
+/// @file InputSnapshot.hpp
+/// @brief Per-tick player input snapshot for networking and prediction.
+
 #pragma once
 
 #include <cstdint>
@@ -14,20 +17,20 @@ struct InputSnapshot
 {
     uint32_t tick{0}; ///< Physics tick this snapshot was sampled on.
 
-    /// Movement keys
-    bool forward{false}; ///< W key.
-    bool back{false};    ///< S key.
-    bool left{false};    ///< A key.
-    bool right{false};   ///< D key.
-    bool jump{false};    ///< Space key.
-    bool crouch{false};  ///< Left Ctrl key.
-    bool sprint{false};  ///< Left Shift key.
-    bool grapple{false}; ///< Middle mouse button / E key.
-    bool shooting{false};
+    // Movement keys
+    bool forward{false};  ///< W key.
+    bool back{false};     ///< S key.
+    bool left{false};     ///< A key.
+    bool right{false};    ///< D key.
+    bool jump{false};     ///< Space key.
+    bool crouch{false};   ///< Left Ctrl key.
+    bool sprint{false};   ///< Left Shift key.
+    bool grapple{false};  ///< Middle mouse button / E key.
+    bool shooting{false}; ///< Primary fire button.
 
-    float yaw{0.0f};   ///< Horizontal look angle in radians (accumulated from mouse X deltas).
-    float pitch{0.0f}; ///< Vertical look angle in radians, clamped to [-89°, +89°] by InputSampleSystem.
-    float roll{0.0f};  ///< Currently always 0; reserved for dynamic movement tilt (wallrun lean, strafe tilt).
+    float yaw{0.0f};      ///< Horizontal look angle in radians (accumulated from mouse X deltas).
+    float pitch{0.0f};    ///< Vertical look angle in radians, clamped to [-89°, +89°] by InputSampleSystem.
+    float roll{0.0f};     ///< Currently always 0; reserved for dynamic movement tilt (wallrun lean, strafe tilt).
 
     /// @brief Yaw/pitch captured at the start of the most-recent physics tick.
     ///

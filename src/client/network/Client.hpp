@@ -1,3 +1,6 @@
+/// @file Client.hpp
+/// @brief TCP client for connecting to the game server.
+
 #pragma once
 
 #include "network/MessageStream.hpp"
@@ -30,6 +33,6 @@ public:
     bool poll();
 
 private:
-    MessageStream msgStream;
+    MessageStream msgStream;           ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr; ///< Resolved server address.
 };

@@ -1,16 +1,21 @@
-// sss.comp — Screen-space subsurface scattering (separable Gaussian).
-// Blurs the HDR color in screen space for pixels marked as skin/organic.
-// This is a simplified single-pass version that applies a horizontal blur.
-// A second dispatch with swapped direction gives the full separable filter.
+/// @file sss.comp
+/// @brief Screen-space subsurface scattering (separable Gaussian).
+/// Blurs the HDR color in screen space for pixels marked as skin/organic.
+/// This is a simplified single-pass version that applies a horizontal blur.
+/// A second dispatch with swapped direction gives the full separable filter.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief HDR input color buffer.
 layout(set = 0, binding = 0) uniform sampler2D hdrInput;
+/// @brief Scene depth buffer for depth-aware filtering.
 layout(set = 0, binding = 1) uniform sampler2D depthBuffer;
 
+/// @brief Output SSS result image.
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D sssOutput;
 
+/// @brief Subsurface scattering parameters.
 layout(set = 2, binding = 0) uniform SSSParams {
     vec2 screenSize;
     vec2 blurDir;       // (1,0) for horizontal, (0,1) for vertical

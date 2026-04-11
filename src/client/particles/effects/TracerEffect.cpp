@@ -1,3 +1,6 @@
+/// @file TracerEffect.cpp
+/// @brief Implementation of oriented-capsule tracer effect for projectiles.
+
 #include "TracerEffect.hpp"
 
 #include "ecs/components/Position.hpp"
@@ -42,7 +45,7 @@ void TracerEffect::spawnFree(glm::vec3 tip, glm::vec3 tail, float lifetime)
     slot->brightness = 1.f;
     slot->coreColor = {1.f, 0.95f, 0.7f, 1.f};
     slot->edgeColor = {1.f, 0.40f, 0.05f, 0.f};
-    slot->lifetime = lifetime; // < 9990 → picked up by the decay loop
+    slot->lifetime = lifetime; // < 9990 -> picked up by the decay loop
 }
 
 void TracerEffect::detach(entt::entity e)
@@ -50,7 +53,7 @@ void TracerEffect::detach(entt::entity e)
     auto it = entityToIdx_.find(static_cast<uint32_t>(e));
     if (it == entityToIdx_.end())
         return;
-    // Mark as fading — lifetime will expire naturally
+    // Mark as fading -- lifetime will expire naturally
     if (it->second < pool_.liveCount()) {
         auto* p = const_cast<TracerParticle*>(pool_.rawData()) + it->second;
         p->lifetime = k_fadeTime;
@@ -75,7 +78,7 @@ void TracerEffect::update(float dt, Registry& registry)
             if (idx >= pool_.liveCount())
                 return;
 
-            // We need mutable access — rawData returns const*, so we cast.
+            // We need mutable access -- rawData returns const*, so we cast.
             // The pool_ owns the data array so this is safe.
             auto* p = const_cast<TracerParticle*>(pool_.rawData()) + idx;
 
@@ -101,7 +104,7 @@ void TracerEffect::update(float dt, Registry& registry)
             p->brightness = std::max(0.f, p->lifetime / k_fadeTime);
             if (p->lifetime <= 0.f) {
                 pool_.kill(i);
-                // Rebuild entity→index map after kill
+                // Rebuild entity->index map after kill
                 for (auto& kv : entityToIdx_) {
                     if (kv.second == pool_.liveCount()) // the element that was swapped in
                         kv.second = i;

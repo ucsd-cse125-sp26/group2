@@ -1,12 +1,16 @@
-// ssao.comp — Screen-space ambient occlusion.
-// Reconstructs view-space position from depth, samples hemisphere, checks occlusion.
+/// @file ssao.comp
+/// @brief Screen-space ambient occlusion.
+/// Reconstructs view-space position from depth, samples hemisphere, checks occlusion.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Scene depth texture.
 layout(set = 0, binding = 0) uniform sampler2D depthTexture;
+/// @brief Output SSAO image (single channel).
 layout(set = 1, binding = 0, r8) writeonly uniform image2D ssaoImage;
 
+/// @brief SSAO algorithm parameters and hemisphere kernel.
 layout(set = 2, binding = 0) uniform SSAOParams {
     mat4 projection;
     mat4 invProjection;
@@ -26,7 +30,7 @@ vec3 hash3(vec2 p) {
 
 vec3 reconstructViewPos(vec2 uv, float depth)
 {
-    // NDC → clip → view.
+    // NDC -> clip -> view.
     vec4 clipPos = vec4(uv * 2.0 - 1.0, depth, 1.0);
     vec4 viewPos = invProjection * clipPos;
     return viewPos.xyz / viewPos.w;

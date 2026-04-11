@@ -1,16 +1,23 @@
-// tonemap.frag — HDR → LDR tone mapping with bloom, SSAO, SSR, volumetrics composite.
-// Includes post-TAA sharpening (unsharp mask) for crisp output.
+/// @file tonemap.frag
+/// @brief HDR to LDR tone mapping with bloom, SSAO, SSR, volumetrics composite.
+/// Includes post-TAA sharpening (unsharp mask) for crisp output.
 #version 450
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
+/// @brief HDR scene color buffer.
 layout(set = 2, binding = 0) uniform sampler2D hdrBuffer;
+/// @brief Bloom buffer (additive).
 layout(set = 2, binding = 1) uniform sampler2D bloomBuffer;
+/// @brief Screen-space ambient occlusion buffer.
 layout(set = 2, binding = 2) uniform sampler2D ssaoBuffer;
+/// @brief Screen-space reflections buffer (RGB=color, A=confidence).
 layout(set = 2, binding = 3) uniform sampler2D ssrBuffer;
+/// @brief Volumetric light scattering buffer.
 layout(set = 2, binding = 4) uniform sampler2D volumetricBuffer;
 
+/// @brief Tone mapping and compositing parameters.
 layout(set = 3, binding = 0) uniform TonemapParams
 {
     float exposure;
@@ -41,7 +48,7 @@ vec3 Reinhard(vec3 x)
 
 void main()
 {
-    // ── Sharpening (unsharp mask on HDR, counters TAA blur) ─────────────────
+    // Sharpening (unsharp mask on HDR, counters TAA blur)
     vec2 ts = 1.0 / vec2(textureSize(hdrBuffer, 0));
     vec3 center = texture(hdrBuffer, fragTexCoord).rgb;
     vec3 hdr;
@@ -61,7 +68,7 @@ void main()
     vec3 bloom = texture(bloomBuffer, fragTexCoord).rgb;
     hdr += bloom * bloomStrength;
 
-    // Composite SSR.  RGB = reflection color, A = confidence/blend weight.
+    // Composite SSR. RGB = reflection color, A = confidence/blend weight.
     vec4 ssr = texture(ssrBuffer, fragTexCoord);
     hdr = mix(hdr, ssr.rgb, ssr.a * ssrStrength);
 

@@ -1,3 +1,6 @@
+/// @file ExplosionEffect.hpp
+/// @brief Shockwave ring and fireball explosion effect for rocket impacts.
+
 #pragma once
 
 #include "particles/ParticlePool.hpp"
@@ -12,9 +15,13 @@
 class ExplosionEffect
 {
 public:
+    /// @brief Advance ring animations and tick deferred smoke timers.
     void update(float dt);
 
     /// @brief Spawn a full explosion at pos with given blast radius.
+    /// @param pos         World-space center of the explosion.
+    /// @param blastRadius Radius controlling ring size and smoke spread.
+    /// @param smoke       SmokeEffect instance used to spawn fire and smoke puffs.
     void spawn(glm::vec3 pos, float blastRadius, SmokeEffect& smoke);
 
     // Shockwave ring particles
@@ -26,11 +33,12 @@ private:
     // but same BillboardParticle struct (size drives ring scale, color encodes ring vs disc).
     ParticlePool<BillboardParticle, 64> ringPool_;
 
+    /// @brief Deferred smoke or fire spawn scheduled after the initial explosion.
     struct PendingSmoke
     {
         glm::vec3 pos;
         float radius;
-        float delay; // seconds until spawn
+        float delay; ///< Seconds until spawn.
         bool isFire;
     };
     // Holds deferred smoke/fire spawns

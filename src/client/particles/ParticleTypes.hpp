@@ -1,11 +1,11 @@
+/// @file ParticleTypes.hpp
+/// @brief GPU-uploadable particle structs for all effect categories.
+///
+/// All structs must satisfy std430 alignment (vec4 fields keep things clean).
+
 #pragma once
 
 #include <glm/glm.hpp>
-
-// ---------------------------------------------------------------------------
-// GPU-uploadable particle structs.
-// All structs must satisfy std430 alignment (vec4 fields keep things clean).
-// ---------------------------------------------------------------------------
 
 /// @brief Single billboard particle (sparks, impact flash, shockwave ring).
 struct BillboardParticle

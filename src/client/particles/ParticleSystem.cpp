@@ -1,3 +1,6 @@
+/// @file ParticleSystem.cpp
+/// @brief Implementation of the top-level particle system orchestrator.
+
 #include "ParticleSystem.hpp"
 
 #include "ecs/components/RibbonEmitter.hpp"
@@ -5,9 +8,7 @@
 
 #include <SDL3/SDL.h>
 
-// ---------------------------------------------------------------------------
 // init / quit
-// ---------------------------------------------------------------------------
 
 bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt)
 {
@@ -46,9 +47,7 @@ void ParticleSystem::quit()
     renderer_.quit();
 }
 
-// ---------------------------------------------------------------------------
 // update
-// ---------------------------------------------------------------------------
 
 void ParticleSystem::update(float dt, const Camera& cam, Registry& reg)
 {
@@ -75,9 +74,7 @@ void ParticleSystem::update(float dt, const Camera& cam, Registry& reg)
     sdf_.clear();
 }
 
-// ---------------------------------------------------------------------------
 // uploadToGpu (copy pass, before render pass)
-// ---------------------------------------------------------------------------
 
 void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
 {
@@ -92,18 +89,14 @@ void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
     renderer_.uploadSdfHud(cmd, sdf_.hudData(), sdf_.hudCount());
 }
 
-// ---------------------------------------------------------------------------
 // render (inside render pass)
-// ---------------------------------------------------------------------------
 
 void ParticleSystem::render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd)
 {
     renderer_.drawAll(pass, cmd, screenW_, screenH_);
 }
 
-// ---------------------------------------------------------------------------
 // Spawn API
-// ---------------------------------------------------------------------------
 
 void ParticleSystem::spawnProjectileTracer(entt::entity e, Registry& reg)
 {
@@ -151,9 +144,7 @@ void ParticleSystem::spawnExplosion(glm::vec3 pos, float blastRadius)
     explosions_.spawn(pos, blastRadius, smoke_);
 }
 
-// ---------------------------------------------------------------------------
 // SDF text
-// ---------------------------------------------------------------------------
 
 void ParticleSystem::drawWorldText(glm::vec3 worldPos, std::string_view text, glm::vec4 color, float worldHeight)
 {
@@ -165,9 +156,7 @@ void ParticleSystem::drawScreenText(glm::vec2 pixelPos, std::string_view text, g
     sdf_.drawScreenText(pixelPos, text, color, pixelHeight);
 }
 
-// ---------------------------------------------------------------------------
 // entt::dispatcher event handlers
-// ---------------------------------------------------------------------------
 
 void ParticleSystem::onWeaponFired(const WeaponFiredEvent& e)
 {

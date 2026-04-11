@@ -1,6 +1,8 @@
+/// @file tracer.frag
+/// @brief Bullet tracer fragment shader with three-layer cross-section profile.
 #version 450
 
-layout(location = 0) in  vec2  vUV;       // .x = 0(tail)→1(tip), .y = -1..+1 (cross-section)
+layout(location = 0) in  vec2  vUV;       // .x = 0(tail)->1(tip), .y = -1..+1 (cross-section)
 layout(location = 1) in  float vBrightness;
 layout(location = 2) in  vec4  vCoreColor;
 layout(location = 3) in  vec4  vEdgeColor;
@@ -18,7 +20,7 @@ void main()
     // Tip-to-tail brightness falloff: tip (u=1) is brightest
     float tipFade = 0.4 + 0.6 * vUV.x;
 
-    // Base color: edge → core
+    // Base color: edge -> core
     vec4 col = mix(vEdgeColor, vCoreColor, mid) * glow * vBrightness * tipFade;
 
     // Overdriven white-hot core (simulates HDR bloom on LDR display)

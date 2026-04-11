@@ -1,3 +1,6 @@
+/// @file TracerEmitter.hpp
+/// @brief Tracer streak emitter component for fast projectiles.
+
 #pragma once
 
 #include <glm/glm.hpp>

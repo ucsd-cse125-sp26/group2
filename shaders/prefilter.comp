@@ -1,12 +1,15 @@
-// prefilter.comp — Pre-filter the environment map for specular IBL.
-// Each mip level corresponds to a roughness value (mip 0 = mirror, max mip = rough).
-// Dispatch per mip level: (mipSize/16, mipSize/16, 6).
+/// @file prefilter.comp
+/// @brief Pre-filter the environment map for specular IBL.
+/// Each mip level corresponds to a roughness value (mip 0 = mirror, max mip = rough).
+/// Dispatch per mip level: (mipSize/16, mipSize/16, 6).
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Output pre-filtered specular cubemap image.
 layout(set = 0, binding = 0, rgba16f) writeonly uniform imageCube outPrefilter;
 
+/// @brief Per-mip roughness parameter.
 layout(set = 1, binding = 0) uniform PrefilterParams {
     float roughness;
     float _pad1, _pad2, _pad3;
@@ -14,7 +17,7 @@ layout(set = 1, binding = 0) uniform PrefilterParams {
 
 const float PI = 3.14159265359;
 
-// ── Procedural sky (same as skybox.frag / irradiance.comp) ──────────────────
+// Procedural sky (same as skybox.frag / irradiance.comp)
 vec3 proceduralSky(vec3 dir)
 {
     float y = dir.y;
@@ -76,7 +79,7 @@ vec3 importanceSampleGGX(vec2 Xi, vec3 N, float a)
     return normalize(tangent * H.x + bitangent * H.y + N * H.z);
 }
 
-// Cubemap face + UV → direction.
+// Cubemap face + UV -> direction.
 vec3 cubeDir(int face, vec2 uv)
 {
     switch (face) {
