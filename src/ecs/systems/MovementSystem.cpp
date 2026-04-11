@@ -107,6 +107,10 @@ void tickTimers(PlayerState& state, float dt)
 {
     state.jumpedThisTick = false;
 
+    // Jump cooldown countdown.
+    if (state.jumpCooldown > 0.0f)
+        state.jumpCooldown -= dt;
+
     // Coyote time countdown.
     if (state.coyoteTimer > 0.0f)
         state.coyoteTimer -= dt;
@@ -283,6 +287,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpCount = 1;
         state.canDoubleJump = true;
         state.jumpedThisTick = true;
+        state.jumpCooldown = tms::k_doubleJumpCooldown;
 
         // Set up jump lurch.
         state.jumpLurchEnabled = true;
@@ -292,7 +297,10 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
     }
 
     // ── Double jump ─────────────────────────────────────────────────────
-    if (state.canDoubleJump && state.jumpCount < 2) {
+    // Requires: (a) re-press of jump key (not held from first jump),
+    //           (b) cooldown expired since last jump.
+    const bool k_jumpRisingEdge = input.jump && !state.jumpHeldLastTick;
+    if (state.canDoubleJump && state.jumpCount < 2 && k_jumpRisingEdge && state.jumpCooldown <= 0.0f) {
         // Reset vertical velocity before applying double jump (feels better than additive).
         if (vel.y < 0.0f)
             vel.y = 0.0f;
@@ -877,6 +885,9 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
             // ── 10. Speed cap ───────────────────────────────────────────
             applySpeedCap(vel.value);
+
+            // ── 11. Track jump key state for edge detection ─────────────
+            state.jumpHeldLastTick = input.jump;
         });
 
     // ── Entities WITHOUT InputSnapshot — physics only (NPCs, etc.) ──────

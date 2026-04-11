@@ -25,6 +25,7 @@ constexpr float k_crouchSpeed = 200.0f; ///< Max wish speed when crouching (u/s)
 constexpr float k_jumpSpeed = 380.0f;         ///< Upward velocity on ground jump (u/s).
 constexpr float k_doubleJumpSpeed = 340.0f;   ///< Upward velocity on air jump (u/s).
 constexpr float k_slidehopJumpSpeed = 280.0f; ///< Upward velocity when jumping during slide (u/s).
+constexpr float k_doubleJumpCooldown = 0.10f; ///< Min time after first jump before double jump is allowed (s).
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Coyote time
