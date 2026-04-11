@@ -28,10 +28,21 @@ public:
 
     [[nodiscard]] const glm::mat4& getView() const { return view; }
     [[nodiscard]] const glm::mat4& getProjection() const { return proj; }
+    [[nodiscard]] glm::mat4 getViewProjection() const { return proj * view; }
 
     [[nodiscard]] const glm::vec3& getEye() const { return eye; }
     [[nodiscard]] const glm::vec3& getTarget() const { return target; }
     [[nodiscard]] const glm::vec3& getUp() const { return up; }
+
+    /// @brief World-space unit vector pointing from eye toward target.
+    [[nodiscard]] glm::vec3 getForward() const;
+    /// @brief World-space unit vector pointing to the camera's right (forward × up).
+    [[nodiscard]] glm::vec3 getRight() const;
+
+    [[nodiscard]] float getFovy() const { return fovy; }
+    [[nodiscard]] float getAspect() const { return aspect; }
+    [[nodiscard]] float getNear() const { return nearPlane; }
+    [[nodiscard]] float getFar() const { return farPlane; }
 
 private:
     glm::vec3 eye{0.0f, 0.0f, 3.0f};

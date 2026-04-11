@@ -3,8 +3,6 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/registry/Registry.hpp"
 
-#include <span>
-
 /// @brief Shared collision system — compiled identically on client and server.
 ///
 /// Any divergence between client and server builds is a bug (breaks prediction).
@@ -24,7 +22,7 @@ namespace systems
 ///
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
-/// @param planes    World collision planes for this tick.
-void runCollision(Registry& registry, float dt, std::span<const physics::Plane> planes);
+/// @param world     World collision geometry (planes, boxes, brushes) for this tick.
+void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world);
 
 } // namespace systems

@@ -1,12 +1,17 @@
 #pragma once
 
+#include "animation/SkinnedModel.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
+#include "particles/ParticleSystem.hpp"
 #include "renderer/Renderer.hpp"
 
 #include <SDL3/SDL.h>
+
+#include <entt/entt.hpp>
+#include <glm/glm.hpp>
 
 /// @brief Top-level client game object.
 ///
@@ -42,6 +47,8 @@ private:
     Renderer renderer;                           ///< Owns the GPU pipeline and ImGui render backend.
     Registry registry;                           ///< The shared ECS registry.
     Client client;                               ///< UDP network client.
+    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
+    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
 
     Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
     float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
@@ -58,6 +65,16 @@ private:
 
     FrameRecorder recorder;                ///< R-key toggled frame-state + screenshot recorder.
     uint64_t frameCount = 0;               ///< Monotonic render-frame counter.
+
+    // Cached camera state — updated each iterate(), used by event() key shortcuts.
+    glm::vec3 cachedEye_{0.f, 100.f, 0.f};
+    glm::vec3 cachedCamFwd_{0.f, 0.f, 1.f};
+
+    // Model indices for entity rendering (loaded at init).
+    int wraithModelIdx = -1;   ///< Wraith player model index.
+    int weaponModelIdx = -1;   ///< R-301 weapon model index.
+    SkinnedModel runAnimation; ///< Mixamo animated character (skeletal animation).
+    int animatedModelIdx = -1; ///< Renderer model index for the animated character.
 
     // ── FPS ring buffer — inter-render deltas, newest at (head-1) % size ─────
     float fpsHistory[k_fpsHistorySize] = {}; ///< Circular buffer of per-frame FPS samples.

@@ -9,10 +9,14 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "particles/ParticleSystem.hpp"
+#include "renderer/Renderer.hpp"
+#include "renderer/Renderer.hpp" // for RenderToggles
 
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
+#include <filesystem>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
 #include <imgui.h>
@@ -91,6 +95,7 @@ void DebugUI::buildUI(const Registry& registry,
                       bool& renderSeparateFromPhysics,
                       bool& inputSyncedWithPhysics,
                       bool& limitFPSToMonitor,
+                      int& ssrMode,
                       const float physicsHz,
                       const float fpsCurrent,
                       const float fpsMin,
@@ -127,6 +132,16 @@ void DebugUI::buildUI(const Registry& registry,
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
         ImGui::SetTooltip("ON:  VSync on — fps locked to monitor refresh rate\n"
                           "OFF: VSync off — uncapped fps (may use mailbox present)");
+
+    // SSR mode selector.
+    {
+        const char* ssrModes[] = {"Sharp (proximity fade)", "Stochastic (temporal)", "Masked (world-space fade)"};
+        ImGui::Combo("SSR Mode", &ssrMode, ssrModes, 3);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Sharp: deterministic rays, proximity fade near objects\n"
+                              "Stochastic: jittered rays + temporal accumulation (softer)\n"
+                              "Masked: deterministic rays, world-space distance fade (IBL fills contact zone)");
+    }
 
     ImGui::Separator();
 
@@ -233,10 +248,13 @@ void DebugUI::buildUI(const Registry& registry,
             // PlayerState
             if (showPlayerState && registry.all_of<PlayerState>(entity)) {
                 const auto& c = registry.get<PlayerState>(entity);
-                ImGui::Text("PlayerState   grounded:%-3s  crouching:%-3s  sliding:%-3s",
+                static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun", "Climbing", "LedgeGrab"};
+                const int k_modeIdx = static_cast<int>(c.moveMode);
+                ImGui::Text("PlayerState   mode:%s  grounded:%-3s  crouching:%-3s  sprint:%-3s",
+                            (k_modeIdx >= 0 && k_modeIdx < 5) ? k_modeNames[k_modeIdx] : "?",
                             c.grounded ? "YES" : "NO",
                             c.crouching ? "YES" : "NO",
-                            c.sliding ? "YES" : "NO");
+                            c.sprinting ? "YES" : "NO");
             }
 
             // InputSnapshot
@@ -434,6 +452,271 @@ void DebugUI::buildMovementChart(const Registry& registry)
         legendSwatch("Velocity", IM_COL32(75, 175, 255, 215));
         legendSwatch("Wish vel", IM_COL32(70, 255, 130, 215));
         ImGui::NewLine();
+    }
+
+    ImGui::End();
+}
+
+// ─── Particle System debug/control window ─────────────────────────────────────
+
+void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward)
+{
+    if (!showParticleWindow_)
+        return;
+
+    ImGui::SetNextWindowPos({10.f, 620.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({440.f, 520.f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Particle System", &showParticleWindow_)) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Status ────────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Status");
+    if (ps.sdfReady())
+        ImGui::TextColored({0.4f, 1.f, 0.4f, 1.f}, "SDF Font: LOADED");
+    else
+        ImGui::TextColored({1.f, 0.5f, 0.3f, 1.f}, "SDF Font: not loaded (text rendering disabled)");
+
+    // ── Live counts ───────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Live Counts");
+
+    struct PoolRow
+    {
+        const char* name;
+        uint32_t live;
+        uint32_t maxN;
+    };
+    const PoolRow rows[] = {
+        {"Sparks / Impact", ps.impactCount(), 4096},
+        {"Tracers (caps.)", ps.tracerCount(), 512},
+        {"Ribbon verts", ps.ribbonVertexCount(), 24576},
+        {"Hitscan beams", ps.hitscanBeamCount(), 64},
+        {"Arc verts", ps.arcVertexCount(), 2048},
+        {"Smoke", ps.smokeCount(), 1024},
+        {"Decals", ps.decalCount(), 512},
+    };
+
+    constexpr ImGuiTableFlags kTF =
+        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
+    if (ImGui::BeginTable("##counts", 3, kTF)) {
+        ImGui::TableSetupColumn("Effect", ImGuiTableColumnFlags_WidthFixed, 150.f);
+        ImGui::TableSetupColumn("Live/Max", ImGuiTableColumnFlags_WidthFixed, 88.f);
+        ImGui::TableSetupColumn("Fill", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto& r : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(r.name);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u / %u", r.live, r.maxN);
+            ImGui::TableSetColumnIndex(2);
+            const float fraction = (r.maxN > 0) ? static_cast<float>(r.live) / static_cast<float>(r.maxN) : 0.f;
+            char overlay[16];
+            SDL_snprintf(overlay, sizeof(overlay), "%.0f%%", static_cast<double>(fraction * 100.f));
+            ImGui::ProgressBar(fraction, {-FLT_MIN, 0.f}, overlay);
+        }
+        ImGui::EndTable();
+    }
+
+    // ── Spawn Controls ────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Spawn Controls");
+
+    ImGui::SliderFloat("Dist ahead (units)", &particleSpawnDist_, 30.f, 800.f, "%.0f");
+
+    const glm::vec3 worldUp = {0.f, 1.f, 0.f};
+    const glm::vec3 camRight = glm::normalize(glm::cross(forward, worldUp));
+    const glm::vec3 hipfireOrigin = eyePos + camRight * 15.f - worldUp * 8.f + forward * 5.f;
+    const glm::vec3 spawnPos = eyePos + forward * particleSpawnDist_;
+    const glm::vec3 wallNorm = -forward;
+
+    ImGui::Spacing();
+
+    // Weapon effects
+    if (ImGui::Button("Shoot Bullet (R301)", {160.f, 0.f})) {
+        ps.spawnBulletTracer(hipfireOrigin, forward, particleSpawnDist_);
+        ps.spawnImpactEffect(
+            hipfireOrigin + forward * particleSpawnDist_, wallNorm, SurfaceType::Metal, WeaponType::Rifle);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Energy Shot", {110.f, 0.f})) {
+        const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
+        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyRifle);
+        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyRifle);
+    }
+
+    if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))
+        ps.spawnSmoke(spawnPos, 40.f);
+    ImGui::SameLine();
+    if (ImGui::Button("Explosion", {100.f, 0.f}))
+        ps.spawnExplosion(spawnPos, 100.f);
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Keyboard Shortcuts");
+    ImGui::TextDisabled("T: Hitscan beam    Y: Metal impact");
+    ImGui::TextDisabled("U: Smoke cloud     I: Explosion");
+    ImGui::TextDisabled("Left-click: Fire weapon");
+
+    ImGui::End();
+}
+
+// ─── Render Toggles window ────────────────────────────────────────────────────
+
+void DebugUI::buildRenderTogglesUI(RenderToggles& t)
+{
+    ImGui::SetNextWindowPos({940.f, 10.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({280.f, 460.f}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Render Toggles");
+
+    ImGui::TextDisabled("Toggle systems to profile FPS impact.");
+    ImGui::TextDisabled("Unchecked = skipped entirely (zero cost).");
+    ImGui::Separator();
+
+    // Count enabled systems for the "all on / all off" buttons.
+    bool* allFlags[] = {&t.sceneGeometry,
+                        &t.pbrModels,
+                        &t.entityModels,
+                        &t.weaponViewmodel,
+                        &t.skybox,
+                        &t.shadows,
+                        &t.ssao,
+                        &t.bloom,
+                        &t.ssr,
+                        &t.volumetrics,
+                        &t.taa,
+                        &t.tonemap,
+                        &t.particles,
+                        &t.sdfText};
+    constexpr int k_flagCount = 14;
+
+    if (ImGui::Button("All ON")) {
+        for (int i = 0; i < k_flagCount; ++i)
+            *allFlags[i] = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("All OFF")) {
+        for (int i = 0; i < k_flagCount; ++i)
+            *allFlags[i] = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Only Post-FX OFF")) {
+        t.ssao = false;
+        t.bloom = false;
+        t.ssr = false;
+        t.volumetrics = false;
+        t.taa = false;
+    }
+    ImGui::Separator();
+
+    // ── Geometry ────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Geometry");
+    ImGui::Checkbox("Scene Geometry (cube+floor)", &t.sceneGeometry);
+    ImGui::Checkbox("PBR Models (Wraith, Porsche, etc.)", &t.pbrModels);
+    ImGui::Checkbox("Entity Models (ECS Renderable)", &t.entityModels);
+    ImGui::Checkbox("Weapon Viewmodel (R-301)", &t.weaponViewmodel);
+    ImGui::Checkbox("Skybox", &t.skybox);
+
+    // ── Lighting ────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Lighting / Shadows");
+    ImGui::Checkbox("Shadow Map", &t.shadows);
+
+    // ── Post-processing ─────────────────────────────────────────────────────
+    ImGui::SeparatorText("Post-Processing");
+    ImGui::Checkbox("SSAO", &t.ssao);
+    ImGui::Checkbox("Bloom", &t.bloom);
+    ImGui::Checkbox("SSR (Screen-Space Reflections)", &t.ssr);
+    ImGui::Checkbox("Volumetric Lighting", &t.volumetrics);
+    ImGui::Checkbox("TAA (Temporal AA)", &t.taa);
+    ImGui::Checkbox("Tone Mapping (HDR->LDR)", &t.tonemap);
+
+    // ── Effects ─────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Effects");
+    ImGui::Checkbox("Particle System", &t.particles);
+    ImGui::Checkbox("SDF Text (HUD + World)", &t.sdfText);
+
+    ImGui::End();
+}
+
+void DebugUI::buildLightingUI(Renderer& renderer)
+{
+    ImGui::SetNextWindowPos({1230.f, 10.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({300.f, 520.f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Lighting Controls")) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Sun position ───────────────────────────────────────────────────────
+    ImGui::SeparatorText("Sun Position");
+    ImGui::SliderFloat("Azimuth", &renderer.sunAzimuth, 0.0f, 360.0f, "%.0f deg");
+    ImGui::SliderFloat("Elevation", &renderer.sunElevation, 5.0f, 90.0f, "%.0f deg");
+
+    // ── Light intensities ──────────────────────────────────────────────────
+    ImGui::SeparatorText("Light Intensity");
+    ImGui::SliderFloat("Sun", &renderer.sunIntensity, 0.0f, 10.0f, "%.1f");
+    ImGui::SliderFloat("Fill", &renderer.fillIntensity, 0.0f, 3.0f, "%.2f");
+
+    // ── Ambient ────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Ambient");
+    float amb[3] = {renderer.ambientR, renderer.ambientG, renderer.ambientB};
+    if (ImGui::ColorEdit3("Ambient Color", amb)) {
+        renderer.ambientR = amb[0];
+        renderer.ambientG = amb[1];
+        renderer.ambientB = amb[2];
+    }
+
+    // ── Post-processing ────────────────────────────────────────────────────
+    ImGui::SeparatorText("Post-Processing");
+    ImGui::SliderFloat("Bloom", &renderer.bloomStr, 0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("SSAO", &renderer.ssaoStr, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("SSR", &renderer.ssrStr, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");
+
+    // ── Cascaded Shadow Maps ──────────────────────────────────────────────
+    ImGui::SeparatorText("Cascaded Shadows");
+    ImGui::SliderFloat("Depth Bias", &renderer.shadowBiasVal, 0.0f, 0.01f, "%.5f");
+    ImGui::SliderFloat("Normal Bias", &renderer.shadowNormalBiasVal, 0.0f, 5.0f, "%.2f");
+    ImGui::SliderFloat("Shadow Distance", &renderer.shadowDistance, 500.0f, 10000.0f, "%.0f");
+    ImGui::SliderFloat("Cascade Lambda", &renderer.cascadeLambda, 0.0f, 1.0f, "%.2f");
+
+    ImGui::End();
+}
+
+void DebugUI::buildSkyboxUI(Renderer& renderer)
+{
+    ImGui::SetNextWindowPos({940.f, 480.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({280.f, 300.f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Skybox")) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("Current: %s", renderer.currentHDRName.c_str());
+    ImGui::Separator();
+
+    if (ImGui::Button("Procedural Sky")) {
+        renderer.useHDRSkybox = false;
+        renderer.currentHDRName = "(procedural)";
+    }
+    ImGui::Separator();
+
+    ImGui::Text("HDR Environments:");
+    for (const auto& path : renderer.availableHDRFiles) {
+        // Extract filename stem for display.
+        auto stem = std::filesystem::path(path).stem().string();
+        bool isCurrent = (renderer.useHDRSkybox && stem == renderer.currentHDRName);
+
+        if (isCurrent)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
+
+        if (ImGui::Button(stem.c_str(), ImVec2(-1, 0))) {
+            renderer.loadHDRSkybox(path);
+        }
+
+        if (isCurrent)
+            ImGui::PopStyleColor();
     }
 
     ImGui::End();

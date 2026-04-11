@@ -81,6 +81,7 @@ set(ASSIMP_NO_EXPORT                     ON  CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_GLTF_IMPORTER           ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FBX_IMPORTER            ON  CACHE BOOL "" FORCE)
 # Use Assimp's own bundled minizip — avoids needing system unzip.h in a
 # non-standard include path (e.g. /usr/include/minizip/ on Ubuntu 24.04).
 set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)
@@ -112,6 +113,26 @@ FetchContent_MakeAvailable(stb)
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
+# ozz-animation — runtime skeletal animation (CPU skinning, sampling, blending).
+# We only need the runtime + offline builders; disable all extras.
+set(ozz_build_tests     OFF CACHE BOOL "" FORCE)
+set(ozz_build_samples   OFF CACHE BOOL "" FORCE)
+set(ozz_build_howtos    OFF CACHE BOOL "" FORCE)
+set(ozz_build_tools     OFF CACHE BOOL "" FORCE)
+set(ozz_build_fbx       OFF CACHE BOOL "" FORCE)
+set(ozz_build_gltf      OFF CACHE BOOL "" FORCE)
+set(ozz_build_data      OFF CACHE BOOL "" FORCE)
+block()
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_Declare(
+        ozz-animation
+        GIT_REPOSITORY https://github.com/guillaumeblanc/ozz-animation.git
+        GIT_TAG        0.15.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(ozz-animation)
+endblock()
+
 # Suppress warnings that fire when our code includes Assimp headers.
 # Using SYSTEM marks those include paths as "system" so -Wall / -Wextra
 # diagnostics are silenced for Assimp's own headers.
@@ -121,6 +142,20 @@ if(TARGET assimp)
         target_include_directories(assimp SYSTEM INTERFACE ${_assimp_inc})
     endif()
 endif()
+
+# Suppress warnings from ozz-animation headers and its own compilation.
+foreach(_ozz_target ozz_base ozz_animation ozz_animation_offline)
+    if(TARGET ${_ozz_target})
+        target_compile_options(${_ozz_target} PRIVATE
+            $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
+            $<$<CXX_COMPILER_ID:MSVC>:/W0>
+        )
+        get_target_property(_ozz_inc ${_ozz_target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_ozz_inc)
+            target_include_directories(${_ozz_target} SYSTEM INTERFACE ${_ozz_inc})
+        endif()
+    endif()
+endforeach()
 
 # ImGui — immediate-mode debug UI (client only).
 # ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
@@ -206,7 +241,34 @@ set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-set(SHADER_SOURCES projective.vert normal.frag model.vert model.frag geometry.vert geometry.frag)
+set(SHADER_SOURCES
+    projective.vert normal.frag         # scene geometry (cube + floor)
+    model.vert model.frag               # legacy model shaders (kept for reference)
+    geometry.vert geometry.frag          # graphics team Lambertian shaders
+    pbr.vert pbr.frag                   # PBR Cook-Torrance (Phase 1)
+    shadow.vert shadow.frag             # shadow map depth-only (Phase 2)
+    fullscreen.vert tonemap.frag        # HDR tone mapping (Phase 4)
+    skybox.vert skybox.frag             # environment skybox (Phase 5)
+    brdf_lut.comp                       # IBL BRDF LUT (Phase 6)
+    irradiance.comp                     # IBL diffuse irradiance (Phase 6)
+    prefilter.comp                      # IBL specular prefilter (Phase 6)
+    ssao.comp ssao_blur.comp            # SSAO (Phase 7)
+    bloom_downsample.comp bloom_upsample.comp  # Bloom (Phase 8)
+    ssr.comp                            # Screen-space reflections (Phase 9)
+    volumetric.comp                     # Volumetric lighting (Phase 10)
+    motion_vectors.comp taa.comp        # TAA (Phase 11)
+    pbr_wboit.frag oit_resolve.frag     # OIT (Phase 12)
+    sss.comp                            # Subsurface scattering (Phase 13)
+    # Particle system shaders (Phase 14)
+    particle_billboard.vert particle_billboard.frag
+    tracer.vert tracer.frag
+    ribbon.vert ribbon.frag
+    smoke.vert smoke.frag
+    lightning_arc.vert lightning_arc.frag
+    hitscan_beam.vert hitscan_beam.frag
+    decal.vert decal.frag
+    sdf_text.vert sdf_text.frag
+)
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
     # GLSL → SPIR-V
@@ -252,8 +314,42 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    # Particle system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticlePool.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleEvents.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/GpuParticleBuffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/GpuParticleBuffer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ImpactEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ImpactEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/RibbonTrail.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/RibbonTrail.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
+    # Skeletal animation
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -263,11 +359,20 @@ add_executable(group2
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
         src/ecs/components/LocalPlayer.hpp
+        src/ecs/components/Renderable.hpp
+        src/ecs/components/Projectile.hpp
+        src/ecs/components/WeaponState.hpp
+        src/ecs/components/TracerEmitter.hpp
+        src/ecs/components/RibbonEmitter.hpp
+        src/ecs/components/ParticleEmitterTag.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/WallDetection.hpp
+        src/ecs/physics/WallDetection.cpp
+        src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
         src/ecs/systems/CollisionSystem.hpp
@@ -316,6 +421,9 @@ target_link_libraries(group2 PRIVATE
     imgui_lib
     assimp
     stb_image
+    ozz_animation_offline
+    ozz_animation
+    ozz_base
 )
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
@@ -351,6 +459,9 @@ add_executable(server
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/WallDetection.hpp
+        src/ecs/physics/WallDetection.cpp
+        src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
         src/ecs/systems/CollisionSystem.hpp
