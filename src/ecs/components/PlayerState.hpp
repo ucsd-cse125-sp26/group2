@@ -29,9 +29,11 @@ struct PlayerState
 {
     // ── Core state ──────────────────────────────────────────────────────
     MoveMode moveMode{MoveMode::OnFoot};
-    bool grounded{false};  ///< True when touching a floor surface this tick.
-    bool crouching{false}; ///< True when crouch input is held.
-    bool sprinting{false}; ///< True when sprint is active.
+    bool grounded{false};            ///< True when touching a floor surface this tick.
+    bool crouching{false};           ///< True when crouch input is held.
+    bool sprinting{false};           ///< True when sprint is active.
+    bool pendingUncrouch{false};     ///< Deferred uncrouch (e.g. after slidehop); applied when safe.
+    glm::vec3 groundNormal{0, 1, 0}; ///< Normal of the floor surface we're standing on.
 
     // ── Jump state ──────────────────────────────────────────────────────
     bool canDoubleJump{true};     ///< Reset on land / wallrun / climb.
@@ -89,6 +91,14 @@ struct PlayerState
     float ledgeHoldTimer{0.0f};  ///< Time spent holding the ledge (s).
     bool exitingLedge{false};
     float exitLedgeTimer{0.0f};
+
+    // ── Grappling hook ───────────────────────────────────────────────────
+    bool grappleActive{false};         ///< True when the hook is attached and pulling.
+    bool grappleCooldownActive{false}; ///< True during cooldown between grapples.
+    float grappleCooldownTimer{0.0f};  ///< Remaining cooldown time (s).
+    float grapplePullTimer{0.0f};      ///< How long we've been pulling (s).
+    glm::vec3 grapplePoint{0.0f};      ///< World-space anchor where the hook is attached.
+    bool grappleInputLastTick{false};  ///< For edge detection on the grapple key.
 
     // ── Camera effects (read by renderer, written by movement) ──────────
     float targetCameraTilt{0.0f}; ///< Target camera roll for wallrun lean (degrees).

@@ -83,15 +83,14 @@ void handleCrouchTransition(Position& pos, CollisionShape& shape, PlayerState& s
     const bool k_wantsCrouch = input.crouch;
     const bool k_isCrouched = state.crouching;
 
+    // Enter crouch immediately.
     if (k_wantsCrouch && !k_isCrouched) {
         state.crouching = true;
         shape.halfExtents.y = tms::k_crouchingHalfHeight;
         pos.value.y -= (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
-    } else if (!k_wantsCrouch && k_isCrouched && state.moveMode != MoveMode::Sliding) {
-        state.crouching = false;
-        shape.halfExtents.y = tms::k_standingHalfHeight;
-        pos.value.y += (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
     }
+    // Uncrouch is handled by the auto-uncrouch pass at tick end (step 10)
+    // which checks for collision before expanding the AABB.
 }
 
 } // namespace
@@ -154,6 +153,13 @@ void tickTimers(PlayerState& state, float dt)
         state.exitLedgeTimer -= dt;
         if (state.exitLedgeTimer <= 0.0f)
             state.exitingLedge = false;
+    }
+
+    // Grapple cooldown.
+    if (state.grappleCooldownActive) {
+        state.grappleCooldownTimer -= dt;
+        if (state.grappleCooldownTimer <= 0.0f)
+            state.grappleCooldownActive = false;
     }
 }
 
@@ -273,6 +279,11 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpCount = 1;
         state.canDoubleJump = true;
         state.jumpedThisTick = true;
+
+        // Restore standing shape — the slide had us crouched.
+        // Shape/pos update is safe here because we're jumping upward.
+        // (Handled via the pendingUncrouch path at tick end to avoid duplication.)
+        state.pendingUncrouch = true;
 
         // Fatigue: increase counter (reduces future slide boosts).
         state.slideFatigueCounter = std::min(state.slideFatigueCounter + 1, tms::k_slideFatigueMax);
@@ -447,8 +458,17 @@ void handleSliding(
         vel.z *= k_scale;
     }
 
-    // No ground friction during slide — the braking deceleration handles slowdown.
-    // Floor slope influence is handled by the collision system's velocity clipping.
+    // Surface angle influence: slopes accelerate/decelerate the slide.
+    // A perfectly flat floor has groundNormal = (0,1,0), slopeForce = 0.
+    // Downhill: the gravity component along the slope adds speed.
+    // Uphill: it subtracts speed.
+    if (state.groundNormal.y < 0.999f && state.groundNormal.y > 0.01f) {
+        // Project gravity onto the slope surface to get the slide force direction.
+        const glm::vec3 k_gravity{0.0f, -1.0f, 0.0f};
+        const glm::vec3 k_slopeDir =
+            glm::normalize(k_gravity - state.groundNormal * glm::dot(k_gravity, state.groundNormal));
+        vel += k_slopeDir * tms::k_slideFloorInfluenceForce * dt;
+    }
 }
 
 } // namespace
@@ -594,7 +614,7 @@ void handleWallRunning(glm::vec3& vel,
 
     // Camera tilt.
     state.targetCameraTilt =
-        (state.wallRunSide == WallSide::Right) ? -tms::k_wallrunCameraTilt : tms::k_wallrunCameraTilt;
+        (state.wallRunSide == WallSide::Right) ? tms::k_wallrunCameraTilt : -tms::k_wallrunCameraTilt;
 }
 
 } // namespace
@@ -766,15 +786,106 @@ void updateCoyoteTime(PlayerState& state)
 } // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Grappling hook
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace
+{
+
+/// Try to fire the grapple hook. Raycasts forward to find a surface.
+void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 eye, const physics::WorldGeometry& world)
+{
+    // ── Cancel on E release (hold E to grapple) ─────────────────────────
+    if (state.grappleActive && !input.grapple) {
+        state.grappleActive = false;
+        state.grappleCooldownActive = true;
+        state.grappleCooldownTimer = tms::k_grappleCooldown;
+        return;
+    }
+
+    // ── Fire on rising edge of E ────────────────────────────────────────
+    const bool k_pressed = input.grapple && !state.grappleInputLastTick;
+    if (!k_pressed || state.grappleActive || state.grappleCooldownActive)
+        return;
+
+    // Raycast forward from the eye position.
+    const float k_sinYaw = std::sin(input.yaw);
+    const float k_cosYaw = std::cos(input.yaw);
+    const float k_cosPitch = std::cos(input.pitch);
+    const glm::vec3 k_fwd{k_sinYaw * k_cosPitch, -std::sin(input.pitch), k_cosYaw * k_cosPitch};
+
+    const glm::vec3 k_end = eye + k_fwd * tms::k_grappleMaxRange;
+    const physics::SphereHitResult k_hit = physics::sphereCast(4.0f, eye, k_end, world);
+
+    if (!k_hit.hit)
+        return;
+
+    // Hook attached!
+    state.grappleActive = true;
+    state.grapplePullTimer = 0.0f;
+    state.grapplePoint = k_hit.point;
+}
+
+/// Apply grapple pull physics.
+void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& input, glm::vec3 pos, float dt)
+{
+    if (!state.grappleActive)
+        return;
+
+    state.grapplePullTimer += dt;
+
+    // ── Auto-release conditions ─────────────────────────────────────────
+    const glm::vec3 k_toHook = state.grapplePoint - pos;
+    const float k_dist = glm::length(k_toHook);
+
+    if (k_dist < tms::k_grappleReleaseMinDist || k_dist > tms::k_grappleReleaseMaxDist ||
+        state.grapplePullTimer > tms::k_grappleMaxDuration || input.crouch)
+    {
+        state.grappleActive = false;
+        state.grappleCooldownActive = true;
+        state.grappleCooldownTimer = tms::k_grappleCooldown;
+        return;
+    }
+
+    // ── Pull direction: blend between direct-to-hook and look direction ──
+    const glm::vec3 k_directDir = glm::normalize(k_toHook);
+
+    const float k_sinYaw = std::sin(input.yaw);
+    const float k_cosYaw = std::cos(input.yaw);
+    const float k_cosPitch = std::cos(input.pitch);
+    const glm::vec3 k_lookDir{k_sinYaw * k_cosPitch, -std::sin(input.pitch), k_cosYaw * k_cosPitch};
+
+    // Blend: pull mostly toward hook, but allow look direction to steer.
+    const glm::vec3 k_pullDir =
+        glm::normalize(k_directDir * (1.0f - tms::k_grappleLookInfluence) + k_lookDir * tms::k_grappleLookInfluence);
+
+    // Accelerate toward the pull direction.
+    const float k_currentPullSpeed = glm::dot(vel, k_pullDir);
+    if (k_currentPullSpeed < tms::k_grapplePullSpeed) {
+        const float k_addSpeed = std::min(tms::k_grapplePullAccel * dt, tms::k_grapplePullSpeed - k_currentPullSpeed);
+        vel += k_pullDir * k_addSpeed;
+    }
+
+    // Reduced gravity while grappling.
+    vel.y -= physics::k_gravity * tms::k_grappleGravityScale * dt;
+
+    // Higher speed cap during grapple.
+    clampHorizSpeed(vel, tms::k_grappleSpeedCap);
+}
+
+} // namespace
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Speed cap
 // ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-void applySpeedCap(glm::vec3& vel)
+void applySpeedCap(glm::vec3& vel, const PlayerState& state)
 {
-    clampHorizSpeed(vel, tms::k_speedCap);
+    const float k_cap = state.grappleActive ? tms::k_grappleSpeedCap : tms::k_speedCap;
+    clampHorizSpeed(vel, k_cap);
 }
 
 } // namespace
@@ -843,10 +954,16 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 break;
             }
 
-            case MoveMode::Sliding:
+            case MoveMode::Sliding: {
                 handleSliding(vel.value, state, shape, pos, input, dt);
-                state.targetCameraTilt = 0.0f;
+                // Slide camera lean: tilt based on lateral velocity relative to look direction.
+                const float k_sinY = std::sin(input.yaw);
+                const float k_cosY = std::cos(input.yaw);
+                const glm::vec3 k_lookRight{k_cosY, 0.0f, -k_sinY};
+                const float k_lateralSpeed = glm::dot(horizVel(vel.value), k_lookRight);
+                state.targetCameraTilt = std::clamp(k_lateralSpeed / 400.0f * 3.0f, -5.0f, 5.0f);
                 break;
+            }
 
             case MoveMode::WallRunning:
                 handleWallRunning(vel.value, state, input, walls, pos.value.y, dt);
@@ -859,6 +976,23 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             case MoveMode::LedgeGrabbing:
                 handleLedgeGrab(vel.value, state, input, dt);
                 break;
+            }
+
+            // ── 5b. Grappling hook ───────────────────────────────────────
+            {
+                const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f, 0);
+                tryFireGrapple(state, input, k_eye, world);
+                if (state.grappleActive) {
+                    handleGrapple(vel.value, state, input, pos.value, dt);
+                    // While grappling, cancel wallrun/climb/slide.
+                    if (state.moveMode != MoveMode::OnFoot) {
+                        state.moveMode = MoveMode::OnFoot;
+                        if (state.crouching) {
+                            state.pendingUncrouch = true;
+                        }
+                    }
+                }
+                state.grappleInputLastTick = input.grapple;
             }
 
             // ── 6. Jump handling (works in any mode) ────────────────────
@@ -883,10 +1017,35 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 state.climbBlacklistActive = false;
             }
 
-            // ── 10. Speed cap ───────────────────────────────────────────
-            applySpeedCap(vel.value);
+            // ── 10. Auto-uncrouch / pending uncrouch ────────────────────
+            // If the player should uncrouch (slidehop exit, or crouch key
+            // released while crouched) but collision might block it, we
+            // try here. The collision system's depenetration will push us
+            // back down if expanding the AABB puts us inside geometry.
+            if (state.pendingUncrouch || (state.crouching && !input.crouch && state.moveMode == MoveMode::OnFoot)) {
+                // Try to stand up: expand AABB and raise centre.
+                state.crouching = false;
+                shape.halfExtents.y = tms::k_standingHalfHeight;
+                pos.value.y += (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
 
-            // ── 11. Track jump key state for edge detection ─────────────
+                // Check if standing up puts us inside geometry.
+                // Use a quick sweep upward from current pos — if it hits
+                // immediately, we can't stand and must stay crouched.
+                const glm::vec3 k_testEnd = pos.value + glm::vec3(0, 0.1f, 0);
+                const physics::HitResult k_test = physics::sweepAll(shape.halfExtents, pos.value, k_testEnd, world);
+                if (k_test.hit && k_test.tFirst < 0.01f) {
+                    // Can't stand — revert to crouched.
+                    state.crouching = true;
+                    shape.halfExtents.y = tms::k_crouchingHalfHeight;
+                    pos.value.y -= (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
+                }
+                state.pendingUncrouch = false;
+            }
+
+            // ── 11. Speed cap ───────────────────────────────────────────
+            applySpeedCap(vel.value, state);
+
+            // ── 12. Track jump key state for edge detection ─────────────
             state.jumpHeldLastTick = input.jump;
         });
 

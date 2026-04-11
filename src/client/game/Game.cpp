@@ -468,41 +468,37 @@ SDL_AppResult Game::iterate()
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
+    float targetRoll = 0.0f; // degrees, from PlayerState
 
     if (renderSeparateFromPhysics) {
         // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
         const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
-        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape>().each(
+        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerState>().each(
             [&](const Position& pos,
                 const PreviousPosition& prev,
                 const InputSnapshot& input,
-                const CollisionShape& shape) {
+                const CollisionShape& shape,
+                const PlayerState& pstate) {
                 const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
-
-                // Yaw is always used directly — no interpolation.
-                //
-                // When inputSyncedWithPhysics, yaw updates once per frame-group
-                // (whenever the physics gate fires).  Interpolating yaw with the
-                // *position* alpha is incorrect: position alpha spans one physics
-                // tick, but yaw spans one frame of mouse input.  On multi-tick
-                // or zero-tick frames the two timebases diverge, causing objects
-                // to visually jitter.  Using yaw directly gives a consistent
-                // per-frame rotation rate at the input sample rate (≥128 Hz with
-                // VSync, or frame rate without), which is already smooth.
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
+                targetRoll = pstate.targetCameraTilt;
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
-        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape>().each(
-            [&](const Position& pos, const InputSnapshot& input, const CollisionShape& shape) {
+        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerState>().each(
+            [&](const Position& pos,
+                const InputSnapshot& input,
+                const CollisionShape& shape,
+                const PlayerState& pstate) {
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
+                targetRoll = pstate.targetCameraTilt;
             });
     }
 
@@ -514,6 +510,65 @@ SDL_AppResult Game::iterate()
 
     // Draw persistent HUD text each frame
     particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
+
+    // ── Speedometer HUD ─────────────────────────────────────────────────
+    // Shows km/h with a horizontal bar that fills with speed.
+    // 1 Quake unit ≈ 1 inch = 0.0254 m. Speed in u/s → km/h:
+    //   km/h = (u/s) * 0.0254 * 3.6 = u/s * 0.09144
+    {
+        float playerSpeed = 0.0f;
+        registry.view<LocalPlayer, Velocity>().each(
+            [&](const Velocity& pvel) { playerSpeed = glm::length(pvel.value); });
+
+        const float k_kmh = playerSpeed * 0.09144f;
+        const float k_maxKmh = 120.0f; // bar fills fully at this speed
+
+        // Speed number (bottom-right area of screen).
+        char speedText[32];
+        std::snprintf(speedText, sizeof(speedText), "%.0f km/h", static_cast<double>(k_kmh));
+        particleSystem.drawScreenText({10.f, 38.f}, speedText, {0.8f, 0.9f, 1.0f, 1.0f}, 18.f);
+
+        // Speed bar: use block characters to draw a filled bar.
+        const float k_fraction = std::clamp(k_kmh / k_maxKmh, 0.0f, 1.0f);
+        const int k_barLen = static_cast<int>(k_fraction * 20.0f);
+
+        // Color: green → yellow → red as speed increases.
+        glm::vec4 barColor;
+        if (k_fraction < 0.5f)
+            barColor =
+                glm::mix(glm::vec4(0.3f, 0.9f, 0.4f, 0.8f), glm::vec4(1.0f, 0.9f, 0.2f, 0.8f), k_fraction * 2.0f);
+        else
+            barColor = glm::mix(
+                glm::vec4(1.0f, 0.9f, 0.2f, 0.8f), glm::vec4(1.0f, 0.25f, 0.15f, 0.9f), (k_fraction - 0.5f) * 2.0f);
+
+        // Build bar string with block chars.
+        char barStr[64] = {};
+        for (int i = 0; i < k_barLen && i < 20; ++i)
+            barStr[i] = '|';
+
+        // Background (empty portion).
+        char bgStr[64] = {};
+        for (int i = 0; i < 20 - k_barLen && i < 20; ++i)
+            bgStr[i] = '.';
+
+        if (k_barLen > 0)
+            particleSystem.drawScreenText({10.f, 58.f}, barStr, barColor, 16.f);
+        if (k_barLen < 20)
+            particleSystem.drawScreenText(
+                {10.f + static_cast<float>(k_barLen) * 8.f, 58.f}, bgStr, {0.3f, 0.3f, 0.3f, 0.4f}, 16.f);
+    }
+
+    // ── Grapple cable visual ────────────────────────────────────────────
+    registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& pstate) {
+        if (pstate.grappleActive) {
+            // Draw cable from player hand to hook point every frame.
+            const float cosPi = std::cos(renderPitch);
+            const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
+            const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
+            const glm::vec3 hand = renderEye + right * 15.f - glm::vec3{0, 1, 0} * 8.f + fwd * 5.f;
+            particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
+        }
+    });
 
     // Compute camera forward and cache for event() key shortcuts
     {
@@ -697,7 +752,16 @@ SDL_AppResult Game::iterate()
     debugUI.buildSkyboxUI(renderer);
     debugUI.render();
 
-    renderer.drawFrame(renderEye, renderYaw, renderPitch);
+    // Smooth camera roll interpolation (degrees → radians).
+    {
+        const float k_targetRad = glm::radians(targetRoll);
+        const float k_speed = 10.0f; // interpolation speed (higher = snappier)
+        currentCameraRoll_ += (k_targetRad - currentCameraRoll_) * std::min(1.0f, k_speed * frameTime);
+        // Kill tiny residual to avoid permanent micro-tilt.
+        if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
+            currentCameraRoll_ = 0.0f;
+    }
+    renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
 
     if (limitFPSToMonitor != prevLimitFPS)
         renderer.setVSync(limitFPSToMonitor);
