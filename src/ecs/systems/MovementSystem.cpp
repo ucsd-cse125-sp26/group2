@@ -83,15 +83,14 @@ void handleCrouchTransition(Position& pos, CollisionShape& shape, PlayerState& s
     const bool k_wantsCrouch = input.crouch;
     const bool k_isCrouched = state.crouching;
 
+    // Enter crouch immediately.
     if (k_wantsCrouch && !k_isCrouched) {
         state.crouching = true;
         shape.halfExtents.y = tms::k_crouchingHalfHeight;
         pos.value.y -= (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
-    } else if (!k_wantsCrouch && k_isCrouched && state.moveMode != MoveMode::Sliding) {
-        state.crouching = false;
-        shape.halfExtents.y = tms::k_standingHalfHeight;
-        pos.value.y += (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
     }
+    // Uncrouch is handled by the auto-uncrouch pass at tick end (step 10)
+    // which checks for collision before expanding the AABB.
 }
 
 } // namespace
@@ -274,6 +273,11 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.canDoubleJump = true;
         state.jumpedThisTick = true;
 
+        // Restore standing shape — the slide had us crouched.
+        // Shape/pos update is safe here because we're jumping upward.
+        // (Handled via the pendingUncrouch path at tick end to avoid duplication.)
+        state.pendingUncrouch = true;
+
         // Fatigue: increase counter (reduces future slide boosts).
         state.slideFatigueCounter = std::min(state.slideFatigueCounter + 1, tms::k_slideFatigueMax);
         return;
@@ -447,8 +451,17 @@ void handleSliding(
         vel.z *= k_scale;
     }
 
-    // No ground friction during slide — the braking deceleration handles slowdown.
-    // Floor slope influence is handled by the collision system's velocity clipping.
+    // Surface angle influence: slopes accelerate/decelerate the slide.
+    // A perfectly flat floor has groundNormal = (0,1,0), slopeForce = 0.
+    // Downhill: the gravity component along the slope adds speed.
+    // Uphill: it subtracts speed.
+    if (state.groundNormal.y < 0.999f && state.groundNormal.y > 0.01f) {
+        // Project gravity onto the slope surface to get the slide force direction.
+        const glm::vec3 k_gravity{0.0f, -1.0f, 0.0f};
+        const glm::vec3 k_slopeDir =
+            glm::normalize(k_gravity - state.groundNormal * glm::dot(k_gravity, state.groundNormal));
+        vel += k_slopeDir * tms::k_slideFloorInfluenceForce * dt;
+    }
 }
 
 } // namespace
@@ -883,10 +896,35 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 state.climbBlacklistActive = false;
             }
 
-            // ── 10. Speed cap ───────────────────────────────────────────
+            // ── 10. Auto-uncrouch / pending uncrouch ────────────────────
+            // If the player should uncrouch (slidehop exit, or crouch key
+            // released while crouched) but collision might block it, we
+            // try here. The collision system's depenetration will push us
+            // back down if expanding the AABB puts us inside geometry.
+            if (state.pendingUncrouch || (state.crouching && !input.crouch && state.moveMode == MoveMode::OnFoot)) {
+                // Try to stand up: expand AABB and raise centre.
+                state.crouching = false;
+                shape.halfExtents.y = tms::k_standingHalfHeight;
+                pos.value.y += (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
+
+                // Check if standing up puts us inside geometry.
+                // Use a quick sweep upward from current pos — if it hits
+                // immediately, we can't stand and must stay crouched.
+                const glm::vec3 k_testEnd = pos.value + glm::vec3(0, 0.1f, 0);
+                const physics::HitResult k_test = physics::sweepAll(shape.halfExtents, pos.value, k_testEnd, world);
+                if (k_test.hit && k_test.tFirst < 0.01f) {
+                    // Can't stand — revert to crouched.
+                    state.crouching = true;
+                    shape.halfExtents.y = tms::k_crouchingHalfHeight;
+                    pos.value.y -= (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
+                }
+                state.pendingUncrouch = false;
+            }
+
+            // ── 11. Speed cap ───────────────────────────────────────────
             applySpeedCap(vel.value);
 
-            // ── 11. Track jump key state for edge detection ─────────────
+            // ── 12. Track jump key state for edge detection ─────────────
             state.jumpHeldLastTick = input.jump;
         });
 

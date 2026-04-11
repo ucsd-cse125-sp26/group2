@@ -50,7 +50,7 @@ constexpr float k_jumpLurchSpeedLoss = 0.125f;   ///< Fraction of speed lost on 
 
 constexpr float k_slideMinStartSpeed = 400.0f;       ///< Min horizontal speed to enter slide (u/s).
 constexpr float k_slideMinSpeed = 100.0f;            ///< Slide cancels below this speed (u/s).
-constexpr float k_slideBoostMin = 50.0f;             ///< Min speed boost on slide entry (u/s).
+constexpr float k_slideBoostMin = 80.0f;             ///< Min speed boost on slide entry (u/s).
 constexpr float k_slideBoostMax = 200.0f;            ///< Max speed boost on slide entry (u/s).
 constexpr float k_slideBoostCooldown = 2.0f;         ///< Cooldown between slide boosts (s).
 constexpr float k_slideBrakingDecelMin = 200.0f;     ///< Initial braking deceleration (u/s^2).
