@@ -109,8 +109,9 @@ public:
     /// @brief Upload a pre-built LoadedModel (e.g. from SkinnedModel) and return its index.
     int uploadSceneModel(const LoadedModel& model);
 
-    /// @brief Re-upload skinned vertex data for one mesh of an animated model.
-    /// Called each frame after CPU skinning to push new positions/normals to the GPU.
+    /// @brief Queue a skinned vertex re-upload for one mesh of an animated model.
+    /// The actual GPU copy is deferred to the next drawFrame() command buffer —
+    /// no separate command submission, no pipeline stall.
     void updateModelMeshVertices(int modelIndex, int meshIndex, const ModelVertex* vertices, Uint32 vertexCount);
 
     /// @brief Returns the number of loaded models.
@@ -197,6 +198,19 @@ private:
     // ── Entity rendering ────────────────────────────────────────────────────
     std::vector<EntityRenderCmd> entityRenderCmds; ///< Per-frame list from Game.
     WeaponViewmodel weaponVM;                      ///< First-person weapon, rendered after depth clear.
+
+    // ── Deferred vertex re-uploads (skinned animation) ────────────────────
+    // Queued by updateModelMeshVertices(), flushed at the start of drawFrame()
+    // inside the main command buffer — zero extra submits, zero pipeline stalls.
+    struct PendingVertexUpload
+    {
+        SDL_GPUBuffer* dstBuffer = nullptr;
+        std::vector<uint8_t> data;
+    };
+    std::vector<PendingVertexUpload> pendingVertexUploads;
+
+    SDL_GPUTransferBuffer* skinTransferBuf = nullptr; ///< Persistent staging buffer (reused with cycle=true).
+    Uint32 skinTransferBufSize = 0;                   ///< Current capacity in bytes.
 
     // ── Screen capture ──────────────────────────────────────────────────────
     SDL_GPUTexture* captureRT = nullptr;

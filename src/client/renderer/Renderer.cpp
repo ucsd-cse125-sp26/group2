@@ -1512,6 +1512,51 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         return;
     }
 
+    // ── Flush pending skinned-mesh vertex uploads ─────────────────────────
+    // Batched into this frame's command buffer — one copy pass for all meshes,
+    // zero extra SDL_SubmitGPUCommandBuffer calls, zero pipeline stalls.
+    if (!pendingVertexUploads.empty()) {
+        // Find the largest upload to size the transfer buffer.
+        Uint32 maxBytes = 0;
+        for (const auto& up : pendingVertexUploads)
+            maxBytes = std::max(maxBytes, static_cast<Uint32>(up.data.size()));
+
+        // Grow the persistent transfer buffer if needed.
+        if (maxBytes > skinTransferBufSize) {
+            if (skinTransferBuf)
+                SDL_ReleaseGPUTransferBuffer(device, skinTransferBuf);
+            SDL_GPUTransferBufferCreateInfo tbInfo{};
+            tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            tbInfo.size = maxBytes;
+            skinTransferBuf = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+            skinTransferBufSize = skinTransferBuf ? maxBytes : 0;
+        }
+
+        if (skinTransferBuf) {
+            for (const auto& up : pendingVertexUploads) {
+                // cycle=true: SDL allocates a fresh staging region each call so
+                // the GPU can still read from the previous frame's copy without stalling.
+                void* mapped = SDL_MapGPUTransferBuffer(device, skinTransferBuf, /*cycle=*/true);
+                if (!mapped)
+                    continue;
+                SDL_memcpy(mapped, up.data.data(), up.data.size());
+                SDL_UnmapGPUTransferBuffer(device, skinTransferBuf);
+
+                SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+                SDL_GPUTransferBufferLocation src{};
+                src.transfer_buffer = skinTransferBuf;
+                src.offset = 0;
+                SDL_GPUBufferRegion dst{};
+                dst.buffer = up.dstBuffer;
+                dst.offset = 0;
+                dst.size = static_cast<Uint32>(up.data.size());
+                SDL_UploadToGPUBuffer(cp, &src, &dst, /*cycle=*/false);
+                SDL_EndGPUCopyPass(cp);
+            }
+        }
+        pendingVertexUploads.clear();
+    }
+
     if (!ensureDepthTexture(w, h) || !ensureHDRTarget(w, h)) {
         SDL_SubmitGPUCommandBuffer(cmd);
         return;
@@ -2397,37 +2442,13 @@ void Renderer::updateModelMeshVertices(int modelIndex, int meshIndex, const Mode
 
     const Uint32 bytes = vertexCount * static_cast<Uint32>(sizeof(ModelVertex));
 
-    // Staging transfer buffer — created per call, released after GPU copy.
-    SDL_GPUTransferBufferCreateInfo tbInfo{};
-    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    tbInfo.size = bytes;
-    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
-    if (!tb)
-        return;
-
-    void* mapped = SDL_MapGPUTransferBuffer(device, tb, false);
-    SDL_memcpy(mapped, vertices, bytes);
-    SDL_UnmapGPUTransferBuffer(device, tb);
-
-    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
-
-    SDL_GPUTransferBufferLocation src{};
-    src.transfer_buffer = tb;
-    src.offset = 0;
-
-    SDL_GPUBufferRegion dst{};
-    dst.buffer = model.meshes[static_cast<size_t>(meshIndex)].vertexBuffer;
-    dst.offset = 0;
-    dst.size = bytes;
-
-    SDL_UploadToGPUBuffer(copyPass, &src, &dst, false);
-
-    SDL_EndGPUCopyPass(copyPass);
-    SDL_SubmitGPUCommandBuffer(cmd);
-
-    // Safe to release immediately — SDL defers actual free until the GPU is done.
-    SDL_ReleaseGPUTransferBuffer(device, tb);
+    // Queue the data — the actual GPU copy happens in drawFrame()'s command
+    // buffer, batched with all other copies.  No separate submit, no stall.
+    PendingVertexUpload upload;
+    upload.dstBuffer = model.meshes[static_cast<size_t>(meshIndex)].vertexBuffer;
+    upload.data.resize(bytes);
+    SDL_memcpy(upload.data.data(), vertices, bytes);
+    pendingVertexUploads.push_back(std::move(upload));
 }
 
 void Renderer::requestScreenshot(const std::string& path)
@@ -2457,6 +2478,12 @@ void Renderer::quit()
         return;
 
     SDL_WaitForGPUIdle(device);
+
+    // Release skinned-mesh staging buffer.
+    if (skinTransferBuf)
+        SDL_ReleaseGPUTransferBuffer(device, skinTransferBuf);
+    skinTransferBuf = nullptr;
+    skinTransferBufSize = 0;
 
     // Release render targets.
     if (captureRT)
