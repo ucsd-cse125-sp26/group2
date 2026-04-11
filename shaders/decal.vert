@@ -1,13 +1,17 @@
+/// @file decal.vert
+/// @brief Decal vertex shader with instanced atlas-mapped quads.
 #version 450
 
-// DecalInstance (64 bytes = 16 floats):
-//   [0..2]  pos.xyz   [3] size
-//   [4..6]  right.xyz [7] _p0
-//   [8..10] up.xyz    [11] opacity
-//   [12..13] uvMin    [14..15] uvMax
+/// @brief DecalInstance (64 bytes = 16 floats):
+///   [0..2]  pos.xyz   [3] size
+///   [4..6]  right.xyz [7] _p0
+///   [8..10] up.xyz    [11] opacity
+///   [12..13] uvMin    [14..15] uvMax
 
+/// @brief Per-decal SSBO data.
 layout(set = 0, binding = 0) readonly buffer DecalData { float data[]; };
 
+/// @brief Per-frame camera uniforms.
 layout(set = 1, binding = 0) uniform ParticleUniforms {
     mat4  view;
     mat4  proj;

@@ -1,3 +1,6 @@
+/// @file RibbonTrail.cpp
+/// @brief Implementation of camera-facing ribbon trail builder.
+
 #include "RibbonTrail.hpp"
 
 #include "ecs/components/Position.hpp"

@@ -1,3 +1,6 @@
+/// @file Projectile.hpp
+/// @brief Projectile component and weapon/surface type enumerations.
+
 #pragma once
 
 #include <cstdint>
@@ -29,7 +32,7 @@ enum class SurfaceType : uint8_t
 /// World position comes from the entity's Position component.
 struct Projectile
 {
-    WeaponType type = WeaponType::Rifle;
-    float damage = 15.f;
-    entt::entity owner = entt::null; ///< Entity that fired this projectile.
+    WeaponType type = WeaponType::Rifle; ///< Weapon that spawned this projectile.
+    float damage = 15.f;                 ///< Damage dealt on hit.
+    entt::entity owner = entt::null;     ///< Entity that fired this projectile.
 };

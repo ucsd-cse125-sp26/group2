@@ -1,3 +1,6 @@
+/// @file Game.hpp
+/// @brief Top-level client game class owning all subsystems and the main loop.
+
 #pragma once
 
 #include "animation/SkinnedModel.hpp"
@@ -55,7 +58,7 @@ private:
     int tickCount = 0;                           ///< Total physics ticks elapsed since start.
     bool mouseCaptured = true;                   ///< True when relative mouse mode is active.
 
-    // ── runtime-tunable loop settings (exposed via ImGui) ────────────────────
+    // Runtime-tunable loop settings (exposed via ImGui)
     float mouseSensitivity = 0.001f;       ///< Radians per pixel of mouse movement.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).
@@ -77,13 +80,13 @@ private:
     SkinnedModel runAnimation; ///< Mixamo animated character (skeletal animation).
     int animatedModelIdx = -1; ///< Renderer model index for the animated character.
 
-    // ── FPS ring buffer — inter-render deltas, newest at (head-1) % size ─────
+    // FPS ring buffer -- inter-render deltas, newest at (head-1) % size
     float fpsHistory[k_fpsHistorySize] = {}; ///< Circular buffer of per-frame FPS samples.
     int fpsHistoryHead = 0;                  ///< Next write index.
     int fpsHistoryCount = 0;                 ///< Valid sample count (saturates at k_fpsHistorySize).
     Uint64 prevRenderTime = 0;               ///< Perf counter at the last render call.
 
-    // ── Performance stats — refreshed every 0.5 s ───────────────────────────
+    // Performance stats -- refreshed every 0.5 s
     Uint64 statsPrevTime = 0;       ///< Perf counter at the last stats snapshot.
     int statsPhysTicks = 0;         ///< Physics ticks accumulated since last snapshot.
     float measuredPhysicsHz = 0.0f; ///< Computed physics rate (Hz).

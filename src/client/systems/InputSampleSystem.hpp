@@ -1,3 +1,6 @@
+/// @file InputSampleSystem.hpp
+/// @brief Client-only input sampling for mouse look and movement keys.
+
 #pragma once
 
 #include "ecs/components/InputSnapshot.hpp"

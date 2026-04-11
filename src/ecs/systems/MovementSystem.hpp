@@ -1,3 +1,6 @@
+/// @file MovementSystem.hpp
+/// @brief Shared movement system implementing the Titanfall-inspired state machine.
+
 #pragma once
 
 #include "ecs/physics/SweptCollision.hpp"

@@ -1,3 +1,6 @@
+/// @file Renderer.cpp
+/// @brief SDL3 GPU renderer implementation -- pipelines, passes, and post-processing.
+
 #include "Renderer.hpp"
 
 #include "Camera.hpp"
@@ -30,9 +33,9 @@
 namespace
 {
 
-// ── UBO structures (must match shader layouts exactly) ──────────────────────
+// UBO structures (must match shader layouts exactly)
 
-/// Vertex UBO (set = 1, binding = 0) — shared by scene + PBR pipelines.
+/// @brief Vertex UBO (set 1, binding 0) -- shared by scene + PBR pipelines.
 struct Matrices
 {
     glm::mat4 model;
@@ -41,7 +44,7 @@ struct Matrices
     glm::mat4 normalMatrix; ///< transpose(inverse(model)), padded to mat4 for std140.
 };
 
-/// Vertex UBO for the old scene pipeline (no normalMatrix).
+/// @brief Vertex UBO for the old scene pipeline (no normalMatrix).
 struct SceneMatrices
 {
     glm::mat4 model;
@@ -49,7 +52,7 @@ struct SceneMatrices
     glm::mat4 projection;
 };
 
-/// Fragment UBO slot 0 — per-mesh PBR material.
+/// @brief Fragment UBO slot 0 -- per-mesh PBR material.
 struct MaterialUBO
 {
     glm::vec4 baseColorFactor;
@@ -60,7 +63,7 @@ struct MaterialUBO
     glm::vec4 emissiveFactor;
 };
 
-/// One light in the LightData UBO.
+/// @brief One light in the LightData UBO.
 struct LightGPU
 {
     glm::vec4 position; // xyz = direction/position, w = type (0 dir, 1 point)
@@ -68,7 +71,7 @@ struct LightGPU
     glm::vec4 params;   // x = range, y = innerCone, z = outerCone, w = castsShadow
 };
 
-/// Fragment UBO slot 1 — scene lighting.
+/// @brief Fragment UBO slot 1 -- scene lighting.
 struct LightDataUBO
 {
     glm::vec4 cameraPos;
@@ -78,21 +81,21 @@ struct LightDataUBO
     LightGPU lights[8];
 };
 
-/// Skybox vertex UBO.
+/// @brief Skybox vertex UBO.
 struct SkyboxMatricesUBO
 {
     glm::mat4 viewRotation;
     glm::mat4 projection;
 };
 
-/// Shadow map vertex UBO — matches shadow.vert LightMatrices.
+/// @brief Shadow map vertex UBO -- matches shadow.vert LightMatrices.
 struct ShadowUBO
 {
     glm::mat4 lightVP;
     glm::mat4 model;
 };
 
-/// Per-cascade data computed each frame.
+/// @brief Per-cascade data computed each frame.
 struct CascadeInfo
 {
     glm::mat4 lightView;
@@ -101,7 +104,8 @@ struct CascadeInfo
     float splitDistance; ///< View-space far plane of this cascade.
 };
 
-/// Shadow data pushed to pbr.frag / normal.frag for cascade shadow sampling.
+/// @brief Shadow data pushed to pbr.frag / normal.frag for cascade shadow sampling.
+///
 /// The fragment shader selects the cascade based on the fragment's view-space Z.
 struct ShadowDataFragUBO
 {
@@ -118,7 +122,7 @@ struct ShadowDataFragUBO
     glm::vec4 fillColor;     ///< rgb = fill light color, a = fill intensity.
 };
 
-/// Tonemap fragment UBO — matches tonemap.frag TonemapParams.
+/// @brief Tonemap fragment UBO -- matches tonemap.frag TonemapParams.
 struct TonemapParamsUBO
 {
     float exposure;
@@ -133,9 +137,7 @@ struct TonemapParamsUBO
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Shader loading helper
-// ═══════════════════════════════════════════════════════════════════════════
 
 SDL_GPUShader* Renderer::loadShaderFromFile(const char* name,
                                             SDL_GPUShaderStage stage,
@@ -176,9 +178,7 @@ SDL_GPUShader* Renderer::loadShaderFromFile(const char* name,
     return shader;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Compute pipeline helper
-// ═══════════════════════════════════════════════════════════════════════════
 
 SDL_GPUComputePipeline* Renderer::createComputePipeline(const char* shaderName,
                                                         Uint32 numSamplers,
@@ -227,9 +227,7 @@ SDL_GPUComputePipeline* Renderer::createComputePipeline(const char* shaderName,
     return pipeline;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Pipeline creation
-// ═══════════════════════════════════════════════════════════════════════════
 
 bool Renderer::initScenePipeline()
 {
@@ -337,7 +335,7 @@ bool Renderer::initPBRPipeline()
         return false;
     }
 
-    // ── Transparent PBR pipeline (same shaders, alpha blend, no depth write) ─
+    // Transparent PBR pipeline (same shaders, alpha blend, no depth write)
     {
         SDL_GPUColorTargetDescription ctBlend{};
         ctBlend.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -543,9 +541,7 @@ bool Renderer::initSceneShadowPipeline()
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Texture upload
-// ═══════════════════════════════════════════════════════════════════════════
 
 SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, const int height, bool sRGB)
 {
@@ -648,16 +644,14 @@ SDL_GPUTexture* Renderer::uploadTexture(const uint8_t* pixels, const int width, 
     return tex;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Model upload
-// ═══════════════════════════════════════════════════════════════════════════
 
 bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
 {
     if (model.meshes.empty())
         return false;
 
-    // ── Sampler (created once, shared across all models) ────────────────────
+    // Sampler (created once, shared across all models)
     SDL_GPUSamplerCreateInfo sampInfo{};
     sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
     sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
@@ -675,7 +669,7 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
     if (!pbrSampler)
         return false;
 
-    // ── Fallback textures ───────────────────────────────────────────────────
+    // Fallback textures
     const uint8_t white[4] = {255, 255, 255, 255};
     const uint8_t flatNormal[4] = {128, 128, 255, 255}; // (0.5, 0.5, 1.0) tangent-space up
     const uint8_t defaultMR[4] = {0, 128, 0, 255};      // metallic=0 (B), roughness=0.5 (G) — dielectric default
@@ -689,14 +683,14 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
     if (!fallbackWhite || !fallbackFlatNormal || !fallbackMR || !fallbackBlack)
         return false;
 
-    // ── Upload textures ─────────────────────────────────────────────────────
+    // Upload textures
     outInstance.textures.reserve(model.textures.size());
     for (const auto& td : model.textures) {
         SDL_GPUTexture* gpuTex = uploadTexture(td.pixels.data(), td.width, td.height, td.isSRGB);
         outInstance.textures.push_back(gpuTex);
     }
 
-    // ── Upload geometry ─────────────────────────────────────────────────────
+    // Upload geometry
     struct MeshSizes
     {
         Uint32 vbBytes;
@@ -799,13 +793,11 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// IBL — generate BRDF LUT, irradiance map, and pre-filtered specular map
-// ═══════════════════════════════════════════════════════════════════════════
+// IBL -- generate BRDF LUT, irradiance map, and pre-filtered specular map
 
 bool Renderer::initIBL()
 {
-    // ── BRDF LUT (512×512 RG16F) ────────────────────────────────────────────
+    // BRDF LUT (512x512 RG16F)
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
@@ -845,7 +837,7 @@ bool Renderer::initIBL()
     // shader has valid textures to sample while we implement the compute
     // pipeline properly.
 
-    // ── Irradiance map (32×32 per face, cubemap, RGBA16F) ───────────────────
+    // Irradiance map (32x32 per face, cubemap, RGBA16F)
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_CUBE;
@@ -862,7 +854,7 @@ bool Renderer::initIBL()
         }
     }
 
-    // ── Pre-filter map (128×128 per face, 5 mip levels, cubemap, RGBA16F) ───
+    // Pre-filter map (128x128 per face, 5 mip levels, cubemap, RGBA16F)
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_CUBE;
@@ -879,7 +871,7 @@ bool Renderer::initIBL()
         }
     }
 
-    // ── IBL sampler (linear, clamp, mipmapped) ──────────────────────────────
+    // IBL sampler (linear, clamp, mipmapped)
     {
         SDL_GPUSamplerCreateInfo si{};
         si.min_filter = SDL_GPU_FILTER_LINEAR;
@@ -902,7 +894,7 @@ bool Renderer::initIBL()
     // pipeline integration is complex and will be done in a follow-up.
     // For now, fill the BRDF LUT with a reasonable approximation via CPU upload.
 
-    // ── CPU-side BRDF LUT approximation ─────────────────────────────────────
+    // CPU-side BRDF LUT approximation
     // Use Karis's analytical fit: scale ≈ 1, bias ≈ 0 gives F0*1+0 = F0
     // which is the correct limit for a rough surface.  This is a crude
     // approximation but better than zero.
@@ -1007,7 +999,7 @@ bool Renderer::initIBL()
         }
     }
 
-    // ── CPU-side irradiance map approximation ───────────────────────────────
+    // CPU-side irradiance map approximation
     // Sample the procedural sky at low resolution for each cubemap face.
     {
         const int sz = 32;
@@ -1129,7 +1121,7 @@ bool Renderer::initIBL()
         SDL_ReleaseGPUTransferBuffer(device, tb);
     }
 
-    // ── CPU-side prefilter map (5 mip levels, roughness = mip/4) ────────────
+    // CPU-side prefilter map (5 mip levels, roughness = mip/4)
     {
         auto toHalf = [](float v) -> uint16_t {
             uint32_t f = *reinterpret_cast<uint32_t*>(&v);
@@ -1268,9 +1260,7 @@ bool Renderer::initIBL()
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// HDR skybox loading (equirectangular → cubemap + IBL regen)
-// ═══════════════════════════════════════════════════════════════════════════
+// HDR skybox loading (equirectangular -> cubemap + IBL regen)
 
 void Renderer::scanHDRFiles()
 {
@@ -1293,7 +1283,7 @@ void Renderer::scanHDRFiles()
 
 bool Renderer::loadHDRSkybox(const std::string& path)
 {
-    // ── Load equirectangular HDR ────────────────────────────────────────────
+    // Load equirectangular HDR
     int hdrW = 0, hdrH = 0, hdrC = 0;
     float* hdrData = stbi_loadf(path.c_str(), &hdrW, &hdrH, &hdrC, 3);
     if (!hdrData) {
@@ -1302,7 +1292,7 @@ bool Renderer::loadHDRSkybox(const std::string& path)
     }
     SDL_Log("HDR skybox: loaded %s (%dx%d)", path.c_str(), hdrW, hdrH);
 
-    // ── Convert to float16 helpers ──────────────────────────────────────────
+    // Convert to float16 helpers
     auto toHalf = [](float v) -> uint16_t {
         uint32_t f;
         SDL_memcpy(&f, &v, 4);
@@ -1358,7 +1348,7 @@ bool Renderer::loadHDRSkybox(const std::string& path)
             glm::mix(pixel(x0, y0), pixel(x0 + 1, y0), sx), glm::mix(pixel(x0, y0 + 1), pixel(x0 + 1, y0 + 1), sx), sy);
     };
 
-    // ── Create cubemap faces (512×512, RGBA16F) ─────────────────────────────
+    // Create cubemap faces (512x512, RGBA16F)
     const int cubeSz = 512;
     const size_t faceBytes = static_cast<size_t>(cubeSz * cubeSz * 4) * sizeof(uint16_t);
     std::vector<uint16_t> faceData(static_cast<size_t>(cubeSz * cubeSz * 4));
@@ -1444,7 +1434,7 @@ bool Renderer::loadHDRSkybox(const std::string& path)
     SDL_ReleaseGPUTransferBuffer(device, tb);
     stbi_image_free(hdrData);
 
-    // ── Regenerate irradiance map from the loaded cubemap ───────────────────
+    // Regenerate irradiance map from the loaded cubemap
     {
         const int irrSz = 32;
         const size_t irrFaceBytes = static_cast<size_t>(irrSz * irrSz * 4) * sizeof(uint16_t);
@@ -1536,7 +1526,7 @@ bool Renderer::loadHDRSkybox(const std::string& path)
         SDL_ReleaseGPUTransferBuffer(device, irrTb);
     }
 
-    // ── Regenerate prefilter map (5 mip levels) from loaded cubemap ─────────
+    // Regenerate prefilter map (5 mip levels) from loaded cubemap
     {
         for (int mip = 0; mip < 5; ++mip) {
             int mipSize = 128 >> mip;
@@ -1653,9 +1643,7 @@ bool Renderer::loadHDRSkybox(const std::string& path)
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Post-processing init (Phases 7-13)
-// ═══════════════════════════════════════════════════════════════════════════
 
 bool Renderer::initBloom()
 {
@@ -1698,9 +1686,7 @@ bool Renderer::initTAA()
     return motionVectorPipeline && taaPipeline;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // init
-// ═══════════════════════════════════════════════════════════════════════════
 
 bool Renderer::init(SDL_Window* win)
 {
@@ -1748,7 +1734,7 @@ bool Renderer::init(SDL_Window* win)
     if (!ImGui_ImplSDLGPU3_Init(&imguiInfo))
         return false;
 
-    // ── Create all pipelines ────────────────────────────────────────────────
+    // Create all pipelines
     if (!initScenePipeline())
         return false;
     if (!initPBRPipeline())
@@ -1792,7 +1778,7 @@ bool Renderer::init(SDL_Window* win)
     if (!initIBL())
         SDL_Log("Renderer: IBL init failed — metallic surfaces will appear dark");
 
-    // ── Post-processing compute pipelines (Phases 7-13) ─────────────────────
+    // Post-processing compute pipelines (Phases 7-13)
     if (!initBloom())
         SDL_Log("Renderer: bloom init failed");
     if (!initSSAO())
@@ -1804,7 +1790,7 @@ bool Renderer::init(SDL_Window* win)
     if (!initTAA())
         SDL_Log("Renderer: TAA init failed");
 
-    // ── Tonemap sampler (linear, clamp-to-edge) ─────────────────────────────
+    // Tonemap sampler (linear, clamp-to-edge)
     SDL_GPUSamplerCreateInfo sampInfo{};
     sampInfo.min_filter = SDL_GPU_FILTER_LINEAR;
     sampInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
@@ -1814,8 +1800,7 @@ bool Renderer::init(SDL_Window* win)
     sampInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     tonemapSampler = SDL_CreateGPUSampler(device, &sampInfo);
 
-    // ── Load model ──────────────────────────────────────────────────────────
-    // ── Load scene models ──────────────────────────────────────────────────
+    // Load scene models
     const char* const k_base = SDL_GetBasePath();
 
     // Helper to load a model and place it in the scene.
@@ -1857,7 +1842,7 @@ bool Renderer::init(SDL_Window* win)
                     nearPlane,
                     farPlane);
 
-    // ── Load default HDR skybox ─────────────────────────────────────────────
+    // Load default HDR skybox
     scanHDRFiles();
     {
         char hdrPath[512];
@@ -1870,9 +1855,7 @@ bool Renderer::init(SDL_Window* win)
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Render target management
-// ═══════════════════════════════════════════════════════════════════════════
 
 bool Renderer::ensureDepthTexture(const Uint32 w, const Uint32 h)
 {
@@ -1947,9 +1930,7 @@ bool Renderer::ensureCaptureRT(const Uint32 w, const Uint32 h, const SDL_GPUText
     return captureRT != nullptr;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// drawFrame — main render loop
-// ═══════════════════════════════════════════════════════════════════════════
+// drawFrame -- main render loop
 
 glm::vec3 Renderer::getSunDirection() const
 {
@@ -1959,14 +1940,20 @@ glm::vec3 Renderer::getSunDirection() const
     return glm::normalize(glm::vec3(cosEl * std::sin(azRad), std::sin(elRad), cosEl * std::cos(azRad)));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Cascaded Shadow Map computation
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// Compute per-cascade light view-projection matrices that tightly fit the
-/// camera's sub-frustum from the light's perspective.  Uses the practical
-/// split scheme (blend of logarithmic and linear) and texel-snaps the ortho
-/// projection to prevent shadow swimming.
+/// @brief Compute per-cascade light view-projection matrices.
+///
+/// Tightly fits the camera's sub-frustum from the light's perspective.  Uses
+/// the practical split scheme (blend of logarithmic and linear) and
+/// texel-snaps the ortho projection to prevent shadow swimming.
+/// @param cam Current camera.
+/// @param lightDir Unit direction vector toward the sun.
+/// @param numCascades Number of cascades (up to 4).
+/// @param shadowMapSize Per-cascade shadow map resolution.
+/// @param shadowMaxDist Maximum shadow distance in world units.
+/// @param lambda Logarithmic vs linear blend factor (0=linear, 1=log).
+/// @return Array of CascadeInfo structs with light VP matrices and split distances.
 static std::array<CascadeInfo, 4> computeCascades(
     const Camera& cam, const glm::vec3& lightDir, int numCascades, int shadowMapSize, float shadowMaxDist, float lambda)
 {
@@ -1974,7 +1961,7 @@ static std::array<CascadeInfo, 4> computeCascades(
 
     const float camNear = cam.getNear();
 
-    // ── Compute split distances (practical split scheme) ────────────────────
+    // Compute split distances (practical split scheme)
     float splits[5];
     splits[0] = camNear;
     for (int i = 0; i < numCascades; ++i) {
@@ -1984,7 +1971,7 @@ static std::array<CascadeInfo, 4> computeCascades(
         splits[i + 1] = lambda * logSplit + (1.0f - lambda) * linSplit;
     }
 
-    // ── Camera basis ────────────────────────────────────────────────────────
+    // Camera basis
     // cam.getUp() returns the raw input up (0,1,0), NOT the orthonormalized
     // up that lookAt computes.  We must derive the actual camera up from
     // forward × right to match the real frustum orientation — otherwise the
@@ -2008,7 +1995,7 @@ static std::array<CascadeInfo, 4> computeCascades(
         const float farDist = splits[c + 1];
         cascades[static_cast<size_t>(c)].splitDistance = farDist;
 
-        // ── 8 frustum corners for this sub-frustum ──────────────────────────
+        // 8 frustum corners for this sub-frustum
         const float nH = tanHalfY * nearDist;
         const float nW = tanHalfX * nearDist;
         const float fH = tanHalfY * farDist;
@@ -2028,19 +2015,19 @@ static std::array<CascadeInfo, 4> computeCascades(
             fc + camRight * fW - camUp * fH,
         };
 
-        // ── Sub-frustum center ──────────────────────────────────────────────
+        // Sub-frustum center
         glm::vec3 center(0.0f);
         for (const auto& corner : corners)
             center += corner;
         center /= 8.0f;
 
-        // ── Light view matrix ───────────────────────────────────────────────
+        // Light view matrix
         // Place the eye far enough behind the center to encompass all
         // potential shadow casters (buildings, terrain behind the camera, etc.).
         constexpr float k_lightDistance = 5000.0f;
         const glm::mat4 lightView = glm::lookAt(center + lightDir * k_lightDistance, center, upVec);
 
-        // ── AABB of sub-frustum in light space ──────────────────────────────
+        // AABB of sub-frustum in light space
         float minX = std::numeric_limits<float>::max();
         float maxX = std::numeric_limits<float>::lowest();
         float minY = std::numeric_limits<float>::max();
@@ -2058,7 +2045,7 @@ static std::array<CascadeInfo, 4> computeCascades(
             maxZ = std::max(maxZ, ls.z);
         }
 
-        // ── Texel-snap XY (prevents shadow swimming on camera movement) ────
+        // Texel-snap XY (prevents shadow swimming on camera movement)
         const float texelX = (maxX - minX) / static_cast<float>(shadowMapSize);
         const float texelY = (maxY - minY) / static_cast<float>(shadowMapSize);
 
@@ -2067,7 +2054,7 @@ static std::array<CascadeInfo, 4> computeCascades(
         minY = std::floor(minY / texelY) * texelY;
         maxY = std::ceil(maxY / texelY) * texelY;
 
-        // ── Orthographic projection (RH, zero-to-one depth for Vulkan) ─────
+        // Orthographic projection (RH, zero-to-one depth for Vulkan)
         // Near/far derived from the frustum Z AABB.  The near plane is extended
         // significantly backward to capture shadow casters (buildings, terrain)
         // behind the camera sub-frustum that still cast into it.
@@ -2089,7 +2076,7 @@ static std::array<CascadeInfo, 4> computeCascades(
 
 void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, const float roll)
 {
-    // ── Camera setup ────────────────────────────────────────────────────────
+    // Camera setup
     const float cosPitch = std::cos(pitch);
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
 
@@ -2105,7 +2092,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
     camera.setLookAt(eye, eye + forward, camUp);
 
-    // ── Acquire GPU resources ───────────────────────────────────────────────
+    // Acquire GPU resources
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
     if (!cmd)
         return;
@@ -2117,7 +2104,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         return;
     }
 
-    // ── Flush pending skinned-mesh vertex uploads ─────────────────────────
+    // Flush pending skinned-mesh vertex uploads
     // Batched into this frame's command buffer — one copy pass for all meshes,
     // zero extra SDL_SubmitGPUCommandBuffer calls, zero pipeline stalls.
     if (!pendingVertexUploads.empty()) {
@@ -2167,7 +2154,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         return;
     }
 
-    // ── Ensure post-processing textures exist at screen resolution ───────
+    // Ensure post-processing textures exist at screen resolution
     // Bloom mip chain (lazy create/resize).
     {
         Uint32 mipW = w / 2, mipH = h / 2;
@@ -2245,18 +2232,16 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
-    // ── Upload particle data (BEFORE any render pass) ────────────────────
+    // Upload particle data (BEFORE any render pass)
     if (particleSystem && toggles.particles)
         particleSystem->uploadToGpu(cmd);
 
-    // ── Prepare ImGui ───────────────────────────────────────────────────────
+    // Prepare ImGui
     ImDrawData* const drawData = ImGui::GetDrawData();
     if (drawData)
         ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
 
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 0: Cascaded Shadow Maps — 4 depth-only passes, one per cascade
-    // ════════════════════════════════════════════════════════════════════════
+    // PASS 0: Cascaded Shadow Maps -- 4 depth-only passes, one per cascade
     std::array<CascadeInfo, 4> cascades{};
     if (toggles.shadows && shadowPipeline && shadowMap) {
         cascades = computeCascades(
@@ -2277,7 +2262,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         for (int c = 0; c < k_shadowCascades; ++c) {
             const auto& cascade = cascades[static_cast<size_t>(c)];
 
-            // ── Viewport + scissor for this cascade's atlas quadrant ────────
+            // Viewport + scissor for this cascade's atlas quadrant
             const auto vx = static_cast<float>((c % 2) * k_shadowMapSize);
             const auto vy = static_cast<float>((c / 2) * k_shadowMapSize);
             const auto vs = static_cast<float>(k_shadowMapSize);
@@ -2287,7 +2272,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 (c % 2) * k_shadowMapSize, (c / 2) * k_shadowMapSize, k_shadowMapSize, k_shadowMapSize};
             SDL_SetGPUScissor(shadowPass, &scissor);
 
-            // ── Scene models (Assimp-loaded) ────────────────────────────────
+            // Scene models (Assimp-loaded)
             SDL_BindGPUGraphicsPipeline(shadowPass, shadowPipeline);
             for (const auto& model : models) {
                 if (!model.drawInScenePass)
@@ -2308,7 +2293,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 }
             }
 
-            // ── Entity models (ECS-driven — now cast shadows) ───────────────
+            // Entity models (ECS-driven -- now cast shadows)
             for (const auto& ecmd : entityRenderCmds) {
                 if (ecmd.modelIndex < 0 || ecmd.modelIndex >= static_cast<int>(models.size()))
                     continue;
@@ -2329,7 +2314,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 }
             }
 
-            // ── Scene geometry (procedural boxes + floor) ───────────────────
+            // Scene geometry (procedural boxes + floor)
             if (sceneShadowPipeline) {
                 SDL_BindGPUGraphicsPipeline(shadowPass, sceneShadowPipeline);
                 SceneMatrices sceneShadowMats{};
@@ -2344,9 +2329,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_EndGPURenderPass(shadowPass);
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 1: Main colour pass → HDR render target
-    // ════════════════════════════════════════════════════════════════════════
+    // PASS 1: Main colour pass -> HDR render target
     {
         SDL_GPUColorTargetInfo ct{};
         ct.texture = hdrTarget;
@@ -2364,7 +2347,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
         SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
 
-        // ── Scene geometry (physics playground) ──────────────────────────────
+        // Scene geometry (physics playground)
         if (toggles.sceneGeometry && scenePipeline) {
             SDL_BindGPUGraphicsPipeline(pass, scenePipeline);
 
@@ -2403,7 +2386,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             SDL_DrawGPUPrimitives(pass, 1182, 1, 0, 0);
         }
 
-        // ── PBR models (two-pass: opaques first, then transparents) ────────
+        // PBR models (two-pass: opaques first, then transparents)
         if (pbrSampler && !models.empty()) {
             // Light data shared by both passes.
             LightDataUBO lightData{};
@@ -2532,7 +2515,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 SDL_DrawGPUPrimitives(pass, 36, 1, 0, 0);
             }
 
-            // ── Entity render commands (PBR models at entity positions) ─────
+            // Entity render commands (PBR models at entity positions)
             // These are driven by the ECS — each entity with Renderable + Position
             // contributes an EntityRenderCmd built by Game::iterate().
             if (toggles.entityModels && pbrPipeline && !entityRenderCmds.empty()) {
@@ -2606,7 +2589,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             }
         }
 
-        // ── Particle rendering (inside HDR pass, after opaques + skybox) ─────
+        // Particle rendering (inside HDR pass, after opaques + skybox)
         // Push ParticleUniforms matching the layout expected by all particle
         // vertex shaders (set=1, binding=0): view, proj, camPos, camRight, camUp.
         if (toggles.particles && particleSystem) {
@@ -2634,7 +2617,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             particleSystem->render(pass, cmd);
         }
 
-        // ── First-person weapon viewmodel ────────────────────────────────────
+        // First-person weapon viewmodel
         // Rendered last in the HDR pass. The weapon should always be in front,
         // so we don't clear depth — it just draws over the scene at close range.
         if (toggles.weaponViewmodel && weaponVM.visible && weaponVM.modelIndex >= 0 &&
@@ -2712,11 +2695,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_EndGPURenderPass(pass);
     }
 
-    // ════════════════════════════════════════════════════════════════════════
     // Compute passes: SSAO, Bloom, SSR, Volumetrics (between HDR and tonemap)
-    // ════════════════════════════════════════════════════════════════════════
 
-    // ── GTAO (Phase 7) — Ground Truth Ambient Occlusion ────────────────────
+    // GTAO (Phase 7) -- Ground Truth Ambient Occlusion
     if (toggles.ssao && ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
         // GTAO main pass → ssaoTexture (raw AO).
         struct
@@ -2770,7 +2751,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_EndGPUComputePass(blurPass);
     }
 
-    // ── Bloom (Phase 8) ─────────────────────────────────────────────────────
+    // Bloom (Phase 8)
     if (toggles.bloom && bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
         // Downsample chain.
         Uint32 srcW = w, srcH = h;
@@ -2827,7 +2808,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         }
     }
 
-    // ── SSR (Phase 9) ───────────────────────────────────────────────────────
+    // SSR (Phase 9)
     static uint64_t ssrFrameCounter = 0;
     ++ssrFrameCounter;
 
@@ -2874,7 +2855,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ssrCurrentIdx = ssrDst;
     }
 
-    // ── Volumetrics (Phase 10) ──────────────────────────────────────────────
+    // Volumetrics (Phase 10)
     if (toggles.volumetrics && volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
         struct
         {
@@ -2920,7 +2901,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_EndGPUComputePass(volPass);
     }
 
-    // ── TAA (Phase 11) — motion vectors + temporal resolve ────────────────
+    // TAA (Phase 11) -- motion vectors + temporal resolve
     if (toggles.taa && motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] &&
         depthTexture)
     {
@@ -2977,9 +2958,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         previousVP = currentVP;
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 2: Tone mapping → swapchain (or captureRT for screenshots)
-    // ════════════════════════════════════════════════════════════════════════
+    // PASS 2: Tone mapping -> swapchain (or captureRT for screenshots)
     {
         const bool capturing = !pendingCapPath.empty() && ensureCaptureRT(w, h, swapchainFormat);
         SDL_GPUTexture* const renderTarget = capturing ? captureRT : swapchain;
@@ -3021,7 +3000,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0); // fullscreen triangle
         }
 
-        // ── ImGui overlay (in LDR, on top of tone-mapped image) ─────────────
+        // ImGui overlay (in LDR, on top of tone-mapped image)
         if (drawData)
             ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, pass);
 
@@ -3048,9 +3027,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         downloadAndSaveCapture(w, h);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Screenshot download
-// ═══════════════════════════════════════════════════════════════════════════
 
 void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
 {
@@ -3111,9 +3088,7 @@ void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
     pendingCapPath.clear();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Misc
-// ═══════════════════════════════════════════════════════════════════════════
 
 int Renderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs)
 {

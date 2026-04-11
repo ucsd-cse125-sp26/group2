@@ -1,3 +1,5 @@
+/// @file hitscan_beam.frag
+/// @brief Hitscan beam fragment shader with three-layer glow profile.
 #version 450
 
 layout(location = 0) in  vec2  vUV;
@@ -17,7 +19,7 @@ void main()
 
     vec4 col = mix(vEdgeColor, vCoreColor, t) * outerGlow * vBrightness;
 
-    // Concentrated inner channel — brighter than base
+    // Concentrated inner channel -- brighter than base
     col.rgb += vCoreColor.rgb * innerGlow * vBrightness * 1.2;
 
     // White-hot core overdriven for HDR look

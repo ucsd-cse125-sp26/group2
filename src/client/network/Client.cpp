@@ -1,3 +1,6 @@
+/// @file Client.cpp
+/// @brief Implementation of the TCP client connection and message I/O.
+
 #include "Client.hpp"
 
 #include <SDL3/SDL.h>

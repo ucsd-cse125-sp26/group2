@@ -1,12 +1,14 @@
+/// @file ribbon.vert
+/// @brief Ribbon trail vertex shader using pre-expanded vertex buffer.
 #version 450
 
-// Vertex buffer: pre-expanded RibbonVertex (32 bytes)
-//   location 0: vec4 (pos.xyz + pad)
-//   location 1: vec4 color (pre-multiplied alpha)
-
+/// @brief Vertex buffer: pre-expanded RibbonVertex (32 bytes).
+///   location 0: vec4 (pos.xyz + pad)
+///   location 1: vec4 color (pre-multiplied alpha)
 layout(location = 0) in vec4 inPosP;   // .xyz = world pos, .w = padding
 layout(location = 1) in vec4 inColor;
 
+/// @brief Per-frame camera uniforms.
 layout(set = 1, binding = 0) uniform ParticleUniforms {
     mat4  view;
     mat4  proj;

@@ -1,12 +1,15 @@
-// oit_resolve.frag — Fullscreen resolve for Weighted Blended OIT.
-// Composites the accumulation + revealage buffers onto the opaque background.
-// Paired with fullscreen.vert.
+/// @file oit_resolve.frag
+/// @brief Fullscreen resolve for Weighted Blended OIT.
+/// Composites the accumulation + revealage buffers onto the opaque background.
+/// Paired with fullscreen.vert.
 #version 450
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
+/// @brief OIT accumulation buffer (premultiplied color * weight).
 layout(set = 2, binding = 0) uniform sampler2D accumTexture;
+/// @brief OIT revealage buffer (product of 1-alpha).
 layout(set = 2, binding = 1) uniform sampler2D revealTexture;
 
 void main()

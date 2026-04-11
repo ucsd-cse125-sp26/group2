@@ -1,3 +1,6 @@
+/// @file GpuParticleBuffer.hpp
+/// @brief GPU storage/vertex buffer paired with a CPU transfer buffer for particle uploads.
+
 #pragma once
 
 #include <SDL3/SDL.h>

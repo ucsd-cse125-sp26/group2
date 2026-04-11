@@ -1,3 +1,6 @@
+/// @file ExplosionEffect.cpp
+/// @brief Implementation of shockwave ring and fireball explosion effect.
+
 #include "ExplosionEffect.hpp"
 
 #include <algorithm>
@@ -13,7 +16,7 @@ void ExplosionEffect::spawn(glm::vec3 pos, float blastRadius, SmokeEffect& smoke
         ring->lifetime = 0.3f;
     }
 
-    // 2. Immediate fireballs (3–5 fire smoke particles)
+    // 2. Immediate fireballs (3-5 fire smoke particles)
     smoke.spawn(pos, blastRadius * 0.4f, /*isFire=*/true);
     smoke.spawn(pos, blastRadius * 0.3f, /*isFire=*/true);
 
@@ -38,7 +41,7 @@ void ExplosionEffect::update(float dt)
     });
 
     // Tick deferred smoke spawns
-    // (We can't call smoke.spawn here without a SmokeEffect ref — caller must handle)
+    // (We can't call smoke.spawn here without a SmokeEffect ref -- caller must handle)
     for (int i = 0; i < pendingCount_; ++i) {
         pending_[i].delay -= dt;
     }

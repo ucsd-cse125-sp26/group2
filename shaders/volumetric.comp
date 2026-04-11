@@ -1,15 +1,20 @@
-// volumetric.comp — Volumetric light scattering via ray marching.
-// Renders at half resolution for performance.
-// Uses Cascaded Shadow Maps (shadow atlas, 2×2 grid).
+/// @file volumetric.comp
+/// @brief Volumetric light scattering via ray marching.
+/// Renders at half resolution for performance.
+/// Uses Cascaded Shadow Maps (shadow atlas, 2x2 grid).
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Scene depth buffer.
 layout(set = 0, binding = 0) uniform sampler2D depthBuffer;
+/// @brief Cascaded shadow map atlas with comparison sampler.
 layout(set = 0, binding = 1) uniform sampler2DShadow shadowMap;
 
+/// @brief Output volumetric scattering image.
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D volumetricImage;
 
+/// @brief Volumetric scattering parameters.
 layout(set = 2, binding = 0) uniform VolumetricParams {
     mat4 invViewProj;
     mat4 lightVP[4];         // Per-cascade light VP matrices.
@@ -26,7 +31,7 @@ layout(set = 2, binding = 0) uniform VolumetricParams {
     float _pad2;
 };
 
-// Atlas layout: 2×2 grid, each cascade occupies 0.5 of the atlas per axis.
+// Atlas layout: 2x2 grid, each cascade occupies 0.5 of the atlas per axis.
 const vec2 k_cascadeOffsets[4] = vec2[4](
     vec2(0.0, 0.0), vec2(0.5, 0.0),
     vec2(0.0, 0.5), vec2(0.5, 0.5)
@@ -73,7 +78,7 @@ void main()
     ivec2 size = imageSize(volumetricImage);
     if (coord.x >= size.x || coord.y >= size.y) return;
 
-    // Half-res UV → full-res UV for depth sampling.
+    // Half-res UV -> full-res UV for depth sampling.
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);
     float depth = texture(depthBuffer, uv).r;
 

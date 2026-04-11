@@ -1,19 +1,26 @@
-// ssr.comp — Screen-space reflections with three selectable modes:
-//   Mode 0 (Sharp):      Deterministic ray march, proximity fade, no temporal.
-//   Mode 1 (Stochastic): Jittered rays + temporal accumulation via ping-pong.
-//   Mode 2 (Masked):     Deterministic ray march, world-space distance fade
-//                         at contact zone, IBL fills the gap naturally.
+/// @file ssr.comp
+/// @brief Screen-space reflections with three selectable modes.
+///   Mode 0 (Sharp):      Deterministic ray march, proximity fade, no temporal.
+///   Mode 1 (Stochastic): Jittered rays + temporal accumulation via ping-pong.
+///   Mode 2 (Masked):     Deterministic ray march, world-space distance fade
+///                         at contact zone, IBL fills the gap naturally.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief HDR scene color buffer.
 layout(set = 0, binding = 0) uniform sampler2D hdrBuffer;
+/// @brief Scene depth buffer.
 layout(set = 0, binding = 1) uniform sampler2D depthBuffer;
+/// @brief Previous frame SSR result (for temporal accumulation).
 layout(set = 0, binding = 2) uniform sampler2D prevSSR;
+/// @brief Per-pixel motion vectors.
 layout(set = 0, binding = 3) uniform sampler2D motionVectors;
 
+/// @brief Output SSR image (RGBA: color + confidence).
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D ssrImage;
 
+/// @brief SSR algorithm parameters.
 layout(set = 2, binding = 0) uniform SSRParams {
     mat4 projection;
     mat4 invProjection;
@@ -71,7 +78,7 @@ void main()
 
     vec3 viewPos = viewPosFromDepth(uv, rawDepth);
 
-    // ── Normal reconstruction (central differences) ─────────────────────────
+    // Normal reconstruction (central differences)
     vec2 ts = 1.0 / screenSize;
     float dL = texture(depthBuffer, uv - vec2(ts.x, 0)).r;
     float dR = texture(depthBuffer, uv + vec2(ts.x, 0)).r;
@@ -87,14 +94,14 @@ void main()
     vec3 ddy = (abs(dD - rawDepth) < abs(rawDepth - dU)) ? (pD - viewPos) : (viewPos - pU);
     vec3 viewNormal = normalize(cross(ddx, ddy));
 
-    // Only nearly-vertical surfaces (walls) — skip floors entirely.
+    // Only nearly-vertical surfaces (walls) -- skip floors entirely.
     float horizontalness = abs(viewNormal.y);
     if (horizontalness < 0.3) {
         imageStore(ssrImage, coord, vec4(0.0));
         return;
     }
 
-    // ── Reflection ray ──────────────────────────────────────────────────────
+    // Reflection ray
     vec3 viewDir = normalize(viewPos);
     vec3 reflDir = reflect(viewDir, viewNormal);
 
@@ -112,7 +119,7 @@ void main()
     float viewDist = abs(viewPos.z);
     vec3 biasedStart = viewPos + reflDir * (viewDist * 0.002);
 
-    // ── Screen-space march ──────────────────────────────────────────────────
+    // Screen-space march
     vec3 startScreen = projectToScreen(biasedStart);
     vec3 endScreen = projectToScreen(biasedStart + reflDir * maxDistance);
     vec3 deltaScreen = endScreen - startScreen;
@@ -177,7 +184,7 @@ void main()
             // Only walls get strong SSR; floors are fully matte.
             float floorSuppress = 1.0 - smoothstep(0.5, 0.75, horizontalness);
 
-            // ── Mode-specific confidence adjustments ────────────────────────
+            // Mode-specific confidence adjustments
 
             float confidence = edgeFade * distFade * horizFade * floorSuppress;
 
@@ -195,17 +202,17 @@ void main()
 
                 // Fade out hits that are very close in world space (contact zone).
                 // Objects sitting ON the floor have their undercarriage ~1-5 units
-                // above.  Fade these out so IBL fills the contact zone naturally.
+                // above. Fade these out so IBL fills the contact zone naturally.
                 confidence *= smoothstep(5.0, 40.0, worldDist);
             }
-            // Mode 1 (Stochastic): no extra fade — temporal handles it.
+            // Mode 1 (Stochastic): no extra fade -- temporal handles it.
 
             vec3 hitColor = texture(hdrBuffer, hitUV).rgb;
             result = vec4(hitColor, confidence);
         }
     }
 
-    // ── Temporal accumulation (Mode 1 only) ─────────────────────────────────
+    // Temporal accumulation (Mode 1 only)
     if (ssrMode == 1) {
         vec2 motion = texture(motionVectors, uv).rg;
         vec2 historyUV = uv - motion;

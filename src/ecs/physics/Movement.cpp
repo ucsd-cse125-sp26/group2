@@ -1,3 +1,6 @@
+/// @file Movement.cpp
+/// @brief Implementation of Quake-style movement physics functions.
+
 #include "Movement.hpp"
 
 #include "PhysicsConstants.hpp"

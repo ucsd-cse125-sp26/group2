@@ -1,3 +1,6 @@
+/// @file FrameRecorder.hpp
+/// @brief Per-frame state recorder for diagnosing camera jitter and position glitches.
+
 #pragma once
 
 #include <cstdint>
@@ -19,20 +22,20 @@ struct FrameState
     double timestamp = 0.0; ///< Seconds since recording started.
     int tickCount = 0;      ///< Physics-tick counter at this render frame.
 
-    // ── raw physics state ────────────────────────────────────────────────────
+    // Raw physics state
     glm::vec3 physPos{0.0f}; ///< pos.value — what physics says.
     glm::vec3 physVel{0.0f}; ///< vel.value — current velocity.
 
-    // ── raw input orientation ────────────────────────────────────────────────
+    // Raw input orientation
     float yaw = 0.0f;   ///< input.yaw   (accumulated mouse X).
     float pitch = 0.0f; ///< input.pitch (accumulated mouse Y).
 
-    // ── what was sent to Renderer::drawFrame ─────────────────────────────────
+    // What was sent to Renderer::drawFrame
     glm::vec3 renderEye{0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
 
-    // ── screen-space (pixels) of world objects — jitter is visible here ───────
+    // Screen-space (pixels) of world objects -- jitter is visible here
     glm::vec2 cubeScreen{0.0f};  ///< Cube centre (0, 32, 400).
     glm::vec2 modelScreen{0.0f}; ///< Wraith model centre (200, 0, 400).
 

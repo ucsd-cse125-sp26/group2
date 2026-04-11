@@ -1,7 +1,8 @@
-// pbr_wboit.frag — Weighted Blended OIT accumulation pass.
-// Outputs to two render targets: accumulation (RGBA16F) and revealage (R8).
-// This is the SAME PBR lighting as pbr.frag but writes to OIT buffers.
-// For now, this is a simplified version that just does the OIT weighting.
+/// @file pbr_wboit.frag
+/// @brief Weighted Blended OIT accumulation pass.
+/// Outputs to two render targets: accumulation (RGBA16F) and revealage (R8).
+/// This is the same PBR lighting as pbr.frag but writes to OIT buffers.
+/// For now, this is a simplified version that just does the OIT weighting.
 #version 450
 
 layout(location = 0) in vec3 fragWorldPos;
@@ -14,8 +15,10 @@ layout(location = 4) in vec3 fragBitangent;
 layout(location = 0) out vec4 accumulation;
 layout(location = 1) out vec4 revealage;
 
+/// @brief Albedo (base color) texture.
 layout(set = 2, binding = 0) uniform sampler2D texAlbedo;
 
+/// @brief Per-mesh material parameters.
 layout(set = 3, binding = 0) uniform Material {
     vec4  baseColorFactor;
     float metallicFactor;

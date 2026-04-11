@@ -1,14 +1,19 @@
-// gtao_blur.comp — Cross-bilateral blur for GTAO.
-// Edge-preserving spatial filter: uses depth similarity to weight samples,
-// preventing AO from bleeding across geometry edges.
+/// @file gtao_blur.comp
+/// @brief Cross-bilateral blur for GTAO.
+/// Edge-preserving spatial filter: uses depth similarity to weight samples,
+/// preventing AO from bleeding across geometry edges.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Input AO texture from GTAO pass.
 layout(set = 0, binding = 0) uniform sampler2D aoInput;
+/// @brief Scene depth texture for edge detection.
 layout(set = 0, binding = 1) uniform sampler2D depthTexture;
+/// @brief Output blurred AO image.
 layout(set = 1, binding = 0, r8) writeonly uniform image2D aoOutput;
 
+/// @brief Bilateral blur parameters.
 layout(set = 2, binding = 0) uniform BlurParams {
     vec2 screenSize;
     float depthSigma;    // depth similarity threshold
@@ -27,7 +32,7 @@ void main()
     float centerAO = texture(aoInput, uv).r;
     float centerDepth = texture(depthTexture, uv).r;
 
-    // Sky → pass through.
+    // Sky -> pass through.
     if (centerDepth >= 0.9999) {
         imageStore(aoOutput, coord, vec4(1.0));
         return;
@@ -40,9 +45,9 @@ void main()
     float totalAO = 0.0;
     float totalWeight = 0.0;
 
-    // 7×7 bilateral kernel.
+    // 7x7 bilateral kernel.
     const int RADIUS = 3;
-    // Spatial Gaussian weights for radius=3 (sigma ≈ 1.5).
+    // Spatial Gaussian weights for radius=3 (sigma ~ 1.5).
     const float spatialWeights[4] = float[](1.0, 0.7788, 0.3679, 0.1054);
 
     for (int y = -RADIUS; y <= RADIUS; ++y) {

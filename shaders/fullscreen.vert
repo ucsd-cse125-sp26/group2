@@ -1,5 +1,6 @@
-// fullscreen.vert — generates a fullscreen triangle from gl_VertexIndex.
-// Draw with 3 vertices, no vertex buffer needed.
+/// @file fullscreen.vert
+/// @brief Generates a fullscreen triangle from gl_VertexIndex.
+/// Draw with 3 vertices, no vertex buffer needed.
 #version 450
 
 layout(location = 0) out vec2 fragTexCoord;

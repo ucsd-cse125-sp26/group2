@@ -1,8 +1,11 @@
+/// @file SkinnedModel.cpp
+/// @brief Implementation of FBX loading, ozz skeleton/animation building, and CPU skinning.
+
 #include "SkinnedModel.hpp"
 
 #include <SDL3/SDL_log.h>
 
-// ── Assimp headers ─────────────────────────────────────────────────────────
+// Assimp headers
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -18,7 +21,7 @@
 #pragma GCC diagnostic pop
 #endif
 
-// ── ozz-animation headers ──────────────────────────────────────────────────
+// ozz-animation headers
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -48,14 +51,12 @@
 #include <unordered_set>
 #include <vector>
 
-// ═══════════════════════════════════════════════════════════════════════════
 // File-local types used by both Impl and helper functions.
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-/// Rest-pose local transform cached during skeleton building, then reused
+/// @brief Rest-pose local transform cached during skeleton building, then reused
 /// as a constant keyframe for joints that have no animation channel.
 struct JointRestPose
 {
@@ -79,13 +80,11 @@ struct MeshSkinData
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
-// PIMPL — all ozz types are hidden from the header.
-// ═══════════════════════════════════════════════════════════════════════════
+// PIMPL -- all ozz types are hidden from the header.
 
 struct SkinnedModel::Impl
 {
-    // ── ozz runtime data ────────────────────────────────────────────────────
+    // ozz runtime data
     ozz::unique_ptr<ozz::animation::Skeleton> skeleton;
     ozz::unique_ptr<ozz::animation::Animation> animation;
     ozz::animation::SamplingJob::Context context;
@@ -98,7 +97,7 @@ struct SkinnedModel::Impl
 
     std::vector<MeshSkinData> meshSkins;
 
-    // ── Skeleton metadata ───────────────────────────────────────────────────
+    // Skeleton metadata
     /// Inverse bind matrix per skeleton joint.  Joints that are structural
     /// (not directly referenced as bones) keep identity.
     std::vector<glm::mat4> inverseBindMatrices;
@@ -116,14 +115,14 @@ struct SkinnedModel::Impl
     bool loaded = false;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Anonymous helpers
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-/// Convert an ozz SIMD 4×4 matrix to a GLM column-major mat4.
+/// @brief Convert an ozz SIMD 4x4 matrix to a GLM column-major mat4.
+/// @param m  The ozz Float4x4 matrix.
+/// @return Equivalent GLM mat4.
 glm::mat4 ozzToGlm(const ozz::math::Float4x4& m)
 {
     glm::mat4 out;
@@ -135,18 +134,25 @@ glm::mat4 ozzToGlm(const ozz::math::Float4x4& m)
     return out;
 }
 
-/// Convert an Assimp row-major 4×4 matrix to GLM column-major.
+/// @brief Convert an Assimp row-major 4x4 matrix to GLM column-major.
+/// @param m  The Assimp matrix.
+/// @return Equivalent GLM mat4.
 glm::mat4 aiToGlm(const aiMatrix4x4& m)
 {
     return glm::transpose(glm::make_mat4(&m.a1));
 }
 
-// ── Skeleton building ───────────────────────────────────────────────────────
+// Skeleton building
 
-/// Recursively build a RawSkeleton joint tree from the Assimp node hierarchy.
+/// @brief Recursively build a RawSkeleton joint tree from the Assimp node hierarchy.
+///
 /// Only includes nodes that are bones or ancestors of bones (prunes mesh
 /// nodes and other non-skeletal branches).
 ///
+/// @param node       Current Assimp node to process.
+/// @param boneNames  Set of bone names referenced by meshes.
+/// @param outJoint   Output joint to populate.
+/// @param restPoses  Map to store rest-pose transforms for each joint.
 /// @return True if this node or any descendant is a bone.
 bool buildJoint(const aiNode* node,
                 const std::unordered_set<std::string>& boneNames,
@@ -189,18 +195,14 @@ bool buildJoint(const aiNode* node,
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Constructor / destructor / move
-// ═══════════════════════════════════════════════════════════════════════════
 
 SkinnedModel::SkinnedModel() : impl_(std::make_unique<Impl>()) {}
 SkinnedModel::~SkinnedModel() = default;
 SkinnedModel::SkinnedModel(SkinnedModel&&) noexcept = default;
 SkinnedModel& SkinnedModel::operator=(SkinnedModel&&) noexcept = default;
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Simple getters (delegate to PIMPL)
-// ═══════════════════════════════════════════════════════════════════════════
 
 const LoadedModel& SkinnedModel::getLoadedModel() const
 {
@@ -227,9 +229,7 @@ bool SkinnedModel::isLoaded() const
     return impl_->loaded;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Load — parse FBX, build ozz skeleton + animation, extract skin weights.
-// ═══════════════════════════════════════════════════════════════════════════
+// Load -- parse FBX, build ozz skeleton + animation, extract skin weights.
 
 bool SkinnedModel::load(const std::string& path)
 {
@@ -254,7 +254,7 @@ bool SkinnedModel::load(const std::string& path)
         return false;
     }
 
-    // ── Step 1: Collect all bone names referenced by any mesh ───────────────
+    // Step 1: Collect all bone names referenced by any mesh
     std::unordered_set<std::string> boneNames;
     for (unsigned m = 0; m < scene->mNumMeshes; ++m) {
         const aiMesh* mesh = scene->mMeshes[m];
@@ -269,7 +269,7 @@ bool SkinnedModel::load(const std::string& path)
 
     SDL_Log("SkinnedModel: found %zu bones in '%s'", boneNames.size(), path.c_str());
 
-    // ── Step 2: Build ozz skeleton from the Assimp node hierarchy ───────────
+    // Step 2: Build ozz skeleton from the Assimp node hierarchy
     // Start from the scene root so the root's transform (FBX axis/unit
     // correction) is incorporated into the model-space matrices.
     ozz::animation::offline::RawSkeleton rawSkeleton;
@@ -300,7 +300,7 @@ bool SkinnedModel::load(const std::string& path)
     for (int i = 0; i < numJoints; ++i)
         impl_->jointNameToIndex[std::string(jointNames[static_cast<size_t>(i)])] = i;
 
-    // ── Step 3: Build ozz animation from the first Assimp animation ─────────
+    // Step 3: Build ozz animation from the first Assimp animation
     const aiAnimation* anim = scene->mAnimations[0];
     const double ticksPerSec = (anim->mTicksPerSecond > 0.0) ? anim->mTicksPerSecond : 60.0;
     const float durationSec = static_cast<float>(anim->mDuration / ticksPerSec);
@@ -379,12 +379,12 @@ bool SkinnedModel::load(const std::string& path)
             static_cast<double>(durationSec),
             anim->mNumChannels);
 
-    // ── Step 4: Allocate runtime buffers ────────────────────────────────────
+    // Step 4: Allocate runtime buffers
     impl_->locals.resize(static_cast<size_t>(impl_->skeleton->num_soa_joints()));
     impl_->models.resize(static_cast<size_t>(numJoints));
     impl_->context.Resize(numJoints);
 
-    // ── Step 5: Collect inverse bind matrices (one per joint) ───────────────
+    // Step 5: Collect inverse bind matrices (one per joint)
     // Non-bone joints (structural ancestors) keep identity.
     impl_->inverseBindMatrices.resize(static_cast<size_t>(numJoints), glm::mat4(1.0f));
 
@@ -400,7 +400,7 @@ bool SkinnedModel::load(const std::string& path)
 
     impl_->skinMatrices.resize(static_cast<size_t>(numJoints));
 
-    // ── Step 6: Extract mesh vertices + skin weights ────────────────────────
+    // Step 6: Extract mesh vertices + skin weights
     for (unsigned mi = 0; mi < scene->mNumMeshes; ++mi) {
         const aiMesh* mesh = scene->mMeshes[mi];
         if (!mesh->HasPositions() || !mesh->HasBones())
@@ -514,16 +514,14 @@ bool SkinnedModel::load(const std::string& path)
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Update — sample animation, local-to-model, CPU skinning.
-// ═══════════════════════════════════════════════════════════════════════════
+// Update -- sample animation, local-to-model, CPU skinning.
 
 void SkinnedModel::update(float dt)
 {
     if (!impl_->loaded)
         return;
 
-    // ── 1. Advance playback clock (looping) ─────────────────────────────────
+    // 1. Advance playback clock (looping)
     const float dur = impl_->animation->duration();
     impl_->playbackTime += dt;
     if (dur > 0.0f)
@@ -531,7 +529,7 @@ void SkinnedModel::update(float dt)
 
     const float ratio = (dur > 0.0f) ? (impl_->playbackTime / dur) : 0.0f;
 
-    // ── 2. Sample the animation at the current normalised time ──────────────
+    // 2. Sample the animation at the current normalised time
     ozz::animation::SamplingJob sampling;
     sampling.animation = impl_->animation.get();
     sampling.context = &impl_->context;
@@ -542,7 +540,7 @@ void SkinnedModel::update(float dt)
         return;
     }
 
-    // ── 3. Convert per-joint local transforms to model-space matrices ───────
+    // 3. Convert per-joint local transforms to model-space matrices
     ozz::animation::LocalToModelJob l2m;
     l2m.skeleton = impl_->skeleton.get();
     l2m.input = ozz::make_span(impl_->locals);
@@ -552,13 +550,13 @@ void SkinnedModel::update(float dt)
         return;
     }
 
-    // ── 4. Precompute skin matrices: modelMatrix[j] × inverseBindMatrix[j] ─
+    // 4. Precompute skin matrices: modelMatrix[j] * inverseBindMatrix[j]
     const int numJoints = impl_->skeleton->num_joints();
     for (int j = 0; j < numJoints; ++j)
         impl_->skinMatrices[static_cast<size_t>(j)] =
             ozzToGlm(impl_->models[static_cast<size_t>(j)]) * impl_->inverseBindMatrices[static_cast<size_t>(j)];
 
-    // ── 5. Linear blend skinning — transform each vertex by its bone weights ─
+    // 5. Linear blend skinning -- transform each vertex by its bone weights
     for (auto& ms : impl_->meshSkins) {
         const size_t numVerts = ms.baseVertices.size();
         for (size_t v = 0; v < numVerts; ++v) {

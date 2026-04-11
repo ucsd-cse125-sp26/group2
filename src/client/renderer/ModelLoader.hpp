@@ -1,3 +1,6 @@
+/// @file ModelLoader.hpp
+/// @brief Assimp-based model loading and CPU-side mesh/texture data types.
+
 #pragma once
 
 #include <cstddef>
@@ -25,8 +28,7 @@ static_assert(offsetof(ModelVertex, normal) == 12, "ModelVertex normal offset mi
 static_assert(offsetof(ModelVertex, texCoord) == 24, "ModelVertex texCoord offset mismatch");
 static_assert(offsetof(ModelVertex, tangent) == 32, "ModelVertex tangent offset mismatch");
 
-/// @brief PBR material scalar parameters extracted from Assimp/glTF.
-/// glTF alpha mode.
+/// @brief glTF alpha blending mode.
 enum class AlphaMode
 {
     Opaque,
@@ -34,6 +36,7 @@ enum class AlphaMode
     Blend
 };
 
+/// @brief PBR material scalar parameters extracted from Assimp/glTF.
 struct MaterialData
 {
     glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};

@@ -1,8 +1,9 @@
+/// @file ShaderUtils.hpp
+/// @brief Shared shader-loading utilities used by Renderer and ParticleRenderer.
+
 #pragma once
 
 #include <SDL3/SDL.h>
-
-/// @brief Shared shader-loading utilities used by Renderer and ParticleRenderer.
 
 /// @brief Load a compiled shader from disk and create an SDL GPU shader object.
 /// @param dev                  The GPU device.

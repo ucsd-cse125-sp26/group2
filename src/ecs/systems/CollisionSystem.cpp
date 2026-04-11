@@ -1,3 +1,6 @@
+/// @file CollisionSystem.cpp
+/// @brief Implementation of swept-AABB collision detection and response.
+
 #include "ecs/systems/CollisionSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
@@ -16,12 +19,13 @@ namespace systems
 static constexpr float k_pushback = 0.03125f;                         // Quake DIST_EPSILON
 static constexpr float k_groundProbeDistance = physics::k_stepHeight; // also used for slope snap
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Depenetration — push the entity out of any geometry it currently overlaps.
-// Runs before the bump loop.
-// ═══════════════════════════════════════════════════════════════════════════
+// Depenetration
 
 /// @brief Push the entity out of any infinite planes it currently overlaps.
+/// @param pos          Entity position (modified in place).
+/// @param vel          Entity velocity (modified in place).
+/// @param halfExtents  AABB half-extents of the entity.
+/// @param planes       Infinite planes to test against.
 static void
 depenetratePlanes(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, std::span<const physics::Plane> planes)
 {
@@ -42,6 +46,10 @@ depenetratePlanes(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
 }
 
 /// @brief Push the entity out of a static AABB it currently overlaps.
+/// @param pos          Entity position (modified in place).
+/// @param vel          Entity velocity (modified in place).
+/// @param halfExtents  AABB half-extents of the entity.
+/// @param box          Static axis-aligned bounding box to test against.
 static void depenetrateBox(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldAABB& box)
 {
     const glm::vec3 k_expMin = box.min - halfExtents;
@@ -82,6 +90,10 @@ static void depenetrateBox(glm::vec3& pos, glm::vec3& vel, const glm::vec3& half
 
 /// @brief Push the entity out of a convex brush it currently overlaps.
 /// Only fires if the entity is inside ALL planes simultaneously.
+/// @param pos          Entity position (modified in place).
+/// @param vel          Entity velocity (modified in place).
+/// @param halfExtents  AABB half-extents of the entity.
+/// @param brush        Convex brush to test against.
 static void
 depenetrateBrush(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldBrush& brush)
 {
@@ -115,7 +127,11 @@ depenetrateBrush(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, c
         vel -= plane.normal * k_into;
 }
 
-/// @brief Run all depenetration passes.
+/// @brief Run all depenetration passes (planes, boxes, brushes).
+/// @param pos          Entity position (modified in place).
+/// @param vel          Entity velocity (modified in place).
+/// @param halfExtents  AABB half-extents of the entity.
+/// @param world        World collision geometry.
 static void
 depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldGeometry& world)
 {
@@ -129,6 +145,11 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
 }
 
 /// @brief Attempt to step over a low obstacle when a wall is hit.
+/// @param pos            Entity position (modified in place on success).
+/// @param vel            Entity velocity (modified in place on success).
+/// @param halfExtents    AABB half-extents of the entity.
+/// @param remainingTime  Time remaining in the current bump iteration.
+/// @param world          World collision geometry.
 /// @return True if the step succeeded and position/velocity were updated.
 static bool tryStepUp(glm::vec3& pos,
                       glm::vec3& vel,
@@ -164,6 +185,10 @@ static bool tryStepUp(glm::vec3& pos,
 }
 
 /// @brief Keep the entity glued to descending slopes and step-downs.
+/// @param pos          Entity position (modified in place).
+/// @param vel          Entity velocity (modified in place).
+/// @param halfExtents  AABB half-extents of the entity.
+/// @param world        World collision geometry.
 static void
 snapToGround(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldGeometry& world)
 {

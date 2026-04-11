@@ -1,3 +1,6 @@
+/// @file LocalPlayer.hpp
+/// @brief Marker component identifying the locally controlled player entity.
+
 #pragma once
 
 /// @brief Marker component that tags exactly one entity per client as the locally controlled player.

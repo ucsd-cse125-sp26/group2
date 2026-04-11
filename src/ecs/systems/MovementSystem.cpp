@@ -1,3 +1,6 @@
+/// @file MovementSystem.cpp
+/// @brief Implementation of the Titanfall-inspired movement state machine.
+
 #include "ecs/systems/MovementSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
@@ -18,26 +21,30 @@
 namespace systems
 {
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Helper utilities
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-/// Horizontal speed (XZ plane).
+/// @brief Compute horizontal speed (XZ plane).
+/// @param v  Velocity vector.
+/// @return Horizontal speed magnitude.
 float horizSpeed(const glm::vec3& v)
 {
     return std::sqrt(v.x * v.x + v.z * v.z);
 }
 
-/// Horizontal velocity (Y zeroed).
+/// @brief Compute horizontal velocity (Y zeroed).
+/// @param v  Velocity vector.
+/// @return Velocity with Y component set to zero.
 glm::vec3 horizVel(const glm::vec3& v)
 {
     return {v.x, 0.0f, v.z};
 }
 
-/// Clamp horizontal speed without affecting Y.
+/// @brief Clamp horizontal speed without affecting Y.
+/// @param v         Velocity vector to clamp (modified in place).
+/// @param maxSpeed  Maximum allowed horizontal speed.
 void clampHorizSpeed(glm::vec3& v, float maxSpeed)
 {
     const float k_hs = horizSpeed(v);
@@ -48,7 +55,9 @@ void clampHorizSpeed(glm::vec3& v, float maxSpeed)
     }
 }
 
-/// Current WASD input as a 2D vector (X=strafe, Y=forward).
+/// @brief Get WASD input as a 2D vector (X=strafe, Y=forward).
+/// @param input  Current input snapshot.
+/// @return 2D movement vector.
 glm::vec2 moveInput2D(const InputSnapshot& input)
 {
     float x = 0.0f;
@@ -64,6 +73,9 @@ glm::vec2 moveInput2D(const InputSnapshot& input)
     return {x, y};
 }
 
+/// @brief Check whether any WASD movement key is pressed.
+/// @param input  Current input snapshot.
+/// @return True if any directional key is held.
 bool anyMoveInput(const InputSnapshot& input)
 {
     return input.forward || input.back || input.left || input.right;
@@ -71,13 +83,16 @@ bool anyMoveInput(const InputSnapshot& input)
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Crouch / shape transition
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
+/// @brief Handle entering the crouch state and adjusting the collision shape.
+/// @param pos    Entity position (modified in place).
+/// @param shape  Collision shape (modified in place).
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
 void handleCrouchTransition(Position& pos, CollisionShape& shape, PlayerState& state, const InputSnapshot& input)
 {
     const bool k_wantsCrouch = input.crouch;
@@ -95,13 +110,14 @@ void handleCrouchTransition(Position& pos, CollisionShape& shape, PlayerState& s
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Timer updates (run every tick regardless of mode)
-// ═══════════════════════════════════════════════════════════════════════════
+// Timer updates
 
 namespace
 {
 
+/// @brief Tick all cooldown and state timers, run every tick regardless of mode.
+/// @param state  Player state (modified in place).
+/// @param dt     Fixed physics delta time in seconds.
 void tickTimers(PlayerState& state, float dt)
 {
     state.jumpedThisTick = false;
@@ -165,13 +181,14 @@ void tickTimers(PlayerState& state, float dt)
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Sprint
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
+/// @brief Update the sprint flag based on input and current state.
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
 void updateSprint(PlayerState& state, const InputSnapshot& input)
 {
     if (input.sprint && input.forward && !state.crouching && state.grounded && state.moveMode == MoveMode::OnFoot) {
@@ -181,6 +198,9 @@ void updateSprint(PlayerState& state, const InputSnapshot& input)
     }
 }
 
+/// @brief Determine the current wish speed based on movement mode and stance.
+/// @param state  Player state.
+/// @return Target movement speed.
 float currentWishSpeed(const PlayerState& state)
 {
     if (state.moveMode == MoveMode::Sliding)
@@ -194,19 +214,22 @@ float currentWishSpeed(const PlayerState& state)
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Jumping (ground, double, coyote, wall, climb, ledge, slidehop)
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
+/// @brief Handle all jump types: ground, double, coyote, wall, climb, ledge, slidehop.
+/// @param vel    Velocity (modified in place).
+/// @param input  Current input snapshot.
+/// @param state  Player state (modified in place).
+/// @param dt     Fixed physics delta time in seconds (unused).
 void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, float /*dt*/)
 {
     if (!input.jump)
         return;
 
-    // ── Ledge jump / mantle ─────────────────────────────────────────────
+    // Ledge jump / mantle
     if (state.moveMode == MoveMode::LedgeGrabbing) {
         if (state.ledgeHoldTimer >= tms::k_ledgeMinHoldTime) {
             // Mantle: jump up onto the ledge.
@@ -223,7 +246,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         return;
     }
 
-    // ── Wall jump ───────────────────────────────────────────────────────
+    // Wall jump
     if (state.moveMode == MoveMode::WallRunning) {
         vel.y = tms::k_wallJumpUpForce;
         vel += state.wallNormal * tms::k_wallJumpSideForce;
@@ -241,7 +264,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         return;
     }
 
-    // ── Climb jump ──────────────────────────────────────────────────────
+    // Climb jump
     if (state.moveMode == MoveMode::Climbing) {
         vel.y = tms::k_climbJumpUpForce;
         vel += state.climbWallNormal * tms::k_climbJumpBackForce;
@@ -258,7 +281,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         return;
     }
 
-    // ── Coyote wall jump (off wall within grace period) ─────────────────
+    // Coyote wall jump (off wall within grace period)
     if (!state.grounded && state.coyoteTimer > 0.0f && state.wasWallRunning) {
         vel.y = tms::k_wallJumpUpForce;
         vel += state.wallBlacklistNormal * tms::k_wallJumpSideForce;
@@ -270,7 +293,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         return;
     }
 
-    // ── Slidehop ────────────────────────────────────────────────────────
+    // Slidehop
     if (state.moveMode == MoveMode::Sliding) {
         vel.y = tms::k_slidehopJumpSpeed;
         state.moveMode = MoveMode::OnFoot;
@@ -290,7 +313,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         return;
     }
 
-    // ── Ground jump (or coyote ground jump) ─────────────────────────────
+    // Ground jump (or coyote ground jump)
     if (state.grounded || state.coyoteTimer > 0.0f) {
         vel.y = tms::k_jumpSpeed;
         state.grounded = false;
@@ -307,7 +330,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         return;
     }
 
-    // ── Double jump ─────────────────────────────────────────────────────
+    // Double jump
     // Requires: (a) re-press of jump key (not held from first jump),
     //           (b) cooldown expired since last jump.
     const bool k_jumpRisingEdge = input.jump && !state.jumpHeldLastTick;
@@ -329,13 +352,15 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Jump Lurch — directional correction window after jumping
-// ═══════════════════════════════════════════════════════════════════════════
+// Jump Lurch
 
 namespace
 {
 
+/// @brief Apply directional correction window after jumping.
+/// @param vel    Velocity (modified in place).
+/// @param input  Current input snapshot.
+/// @param state  Player state (modified in place).
 void handleJumpLurch(glm::vec3& vel, const InputSnapshot& input, PlayerState& state)
 {
     if (!state.jumpLurchEnabled)
@@ -385,14 +410,17 @@ void handleJumpLurch(glm::vec3& vel, const InputSnapshot& input, PlayerState& st
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Sliding
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-/// Try to enter slide: must be moving fast enough + pressing crouch while grounded.
+/// @brief Try to enter slide: must be moving fast enough and pressing crouch while grounded.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param shape  Collision shape (modified in place).
+/// @param pos    Entity position (modified in place).
+/// @param input  Current input snapshot.
 void tryEnterSlide(glm::vec3& vel, PlayerState& state, CollisionShape& shape, Position& pos, const InputSnapshot& input)
 {
     if (state.moveMode != MoveMode::OnFoot)
@@ -429,6 +457,13 @@ void tryEnterSlide(glm::vec3& vel, PlayerState& state, CollisionShape& shape, Po
     }
 }
 
+/// @brief Process sliding movement, braking, and slope influence.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param shape  Collision shape (modified in place).
+/// @param pos    Entity position (modified in place).
+/// @param input  Current input snapshot.
+/// @param dt     Fixed physics delta time in seconds.
 void handleSliding(
     glm::vec3& vel, PlayerState& state, CollisionShape& shape, Position& pos, const InputSnapshot& input, float dt)
 {
@@ -473,14 +508,18 @@ void handleSliding(
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Wallrunning
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-/// Check if a wall normal matches the blacklist (same wall).
+/// @brief Check if a wall normal matches the blacklist (same wall).
+/// @param normal    Wall normal to test.
+/// @param height    Current entity height.
+/// @param blNormal  Blacklisted wall normal.
+/// @param blHeight  Height at which the blacklisted wall was recorded.
+/// @param active    Whether the blacklist is active.
+/// @return True if the wall is blacklisted.
 bool isBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNormal, float blHeight, bool active)
 {
     if (!active)
@@ -491,6 +530,12 @@ bool isBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNor
     return false;
 }
 
+/// @brief Attempt to enter wallrun mode when airborne near a wall.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
+/// @param walls  Wall detection result from this tick.
+/// @param posY   Current vertical position of the entity.
 void tryEnterWallrun(glm::vec3& vel,
                      PlayerState& state,
                      const InputSnapshot& input,
@@ -544,6 +589,9 @@ void tryEnterWallrun(glm::vec3& vel,
         tryWall(walls.wallLeft, walls.leftNormal, WallSide::Left);
 }
 
+/// @brief Exit wallrun mode and start cooldown timers.
+/// @param state  Player state (modified in place).
+/// @param posY   Current vertical position for blacklist height.
 void exitWallrun(PlayerState& state, float posY)
 {
     state.moveMode = MoveMode::OnFoot;
@@ -556,6 +604,13 @@ void exitWallrun(PlayerState& state, float posY)
     state.wallBlacklistHeight = posY;
 }
 
+/// @brief Process wallrunning movement, exit conditions, and camera tilt.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
+/// @param walls  Wall detection result from this tick.
+/// @param posY   Current vertical position of the entity.
+/// @param dt     Fixed physics delta time in seconds.
 void handleWallRunning(glm::vec3& vel,
                        PlayerState& state,
                        const InputSnapshot& input,
@@ -566,7 +621,7 @@ void handleWallRunning(glm::vec3& vel,
     state.wallRunTimer += dt;
     state.wallRunSpeedTimer += dt;
 
-    // ── Exit conditions ─────────────────────────────────────────────────
+    // Exit conditions
     if (state.wallRunTimer >= tms::k_wallrunKickoffDuration) {
         exitWallrun(state, posY);
         return;
@@ -579,7 +634,7 @@ void handleWallRunning(glm::vec3& vel,
         return;
     }
 
-    // ── Movement along wall ─────────────────────────────────────────────
+    // Movement along wall
     // Update wall normal from latest detection.
     if (state.wallRunSide == WallSide::Right)
         state.wallNormal = walls.rightNormal;
@@ -619,13 +674,17 @@ void handleWallRunning(glm::vec3& vel,
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Climbing
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
+/// @brief Attempt to enter climb mode when airborne facing a wall.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
+/// @param walls  Wall detection result from this tick.
+/// @param posY   Current vertical position of the entity.
 void tryEnterClimb(glm::vec3& vel,
                    PlayerState& state,
                    const InputSnapshot& input,
@@ -673,6 +732,9 @@ void tryEnterClimb(glm::vec3& vel,
     vel.y = std::max(vel.y, 0.0f);
 }
 
+/// @brief Exit climb mode and start cooldown timers.
+/// @param state  Player state (modified in place).
+/// @param posY   Current vertical position for blacklist height.
 void exitClimb(PlayerState& state, float posY)
 {
     state.moveMode = MoveMode::OnFoot;
@@ -685,6 +747,13 @@ void exitClimb(PlayerState& state, float posY)
     state.climbBlacklistHeight = posY;
 }
 
+/// @brief Process climbing movement with speed decay and exit conditions.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
+/// @param walls  Wall detection result from this tick.
+/// @param posY   Current vertical position of the entity.
+/// @param dt     Fixed physics delta time in seconds.
 void handleClimbing(glm::vec3& vel,
                     PlayerState& state,
                     const InputSnapshot& input,
@@ -694,13 +763,13 @@ void handleClimbing(glm::vec3& vel,
 {
     state.climbTimer += dt;
 
-    // ── Exit conditions ─────────────────────────────────────────────────
+    // Exit conditions
     if (state.climbTimer >= tms::k_climbKickoffDuration || !walls.wallFront || !input.forward) {
         exitClimb(state, posY);
         return;
     }
 
-    // ── Climbing movement (upward with speed decay) ─────────────────────
+    // Climbing movement (upward with speed decay)
     const float k_decayAlpha = std::clamp(state.climbTimer / tms::k_climbKickoffDuration, 0.0f, 1.0f);
     const float k_climbSpeed = std::lerp(tms::k_climbMaxSpeed, tms::k_climbMinSpeed, k_decayAlpha);
 
@@ -718,13 +787,14 @@ void handleClimbing(glm::vec3& vel,
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Ledge grabbing
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
+/// @brief Attempt to grab a ledge while climbing.
+/// @param state  Player state (modified in place).
+/// @param walls  Wall detection result from this tick.
 void tryEnterLedgeGrab(PlayerState& state, const physics::WallDetectionResult& walls)
 {
     // Can only grab ledges while climbing.
@@ -743,6 +813,11 @@ void tryEnterLedgeGrab(PlayerState& state, const physics::WallDetectionResult& w
     state.jumpCount = 0;
 }
 
+/// @brief Process ledge grab hold, freeze velocity, and auto-mantle.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
+/// @param dt     Fixed physics delta time in seconds.
 void handleLedgeGrab(glm::vec3& vel, PlayerState& state, const InputSnapshot& input, float dt)
 {
     state.ledgeHoldTimer += dt;
@@ -766,13 +841,13 @@ void handleLedgeGrab(glm::vec3& vel, PlayerState& state, const InputSnapshot& in
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Coyote time
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
+/// @brief Start coyote timer when transitioning from grounded to airborne.
+/// @param state  Player state (modified in place).
 void updateCoyoteTime(PlayerState& state)
 {
     // Start coyote timer when transitioning from grounded to airborne.
@@ -785,17 +860,19 @@ void updateCoyoteTime(PlayerState& state)
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Grappling hook
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-/// Try to fire the grapple hook. Raycasts forward to find a surface.
+/// @brief Try to fire the grapple hook by raycasting forward to find a surface.
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
+/// @param eye    Eye position for the raycast origin.
+/// @param world  World collision geometry.
 void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 eye, const physics::WorldGeometry& world)
 {
-    // ── Cancel on E release (hold E to grapple) ─────────────────────────
+    // Cancel on E release (hold E to grapple)
     if (state.grappleActive && !input.grapple) {
         state.grappleActive = false;
         state.grappleCooldownActive = true;
@@ -803,7 +880,7 @@ void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 ey
         return;
     }
 
-    // ── Fire on rising edge of E ────────────────────────────────────────
+    // Fire on rising edge of E
     const bool k_pressed = input.grapple && !state.grappleInputLastTick;
     if (!k_pressed || state.grappleActive || state.grappleCooldownActive)
         return;
@@ -826,7 +903,12 @@ void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 ey
     state.grapplePoint = k_hit.point;
 }
 
-/// Apply grapple pull physics.
+/// @brief Apply grapple pull physics toward the hook point.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state (modified in place).
+/// @param input  Current input snapshot.
+/// @param pos    Current entity position.
+/// @param dt     Fixed physics delta time in seconds.
 void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& input, glm::vec3 pos, float dt)
 {
     if (!state.grappleActive)
@@ -834,7 +916,7 @@ void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& inpu
 
     state.grapplePullTimer += dt;
 
-    // ── Auto-release conditions ─────────────────────────────────────────
+    // Auto-release conditions
     const glm::vec3 k_toHook = state.grapplePoint - pos;
     const float k_dist = glm::length(k_toHook);
 
@@ -847,7 +929,7 @@ void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& inpu
         return;
     }
 
-    // ── Pull direction: blend between direct-to-hook and look direction ──
+    // Pull direction: blend between direct-to-hook and look direction
     const glm::vec3 k_directDir = glm::normalize(k_toHook);
 
     const float k_sinYaw = std::sin(input.yaw);
@@ -875,13 +957,14 @@ void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& inpu
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Speed cap
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
+/// @brief Clamp horizontal speed to the global or grapple speed cap.
+/// @param vel    Velocity (modified in place).
+/// @param state  Player state.
 void applySpeedCap(glm::vec3& vel, const PlayerState& state)
 {
     const float k_cap = state.grappleActive ? tms::k_grappleSpeedCap : tms::k_speedCap;
@@ -890,20 +973,18 @@ void applySpeedCap(glm::vec3& vel, const PlayerState& state)
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Main entry point
-// ═══════════════════════════════════════════════════════════════════════════
 
 void runMovement(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
-    // ── Entities WITH InputSnapshot — full player movement ──────────────
+    // Entities WITH InputSnapshot — full player movement
     registry.view<Position, Velocity, PlayerState, CollisionShape, InputSnapshot>().each(
         [dt,
          &world](Position& pos, Velocity& vel, PlayerState& state, CollisionShape& shape, const InputSnapshot& input) {
-            // ── 0. Tick timers ──────────────────────────────────────────
+            // 0. Tick timers
             tickTimers(state, dt);
 
-            // ── 1. Wall / climb / ledge detection ───────────────────────
+            // 1. Wall / climb / ledge detection
             physics::WallDetectionResult walls{};
             if (!state.grounded || state.moveMode == MoveMode::WallRunning || state.moveMode == MoveMode::Climbing) {
                 walls = physics::detectWalls(pos.value,
@@ -914,10 +995,10 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                                              tms::k_wallrunSphereRadius);
             }
 
-            // ── 2. Sprint update ────────────────────────────────────────
+            // 2. Sprint update
             updateSprint(state, input);
 
-            // ── 3. State transitions (try enter new modes) ──────────────
+            // 3. State transitions (try enter new modes)
             // Order matters: ledge > climb > wallrun > slide
             tryEnterLedgeGrab(state, walls);
             if (state.moveMode == MoveMode::OnFoot)
@@ -927,11 +1008,11 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             if (state.moveMode == MoveMode::OnFoot)
                 tryEnterSlide(vel.value, state, shape, pos, input);
 
-            // ── 4. Crouch transition (only in OnFoot) ───────────────────
+            // 4. Crouch transition (only in OnFoot)
             if (state.moveMode == MoveMode::OnFoot)
                 handleCrouchTransition(pos, shape, state, input);
 
-            // ── 5. Mode-specific movement ───────────────────────────────
+            // 5. Mode-specific movement
             switch (state.moveMode) {
             case MoveMode::OnFoot: {
                 const glm::vec3 k_wishDir =
@@ -978,7 +1059,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 break;
             }
 
-            // ── 5b. Grappling hook ───────────────────────────────────────
+            // 5b. Grappling hook
             {
                 const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f, 0);
                 tryFireGrapple(state, input, k_eye, world);
@@ -995,17 +1076,17 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 state.grappleInputLastTick = input.grapple;
             }
 
-            // ── 6. Jump handling (works in any mode) ────────────────────
+            // 6. Jump handling (works in any mode)
             handleJump(vel.value, input, state, dt);
 
-            // ── 7. Jump lurch (air only) ────────────────────────────────
+            // 7. Jump lurch (air only)
             if (!state.grounded && state.moveMode == MoveMode::OnFoot)
                 handleJumpLurch(vel.value, input, state);
 
-            // ── 8. Coyote time update ───────────────────────────────────
+            // 8. Coyote time update
             updateCoyoteTime(state);
 
-            // ── 9. Landing reset ────────────────────────────────────────
+            // 9. Landing reset
             if (state.grounded && state.moveMode == MoveMode::OnFoot) {
                 state.jumpCount = 0;
                 state.canDoubleJump = true;
@@ -1017,7 +1098,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 state.climbBlacklistActive = false;
             }
 
-            // ── 10. Auto-uncrouch / pending uncrouch ────────────────────
+            // 10. Auto-uncrouch / pending uncrouch
             // If the player should uncrouch (slidehop exit, or crouch key
             // released while crouched) but collision might block it, we
             // try here. The collision system's depenetration will push us
@@ -1042,14 +1123,14 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 state.pendingUncrouch = false;
             }
 
-            // ── 11. Speed cap ───────────────────────────────────────────
+            // 11. Speed cap
             applySpeedCap(vel.value, state);
 
-            // ── 12. Track jump key state for edge detection ─────────────
+            // 12. Track jump key state for edge detection
             state.jumpHeldLastTick = input.jump;
         });
 
-    // ── Entities WITHOUT InputSnapshot — physics only (NPCs, etc.) ──────
+    // Entities WITHOUT InputSnapshot — physics only (NPCs, etc.)
     registry.view<Velocity, PlayerState>(entt::exclude<InputSnapshot>)
         .each([dt](Velocity& vel, const PlayerState& state) {
             if (state.grounded)

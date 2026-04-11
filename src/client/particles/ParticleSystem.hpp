@@ -1,3 +1,6 @@
+/// @file ParticleSystem.hpp
+/// @brief Top-level particle system orchestrator owning all effect sub-systems.
+
 #pragma once
 
 #include "ParticleEvents.hpp"
@@ -31,10 +34,17 @@
 class ParticleSystem
 {
 public:
+    /// @brief Initialise all effect sub-systems and the GPU renderer.
+    /// @param dev       The SDL GPU device.
+    /// @param colorFmt  Swapchain colour format.
+    /// @param shaderFmt Shader binary format (SPIRV or MSL).
+    /// @return True on success.
     bool init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt);
+
+    /// @brief Tear down all GPU resources and effect sub-systems.
     void quit();
 
-    // ── Spawn API (call from weapon / game event logic) ────────────────────
+    // Spawn API (call from weapon / game event logic)
 
     /// @brief Attach an oriented-capsule tracer to a fast-bullet projectile entity.
     void spawnProjectileTracer(entt::entity e, Registry& reg);
@@ -63,12 +73,23 @@ public:
     /// @brief Spawn rocket explosion at pos.
     void spawnExplosion(glm::vec3 pos, float blastRadius);
 
-    // ── SDF text (queued per frame, flushed in render) ─────────────────────
+    // SDF text (queued per frame, flushed in render)
 
+    /// @brief Queue world-space SDF text for this frame.
+    /// @param worldPos    World-space anchor position.
+    /// @param text        UTF-8 string to render.
+    /// @param color       RGBA text colour.
+    /// @param worldHeight Glyph height in world units.
     void drawWorldText(glm::vec3 worldPos, std::string_view text, glm::vec4 color, float worldHeight);
+
+    /// @brief Queue screen-space HUD SDF text for this frame.
+    /// @param pixelPos    Screen position in pixels (top-left origin).
+    /// @param text        UTF-8 string to render.
+    /// @param color       RGBA text colour.
+    /// @param pixelHeight Glyph height in pixels.
     void drawScreenText(glm::vec2 pixelPos, std::string_view text, glm::vec4 color, float pixelHeight);
 
-    // ── Frame lifecycle ────────────────────────────────────────────────────
+    // Frame lifecycle
 
     /// @brief Set screen dimensions for HUD rendering. Call before render().
     void setScreenSize(float w, float h)
@@ -86,12 +107,17 @@ public:
     /// @brief Issue all particle draw calls. Must be called INSIDE a render pass.
     void render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd);
 
-    // ── entt::dispatcher event handlers ───────────────────────────────────
+    // entt::dispatcher event handlers
+    /// @brief Handle a weapon-fired event (spawns hitscan beam if applicable).
     void onWeaponFired(const WeaponFiredEvent& e);
+
+    /// @brief Handle a projectile impact event (spawns sparks and decal).
     void onImpact(const ProjectileImpactEvent& e);
+
+    /// @brief Handle an explosion event (spawns explosion and smoke).
     void onExplosion(const ExplosionEvent& e);
 
-    // ── Live-count accessors (for debug UI) ───────────────────────────────
+    // Live-count accessors (for debug UI)
     [[nodiscard]] uint32_t impactCount() const { return impact_.count(); }
     [[nodiscard]] uint32_t tracerCount() const { return tracers_.count(); }
     [[nodiscard]] uint32_t ribbonVertexCount() const { return ribbons_.count(); }

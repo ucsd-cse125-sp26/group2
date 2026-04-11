@@ -1,3 +1,6 @@
+/// @file SmokeEffect.cpp
+/// @brief Implementation of volumetric smoke billboard particle effect.
+
 #include "SmokeEffect.hpp"
 
 #include "ecs/components/ParticleEmitterTag.hpp"
@@ -9,10 +12,16 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
+/// @brief Return a random float in [0, 1].
 static float randf()
 {
     return static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
 }
+
+/// @brief Return a random float in [lo, hi].
+/// @param lo Lower bound (inclusive).
+/// @param hi Upper bound (inclusive).
+/// @return Random value uniformly distributed between lo and hi.
 static float randRange(float lo, float hi)
 {
     return lo + randf() * (hi - lo);
@@ -63,7 +72,7 @@ void SmokeEffect::update(float dt, Registry& registry, glm::vec3 camPos, glm::ve
         p.size += (120.f - p.size) * 0.3f * dt; // grow toward max
         p.rotation += dt * 0.15f;
 
-        // Alpha: fade in 0→0.35 during first 20% of life, out 0.35→0 during last 30%
+        // Alpha: fade in 0->0.35 during first 20% of life, out 0.35->0 during last 30%
         float alpha;
         if (p.normalizedAge < 0.2f)
             alpha = (p.normalizedAge / 0.2f) * 0.35f;

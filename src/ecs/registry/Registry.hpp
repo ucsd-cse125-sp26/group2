@@ -1,3 +1,6 @@
+/// @file Registry.hpp
+/// @brief Shared ECS registry type alias for the game engine.
+
 #pragma once
 
 #include <entt/entt.hpp>
