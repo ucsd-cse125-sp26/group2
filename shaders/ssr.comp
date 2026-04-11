@@ -87,9 +87,9 @@ void main()
     vec3 ddy = (abs(dD - rawDepth) < abs(rawDepth - dU)) ? (pD - viewPos) : (viewPos - pU);
     vec3 viewNormal = normalize(cross(ddx, ddy));
 
-    // Only mostly-horizontal surfaces.
+    // Only nearly-vertical surfaces (walls) — skip floors entirely.
     float horizontalness = abs(viewNormal.y);
-    if (horizontalness < 0.5) {
+    if (horizontalness < 0.3) {
         imageStore(ssrImage, coord, vec4(0.0));
         return;
     }
@@ -173,9 +173,13 @@ void main()
             float distFade = 1.0 - float(hitStep) / float(numSteps);
             float horizFade = smoothstep(0.5, 0.85, horizontalness);
 
+            // Suppress mirror-like reflections on flat surfaces (floors).
+            // Only walls get strong SSR; floors are fully matte.
+            float floorSuppress = 1.0 - smoothstep(0.5, 0.75, horizontalness);
+
             // ── Mode-specific confidence adjustments ────────────────────────
 
-            float confidence = edgeFade * distFade * horizFade;
+            float confidence = edgeFade * distFade * horizFade * floorSuppress;
 
             if (ssrMode == 0) {
                 // Sharp: proximity fade (screen-space travel distance).

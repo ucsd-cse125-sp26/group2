@@ -117,6 +117,18 @@ public:
     /// @brief Returns the number of loaded models.
     [[nodiscard]] int modelCount() const { return static_cast<int>(models.size()); }
 
+    // ── HDR skybox ────────────────────────────────────────────────────────
+    /// @brief Load an equirectangular HDR image as the environment skybox + IBL source.
+    bool loadHDRSkybox(const std::string& path);
+    /// @brief Scan the assets HDR directory and populate availableHDRFiles.
+    void scanHDRFiles();
+    /// @brief Available HDR file paths (populated by scanHDRFiles).
+    std::vector<std::string> availableHDRFiles;
+    /// @brief Currently loaded HDR file (display name).
+    std::string currentHDRName = "(procedural)";
+    /// @brief True when an HDR cubemap is loaded and should be used for skybox + IBL.
+    bool useHDRSkybox = false;
+
 private:
     // ── Core GPU state ──────────────────────────────────────────────────────
     SDL_Window* window = nullptr;
@@ -156,6 +168,7 @@ private:
     SDL_GPUTexture* irradianceMap = nullptr; ///< 32×32 per face, RGBA16F cubemap.
     SDL_GPUTexture* prefilterMap = nullptr;  ///< 128×128 per face, 5 mip levels, RGBA16F cubemap.
     SDL_GPUSampler* iblSampler = nullptr;    ///< Linear, clamp-to-edge, mipmapped.
+    SDL_GPUTexture* envCubemap = nullptr;    ///< HDR environment cubemap (512×512, RGBA16F).
 
     // ── Samplers ────────────────────────────────────────────────────────────
     SDL_GPUSampler* pbrSampler = nullptr;     ///< Linear, repeat, aniso 8×, mipmapped.
@@ -249,6 +262,24 @@ private:
 public:
     int ssrMode = 2;       ///< 0=Sharp, 1=Stochastic, 2=Masked (default).
     RenderToggles toggles; ///< Live-tunable feature toggles (checked every frame).
+
+    // ── Sun / lighting (live-tunable via ImGui) ────────────────────────────
+    float sunAzimuth = 210.0f;  ///< Degrees, 0=North, 90=East, 180=South (default ~SSW).
+    float sunElevation = 60.0f; ///< Degrees above horizon (default 60° ≈ 11am).
+    float sunIntensity = 3.0f;  ///< Primary directional light intensity.
+    float fillIntensity = 0.8f; ///< Fill/bounce light intensity.
+    float ambientR = 0.08f, ambientG = 0.09f, ambientB = 0.12f; ///< PBR ambient color.
+    float bloomStr = 0.04f;                                     ///< Bloom compositing strength.
+    float ssaoStr = 0.8f;                                       ///< SSAO compositing strength.
+    float ssrStr = 0.4f;                                        ///< SSR compositing strength.
+    float volStr = 0.15f;                                       ///< Volumetric compositing strength.
+    float sharpenStr = 0.6f;                                    ///< Post-TAA sharpening strength.
+    float shadowBiasVal = 0.0005f;
+    float shadowNormalBiasVal = 1.5f;
+
+    /// Compute the sun direction (unit vector TO sun) from azimuth/elevation.
+    [[nodiscard]] glm::vec3 getSunDirection() const;
+
 private:
     // Volumetrics (Phase 10)
     SDL_GPUTexture* volumetricTexture = nullptr; ///< RGBA16F half-res.
