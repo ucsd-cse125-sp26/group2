@@ -691,6 +691,7 @@ SDL_AppResult Game::iterate()
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     debugUI.buildRenderTogglesUI(renderer.toggles);
     debugUI.render();
+
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
 
     if (limitFPSToMonitor != prevLimitFPS)
