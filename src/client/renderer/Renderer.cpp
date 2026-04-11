@@ -2087,12 +2087,23 @@ static std::array<CascadeInfo, 4> computeCascades(
     return cascades;
 }
 
-void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
+void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, const float roll)
 {
     // ── Camera setup ────────────────────────────────────────────────────────
     const float cosPitch = std::cos(pitch);
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
-    camera.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
+
+    // Compute an up vector that incorporates roll (camera tilt).
+    // Roll rotates the up vector around the forward axis.
+    glm::vec3 camUp{0.0f, 1.0f, 0.0f};
+    if (std::abs(roll) > 0.001f) {
+        const glm::vec3 right = glm::normalize(glm::cross(forward, camUp));
+        const glm::vec3 trueUp = glm::normalize(glm::cross(right, forward));
+        const float cosR = std::cos(roll);
+        const float sinR = std::sin(roll);
+        camUp = trueUp * cosR + right * sinR;
+    }
+    camera.setLookAt(eye, eye + forward, camUp);
 
     // ── Acquire GPU resources ───────────────────────────────────────────────
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
@@ -2326,7 +2337,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 sceneShadowMats.view = cascade.lightView;
                 sceneShadowMats.projection = cascade.lightProj;
                 SDL_PushGPUVertexUniformData(cmd, 0, &sceneShadowMats, sizeof(sceneShadowMats));
-                SDL_DrawGPUPrimitives(shadowPass, 1002, 1, 0, 0);
+                SDL_DrawGPUPrimitives(shadowPass, 1182, 1, 0, 0);
             }
         }
 
@@ -2389,7 +2400,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             };
             SDL_BindGPUFragmentSamplers(pass, 0, &sceneShadowSamp, 1);
 
-            SDL_DrawGPUPrimitives(pass, 1002, 1, 0, 0);
+            SDL_DrawGPUPrimitives(pass, 1182, 1, 0, 0);
         }
 
         // ── PBR models (two-pass: opaques first, then transparents) ────────

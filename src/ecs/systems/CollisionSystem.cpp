@@ -209,6 +209,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     pos.value += k_hit.normal * k_pushback;
                     vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
                     state.grounded = true;
+                    state.groundNormal = k_hit.normal;
                 } else {
                     if (k_wasGrounded && tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world)) {
                         state.grounded = true;
@@ -230,8 +231,10 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             const glm::vec3 k_probeTarget = pos.value - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
             const physics::HitResult k_probe = physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
 
-            if (k_probe.hit && k_probe.normal.y > 0.7f)
+            if (k_probe.hit && k_probe.normal.y > 0.7f) {
                 state.grounded = true;
+                state.groundNormal = k_probe.normal;
+            }
         });
 }
 
