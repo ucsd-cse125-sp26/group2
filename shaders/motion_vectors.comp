@@ -1,11 +1,15 @@
-// motion_vectors.comp — Compute per-pixel screen-space motion vectors.
+/// @file motion_vectors.comp
+/// @brief Compute per-pixel screen-space motion vectors.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Scene depth buffer.
 layout(set = 0, binding = 0) uniform sampler2D depthBuffer;
+/// @brief Output motion vector image (RG16F).
 layout(set = 1, binding = 0, rg16f) writeonly uniform image2D motionImage;
 
+/// @brief Motion vector computation parameters.
 layout(set = 2, binding = 0) uniform MotionParams {
     mat4 currentInvVP;   // inverse of current frame's ViewProjection
     mat4 previousVP;     // previous frame's ViewProjection
@@ -22,7 +26,7 @@ void main()
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);
     float depth = texture(depthBuffer, uv).r;
 
-    // Skip sky — no motion.
+    // Skip sky -- no motion.
     if (depth >= 0.9999) {
         imageStore(motionImage, coord, vec4(0.0));
         return;

@@ -1,12 +1,16 @@
+/// @file hitscan_beam.vert
+/// @brief Hitscan beam vertex shader with camera-facing oriented quads.
 #version 450
 
-// HitscanBeam (64 bytes = 16 floats):
-//   [0..2]  origin.xyz  [3] radius
-//   [4..6]  hitPos.xyz  [7] lifetime
-//   [8..11] coreColor   [12..15] edgeColor
+/// @brief HitscanBeam (64 bytes = 16 floats):
+///   [0..2]  origin.xyz  [3] radius
+///   [4..6]  hitPos.xyz  [7] lifetime
+///   [8..11] coreColor   [12..15] edgeColor
 
+/// @brief Per-beam SSBO data.
 layout(set = 0, binding = 0) readonly buffer BeamData { float data[]; };
 
+/// @brief Per-frame camera uniforms.
 layout(set = 1, binding = 0) uniform ParticleUniforms {
     mat4  view;
     mat4  proj;

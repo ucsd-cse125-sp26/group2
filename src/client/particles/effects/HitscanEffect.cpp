@@ -1,3 +1,6 @@
+/// @file HitscanEffect.cpp
+/// @brief Implementation of hitscan energy beam with fBm path deviation.
+
 #include "HitscanEffect.hpp"
 
 #include <algorithm>
@@ -6,23 +9,24 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
+/// @brief Return a random float in [0, 1].
 static float randf()
 {
     return static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
 }
 
-// ===========================================================================
 // 1-D smooth value noise + fBm
 //
-// Using integer hash → cubic-interpolated value noise.
+// Using integer hash -> cubic-interpolated value noise.
 // The noise is sampled at (t * freq + seed + time * animRate), so:
 //   - freq controls how rapidly the bolt wiggles spatially
 //   - animRate controls how fast that octave changes over time
-// ===========================================================================
 
+/// @brief Good avalanche hash -- gives uniform [0,1] output for any integer input.
+/// @param n Integer input.
+/// @return Hashed value in [0, 1].
 static float hash1(int n)
 {
-    // Good avalanche hash — gives uniform [0,1] output for any integer input.
     uint32_t x = static_cast<uint32_t>(n);
     x = ((x >> 16) ^ x) * 0x45d9f3bu;
     x = ((x >> 16) ^ x) * 0x45d9f3bu;
@@ -30,7 +34,9 @@ static float hash1(int n)
     return static_cast<float>(x & 0xFFFFFFu) / static_cast<float>(0xFFFFFFu);
 }
 
-/// 1-D value noise with cubic (smoothstep) interpolation.  Continuous in t.
+/// @brief 1-D value noise with cubic (smoothstep) interpolation.  Continuous in t.
+/// @param t Sample position along the noise domain.
+/// @return Noise value in [0, 1].
 static float vnoise(float t)
 {
     const int i = static_cast<int>(std::floor(t));
@@ -39,10 +45,15 @@ static float vnoise(float t)
     return glm::mix(hash1(i), hash1(i + 1), s);
 }
 
-/// 4-octave fBm displacement (lacunarity ≈ 3, persistence ≈ 0.4).
-/// Higher octaves run at 2× the animation speed of the one below them,
+/// @brief 4-octave fBm displacement (lacunarity ~ 3, persistence ~ 0.4).
+///
+/// Higher octaves run at 2x the animation speed of the one below them,
 /// giving slow large-scale breathing overlaid with fast fine crackle.
-/// Returns ~[-1, +1].
+/// @param t       Sample position along the arc [0, 1].
+/// @param seed    Base seed for this noise instance.
+/// @param time    Elapsed animation time (drives temporal evolution).
+/// @param octaves Number of fBm octaves to sum.
+/// @return Displacement value in approximately [-1, +1].
 static float fbm(float t, float seed, float time, int octaves = 4)
 {
     float d = 0.f;
@@ -59,9 +70,16 @@ static float fbm(float t, float seed, float time, int octaves = 4)
     return d;
 }
 
-/// Domain-warped fBm: warp t before sampling.
-/// Warping causes frequency content to vary spatially — some regions are smooth,
-/// others suddenly jagged — matching how real lightning looks.
+/// @brief Domain-warped fBm: warp t before sampling.
+///
+/// Warping causes frequency content to vary spatially -- some regions are smooth,
+/// others suddenly jagged -- matching how real lightning looks.
+/// @param t       Sample position along the arc [0, 1].
+/// @param seed    Base fBm seed.
+/// @param warpSeed Seed for the domain warp noise.
+/// @param time    Elapsed animation time.
+/// @param octaves Number of fBm octaves to sum.
+/// @return Warped displacement value in approximately [-1, +1].
 static float wfbm(float t, float seed, float warpSeed, float time, int octaves = 4)
 {
     constexpr float kWarpStr = 0.14f;
@@ -70,9 +88,7 @@ static float wfbm(float t, float seed, float warpSeed, float time, int octaves =
     return fbm(tWarped, seed, time, octaves);
 }
 
-// ===========================================================================
 // Bezier helpers
-// ===========================================================================
 
 glm::vec3 HitscanEffect::evalBezier(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t)
 {
@@ -86,9 +102,7 @@ glm::vec3 HitscanEffect::evalBezierTangent(glm::vec3 p0, glm::vec3 p1, glm::vec3
     return 3.f * u * u * (p1 - p0) + 6.f * u * t * (p2 - p1) + 3.f * t * t * (p3 - p2);
 }
 
-// ===========================================================================
 // Control-point + branch randomization
-// ===========================================================================
 
 void HitscanEffect::randomizeCP(
     glm::vec3 origin, glm::vec3 hitPos, glm::vec3 camForward, glm::vec3& cp1, glm::vec3& cp2)
@@ -115,24 +129,22 @@ void HitscanEffect::randomizeCP(
 
 void HitscanEffect::rerandomizeBranches(BezierBeam& beam, glm::vec3 /*camForward*/)
 {
-    beam.branchCount = 2 + (std::rand() % (k_maxBranches - 1)); // 2–5
+    beam.branchCount = 2 + (std::rand() % (k_maxBranches - 1)); // 2-5
 
     for (int i = 0; i < beam.branchCount; ++i) {
         auto& b = beam.branches[i];
         b.tStart = 0.10f + randf() * 0.75f;              // spread over the bolt body
-        b.length = 0.07f + randf() * 0.17f;              // 7–24 % of main bolt length
-        b.angle = (randf() - 0.5f) * glm::radians(60.f); // ±30° divergence
+        b.length = 0.07f + randf() * 0.17f;              // 7-24 % of main bolt length
+        b.angle = (randf() - 0.5f) * glm::radians(60.f); // +/-30 deg divergence
         b.seed = randf() * 50.f;
     }
 }
 
-// ===========================================================================
 // Triangle-strip ribbon builder
 //
-// Each segment of the path gets two vertices (left edge edge=+1, right edge
-// edge=-1).  When appending to a non-empty strip, two degenerate vertices are
-// prepended to restart the strip — this keeps everything in a single draw call.
-// ===========================================================================
+// Each segment of the path gets two vertices (left edge=+1, right edge=-1).
+// When appending to a non-empty strip, two degenerate vertices are prepended
+// to restart the strip -- this keeps everything in a single draw call.
 
 void HitscanEffect::appendArcStrip(const std::vector<glm::vec3>& pts,
                                    float radius,
@@ -172,9 +184,7 @@ void HitscanEffect::appendArcStrip(const std::vector<glm::vec3>& pts,
     }
 }
 
-// ===========================================================================
 // spawn
-// ===========================================================================
 
 void HitscanEffect::spawn(glm::vec3 origin, glm::vec3 hitPos, WeaponType /*wt*/, glm::vec3 camForward)
 {
@@ -221,9 +231,7 @@ void HitscanEffect::spawn(glm::vec3 origin, glm::vec3 hitPos, WeaponType /*wt*/,
     slot->returnStrokes[2] = {0.180f, randf() * 50.f, false};
 }
 
-// ===========================================================================
-// update — rebuilds arcVerts_ every frame
-// ===========================================================================
+// update -- rebuilds arcVerts_ every frame
 
 void HitscanEffect::update(float dt, glm::vec3 camForward)
 {
@@ -254,7 +262,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
         for (auto& rs : beam.returnStrokes) {
             if (!rs.fired && elapsed >= rs.fireAt) {
                 rs.fired = true;
-                // Capture current shape → generate new arc path → restart morph
+                // Capture current shape -> generate new arc path -> restart morph
                 beam.cp1Prev = glm::mix(beam.cp1Prev, beam.cp1Curr, beam.interpT);
                 beam.cp2Prev = glm::mix(beam.cp2Prev, beam.cp2Curr, beam.interpT);
                 randomizeCP(beam.origin, beam.hitPos, camForward, beam.cp1Curr, beam.cp2Curr);
@@ -265,7 +273,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
             }
         }
 
-        // ── Bezier spine ──────────────────────────────────────────────────────
+        // Bezier spine
         const glm::vec3 cp1 = glm::mix(beam.cp1Prev, beam.cp1Curr, beam.interpT);
         const glm::vec3 cp2 = glm::mix(beam.cp2Prev, beam.cp2Curr, beam.interpT);
 
@@ -282,20 +290,20 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
         perp = glm::normalize(perp);
         const glm::vec3 perp2 = glm::normalize(glm::cross(axisN, perp));
 
-        // baseAmp: 16 % of beam length — controls overall path deviation
+        // baseAmp: 16 % of beam length -- controls overall path deviation
         const float baseAmp = len * 0.16f;
 
-        // ── Fade envelope (ramp in 8 %, ramp out 25 %) ───────────────────────
+        // Fade envelope (ramp in 8 %, ramp out 25 %)
         const float tLife = elapsed / k_beamLifetime;
         const float rampIn = std::min(1.f, tLife / 0.08f);
         const float rampOut = std::min(1.f, beam.lifetime / (k_beamLifetime * 0.25f));
         const float fade = rampIn * rampOut;
 
-        // ── Sample main arc ───────────────────────────────────────────────────
-        // For each sample t ∈ [0,1]:
+        // Sample main arc
+        // For each sample t in [0,1]:
         //   1. Evaluate Bezier spine point (large-scale arc shape, smooth morph)
         //   2. Domain-warp t, then sample 4-octave fBm in two perpendicular axes
-        //   3. Multiply by sin(t·π) envelope — pinned at both endpoints
+        //   3. Multiply by sin(t*pi) envelope -- pinned at both endpoints
         //   4. Displace the spine point
 
         std::vector<glm::vec3> mainPts;
@@ -305,7 +313,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
             const float t = static_cast<float>(i) / static_cast<float>(k_bezierSegs);
             glm::vec3 pt = evalBezier(beam.origin, cp1, cp2, beam.hitPos, t);
 
-            // Envelope: sin(t·π) peaks at midpoint, zero at both endpoints
+            // Envelope: sin(t*pi) peaks at midpoint, zero at both endpoints
             const float env = std::sin(t * glm::pi<float>());
 
             // fBm along U-axis (primary wiggle plane)
@@ -317,22 +325,22 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
             mainPts.push_back(pt);
         }
 
-        // ── Three-layer main arc render ───────────────────────────────────────
+        // Three-layer main arc render
         //
         // The three layers with different radii and alphas produce the HDR look:
         // the wide-low-alpha bloom layer makes the whole arc glow across a large
         // screen area; the tight high-alpha core looks white-hot.
 
-        // Layer 1 — outer bloom halo  (wide, dim — simulates atmospheric scatter)
+        // Layer 1 -- outer bloom halo  (wide, dim -- simulates atmospheric scatter)
         appendArcStrip(mainPts, 6.5f, {0.20f, 0.50f, 1.00f, 0.07f * fade}, camForward);
 
-        // Layer 2 — inner energy channel  (the main visible arc body)
+        // Layer 2 -- inner energy channel  (the main visible arc body)
         appendArcStrip(mainPts, 1.8f, {0.45f, 0.80f, 1.00f, 0.55f * fade}, camForward);
 
-        // Layer 3 — white-hot centerline  (overdriven — simulates HDR core)
+        // Layer 3 -- white-hot centerline  (overdriven -- simulates HDR core)
         appendArcStrip(mainPts, 0.40f, {0.92f, 0.97f, 1.00f, 0.96f * fade}, camForward);
 
-        // ── Branches ─────────────────────────────────────────────────────────
+        // Branches
         //
         // Each branch starts at a clamped point on the main arc, extends at an
         // angle from the tangent, and uses 2-octave fBm for its own path.
@@ -345,7 +353,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
             const int rootIdx = static_cast<int>(br.tStart * static_cast<float>(k_bezierSegs) + 0.5f);
             const glm::vec3 root = mainPts[std::min(rootIdx, k_bezierSegs)];
 
-            // Tangent at tStart — the branch diverges from the main bolt direction
+            // Tangent at tStart -- the branch diverges from the main bolt direction
             const glm::vec3 tang = evalBezierTangent(beam.origin, cp1, cp2, beam.hitPos, br.tStart);
             const float tangL = glm::length(tang);
             const glm::vec3 tangN = (tangL > 0.001f) ? tang / tangL : axisN;
@@ -381,9 +389,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
     }
 }
 
-// ===========================================================================
 // activeBeamCount
-// ===========================================================================
 
 uint32_t HitscanEffect::activeBeamCount() const
 {

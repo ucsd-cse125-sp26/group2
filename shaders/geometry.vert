@@ -1,8 +1,11 @@
+/// @file geometry.vert
+/// @brief Procedural cube geometry vertex shader with per-face colors.
 #version 450
 
 layout(location = 0) out vec3 diffuse;
 layout(location = 1) flat out vec3 fragNormal;
 
+/// @brief Per-frame camera and model matrices.
 layout(set = 1, binding = 0) uniform Matrices
 {
     mat4 model;
@@ -54,7 +57,7 @@ const vec3 cubeMax = -cubeMin;
         vec3(cubeMax.x, cubeMax.y, cubeMax.z)
     );
 
-    // Specify normals
+    // Normals per vertex
     const vec3 normals[24] = vec3[](
         // Front
         vec3(0, 0, 1),
@@ -93,7 +96,7 @@ const vec3 cubeMax = -cubeMin;
         vec3(1, 0, 0)
     );
 
-    // Specify indices
+    // Index buffer
     const uint indices[36] = uint[](
         0, 1, 2, 0, 2, 3,        // Front
         4, 5, 6, 4, 6, 7,        // Back

@@ -1,3 +1,6 @@
+/// @file Game.cpp
+/// @brief Implementation of the top-level Game class and SDL application callbacks.
+
 #include "Game.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
@@ -89,7 +92,7 @@ bool Game::init()
     SDL_SetWindowRelativeMouseMode(window, true);
     mouseCaptured = true;
 
-    // ── Load models for entity rendering ────────────────────────────────────
+    // Load models for entity rendering
     wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
     if (wraithModelIdx < 0)
         SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
@@ -98,7 +101,7 @@ bool Game::init()
     if (weaponModelIdx < 0)
         SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
 
-    // ── Load animated model (Mixamo FBX) ──────────────────────────────────
+    // Load animated model (Mixamo FBX)
     {
         const char* base = SDL_GetBasePath();
         std::string fbxPath = std::string(base ? base : "") + "assets/Standard_Run.fbx";
@@ -193,7 +196,7 @@ SDL_AppResult Game::event(SDL_Event* event)
             //     break;
             // }
 
-        // ── Particle system test keys ───────────────────────────────────────
+        // Particle system test keys
         case SDLK_T: {
             // Energy beam — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
@@ -248,12 +251,12 @@ SDL_AppResult Game::event(SDL_Event* event)
         }
     }
 
-    // ── Left-click fires weapon (dispatches WeaponFiredEvent) ────────────
+    // Left-click fires weapon (dispatches WeaponFiredEvent)
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT && mouseCaptured) {
         const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
         const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
-        // ── Ray-scene intersection for hit position ─────────────────────
+        // Ray-scene intersection for hit position
         // Test against the floor plane (y=0) and use the nearest hit.
         constexpr float k_maxRange = 5000.f;
         float hitDist = k_maxRange; // fallback: max range
@@ -325,47 +328,45 @@ SDL_AppResult Game::event(SDL_Event* event)
     return SDL_APP_CONTINUE;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// iterate() — decoupled physics / render loop.
-//
-// Physics ALWAYS runs at exactly 128 Hz (k_physicsHz) using an accumulator
-// with a multi-tick catch-up loop (up to k_maxTicksPerFrame per call).
-// This is non-negotiable: it must match the server tick rate.
-//
-// Input is split into two independent streams:
-//
-//   Mouse look (yaw / pitch) — sampled EVERY iterate() call so camera
-//       rotation is perfectly smooth at whatever frame rate the renderer
-//       produces.  The camera always uses the latest yaw directly (never
-//       interpolated).  Interpolating yaw with the physics alpha creates a
-//       timebase mismatch on multi-tick or zero-tick frames, producing
-//       visible jitter.
-//
-//   Movement keys (WASD / jump / crouch) — sampled once per physics tick
-//       group when inputSyncedWithPhysics is true (the default) so
-//       movement calculations match the server.  When the toggle is off,
-//       keys are also sampled every iterate() call.
-//
-// Position interpolation uses alpha = accumulator / k_physicsDt across the
-// LAST physics tick (PreviousPosition is saved inside the while loop before
-// each tick).
-//
-// Three ImGui-tunable flags:
-//
-//   renderSeparateFromPhysics — render every iterate() call with position
-//       interpolated between the last two physics ticks (true, default) vs.
-//       render only after a physics tick (false, caps render fps at 128 Hz).
-//
-//   inputSyncedWithPhysics — sample movement keys once per tick group
-//       (true, default, server-consistent) vs. every iterate() call (false).
-//       Mouse look is always per-frame regardless of this toggle.
-//
-//   limitFPSToMonitor — VSync on (true) / off (false, default).
-// ═══════════════════════════════════════════════════════════════════════════
+/// @brief Advance one frame: decoupled physics / render loop.
+///
+/// Physics ALWAYS runs at exactly 128 Hz (k_physicsHz) using an accumulator
+/// with a multi-tick catch-up loop (up to k_maxTicksPerFrame per call).
+/// This is non-negotiable: it must match the server tick rate.
+///
+/// Input is split into two independent streams:
+///
+///   Mouse look (yaw / pitch) -- sampled EVERY iterate() call so camera
+///       rotation is perfectly smooth at whatever frame rate the renderer
+///       produces.  The camera always uses the latest yaw directly (never
+///       interpolated).  Interpolating yaw with the physics alpha creates a
+///       timebase mismatch on multi-tick or zero-tick frames, producing
+///       visible jitter.
+///
+///   Movement keys (WASD / jump / crouch) -- sampled once per physics tick
+///       group when inputSyncedWithPhysics is true (the default) so
+///       movement calculations match the server.  When the toggle is off,
+///       keys are also sampled every iterate() call.
+///
+/// Position interpolation uses alpha = accumulator / k_physicsDt across the
+/// LAST physics tick (PreviousPosition is saved inside the while loop before
+/// each tick).
+///
+/// Three ImGui-tunable flags:
+///
+///   renderSeparateFromPhysics -- render every iterate() call with position
+///       interpolated between the last two physics ticks (true, default) vs.
+///       render only after a physics tick (false, caps render fps at 128 Hz).
+///
+///   inputSyncedWithPhysics -- sample movement keys once per tick group
+///       (true, default, server-consistent) vs. every iterate() call (false).
+///       Mouse look is always per-frame regardless of this toggle.
+///
+///   limitFPSToMonitor -- VSync on (true) / off (false, default).
 
 SDL_AppResult Game::iterate()
 {
-    // ── 1. Accumulate real elapsed time ──────────────────────────────────
+    // 1. Accumulate real elapsed time
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
@@ -382,7 +383,7 @@ SDL_AppResult Game::iterate()
                 static_cast<double>(accumulator),
                 renderSeparateFromPhysics);
 
-    // ── 2. Refresh performance stats every 0.5 s ─────────────────────────
+    // 2. Refresh performance stats every 0.5 s
     static constexpr float k_statsPeriod = 0.5f;
     const float statsDt = static_cast<float>(k_now - statsPrevTime) / static_cast<float>(k_perfFreq);
     if (statsDt >= k_statsPeriod && fpsHistoryCount > 0) {
@@ -412,7 +413,7 @@ SDL_AppResult Game::iterate()
         statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
     }
 
-    // ── 3. Input ───────────────────────────────────────────────────────────
+    // 3. Input
     //
     // Mouse look runs EVERY iterate() call — this keeps camera rotation
     // perfectly smooth at whatever frame rate the renderer is producing.
@@ -430,7 +431,7 @@ SDL_AppResult Game::iterate()
 
     systems::runInputSend(registry, client);
 
-    // ── 4. Physics — always 128 Hz, up to k_maxTicksPerFrame catch-up ─────
+    // 4. Physics -- always 128 Hz, up to k_maxTicksPerFrame catch-up
     bool physicsRan = false;
     int ticksThisFrame = 0;
 
@@ -460,11 +461,11 @@ SDL_AppResult Game::iterate()
         physicsRan = true;
     }
 
-    // ── 5. Bail out early if there is nothing new to render ───────────────
+    // 5. Bail out early if there is nothing new to render
     if (!renderSeparateFromPhysics && !physicsRan)
         return SDL_APP_CONTINUE;
 
-    // ── 6. Resolve camera ─────────────────────────────────────────────────
+    // 6. Resolve camera
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
@@ -502,16 +503,16 @@ SDL_AppResult Game::iterate()
             });
     }
 
-    // ── Flush dispatcher events (weapon fired, impact, explosion) ─────────
+    // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
 
-    // ── Update particle system (render-rate, not physics-rate) ────────────
+    // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
 
     // Draw persistent HUD text each frame
     particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
 
-    // ── Speedometer HUD ─────────────────────────────────────────────────
+    // Speedometer HUD
     // Shows km/h with a horizontal bar that fills with speed.
     // 1 Quake unit ≈ 1 inch = 0.0254 m. Speed in u/s → km/h:
     //   km/h = (u/s) * 0.0254 * 3.6 = u/s * 0.09144
@@ -558,7 +559,7 @@ SDL_AppResult Game::iterate()
                 {10.f + static_cast<float>(k_barLen) * 8.f, 58.f}, bgStr, {0.3f, 0.3f, 0.3f, 0.4f}, 16.f);
     }
 
-    // ── Grapple cable visual ────────────────────────────────────────────
+    // Grapple cable visual
     registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& pstate) {
         if (pstate.grappleActive) {
             // Draw cable from player hand to hook point every frame.
@@ -578,7 +579,7 @@ SDL_AppResult Game::iterate()
         cachedEye_ = renderEye;
     }
 
-    // ── Update skeletal animation (CPU skinning) ─────────────────────────
+    // Update skeletal animation (CPU skinning)
     if (runAnimation.isLoaded() && animatedModelIdx >= 0) {
         runAnimation.update(frameTime);
         for (size_t m = 0; m < runAnimation.meshCount(); ++m) {
@@ -588,7 +589,7 @@ SDL_AppResult Game::iterate()
         }
     }
 
-    // ── Build entity render list ────────────────────────────────────────────
+    // Build entity render list
     {
         std::vector<EntityRenderCmd> entityCmds;
         registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
@@ -607,7 +608,7 @@ SDL_AppResult Game::iterate()
         renderer.setEntityRenderList(std::move(entityCmds));
     }
 
-    // ── Build weapon viewmodel ──────────────────────────────────────────────
+    // Build weapon viewmodel
     // R-301 model bounds: X ±0.6, Y −3.4..+1.3, Z −8.4..+7.2
     // Model's +Z axis is the barrel direction.  Origin is near the grip.
     {
@@ -660,7 +661,7 @@ SDL_AppResult Game::iterate()
         renderer.setWeaponViewmodel(vm);
     }
 
-    // ── 7. Frame recording (R key) — anchored to physics ticks ───────────
+    // 7. Frame recording (R key) -- anchored to physics ticks
     if (physicsRan && recorder.isRecording()) {
         FrameState state;
         state.frameNumber = frameCount;
@@ -712,7 +713,7 @@ SDL_AppResult Game::iterate()
         recorder.recordFrame(state);
     }
 
-    // ── 8. FPS sample — record inter-render delta into ring buffer ────────
+    // 8. FPS sample -- record inter-render delta into ring buffer
     if (prevRenderTime != 0) {
         const float renderDt = static_cast<float>(k_now - prevRenderTime) / static_cast<float>(k_perfFreq);
         if (renderDt > 0.0f && renderDt < 1.0f) { // ignore startup / minimised outliers
@@ -726,12 +727,12 @@ SDL_AppResult Game::iterate()
 
     ++frameCount;
 
-    // ── 9. VSync toggle — apply when limitFPSToMonitor changes ───────────
+    // 9. VSync toggle -- apply when limitFPSToMonitor changes
     // buildUI may modify limitFPSToMonitor, so we snapshot it before and
     // call setVSync only when it actually flips (avoids per-frame API calls).
     const bool prevLimitFPS = limitFPSToMonitor;
 
-    // ── 10. Render ────────────────────────────────────────────────────────
+    // 10. Render
     debugUI.newFrame();
     debugUI.buildUI(registry,
                     tickCount,

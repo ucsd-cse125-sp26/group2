@@ -1,3 +1,6 @@
+/// @file EventQueue.cpp
+/// @brief Implementation of the EventQueue FIFO operations.
+
 #include "EventQueue.hpp"
 
 bool EventQueue::isEmpty()

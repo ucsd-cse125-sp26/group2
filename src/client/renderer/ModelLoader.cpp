@@ -1,3 +1,6 @@
+/// @file ModelLoader.cpp
+/// @brief Assimp model loading, embedded texture decoding, and scene-graph traversal.
+
 #include "ModelLoader.hpp"
 
 #include <SDL3/SDL_log.h>
@@ -35,8 +38,12 @@
 namespace
 {
 
-// ── Texture helpers ─────────────────────────────────────────────────────────
+// Texture helpers
 
+/// @brief Decode an Assimp embedded texture into RGBA pixel data.
+/// @param embTex Assimp embedded texture pointer.
+/// @param textures Output vector to append the decoded texture to.
+/// @return True on success, false if the texture is null or decoding fails.
 bool decodeEmbeddedTexture(const aiTexture* embTex, std::vector<TextureData>& textures)
 {
     if (!embTex)
@@ -75,6 +82,13 @@ bool decodeEmbeddedTexture(const aiTexture* embTex, std::vector<TextureData>& te
     return true;
 }
 
+/// @brief Resolve an embedded texture by Assimp type and return its index.
+/// @param mat Assimp material.
+/// @param type Texture type to resolve.
+/// @param scene Assimp scene.
+/// @param textures Decoded texture storage.
+/// @param embTexToDataIdx Mapping from Assimp texture index to textures[] index.
+/// @return Index into textures[], or -1 if not found.
 int resolveTexture(const aiMaterial* mat,
                    aiTextureType type,
                    const aiScene* scene,
@@ -118,6 +132,8 @@ int resolveTexture(const aiMaterial* mat,
     return -1;
 }
 
+/// @brief Resolve the diffuse/base-colour texture, trying multiple Assimp types.
+/// @return Index into textures[], or -1 if not found.
 int resolveDiffuseTex(const aiMaterial* mat,
                       const aiScene* scene,
                       std::vector<TextureData>& textures,
@@ -131,9 +147,11 @@ int resolveDiffuseTex(const aiMaterial* mat,
     return -1;
 }
 
-/// Try multiple Assimp texture types for the glTF metallic-roughness map.
+/// @brief Try multiple Assimp texture types for the glTF metallic-roughness map.
+///
 /// glTF stores metallic-roughness combined (B=metallic, G=roughness).
 /// Assimp maps it to different types depending on version and importer path.
+/// @return Index into textures[], or -1 if not found.
 int resolveMetallicRoughnessTex(const aiMaterial* mat,
                                 const aiScene* scene,
                                 std::vector<TextureData>& textures,
@@ -151,6 +169,9 @@ int resolveMetallicRoughnessTex(const aiMaterial* mat,
     return -1;
 }
 
+/// @brief Extract PBR material scalars from an Assimp material.
+/// @param mat Assimp material.
+/// @return Populated MaterialData.
 MaterialData extractMaterial(const aiMaterial* mat)
 {
     MaterialData out;
@@ -200,26 +221,34 @@ MaterialData extractMaterial(const aiMaterial* mat)
     return out;
 }
 
-// ── glm / Assimp matrix conversion ─────────────────────────────────────────
+// glm / Assimp matrix conversion
 
-/// Assimp is row-major; GLM is column-major — transpose on copy.
+/// @brief Convert an Assimp row-major matrix to a GLM column-major matrix.
+/// @param m Assimp 4x4 matrix.
+/// @return Equivalent glm::mat4.
 glm::mat4 aiToGlm(const aiMatrix4x4& m)
 {
     return glm::transpose(glm::make_mat4(&m.a1));
 }
 
-// ── Recursive scene-graph traversal ─────────────────────────────────────────
+// Recursive scene-graph traversal
 //
 // Key rules:
-//   • Positions and normals are transformed by each node's accumulated world
+//   - Positions and normals are transformed by each node's accumulated world
 //     matrix, with normals using the correct normal matrix (inverse-transpose
-//     of the upper-left 3×3 of the world matrix).
-//   • When a node's transform has a NEGATIVE determinant (mirror / reflection),
+//     of the upper-left 3x3 of the world matrix).
+//   - When a node's transform has a NEGATIVE determinant (mirror / reflection),
 //     all face windings for its meshes are reversed so the geometry remains
 //     front-facing after the reflection.
-//   • UV coordinates are NOT transformed — they are 2D and independent of the
+//   - UV coordinates are NOT transformed -- they are 2D and independent of the
 //     3D node hierarchy.
 
+/// @brief Recursively process an Assimp scene node, baking transforms into vertex data.
+/// @param node Current Assimp node.
+/// @param scene Assimp scene.
+/// @param parentTransform Accumulated parent world transform.
+/// @param outModel Output model receiving meshes and textures.
+/// @param embTexToDataIdx Mapping from Assimp texture index to textures[] index.
 void processNode(const aiNode* node,
                  const aiScene* scene,
                  const glm::mat4& parentTransform,
@@ -336,8 +365,6 @@ void processNode(const aiNode* node,
 
 } // namespace
 
-// ═══════════════════════════════════════════════════════════════════════════
-
 bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs)
 {
     Assimp::Importer importer;
@@ -345,7 +372,7 @@ bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs)
     unsigned int flags = static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals |
                                                    aiProcess_CalcTangentSpace | aiProcess_JoinIdenticalVertices);
 
-    // ── UV coordinate convention ────────────────────────────────────────────
+    // UV coordinate convention
     // Vulkan (and DirectX) expect V=0 at the TOP of the image.
     // OpenGL, Blender, and many Sketchfab exports use V=0 at the BOTTOM.
     //

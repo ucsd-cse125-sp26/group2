@@ -1,3 +1,6 @@
+/// @file CollisionSystem.hpp
+/// @brief Shared collision system for swept-AABB physics resolution.
+
 #pragma once
 
 #include "ecs/physics/SweptCollision.hpp"

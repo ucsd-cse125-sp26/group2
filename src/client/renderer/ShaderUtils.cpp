@@ -1,3 +1,6 @@
+/// @file ShaderUtils.cpp
+/// @brief Implementation of shared shader-loading utilities.
+
 #include "ShaderUtils.hpp"
 
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,

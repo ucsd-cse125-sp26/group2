@@ -1,4 +1,7 @@
-// stb_truetype implementation — compiled exactly once here
+/// @file SdfAtlas.cpp
+/// @brief SDF glyph atlas baking and GPU upload implementation.
+
+// stb_truetype implementation -- compiled exactly once here
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "SdfAtlas.hpp"
 
@@ -11,15 +14,23 @@
 #include <stb_truetype.h>
 #include <vector>
 
-// ---------------------------------------------------------------------------
 // Shelf-packer for glyph atlas
-// ---------------------------------------------------------------------------
 
+/// @brief Single shelf row used by the shelf-packing algorithm.
 struct Shelf
 {
     int x = 0, y = 0, h = 0;
 };
 
+/// @brief Try to pack a rectangle into the atlas using shelf-packing.
+/// @param shelves Current shelf state.
+/// @param atlasW Atlas width in pixels.
+/// @param atlasH Atlas height in pixels.
+/// @param w Rectangle width to pack.
+/// @param h Rectangle height to pack.
+/// @param outX Output x position in the atlas.
+/// @param outY Output y position in the atlas.
+/// @return true if the rectangle was packed successfully.
 static bool packRect(std::vector<Shelf>& shelves, int atlasW, int atlasH, int w, int h, int& outX, int& outY)
 {
     const int padding = 2;
@@ -45,10 +56,14 @@ static bool packRect(std::vector<Shelf>& shelves, int atlasW, int atlasH, int w,
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // Brute-force SDF bake for one glyph bitmap
-// ---------------------------------------------------------------------------
 
+/// @brief Compute a signed-distance field from a binary glyph bitmap.
+/// @param bmp Source bitmap (values > 127 are considered inside).
+/// @param bw Bitmap width in pixels.
+/// @param bh Bitmap height in pixels.
+/// @param out Output SDF buffer (same dimensions as bmp).
+/// @param spread Maximum search distance in pixels.
 static void bakeSdf(const uint8_t* bmp, int bw, int bh, uint8_t* out, int spread)
 {
     for (int py = 0; py < bh; ++py) {
@@ -80,9 +95,7 @@ static void bakeSdf(const uint8_t* bmp, int bw, int bh, uint8_t* out, int spread
     }
 }
 
-// ---------------------------------------------------------------------------
 // init
-// ---------------------------------------------------------------------------
 
 bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
 {
@@ -107,7 +120,7 @@ bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
     std::vector<uint8_t> atlas(k_atlasW * k_atlasH, 0);
     std::vector<Shelf> shelves;
 
-    // Bake ASCII 32–126
+    // Bake ASCII 32-126
     for (int cp = 32; cp <= 126; ++cp) {
         int ix0, iy0, ix1, iy1;
         stbtt_GetCodepointBitmapBox(&font, cp, scale_, scale_, &ix0, &iy0, &ix1, &iy1);
@@ -218,6 +231,7 @@ bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
     return true;
 }
 
+/// @brief Release all GPU resources and reset internal state.
 void SdfAtlas::quit()
 {
     if (device_) {
@@ -232,12 +246,18 @@ void SdfAtlas::quit()
     glyphs_.clear();
 }
 
+/// @brief Look up glyph metrics by Unicode codepoint.
+/// @param codepoint Unicode codepoint to look up.
+/// @return Pointer to glyph info, or nullptr if the codepoint was not baked.
 const GlyphInfo* SdfAtlas::glyph(uint32_t codepoint) const
 {
     auto it = glyphs_.find(codepoint);
     return (it != glyphs_.end()) ? &it->second : nullptr;
 }
 
+/// @brief Bind the SDF atlas texture and sampler to a fragment sampler slot.
+/// @param pass Active render pass.
+/// @param slot Fragment sampler slot index.
 void SdfAtlas::bindFragment(SDL_GPURenderPass* pass, uint32_t slot) const
 {
     if (texture_ && sampler_) {

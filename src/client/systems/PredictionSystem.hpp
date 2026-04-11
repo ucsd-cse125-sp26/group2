@@ -1,3 +1,6 @@
+/// @file PredictionSystem.hpp
+/// @brief Client-side prediction for local input application without server confirmation.
+
 #pragma once
 
 /// @brief Client-side prediction system (not yet implemented).

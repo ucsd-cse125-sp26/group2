@@ -1,3 +1,6 @@
+/// @file ReconciliationSystem.hpp
+/// @brief Reconciles server state against the client's predicted history.
+
 #pragma once
 
 /// @brief Reconciles server state against the client's predicted history (not yet implemented).

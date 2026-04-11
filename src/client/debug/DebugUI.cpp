@@ -1,3 +1,6 @@
+/// @file DebugUI.cpp
+/// @brief Implementation of the DebugUI overlay and all ImGui debug windows.
+
 #include "debug/DebugUI.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
@@ -21,12 +24,18 @@
 #include <glm/vec3.hpp>
 #include <imgui.h>
 
-// ─── file-local helpers ──────────────────────────────────────────────────────
+// File-local helpers
 
 namespace
 {
 
-/// Draw a line with a filled triangular arrowhead at `end`.
+/// @brief Draw a line with a filled triangular arrowhead at @p end.
+/// @param dl        The ImGui draw list to render into.
+/// @param start     Line start position in screen coordinates.
+/// @param end       Line end position in screen coordinates.
+/// @param color     Packed RGBA color.
+/// @param thickness Line thickness in pixels.
+/// @param headSize  Arrowhead length in pixels.
 void drawArrow(ImDrawList* dl, ImVec2 start, ImVec2 end, ImU32 color, float thickness, float headSize)
 {
     const float dx = end.x - start.x;
@@ -51,7 +60,7 @@ void drawArrow(ImDrawList* dl, ImVec2 start, ImVec2 end, ImU32 color, float thic
 
 } // namespace
 
-// ─── DebugUI methods ─────────────────────────────────────────────────────────
+// DebugUI methods
 
 bool DebugUI::init(SDL_Window* window)
 {
@@ -111,7 +120,7 @@ void DebugUI::buildUI(const Registry& registry,
     ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F1: test packet");
     ImGui::Separator();
 
-    // ── Settings ─────────────────────────────────────────────────────────────
+    // Settings
     ImGui::SeparatorText("Settings");
 
     // Logarithmic slider so both ends of the range are equally reachable.
@@ -145,7 +154,7 @@ void DebugUI::buildUI(const Registry& registry,
 
     ImGui::Separator();
 
-    // ── Performance ───────────────────────────────────────────────────────────
+    // Performance
     ImGui::SeparatorText("Performance");
     ImGui::Text("Phys: %5.1f Hz    Tick: %d", static_cast<double>(physicsHz), tickCount);
     ImGui::Text("FPS  cur:%5.0f  1%%:%5.0f  5%%:%5.0f  min:%5.0f  max:%5.0f",
@@ -282,7 +291,7 @@ void DebugUI::buildUI(const Registry& registry,
 
 void DebugUI::buildMovementChart(const Registry& registry)
 {
-    // ── find local player ─────────────────────────────────────────────────────
+    // Find local player
     entt::entity localPlayer = entt::null;
     const auto* const k_es = registry.storage<entt::entity>();
     if (k_es) {
@@ -294,12 +303,12 @@ void DebugUI::buildMovementChart(const Registry& registry)
         }
     }
 
-    // ── window setup ──────────────────────────────────────────────────────────
+    // Window setup
     ImGui::SetNextWindowPos({500.0f, 10.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({430.0f, 470.0f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Movement Chart");
 
-    // ── canvas geometry ───────────────────────────────────────────────────────
+    // Canvas geometry
     // Reserve a square canvas; keep ~52 px below it for the stats line + legend.
     const ImVec2 k_cursor = ImGui::GetCursorScreenPos();
     const ImVec2 k_avail = ImGui::GetContentRegionAvail();
@@ -311,7 +320,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     ImDrawList* const dl = ImGui::GetWindowDrawList();
     dl->PushClipRect(k_cursor, k_canvasP1, true);
 
-    // ── coordinate helpers ────────────────────────────────────────────────────
+    // Coordinate helpers
     // World space:  ±1 500 units in X and Z, centred at the spawn origin.
     // Chart axes:   world -X  → screen right  (camera right = world -X)
     //               world +Z  → screen up     (flip, because screen Y grows downward)
@@ -327,10 +336,10 @@ void DebugUI::buildMovementChart(const Registry& registry)
                 k_cursor.y + k_side * 0.5f - wz * k_posScale};
     };
 
-    // ── background ────────────────────────────────────────────────────────────
+    // Background
     dl->AddRectFilled(k_cursor, k_canvasP1, IM_COL32(14, 14, 22, 255));
 
-    // ── grid lines (every 500 world units) ───────────────────────────────────
+    // Grid lines (every 500 world units)
     for (int i = -2; i <= 2; ++i) {
         const float w = static_cast<float>(i) * 500.0f;
         const bool isCtr = (i == 0);
@@ -349,7 +358,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     const ImVec2 k_orig = worldToScreen(0.0f, 0.0f);
     dl->AddCircle(k_orig, 3.0f, IM_COL32(90, 90, 130, 200), 8, 1.0f);
 
-    // ── player ────────────────────────────────────────────────────────────────
+    // Player
     const bool k_hasPlayer =
         localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot>(localPlayer);
 
@@ -414,7 +423,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     dl->AddRect(k_cursor, k_canvasP1, IM_COL32(75, 75, 115, 255), 0.0f, 0, 1.5f);
     dl->PopClipRect();
 
-    // ── stats line ────────────────────────────────────────────────────────────
+    // Stats line
     ImGui::Spacing();
     if (k_hasPlayer) {
         const auto& vel = registry.get<Velocity>(localPlayer).value;
@@ -436,7 +445,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
         ImGui::TextDisabled("--");
     }
 
-    // ── legend ────────────────────────────────────────────────────────────────
+    // Legend
     ImGui::Spacing();
     {
         ImDrawList* const ldl = ImGui::GetWindowDrawList();
@@ -457,7 +466,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     ImGui::End();
 }
 
-// ─── Particle System debug/control window ─────────────────────────────────────
+// Particle System debug/control window
 
 void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward)
 {
@@ -471,14 +480,14 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         return;
     }
 
-    // ── Status ────────────────────────────────────────────────────────────────
+    // Status
     ImGui::SeparatorText("Status");
     if (ps.sdfReady())
         ImGui::TextColored({0.4f, 1.f, 0.4f, 1.f}, "SDF Font: LOADED");
     else
         ImGui::TextColored({1.f, 0.5f, 0.3f, 1.f}, "SDF Font: not loaded (text rendering disabled)");
 
-    // ── Live counts ───────────────────────────────────────────────────────────
+    // Live counts
     ImGui::SeparatorText("Live Counts");
 
     struct PoolRow
@@ -520,7 +529,7 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         ImGui::EndTable();
     }
 
-    // ── Spawn Controls ────────────────────────────────────────────────────────
+    // Spawn Controls
     ImGui::SeparatorText("Spawn Controls");
 
     ImGui::SliderFloat("Dist ahead (units)", &particleSpawnDist_, 30.f, 800.f, "%.0f");
@@ -561,7 +570,7 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
     ImGui::End();
 }
 
-// ─── Render Toggles window ────────────────────────────────────────────────────
+// Render Toggles window
 
 void DebugUI::buildRenderTogglesUI(RenderToggles& t)
 {
@@ -609,7 +618,7 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
     }
     ImGui::Separator();
 
-    // ── Geometry ────────────────────────────────────────────────────────────
+    // Geometry
     ImGui::SeparatorText("Geometry");
     ImGui::Checkbox("Scene Geometry (cube+floor)", &t.sceneGeometry);
     ImGui::Checkbox("PBR Models (Wraith, Porsche, etc.)", &t.pbrModels);
@@ -617,11 +626,11 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
     ImGui::Checkbox("Weapon Viewmodel (R-301)", &t.weaponViewmodel);
     ImGui::Checkbox("Skybox", &t.skybox);
 
-    // ── Lighting ────────────────────────────────────────────────────────────
+    // Lighting
     ImGui::SeparatorText("Lighting / Shadows");
     ImGui::Checkbox("Shadow Map", &t.shadows);
 
-    // ── Post-processing ─────────────────────────────────────────────────────
+    // Post-processing
     ImGui::SeparatorText("Post-Processing");
     ImGui::Checkbox("SSAO", &t.ssao);
     ImGui::Checkbox("Bloom", &t.bloom);
@@ -630,7 +639,7 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
     ImGui::Checkbox("TAA (Temporal AA)", &t.taa);
     ImGui::Checkbox("Tone Mapping (HDR->LDR)", &t.tonemap);
 
-    // ── Effects ─────────────────────────────────────────────────────────────
+    // Effects
     ImGui::SeparatorText("Effects");
     ImGui::Checkbox("Particle System", &t.particles);
     ImGui::Checkbox("SDF Text (HUD + World)", &t.sdfText);
@@ -647,17 +656,17 @@ void DebugUI::buildLightingUI(Renderer& renderer)
         return;
     }
 
-    // ── Sun position ───────────────────────────────────────────────────────
+    // Sun position
     ImGui::SeparatorText("Sun Position");
     ImGui::SliderFloat("Azimuth", &renderer.sunAzimuth, 0.0f, 360.0f, "%.0f deg");
     ImGui::SliderFloat("Elevation", &renderer.sunElevation, 5.0f, 90.0f, "%.0f deg");
 
-    // ── Light intensities ──────────────────────────────────────────────────
+    // Light intensities
     ImGui::SeparatorText("Light Intensity");
     ImGui::SliderFloat("Sun", &renderer.sunIntensity, 0.0f, 10.0f, "%.1f");
     ImGui::SliderFloat("Fill", &renderer.fillIntensity, 0.0f, 3.0f, "%.2f");
 
-    // ── Ambient ────────────────────────────────────────────────────────────
+    // Ambient
     ImGui::SeparatorText("Ambient");
     float amb[3] = {renderer.ambientR, renderer.ambientG, renderer.ambientB};
     if (ImGui::ColorEdit3("Ambient Color", amb)) {
@@ -666,7 +675,7 @@ void DebugUI::buildLightingUI(Renderer& renderer)
         renderer.ambientB = amb[2];
     }
 
-    // ── Post-processing ────────────────────────────────────────────────────
+    // Post-processing
     ImGui::SeparatorText("Post-Processing");
     ImGui::SliderFloat("Bloom", &renderer.bloomStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("SSAO", &renderer.ssaoStr, 0.0f, 2.0f, "%.2f");
@@ -674,7 +683,7 @@ void DebugUI::buildLightingUI(Renderer& renderer)
     ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");
 
-    // ── Cascaded Shadow Maps ──────────────────────────────────────────────
+    // Cascaded Shadow Maps
     ImGui::SeparatorText("Cascaded Shadows");
     ImGui::SliderFloat("Depth Bias", &renderer.shadowBiasVal, 0.0f, 0.01f, "%.5f");
     ImGui::SliderFloat("Normal Bias", &renderer.shadowNormalBiasVal, 0.0f, 5.0f, "%.2f");

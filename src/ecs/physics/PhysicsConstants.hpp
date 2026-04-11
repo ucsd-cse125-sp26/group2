@@ -1,3 +1,6 @@
+/// @file PhysicsConstants.hpp
+/// @brief All physics tuning constants in one place.
+
 #pragma once
 
 /// @brief All physics tuning values in one place.

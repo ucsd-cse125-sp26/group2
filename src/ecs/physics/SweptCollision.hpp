@@ -1,3 +1,6 @@
+/// @file SweptCollision.hpp
+/// @brief Swept AABB and sphere collision queries against world geometry.
+
 #pragma once
 
 #include <glm/vec3.hpp>
@@ -86,9 +89,7 @@ HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end
 /// @brief Sweep an AABB against all world geometry, returning the earliest hit.
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Sphere cast — swept sphere for wall/climb/ledge detection.
-// ═══════════════════════════════════════════════════════════════════════════
+// Sphere cast
 
 /// @brief Result of a sphere-cast query (includes world-space hit point).
 struct SphereHitResult

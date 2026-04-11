@@ -1,3 +1,6 @@
+/// @file SweptCollision.cpp
+/// @brief Implementation of swept AABB and sphere collision queries.
+
 #include "SweptCollision.hpp"
 
 #include <algorithm>
@@ -46,13 +49,11 @@ HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::
     return result;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// sweepAABBvsBox — Swept AABB vs static AABB (Minkowski difference + slab test)
+// sweepAABBvsBox
 //
 // Expand the static box by the moving AABB's half-extents, then ray-test
-// the AABB centre against the expanded box.  The first slab entry gives
+// the AABB centre against the expanded box. The first slab entry gives
 // the collision time and the face normal.
-// ═══════════════════════════════════════════════════════════════════════════
 
 HitResult sweepAABBvsBox(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldAABB& box)
 {
@@ -122,14 +123,12 @@ HitResult sweepAABBvsBox(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, 
     return result;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// sweepAABBvsBrush — Swept AABB vs convex brush (set of bounding planes)
+// sweepAABBvsBrush
 //
-// A convex brush is the intersection of half-spaces.  The sweep enters
+// A convex brush is the intersection of half-spaces. The sweep enters
 // the brush when it simultaneously crosses all planes from outside to
-// inside.  We track the latest entry and earliest exit; if entry < exit
-// and entry ∈ [0, 1), the sweep hits the brush.
-// ═══════════════════════════════════════════════════════════════════════════
+// inside. We track the latest entry and earliest exit; if entry < exit
+// and entry is in [0, 1), the sweep hits the brush.
 
 HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldBrush& brush)
 {
@@ -193,9 +192,7 @@ HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end
     return result;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// sweepAll — Test against all world geometry, return earliest hit
-// ═══════════════════════════════════════════════════════════════════════════
+// sweepAll
 
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
@@ -216,22 +213,20 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
     return best;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// sphereCast — Swept sphere vs all world geometry
+// sphereCast
 //
 // Expands each piece of geometry by the sphere radius (Minkowski sum), then
 // tests the sphere centre as a point/ray against the expanded geometry.
 // This gives exact results for planes and brushes, and slightly conservative
 // results for AABB corners (inflated box instead of rounded box), which is
 // acceptable and even desirable for wall detection generosity.
-// ═══════════════════════════════════════════════════════════════════════════
 
 SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
     SphereHitResult best;
     const glm::vec3 k_delta = end - start;
 
-    // ── Test against infinite planes ────────────────────────────────────
+    // Test against infinite planes
     for (const Plane& plane : world.planes) {
         const float k_distStart = glm::dot(plane.normal, start) - plane.distance;
         const float k_distEnd = glm::dot(plane.normal, end) - plane.distance;
@@ -250,7 +245,7 @@ SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const W
         }
     }
 
-    // ── Test against AABBs (inflated by sphere radius) ──────────────────
+    // Test against AABBs (inflated by sphere radius)
     for (const WorldAABB& box : world.boxes) {
         const glm::vec3 k_expMin = box.min - glm::vec3(radius);
         const glm::vec3 k_expMax = box.max + glm::vec3(radius);
@@ -305,7 +300,7 @@ SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const W
         }
     }
 
-    // ── Test against brushes (each plane expanded by radius) ────────────
+    // Test against brushes (each plane expanded by radius)
     for (const WorldBrush& brush : world.brushes) {
         float tEntry = -1e30f;
         float tExit = 1e30f;

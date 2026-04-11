@@ -1,17 +1,18 @@
-// model.frag — fragment shader for Assimp-loaded mesh geometry.
-//
-// Samples the per-mesh base-colour texture and applies two-light diffuse + ambient.
-//
-// SDL3 GPU SPIR-V resource layout for fragment shaders:
-//   set = 2 → sampled textures / storage textures / storage buffers  ← texDiffuse here
-//   set = 3 → uniform buffers
+/// @file model.frag
+/// @brief Fragment shader for Assimp-loaded mesh geometry.
+///
+/// Samples the per-mesh base-colour texture and applies two-light diffuse + ambient.
+///
+/// SDL3 GPU SPIR-V resource layout for fragment shaders:
+///   set = 2 -> sampled textures / storage textures / storage buffers  <- texDiffuse here
+///   set = 3 -> uniform buffers
 #version 450
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec3 fragWorldPos;
 layout(location = 2) in vec2 fragTexCoord;
 
-// Fragment-stage sampler slot 0: base-colour texture (or 1×1 white fallback).
+/// @brief Base-colour texture (or 1x1 white fallback).
 layout(set = 2, binding = 0) uniform sampler2D texDiffuse;
 
 layout(location = 0) out vec4 outColor;

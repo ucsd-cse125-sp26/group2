@@ -1,22 +1,25 @@
+/// @file sdf_text.vert
+/// @brief SDF text vertex shader for world-space and HUD glyph rendering.
 #version 450
 
-// SdfGlyphGPU (80 bytes = 20 floats):
-//   [0..2]  worldPos.xyz  [3] size
-//   [4..5]  uvMin.xy      [6..7] uvMax.xy
-//   [8..11] color.rgba
-//   [12..14] right.xyz    [15] _p0
-//   [16..18] up.xyz       [19] _p1
+/// @brief SdfGlyphGPU (80 bytes = 20 floats):
+///   [0..2]  worldPos.xyz  [3] size
+///   [4..5]  uvMin.xy      [6..7] uvMax.xy
+///   [8..11] color.rgba
+///   [12..14] right.xyz    [15] _p0
+///   [16..18] up.xyz       [19] _p1
 
+/// @brief Per-glyph SSBO data.
 layout(set = 0, binding = 0) readonly buffer GlyphData { float data[]; };
 
-// World text uses full ParticleUniforms; HUD text uses HudUniforms.
-// Both are pushed at set=1, binding=0.  The pipeline variant controls
-// which uniform layout is active.  We define both and use a specialisation
-// constant to pick at pipeline creation — but since SDL_GPU doesn't expose
-// that easily, we just use the 176-byte ParticleUniforms for world text
-// and the 16-byte HudUniforms (invScreenSize) for HUD text, which fits in
-// the same slot.  Fragment shader is identical for both.
-
+/// @brief Per-frame uniforms (shared slot for world text and HUD text).
+/// World text uses full ParticleUniforms; HUD text uses HudUniforms.
+/// Both are pushed at set=1, binding=0. The pipeline variant controls
+/// which uniform layout is active. We define both and use a specialisation
+/// constant to pick at pipeline creation -- but since SDL_GPU doesn't expose
+/// that easily, we just use the 176-byte ParticleUniforms for world text
+/// and the 16-byte HudUniforms (invScreenSize) for HUD text, which fits in
+/// the same slot. Fragment shader is identical for both.
 layout(set = 1, binding = 0) uniform Uniforms {
     // For world text:  first 128 bytes = view(64) + proj(64)
     // For HUD text:    first 8 bytes = invScreenSize.xy, rest unused

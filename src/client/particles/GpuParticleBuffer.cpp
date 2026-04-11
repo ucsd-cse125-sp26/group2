@@ -1,3 +1,6 @@
+/// @file GpuParticleBuffer.cpp
+/// @brief Implementation of GPU/transfer buffer management for particle data.
+
 #include "GpuParticleBuffer.hpp"
 
 #include <cstring>

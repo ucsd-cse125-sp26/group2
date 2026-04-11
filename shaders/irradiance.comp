@@ -1,20 +1,22 @@
-// irradiance.comp — Convolve the environment into a diffuse irradiance cubemap.
-// Each texel stores the cosine-weighted integral of incoming radiance over the
-// hemisphere aligned with that texel's direction.
-// Dispatch: (faceSize/16, faceSize/16, 6) — one workgroup per tile, 6 faces.
+/// @file irradiance.comp
+/// @brief Convolve the environment into a diffuse irradiance cubemap.
+/// Each texel stores the cosine-weighted integral of incoming radiance over the
+/// hemisphere aligned with that texel's direction.
+/// Dispatch: (faceSize/16, faceSize/16, 6) -- one workgroup per tile, 6 faces.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 // The procedural sky is evaluated inline (same math as skybox.frag)
-// instead of reading from a cubemap texture — avoids needing to render
+// instead of reading from a cubemap texture -- avoids needing to render
 // the sky to a cubemap first.
 
+/// @brief Output diffuse irradiance cubemap image.
 layout(set = 0, binding = 0, rgba16f) writeonly uniform imageCube outIrradiance;
 
 const float PI = 3.14159265359;
 
-// ── Procedural sky (duplicated from skybox.frag) ────────────────────────────
+// Procedural sky (duplicated from skybox.frag)
 vec3 proceduralSky(vec3 dir)
 {
     float y = dir.y;
@@ -89,7 +91,7 @@ void main()
             vec3 tangentSample = vec3(sin(theta) * cos(phi),
                                       sin(theta) * sin(phi),
                                       cos(theta));
-            // Tangent space → world.
+            // Tangent space -> world.
             vec3 sampleVec = tangentSample.x * right +
                              tangentSample.y * up +
                              tangentSample.z * N;

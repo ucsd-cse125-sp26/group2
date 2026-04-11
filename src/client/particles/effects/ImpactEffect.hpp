@@ -1,3 +1,6 @@
+/// @file ImpactEffect.hpp
+/// @brief Spark burst and impact flash effect for projectile hits.
+
 #pragma once
 
 #include "ecs/components/Projectile.hpp"
@@ -10,9 +13,14 @@
 class ImpactEffect
 {
 public:
+    /// @brief Advance spark physics and fade alpha over time.
     void update(float dt);
 
-    /// @brief Spawn 8–16 sparks + 1 flash at the impact point.
+    /// @brief Spawn 8-16 sparks + 1 flash at the impact point.
+    /// @param pos     World-space impact position.
+    /// @param normal  Surface normal at the impact point.
+    /// @param surface Surface material type controlling spark appearance.
+    /// @param frameDt Current frame delta time, used for single-frame flash lifetime.
     void spawn(glm::vec3 pos, glm::vec3 normal, SurfaceType surface, float frameDt);
 
     [[nodiscard]] const BillboardParticle* data() const { return pool_.rawData(); }

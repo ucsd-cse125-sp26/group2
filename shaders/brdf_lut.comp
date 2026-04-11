@@ -1,10 +1,12 @@
-// brdf_lut.comp — Precompute the BRDF integration LUT for split-sum IBL.
-// Output: RG16F texture where R = scale, G = bias for the Fresnel term.
-// Invocation: dispatch(512/16, 512/16, 1) with local_size = (16, 16, 1).
+/// @file brdf_lut.comp
+/// @brief Precompute the BRDF integration LUT for split-sum IBL.
+/// Output: RG16F texture where R = scale, G = bias for the Fresnel term.
+/// Invocation: dispatch(512/16, 512/16, 1) with local_size = (16, 16, 1).
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Output BRDF LUT image.
 layout(set = 0, binding = 0, rg16f) writeonly uniform image2D outLUT;
 
 const float PI = 3.14159265359;
@@ -36,7 +38,7 @@ vec3 importanceSampleGGX(vec2 Xi, vec3 N, float roughness)
     // Spherical to cartesian (tangent space).
     vec3 H = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
 
-    // Tangent space → world via an arbitrary TBN aligned with N.
+    // Tangent space -> world via an arbitrary TBN aligned with N.
     vec3 up = abs(N.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
     vec3 tangent = normalize(cross(up, N));
     vec3 bitangent = cross(N, tangent);
@@ -46,7 +48,7 @@ vec3 importanceSampleGGX(vec2 Xi, vec3 N, float roughness)
 
 float geometrySchlickGGX(float NdotV, float roughness)
 {
-    // IBL uses k = roughness² / 2 (not the direct-light remapping).
+    // IBL uses k = roughness^2 / 2 (not the direct-light remapping).
     float a = roughness;
     float k = (a * a) / 2.0;
     return NdotV / (NdotV * (1.0 - k) + k);

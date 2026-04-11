@@ -1,3 +1,6 @@
+/// @file RibbonTrail.hpp
+/// @brief Camera-facing ribbon trail builder for slow/arcing projectiles.
+
 #pragma once
 
 #include "ecs/registry/Registry.hpp"
@@ -14,11 +17,14 @@ class RibbonTrail
 {
 public:
     /// @brief Rebuild the vertex staging buffer from all active RibbonEmitter entities.
+    /// @param dt       Frame delta time in seconds.
+    /// @param registry ECS registry containing RibbonEmitter entities.
+    /// @param camPos   World-space camera position for billboard orientation.
     void update(float dt, Registry& registry, glm::vec3 camPos);
 
     [[nodiscard]] const RibbonVertex* data() const { return vertices_.data(); }
     [[nodiscard]] uint32_t count() const { return static_cast<uint32_t>(vertices_.size()); }
 
 private:
-    std::vector<RibbonVertex> vertices_; // rebuilt every frame
+    std::vector<RibbonVertex> vertices_; ///< Rebuilt every frame.
 };
