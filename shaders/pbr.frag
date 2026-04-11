@@ -63,14 +63,21 @@ layout(set = 3, binding = 2) uniform ShadowData
 // ── Constants ───────────────────────────────────────────────────────────────
 const float PI = 3.14159265359;
 
-// ── Shadow sampling (3×3 PCF) ───────────────────────────────────────────────
+// ── Shadow sampling (3×3 PCF with normal-offset bias) ──────────────────────
 float calcShadow(vec3 worldPos, vec3 N)
 {
-    // Transform world position to light clip space.
-    vec4 lightClip = shadow.lightVP * vec4(worldPos, 1.0);
+    // Normal-offset bias (UE-style): push the sample point along the surface
+    // normal to prevent self-shadowing without peter-panning.
+    // Surfaces facing away from the light get more offset.
+    vec3 lightDir = normalize(lighting.lights[0].position.xyz);
+    float NdotL = dot(N, lightDir);
+    float normalOffsetScale = shadow.shadowNormalBias * (1.0 - NdotL);
+    vec3 offsetPos = worldPos + N * normalOffsetScale;
+
+    // Transform to light clip space.
+    vec4 lightClip = shadow.lightVP * vec4(offsetPos, 1.0);
     vec3 lightNDC = lightClip.xyz / lightClip.w;
 
-    // NDC [-1,1] → UV [0,1].  Vulkan depth is already [0,1].
     vec2 shadowUV = lightNDC.xy * 0.5 + 0.5;
     float currentDepth = lightNDC.z;
 
@@ -84,7 +91,6 @@ float calcShadow(vec3 worldPos, vec3 N)
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
             vec2 offset = vec2(float(x), float(y)) * texelSize;
-            // sampler2DShadow: texture() returns 0.0 (in shadow) or 1.0 (lit).
             total += texture(shadowMap, vec3(shadowUV + offset, currentDepth - shadow.shadowBias));
         }
     }
@@ -217,9 +223,7 @@ void main()
     // ── Image-Based Lighting (IBL) ─────────────────────────────────────────
     // Split-sum approximation: the integral of incoming environment radiance
     // is split into a pre-filtered specular term and a diffuse irradiance term.
-    // Clamp NdotV to avoid extreme Fresnel rim glow from normal maps
-    // that push normals nearly perpendicular to the view direction.
-    float NdotV_ibl = max(dot(N, V), 0.05);
+    float NdotV_ibl = max(dot(N, V), 0.1);
     vec3 F_ibl = fresnelSchlickRoughness(NdotV_ibl, F0, roughness);
 
     // Metallic surfaces don't diffuse; dielectrics do.
@@ -231,10 +235,16 @@ void main()
 
     // Specular IBL: pre-filtered environment map sampled along reflection.
     vec3 R = reflect(-V, N);
-    const float MAX_REFLECTION_LOD = 4.0; // matches the number of prefilter mip levels
+    const float MAX_REFLECTION_LOD = 4.0;
     vec3 prefilteredColor = textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
     vec2 brdf = texture(brdfLUT, vec2(NdotV_ibl, roughness)).rg;
     vec3 specularIBL = prefilteredColor * (F_ibl * brdf.x + brdf.y);
+
+    // Specular occlusion (UE-style): suppress specular at grazing angles to
+    // prevent the bright white rim/outline artifact on mesh edges.
+    // Rougher surfaces get more occlusion; smooth surfaces keep their rim.
+    float specOcc = clamp(pow(NdotV_ibl, 0.25 + roughness * 0.5), 0.0, 1.0);
+    specularIBL *= specOcc;
 
     vec3 ambient = diffuseIBL + specularIBL;
 

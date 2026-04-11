@@ -10,11 +10,13 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "particles/ParticleSystem.hpp"
+#include "renderer/Renderer.hpp"
 #include "renderer/Renderer.hpp" // for RenderToggles
 
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
+#include <filesystem>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
 #include <imgui.h>
@@ -632,6 +634,88 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
     ImGui::SeparatorText("Effects");
     ImGui::Checkbox("Particle System", &t.particles);
     ImGui::Checkbox("SDF Text (HUD + World)", &t.sdfText);
+
+    ImGui::End();
+}
+
+void DebugUI::buildLightingUI(Renderer& renderer)
+{
+    ImGui::SetNextWindowPos({1230.f, 10.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({300.f, 520.f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Lighting Controls")) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Sun position ───────────────────────────────────────────────────────
+    ImGui::SeparatorText("Sun Position");
+    ImGui::SliderFloat("Azimuth", &renderer.sunAzimuth, 0.0f, 360.0f, "%.0f deg");
+    ImGui::SliderFloat("Elevation", &renderer.sunElevation, 5.0f, 90.0f, "%.0f deg");
+
+    // ── Light intensities ──────────────────────────────────────────────────
+    ImGui::SeparatorText("Light Intensity");
+    ImGui::SliderFloat("Sun", &renderer.sunIntensity, 0.0f, 10.0f, "%.1f");
+    ImGui::SliderFloat("Fill", &renderer.fillIntensity, 0.0f, 3.0f, "%.2f");
+
+    // ── Ambient ────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Ambient");
+    float amb[3] = {renderer.ambientR, renderer.ambientG, renderer.ambientB};
+    if (ImGui::ColorEdit3("Ambient Color", amb)) {
+        renderer.ambientR = amb[0];
+        renderer.ambientG = amb[1];
+        renderer.ambientB = amb[2];
+    }
+
+    // ── Post-processing ────────────────────────────────────────────────────
+    ImGui::SeparatorText("Post-Processing");
+    ImGui::SliderFloat("Bloom", &renderer.bloomStr, 0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("SSAO", &renderer.ssaoStr, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("SSR", &renderer.ssrStr, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");
+
+    // ── Shadow ─────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Shadow");
+    ImGui::SliderFloat("Depth Bias", &renderer.shadowBiasVal, 0.0f, 0.01f, "%.5f");
+    ImGui::SliderFloat("Normal Bias", &renderer.shadowNormalBiasVal, 0.0f, 5.0f, "%.2f");
+
+    ImGui::End();
+}
+
+void DebugUI::buildSkyboxUI(Renderer& renderer)
+{
+    ImGui::SetNextWindowPos({940.f, 480.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({280.f, 300.f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Skybox")) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("Current: %s", renderer.currentHDRName.c_str());
+    ImGui::Separator();
+
+    if (ImGui::Button("Procedural Sky")) {
+        renderer.useHDRSkybox = false;
+        renderer.currentHDRName = "(procedural)";
+    }
+    ImGui::Separator();
+
+    ImGui::Text("HDR Environments:");
+    for (const auto& path : renderer.availableHDRFiles) {
+        // Extract filename stem for display.
+        auto stem = std::filesystem::path(path).stem().string();
+        bool isCurrent = (renderer.useHDRSkybox && stem == renderer.currentHDRName);
+
+        if (isCurrent)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
+
+        if (ImGui::Button(stem.c_str(), ImVec2(-1, 0))) {
+            renderer.loadHDRSkybox(path);
+        }
+
+        if (isCurrent)
+            ImGui::PopStyleColor();
+    }
 
     ImGui::End();
 }

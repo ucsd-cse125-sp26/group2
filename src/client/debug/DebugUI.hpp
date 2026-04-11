@@ -76,6 +76,12 @@ public:
     /// @param toggles  The renderer's toggle struct (read/write).
     void buildRenderTogglesUI(struct RenderToggles& toggles);
 
+    /// @brief Build the Skybox selector window for live HDR skybox swapping.
+    void buildSkyboxUI(class Renderer& renderer);
+
+    /// @brief Build the Lighting Controls window for live parameter tuning.
+    void buildLightingUI(class Renderer& renderer);
+
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
