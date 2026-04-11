@@ -1,3 +1,6 @@
+/// @file WallDetection.cpp
+/// @brief Implementation of wall, climb, and ledge detection via sphere casts.
+
 #include "WallDetection.hpp"
 
 #include <cmath>
@@ -18,7 +21,7 @@ WallDetectionResult detectWalls(
     const glm::vec3 k_forward{k_sinYaw, 0.0f, k_cosYaw};
     const glm::vec3 k_right{k_cosYaw, 0.0f, -k_sinYaw};
 
-    // ── Side wall detection (for wallrunning) ───────────────────────────
+    // Side wall detection (for wallrunning)
     // Trace from the player's centre sideways, at roughly hip height.
     {
         const glm::vec3 k_rightEnd = pos + k_right * checkDist;
@@ -39,7 +42,7 @@ WallDetectionResult detectWalls(
         }
     }
 
-    // ── Front wall detection (for climbing) ─────────────────────────────
+    // Front wall detection (for climbing)
     // Trace forward from the player's centre.
     {
         const glm::vec3 k_frontEnd = pos + k_forward * checkDist;
@@ -51,7 +54,7 @@ WallDetectionResult detectWalls(
         }
     }
 
-    // ── Ledge detection ─────────────────────────────────────────────────
+    // Ledge detection
     // If a front wall is detected, check if we're near the top by tracing
     // from above the player's head forward, then down. If the forward trace
     // MISSES but we had a wall below, there's a ledge.
@@ -76,7 +79,7 @@ WallDetectionResult detectWalls(
         }
     }
 
-    // ── Ground distance probe ───────────────────────────────────────────
+    // Ground distance probe
     // Cast straight down from the player's feet to measure height above ground.
     {
         const glm::vec3 k_feetPos = pos - glm::vec3(0.0f, halfExtents.y, 0.0f);

@@ -1,3 +1,6 @@
+/// @file PlayerState.hpp
+/// @brief Player locomotion state component for movement systems.
+
 #pragma once
 
 #include <glm/vec2.hpp>
@@ -27,7 +30,7 @@ enum class WallSide : uint8_t
 /// Extended for Titanfall-style movement mechanics.
 struct PlayerState
 {
-    // ── Core state ──────────────────────────────────────────────────────
+    // Core state
     MoveMode moveMode{MoveMode::OnFoot};
     bool grounded{false};            ///< True when touching a floor surface this tick.
     bool crouching{false};           ///< True when crouch input is held.
@@ -35,30 +38,30 @@ struct PlayerState
     bool pendingUncrouch{false};     ///< Deferred uncrouch (e.g. after slidehop); applied when safe.
     glm::vec3 groundNormal{0, 1, 0}; ///< Normal of the floor surface we're standing on.
 
-    // ── Jump state ──────────────────────────────────────────────────────
+    // Jump state
     bool canDoubleJump{true};     ///< Reset on land / wallrun / climb.
     bool jumpedThisTick{false};   ///< Set during the tick a jump occurs (for lurch setup).
     int jumpCount{0};             ///< 0 = on ground, 1 = first jump, 2 = double jumped.
     bool jumpHeldLastTick{false}; ///< Was jump key held on the previous tick (for edge detection).
     float jumpCooldown{0.0f};     ///< Minimum time before double jump is available (s).
 
-    // ── Coyote time ─────────────────────────────────────────────────────
+    // Coyote time
     float coyoteTimer{0.0f}; ///< Remaining grace time after leaving ground/wall (s).
     bool wasGroundedLastTick{false};
 
-    // ── Jump lurch ──────────────────────────────────────────────────────
+    // Jump lurch
     bool jumpLurchEnabled{false};     ///< True during the lurch grace window after jumping.
     float jumpLurchTimer{0.0f};       ///< Time elapsed since the jump that enabled lurch (s).
     glm::vec2 moveInputsOnJump{0.0f}; ///< WASD direction when jump started (for detecting direction change).
 
-    // ── Sliding ─────────────────────────────────────────────────────────
+    // Sliding
     float slideTimer{0.0f};         ///< How long the current slide has lasted (s).
     int slideFatigueCounter{0};     ///< Diminishing returns on consecutive slidehops.
     float slideBoostCooldown{0.0f}; ///< Remaining cooldown before next slide boost (s).
     int slideFatigueDecayAccum{0};  ///< Tick accumulator for fatigue recovery.
     bool canEnterSlide{true};       ///< Cleared when in air, set on landing.
 
-    // ── Wallrunning ─────────────────────────────────────────────────────
+    // Wallrunning
     WallSide wallRunSide{WallSide::None};
     glm::vec3 wallNormal{0.0f};    ///< Normal of the wall being run on.
     glm::vec3 wallForward{0.0f};   ///< Direction of travel along the wall.
@@ -73,7 +76,7 @@ struct PlayerState
     float wallBlacklistHeight{-1e10f};
     bool wallBlacklistActive{false};
 
-    // ── Climbing ────────────────────────────────────────────────────────
+    // Climbing
     glm::vec3 climbWallNormal{0.0f}; ///< Normal of the wall being climbed.
     float climbTimer{0.0f};          ///< Time on current climb (s).
     bool exitingClimb{false};
@@ -85,14 +88,14 @@ struct PlayerState
     float climbBlacklistHeight{-1e10f};
     bool climbBlacklistActive{false};
 
-    // ── Ledge grabbing ──────────────────────────────────────────────────
+    // Ledge grabbing
     glm::vec3 ledgePoint{0.0f};  ///< World-space position of the grabbed ledge.
     glm::vec3 ledgeNormal{0.0f}; ///< Wall normal at the ledge.
     float ledgeHoldTimer{0.0f};  ///< Time spent holding the ledge (s).
     bool exitingLedge{false};
     float exitLedgeTimer{0.0f};
 
-    // ── Grappling hook ───────────────────────────────────────────────────
+    // Grappling hook
     bool grappleActive{false};         ///< True when the hook is attached and pulling.
     bool grappleCooldownActive{false}; ///< True during cooldown between grapples.
     float grappleCooldownTimer{0.0f};  ///< Remaining cooldown time (s).
@@ -100,6 +103,6 @@ struct PlayerState
     glm::vec3 grapplePoint{0.0f};      ///< World-space anchor where the hook is attached.
     bool grappleInputLastTick{false};  ///< For edge detection on the grapple key.
 
-    // ── Camera effects (read by renderer, written by movement) ──────────
+    // Camera effects (read by renderer, written by movement)
     float targetCameraTilt{0.0f}; ///< Target camera roll for wallrun lean (degrees).
 };

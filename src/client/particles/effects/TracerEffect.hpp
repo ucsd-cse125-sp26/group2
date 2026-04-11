@@ -1,3 +1,6 @@
+/// @file TracerEffect.hpp
+/// @brief Oriented-capsule tracer management for fast-bullet projectile entities.
+
 #pragma once
 
 #include "ecs/registry/Registry.hpp"
@@ -14,13 +17,18 @@
 class TracerEffect
 {
 public:
-    /// @brief Update all live tracers. registry is used to read projectile positions.
+    /// @brief Update all live tracers. Registry is used to read projectile positions.
+    /// @param dt       Frame delta time in seconds.
+    /// @param registry ECS registry containing TracerEmitter entities.
     void update(float dt, Registry& registry);
 
     /// @brief Attach a new tracer to a projectile entity.
+    /// @param e        Entity handle of the projectile.
+    /// @param registry ECS registry to read Position and TracerEmitter from.
     void attach(entt::entity e, Registry& registry);
 
     /// @brief Detach the tracer from an entity (entity dying); tracer fades out.
+    /// @param e Entity handle being destroyed.
     void detach(entt::entity e);
 
     /// @brief Spawn a standalone one-shot tracer streak not tied to any ECS entity.
@@ -35,7 +43,7 @@ public:
 private:
     ParticlePool<TracerParticle, 512> pool_;
 
-    // Maps entity → index into pool (for fast detach / per-entity update)
+    // Maps entity -> index into pool (for fast detach / per-entity update)
     std::unordered_map<uint32_t, uint32_t> entityToIdx_;
 
     static constexpr float k_streakLength = 180.f; ///< Visual streak length in world units.

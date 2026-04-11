@@ -1,3 +1,6 @@
+/// @file Velocity.hpp
+/// @brief Linear velocity component for ECS entities.
+
 #pragma once
 
 #include <glm/vec3.hpp>

@@ -1,3 +1,6 @@
+/// @file Movement.hpp
+/// @brief Pure physics math for velocity, friction, and acceleration.
+
 #pragma once
 
 #include <glm/vec3.hpp>

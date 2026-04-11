@@ -1,13 +1,16 @@
-// bloom_downsample.frag — 13-tap downsample filter for bloom mip chain.
-// Uses Karis average on the first pass to suppress fireflies.
-// Paired with fullscreen.vert.
+/// @file bloom_downsample.frag
+/// @brief 13-tap downsample filter for bloom mip chain.
+/// Uses Karis average on the first pass to suppress fireflies.
+/// Paired with fullscreen.vert.
 #version 450
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
+/// @brief Source mip texture to downsample.
 layout(set = 2, binding = 0) uniform sampler2D srcTexture;
 
+/// @brief Downsample pass parameters.
 layout(set = 3, binding = 0) uniform DownsampleParams {
     vec2 srcResolution;
     float isFirstPass; // 1.0 for Karis average, 0.0 otherwise

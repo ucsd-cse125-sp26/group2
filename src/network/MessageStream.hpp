@@ -1,3 +1,6 @@
+/// @file MessageStream.hpp
+/// @brief Length-prefixed message framing layer over a TCP stream socket.
+
 #pragma once
 
 #include <SDL3/SDL_stdinc.h>

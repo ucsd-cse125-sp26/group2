@@ -1,3 +1,6 @@
+/// @file Position.hpp
+/// @brief World-space position component for ECS entities.
+
 #pragma once
 
 #include <glm/vec3.hpp>

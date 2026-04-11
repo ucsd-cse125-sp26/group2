@@ -1,3 +1,6 @@
+/// @file ParticlePool.hpp
+/// @brief Fixed-capacity particle pool with O(1) swap-remove.
+
 #pragma once
 
 #include <array>

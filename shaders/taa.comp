@@ -1,14 +1,20 @@
-// taa.comp — Temporal anti-aliasing with neighborhood clamping.
+/// @file taa.comp
+/// @brief Temporal anti-aliasing with neighborhood clamping.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Current frame HDR color.
 layout(set = 0, binding = 0) uniform sampler2D currentFrame;
+/// @brief Previous frame TAA result (history buffer).
 layout(set = 0, binding = 1) uniform sampler2D historyFrame;
+/// @brief Per-pixel motion vectors for reprojection.
 layout(set = 0, binding = 2) uniform sampler2D motionVectors;
 
+/// @brief Output TAA result image.
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D outputImage;
 
+/// @brief TAA algorithm parameters.
 layout(set = 2, binding = 0) uniform TAAParams {
     vec2 screenSize;
     float blendFactor;  // 0.1 = 10% current, 90% history
@@ -33,7 +39,7 @@ void main()
     // History color (reprojected).
     vec3 history = texture(historyFrame, historyUV).rgb;
 
-    // Neighborhood clamping (3×3 min/max) to reduce ghosting.
+    // Neighborhood clamping (3x3 min/max) to reduce ghosting.
     vec3 nbMin = vec3(9999.0);
     vec3 nbMax = vec3(-9999.0);
     vec2 ts = 1.0 / screenSize;

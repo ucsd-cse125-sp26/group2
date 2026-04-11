@@ -1,3 +1,6 @@
+/// @file DebugUI.hpp
+/// @brief Live ECS inspector overlay and debug windows powered by Dear ImGui.
+
 #pragma once
 
 #include "ecs/registry/Registry.hpp"
@@ -101,7 +104,7 @@ private:
     /// view-direction, velocity, and wish-velocity arrows.
     void buildMovementChart(const Registry& registry);
 
-    // ── Particle UI state ──────────────────────────────────────────────────
+    // Particle UI state
     float particleSpawnDist_ = 200.f; ///< Units ahead of camera to spawn effects.
     bool showParticleWindow_ = true;
 };

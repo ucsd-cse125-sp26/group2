@@ -1,5 +1,6 @@
-// pbr.frag — Cook-Torrance GGX microfacet BRDF with metallic-roughness workflow.
-// Output is linear HDR (no tone mapping or gamma here).
+/// @file pbr.frag
+/// @brief Cook-Torrance GGX microfacet BRDF with metallic-roughness workflow.
+/// Output is linear HDR (no tone mapping or gamma here).
 #version 450
 
 layout(location = 0) in vec3 fragWorldPos;
@@ -10,19 +11,25 @@ layout(location = 4) in vec3 fragBitangent;
 
 layout(location = 0) out vec4 outColor;
 
-// ── Texture samplers ────────────────────────────────────────────────────────
+// Texture samplers
+/// @brief Albedo (base color) texture.
 layout(set = 2, binding = 0) uniform sampler2D texAlbedo;
+/// @brief Metallic-roughness packed texture (B=metallic, G=roughness).
 layout(set = 2, binding = 1) uniform sampler2D texMetallicRoughness;
+/// @brief Emissive texture.
 layout(set = 2, binding = 2) uniform sampler2D texEmissive;
+/// @brief Normal map texture.
 layout(set = 2, binding = 3) uniform sampler2D texNormal;
-// IBL textures (Phase 6).
+/// @brief Diffuse irradiance cubemap (IBL).
 layout(set = 2, binding = 4) uniform samplerCube irradianceMap;
+/// @brief Pre-filtered specular environment cubemap (IBL).
 layout(set = 2, binding = 5) uniform samplerCube prefilterMap;
+/// @brief BRDF integration LUT (IBL split-sum).
 layout(set = 2, binding = 6) uniform sampler2D   brdfLUT;
-// Shadow map (Phase 2).
+/// @brief Cascaded shadow map atlas with comparison sampler.
 layout(set = 2, binding = 7) uniform sampler2DShadow shadowMap;
 
-// ── Material parameters (pushed per-mesh) ───────────────────────────────────
+/// @brief Material parameters (pushed per-mesh).
 layout(set = 3, binding = 0) uniform Material
 {
     vec4  baseColorFactor;
@@ -33,7 +40,7 @@ layout(set = 3, binding = 0) uniform Material
     vec4  emissiveFactor;   // rgb in xyz, w unused
 } mat;
 
-// ── Light data (pushed once per frame) ──────────────────────────────────────
+/// @brief Light data (pushed once per frame).
 struct Light
 {
     vec4 position;   // xyz = dir (w=0 directional) or pos (w=1 point)
@@ -41,6 +48,7 @@ struct Light
     vec4 params;     // x = range, y = innerCone, z = outerCone, w = castsShadow
 };
 
+/// @brief Per-frame lighting uniform block.
 layout(set = 3, binding = 1) uniform LightData
 {
     vec4  cameraPos;     // xyz = world-space eye
@@ -50,7 +58,7 @@ layout(set = 3, binding = 1) uniform LightData
     Light lights[8];
 } lighting;
 
-// ── Cascaded Shadow Map data (pushed once per frame) ────────────────────────
+/// @brief Cascaded shadow map data (pushed once per frame).
 layout(set = 3, binding = 2) uniform ShadowData
 {
     mat4  lightVP[4];       // Per-cascade light view-projection matrices.
@@ -62,10 +70,10 @@ layout(set = 3, binding = 2) uniform ShadowData
     float _shadowPad;
 } shadow;
 
-// ── Constants ───────────────────────────────────────────────────────────────
+// Constants
 const float PI = 3.14159265359;
 
-// Atlas layout: 2×2 grid, each cascade occupies 0.5 of the atlas per axis.
+// Atlas layout: 2x2 grid, each cascade occupies 0.5 of the atlas per axis.
 //   Cascade 0: (0.0, 0.0)   Cascade 1: (0.5, 0.0)
 //   Cascade 2: (0.0, 0.5)   Cascade 3: (0.5, 0.5)
 const vec2 k_cascadeOffsets[4] = vec2[4](
@@ -73,7 +81,7 @@ const vec2 k_cascadeOffsets[4] = vec2[4](
     vec2(0.0, 0.5), vec2(0.5, 0.5)
 );
 
-// ── Shadow sampling for one cascade (3×3 PCF on atlas) ─────────────────────
+// Shadow sampling for one cascade (3x3 PCF on atlas)
 float sampleCascade(int cascade, vec3 offsetPos)
 {
     vec4 lightClip = shadow.lightVP[cascade] * vec4(offsetPos, 1.0);
@@ -81,7 +89,7 @@ float sampleCascade(int cascade, vec3 offsetPos)
     vec2 localUV   = lightNDC.xy * 0.5 + 0.5;
     localUV.y = 1.0 - localUV.y;
 
-    // Outside this cascade's local region → no contribution.
+    // Outside this cascade's local region -> no contribution.
     if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0)
         return 1.0;
 
@@ -92,7 +100,7 @@ float sampleCascade(int cascade, vec3 offsetPos)
     // Texel size in atlas coordinates (cascade occupies half the atlas).
     float texelSize = 1.0 / (shadow.shadowMapSize * 2.0);
 
-    // 3×3 PCF with comparison sampler.
+    // 3x3 PCF with comparison sampler.
     float total = 0.0;
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
@@ -103,7 +111,7 @@ float sampleCascade(int cascade, vec3 offsetPos)
     return total / 9.0;
 }
 
-// ── Cascaded Shadow Map sampling with inter-cascade blending ───────────────
+// Cascaded shadow map sampling with inter-cascade blending
 float calcShadow(vec3 worldPos, vec3 N)
 {
     // Normal-offset bias (UE-style).
@@ -139,7 +147,7 @@ float calcShadow(vec3 worldPos, vec3 N)
     return shadowVal;
 }
 
-// ── GGX Normal Distribution Function (Trowbridge-Reitz) ────────────────────
+// GGX Normal Distribution Function (Trowbridge-Reitz)
 float distributionGGX(vec3 N, vec3 H, float roughness)
 {
     float a  = roughness * roughness;
@@ -151,7 +159,7 @@ float distributionGGX(vec3 N, vec3 H, float roughness)
     return a2 / (PI * denom * denom);
 }
 
-// ── Smith-GGX Geometry Function (Schlick-GGX approximation) ────────────────
+// Smith-GGX Geometry Function (Schlick-GGX approximation)
 float geometrySchlickGGX(float NdotV, float roughness)
 {
     float r = roughness + 1.0;
@@ -166,7 +174,7 @@ float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
     return geometrySchlickGGX(NdotV, roughness) * geometrySchlickGGX(NdotL, roughness);
 }
 
-// ── Fresnel-Schlick ─────────────────────────────────────────────────────────
+// Fresnel-Schlick
 vec3 fresnelSchlick(float cosTheta, vec3 F0)
 {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
@@ -178,10 +186,9 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 void main()
 {
-    // ── Sample textures ─────────────────────────────────────────────────────
+    // Sample textures
     vec4 albedoSample = texture(texAlbedo, fragTexCoord);
     vec3 albedo = albedoSample.rgb * mat.baseColorFactor.rgb;
 
@@ -190,7 +197,7 @@ void main()
     float metallic  = mrSample.x * mat.metallicFactor;
     float roughness = clamp(mrSample.y * mat.roughnessFactor, 0.04, 1.0);
 
-    // ── Surface vectors ─────────────────────────────────────────────────────
+    // Surface vectors
     // Normals are pre-transformed in the vertex shader by the correct normal
     // matrix (inverse-transpose).  Mirrored geometry has its winding corrected
     // at load time (ModelLoader::processNode detects negative-determinant
@@ -208,11 +215,11 @@ void main()
 
     vec3 V = normalize(lighting.cameraPos.xyz - fragWorldPos);
 
-    // ── Fresnel reflectance at normal incidence ─────────────────────────────
+    // Fresnel reflectance at normal incidence
     // Dielectrics ~0.04, metals use albedo as F0.
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-    // ── Per-light accumulation ──────────────────────────────────────────────
+    // Per-light accumulation
     vec3 Lo = vec3(0.0);
 
     for (int i = 0; i < lighting.numLights && i < 8; ++i) {
@@ -221,7 +228,7 @@ void main()
         float attenuation = light.color.a;
 
         if (light.position.w < 0.5) {
-            // Directional light — position.xyz is the direction TO the light.
+            // Directional light -- position.xyz is the direction TO the light.
             L = normalize(light.position.xyz);
         } else {
             // Point light.
@@ -262,7 +269,7 @@ void main()
         }
     }
 
-    // ── Image-Based Lighting (IBL) ─────────────────────────────────────────
+    // Image-Based Lighting (IBL)
     // Split-sum approximation: the integral of incoming environment radiance
     // is split into a pre-filtered specular term and a diffuse irradiance term.
     float NdotV_ibl = max(dot(N, V), 0.1);
@@ -290,18 +297,18 @@ void main()
 
     vec3 ambient = diffuseIBL + specularIBL;
 
-    // ── Emissive ────────────────────────────────────────────────────────────
+    // Emissive
     // Only use emissive when the material's emissiveFactor is non-zero.
     // Some game-ripped models store full color detail in "emissive" textures
-    // that aren't actually meant to glow — using them blindly washes out the image.
+    // that aren't actually meant to glow -- using them blindly washes out the image.
     vec3 emissive = mat.emissiveFactor.rgb;
     if (emissive.r + emissive.g + emissive.b > 0.01)
         emissive *= texture(texEmissive, fragTexCoord).rgb;
 
-    // ── Final colour ────────────────────────────────────────────────────────
+    // Final colour
     // The opaque pipeline ignores alpha (blending off).
     // The transparent pipeline uses it (alpha blending on, no depth write).
-    // Alpha comes from baseColorFactor.a × albedo texture alpha.
+    // Alpha comes from baseColorFactor.a x albedo texture alpha.
     vec3 color = ambient + Lo + emissive;
     float alpha = mat.baseColorFactor.a * albedoSample.a;
     outColor = vec4(color, alpha);

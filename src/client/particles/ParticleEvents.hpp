@@ -1,3 +1,6 @@
+/// @file ParticleEvents.hpp
+/// @brief Event structs dispatched via entt::dispatcher for particle spawning.
+
 #pragma once
 
 #include "ecs/components/Projectile.hpp"

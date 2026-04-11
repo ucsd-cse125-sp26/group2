@@ -1,3 +1,6 @@
+/// @file MessageStream.cpp
+/// @brief Implementation of the MessageStream length-prefixed framing layer.
+
 #include "MessageStream.hpp"
 
 bool MessageStream::send(const void* data, Uint32 size)

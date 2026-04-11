@@ -1,3 +1,6 @@
+/// @file Camera.cpp
+/// @brief Camera implementation -- view/projection matrix computation and orbit controls.
+
 #include "Camera.hpp"
 
 #include <glm/ext/matrix_clip_space.hpp>

@@ -1,3 +1,6 @@
+/// @file BulletHoleDecal.cpp
+/// @brief Implementation of ring-buffer decal pool for bullet holes and scorch marks.
+
 #include "BulletHoleDecal.hpp"
 
 #include <cmath>

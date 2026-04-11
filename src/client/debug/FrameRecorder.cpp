@@ -1,3 +1,6 @@
+/// @file FrameRecorder.cpp
+/// @brief Implementation of FrameRecorder session management and CSV output.
+
 #include "FrameRecorder.hpp"
 
 #include <SDL3/SDL_log.h>
@@ -25,8 +28,10 @@
 #include <iomanip>
 #include <sstream>
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
+/// @brief Generate a timestamp string in YYYYMMDD_HHMMSS format.
+/// @return Formatted timestamp for use in session directory names.
 static std::string makeTimestamp()
 {
     std::time_t t = std::time(nullptr);
@@ -36,7 +41,7 @@ static std::string makeTimestamp()
     return oss.str();
 }
 
-// ── FrameRecorder ─────────────────────────────────────────────────────────────
+// FrameRecorder
 
 void FrameRecorder::startRecording(const std::string& baseDir)
 {
@@ -104,7 +109,7 @@ void FrameRecorder::writeCSV() const
     SDL_Log("FrameRecorder: wrote %s", path.c_str());
 }
 
-// ── stbi_write_png wrapper (used by Renderer to save captured frames) ─────────
+// stbi_write_png wrapper (used by Renderer to save captured frames)
 
 // Declared in this TU so the linker finds the implementation above.
 // Renderer.cpp includes stb_image_write.h as a declaration-only header;

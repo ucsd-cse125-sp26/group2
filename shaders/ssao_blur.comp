@@ -1,9 +1,12 @@
-// ssao_blur.comp — 4×4 bilateral blur for SSAO.
+/// @file ssao_blur.comp
+/// @brief 4x4 bilateral blur for SSAO.
 #version 450
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+/// @brief Input SSAO texture to blur.
 layout(set = 0, binding = 0) uniform sampler2D ssaoInput;
+/// @brief Output blurred SSAO image.
 layout(set = 1, binding = 0, r8) writeonly uniform image2D ssaoOutput;
 
 void main()

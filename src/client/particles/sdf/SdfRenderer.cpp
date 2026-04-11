@@ -1,10 +1,15 @@
+/// @file SdfRenderer.cpp
+/// @brief SDF text renderer implementation for world-space and screen-space text.
+
 #include "SdfRenderer.hpp"
 
+/// @brief Initialise the renderer by loading a font and baking the SDF atlas.
 bool SdfRenderer::init(SDL_GPUDevice* dev, const char* ttfPath)
 {
     return atlas_.init(dev, ttfPath);
 }
 
+/// @brief Release all resources owned by this renderer.
 void SdfRenderer::quit()
 {
     atlas_.quit();
@@ -12,12 +17,14 @@ void SdfRenderer::quit()
     hudGlyphs_.clear();
 }
 
+/// @brief Clear all queued glyph data for the current frame.
 void SdfRenderer::clear()
 {
     worldGlyphs_.clear();
     hudGlyphs_.clear();
 }
 
+/// @brief Queue world-space billboard text (faces camera, depth-tested).
 void SdfRenderer::drawWorldText(
     glm::vec3 worldPos, std::string_view text, glm::vec4 color, float worldHeight, glm::vec3 camRight, glm::vec3 camUp)
 {
@@ -60,6 +67,7 @@ void SdfRenderer::drawWorldText(
     }
 }
 
+/// @brief Queue HUD text in pixel coordinates (no depth test).
 void SdfRenderer::drawScreenText(glm::vec2 pixelPos, std::string_view text, glm::vec4 color, float pixelHeight)
 {
     if (!atlas_.ready())

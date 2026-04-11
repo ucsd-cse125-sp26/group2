@@ -1,16 +1,20 @@
+/// @file tracer.vert
+/// @brief Bullet tracer vertex shader with camera-facing oriented quads.
 #version 450
 
-// TracerParticle layout (64 bytes = 16 floats):
-//   [0..2]  tip.xyz
-//   [3]     radius
-//   [4..6]  tail.xyz
-//   [7]     brightness
-//   [8..11] coreColor rgba
-//   [12..15] edgeColor rgba
-//   [16]    lifetime  (+ 3 pad) — not needed in VS
+/// @brief TracerParticle layout (64 bytes = 16 floats):
+///   [0..2]  tip.xyz
+///   [3]     radius
+///   [4..6]  tail.xyz
+///   [7]     brightness
+///   [8..11] coreColor rgba
+///   [12..15] edgeColor rgba
+///   [16]    lifetime  (+ 3 pad) -- not needed in VS
 
+/// @brief Per-particle SSBO data.
 layout(set = 0, binding = 0) readonly buffer TracerData { float data[]; };
 
+/// @brief Per-frame camera uniforms.
 layout(set = 1, binding = 0) uniform ParticleUniforms {
     mat4  view;
     mat4  proj;
@@ -45,8 +49,8 @@ void main()
     const vec3 side   = normalize(cross(axis, toEye)) * radius;
 
     // 4 corners of the oriented quad:
-    //  corner u=(0,±1) at tail, corner u=(1,±1) at tip
-    // gl_VertexIndex % 4 → corner index
+    //  corner u=(0,+/-1) at tail, corner u=(1,+/-1) at tip
+    // gl_VertexIndex % 4 -> corner index
     const int ci = gl_VertexIndex % 4;
     // (tailSide-, tailSide+, tipSide+, tipSide-)
     float t   = (ci >= 2) ? 1.0 : 0.0;  // 0 = tail end, 1 = tip end

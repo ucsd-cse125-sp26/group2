@@ -1,3 +1,6 @@
+/// @file Renderer.hpp
+/// @brief SDL3 GPU forward PBR renderer with HDR pipeline and post-processing.
+
 #pragma once
 
 #include "Camera.hpp"
@@ -12,55 +15,56 @@
 
 class ParticleSystem; ///< Forward-declared to avoid circular includes.
 
-/// @brief Live toggles for every render system — exposed to ImGui.
+/// @brief Live toggles for every render system -- exposed to ImGui.
 ///
 /// All default to true (everything on).  The Renderer checks these each frame
 /// and skips the corresponding pass/dispatch when disabled.
 struct RenderToggles
 {
-    // ── Geometry passes ─────────────────────────────────────────────────────
+    // Geometry passes
     bool sceneGeometry = true;   ///< Hard-coded cube + floor.
     bool pbrModels = true;       ///< Assimp-loaded scene models (opaque + transparent).
     bool entityModels = true;    ///< ECS-driven entity models (Renderable component).
     bool weaponViewmodel = true; ///< First-person weapon.
     bool skybox = true;          ///< Procedural / cubemap skybox.
 
-    // ── Shadow ──────────────────────────────────────────────────────────────
+    // Shadow
     bool shadows = true; ///< Shadow map pass + shadow sampling in PBR.
 
-    // ── Post-processing ─────────────────────────────────────────────────────
+    // Post-processing
     bool ssao = true;        ///< Screen-space ambient occlusion.
     bool bloom = true;       ///< Bloom downsample + upsample chain.
     bool ssr = true;         ///< Screen-space reflections.
     bool volumetrics = true; ///< Volumetric lighting / god rays.
     bool taa = true;         ///< Temporal anti-aliasing.
-    bool tonemap = true;     ///< HDR → LDR tone mapping (disabling = raw HDR blit).
+    bool tonemap = true;     ///< HDR -> LDR tone mapping (disabling = raw HDR blit).
 
-    // ── Effects ─────────────────────────────────────────────────────────────
+    // Effects
     bool particles = true; ///< GPU particle system.
     bool sdfText = true;   ///< SDF text rendering (HUD + world).
 };
 
-/// @brief SDL3 GPU renderer — forward PBR pipeline with HDR + tone mapping.
+/// @brief SDL3 GPU renderer -- forward PBR pipeline with HDR + tone mapping.
 ///
 /// Render-pass architecture:
-///   Pass 0 — Shadow map (depth-only from directional light, cascaded)
-///   Pass 1 — Main colour pass (forward PBR into HDR render target)
-///             ├ Skybox (procedural gradient / cubemap)
-///             ├ Scene geometry (hard-coded cube + floor)
-///             └ Loaded model (Assimp GLB meshes)
-///   Pass 2 — Tone mapping (HDR → LDR swapchain) + ImGui overlay
+///   Pass 0 -- Shadow map (depth-only from directional light, cascaded)
+///   Pass 1 -- Main colour pass (forward PBR into HDR render target)
+///             - Skybox (procedural gradient / cubemap)
+///             - Scene geometry (hard-coded cube + floor)
+///             - Loaded model (Assimp GLB meshes)
+///   Pass 2 -- Tone mapping (HDR -> LDR swapchain) + ImGui overlay
 ///
-/// Also owns the `imgui_impl_sdlgpu3` render backend.  The ImGui context and
-/// SDL3 input backend are owned by DebugUI — initialise DebugUI first.
-/// @brief Per-entity render command — built by Game, consumed by Renderer::drawFrame.
+/// Also owns the imgui_impl_sdlgpu3 render backend.  The ImGui context and
+/// SDL3 input backend are owned by DebugUI -- initialise DebugUI first.
+
+/// @brief Per-entity render command -- built by Game, consumed by Renderer::drawFrame.
 struct EntityRenderCmd
 {
     int32_t modelIndex = -1;        ///< Index into Renderer::models[].
     glm::mat4 worldTransform{1.0f}; ///< Full world transform (position × rotation × scale).
 };
 
-/// @brief First-person weapon viewmodel descriptor.
+/// @brief First-person weapon viewmodel descriptor sent per frame.
 struct WeaponViewmodel
 {
     int32_t modelIndex = -1;   ///< Index into Renderer::models[].
@@ -68,16 +72,35 @@ struct WeaponViewmodel
     bool visible = false;
 };
 
+/// @brief SDL3 GPU renderer with forward PBR pipeline.
 class Renderer
 {
 public:
+    /// @brief Initialise the GPU device, pipelines, and default scene assets.
+    /// @param window SDL window to render into.
+    /// @return True on success.
     bool init(SDL_Window* window);
+
+    /// @brief Render one frame from the given camera pose.
+    /// @param eye Camera world position.
+    /// @param yaw Horizontal rotation in radians.
+    /// @param pitch Vertical rotation in radians.
+    /// @param roll Camera roll in radians (default 0).
     void drawFrame(glm::vec3 eye, float yaw, float pitch, float roll = 0.0f);
+
+    /// @brief Queue a screenshot to be saved after the next frame.
+    /// @param path Output file path (PNG).
     void requestScreenshot(const std::string& path);
+
+    /// @brief Enable or disable vertical sync.
+    /// @param enabled True for VSync, false for uncapped.
+    /// @return True on success.
     bool setVSync(bool enabled);
+
+    /// @brief Release all GPU resources and shut down the renderer.
     void quit();
 
-    // ── Particle system integration ────────────────────────────────────────
+    // Particle system integration
     /// @brief Register a particle system to be rendered each frame (after scene, before ImGui).
     void setParticleSystem(ParticleSystem* ps) { particleSystem = ps; }
 
@@ -96,7 +119,7 @@ public:
         return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
     }
 
-    // ── Entity rendering ───────────────────────────────────────────────────
+    // Entity rendering
     /// @brief Set the list of entity render commands for this frame.
     void setEntityRenderList(std::vector<EntityRenderCmd> cmds) { entityRenderCmds = std::move(cmds); }
 
@@ -110,14 +133,19 @@ public:
     int uploadSceneModel(const LoadedModel& model);
 
     /// @brief Queue a skinned vertex re-upload for one mesh of an animated model.
-    /// The actual GPU copy is deferred to the next drawFrame() command buffer —
+    ///
+    /// The actual GPU copy is deferred to the next drawFrame() command buffer --
     /// no separate command submission, no pipeline stall.
+    /// @param modelIndex Index into the models[] vector.
+    /// @param meshIndex Index into the model's meshes[] vector.
+    /// @param vertices New vertex data.
+    /// @param vertexCount Number of vertices.
     void updateModelMeshVertices(int modelIndex, int meshIndex, const ModelVertex* vertices, Uint32 vertexCount);
 
     /// @brief Returns the number of loaded models.
     [[nodiscard]] int modelCount() const { return static_cast<int>(models.size()); }
 
-    // ── HDR skybox ────────────────────────────────────────────────────────
+    // HDR skybox
     /// @brief Load an equirectangular HDR image as the environment skybox + IBL source.
     bool loadHDRSkybox(const std::string& path);
     /// @brief Scan the assets HDR directory and populate availableHDRFiles.
@@ -130,7 +158,7 @@ public:
     bool useHDRSkybox = false;
 
 private:
-    // ── Core GPU state ──────────────────────────────────────────────────────
+    // Core GPU state
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
     SDL_GPUTextureFormat swapchainFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
@@ -141,7 +169,7 @@ private:
     float farPlane = 15000.0f;
     Camera camera;
 
-    // ── Pipelines ───────────────────────────────────────────────────────────
+    // Pipelines
     SDL_GPUGraphicsPipeline* scenePipeline = nullptr;          ///< Hard-coded cube + floor (PBR lit).
     SDL_GPUGraphicsPipeline* pbrPipeline = nullptr;            ///< Assimp model — opaque meshes.
     SDL_GPUGraphicsPipeline* pbrTransparentPipeline = nullptr; ///< Same PBR — alpha-blended meshes.
@@ -150,7 +178,7 @@ private:
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;         ///< Depth-only shadow map.
     SDL_GPUGraphicsPipeline* sceneShadowPipeline = nullptr;    ///< Scene geometry into shadow map.
 
-    // ── Render targets ──────────────────────────────────────────────────────
+    // Render targets
     SDL_GPUTexture* depthTexture = nullptr; ///< Scene depth, D32_FLOAT.
     Uint32 depthWidth = 0;
     Uint32 depthHeight = 0;
@@ -163,19 +191,21 @@ private:
     static constexpr int k_shadowMapSize = 2048;
     SDL_GPUTexture* shadowMap = nullptr; ///< D32_FLOAT, 2D atlas (2×k_shadowMapSize)², 4 cascade quadrants.
 
-    // ── IBL textures (Phase 6) ──────────────────────────────────────────────
+    // IBL textures (Phase 6)
     SDL_GPUTexture* brdfLUT = nullptr;       ///< 512×512 RG16F split-sum LUT.
     SDL_GPUTexture* irradianceMap = nullptr; ///< 32×32 per face, RGBA16F cubemap.
     SDL_GPUTexture* prefilterMap = nullptr;  ///< 128×128 per face, 5 mip levels, RGBA16F cubemap.
     SDL_GPUSampler* iblSampler = nullptr;    ///< Linear, clamp-to-edge, mipmapped.
     SDL_GPUTexture* envCubemap = nullptr;    ///< HDR environment cubemap (512×512, RGBA16F).
 
-    // ── Samplers ────────────────────────────────────────────────────────────
+    // Samplers
     SDL_GPUSampler* pbrSampler = nullptr;     ///< Linear, repeat, aniso 8×, mipmapped.
     SDL_GPUSampler* shadowSampler = nullptr;  ///< Comparison, border.
     SDL_GPUSampler* tonemapSampler = nullptr; ///< Linear, clamp-to-edge (for fullscreen pass).
 
-    // ── Model rendering ─────────────────────────────────────────────────────
+    // Model rendering
+
+    /// @brief GPU-side mesh data for one mesh within a loaded model.
     struct GpuMesh
     {
         SDL_GPUBuffer* vertexBuffer = nullptr;
@@ -189,7 +219,7 @@ private:
         bool isTransparent = false; ///< True when alphaMode is BLEND or MASK.
     };
 
-    /// One loaded model instance in the scene.
+    /// @brief One loaded model instance in the scene.
     struct ModelInstance
     {
         std::vector<GpuMesh> meshes;
@@ -200,22 +230,24 @@ private:
 
     std::vector<ModelInstance> models;
 
-    // Fallback 1×1 textures for missing PBR maps.
+    // Fallback 1x1 textures for missing PBR maps.
     SDL_GPUTexture* fallbackWhite = nullptr;      ///< Albedo / AO default.
     SDL_GPUTexture* fallbackFlatNormal = nullptr; ///< (0.5, 0.5, 1.0, 1.0).
     SDL_GPUTexture* fallbackMR = nullptr;         ///< (1.0, 0.5, 0, 0) = metallic=1, roughness=0.5.
     SDL_GPUTexture* fallbackBlack = nullptr;      ///< Emissive default.
 
-    // ── Particle system ──────────────────────────────────────────────────────
+    // Particle system
     ParticleSystem* particleSystem = nullptr; ///< Optional; renders after scene geometry.
 
-    // ── Entity rendering ────────────────────────────────────────────────────
+    // Entity rendering
     std::vector<EntityRenderCmd> entityRenderCmds; ///< Per-frame list from Game.
     WeaponViewmodel weaponVM;                      ///< First-person weapon, rendered after depth clear.
 
-    // ── Deferred vertex re-uploads (skinned animation) ────────────────────
+    // Deferred vertex re-uploads (skinned animation)
     // Queued by updateModelMeshVertices(), flushed at the start of drawFrame()
-    // inside the main command buffer — zero extra submits, zero pipeline stalls.
+    // inside the main command buffer -- zero extra submits, zero pipeline stalls.
+
+    /// @brief Queued vertex buffer update for skinned animation.
     struct PendingVertexUpload
     {
         SDL_GPUBuffer* dstBuffer = nullptr;
@@ -226,13 +258,13 @@ private:
     SDL_GPUTransferBuffer* skinTransferBuf = nullptr; ///< Persistent staging buffer (reused with cycle=true).
     Uint32 skinTransferBufSize = 0;                   ///< Current capacity in bytes.
 
-    // ── Screen capture ──────────────────────────────────────────────────────
+    // Screen capture
     SDL_GPUTexture* captureRT = nullptr;
     Uint32 captureRTW = 0, captureRTH = 0;
     SDL_GPUTextureFormat captureRTFmt = SDL_GPU_TEXTUREFORMAT_INVALID;
     std::string pendingCapPath;
 
-    // ── Post-processing (Phases 7-12) ─────────────────────────────────────
+    // Post-processing (Phases 7-12)
     // Bloom (Phase 8)
     static constexpr int k_bloomMips = 6;
     SDL_GPUTexture* bloomMips[k_bloomMips] = {}; ///< Downsample chain, RGBA16F.
@@ -263,7 +295,7 @@ public:
     int ssrMode = 2;       ///< 0=Sharp, 1=Stochastic, 2=Masked (default).
     RenderToggles toggles; ///< Live-tunable feature toggles (checked every frame).
 
-    // ── Sun / lighting (live-tunable via ImGui) ────────────────────────────
+    // Sun / lighting (live-tunable via ImGui)
     float sunAzimuth = 210.0f;  ///< Degrees, 0=North, 90=East, 180=South (default ~SSW).
     float sunElevation = 60.0f; ///< Degrees above horizon (default 60° ≈ 11am).
     float sunIntensity = 3.0f;  ///< Primary directional light intensity.
@@ -279,7 +311,8 @@ public:
     float shadowDistance = 3000.0f; ///< Max shadow range (world units).
     float cascadeLambda = 0.92f;    ///< Log vs linear cascade split blend (0=linear, 1=log).
 
-    /// Compute the sun direction (unit vector TO sun) from azimuth/elevation.
+    /// @brief Compute the sun direction (unit vector TO sun) from azimuth/elevation.
+    /// @return Normalised direction vector pointing toward the sun.
     [[nodiscard]] glm::vec3 getSunDirection() const;
 
 private:
@@ -293,7 +326,7 @@ private:
     SDL_GPUGraphicsPipeline* oitPipeline = nullptr;
     SDL_GPUGraphicsPipeline* oitResolvePipeline = nullptr;
 
-    // ── Private helpers ─────────────────────────────────────────────────────
+    // Private helpers
     bool initScenePipeline();
     bool initPBRPipeline();
     bool initSkyboxPipeline();
@@ -319,13 +352,27 @@ private:
                                                   Uint32 threadCountX,
                                                   Uint32 threadCountY,
                                                   Uint32 threadCountZ);
+    /// @brief Ensure the depth texture exists at the given resolution, recreating if needed.
     bool ensureDepthTexture(Uint32 w, Uint32 h);
+
+    /// @brief Ensure the HDR render target exists at the given resolution.
     bool ensureHDRTarget(Uint32 w, Uint32 h);
+
+    /// @brief Ensure the capture render target exists for screenshot download.
     bool ensureCaptureRT(Uint32 w, Uint32 h, SDL_GPUTextureFormat fmt);
 
+    /// @brief Upload a LoadedModel to the GPU and populate a ModelInstance.
     bool uploadModel(const LoadedModel& model, ModelInstance& outInstance);
+
+    /// @brief Upload RGBA pixel data and generate a mip chain.
+    /// @param pixels Raw RGBA pixel data.
+    /// @param width Texture width in pixels.
+    /// @param height Texture height in pixels.
+    /// @param sRGB True for sRGB colour textures, false for linear data.
+    /// @return Created GPU texture, or nullptr on failure.
     SDL_GPUTexture* uploadTexture(const uint8_t* pixels, int width, int height, bool sRGB = true);
 
+    /// @brief Download the capture render target to CPU and write a PNG file.
     void downloadAndSaveCapture(Uint32 w, Uint32 h);
 
     /// @brief Helper: load a compiled shader from the shaders/ directory.

@@ -1,3 +1,6 @@
+/// @file Server.hpp
+/// @brief TCP game server that accepts clients and dispatches incoming packets.
+
 #pragma once
 
 #include "network/MessageStream.hpp"
@@ -27,25 +30,38 @@ public:
     /// @brief Drain all pending messages for this tick.
     void poll();
 
+    /// @brief Accept up to one new client connection per call.
     void acceptClients();
+
+    /// @brief Read and process pending messages from all connected clients.
     void readClients();
 
+    /// @brief Check whether the event queue is empty.
+    /// @return True if no events are pending.
     bool isEmpty();
+
+    /// @brief Remove and return the next event from the queue.
+    /// @return The front event.
     Event dequeueEvent();
 
 private:
+    /// @brief Per-client connection state.
     struct Connection
     {
-        MessageStream msgStream;
-        uint8_t clientId;
+        MessageStream msgStream; ///< Framed message stream for this client.
+        uint8_t clientId;        ///< Unique identifier assigned on accept.
     };
 
+    /// @brief Dispatch a single decoded message from a client.
+    /// @param client The connection the message arrived on.
+    /// @param data   Pointer to the message payload.
+    /// @param len    Payload length in bytes.
     void handleMessage(Connection& client, const void* data, Uint32 len);
 
-    NET_Server* server = nullptr;
+    NET_Server* server = nullptr;    ///< Underlying SDL_net server handle.
 
-    std::vector<Connection> clients;
-    EventQueue eventQueue;
+    std::vector<Connection> clients; ///< Currently connected clients.
+    EventQueue eventQueue;           ///< Incoming events awaiting processing.
 
-    uint8_t nextClientId = 0;
+    uint8_t nextClientId = 0;        ///< Counter for assigning client IDs.
 };

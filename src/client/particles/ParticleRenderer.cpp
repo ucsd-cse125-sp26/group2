@@ -1,3 +1,6 @@
+/// @file ParticleRenderer.cpp
+/// @brief Implementation of all particle GPU pipelines, buffer uploads, and draw calls.
+
 #include "ParticleRenderer.hpp"
 
 #include "renderer/ShaderUtils.hpp"
@@ -12,9 +15,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 
-// ---------------------------------------------------------------------------
 // Blend state helpers
-// ---------------------------------------------------------------------------
 
 SDL_GPUColorTargetBlendState ParticleRenderer::additiveBlend()
 {
@@ -55,9 +56,7 @@ SDL_GPUColorTargetBlendState ParticleRenderer::alphaBlend()
     return b;
 }
 
-// ---------------------------------------------------------------------------
 // Pipeline factories
-// ---------------------------------------------------------------------------
 
 SDL_GPUGraphicsPipeline* ParticleRenderer::makeStoragePipeline(const char* vertName,
                                                                const char* fragName,
@@ -170,9 +169,7 @@ SDL_GPUGraphicsPipeline* ParticleRenderer::makeVertexPipeline(const char* vertNa
     return pl;
 }
 
-// ---------------------------------------------------------------------------
-// Quad index buffer {0,1,2, 2,3,0} × k_maxQuadInstances
-// ---------------------------------------------------------------------------
+// Quad index buffer {0,1,2, 2,3,0} x k_maxQuadInstances
 
 void ParticleRenderer::buildQuadIndexBuffer()
 {
@@ -226,9 +223,7 @@ void ParticleRenderer::buildQuadIndexBuffer()
     SDL_ReleaseGPUTransferBuffer(device_, tb);
 }
 
-// ---------------------------------------------------------------------------
-// Smoke noise texture (procedural 256×256 R8_UNORM value noise)
-// ---------------------------------------------------------------------------
+// Smoke noise texture (procedural 256x256 R8_UNORM value noise)
 
 void ParticleRenderer::buildSmokeNoise()
 {
@@ -322,9 +317,7 @@ void ParticleRenderer::buildSmokeNoise()
     smokeSampler_ = SDL_CreateGPUSampler(device_, &sci);
 }
 
-// ---------------------------------------------------------------------------
-// Bullet hole decal texture (R8G8B8A8, 128×128, procedural)
-// ---------------------------------------------------------------------------
+// Bullet hole decal texture (R8G8B8A8, 128x128, procedural)
 
 void ParticleRenderer::buildDecalTexture()
 {
@@ -465,9 +458,7 @@ void ParticleRenderer::buildDecalTexture()
     decalSamp_ = SDL_CreateGPUSampler(device_, &sci);
 }
 
-// ---------------------------------------------------------------------------
 // init / quit
-// ---------------------------------------------------------------------------
 
 bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt)
 {
@@ -475,7 +466,7 @@ bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
     colorFmt_ = colorFmt;
     shaderFmt_ = shaderFmt;
 
-    // --- GPU buffers ---
+    // GPU buffers
     billboardBuf_.init(dev, sizeof(BillboardParticle) * 4096);
     tracerBuf_.init(dev, sizeof(TracerParticle) * 512); // 80 B × 512 = 40 KB
     ribbonBuf_.init(dev, sizeof(RibbonVertex) * 24576, GpuParticleBuffer::Mode::Vertex);
@@ -495,14 +486,14 @@ bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
 
 bool ParticleRenderer::buildPipelines()
 {
-    // ── Billboard (sparks, flash) — additive, depth test, no write ────────
+    // Billboard (sparks, flash) -- additive, depth test, no write
     billboardPipeline_ = makeStoragePipeline(
         "particle_billboard.vert", "particle_billboard.frag", 1, 0, additiveBlend(), true, false, false);
 
-    // ── Tracer capsule — additive, depth test, no write ───────────────────
+    // Tracer capsule -- additive, depth test, no write
     tracerPipeline_ = makeStoragePipeline("tracer.vert", "tracer.frag", 1, 0, additiveBlend(), true, false, false);
 
-    // ── Ribbon trail — premul alpha, vertex buffer, depth test, no write ──
+    // Ribbon trail -- premul alpha, vertex buffer, depth test, no write
     {
         SDL_GPUVertexAttribute attrs[2]{};
         // location 0: vec3 pos + float pad → stride offset 0
@@ -530,11 +521,11 @@ bool ParticleRenderer::buildPipelines()
         ribbonPipeline_ = makeVertexPipeline("ribbon.vert", "ribbon.frag", vis, premulAlphaBlend(), true, false);
     }
 
-    // ── Hitscan beam — additive, storage ──────────────────────────────────
+    // Hitscan beam -- additive, storage
     hitscanPipeline_ =
         makeStoragePipeline("hitscan_beam.vert", "hitscan_beam.frag", 1, 0, additiveBlend(), true, false, false);
 
-    // ── Lightning arc — additive, vertex buffer, triangle strip ──────────
+    // Lightning arc -- additive, vertex buffer, triangle strip
     {
         SDL_GPUVertexAttribute attrs[2]{};
         // location 0: vec3 pos + float edge
@@ -568,16 +559,16 @@ bool ParticleRenderer::buildPipelines()
                                           SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP);
     }
 
-    // ── Smoke — premul alpha, storage, 1 sampler (noise) ─────────────────
+    // Smoke -- premul alpha, storage, 1 sampler (noise)
     smokePipeline_ = makeStoragePipeline("smoke.vert", "smoke.frag", 1, 1, premulAlphaBlend(), true, false, false);
 
-    // ── Decal — alpha blend, depth bias, no depth write ──────────────────
+    // Decal -- alpha blend, depth bias, no depth write
     decalPipeline_ = makeStoragePipeline("decal.vert", "decal.frag", 1, 1, alphaBlend(), true, false, true);
 
-    // ── SDF world text — alpha blend, depth test ─────────────────────────
+    // SDF world text -- alpha blend, depth test
     sdfWorldPipeline_ = makeStoragePipeline("sdf_text.vert", "sdf_text.frag", 1, 1, alphaBlend(), true, false, false);
 
-    // ── SDF HUD text — alpha blend, no depth ─────────────────────────────
+    // SDF HUD text -- alpha blend, no depth
     sdfHudPipeline_ = makeStoragePipeline("sdf_text.vert", "sdf_text.frag", 1, 1, alphaBlend(), false, false, false);
 
     // All pipelines are optional — missing shaders just mean that effect won't draw.
@@ -641,9 +632,7 @@ void ParticleRenderer::quit()
     device_ = nullptr;
 }
 
-// ---------------------------------------------------------------------------
 // Upload methods
-// ---------------------------------------------------------------------------
 
 void ParticleRenderer::uploadBillboards(SDL_GPUCommandBuffer* cmd, const BillboardParticle* d, uint32_t n)
 {
@@ -690,12 +679,11 @@ void ParticleRenderer::uploadSdfHud(SDL_GPUCommandBuffer* cmd, const SdfGlyphGPU
     sdfHudBuf_.upload(cmd, d, n, sizeof(SdfGlyphGPU));
 }
 
-// ---------------------------------------------------------------------------
-// drawAll — ordered render pass draw calls
-// ---------------------------------------------------------------------------
+// drawAll -- ordered render pass draw calls
 
-// std140-compatible uniform block pushed before every particle pipeline.
-// Must match layout(set=1, binding=0) in all particle vertex shaders.
+/// @brief std140-compatible uniform block pushed before every particle pipeline.
+///
+/// Must match layout(set=1, binding=0) in all particle vertex shaders.
 struct alignas(16) ParticleUniforms
 {
     glm::mat4 view;

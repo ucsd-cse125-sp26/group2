@@ -1,10 +1,12 @@
-// skybox.vert — cube geometry for environment skybox.
-// Draw with 36 vertices, no vertex buffer.  Depth is set to max (w)
-// so the skybox only fills pixels where no geometry was drawn.
+/// @file skybox.vert
+/// @brief Cube geometry for environment skybox.
+/// Draw with 36 vertices, no vertex buffer. Depth is set to max (w)
+/// so the skybox only fills pixels where no geometry was drawn.
 #version 450
 
 layout(location = 0) out vec3 fragDir;
 
+/// @brief Skybox camera matrices (rotation-only view and projection).
 layout(set = 1, binding = 0) uniform SkyboxMatrices
 {
     mat4 viewRotation;   // view matrix with translation zeroed (rotation only)
