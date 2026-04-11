@@ -10,6 +10,7 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "particles/ParticleSystem.hpp"
+#include "renderer/Renderer.hpp" // for RenderToggles
 
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
@@ -554,6 +555,83 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
     ImGui::TextDisabled("T: Hitscan beam    Y: Metal impact");
     ImGui::TextDisabled("U: Smoke cloud     I: Explosion");
     ImGui::TextDisabled("Left-click: Fire weapon");
+
+    ImGui::End();
+}
+
+// ─── Render Toggles window ────────────────────────────────────────────────────
+
+void DebugUI::buildRenderTogglesUI(RenderToggles& t)
+{
+    ImGui::SetNextWindowPos({940.f, 10.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({280.f, 460.f}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Render Toggles");
+
+    ImGui::TextDisabled("Toggle systems to profile FPS impact.");
+    ImGui::TextDisabled("Unchecked = skipped entirely (zero cost).");
+    ImGui::Separator();
+
+    // Count enabled systems for the "all on / all off" buttons.
+    bool* allFlags[] = {&t.sceneGeometry,
+                        &t.pbrModels,
+                        &t.entityModels,
+                        &t.weaponViewmodel,
+                        &t.skybox,
+                        &t.shadows,
+                        &t.ssao,
+                        &t.bloom,
+                        &t.ssr,
+                        &t.volumetrics,
+                        &t.taa,
+                        &t.tonemap,
+                        &t.particles,
+                        &t.sdfText};
+    constexpr int k_flagCount = 14;
+
+    if (ImGui::Button("All ON")) {
+        for (int i = 0; i < k_flagCount; ++i)
+            *allFlags[i] = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("All OFF")) {
+        for (int i = 0; i < k_flagCount; ++i)
+            *allFlags[i] = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Only Post-FX OFF")) {
+        t.ssao = false;
+        t.bloom = false;
+        t.ssr = false;
+        t.volumetrics = false;
+        t.taa = false;
+    }
+    ImGui::Separator();
+
+    // ── Geometry ────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Geometry");
+    ImGui::Checkbox("Scene Geometry (cube+floor)", &t.sceneGeometry);
+    ImGui::Checkbox("PBR Models (Wraith, Porsche, etc.)", &t.pbrModels);
+    ImGui::Checkbox("Entity Models (ECS Renderable)", &t.entityModels);
+    ImGui::Checkbox("Weapon Viewmodel (R-301)", &t.weaponViewmodel);
+    ImGui::Checkbox("Skybox", &t.skybox);
+
+    // ── Lighting ────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Lighting / Shadows");
+    ImGui::Checkbox("Shadow Map", &t.shadows);
+
+    // ── Post-processing ─────────────────────────────────────────────────────
+    ImGui::SeparatorText("Post-Processing");
+    ImGui::Checkbox("SSAO", &t.ssao);
+    ImGui::Checkbox("Bloom", &t.bloom);
+    ImGui::Checkbox("SSR (Screen-Space Reflections)", &t.ssr);
+    ImGui::Checkbox("Volumetric Lighting", &t.volumetrics);
+    ImGui::Checkbox("TAA (Temporal AA)", &t.taa);
+    ImGui::Checkbox("Tone Mapping (HDR->LDR)", &t.tonemap);
+
+    // ── Effects ─────────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Effects");
+    ImGui::Checkbox("Particle System", &t.particles);
+    ImGui::Checkbox("SDF Text (HUD + World)", &t.sdfText);
 
     ImGui::End();
 }

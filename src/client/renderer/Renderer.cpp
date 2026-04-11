@@ -1596,7 +1596,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
     // ── Upload particle data (BEFORE any render pass) ────────────────────
-    if (particleSystem)
+    if (particleSystem && toggles.particles)
         particleSystem->uploadToGpu(cmd);
 
     // ── Prepare ImGui ───────────────────────────────────────────────────────
@@ -1608,7 +1608,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     // PASS 0: Shadow map — depth-only from directional light's perspective
     // ════════════════════════════════════════════════════════════════════════
     glm::mat4 lightVP(1.0f);
-    if (shadowPipeline && shadowMap) {
+    if (toggles.shadows && shadowPipeline && shadowMap) {
         // Light direction matches the primary directional light.
         const glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
         // Place the light "camera" far along the light direction, looking at scene center.
@@ -1673,7 +1673,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
 
         // ── Scene geometry (physics playground) ──────────────────────────────
-        if (scenePipeline) {
+        if (toggles.sceneGeometry && scenePipeline) {
             SceneMatrices sceneMats{};
             sceneMats.model = glm::mat4(1.0f);
             sceneMats.view = camera.getView();
@@ -1760,7 +1760,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             shadowData.shadowMapSize = (shadowMap && shadowPipeline) ? static_cast<float>(k_shadowMapSize) : 0.0f;
 
             // Pass 1: Opaque meshes (writes depth, no blending).
-            if (pbrPipeline) {
+            if (toggles.pbrModels && pbrPipeline) {
                 SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
                 SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
                 SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
@@ -1769,7 +1769,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
             // Pass 2: Skybox — BEFORE transparents so transparent fragments
             // blend with the sky colour, not the black clear colour.
-            if (skyboxPipeline) {
+            if (toggles.skybox && skyboxPipeline) {
                 SDL_BindGPUGraphicsPipeline(pass, skyboxPipeline);
 
                 SkyboxMatricesUBO skyMats{};
@@ -1785,7 +1785,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             // ── Entity render commands (PBR models at entity positions) ─────
             // These are driven by the ECS — each entity with Renderable + Position
             // contributes an EntityRenderCmd built by Game::iterate().
-            if (pbrPipeline && !entityRenderCmds.empty()) {
+            if (toggles.entityModels && pbrPipeline && !entityRenderCmds.empty()) {
                 SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
                 SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
                 SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
@@ -1848,7 +1848,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
             // Pass 3: Transparent meshes (alpha blending, no depth write).
             // Rendered after skybox so they blend with the sky background.
-            if (pbrTransparentPipeline) {
+            if (toggles.pbrModels && pbrTransparentPipeline) {
                 SDL_BindGPUGraphicsPipeline(pass, pbrTransparentPipeline);
                 SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
                 SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
@@ -1859,7 +1859,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         // ── Particle rendering (inside HDR pass, after opaques + skybox) ─────
         // Push ParticleUniforms matching the layout expected by all particle
         // vertex shaders (set=1, binding=0): view, proj, camPos, camRight, camUp.
-        if (particleSystem) {
+        if (toggles.particles && particleSystem) {
             struct alignas(16) ParticleUniforms
             {
                 glm::mat4 view;
@@ -1887,8 +1887,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         // ── First-person weapon viewmodel ────────────────────────────────────
         // Rendered last in the HDR pass. The weapon should always be in front,
         // so we don't clear depth — it just draws over the scene at close range.
-        if (weaponVM.visible && weaponVM.modelIndex >= 0 && weaponVM.modelIndex < static_cast<int>(models.size()) &&
-            pbrPipeline)
+        if (toggles.weaponViewmodel && weaponVM.visible && weaponVM.modelIndex >= 0 &&
+            weaponVM.modelIndex < static_cast<int>(models.size()) && pbrPipeline)
         {
 
             SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
@@ -1967,7 +1967,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     // ════════════════════════════════════════════════════════════════════════
 
     // ── SSAO (Phase 7) ──────────────────────────────────────────────────────
-    if (ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
+    if (toggles.ssao && ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
         struct
         {
             glm::mat4 proj;
@@ -2013,7 +2013,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // ── Bloom (Phase 8) ─────────────────────────────────────────────────────
-    if (bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
+    if (toggles.bloom && bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
         // Downsample chain.
         Uint32 srcW = w, srcH = h;
         for (int i = 0; i < k_bloomMips; ++i) {
@@ -2073,7 +2073,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     static uint64_t ssrFrameCounter = 0;
     ++ssrFrameCounter;
 
-    if (ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
+    if (toggles.ssr && ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
         // Ping-pong: write to current, read history from previous.
         const int ssrSrc = ssrCurrentIdx;     // previous frame's result
         const int ssrDst = 1 - ssrCurrentIdx; // this frame's output
@@ -2117,7 +2117,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // ── Volumetrics (Phase 10) ──────────────────────────────────────────────
-    if (volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
+    if (toggles.volumetrics && volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
         struct
         {
             glm::mat4 invViewProj;
@@ -2156,7 +2156,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // ── TAA (Phase 11) — motion vectors + temporal resolve ────────────────
-    if (motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] && depthTexture) {
+    if (toggles.taa && motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] &&
+        depthTexture)
+    {
         const glm::mat4 currentVP = camera.getViewProjection();
 
         // Motion vectors.

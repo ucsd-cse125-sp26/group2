@@ -12,6 +12,35 @@
 
 class ParticleSystem; ///< Forward-declared to avoid circular includes.
 
+/// @brief Live toggles for every render system — exposed to ImGui.
+///
+/// All default to true (everything on).  The Renderer checks these each frame
+/// and skips the corresponding pass/dispatch when disabled.
+struct RenderToggles
+{
+    // ── Geometry passes ─────────────────────────────────────────────────────
+    bool sceneGeometry = true;   ///< Hard-coded cube + floor.
+    bool pbrModels = true;       ///< Assimp-loaded scene models (opaque + transparent).
+    bool entityModels = true;    ///< ECS-driven entity models (Renderable component).
+    bool weaponViewmodel = true; ///< First-person weapon.
+    bool skybox = true;          ///< Procedural / cubemap skybox.
+
+    // ── Shadow ──────────────────────────────────────────────────────────────
+    bool shadows = true; ///< Shadow map pass + shadow sampling in PBR.
+
+    // ── Post-processing ─────────────────────────────────────────────────────
+    bool ssao = true;        ///< Screen-space ambient occlusion.
+    bool bloom = true;       ///< Bloom downsample + upsample chain.
+    bool ssr = true;         ///< Screen-space reflections.
+    bool volumetrics = true; ///< Volumetric lighting / god rays.
+    bool taa = true;         ///< Temporal anti-aliasing.
+    bool tonemap = true;     ///< HDR → LDR tone mapping (disabling = raw HDR blit).
+
+    // ── Effects ─────────────────────────────────────────────────────────────
+    bool particles = true; ///< GPU particle system.
+    bool sdfText = true;   ///< SDF text rendering (HUD + world).
+};
+
 /// @brief SDL3 GPU renderer — forward PBR pipeline with HDR + tone mapping.
 ///
 /// Render-pass architecture:
@@ -203,7 +232,8 @@ private:
     SDL_GPUComputePipeline* ssrPipeline = nullptr;
 
 public:
-    int ssrMode = 2; ///< 0=Sharp, 1=Stochastic, 2=Masked (default).
+    int ssrMode = 2;       ///< 0=Sharp, 1=Stochastic, 2=Masked (default).
+    RenderToggles toggles; ///< Live-tunable feature toggles (checked every frame).
 private:
     // Volumetrics (Phase 10)
     SDL_GPUTexture* volumetricTexture = nullptr; ///< RGBA16F half-res.
