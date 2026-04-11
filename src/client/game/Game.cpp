@@ -689,6 +689,7 @@ SDL_AppResult Game::iterate()
                     statsFPS1pLow,
                     statsFPS5pLow);
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
+    debugUI.buildRenderTogglesUI(renderer.toggles);
     debugUI.render();
     renderer.drawFrame(renderEye, renderYaw, renderPitch);
 

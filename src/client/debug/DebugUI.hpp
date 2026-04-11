@@ -72,6 +72,10 @@ public:
     /// @param forward  Camera forward unit vector.
     void buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward);
 
+    /// @brief Build the Render Toggles window for live performance profiling.
+    /// @param toggles  The renderer's toggle struct (read/write).
+    void buildRenderTogglesUI(struct RenderToggles& toggles);
+
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
