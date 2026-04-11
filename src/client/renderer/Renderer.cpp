@@ -2278,20 +2278,22 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             params.exposure = 1.0f;
             params.gamma = 2.2f;
             params.tonemapMode = 0; // ACES
-            params.bloomStrength = bloomMips[0] ? 0.3f : 0.0f;
-            params.ssaoStrength = ssaoBlurTexture ? 0.5f : 0.0f;
-            params.ssrStrength = ssrTexture[0] ? 0.4f : 0.0f;
-            params.volumetricStrength = volumetricTexture ? 0.5f : 0.0f;
+            params.bloomStrength = (toggles.bloom && bloomMips[0]) ? 0.3f : 0.0f;
+            params.ssaoStrength = (toggles.ssao && ssaoBlurTexture) ? 0.5f : 0.0f;
+            params.ssrStrength = (toggles.ssr && ssrTexture[0]) ? 0.4f : 0.0f;
+            params.volumetricStrength = (toggles.volumetrics && volumetricTexture) ? 0.5f : 0.0f;
             SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
 
             // Bind all 5 post-process textures for compositing.
             const SDL_GPUTextureSamplerBinding tonemapSamplers[5] = {
                 {.texture = hdrTarget, .sampler = tonemapSampler},
-                {.texture = bloomMips[0] ? bloomMips[0] : fallbackBlack, .sampler = tonemapSampler},
-                {.texture = ssaoBlurTexture ? ssaoBlurTexture : fallbackWhite, .sampler = tonemapSampler},
-                {.texture = ssrTexture[ssrCurrentIdx] ? ssrTexture[ssrCurrentIdx] : fallbackBlack,
+                {.texture = (toggles.bloom && bloomMips[0]) ? bloomMips[0] : fallbackBlack, .sampler = tonemapSampler},
+                {.texture = (toggles.ssao && ssaoBlurTexture) ? ssaoBlurTexture : fallbackWhite,
                  .sampler = tonemapSampler},
-                {.texture = volumetricTexture ? volumetricTexture : fallbackBlack, .sampler = tonemapSampler},
+                {.texture = (toggles.ssr && ssrTexture[ssrCurrentIdx]) ? ssrTexture[ssrCurrentIdx] : fallbackBlack,
+                 .sampler = tonemapSampler},
+                {.texture = (toggles.volumetrics && volumetricTexture) ? volumetricTexture : fallbackBlack,
+                 .sampler = tonemapSampler},
             };
             SDL_BindGPUFragmentSamplers(pass, 0, tonemapSamplers, 5);
 
