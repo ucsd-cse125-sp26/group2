@@ -1985,10 +1985,15 @@ static std::array<CascadeInfo, 4> computeCascades(
     }
 
     // ── Camera basis ────────────────────────────────────────────────────────
+    // cam.getUp() returns the raw input up (0,1,0), NOT the orthonormalized
+    // up that lookAt computes.  We must derive the actual camera up from
+    // forward × right to match the real frustum orientation — otherwise the
+    // cascade frustum corners are wrong whenever the camera has pitch, causing
+    // shadows to detach from objects and move with the camera.
     const glm::vec3 camPos = cam.getEye();
     const glm::vec3 camFwd = cam.getForward();
     const glm::vec3 camRight = cam.getRight();
-    const glm::vec3 camUp = cam.getUp();
+    const glm::vec3 camUp = glm::normalize(glm::cross(camRight, camFwd));
 
     const float fovY = glm::radians(cam.getFovy());
     const float aspect = cam.getAspect();
