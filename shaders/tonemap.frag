@@ -1,4 +1,5 @@
 // tonemap.frag — HDR → LDR tone mapping with bloom, SSAO, SSR, volumetrics composite.
+// Includes post-TAA sharpening (unsharp mask) for crisp output.
 #version 450
 
 layout(location = 0) in vec2 fragTexCoord;
@@ -19,7 +20,7 @@ layout(set = 3, binding = 0) uniform TonemapParams
     float ssaoStrength;
     float ssrStrength;
     float volumetricStrength;
-    float _pad;
+    float sharpenStrength;
 };
 
 // ACES filmic tone mapping (Narkowicz 2015).
@@ -40,7 +41,21 @@ vec3 Reinhard(vec3 x)
 
 void main()
 {
-    vec3 hdr = texture(hdrBuffer, fragTexCoord).rgb;
+    // ── Sharpening (unsharp mask on HDR, counters TAA blur) ─────────────────
+    vec2 ts = 1.0 / vec2(textureSize(hdrBuffer, 0));
+    vec3 center = texture(hdrBuffer, fragTexCoord).rgb;
+    vec3 hdr;
+
+    if (sharpenStrength > 0.0) {
+        vec3 top = texture(hdrBuffer, fragTexCoord + vec2(0, -ts.y)).rgb;
+        vec3 bot = texture(hdrBuffer, fragTexCoord + vec2(0,  ts.y)).rgb;
+        vec3 lft = texture(hdrBuffer, fragTexCoord + vec2(-ts.x, 0)).rgb;
+        vec3 rgt = texture(hdrBuffer, fragTexCoord + vec2( ts.x, 0)).rgb;
+        vec3 neighbors = (top + bot + lft + rgt) * 0.25;
+        hdr = max(center + (center - neighbors) * sharpenStrength, vec3(0.0));
+    } else {
+        hdr = center;
+    }
 
     // Composite bloom (additive).
     vec3 bloom = texture(bloomBuffer, fragTexCoord).rgb;

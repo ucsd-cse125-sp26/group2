@@ -109,7 +109,7 @@ struct TonemapParamsUBO
     float ssaoStrength;
     float ssrStrength;
     float volumetricStrength;
-    float _pad;
+    float sharpenStrength;
 };
 
 } // namespace
@@ -214,9 +214,9 @@ SDL_GPUComputePipeline* Renderer::createComputePipeline(const char* shaderName,
 
 bool Renderer::initScenePipeline()
 {
-    // Scene geometry: uses projective.vert (1 vert UBO) + normal.frag (1 frag UBO for lights).
+    // Scene geometry: projective.vert (1 vert UBO) + normal.frag (1 frag sampler + 1 frag UBO).
     SDL_GPUShader* vert = loadShaderFromFile("projective.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-    SDL_GPUShader* frag = loadShaderFromFile("normal.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    SDL_GPUShader* frag = loadShaderFromFile("normal.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
     if (!vert || !frag) {
         SDL_ReleaseGPUShader(device, vert);
         SDL_ReleaseGPUShader(device, frag);
@@ -477,6 +477,47 @@ bool Renderer::initShadowPipeline()
 
     if (!shadowPipeline) {
         SDL_Log("Renderer: shadow pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+bool Renderer::initSceneShadowPipeline()
+{
+    // Scene geometry into shadow map: projective.vert (procedural verts) + shadow.frag (no-op).
+    SDL_GPUShader* vert = loadShaderFromFile("projective.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+    SDL_GPUShader* frag = loadShaderFromFile("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    // No vertex input — projective.vert generates all positions from gl_VertexIndex.
+    pci.target_info.num_color_targets = 0;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+    // Same depth bias as shadow pipeline.
+    pci.rasterizer_state.depth_bias_constant_factor = 1.25f;
+    pci.rasterizer_state.depth_bias_slope_factor = 1.75f;
+    pci.rasterizer_state.enable_depth_bias = true;
+
+    sceneShadowPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!sceneShadowPipeline) {
+        SDL_Log("Renderer: scene shadow pipeline creation failed: %s", SDL_GetError());
         return false;
     }
     return true;
@@ -1313,6 +1354,7 @@ bool Renderer::init(SDL_Window* win)
         return false;
     // Shadow pipeline + shadow map texture + comparison sampler.
     initShadowPipeline();
+    initSceneShadowPipeline();
     {
         // Shadow map: D32_FLOAT, 2048×2048, single layer (no cascades yet).
         SDL_GPUTextureCreateInfo smInfo{};
@@ -1657,10 +1699,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         // Light direction matches the primary directional light.
         const glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
         // Place the light "camera" far along the light direction, looking at scene center.
-        const glm::vec3 lightPos = lightDir * 1500.0f;
-        const glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f, 0.0f, 400.0f), glm::vec3(0, 1, 0));
-        // Orthographic projection covering the scene.
-        const glm::mat4 lightProj = glm::ortho(-600.0f, 600.0f, -300.0f, 300.0f, 0.1f, 3000.0f);
+        const glm::vec3 lightPos = lightDir * 2000.0f;
+        const glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f, 0.0f, 200.0f), glm::vec3(0, 1, 0));
+        // Orthographic projection covering the play area (wider for expanded floor).
+        const glm::mat4 lightProj = glm::ortho(-1200.0f, 1200.0f, -600.0f, 600.0f, 0.1f, 4000.0f);
         lightVP = lightProj * lightView;
 
         SDL_GPUDepthStencilTargetInfo sdt{};
@@ -1694,6 +1736,17 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             }
         }
 
+        // Also render scene geometry (procedural boxes + floor) into shadow map.
+        if (sceneShadowPipeline) {
+            SDL_BindGPUGraphicsPipeline(shadowPass, sceneShadowPipeline);
+            SceneMatrices sceneShadowMats{};
+            sceneShadowMats.model = glm::mat4(1.0f);
+            sceneShadowMats.view = lightView;
+            sceneShadowMats.projection = lightProj;
+            SDL_PushGPUVertexUniformData(cmd, 0, &sceneShadowMats, sizeof(sceneShadowMats));
+            SDL_DrawGPUPrimitives(shadowPass, 1002, 1, 0, 0);
+        }
+
         SDL_EndGPURenderPass(shadowPass);
     }
 
@@ -1719,13 +1772,30 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
         // ── Scene geometry (physics playground) ──────────────────────────────
         if (toggles.sceneGeometry && scenePipeline) {
+            SDL_BindGPUGraphicsPipeline(pass, scenePipeline);
+
             SceneMatrices sceneMats{};
             sceneMats.model = glm::mat4(1.0f);
             sceneMats.view = camera.getView();
             sceneMats.projection = camera.getProjection();
             SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
 
-            SDL_BindGPUGraphicsPipeline(pass, scenePipeline);
+            // Push shadow data for the scene fragment shader.
+            ShadowDataFragUBO sceneShadow{};
+            sceneShadow.lightVP = lightVP;
+            sceneShadow.shadowBias = 0.003f;
+            sceneShadow.shadowNormalBias = 0.0f;
+            sceneShadow.shadowMapSize =
+                (shadowMap && shadowPipeline && toggles.shadows) ? static_cast<float>(k_shadowMapSize) : 0.0f;
+            SDL_PushGPUFragmentUniformData(cmd, 0, &sceneShadow, sizeof(sceneShadow));
+
+            // Bind the shadow map for scene geometry shadow receiving.
+            const SDL_GPUTextureSamplerBinding sceneShadowSamp = {
+                .texture = (shadowMap && toggles.shadows) ? shadowMap : fallbackWhite,
+                .sampler = shadowSampler ? shadowSampler : tonemapSampler,
+            };
+            SDL_BindGPUFragmentSamplers(pass, 0, &sceneShadowSamp, 1);
+
             SDL_DrawGPUPrimitives(pass, 1002, 1, 0, 0);
         }
 
@@ -1739,7 +1809,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             lightData.lights[0].position = glm::vec4(glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f)), 0.0f);
             lightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, 3.0f);
             lightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
-            lightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
+            lightData.lights[1].color = glm::vec4(0.15f, 0.20f, 0.30f, 0.5f);
 
             // Helper: draw all scene-placed meshes matching the transparency filter.
             // Entity/weapon models (drawInScenePass==false) are handled separately.
@@ -2101,7 +2171,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             } params{};
             params.srcRes = glm::vec2(static_cast<float>(std::max(w >> (i + 2), 1u)),
                                       static_cast<float>(std::max(h >> (i + 2), 1u)));
-            params.intensity = 0.5f;
+            params.intensity = 0.3f;
 
             SDL_GPUStorageTextureReadWriteBinding dstWrite = {.texture = bloomMips[i], .mip_level = 0, .layer = 0};
             SDL_GPUComputePass* upPass = SDL_BeginGPUComputePass(cmd, &dstWrite, 1, nullptr, 0);
@@ -2182,7 +2252,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         volUBO.lightDir_vol = glm::vec4(glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f)), 0.0f);
         volUBO.lightColor_vol = glm::vec4(1.0f, 0.95f, 0.85f, 2.0f);
         volUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
-        volUBO.fogDensity = 0.001f;
+        volUBO.fogDensity = 0.0002f;
         volUBO.scatteringG = 0.7f;
         volUBO.shadowBias_vol = 0.002f;
         volUBO.maxDistance = 2000.0f;
@@ -2278,10 +2348,11 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             params.exposure = 1.0f;
             params.gamma = 2.2f;
             params.tonemapMode = 0; // ACES
-            params.bloomStrength = (toggles.bloom && bloomMips[0]) ? 0.3f : 0.0f;
-            params.ssaoStrength = (toggles.ssao && ssaoBlurTexture) ? 0.5f : 0.0f;
+            params.bloomStrength = (toggles.bloom && bloomMips[0]) ? 0.04f : 0.0f;
+            params.ssaoStrength = (toggles.ssao && ssaoBlurTexture) ? 0.8f : 0.0f;
             params.ssrStrength = (toggles.ssr && ssrTexture[0]) ? 0.4f : 0.0f;
-            params.volumetricStrength = (toggles.volumetrics && volumetricTexture) ? 0.5f : 0.0f;
+            params.volumetricStrength = (toggles.volumetrics && volumetricTexture) ? 0.15f : 0.0f;
+            params.sharpenStrength = (toggles.taa) ? 0.6f : 0.0f;
             SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
 
             // Bind all 5 post-process textures for compositing.
@@ -2583,6 +2654,8 @@ void Renderer::quit()
     ImGui_ImplSDLGPU3_Shutdown();
     if (scenePipeline)
         SDL_ReleaseGPUGraphicsPipeline(device, scenePipeline);
+    if (sceneShadowPipeline)
+        SDL_ReleaseGPUGraphicsPipeline(device, sceneShadowPipeline);
     if (pbrPipeline)
         SDL_ReleaseGPUGraphicsPipeline(device, pbrPipeline);
     if (pbrTransparentPipeline)
