@@ -16,22 +16,22 @@ layout(set = 1, binding = 0) uniform Matrices
 // Physics test playground — all geometry in world space (model = identity).
 //
 // Objects (vertex ranges):
-//   Boxes    [0..395]   11 axis-aligned boxes × 36 verts
-//   Ramps    [396..455] 2 ramps × 30 verts (wedge shapes)
-//   DiagWall [456..491] 1 diagonal wall × 36 verts
-//   Floor    [492..497] 1 floor quad × 6 verts
+//   Boxes    [0..899]    25 axis-aligned boxes × 36 verts
+//   Ramps    [900..959]  2 ramps × 30 verts (wedge shapes)
+//   DiagWall [960..995]  1 diagonal wall × 36 verts
+//   Floor    [996..1001] 1 floor quad × 6 verts
 //
-// Total: 498 vertices.
+// Total: 1002 vertices.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────
 // Box geometry — 11 AABBs, procedurally generated from (min, max) pairs.
 // ─────────────────────────────────────────────────────────────────────────
 
-const int NUM_BOXES    = 11;
-const int BOX_VERTS    = NUM_BOXES * 36;   // 396
+const int NUM_BOXES    = 25;
+const int BOX_VERTS    = NUM_BOXES * 36;   // 900
 
-const vec3 boxMinMax[22] = vec3[](
+const vec3 boxMinMax[50] = vec3[](
     // Box 0: reference cube
     vec3(-32, 0, 368), vec3(32, 64, 432),
     // Box 1: small steppable box
@@ -53,11 +53,51 @@ const vec3 boxMinMax[22] = vec3[](
     // Box 9: pole
     vec3(-258, 0, 1892), vec3(-242, 200, 1908),
     // Box 10: thin walkway (elevated)
-    vec3(-16, 80, 2100), vec3(16, 96, 2500)
+    vec3(-16, 80, 2100), vec3(16, 96, 2500),
+
+    // ── Wallrun corridor ──
+    // Box 11: left wallrun wall
+    vec3(-116, 0, 2700), vec3(-100, 200, 3100),
+    // Box 12: right wallrun wall
+    vec3(100, 0, 2700), vec3(116, 200, 3100),
+
+    // ── Wall-to-wall jump section ──
+    // Box 13: left wall (offset)
+    vec3(-116, 0, 3300), vec3(-100, 200, 3600),
+    // Box 14: right wall (offset)
+    vec3(140, 0, 3400), vec3(156, 200, 3700),
+
+    // ── Climb wall ──
+    // Box 15: tall climb wall
+    vec3(-64, 0, 3900), vec3(64, 300, 3916),
+
+    // ── Ledge wall ──
+    // Box 16: medium wall with grabbable top
+    vec3(200, 0, 3900), vec3(328, 120, 3916),
+
+    // ── Slide run guide walls ──
+    // Box 17: left guide
+    vec3(-200, 0, 4100), vec3(-184, 40, 4600),
+    // Box 18: right guide
+    vec3(184, 0, 4100), vec3(200, 40, 4600),
+
+    // ── Parkour course ──
+    // Box 19: start platform
+    vec3(-48, 0, 4800), vec3(48, 48, 4848),
+    // Box 20: left wallrun
+    vec3(-140, 0, 4900), vec3(-124, 200, 5300),
+    // Box 21: right wallrun
+    vec3(124, 0, 5000), vec3(140, 200, 5400),
+    // Box 22: climb target
+    vec3(-64, 0, 5500), vec3(64, 250, 5516),
+    // Box 23: ledge platform
+    vec3(200, 0, 5500), vec3(328, 100, 5516),
+    // Box 24: landing pad
+    vec3(-80, 0, 5550), vec3(80, 16, 5650)
 );
 
 // Per-box color.  Box 0 (reference cube) uses per-face colors instead.
-const vec3 boxColors[11] = vec3[](
+const vec3 boxColors[25] = vec3[](
     vec3(0.5),              // 0: ref cube (per-face override below)
     vec3(0.9, 0.6, 0.2),   // 1: small step box — orange
     vec3(0.2, 0.7, 0.3),   // 2: large jump box — green
@@ -68,7 +108,27 @@ const vec3 boxColors[11] = vec3[](
     vec3(0.55, 0.55, 0.60),// 7: stair 5
     vec3(0.6, 0.6, 0.65),  // 8: wall — grey
     vec3(0.9, 0.9, 0.9),   // 9: pole — white
-    vec3(0.9, 0.8, 0.2)    // 10: walkway — gold
+    vec3(0.9, 0.8, 0.2),   // 10: walkway — gold
+    // Wallrun corridor — teal
+    vec3(0.2, 0.6, 0.7),   // 11: left wallrun wall
+    vec3(0.2, 0.6, 0.7),   // 12: right wallrun wall
+    // Wall-to-wall section — cyan
+    vec3(0.3, 0.7, 0.8),   // 13: left wall offset
+    vec3(0.3, 0.7, 0.8),   // 14: right wall offset
+    // Climb wall — dark blue
+    vec3(0.2, 0.3, 0.7),   // 15: tall climb wall
+    // Ledge wall — warm brown
+    vec3(0.7, 0.5, 0.3),   // 16: ledge wall
+    // Slide guide walls — dark grey
+    vec3(0.35, 0.35, 0.4), // 17: left guide
+    vec3(0.35, 0.35, 0.4), // 18: right guide
+    // Parkour course
+    vec3(0.8, 0.4, 0.6),   // 19: start platform — pink
+    vec3(0.2, 0.6, 0.7),   // 20: left wallrun — teal
+    vec3(0.2, 0.6, 0.7),   // 21: right wallrun — teal
+    vec3(0.2, 0.3, 0.7),   // 22: climb target — dark blue
+    vec3(0.7, 0.5, 0.3),   // 23: ledge platform — brown
+    vec3(0.4, 0.8, 0.4)    // 24: landing pad — green
 );
 
 // Reference cube per-face colours (overrides boxColors[0]).
@@ -138,7 +198,7 @@ vec3 boxVertex(int boxIdx, int lv) {
 // Side triangles are padded to 6 verts (degenerate second triangle).
 // ─────────────────────────────────────────────────────────────────────────
 
-const int RAMP_START   = BOX_VERTS;        // 396
+const int RAMP_START   = BOX_VERTS;        // 900
 const int RAMP_VERTS   = 60;               // 2 ramps × 30
 
 // Gentle ramp (15 deg): x ∈ [-214,-86], z ∈ [950,1250], h=80
@@ -242,7 +302,7 @@ const vec3 rampNormals[10] = vec3[](
 // Top corners: same XZ at y=120.
 // ─────────────────────────────────────────────────────────────────────────
 
-const int DIAG_START   = RAMP_START + RAMP_VERTS;  // 456
+const int DIAG_START   = RAMP_START + RAMP_VERTS;  // 960
 const int DIAG_VERTS   = 36;
 
 const vec3 diagPositions[36] = vec3[](
@@ -290,8 +350,8 @@ const vec3 diagNormals[6] = vec3[](
 // Floor quad — 6 verts.
 // ─────────────────────────────────────────────────────────────────────────
 
-const int FLOOR_START  = DIAG_START + DIAG_VERTS;   // 492
-const int TOTAL_VERTS  = FLOOR_START + 6;            // 498
+const int FLOOR_START  = DIAG_START + DIAG_VERTS;   // 996
+const int TOTAL_VERTS  = FLOOR_START + 6;            // 1002
 
 const vec3 floorVerts[6] = vec3[](
     vec3(-2000, 0, -2000), vec3( 2000, 0,  2000), vec3( 2000, 0, -2000),

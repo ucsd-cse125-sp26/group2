@@ -92,7 +92,7 @@ inline const WorldGeometry& testWorld()
     }};
 
     // ── Axis-aligned boxes ──────────────────────────────────────────────
-    static const std::array<WorldAABB, 11> k_boxes = {{
+    static const std::array<WorldAABB, 25> k_boxes = {{
         // 0. Reference cube (existing visual — now also collidable)
         {{-32, 0, 368}, {32, 64, 432}},
 
@@ -117,6 +117,47 @@ inline const WorldGeometry& testWorld()
 
         // 10. Thin elevated walkway (32 wide × 16 tall × 400 long, at y=80)
         {{-16, 80, 2100}, {16, 96, 2500}},
+
+        // ── Wallrun corridor (parallel walls, 400u long, 200u tall, 200u apart) ──
+        // 11. Left wallrun wall
+        {{-116, 0, 2700}, {-100, 200, 3100}},
+        // 12. Right wallrun wall
+        {{100, 0, 2700}, {116, 200, 3100}},
+
+        // ── Wall-to-wall jump section (offset walls for chaining wallruns) ──
+        // 13. Left wall (offset)
+        {{-116, 0, 3300}, {-100, 200, 3600}},
+        // 14. Right wall (offset further)
+        {{140, 0, 3400}, {156, 200, 3700}},
+
+        // ── Climb wall (tall flat wall, 300u tall) ──
+        // 15. Climb wall (front-facing from the corridor)
+        {{-64, 0, 3900}, {64, 300, 3916}},
+
+        // ── Ledge wall (medium height wall, 120u — reachable via climb) ──
+        // 16. Ledge wall with flat top
+        {{200, 0, 3900}, {328, 120, 3916}},
+
+        // ── Slide run (long flat stretch for sprint → slide) ──
+        // The floor itself is the slide surface, but add side walls to guide
+        // 17. Left guide wall
+        {{-200, 0, 4100}, {-184, 40, 4600}},
+        // 18. Right guide wall
+        {{184, 0, 4100}, {200, 40, 4600}},
+
+        // ── Combined parkour course ──
+        // 19. Platform (jump up to start the course)
+        {{-48, 0, 4800}, {48, 48, 4848}},
+        // 20. Left wallrun wall (angled course)
+        {{-140, 0, 4900}, {-124, 200, 5300}},
+        // 21. Right wallrun wall (angled course)
+        {{124, 0, 5000}, {140, 200, 5400}},
+        // 22. Climb target (at end of wallrun)
+        {{-64, 0, 5500}, {64, 250, 5516}},
+        // 23. Ledge platform (on top of a medium wall)
+        {{200, 0, 5500}, {328, 100, 5516}},
+        // 24. Landing pad (beyond the climb wall)
+        {{-80, 0, 5550}, {80, 16, 5650}},
     }};
 
     // ── Convex brushes ──────────────────────────────────────────────────
