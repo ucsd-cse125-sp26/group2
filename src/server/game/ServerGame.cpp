@@ -111,7 +111,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         }
     }
 
-    systems::runMovement(registry, dt);
+    systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
     ++tickCount;
 

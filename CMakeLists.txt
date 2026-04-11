@@ -370,6 +370,9 @@ add_executable(group2
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/WallDetection.hpp
+        src/ecs/physics/WallDetection.cpp
+        src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
         src/ecs/systems/CollisionSystem.hpp
@@ -456,6 +459,9 @@ add_executable(server
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/WallDetection.hpp
+        src/ecs/physics/WallDetection.cpp
+        src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
         src/ecs/systems/CollisionSystem.hpp
