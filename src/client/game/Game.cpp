@@ -14,6 +14,7 @@
 #include "ecs/systems/MovementSystem.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
+#include "systems/InputSendSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -184,13 +185,13 @@ SDL_AppResult Game::event(SDL_Event* event)
             SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
             break;
 
-        // F1 — send a test hello packet to the server.
-        case SDLK_F1: {
-            static constexpr char k_helloMsg[] = "Hello from client!";
-            client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
-            SDL_Log("Sent test packet to server");
-            break;
-        }
+            // F1 — send a test hello packet to the server.
+            // case SDLK_F1: {
+            //     static constexpr char k_helloMsg[] = "Hello from client!";
+            //     client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
+            //     SDL_Log("Sent test packet to server");
+            //     break;
+            // }
 
         // ── Particle system test keys ───────────────────────────────────────
         case SDLK_T: {
@@ -426,6 +427,8 @@ SDL_AppResult Game::iterate()
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry);
     }
+
+    systems::runInputSend(registry, client);
 
     // ── 4. Physics — always 128 Hz, up to k_maxTicksPerFrame catch-up ─────
     bool physicsRan = false;
