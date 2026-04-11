@@ -216,4 +216,139 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
     return best;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// sphereCast — Swept sphere vs all world geometry
+//
+// Expands each piece of geometry by the sphere radius (Minkowski sum), then
+// tests the sphere centre as a point/ray against the expanded geometry.
+// This gives exact results for planes and brushes, and slightly conservative
+// results for AABB corners (inflated box instead of rounded box), which is
+// acceptable and even desirable for wall detection generosity.
+// ═══════════════════════════════════════════════════════════════════════════
+
+SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
+{
+    SphereHitResult best;
+    const glm::vec3 k_delta = end - start;
+
+    // ── Test against infinite planes ────────────────────────────────────
+    for (const Plane& plane : world.planes) {
+        const float k_distStart = glm::dot(plane.normal, start) - plane.distance;
+        const float k_distEnd = glm::dot(plane.normal, end) - plane.distance;
+
+        if (k_distStart < radius)
+            continue; // starts inside
+        if (k_distEnd >= k_distStart)
+            continue; // moving away
+
+        const float k_t = (k_distStart - radius) / (k_distStart - k_distEnd);
+        if (k_t >= 0.0f && k_t < best.t) {
+            best.hit = true;
+            best.t = k_t;
+            best.normal = plane.normal;
+            best.point = glm::mix(start, end, k_t) - plane.normal * radius;
+        }
+    }
+
+    // ── Test against AABBs (inflated by sphere radius) ──────────────────
+    for (const WorldAABB& box : world.boxes) {
+        const glm::vec3 k_expMin = box.min - glm::vec3(radius);
+        const glm::vec3 k_expMax = box.max + glm::vec3(radius);
+
+        // Skip if starting inside the inflated box.
+        if (start.x >= k_expMin.x && start.x <= k_expMax.x && start.y >= k_expMin.y && start.y <= k_expMax.y &&
+            start.z >= k_expMin.z && start.z <= k_expMax.z)
+            continue;
+
+        float tEntry = -1e30f;
+        float tExit = 1e30f;
+        glm::vec3 hitN{0.0f};
+        bool miss = false;
+
+        for (int axis = 0; axis < 3 && !miss; ++axis) {
+            const float k_lo = k_expMin[axis];
+            const float k_hi = k_expMax[axis];
+
+            if (std::abs(k_delta[axis]) < 1e-8f) {
+                if (start[axis] < k_lo || start[axis] > k_hi)
+                    miss = true;
+            } else {
+                const float k_invD = 1.0f / k_delta[axis];
+                float t1 = (k_lo - start[axis]) * k_invD;
+                float t2 = (k_hi - start[axis]) * k_invD;
+
+                glm::vec3 n1{0.0f};
+                n1[axis] = -1.0f;
+                glm::vec3 n2{0.0f};
+                n2[axis] = 1.0f;
+
+                if (t1 > t2) {
+                    std::swap(t1, t2);
+                    std::swap(n1, n2);
+                }
+                if (t1 > tEntry) {
+                    tEntry = t1;
+                    hitN = n1;
+                }
+                if (t2 < tExit)
+                    tExit = t2;
+                if (tEntry > tExit || tExit < 0.0f)
+                    miss = true;
+            }
+        }
+
+        if (!miss && tEntry >= 0.0f && tEntry < best.t) {
+            best.hit = true;
+            best.t = tEntry;
+            best.normal = hitN;
+            best.point = start + k_delta * tEntry;
+        }
+    }
+
+    // ── Test against brushes (each plane expanded by radius) ────────────
+    for (const WorldBrush& brush : world.brushes) {
+        float tEntry = -1e30f;
+        float tExit = 1e30f;
+        glm::vec3 hitN{0.0f, 1.0f, 0.0f};
+        bool startsOutside = false;
+        bool miss = false;
+
+        for (int i = 0; i < brush.planeCount && !miss; ++i) {
+            const Plane& p = brush.planes[i];
+            // For a sphere, r = radius for every plane (sphere is symmetric).
+            const float k_adjStart = glm::dot(p.normal, start) - p.distance - radius;
+            const float k_adjEnd = glm::dot(p.normal, end) - p.distance - radius;
+
+            if (k_adjStart > 0.0f)
+                startsOutside = true;
+            if (k_adjStart > 0.0f && k_adjEnd > 0.0f) {
+                miss = true;
+                break;
+            }
+            if (k_adjStart <= 0.0f && k_adjEnd <= 0.0f)
+                continue;
+
+            const float k_t = k_adjStart / (k_adjStart - k_adjEnd);
+            if (k_adjStart > 0.0f) {
+                if (k_t > tEntry) {
+                    tEntry = k_t;
+                    hitN = p.normal;
+                }
+            } else {
+                if (k_t < tExit)
+                    tExit = k_t;
+            }
+        }
+
+        if (!miss && startsOutside && tEntry < tExit && tEntry >= 0.0f && tEntry < best.t) {
+            best.hit = true;
+            best.t = tEntry;
+            best.normal = hitN;
+            best.point = start + k_delta * tEntry - hitN * radius;
+        }
+    }
+
+    return best;
+}
+
 } // namespace physics

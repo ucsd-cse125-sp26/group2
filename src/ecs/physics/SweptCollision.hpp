@@ -86,4 +86,29 @@ HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end
 /// @brief Sweep an AABB against all world geometry, returning the earliest hit.
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Sphere cast — swept sphere for wall/climb/ledge detection.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// @brief Result of a sphere-cast query (includes world-space hit point).
+struct SphereHitResult
+{
+    bool hit{false};
+    float t{1.0f};                      ///< Fraction along path [0..1].
+    glm::vec3 normal{0.0f, 1.0f, 0.0f}; ///< Surface normal at contact.
+    glm::vec3 point{0.0f};              ///< World-space contact point on the surface.
+};
+
+/// @brief Cast a sphere along the path [start, end] against all world geometry.
+///
+/// Uses the Minkowski-sum approach: geometry is expanded by the sphere radius,
+/// then the sweep becomes a point (ray) test against the expanded geometry.
+///
+/// @param radius  Sphere radius (u).
+/// @param start   World-space start of sweep (sphere centre).
+/// @param end     World-space end of sweep (sphere centre).
+/// @param world   World collision geometry to test against.
+/// @return        Earliest hit, or `SphereHitResult{hit=false}` if clear.
+SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
+
 } // namespace physics

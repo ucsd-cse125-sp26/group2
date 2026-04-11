@@ -65,6 +65,7 @@ inline void runMovementKeys(Registry& registry)
         snap.right = k_keys[SDL_SCANCODE_D];
         snap.jump = k_keys[SDL_SCANCODE_SPACE];
         snap.crouch = k_keys[SDL_SCANCODE_LCTRL];
+        snap.sprint = k_keys[SDL_SCANCODE_LSHIFT];
     });
 }
 

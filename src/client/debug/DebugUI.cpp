@@ -245,10 +245,13 @@ void DebugUI::buildUI(const Registry& registry,
             // PlayerState
             if (showPlayerState && registry.all_of<PlayerState>(entity)) {
                 const auto& c = registry.get<PlayerState>(entity);
-                ImGui::Text("PlayerState   grounded:%-3s  crouching:%-3s  sliding:%-3s",
+                static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun", "Climbing", "LedgeGrab"};
+                const int k_modeIdx = static_cast<int>(c.moveMode);
+                ImGui::Text("PlayerState   mode:%s  grounded:%-3s  crouching:%-3s  sprint:%-3s",
+                            (k_modeIdx >= 0 && k_modeIdx < 5) ? k_modeNames[k_modeIdx] : "?",
                             c.grounded ? "YES" : "NO",
                             c.crouching ? "YES" : "NO",
-                            c.sliding ? "YES" : "NO");
+                            c.sprinting ? "YES" : "NO");
             }
 
             // InputSnapshot
