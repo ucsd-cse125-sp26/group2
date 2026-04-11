@@ -126,15 +126,15 @@ constexpr float k_crouchingHalfHeight = 22.0f; ///< Crouching/sliding AABB half-
 // Grappling hook
 // ═══════════════════════════════════════════════════════════════════════════
 
-constexpr float k_grappleMaxRange = 1000.0f;       ///< Max distance the hook can reach (u).
-constexpr float k_grapplePullSpeed = 500.0f;       ///< Base pull speed toward hook point (u/s).
-constexpr float k_grapplePullAccel = 800.0f;       ///< Acceleration toward hook point (u/s^2).
-constexpr float k_grappleLookInfluence = 0.4f;     ///< How much look direction blends into pull (0-1).
+constexpr float k_grappleMaxRange = 1500.0f;       ///< Max distance the hook can reach (u).
+constexpr float k_grapplePullSpeed = 900.0f;       ///< Base pull speed toward hook point (u/s).
+constexpr float k_grapplePullAccel = 1800.0f;      ///< Acceleration toward hook point (u/s^2).
+constexpr float k_grappleLookInfluence = 0.35f;    ///< How much look direction blends into pull (0-1).
 constexpr float k_grappleReleaseMinDist = 60.0f;   ///< Auto-release when this close to hook point (u).
-constexpr float k_grappleReleaseMaxDist = 1500.0f; ///< Auto-release when this far from hook point (u).
-constexpr float k_grappleMaxDuration = 2.5f;       ///< Max pull duration before auto-release (s).
+constexpr float k_grappleReleaseMaxDist = 2000.0f; ///< Auto-release when this far from hook point (u).
+constexpr float k_grappleMaxDuration = 7.0f;       ///< Safety timeout (s). Normally cancelled by releasing E.
 constexpr float k_grappleCooldown = 1.0f;          ///< Cooldown between grapple uses (s).
-constexpr float k_grappleGravityScale = 0.33f;     ///< Gravity multiplier while grappling (reduced).
+constexpr float k_grappleGravityScale = 0.15f;     ///< Gravity multiplier while grappling (heavily reduced).
 constexpr float k_grappleSpeedCap = 1500.0f;       ///< Higher speed cap while grappling (u/s).
 
 } // namespace tms

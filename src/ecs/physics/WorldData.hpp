@@ -92,7 +92,7 @@ inline const WorldGeometry& testWorld()
     }};
 
     // ── Axis-aligned boxes ──────────────────────────────────────────────
-    static const std::array<WorldAABB, 25> k_boxes = {{
+    static const std::array<WorldAABB, 30> k_boxes = {{
         // 0. Reference cube (existing visual — now also collidable)
         {{-32, 0, 368}, {32, 64, 432}},
 
@@ -158,6 +158,18 @@ inline const WorldGeometry& testWorld()
         {{200, 0, 5500}, {328, 100, 5516}},
         // 24. Landing pad (beyond the climb wall)
         {{-80, 0, 5550}, {80, 16, 5650}},
+
+        // ── Grapple test: arch + high platform ──
+        // 25. Arch left pillar (32×500×32, very tall)
+        {{-116, 0, 6000}, {-84, 500, 6032}},
+        // 26. Arch right pillar
+        {{84, 0, 6000}, {116, 500, 6032}},
+        // 27. Arch crossbar (connects pillars at y=460, 232 wide × 40 tall × 32 deep)
+        {{-116, 460, 6000}, {116, 500, 6032}},
+        // 28. High platform (behind the arch, at y=400, 200×16×100)
+        {{-100, 400, 6200}, {100, 416, 6300}},
+        // 29. Ultra-high target platform (y=600, small, way up there)
+        {{-48, 580, 6500}, {48, 596, 6548}},
     }};
 
     // ── Convex brushes ──────────────────────────────────────────────────
