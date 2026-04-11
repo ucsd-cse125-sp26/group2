@@ -92,6 +92,14 @@ struct PlayerState
     bool exitingLedge{false};
     float exitLedgeTimer{0.0f};
 
+    // ── Grappling hook ───────────────────────────────────────────────────
+    bool grappleActive{false};         ///< True when the hook is attached and pulling.
+    bool grappleCooldownActive{false}; ///< True during cooldown between grapples.
+    float grappleCooldownTimer{0.0f};  ///< Remaining cooldown time (s).
+    float grapplePullTimer{0.0f};      ///< How long we've been pulling (s).
+    glm::vec3 grapplePoint{0.0f};      ///< World-space anchor where the hook is attached.
+    bool grappleInputLastTick{false};  ///< For edge detection on the grapple key.
+
     // ── Camera effects (read by renderer, written by movement) ──────────
     float targetCameraTilt{0.0f}; ///< Target camera roll for wallrun lean (degrees).
 };

@@ -558,6 +558,18 @@ SDL_AppResult Game::iterate()
                 {10.f + static_cast<float>(k_barLen) * 8.f, 58.f}, bgStr, {0.3f, 0.3f, 0.3f, 0.4f}, 16.f);
     }
 
+    // ── Grapple cable visual ────────────────────────────────────────────
+    registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& pstate) {
+        if (pstate.grappleActive) {
+            // Draw cable from player hand to hook point every frame.
+            const float cosPi = std::cos(renderPitch);
+            const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
+            const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
+            const glm::vec3 hand = renderEye + right * 15.f - glm::vec3{0, 1, 0} * 8.f + fwd * 5.f;
+            particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
+        }
+    });
+
     // Compute camera forward and cache for event() key shortcuts
     {
         const float cosPitch = std::cos(renderPitch);

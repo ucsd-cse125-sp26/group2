@@ -154,6 +154,13 @@ void tickTimers(PlayerState& state, float dt)
         if (state.exitLedgeTimer <= 0.0f)
             state.exitingLedge = false;
     }
+
+    // Grapple cooldown.
+    if (state.grappleCooldownActive) {
+        state.grappleCooldownTimer -= dt;
+        if (state.grappleCooldownTimer <= 0.0f)
+            state.grappleCooldownActive = false;
+    }
 }
 
 } // namespace
@@ -779,15 +786,107 @@ void updateCoyoteTime(PlayerState& state)
 } // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Grappling hook
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace
+{
+
+/// Try to fire the grapple hook. Raycasts forward to find a surface.
+void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 eye, const physics::WorldGeometry& world)
+{
+    // Rising edge detection on grapple key.
+    const bool k_pressed = input.grapple && !state.grappleInputLastTick;
+
+    if (state.grappleActive && input.grapple && k_pressed) {
+        // Cancel active grapple on re-press.
+        state.grappleActive = false;
+        state.grappleCooldownActive = true;
+        state.grappleCooldownTimer = tms::k_grappleCooldown;
+        return;
+    }
+
+    if (!k_pressed || state.grappleActive || state.grappleCooldownActive)
+        return;
+
+    // Raycast forward from the eye position.
+    const float k_sinYaw = std::sin(input.yaw);
+    const float k_cosYaw = std::cos(input.yaw);
+    const float k_cosPitch = std::cos(input.pitch);
+    const glm::vec3 k_fwd{k_sinYaw * k_cosPitch, -std::sin(input.pitch), k_cosYaw * k_cosPitch};
+
+    const glm::vec3 k_end = eye + k_fwd * tms::k_grappleMaxRange;
+    const physics::SphereHitResult k_hit = physics::sphereCast(4.0f, eye, k_end, world);
+
+    if (!k_hit.hit)
+        return;
+
+    // Hook attached!
+    state.grappleActive = true;
+    state.grapplePullTimer = 0.0f;
+    state.grapplePoint = k_hit.point;
+}
+
+/// Apply grapple pull physics.
+void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& input, glm::vec3 pos, float dt)
+{
+    if (!state.grappleActive)
+        return;
+
+    state.grapplePullTimer += dt;
+
+    // ── Auto-release conditions ─────────────────────────────────────────
+    const glm::vec3 k_toHook = state.grapplePoint - pos;
+    const float k_dist = glm::length(k_toHook);
+
+    if (k_dist < tms::k_grappleReleaseMinDist || k_dist > tms::k_grappleReleaseMaxDist ||
+        state.grapplePullTimer > tms::k_grappleMaxDuration || input.crouch)
+    {
+        state.grappleActive = false;
+        state.grappleCooldownActive = true;
+        state.grappleCooldownTimer = tms::k_grappleCooldown;
+        return;
+    }
+
+    // ── Pull direction: blend between direct-to-hook and look direction ──
+    const glm::vec3 k_directDir = glm::normalize(k_toHook);
+
+    const float k_sinYaw = std::sin(input.yaw);
+    const float k_cosYaw = std::cos(input.yaw);
+    const float k_cosPitch = std::cos(input.pitch);
+    const glm::vec3 k_lookDir{k_sinYaw * k_cosPitch, -std::sin(input.pitch), k_cosYaw * k_cosPitch};
+
+    // Blend: pull mostly toward hook, but allow look direction to steer.
+    const glm::vec3 k_pullDir =
+        glm::normalize(k_directDir * (1.0f - tms::k_grappleLookInfluence) + k_lookDir * tms::k_grappleLookInfluence);
+
+    // Accelerate toward the pull direction.
+    const float k_currentPullSpeed = glm::dot(vel, k_pullDir);
+    if (k_currentPullSpeed < tms::k_grapplePullSpeed) {
+        const float k_addSpeed = std::min(tms::k_grapplePullAccel * dt, tms::k_grapplePullSpeed - k_currentPullSpeed);
+        vel += k_pullDir * k_addSpeed;
+    }
+
+    // Reduced gravity while grappling.
+    vel.y -= physics::k_gravity * tms::k_grappleGravityScale * dt;
+
+    // Higher speed cap during grapple.
+    clampHorizSpeed(vel, tms::k_grappleSpeedCap);
+}
+
+} // namespace
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Speed cap
 // ═══════════════════════════════════════════════════════════════════════════
 
 namespace
 {
 
-void applySpeedCap(glm::vec3& vel)
+void applySpeedCap(glm::vec3& vel, const PlayerState& state)
 {
-    clampHorizSpeed(vel, tms::k_speedCap);
+    const float k_cap = state.grappleActive ? tms::k_grappleSpeedCap : tms::k_speedCap;
+    clampHorizSpeed(vel, k_cap);
 }
 
 } // namespace
@@ -880,6 +979,23 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 break;
             }
 
+            // ── 5b. Grappling hook ───────────────────────────────────────
+            {
+                const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f, 0);
+                tryFireGrapple(state, input, k_eye, world);
+                if (state.grappleActive) {
+                    handleGrapple(vel.value, state, input, pos.value, dt);
+                    // While grappling, cancel wallrun/climb/slide.
+                    if (state.moveMode != MoveMode::OnFoot) {
+                        state.moveMode = MoveMode::OnFoot;
+                        if (state.crouching) {
+                            state.pendingUncrouch = true;
+                        }
+                    }
+                }
+                state.grappleInputLastTick = input.grapple;
+            }
+
             // ── 6. Jump handling (works in any mode) ────────────────────
             handleJump(vel.value, input, state, dt);
 
@@ -928,7 +1044,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             }
 
             // ── 11. Speed cap ───────────────────────────────────────────
-            applySpeedCap(vel.value);
+            applySpeedCap(vel.value, state);
 
             // ── 12. Track jump key state for edge detection ─────────────
             state.jumpHeldLastTick = input.jump;
