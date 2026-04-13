@@ -860,99 +860,129 @@ void updateCoyoteTime(PlayerState& state)
 
 } // namespace
 
-// Grappling hook
+// Grappling hook — Widowmaker-style (direct pull → look-biased launch)
+//
+// Physics model:
+//   FIRE:   Press E → raycast forward → attach to first surface hit.
+//   PULL:   Velocity is overridden each tick to point directly at the anchor.
+//           No air control, no gravity, no steering. Pure linear pull.
+//   DETACH: On arrival (close to anchor), jump cancel, or safety timeout.
+//           Velocity is redirected: blend grapple direction with look direction.
+//           Looking up converts horizontal pull speed into a vertical arc.
+//           This is the signature "look-up launch" that creates skill expression.
 
 namespace
 {
 
-/// @brief Try to fire the grapple hook by raycasting forward to find a surface.
-/// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-/// @param eye    Eye position for the raycast origin.
-/// @param world  World collision geometry.
+/// @brief Compute the player's 3D look direction from yaw/pitch.
+glm::vec3 lookDirFromInput(const InputSnapshot& input)
+{
+    const float k_cosPitch = std::cos(input.pitch);
+    return {std::sin(input.yaw) * k_cosPitch, -std::sin(input.pitch), std::cos(input.yaw) * k_cosPitch};
+}
+
+/// @brief Detach the grapple and apply the look-biased launch impulse.
+///
+/// The launch velocity is a blend of the grapple-line direction and the
+/// player's current look direction.  Looking upward near detach converts
+/// horizontal pull speed into a soaring vertical arc — this is the core
+/// Widowmaker tech that makes the grapple expressive.
+void grappleDetachWithLaunch(glm::vec3& vel, PlayerState& state, const InputSnapshot& input, glm::vec3 pos)
+{
+    const float k_speed = glm::length(vel);
+
+    // Current grapple-line direction (from player toward anchor).
+    const glm::vec3 k_toHook = state.grapplePoint - pos;
+    const float k_dist = glm::length(k_toHook);
+    const glm::vec3 k_grappleDir = (k_dist > 0.001f) ? k_toHook / k_dist : glm::vec3(0, 1, 0);
+
+    // Player look direction (where they're aiming at detach time).
+    const glm::vec3 k_lookDir = lookDirFromInput(input);
+
+    // Blend grapple direction with look direction.
+    // k_grappleLaunchLookBias = 0.6 → 60% look, 40% grapple line.
+    // Looking straight up near detach = massive vertical launch.
+    const glm::vec3 k_launchDir =
+        glm::normalize(k_grappleDir * (1.0f - tms::k_grappleLaunchLookBias) + k_lookDir * tms::k_grappleLaunchLookBias);
+
+    // Apply launch: preserve momentum with a slight speed boost.
+    const float k_launchSpeed = std::max(k_speed, tms::k_grapplePullSpeed * 0.5f) * tms::k_grappleLaunchSpeedMult;
+    vel = k_launchDir * k_launchSpeed;
+
+    // End grapple, start cooldown.
+    state.grappleActive = false;
+    state.grappleCooldownActive = true;
+    state.grappleCooldownTimer = tms::k_grappleCooldown;
+    state.grounded = false;
+}
+
+/// @brief Fire grapple on E press.  One-shot: press E to fire, not hold.
 void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 eye, const physics::WorldGeometry& world)
 {
-    // Cancel on E release (hold E to grapple)
-    if (state.grappleActive && !input.grapple) {
-        state.grappleActive = false;
-        state.grappleCooldownActive = true;
-        state.grappleCooldownTimer = tms::k_grappleCooldown;
-        return;
-    }
-
-    // Fire on rising edge of E
     const bool k_pressed = input.grapple && !state.grappleInputLastTick;
     if (!k_pressed || state.grappleActive || state.grappleCooldownActive)
         return;
 
     // Raycast forward from the eye position.
-    const float k_sinYaw = std::sin(input.yaw);
-    const float k_cosYaw = std::cos(input.yaw);
-    const float k_cosPitch = std::cos(input.pitch);
-    const glm::vec3 k_fwd{k_sinYaw * k_cosPitch, -std::sin(input.pitch), k_cosYaw * k_cosPitch};
-
+    const glm::vec3 k_fwd = lookDirFromInput(input);
     const glm::vec3 k_end = eye + k_fwd * tms::k_grappleMaxRange;
     const physics::SphereHitResult k_hit = physics::sphereCast(4.0f, eye, k_end, world);
 
     if (!k_hit.hit)
         return;
 
-    // Hook attached!
+    // Hook attached — begin pull.
     state.grappleActive = true;
     state.grapplePullTimer = 0.0f;
     state.grapplePoint = k_hit.point;
+    state.grapplePullDir = glm::normalize(k_hit.point - eye);
 }
 
-/// @brief Apply grapple pull physics toward the hook point.
-/// @param vel    Velocity (modified in place).
-/// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-/// @param pos    Current entity position.
-/// @param dt     Fixed physics delta time in seconds.
-void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& input, glm::vec3 pos, float dt)
+/// @brief Pull the player directly toward the anchor.  No air control, no gravity.
+///
+/// Velocity is overridden each tick (not additive). The player flies in a
+/// straight line toward the anchor point at k_grapplePullSpeed.
+void handleGrapple(glm::vec3& vel, PlayerState& state, const InputSnapshot& input, glm::vec3 pos, float /*dt*/)
 {
     if (!state.grappleActive)
         return;
 
-    state.grapplePullTimer += dt;
-
-    // Auto-release conditions
     const glm::vec3 k_toHook = state.grapplePoint - pos;
     const float k_dist = glm::length(k_toHook);
 
-    if (k_dist < tms::k_grappleReleaseMinDist || k_dist > tms::k_grappleReleaseMaxDist ||
-        state.grapplePullTimer > tms::k_grappleMaxDuration || input.crouch)
-    {
+    // ── Detach conditions ───────────────────────────────────────────────
+
+    // Arrived at anchor — auto-detach with launch.
+    if (k_dist < tms::k_grappleDetachDist) {
+        grappleDetachWithLaunch(vel, state, input, pos);
+        return;
+    }
+
+    // Jump to cancel early — detach with launch (the skill expression).
+    if (input.jump) {
+        grappleDetachWithLaunch(vel, state, input, pos);
+        return;
+    }
+
+    // Safety timeout.
+    if (state.grapplePullTimer > tms::k_grappleMaxDuration) {
+        grappleDetachWithLaunch(vel, state, input, pos);
+        return;
+    }
+
+    // Crouch to cancel without launch (just drop).
+    if (input.crouch) {
         state.grappleActive = false;
         state.grappleCooldownActive = true;
         state.grappleCooldownTimer = tms::k_grappleCooldown;
         return;
     }
 
-    // Pull direction: blend between direct-to-hook and look direction
-    const glm::vec3 k_directDir = glm::normalize(k_toHook);
-
-    const float k_sinYaw = std::sin(input.yaw);
-    const float k_cosYaw = std::cos(input.yaw);
-    const float k_cosPitch = std::cos(input.pitch);
-    const glm::vec3 k_lookDir{k_sinYaw * k_cosPitch, -std::sin(input.pitch), k_cosYaw * k_cosPitch};
-
-    // Blend: pull mostly toward hook, but allow look direction to steer.
-    const glm::vec3 k_pullDir =
-        glm::normalize(k_directDir * (1.0f - tms::k_grappleLookInfluence) + k_lookDir * tms::k_grappleLookInfluence);
-
-    // Accelerate toward the pull direction.
-    const float k_currentPullSpeed = glm::dot(vel, k_pullDir);
-    if (k_currentPullSpeed < tms::k_grapplePullSpeed) {
-        const float k_addSpeed = std::min(tms::k_grapplePullAccel * dt, tms::k_grapplePullSpeed - k_currentPullSpeed);
-        vel += k_pullDir * k_addSpeed;
-    }
-
-    // Reduced gravity while grappling.
-    vel.y -= physics::k_gravity * tms::k_grappleGravityScale * dt;
-
-    // Higher speed cap during grapple.
-    clampHorizSpeed(vel, tms::k_grappleSpeedCap);
+    // ── Pull phase: override velocity directly toward anchor ────────────
+    // No gradual acceleration. No air control. No gravity.
+    // Pure linear flight toward the hook point.
+    const glm::vec3 k_pullDir = k_toHook / k_dist;
+    vel = k_pullDir * tms::k_grapplePullSpeed;
 }
 
 } // namespace
@@ -967,8 +997,10 @@ namespace
 /// @param state  Player state.
 void applySpeedCap(glm::vec3& vel, const PlayerState& state)
 {
-    const float k_cap = state.grappleActive ? tms::k_grappleSpeedCap : tms::k_speedCap;
-    clampHorizSpeed(vel, k_cap);
+    // During grapple pull, velocity is directly controlled — don't cap it.
+    if (state.grappleActive)
+        return;
+    clampHorizSpeed(vel, tms::k_speedCap);
 }
 
 } // namespace
@@ -1059,32 +1091,44 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 break;
             }
 
-            // 5b. Grappling hook
+            // 5b. Grappling hook (Widowmaker-style)
+            // Check for fire (rising edge of E). If active, the pull phase
+            // overrides ALL movement — no gravity, no air control, no steering.
+            // Jump detaches with a look-biased launch. Crouch cancels with drop.
+            bool grapplePulling = false;
             {
                 const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f, 0);
                 tryFireGrapple(state, input, k_eye, world);
+                state.grappleInputLastTick = input.grapple;
+
                 if (state.grappleActive) {
-                    handleGrapple(vel.value, state, input, pos.value, dt);
-                    // While grappling, cancel wallrun/climb/slide.
+                    // Cancel wallrun/climb/slide on grapple.
                     if (state.moveMode != MoveMode::OnFoot) {
                         state.moveMode = MoveMode::OnFoot;
-                        if (state.crouching) {
+                        if (state.crouching)
                             state.pendingUncrouch = true;
-                        }
                     }
+
+                    // Pull overrides velocity. Jump/crouch detach is handled inside.
+                    handleGrapple(vel.value, state, input, pos.value, dt);
+
+                    // If still active after handleGrapple, mark as pulling
+                    // to skip all remaining movement this tick.
+                    grapplePulling = state.grappleActive;
                 }
-                state.grappleInputLastTick = input.grapple;
             }
 
-            // 6. Jump handling (works in any mode)
-            handleJump(vel.value, input, state, dt);
+            // 6. Jump handling (works in any mode — but NOT during grapple pull)
+            if (!grapplePulling)
+                handleJump(vel.value, input, state, dt);
 
-            // 7. Jump lurch (air only)
-            if (!state.grounded && state.moveMode == MoveMode::OnFoot)
+            // 7. Jump lurch (air only, NOT during grapple)
+            if (!grapplePulling && !state.grounded && state.moveMode == MoveMode::OnFoot)
                 handleJumpLurch(vel.value, input, state);
 
             // 8. Coyote time update
-            updateCoyoteTime(state);
+            if (!grapplePulling)
+                updateCoyoteTime(state);
 
             // 9. Landing reset
             if (state.grounded && state.moveMode == MoveMode::OnFoot) {

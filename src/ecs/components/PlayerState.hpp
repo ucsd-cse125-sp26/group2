@@ -95,12 +95,13 @@ struct PlayerState
     bool exitingLedge{false};
     float exitLedgeTimer{0.0f};
 
-    // Grappling hook
-    bool grappleActive{false};         ///< True when the hook is attached and pulling.
-    bool grappleCooldownActive{false}; ///< True during cooldown between grapples.
+    // Grappling hook (Widowmaker-style: direct pull, look-biased launch)
+    bool grappleActive{false};         ///< True while being pulled toward anchor.
+    bool grappleCooldownActive{false}; ///< True during cooldown between uses.
     float grappleCooldownTimer{0.0f};  ///< Remaining cooldown time (s).
-    float grapplePullTimer{0.0f};      ///< How long we've been pulling (s).
-    glm::vec3 grapplePoint{0.0f};      ///< World-space anchor where the hook is attached.
+    float grapplePullTimer{0.0f};      ///< Time spent being pulled (s).
+    glm::vec3 grapplePoint{0.0f};      ///< World-space anchor point.
+    glm::vec3 grapplePullDir{0.0f};    ///< Cached pull direction (toward anchor at fire time).
     bool grappleInputLastTick{false};  ///< For edge detection on the grapple key.
 
     // Camera effects (read by renderer, written by movement)
