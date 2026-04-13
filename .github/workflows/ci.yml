@@ -48,6 +48,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Strawberry Perl ships ccache.exe which wraps sccache, causing
+      # PDB write contention on parallel MSVC builds.
+      - name: Remove Strawberry Perl from PATH
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "$(echo "$PATH" | tr ';' '\n' | grep -iv strawberry | tr '\n' ';')" >> "$GITHUB_PATH"
+
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -185,13 +192,12 @@ jobs:
       - name: Run clang-tidy
         run: |
           python3 -c "
-          import json, subprocess, sys
+          import json
           with open('build/debug/compile_commands.json') as f:
-              files = [e['file'] for e in json.load(f)
-                       if '/src/' in e['file'] and '/_deps/' not in e['file']]
-          result = subprocess.run(['clang-tidy', '-p', 'build/debug'] + files)
-          sys.exit(result.returncode)
-          "
+              for e in json.load(f):
+                  if '/src/' in e['file'] and '/_deps/' not in e['file']:
+                      print(e['file'])
+          " | xargs -P "$(nproc)" -n 1 clang-tidy --quiet -p build/debug
 
   # ------------------------------------------------------------------ #
   #  Release builds — optimised, no sanitizers                          #
@@ -233,6 +239,8 @@ jobs:
             preset: release-win
             cc: cl
             cxx: cl
+            # sccache + MSVC requires embedded debug info (/Z7 not /Zi)
+            extra_cmake: -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
             binary_src: build\release-win\group2.exe
             artifact: group2-windows-x86_64.exe
             server_binary_src: build\release-win\server.exe
@@ -240,6 +248,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Strawberry Perl ships ccache.exe which wraps sccache, causing
+      # PDB write contention on parallel MSVC builds.
+      - name: Remove Strawberry Perl from PATH
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "$(echo "$PATH" | tr ';' '\n' | grep -iv strawberry | tr '\n' ';')" >> "$GITHUB_PATH"
 
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
@@ -308,7 +323,8 @@ jobs:
           cmake --preset ${{ matrix.preset }} \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
+            ${{ matrix.extra_cmake || '' }}
 
       - name: Build
         shell: bash

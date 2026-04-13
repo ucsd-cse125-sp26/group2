@@ -158,10 +158,13 @@ int resolveMetallicRoughnessTex(const aiMaterial* mat,
                                 std::vector<int>& embTexToDataIdx)
 {
     // Try every known Assimp slot for PBR metallic-roughness (ordered by likelihood).
-    for (aiTextureType type : {aiTextureType_UNKNOWN,           // type 18 — glTF importer default
-                               aiTextureType_METALNESS,         // type 15 — explicit metallic
-                               aiTextureType_DIFFUSE_ROUGHNESS, // type 16 — explicit roughness
-                               aiTextureType_SPECULAR}) {       // type 2  — some exporters put ORM here
+    static constexpr aiTextureType pbrSlots[] = {
+        aiTextureType_UNKNOWN,           // type 18 — glTF importer default
+        aiTextureType_METALNESS,         // type 15 — explicit metallic
+        aiTextureType_DIFFUSE_ROUGHNESS, // type 16 — explicit roughness
+        aiTextureType_SPECULAR,          // type 2  — some exporters put ORM here
+    };
+    for (aiTextureType type : pbrSlots) {
         int idx = resolveTexture(mat, type, scene, textures, embTexToDataIdx);
         if (idx >= 0)
             return idx;

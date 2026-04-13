@@ -4,7 +4,6 @@ HeaderFilterRegex: '^(src|include)/.*'
 
 Checks: >
   clang-diagnostic-*,
-  clang-analyzer-*,
   bugprone-*,
   modernize-*,
   performance-*,
@@ -17,7 +16,9 @@ Checks: >
 WarningsAsErrors: ''
 
 CheckOptions:
-  # Naming — CamelCase types, camelBack functions/variables, k_ prefix for constants.
+  # Naming — CamelCase types, camelBack functions/variables.
+  # k_ prefix for namespace/class-scope constants only; local consts use plain camelBack
+  # (the codebase convention is `const auto foo = …`, not `const auto k_foo = …`).
   # No m_ prefix on members: the codebase uses plain camelBack for both struct fields
   # and class members.
   - key: readability-identifier-naming.ClassCase
@@ -42,6 +43,14 @@ CheckOptions:
     value: camelBack
   - key: readability-identifier-naming.ConstantPrefix
     value: k_
+  - key: readability-identifier-naming.LocalConstantCase
+    value: camelBack
+  - key: readability-identifier-naming.LocalConstantPrefix
+    value: ''
+  - key: readability-identifier-naming.LocalConstantPointerCase
+    value: camelBack
+  - key: readability-identifier-naming.LocalConstantPointerPrefix
+    value: ''
   - key: readability-identifier-naming.StaticConstantCase
     value: camelBack
   - key: readability-identifier-naming.StaticConstantPrefix

@@ -3,6 +3,8 @@
 
 #include "EventQueue.hpp"
 
+#include <stdexcept>
+
 bool EventQueue::isEmpty()
 {
     return events.empty();
