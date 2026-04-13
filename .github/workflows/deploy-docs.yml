@@ -1,0 +1,55 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Doxyfile.in'
+      - 'cmake/Doxygen.cmake'
+      - '.github/workflows/deploy-docs.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen and Graphviz
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends doxygen graphviz
+
+      - name: Generate Doxyfile from template
+        run: |
+          sed \
+            -e 's|@PROJECT_NAME@|group2|' \
+            -e 's|@PROJECT_DESCRIPTION@|CSE 125 Group 2|' \
+            -e 's|@PROJECT_VERSION@|0.1.0|' \
+            -e 's|@CMAKE_SOURCE_DIR@|.|' \
+            -e 's|@DOXYGEN_OUTPUT_DIR@|build/docs|' \
+            -e 's|@DOXYGEN_HAVE_DOT@|YES|' \
+            -e 's|@DOXYGEN_DOT_PATH@||' \
+            Doxyfile.in > Doxyfile
+
+      - name: Generate documentation
+        run: doxygen Doxyfile
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 222 cse125.ucsd.edu >> ~/.ssh/known_hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Deploy docs via rsync
+        run: |
+          rsync -rltz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p 222 -o StrictHostKeyChecking=yes" \
+            build/docs/html/ \
+            dkatulevskiy@cse125.ucsd.edu:/var/www/html/class/cse125/www/2026/cse125g2/docs/
