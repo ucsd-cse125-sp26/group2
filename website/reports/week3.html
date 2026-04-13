@@ -156,41 +156,41 @@
           <h2 class="section-title">02_INDIVIDUAL_REPORTS</h2>
 
           <div style="display:grid; gap:20px; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));">
-            <article class="panel" style="display:grid; gap:12px;">
-              <div style="display:grid; gap:10px;">
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
                 <div>
                   <p class="card-title report-header">Joshua Castaneda</p>
                   <p class="small-copy">Graphics / Physics</p>
                 </div>
                 <div>
                   <p class="muted-label">Concrete_Goals</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">A scene with a basic object and a controllable camera in the scene.</p>
                 </div>
                 <div>
                   <p class="muted-label">Accomplished</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">We accomplished our basic goal and began on implementing the loading of arbitrary models and textures as well. These are a WIP though.</p>
                 </div>
                 <div>
                   <p class="muted-label">Why_It_Changed</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">For the concrete goals, things went as planned, but I would have liked to get more work done in terms of model loading and textures. Working in SDL3 GPU was a bit harder than expected though since I did not realize there were no examples for the GPU pipeline and was mainly referencing SDL3 2D examples up to now.</p>
                 </div>
                 <div>
                   <p class="muted-label">Next_Week</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Finish implementing model loading into the shaders, finish implementing textures, think about and setup the art -> game pipeline, and I would also like to clean up a bunch of the stuff we wrote during week 2.</p>
                 </div>
                 <div>
                   <p class="muted-label">What_I_Learned</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Boilerplate is annoying, especially with limited examples. The docs were helpful, but parsing through them and trying to understand what parts I actually needed was a process. The most helpful thing was the one set of examples we were able to find. https://github.com/TheSpydog/SDL_gpu_examples, cross compatibility is annoying, IDEs are annoying.</p>
                 </div>
                 <div>
                   <p class="muted-label">Individual_Morale</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I think I am doing good. I feel like once the boilerplate was understood and out of the way, implementing the actual shaders was not bad at all. Now parsing the SDL3 GPU docs for resources on how to load buffers on the GPU is the next hurdle that I think will be annoying, but once that's done, shaders shouldn't be too much of an issue. I do have concerns about AI use, but we'll get to that when we get to it.</p>
                 </div>
               </div>
             </article>
 
-            <article class="panel" style="display:grid; gap:12px;">
-              <div style="display:grid; gap:10px;">
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
                 <div>
                   <p class="card-title report-header">Cedric-James David</p>
                   <p class="small-copy">Gameplay / Network</p>
@@ -225,107 +225,107 @@
               </div>
             </article>
 
-            <article class="panel" style="display:grid; gap:12px;">
-              <div style="display:grid; gap:10px;">
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
                 <div>
                   <p class="card-title report-header">Guthry Hahm</p>
                   <p class="small-copy">Graphics</p>
                 </div>
                 <div>
                   <p class="muted-label">Concrete_Goals</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Get a basic 3D cube to show up on the screen and implement a basic shader to display it.</p>
                 </div>
                 <div>
                   <p class="muted-label">Accomplished</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Given Josh implemented the in shader cube, I added normals to it and a basic Lambertian lighting model. I am probably halway through writing the code to be able to use buffers to move geometry data from the CPU to the GPU instead of using shaders only.</p>
                 </div>
                 <div>
                   <p class="muted-label">Why_It_Changed</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I had planned to be able to use GPU Buffers, it just simply longer than I had for this week.</p>
                 </div>
                 <div>
                   <p class="muted-label">Next_Week</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Finish the program's capability to upload Geometry buffers to the GPU rather than use in-shader mesh data. Finalize the structure In which we model geometry data so that .obj parsers up and running so that we can directly render 3d files in our game. Work with Josh to get textures working.</p>
                 </div>
                 <div>
                   <p class="muted-label">What_I_Learned</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I learned quite a lot about the SDL_GPU API, it is more verbose than OpenGL, kind of in a middle ground of difficulty between OpenGl and Vulkan type API’s, so with OpenGL knowledge, there were more concepts I had to understand, like Transfer Buffers, BufferBindings Structs. I did expect to learn about this, and I definitely believe I spent most of my time learning about the API in the hopes that that knowledge would serve me to make more and better contributions later on.</p>
                 </div>
                 <div>
                   <p class="muted-label">Individual_Morale</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I think my morale is pretty good, I was glad I was able to contribute to what I did. Right now my hope is that I can continue to keep up with the rest of the group in terms of contributions, especially given AI assistance that others like to use, and my tendency to like to thoroughly understand all the code I read and write.</p>
                 </div>
               </div>
             </article>
 
-            <article class="panel" style="display:grid; gap:12px;">
-              <div style="display:grid; gap:10px;">
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
                 <div>
                   <p class="card-title report-header">Daniil Katulevskiy</p>
                   <p class="small-copy">Physics / CI</p>
                 </div>
                 <div>
                   <p class="muted-label">Concrete_Goals</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Create a simple physics system, move character in quake / source style, proper wishvelocity, airacceleration, and other classic instruments for movement control.</p>
                 </div>
                 <div>
                   <p class="muted-label">Accomplished</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Implemented movement system, titanfall-style, helped with graphics, basic particles, loaded first rigged mesh and played an animation on it.</p>
                 </div>
                 <div>
                   <p class="muted-label">Why_It_Changed</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Went better than expected, good progress overall.</p>
                 </div>
                 <div>
                   <p class="muted-label">Next_Week</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Work a bit more on making movement more intuitive, render enemies as a 3d rigged character (static T-pose), play different animations for a 3d rigged model depending on input, read about blending animations.</p>
                 </div>
                 <div>
                   <p class="muted-label">What_I_Learned</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Need to have visual model and animations separate from hitbox positioning; there will be no renderer on server. Mouse movement needs to be processed each frame rendered, not with physics const dt loop, to avoid viewangle jitters.</p>
                 </div>
                 <div>
                   <p class="muted-label">Individual_Morale</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Really good, glad to see what we've got going so far. I overstepped my responsibilities a bit into the graphics domain, needed to have some baseline for dialing in the movement system, but will try to refrain from this for future contributions.</p>
                 </div>
               </div>
             </article>
 
-            <article class="panel" style="display:grid; gap:12px;">
-              <div style="display:grid; gap:10px;">
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
                 <div>
                   <p class="card-title report-header">Jolina Leong</p>
                   <p class="small-copy">Art / Modeling</p>
                 </div>
                 <div>
                   <p class="muted-label">Concrete_Goals</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Concept styles for the game environment, concept weapons (Assault rifles, Railgun, Rocket Launcher, and Tracking gun), concept character design.</p>
                 </div>
                 <div>
                   <p class="muted-label">Accomplished</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Concepted game environment styles and most weapons, will finish up concepts for the tracking gun and character before our next meeting on Tuesday.</p>
                 </div>
                 <div>
                   <p class="muted-label">Why_It_Changed</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I had planned to complete all concepts by the end of this weekend, however I ran into an unexpected issue with a separate project I'm participating in, delaying my progress in completing my tasks for this week.</p>
                 </div>
                 <div>
                   <p class="muted-label">Next_Week</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">Begin modeling the character and 1-2 weapon types for the game. If necessary, create a placeholder model for testing purposes.</p>
                 </div>
                 <div>
                   <p class="muted-label">What_I_Learned</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I learned more about weapon designs and ways to incorporate different elements to make them look more unique in shape language and appearance.</p>
                 </div>
                 <div>
                   <p class="muted-label">Individual_Morale</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I'm looking forward to beginning modeling and seeing how the game will come together.</p>
                 </div>
               </div>
             </article>
 
-            <article class="panel" style="display:grid; gap:12px;">
-              <div style="display:grid; gap:10px;">
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
                 <div>
                   <p class="card-title report-header">Jacob Roner</p>
                   <p class="small-copy">Gameplay / Integration</p>
@@ -357,35 +357,35 @@
               </div>
             </article>
 
-            <article class="panel" style="display:grid; gap:12px;">
-              <div style="display:grid; gap:10px;">
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
                 <div>
                   <p class="card-title report-header">Scott Semtner</p>
                   <p class="small-copy">Network</p>
                 </div>
                 <div>
                   <p class="muted-label">Concrete_Goals</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">My goals for this week were to work with Cedric on setting up a low level echo server for networking using SDL 3, which also included figuring out how to install SDL3_net. I also worked on switching from a datagram socket setup to a stream socket setup with SDL3_net, which is more TCP-like (as the tips page recommends).</p>
                 </div>
                 <div>
                   <p class="muted-label">Accomplished</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I was able to get SDL3_net installed using cmake by just pulling in the source from the main branch of the github project. I then updated the client and server networking code to use 1 stream socket connection between each client and the server, and then parse frames from that stream using a simple length based setup (4 byte length field at the start of each packet).</p>
                 </div>
                 <div>
                   <p class="muted-label">Why_It_Changed</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I feel like the rest of the group is doing such a great job that I don't have as much that I needed to accomplish individually, and then I was out of town thurs-sun so I did not have much time to go above the initial goals.</p>
                 </div>
                 <div>
                   <p class="muted-label">Next_Week</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I would like to discuss with the group and get a better idea of how we want to do serialization and deserialization beyond what was already done in the past few days, then work on implementing/expanding that.</p>
                 </div>
                 <div>
                   <p class="muted-label">What_I_Learned</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">I learned how to add a new source to cmake which should be useful in the future. I did not really expect to learn that.</p>
                 </div>
                 <div>
                   <p class="muted-label">Individual_Morale</p>
-                  <p class="small-copy">[TODO]</p>
+                  <p class="small-copy">My individual morale is pretty good, the group is doing great and I just need to figure out how I can contribute even more.</p>
                 </div>
               </div>
             </article>
