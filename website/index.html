@@ -16,9 +16,9 @@
     <div class="brand">CSE_125_GROUP_02</div>
 
     <nav class="top-nav" aria-label="Primary navigation">
-      <a href="#" class="active">Overview</a>
-      <a href="#">Docs</a>
-      <a href="#">Archive</a>
+      <a href="index.html" class="active">Overview</a>
+      <a href="docs/index.html">Docs</a>
+      <a href="archive.html">Archive</a>
     </nav>
 
     <div class="topbar-right">
@@ -73,7 +73,7 @@
   <main class="page">
     <div class="content">
       <section class="home-hero" aria-label="Campaign spotlight">
-        <img src="img/first_render.png" alt="Project Screenshots" class="home-hero-image" />
+        <img src="img/screenshots/01_first_render.png" alt="Project Screenshots" class="home-hero-image" />
         <div class="home-hero-overlay"></div>
 
         <div class="home-hero-content">
@@ -82,8 +82,8 @@
           <p class="home-hero-copy">
             Group_02 presents a multiplayer shooter with ultra-fast mobility, shifting gravity, and intense combat. Collect weapons and abilities to fight your way to the top!
           <div class="home-hero-actions">
-            <a href="#" class="button home-btn-primary">Latest_Version</a>
-            <a href="spec.html" class="button home-btn-secondary">View_Specs</a>
+            <a href="spec.html" class="button home-btn-primary">View_Specs</a>
+            <a href="archive.html" class="button home-btn-secondary">View_Gallery</a>
           </div>
         </div>
 
@@ -103,7 +103,21 @@
 
           <article class="news-card">
             <div class="news-thumb-wrap">
-              <img src="img/paper.png" alt="Circuit board render" class="news-thumb" />
+              <img src="img/assets/report.png" alt="" class="news-thumb" />
+            </div>
+            <div class="news-body">
+              <p class="news-meta">04.12.2026 // Update_Log</p>
+              <h3>Week_03 Report Published</h3>
+              <p>
+                The first weekly report has been published! Check it out using the link below. 
+              </p>
+              <a href="reports/week3.html" class="news-action">View_Report <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></a>
+            </div>
+          </article>
+
+          <article class="news-card">
+            <div class="news-thumb-wrap">
+              <img src="img/assets/paper.png" alt="piece of paper" class="news-thumb" />
             </div>
             <div class="news-body">
               <p class="news-meta">04.6.2026 // Update_Log</p>
@@ -122,25 +136,25 @@
 
           <div class="brief-item">
             <p>Current_Objective</p>
-            <span>Initialize graphics, networking, and physics.</span>
+            <span>Stitch main graphics and netowrking components together with working textures and lighting.</span>
           </div>
 
           <div class="brief-item danger">
             <p>Priority Task</p>
-            <span>Render a scene with a camera and simple primitives.</span>
+            <span>Server with working game state and client who can join and render.</span>
           </div>
 
           <div class="diag-card" aria-label="System diagnostics">
             <h3>System Diagnostics</h3>
             <div class="diag-row">
               <div class="diag-bar">
-                <div class="priority-bar"><div class="priority-fill" style="width: 10%;"></div></div>
+                <div class="priority-bar"><div class="priority-fill" style="width: 20%;"></div></div>
               </div>
-              <p><span>Completion</span><strong>10%</strong></p>
+              <p><span>Completion</span><strong>20%</strong></p>
             </div>
             <div class="diag-row">
               <div class="diag-bar">
-                <div class="priority-bar"><div class="priority-fill" style="width: 25%;"></div></div>
+                <div class="priority-bar"><div class="priority-fill" style="width: 35%;"></div></div>
               </div>
               <p><span>Current Build</span><strong>Prototype</strong></p>
             </div>

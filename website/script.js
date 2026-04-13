@@ -70,9 +70,120 @@
         });
       }
 
+      function parseImageLinksFromDirectoryHtml(html, baseDir) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const links = Array.from(doc.querySelectorAll('a[href]'));
+        const imageExt = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+        return links
+          .map(function (link) {
+            return link.getAttribute('href') || '';
+          })
+          .filter(function (href) {
+            return imageExt.test(href);
+          })
+          .map(function (href) {
+            if (/^https?:\/\//i.test(href) || href.startsWith('/')) {
+              return href;
+            }
+            return baseDir + href.replace(/^\.\//, '').replace(/^\/+/, '');
+          })
+          .filter(function (src, index, arr) {
+            return arr.indexOf(src) === index;
+          });
+      }
+
+      async function loadHeroGallerySources(baseDir) {
+        // Try manifest first, then directory listing as fallback.
+        try {
+          const manifestResponse = await fetch(baseDir + 'manifest.json', { cache: 'no-store' });
+          if (manifestResponse.ok) {
+            const manifest = await manifestResponse.json();
+            if (Array.isArray(manifest)) {
+              const imageExt = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+              const manifestImages = manifest
+                .filter(function (name) {
+                  return typeof name === 'string' && imageExt.test(name);
+                })
+                .map(function (name) {
+                  return baseDir + name.replace(/^\/+/, '');
+                });
+
+              if (manifestImages.length) {
+                return manifestImages;
+              }
+            }
+          }
+        } catch (error) {
+          // ignore and attempt directory listing
+        }
+
+        try {
+          const listingResponse = await fetch(baseDir, { cache: 'no-store' });
+          if (!listingResponse.ok) return [];
+          const html = await listingResponse.text();
+          return parseImageLinksFromDirectoryHtml(html, baseDir);
+        } catch (error) {
+          return [];
+        }
+      }
+
+      async function initHomeHeroRotation() {
+        const heroImage = document.querySelector('.home-hero-image');
+        if (!heroImage) return;
+
+        const defaultSrc = heroImage.getAttribute('src') || '';
+        const baseDir = 'img/screenshots/';
+        const discovered = await loadHeroGallerySources(baseDir);
+        const images = discovered.length ? discovered : [defaultSrc];
+
+        if (images.length <= 1) return;
+
+        const rotationMs = 5000;
+        const fadeMs = 1000;
+        let isTransitioning = false;
+
+        heroImage.style.transition = 'opacity ' + fadeMs + 'ms ease';
+        heroImage.style.opacity = '1';
+
+        setInterval(function () {
+          if (isTransitioning) return;
+
+          const current = heroImage.getAttribute('src') || '';
+          const candidates = images.filter(function (src) {
+            return src !== current;
+          });
+          const pool = candidates.length ? candidates : images;
+          const next = pool[Math.floor(Math.random() * pool.length)];
+
+          const preloaded = new Image();
+          preloaded.onload = function () {
+            isTransitioning = true;
+            heroImage.style.opacity = '0';
+
+            setTimeout(function () {
+              heroImage.src = next;
+              heroImage.style.opacity = '1';
+
+              setTimeout(function () {
+                isTransitioning = false;
+              }, fadeMs);
+            }, fadeMs);
+          };
+
+          preloaded.onerror = function () {
+            // If preload fails, skip this cycle and try a new image next rotation.
+          };
+
+          preloaded.src = next;
+        }, rotationMs);
+      }
+
       updateHudClock();
       updateLatency();
       animateReportsHud();
+      initHomeHeroRotation();
       setInterval(updateHudClock, 1000);
       setInterval(updateLatency, 2500);
 

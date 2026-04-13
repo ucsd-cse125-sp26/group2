@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSE_125_GROUP_02 // ARCHIVE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=Work+Sans:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .panel-img:hover { background: rgba(251, 228, 52, 0.06); }
+    .close-bttn {
+        justify-self:end;
+        border:0;
+        background:#1b2117;
+        color:#fbe434;
+        font-family:"Space Grotesk", Arial, sans-serif;
+        text-transform:uppercase; font-weight:800; 
+        letter-spacing:0.04em; 
+        padding:10px 14px; 
+        cursor:pointer; 
+        clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+    }
+    .close-bttn:hover { background: var(--surface-highest); }
+  </style>
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+
+  <header class="topbar">
+    <div class="brand">CSE_125_GROUP_02</div>
+
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="docs/index.html">Docs</a>
+      <a href="archive.html" class="active">Archive</a>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="status-chip">
+        <span class="status-label">System_Status</span>
+        <span class="status-value">Progressing</span>
+      </div>
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--ghost">GitHub_Link</a>
+      <button class="mobile-toggle" id="mobileToggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="page page-no-sidebar" style="padding-left:30;">
+    <div class="content">
+      <section class="reports-shell" aria-label="Screenshots archive gallery">
+        <div class="reports-bg-word" aria-hidden="true">GALLERY</div>
+
+        <header class="reports-header">
+          <div>
+            <h1><span aria-hidden="true"></span> Screenshots_Archive</h1>
+            <p>Snapshots of development</p>
+          </div>
+          <div class="reports-signal" aria-label="Gallery scan status">
+            <small>Uplink Quality</small>
+            <div class="reports-signal-bars">
+              <i></i><i></i><i></i><i class="low"></i><i class="low"></i>
+            </div>
+          </div>
+        </header>
+
+        <section class="section" aria-label="All screenshots">
+
+          <article class="panel" style="padding:14px 16px; margin-bottom:18px;">
+            <p class="small-copy" id="galleryStatus" style="margin:0;">
+              Scanning folder: <strong>screenshots/</strong>
+            </p>
+          </article>
+
+          <div id="archiveGallery" style="display:grid; gap:20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));"></div>
+        </section>
+
+        <script>
+          (function () {
+            const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+            let lightboxOverlay = null;
+            let lightboxImage = null;
+
+            function ensureLightbox() {
+              if (lightboxOverlay && lightboxImage) {
+                return;
+              }
+
+              lightboxOverlay = document.createElement('div');
+              lightboxOverlay.setAttribute('aria-hidden', 'true');
+              lightboxOverlay.style.cssText = 'position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(4,8,4,0.92); backdrop-filter:blur(4px); z-index:2000; padding:20px;';
+
+              const frame = document.createElement('div');
+              frame.style.cssText = 'position:relative; max-width:100%; max-height:100%; display:grid; gap:10px;';
+
+              const closeBtn = document.createElement('button');
+              closeBtn.type = 'button';
+              closeBtn.setAttribute('aria-label', 'Close image viewer');
+              closeBtn.className = "close-bttn";
+              closeBtn.textContent = 'Close';
+
+              lightboxImage = document.createElement('img');
+              lightboxImage.alt = '';
+              lightboxImage.style.cssText = 'max-width:95vw; max-height:88vh; width:auto; height:auto; object-fit:contain; border:1px solid rgba(255,255,255,0.15); box-shadow:0 18px 46px rgba(0,0,0,0.45); background:#050705;';
+
+              closeBtn.addEventListener('click', closeLightbox);
+              lightboxOverlay.addEventListener('click', function (event) {
+                if (event.target === lightboxOverlay) {
+                  closeLightbox();
+                }
+              });
+
+              frame.appendChild(closeBtn);
+              frame.appendChild(lightboxImage);
+              lightboxOverlay.appendChild(frame);
+              document.body.appendChild(lightboxOverlay);
+            }
+
+            function openLightbox(src, alt) {
+              ensureLightbox();
+              lightboxImage.src = src;
+              lightboxImage.alt = alt || 'Screenshot preview';
+              lightboxOverlay.style.display = 'flex';
+              lightboxOverlay.setAttribute('aria-hidden', 'false');
+            }
+
+            function closeLightbox() {
+              if (!lightboxOverlay) {
+                return;
+              }
+              lightboxOverlay.style.display = 'none';
+              lightboxOverlay.setAttribute('aria-hidden', 'true');
+            }
+
+            function getFileName(path) {
+              return path.split('/').pop() || path;
+            }
+
+            function setStatus(message) {
+              const statusEl = document.getElementById('galleryStatus');
+              if (statusEl) {
+                statusEl.innerHTML = message;
+              }
+            }
+
+            function addCard(galleryEl, src, index) {
+              var name = getFileName(src);
+              const idx = name.indexOf("_");
+              const prefix = Number(name.slice(0, idx));
+              if (idx !== -1 && !Number.isNaN(prefix)) {
+                name = name.slice(idx + 1);
+              }
+
+              const card = document.createElement('figure');
+              card.className = 'panel panel-img';
+              card.style.cssText = 'padding:16px; margin:0; display:grid; gap:12px; align-content:start; cursor:pointer;';
+              card.tabIndex = 0;
+              card.setAttribute('role', 'button');
+              card.setAttribute('aria-label', `Open ${name} in full viewer`);
+
+              const title = document.createElement('p');
+              title.className = 'card-title';
+              title.textContent = `Screenshot_${String(index + 1).padStart(2, '0')} // ${name}`;
+
+              const img = document.createElement('img');
+              img.src = src;
+              img.alt = name;
+              img.loading = 'lazy';
+              img.style.cssText = 'width:100%; display:block; aspect-ratio: 16 / 10; object-fit: cover; border:1px solid rgba(255,255,255,0.06); box-shadow:0 10px 24px rgba(0,0,0,0.25);';
+
+              const caption = document.createElement('figcaption');
+              caption.className = 'small-copy';
+              caption.textContent = name;
+
+              card.appendChild(title);
+              card.appendChild(img);
+              card.appendChild(caption);
+
+              card.addEventListener('click', function () {
+                openLightbox(src, name);
+              });
+
+              card.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openLightbox(src, name);
+                }
+              });
+
+              galleryEl.appendChild(card);
+            }
+
+            async function fromManifest(baseDir) {
+              const response = await fetch(baseDir + 'manifest.json', { cache: 'no-store' });
+              if (!response.ok) {
+                return [];
+              }
+
+              const manifest = await response.json();
+              if (!Array.isArray(manifest)) {
+                return [];
+              }
+
+              return manifest
+                .filter((name) => typeof name === 'string' && IMAGE_EXT.test(name))
+                .map((name) => baseDir + name.replace(/^\/+/, ''));
+            }
+
+            async function fromDirectoryListing(baseDir) {
+              const response = await fetch(baseDir, { cache: 'no-store' });
+              if (!response.ok) {
+                return [];
+              }
+
+              const html = await response.text();
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(html, 'text/html');
+              const links = Array.from(doc.querySelectorAll('a[href]'));
+
+              return links
+                .map((a) => a.getAttribute('href') || '')
+                .filter((href) => IMAGE_EXT.test(href))
+                .map((href) => {
+                  if (/^https?:\/\//i.test(href) || href.startsWith('/')) {
+                    return href;
+                  }
+                  return baseDir + href.replace(/^\.\//, '').replace(/^\/+/, '');
+                })
+                .filter((value, idx, arr) => arr.indexOf(value) === idx);
+            }
+
+            async function loadScreenshotsGallery() {
+              const galleryEl = document.getElementById('archiveGallery');
+              if (!galleryEl) {
+                return;
+              }
+
+              ensureLightbox();
+
+              const baseDir = 'img/screenshots/';
+              let images = [];
+
+              try {
+                images = await fromDirectoryListing(baseDir);
+                if (!images.length) {
+                    images = await fromManifest(baseDir);
+                }
+
+                if (!images.length) {
+                  setStatus('SCAN FAILED: No screenshots found. Add image files under <strong>website/screenshots/</strong>.');
+                  return;
+                }
+
+                images.forEach((src, index) => addCard(galleryEl, src, index));
+                setStatus(`Loaded <strong>${images.length}</strong> screenshot(s) from <strong>${baseDir}</strong>.`);
+              } catch (error) {
+                setStatus('Could not scan <strong>img/screenshots/</strong>. If directory listing is disabled, add a <strong>manifest.json</strong> file in that folder containing an array of image filenames.');
+              }
+            }
+
+            loadScreenshotsGallery();
+
+            document.addEventListener('keydown', function (event) {
+              if (event.key === 'Escape') {
+                closeLightbox();
+              }
+            });
+          })();
+        </script>
+      </section>
+    </div>
+  </main>
+
+  <div class="status-hud" aria-label="Status HUD">
+    <div class="meta">
+      <span class="label">Date</span><span class="value" id="hudDate">----</span>
+      <span class="label">Time</span><span class="value" id="hudTime">--:--:--</span>
+      <span class="label">Latency</span><span class="value" id="hudLatency">18ms</span>
+    </div>
+  </div>
+
+  <footer class="footer footer-no-sidebar">
+    <div>© 1999 Group_02. All Rights Reserved.</div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a class="foot-link" href="img/gag/no-privacy.jpg">Privacy_Protocols</a>
+      <a class="foot-link" href="img/gag/lost.png">System_Status</a>
+      <a class="foot-link" href="img/gag/lost.png">Support_Comms</a>
+    </nav>
+    <div class="footer-build">Project_Accelerate</div>
+  </footer>
+  <script src="script.js"></script>
+</body>
+</html>
