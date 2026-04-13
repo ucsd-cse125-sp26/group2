@@ -16,7 +16,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Use the dynamic CRT (/MD) consistently across all targets, including
 # FetchContent deps like ozz-animation that default to /MT.
-cmake_policy(SET CMP0091 NEW)
+# CMAKE_POLICY_DEFAULT propagates into subprojects (cmake_policy does not —
+# subprojects reset it when they call cmake_minimum_required).
+set(CMAKE_POLICY_DEFAULT_CMP0091 NEW CACHE STRING "" FORCE)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 include(FetchContent)
