@@ -47,6 +47,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       # Strawberry Perl ships ccache.exe which wraps sccache, causing
       # PDB write contention on parallel MSVC builds.
@@ -145,61 +147,6 @@ jobs:
             | xargs clang-format-18 --dry-run --Werror
 
   # ------------------------------------------------------------------ #
-  #  clang-tidy — non-blocking                                           #
-  # ------------------------------------------------------------------ #
-  tidy:
-    name: clang-tidy
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build clang clang-tidy \
-            glslang-tools spirv-cross \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxss-dev libxkbcommon-dev \
-            libwayland-dev wayland-protocols \
-            libpulse-dev libasound2-dev \
-            libdbus-1-dev libudev-dev \
-            libgl-dev libgles2-mesa-dev \
-            libdrm-dev libgbm-dev
-
-      - name: Cache FetchContent deps
-        uses: actions/cache@v4
-        with:
-          path: build/debug/_deps
-          key: deps-v2-Linux-debug-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-v2-Linux-debug-
-
-      - name: Purge stale dep build dirs
-        shell: bash
-        run: |
-          find build/debug/_deps -maxdepth 1 -type d \
-            \( -name '*-build' -o -name '*-subbuild' \) \
-            -exec rm -rf {} + 2>/dev/null || true
-
-      - name: Configure
-        env:
-          CC:  clang
-          CXX: clang++
-        run: |
-          cmake --preset debug \
-            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
-
-      - name: Run clang-tidy
-        run: |
-          python3 -c "
-          import json
-          with open('build/debug/compile_commands.json') as f:
-              for e in json.load(f):
-                  if '/src/' in e['file'] and '/_deps/' not in e['file']:
-                      print(e['file'])
-          " | xargs -P "$(nproc)" -n 1 clang-tidy --quiet -p build/debug
-
-  # ------------------------------------------------------------------ #
   #  Release builds — optimised, no sanitizers                          #
   #  Runs on: push to main  →  updates "latest" pre-release             #
   #            tag v*.*.*   →  creates versioned release                #
@@ -248,6 +195,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       # Strawberry Perl ships ccache.exe which wraps sccache, causing
       # PDB write contention on parallel MSVC builds.

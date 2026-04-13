@@ -34,7 +34,8 @@ cmake --preset debug-win && cmake --build --preset debug-win
 | Math | [GLM](https://github.com/g-truc/glm) |
 | Build | CMake 3.25+ · Ninja · MSVC 2022 (Windows) · Clang (Linux/macOS) |
 | Sanitizers | ASan + UBSan (debug Linux/macOS), ASan (Windows MSVC) |
-| Lint | clang-format-18 · clang-tidy |
+| Lint | clang-format-18 |
+| Assets | Git LFS — binary models, textures, and HDRIs stored via Large File Storage |
 | CI | GitHub Actions (Ubuntu · macOS · Windows) |
 
 All C++ dependencies are fetched automatically via CMake `FetchContent` — no manual library installs needed.
@@ -56,7 +57,7 @@ system-level dependencies in one shot. Run it once after cloning.
 bash scripts/setup-linux.sh
 ```
 
-Installs: `cmake`, `ninja`, `clang`, `clang-format-18`, `clang-tidy-18`, `glslang-tools` (GLSL→SPIR-V), `spirv-cross` (SPIR-V→MSL), and all SDL3 system headers (X11, Wayland, ALSA, Pulse, etc.).
+Installs: `cmake`, `ninja`, `clang`, `clang-format-18`, `git-lfs`, `glslang-tools` (GLSL→SPIR-V), `spirv-cross` (SPIR-V→MSL), and all SDL3 system headers (X11, Wayland, ALSA, Pulse, etc.).
 
 ### Linux — Arch Linux (and derivatives: Manjaro, EndeavourOS, CachyOS…)
 
@@ -64,7 +65,7 @@ Installs: `cmake`, `ninja`, `clang`, `clang-format-18`, `clang-tidy-18`, `glslan
 bash scripts/setup-archlinux.sh
 ```
 
-Installs: `cmake`, `ninja`, `clang`, `shaderc` (GLSL→SPIR-V via `glslc`), `spirv-cross` (SPIR-V→MSL), and SDL3 system dependencies.
+Installs: `cmake`, `ninja`, `clang`, `git-lfs`, `shaderc` (GLSL→SPIR-V via `glslc`), `spirv-cross` (SPIR-V→MSL), and SDL3 system dependencies.
 
 ### macOS
 
@@ -73,7 +74,7 @@ bash scripts/setup-macos.sh
 ```
 
 Requires Xcode Command Line Tools (provides clang + Metal) + [Homebrew](https://brew.sh).
-Installs: `cmake`, `ninja`, `llvm@18`, `glslang` (GLSL→SPIR-V), `spirv-cross` (SPIR-V→MSL, required for Metal).
+Installs: `cmake`, `ninja`, `llvm@18`, `git-lfs`, `glslang` (GLSL→SPIR-V), `spirv-cross` (SPIR-V→MSL, required for Metal).
 
 ### Windows
 
@@ -84,7 +85,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\setup-windows.ps1
 ```
 
-Installs via `winget`: **VS Build Tools 2022** (MSVC + Windows SDK), CMake, Ninja, LLVM (clang-format/clang-tidy), and the **Vulkan SDK** (provides `glslc` for GLSL→SPIR-V and `spirv-cross` for SPIR-V→MSL).
+Installs via `winget`: **VS Build Tools 2022** (MSVC + Windows SDK), CMake, Ninja, LLVM (clang-format), Git LFS, and the **Vulkan SDK** (provides `glslc` for GLSL→SPIR-V and `spirv-cross` for SPIR-V→MSL).
 
 > **Note — git tag fetch:** The setup scripts run `git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"` to prevent `git pull` from failing with "would clobber existing tag". If you cloned before running a setup script, run that one line manually.
 
@@ -218,6 +219,23 @@ backend is active and loads `.spv` (Vulkan) or `.msl` (Metal) accordingly.
 
 ---
 
+## Assets
+
+Game assets (3D models, textures, HDRIs) live in `assets/` and are tracked with
+[Git LFS](https://git-lfs.com). The setup scripts install and configure LFS automatically.
+
+After cloning, LFS files are pulled on checkout. If assets appear as small pointer files
+instead of real data, run:
+
+```bash
+git lfs pull
+```
+
+**Adding new assets:** just drop files into `assets/` and commit normally — every file
+in `assets/` is automatically stored in LFS regardless of extension. No special commands needed.
+
+---
+
 ## Code style
 
 ### Formatting
@@ -245,7 +263,8 @@ Key rules (`.clang-format`): 4-space indent · 120 column limit · Allman braces
 | Function / Method | `camelBack` | `drawFrame()` |
 | Variable / Parameter | `camelBack` | `deltaTime` |
 | Member field | `camelBack` | `window` |
-| Constant | `k_camelBack` | `k_winW` |
+| Local constant | `camelBack` | `const auto winW = …` |
+| Static / global constant | `k_camelBack` | `k_maxPlayers` |
 | Namespace | `lower_case` | `renderer` |
 
 ---
@@ -258,9 +277,10 @@ GitHub Actions runs on every push and PR:
 |---|---|---|
 | `build` | Ubuntu · macOS · Windows | Debug build with sanitizers |
 | `format` | Ubuntu | `clang-format-18 --dry-run --Werror` — blocks merge |
-| `tidy` | Ubuntu | `clang-tidy` — non-blocking while codebase grows |
 | `release-build` | Ubuntu · macOS · Windows | Optimised build |
 | `publish` | Ubuntu | Creates / updates GitHub Release |
+| `deploy` | Ubuntu | Deploys `website/` to course site (main only) |
+| `deploy-docs` | Ubuntu | Generates Doxygen API docs and deploys (main only) |
 
 Release binaries are published to GitHub Releases on every push to `main` (rolling `latest` pre-release) and on version tags `v*.*.*` (versioned release).
 
@@ -295,8 +315,10 @@ group2/
 │   │   ├── Renderer.hpp       # SDL3 GPU pipeline wrapper
 │   │   └── Renderer.cpp
 │   └── main.cpp               # SDL3 app callbacks → Game
+├── assets/                    # Models, textures, HDRIs (Git LFS)
 ├── .clang-format
 ├── .clang-tidy
+├── .gitattributes             # LFS tracking rules + line endings
 ├── .gitignore
 ├── CMakeLists.txt
 └── CMakePresets.json

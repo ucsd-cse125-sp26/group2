@@ -427,14 +427,18 @@ target_link_libraries(group2 PRIVATE
 )
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
-# find them via SDL_GetBasePath().
-add_custom_command(TARGET group2 POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/assets"
-            "$<TARGET_FILE_DIR:group2>/assets"
-    COMMENT "Copying assets to binary directory"
-    VERBATIM
-)
+# find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    add_custom_command(TARGET group2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+                "$<TARGET_FILE_DIR:group2>/assets"
+        COMMENT "Copying assets to binary directory"
+        VERBATIM
+    )
+else()
+    message(STATUS "assets/ directory not found — skipping asset copy (install Git LFS and run 'git lfs pull')")
+endif()
 
 # ===========================================================================
 # Server executable

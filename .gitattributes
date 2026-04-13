@@ -9,4 +9,5 @@
 *.glsl  text eol=lf
 *.vert  text eol=lf
 *.frag  text eol=lf
+# Git LFS — everything in assets/ goes through LFS regardless of extension
 assets/** filter=lfs diff=lfs merge=lfs -text

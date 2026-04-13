@@ -33,7 +33,7 @@ echo "==> Installing build tools..."
 # Using the same clang-format version locally and in CI prevents formatting drift.
 # glslang     — GLSL → SPIR-V compiler (glslangValidator)
 # spirv-cross — SPIR-V → MSL transpiler (required for Metal backend on macOS)
-brew install cmake ninja llvm@18 glslang spirv-cross
+brew install cmake ninja llvm@18 glslang spirv-cross git-lfs
 
 LLVM18_BIN="$(brew --prefix llvm@18)/bin"
 
@@ -60,6 +60,7 @@ ln -sf "$LLVM18_BIN/clang-format" "$LLVM18_BIN/clang-format-18" 2>/dev/null || t
 ln -sf "$LLVM18_BIN/clang-tidy"   "$LLVM18_BIN/clang-tidy-18"   2>/dev/null || true
 
 echo "==> Configuring git for this repository..."
+git lfs install
 git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
 
 echo ""

@@ -45,8 +45,11 @@ winget install --id Kitware.CMake --silent --accept-source-agreements --accept-p
 Write-Host "==> Installing Ninja..." -ForegroundColor Cyan
 winget install --id Ninja-build.Ninja --silent --accept-source-agreements --accept-package-agreements
 
-Write-Host "==> Installing LLVM (clang-format, clang-tidy)..." -ForegroundColor Cyan
+Write-Host "==> Installing LLVM (clang-format)..." -ForegroundColor Cyan
 winget install --id LLVM.LLVM --silent --accept-source-agreements --accept-package-agreements
+
+Write-Host "==> Installing Git LFS..." -ForegroundColor Cyan
+winget install --id GitHub.GitLFS --silent --accept-source-agreements --accept-package-agreements
 
 Write-Host "==> Installing Vulkan SDK (glslc + spirv-cross shader tools)..." -ForegroundColor Cyan
 # The Vulkan SDK bundles glslc (GLSL → SPIR-V) and spirv-cross (SPIR-V → MSL),
@@ -127,6 +130,7 @@ if ($clionDirs.Count -gt 0) {
 }
 
 Write-Host "==> Configuring git for this repository..." -ForegroundColor Cyan
+git lfs install
 git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
 
 Write-Host ""

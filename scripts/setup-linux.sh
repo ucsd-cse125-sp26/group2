@@ -15,9 +15,9 @@ sudo apt-get install -y --no-install-recommends \
     ninja-build \
     clang \
     clang-format-18 \
-    clang-tidy-18 \
     lldb \
-    git
+    git \
+    git-lfs
 
 echo "==> Installing shader tools..."
 # glslang-tools — GLSL → SPIR-V compiler (glslangValidator)
@@ -26,9 +26,8 @@ sudo apt-get install -y --no-install-recommends \
     glslang-tools \
     spirv-cross
 
-# Register the pinned versions as the default so plain 'clang-format' / 'clang-tidy' resolve to -18.
+# Register the pinned version as the default so plain 'clang-format' resolves to -18.
 sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 18
-sudo update-alternatives --install /usr/bin/clang-tidy   clang-tidy   /usr/bin/clang-tidy-18   18
 
 echo "==> Installing SDL3 system dependencies..."
 sudo apt-get install -y --no-install-recommends \
@@ -51,6 +50,7 @@ sudo apt-get install -y --no-install-recommends \
     libgbm-dev
 
 echo "==> Configuring git for this repository..."
+git lfs install
 git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
 
 echo ""

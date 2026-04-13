@@ -14,7 +14,8 @@ sudo pacman -S --needed --noconfirm \
     ninja \
     clang \
     lldb \
-    git
+    git \
+    git-lfs
 
 echo "==> Installing shader tools..."
 # shaderc     — GLSL → SPIR-V compiler (glslc); preferred over glslangValidator
@@ -42,6 +43,7 @@ sudo pacman -S --needed --noconfirm \
     libdrm
 
 echo "==> Configuring git for this repository..."
+git lfs install
 git config --add remote.origin.fetch "+refs/tags/*:refs/tags/*"
 
 echo ""
