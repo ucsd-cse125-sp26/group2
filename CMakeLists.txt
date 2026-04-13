@@ -14,12 +14,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Emit compile_commands.json for clang-tidy / IDE support
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Use the dynamic CRT (/MD) consistently across all targets, including
-# FetchContent deps like ozz-animation that default to /MT.
-# CMAKE_POLICY_DEFAULT propagates into subprojects (cmake_policy does not —
-# subprojects reset it when they call cmake_minimum_required).
-set(CMAKE_POLICY_DEFAULT_CMP0091 NEW CACHE STRING "" FORCE)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 include(FetchContent)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
@@ -129,6 +123,7 @@ set(ozz_build_tools     OFF CACHE BOOL "" FORCE)
 set(ozz_build_fbx       OFF CACHE BOOL "" FORCE)
 set(ozz_build_gltf      OFF CACHE BOOL "" FORCE)
 set(ozz_build_data      OFF CACHE BOOL "" FORCE)
+set(ozz_build_msvc_rt_dll ON CACHE BOOL "" FORCE)
 block()
     set(BUILD_SHARED_LIBS OFF)
     FetchContent_Declare(
