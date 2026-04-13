@@ -42,20 +42,20 @@ jobs:
             preset: debug-win
             cc: cl
             cxx: cl
-            # sccache + MSVC requires embedded debug info (/Z7 not /Zi)
-            extra_cmake: -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
 
-      # Strawberry Perl ships ccache.exe which double-wraps sccache,
-      # breaking MSVC PDB handling.  Delete it outright.
-      - name: Remove Strawberry ccache
+      # Windows C: drive is slow (~4K IOPS); a Dev Drive VHDX gives ~128K IOPS.
+      # Creates a ReFS virtual disk and moves the workspace there.
+      - name: Setup Dev Drive
         if: runner.os == 'Windows'
-        shell: bash
-        run: rm -f "C:/Strawberry/c/bin/ccache.exe"
+        uses: samypr100/setup-dev-drive@v3
+        with:
+          workspace-copy: true
+          drive-size: 4GB
 
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
@@ -92,7 +92,10 @@ jobs:
           vulkan_version: latest
           cache: true
 
+      # sccache is incompatible with MSVC's PDB model (assimp sets /Zi + /Fd
+      # which conflicts with sccache's output caching).  Linux/macOS only.
       - name: Setup sccache
+        if: runner.os != 'Windows'
         uses: mozilla/sccache-action@v0.0.9
 
       - name: Cache FetchContent deps
@@ -121,9 +124,12 @@ jobs:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
         run: |
+          SCCACHE_FLAGS=""
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            SCCACHE_FLAGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
+          fi
           cmake --preset ${{ matrix.preset }} \
-            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            $SCCACHE_FLAGS \
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             ${{ matrix.extra_cmake || '' }}
 
@@ -186,8 +192,6 @@ jobs:
             preset: release-win
             cc: cl
             cxx: cl
-            # sccache + MSVC requires embedded debug info (/Z7 not /Zi)
-            extra_cmake: -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
             binary_src: build\release-win\group2.exe
             artifact: group2-windows-x86_64.exe
             server_binary_src: build\release-win\server.exe
@@ -198,12 +202,13 @@ jobs:
         with:
           lfs: true
 
-      # Strawberry Perl ships ccache.exe which double-wraps sccache,
-      # breaking MSVC PDB handling.  Delete it outright.
-      - name: Remove Strawberry ccache
+      # Windows C: drive is slow (~4K IOPS); a Dev Drive VHDX gives ~128K IOPS.
+      - name: Setup Dev Drive
         if: runner.os == 'Windows'
-        shell: bash
-        run: rm -f "C:/Strawberry/c/bin/ccache.exe"
+        uses: samypr100/setup-dev-drive@v3
+        with:
+          workspace-copy: true
+          drive-size: 4GB
 
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
@@ -240,7 +245,10 @@ jobs:
           vulkan_version: latest
           cache: true
 
+      # sccache is incompatible with MSVC's PDB model (assimp sets /Zi + /Fd
+      # which conflicts with sccache's output caching).  Linux/macOS only.
       - name: Setup sccache
+        if: runner.os != 'Windows'
         uses: mozilla/sccache-action@v0.0.9
 
       - name: Cache FetchContent deps
@@ -269,9 +277,12 @@ jobs:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
         run: |
+          SCCACHE_FLAGS=""
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            SCCACHE_FLAGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
+          fi
           cmake --preset ${{ matrix.preset }} \
-            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            $SCCACHE_FLAGS \
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             ${{ matrix.extra_cmake || '' }}
 
