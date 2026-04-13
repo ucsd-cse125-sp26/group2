@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# Pre-push: run clang-format (blocking) on project sources.
+# Pre-push: run Git LFS pre-push + clang-format (blocking) on project sources.
 set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Git LFS — upload any new LFS objects before the push
+# ---------------------------------------------------------------------------
+if command -v git-lfs &>/dev/null; then
+    git lfs pre-push "$@"
+fi
 
 # ---------------------------------------------------------------------------
 # clang-format — blocks the push on any violation

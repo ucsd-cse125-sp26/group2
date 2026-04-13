@@ -50,12 +50,12 @@ jobs:
         with:
           lfs: true
 
-      # Strawberry Perl ships ccache.exe which wraps sccache, causing
-      # PDB write contention on parallel MSVC builds.
-      - name: Remove Strawberry Perl from PATH
+      # Strawberry Perl ships ccache.exe which double-wraps sccache,
+      # breaking MSVC PDB handling.  Delete it outright.
+      - name: Remove Strawberry ccache
         if: runner.os == 'Windows'
         shell: bash
-        run: echo "$(echo "$PATH" | tr ';' '\n' | grep -iv strawberry | tr '\n' ';')" >> "$GITHUB_PATH"
+        run: rm -f "C:/Strawberry/c/bin/ccache.exe"
 
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
@@ -198,12 +198,12 @@ jobs:
         with:
           lfs: true
 
-      # Strawberry Perl ships ccache.exe which wraps sccache, causing
-      # PDB write contention on parallel MSVC builds.
-      - name: Remove Strawberry Perl from PATH
+      # Strawberry Perl ships ccache.exe which double-wraps sccache,
+      # breaking MSVC PDB handling.  Delete it outright.
+      - name: Remove Strawberry ccache
         if: runner.os == 'Windows'
         shell: bash
-        run: echo "$(echo "$PATH" | tr ';' '\n' | grep -iv strawberry | tr '\n' ';')" >> "$GITHUB_PATH"
+        run: rm -f "C:/Strawberry/c/bin/ccache.exe"
 
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
