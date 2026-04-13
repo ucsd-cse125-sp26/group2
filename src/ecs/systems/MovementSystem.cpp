@@ -936,6 +936,9 @@ void tryFireGrapple(PlayerState& state, const InputSnapshot& input, glm::vec3 ey
     state.grapplePullTimer = 0.0f;
     state.grapplePoint = k_hit.point;
     state.grapplePullDir = glm::normalize(k_hit.point - eye);
+
+    // Force airborne — the grapple lifts you off the ground immediately.
+    state.grounded = false;
 }
 
 /// @brief Pull the player directly toward the anchor.  No air control, no gravity.

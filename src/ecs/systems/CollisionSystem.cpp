@@ -232,9 +232,15 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
 
                 if (k_isFloor) {
                     pos.value += k_hit.normal * k_pushback;
-                    vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
-                    state.grounded = true;
-                    state.groundNormal = k_hit.normal;
+                    if (state.grappleActive) {
+                        // During grapple: slide along floor but don't ground or kill pull velocity.
+                        // Just push out of the surface, keep the grapple velocity intact.
+                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
+                    } else {
+                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
+                        state.grounded = true;
+                        state.groundNormal = k_hit.normal;
+                    }
                 } else {
                     if (k_wasGrounded && tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world)) {
                         state.grounded = true;
@@ -245,20 +251,23 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 }
             }
 
-            // Phase 2 — Slope sticking
-            if (k_wasGrounded) {
+            // Phase 2 — Slope sticking (skip during grapple — player must fly freely)
+            if (k_wasGrounded && !state.grappleActive) {
                 const float k_horizSpeed = glm::length(glm::vec3{vel.value.x, 0.0f, vel.value.z});
                 if (k_horizSpeed > 0.001f)
                     snapToGround(pos.value, vel.value, shape.halfExtents, world);
             }
 
-            // Phase 3 — Ground probe
-            const glm::vec3 k_probeTarget = pos.value - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
-            const physics::HitResult k_probe = physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
+            // Phase 3 — Ground probe (skip during grapple)
+            if (!state.grappleActive) {
+                const glm::vec3 k_probeTarget = pos.value - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
+                const physics::HitResult k_probe =
+                    physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
 
-            if (k_probe.hit && k_probe.normal.y > 0.7f) {
-                state.grounded = true;
-                state.groundNormal = k_probe.normal;
+                if (k_probe.hit && k_probe.normal.y > 0.7f) {
+                    state.grounded = true;
+                    state.groundNormal = k_probe.normal;
+                }
             }
         });
 }
