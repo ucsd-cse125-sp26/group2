@@ -172,30 +172,30 @@ jobs:
             preset: release
             cc: clang
             cxx: clang++
-            binary_src: build/release/group2
-            artifact: group2-linux-x86_64
-            server_binary_src: build/release/server
-            server_artifact: server-linux-x86_64
+            build_dir: build/release
+            client_bin: group2
+            server_bin: server
+            archive_suffix: linux-x86_64
 
           - name: macOS
             os: macos-latest
             preset: release
             cc: clang
             cxx: clang++
-            binary_src: build/release/group2
-            artifact: group2-macos
-            server_binary_src: build/release/server
-            server_artifact: server-macos
+            build_dir: build/release
+            client_bin: group2
+            server_bin: server
+            archive_suffix: macos
 
           - name: Windows
             os: windows-latest
             preset: release-win
             cc: cl
             cxx: cl
-            binary_src: build\release-win\group2.exe
-            artifact: group2-windows-x86_64.exe
-            server_binary_src: build\release-win\server.exe
-            server_artifact: server-windows-x86_64.exe
+            build_dir: build/release-win
+            client_bin: group2.exe
+            server_bin: server.exe
+            archive_suffix: windows-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -290,31 +290,38 @@ jobs:
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --parallel
 
-      - name: Stage binaries (Linux / macOS)
-        if: runner.os != 'Windows'
+      # Package client: binary + shaders/ + assets/ into a zip archive.
+      - name: Package client
+        shell: bash
         run: |
-          cp ${{ matrix.binary_src }} ${{ matrix.artifact }}
-          cp ${{ matrix.server_binary_src }} ${{ matrix.server_artifact }}
+          STAGE="staging/group2-${{ matrix.archive_suffix }}"
+          mkdir -p "$STAGE"
+          cp "${{ matrix.build_dir }}/${{ matrix.client_bin }}" "$STAGE/"
+          cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
+          if [ -d "${{ matrix.build_dir }}/assets" ]; then
+            cp -r "${{ matrix.build_dir }}/assets" "$STAGE/"
+          fi
+          cd staging
+          zip -r "../group2-${{ matrix.archive_suffix }}.zip" "group2-${{ matrix.archive_suffix }}"
 
-      - name: Stage binaries (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      # Server is a standalone binary — no shaders or assets needed.
+      - name: Package server
+        shell: bash
         run: |
-          Copy-Item ${{ matrix.binary_src }} ${{ matrix.artifact }}
-          Copy-Item ${{ matrix.server_binary_src }} ${{ matrix.server_artifact }}
+          cp "${{ matrix.build_dir }}/${{ matrix.server_bin }}" "server-${{ matrix.archive_suffix }}${{ runner.os == 'Windows' && '.exe' || '' }}"
 
-      - name: Upload client binary
+      - name: Upload client archive
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: group2-${{ matrix.archive_suffix }}.zip
+          path: group2-${{ matrix.archive_suffix }}.zip
           retention-days: 7
 
       - name: Upload server binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.server_artifact }}
-          path: ${{ matrix.server_artifact }}
+          name: server-${{ matrix.archive_suffix }}
+          path: server-${{ matrix.archive_suffix }}${{ runner.os == 'Windows' && '.exe' || '' }}
           retention-days: 7
 
   # ------------------------------------------------------------------ #
@@ -376,9 +383,9 @@ jobs:
             --title "$RELEASE_TITLE" \
             --notes "$RELEASE_NOTES" \
             $PRERELEASE_FLAG \
-            group2-linux-x86_64 \
-            group2-macos \
-            group2-windows-x86_64.exe \
+            group2-linux-x86_64.zip \
+            group2-macos.zip \
+            group2-windows-x86_64.zip \
             server-linux-x86_64 \
             server-macos \
             server-windows-x86_64.exe
