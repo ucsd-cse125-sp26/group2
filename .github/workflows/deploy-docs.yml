@@ -36,7 +36,9 @@ jobs:
             Doxyfile.in > Doxyfile
 
       - name: Generate documentation
-        run: doxygen Doxyfile
+        run: |
+          mkdir -p build/docs
+          doxygen Doxyfile
 
       - name: Set up SSH key
         run: |
