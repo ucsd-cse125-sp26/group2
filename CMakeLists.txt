@@ -14,6 +14,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Emit compile_commands.json for clang-tidy / IDE support
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Use the dynamic CRT (/MD) consistently across all targets, including
+# FetchContent deps like ozz-animation that default to /MT.
+cmake_policy(SET CMP0091 NEW)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
 include(FetchContent)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake")
