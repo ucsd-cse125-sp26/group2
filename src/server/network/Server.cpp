@@ -68,7 +68,7 @@ void Server::acceptClients()
         clients.emplace_back();
         clients.back().msgStream.socket = socket;
         clients.back().clientId = clientId;
-        eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected});
+        eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::connected});
     }
 }
 
