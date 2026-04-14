@@ -5,6 +5,7 @@ cmake-build-debug/
 .cache/
 
 imgui.ini
+assets/
 
 # CMake artifacts (keep cmake/ module directory)
 CMakeFiles/

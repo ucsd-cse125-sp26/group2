@@ -1699,12 +1699,13 @@ bool Renderer::init(SDL_Window* win)
 #endif
         ;
 
-    device = SDL_CreateGPUDevice(k_wantedFormats, /*debug_mode=*/false, nullptr);
+    device = SDL_CreateGPUDevice(k_wantedFormats, /*debug_mode=*/true, nullptr);
     if (!device) {
         SDL_Log("Renderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
     }
     SDL_Log("Renderer: GPU driver = %s", SDL_GetGPUDeviceDriver(device));
+    SDL_Log("Renderer: available shader formats = 0x%x", SDL_GetGPUShaderFormats(device));
 
     if (!SDL_ClaimWindowForGPUDevice(device, window)) {
         SDL_Log("Renderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
@@ -1712,18 +1713,28 @@ bool Renderer::init(SDL_Window* win)
     }
 
     // Detect shader format and cache swapchain format.
+    // Prefer MSL on the Metal backend: our spirv-cross pipeline produces MSL
+    // with correct resource bindings for SDL3 GPU's slot model.  SDL3's
+    // built-in SPIR-V translation (shadercross) may also work, but using our
+    // pre-compiled MSL avoids a runtime dependency on shadercross and gives us
+    // explicit control over Metal argument indices.
     const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
     shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
-    if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
-        shaderFormat = SDL_GPU_SHADERFORMAT_SPIRV;
 #ifdef HAVE_MSL_SHADERS
-    else if (k_available & SDL_GPU_SHADERFORMAT_MSL)
+    if (k_available & SDL_GPU_SHADERFORMAT_MSL)
         shaderFormat = SDL_GPU_SHADERFORMAT_MSL;
+    else
 #endif
+        if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
+        shaderFormat = SDL_GPU_SHADERFORMAT_SPIRV;
     if (shaderFormat == SDL_GPU_SHADERFORMAT_INVALID) {
         SDL_Log("Renderer: no supported shader format");
         return false;
     }
+    SDL_Log("Renderer: selected shader format = %s",
+            (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)     ? "MSL"
+            : (shaderFormat == SDL_GPU_SHADERFORMAT_SPIRV) ? "SPIR-V"
+                                                           : "unknown");
 
     swapchainFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
 
@@ -2362,7 +2373,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     {
         SDL_GPUColorTargetInfo ct{};
         ct.texture = hdrTarget;
-        ct.clear_color = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+        ct.clear_color = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
         ct.load_op = SDL_GPU_LOADOP_CLEAR;
         ct.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -2727,7 +2738,11 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     // Compute passes: SSAO, Bloom, SSR, Volumetrics (between HDR and tonemap)
 
     // GTAO (Phase 7) -- Ground Truth Ambient Occlusion
-    if (toggles.ssao && ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
+    // Always dispatch compute passes when pipeline/textures exist — toggling
+    // is handled in the tonemap compositing strength.  Skipping entire compute
+    // passes on the Metal backend breaks resource-transition tracking between
+    // encoders, causing GPU faults when the set of active passes changes.
+    if (ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
         // GTAO main pass → ssaoTexture (raw AO).
         struct
         {
@@ -2781,7 +2796,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // Bloom (Phase 8)
-    if (toggles.bloom && bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
+    if (bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
         // Downsample chain.
         Uint32 srcW = w, srcH = h;
         for (int i = 0; i < k_bloomMips; ++i) {
@@ -2841,7 +2856,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     static uint64_t ssrFrameCounter = 0;
     ++ssrFrameCounter;
 
-    if (toggles.ssr && ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
+    if (ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
         // Ping-pong: write to current, read history from previous.
         const int ssrSrc = ssrCurrentIdx;     // previous frame's result
         const int ssrDst = 1 - ssrCurrentIdx; // this frame's output
@@ -2885,7 +2900,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // Volumetrics (Phase 10)
-    if (toggles.volumetrics && volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
+    if (volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
         struct
         {
             glm::mat4 invViewProj;
@@ -2931,9 +2946,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // TAA (Phase 11) -- motion vectors + temporal resolve
-    if (toggles.taa && motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] &&
-        depthTexture)
-    {
+    if (motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] && depthTexture) {
         const glm::mat4 currentVP = camera.getViewProjection();
 
         // Motion vectors.

@@ -240,6 +240,23 @@ endif()
 
 if(SPIRV_CROSS)
     message(STATUS "MSL transpiler:  spirv-cross (${SPIRV_CROSS})")
+
+    # spv_to_msl: pre-built CLI tool that converts SPIR-V → MSL with explicit
+    # resource bindings matching SDL3 GPU's Metal backend slot model.
+    # Source in cmake/spv_to_msl.cpp; rebuild with:
+    #   c++ -std=c++17 -O2 -I$(brew --prefix spirv-cross)/include \
+    #       cmake/spv_to_msl.cpp \
+    #       -L$(brew --prefix spirv-cross)/lib \
+    #       -lspirv-cross-msl -lspirv-cross-glsl -lspirv-cross-core \
+    #       -o cmake/spv_to_msl
+    find_program(SPV_TO_MSL spv_to_msl
+        HINTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    if(SPV_TO_MSL)
+        message(STATUS "spv_to_msl:      ${SPV_TO_MSL}")
+    else()
+        message(WARNING "spv_to_msl not found — falling back to spirv-cross --msl (bindings may be wrong)")
+    endif()
 elseif(APPLE)
     message(FATAL_ERROR
         "spirv-cross not found — required on macOS for the SDL3 GPU Metal backend.\n"
@@ -295,13 +312,37 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
 
     # SPIR-V → MSL (Metal backend on macOS)
-    if(SPIRV_CROSS)
+    #
+    # spirv-cross --msl reorders resource bindings arbitrarily, which breaks
+    # SDL3 GPU's Metal backend.  We use a small build tool (spv_to_msl) that
+    # calls the spirv-cross C++ API with explicit MSLResourceBinding entries
+    # to assign Metal indices matching SDL3's slot model:
+    #
+    #   Textures: samplers(0..)  → RO-storage  → RW-storage
+    #   Buffers:  UBOs(0..)      → RO-storage  → RW-storage
+    #   Samplers: 0..N-1
+    #
+    if(SPV_TO_MSL)
+        set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
+        add_custom_command(
+            OUTPUT  "${MSL_OUT}"
+            COMMAND "${SPV_TO_MSL}" "${SPV_OUT}" "${MSL_OUT}"
+            DEPENDS "${SPV_OUT}"
+            COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
+            VERBATIM
+        )
+        list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+    elseif(SPIRV_CROSS)
         set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
         add_custom_command(
             OUTPUT  "${MSL_OUT}"
             COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
+            COMMAND python3
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
+                    "${SPIRV_CROSS}" "${SPV_OUT}" "${MSL_OUT}"
             DEPENDS "${SPV_OUT}"
-            COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
+            COMMENT "Transpiling shader ${SHADER_SRC} → MSL (fallback)"
             VERBATIM
         )
         list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
@@ -433,6 +474,11 @@ add_custom_command(TARGET group2 POST_BUILD
 if(SPIRV_CROSS)
     target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
 endif()
+
+# SDL3 GPU uses [0, 1] depth range on all backends (Vulkan + Metal).
+# Without this define, glm::perspective maps depth to [-1, 1] (OpenGL convention)
+# and fragments in the near half of the frustum are clipped on Metal.
+target_compile_definitions(group2 PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 # ---- Client link libraries ----
 target_link_libraries(group2 PRIVATE
