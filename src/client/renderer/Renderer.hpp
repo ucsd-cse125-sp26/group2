@@ -265,6 +265,8 @@ private:
     std::string pendingCapPath;
 
     // Post-processing (Phases 7-12)
+    Uint32 postProcW = 0, postProcH = 0; ///< Screen dims used for post-processing texture allocation.
+
     // Bloom (Phase 8)
     static constexpr int k_bloomMips = 6;
     SDL_GPUTexture* bloomMips[k_bloomMips] = {}; ///< Downsample chain, RGBA16F.
