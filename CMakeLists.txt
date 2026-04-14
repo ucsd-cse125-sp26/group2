@@ -72,6 +72,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT)
 
+# toml++ - TOML parsing library
+FetchContent_Declare(
+    tomlplusplus
+    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+    GIT_TAG        v3.4.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(tomlplusplus)
+
 # Assimp — 3D model loading (GLTF/GLB, OBJ, FBX, …; client only).
 # Keep the build lean: static lib, no install targets, no tools, no tests,
 # and only the GLTF/GLB importer enabled.
@@ -387,6 +396,8 @@ add_executable(group2
         src/client/debug/DebugUI.cpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/network/NetworkConfig.hpp
+        src/network/NetworkConfig.cpp
         src/ecs/components/ClientId.hpp
 )
 
@@ -409,6 +420,15 @@ add_custom_command(TARGET group2 POST_BUILD
     VERBATIM
 )
 
+# Copy config.toml next to the client binary.
+add_custom_command(TARGET group2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "$<TARGET_FILE_DIR:group2>/config.toml"
+    COMMENT "Copying config.toml to client binary directory"
+    VERBATIM
+)
+
 # Tell the renderer which shader formats were compiled.
 if(SPIRV_CROSS)
     target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
@@ -426,6 +446,7 @@ target_link_libraries(group2 PRIVATE
     ozz_animation_offline
     ozz_animation
     ozz_base
+    tomlplusplus::tomlplusplus
 )
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
@@ -478,6 +499,8 @@ add_executable(server
         src/server/systems/BroadcastSystem.hpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/network/NetworkConfig.hpp
+        src/network/NetworkConfig.cpp
         src/ecs/components/ClientId.hpp
 )
 
@@ -494,6 +517,16 @@ target_link_libraries(server PRIVATE
     SDL3_net::SDL3_net
     EnTT::EnTT
     glm::glm
+    tomlplusplus::tomlplusplus
+)
+
+# Copy config.toml next to the server binary.
+add_custom_command(TARGET server POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "$<TARGET_FILE_DIR:server>/config.toml"
+    COMMENT "Copying config.toml to server binary directory"
+    VERBATIM
 )
 
 # ---- Compiler warnings ----

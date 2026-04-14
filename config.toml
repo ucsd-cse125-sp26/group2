@@ -1,0 +1,6 @@
+# config.toml — shared runtime configuration for client and server.
+# All keys are optional; missing keys fall back to compiled-in defaults.
+
+[network]
+host = "127.0.0.1"
+port = 8888
