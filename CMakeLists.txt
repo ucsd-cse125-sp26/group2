@@ -254,7 +254,7 @@ set(SHADER_SOURCES
     brdf_lut.comp                       # IBL BRDF LUT (Phase 6)
     irradiance.comp                     # IBL diffuse irradiance (Phase 6)
     prefilter.comp                      # IBL specular prefilter (Phase 6)
-    ssao.comp ssao_blur.comp            # SSAO (Phase 7)
+    gtao.comp gtao_blur.comp            # GTAO (Phase 7)
     bloom_downsample.comp bloom_upsample.comp  # Bloom (Phase 8)
     ssr.comp                            # Screen-space reflections (Phase 9)
     volumetric.comp                     # Volumetric lighting (Phase 10)

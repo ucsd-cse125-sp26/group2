@@ -13,7 +13,6 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "particles/ParticleSystem.hpp"
-#include "renderer/Renderer.hpp"
 #include "renderer/Renderer.hpp" // for RenderToggles
 
 #include <backends/imgui_impl_sdl3.h>

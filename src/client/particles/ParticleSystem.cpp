@@ -24,7 +24,9 @@ bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL
                                "/usr/share/fonts/noto/NotoSans-Regular.ttf",             // Noto (various distros)
                                "/usr/share/fonts/liberation/LiberationSans-Regular.ttf", // Liberation
                                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                               "/System/Library/Fonts/Helvetica.ttc",                    // macOS
+                               "/System/Library/Fonts/Supplemental/Arial.ttf",           // macOS (Supplemental)
+                               "/Library/Fonts/Arial.ttf",                               // macOS (Library)
+                               "/System/Library/Fonts/SFNS.ttf",                         // macOS (San Francisco)
                                "C:/Windows/Fonts/segoeui.ttf",                           // Windows
                                nullptr};
     for (int i = 0; fontPaths[i]; ++i) {

@@ -955,7 +955,8 @@ bool Renderer::initIBL()
                 // Convert float to float16 (half). Use a simple truncation.
                 auto toHalf = [](float v) -> uint16_t {
                     // Quick float→half conversion (loses precision but works for [0,1]).
-                    uint32_t f = *reinterpret_cast<uint32_t*>(&v);
+                    uint32_t f;
+                    SDL_memcpy(&f, &v, 4); // memcpy avoids strict-aliasing UB
                     uint32_t sign = (f >> 16) & 0x8000;
                     int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
                     uint32_t mant = (f >> 13) & 0x03FF;
@@ -2154,12 +2155,17 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         return;
     }
 
-    // Ensure post-processing textures exist at screen resolution
-    // Bloom mip chain (lazy create/resize).
+    // Ensure post-processing textures exist at screen resolution.
+    // Recreate all post-processing textures when the screen size changes.
+    const bool ppResize = (postProcW != w || postProcH != h);
+    if (ppResize)
+        SDL_WaitForGPUIdle(device); // Drain in-flight commands before releasing textures.
+
+    // Bloom mip chain (lazy create / resize).
     {
         Uint32 mipW = w / 2, mipH = h / 2;
         for (int i = 0; i < k_bloomMips; ++i) {
-            if (!bloomMips[i] || true) { // Always recreate for simplicity.
+            if (!bloomMips[i] || ppResize) {
                 if (bloomMips[i])
                     SDL_ReleaseGPUTexture(device, bloomMips[i]);
                 SDL_GPUTextureCreateInfo ci{};
@@ -2178,24 +2184,20 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         }
     }
 
-    // SSAO textures.
-    if (!ssaoTexture) {
-        auto makeR8 = [&](Uint32 tw, Uint32 th) -> SDL_GPUTexture* {
-            SDL_GPUTextureCreateInfo ci{};
-            ci.type = SDL_GPU_TEXTURETYPE_2D;
-            ci.format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
-            ci.width = tw;
-            ci.height = th;
-            ci.layer_count_or_depth = 1;
-            ci.num_levels = 1;
-            ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
-            return SDL_CreateGPUTexture(device, &ci);
-        };
-        ssaoTexture = makeR8(w, h);
-        ssaoBlurTexture = makeR8(w, h);
-    }
+    // Helper: create an R8_UNORM texture.
+    auto makeR8 = [&](Uint32 tw, Uint32 th) -> SDL_GPUTexture* {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_2D;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+        ci.width = tw;
+        ci.height = th;
+        ci.layer_count_or_depth = 1;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        return SDL_CreateGPUTexture(device, &ci);
+    };
 
-    // SSR, volumetric, TAA, motion vectors (lazy init once).
+    // Helper: create an RGBA16F texture.
     auto makeRGBA16F = [&](Uint32 tw, Uint32 th) -> SDL_GPUTexture* {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
@@ -2208,17 +2210,41 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         return SDL_CreateGPUTexture(device, &ci);
     };
 
-    if (!ssrTexture[0]) {
+    // SSAO textures.
+    if (!ssaoTexture || ppResize) {
+        if (ssaoTexture)
+            SDL_ReleaseGPUTexture(device, ssaoTexture);
+        if (ssaoBlurTexture)
+            SDL_ReleaseGPUTexture(device, ssaoBlurTexture);
+        ssaoTexture = makeR8(w, h);
+        ssaoBlurTexture = makeR8(w, h);
+    }
+
+    // SSR, volumetric, TAA, motion vectors.
+    if (!ssrTexture[0] || ppResize) {
+        for (auto*& t : ssrTexture) {
+            if (t)
+                SDL_ReleaseGPUTexture(device, t);
+        }
         ssrTexture[0] = makeRGBA16F(w, h);
         ssrTexture[1] = makeRGBA16F(w, h);
     }
-    if (!volumetricTexture)
+    if (!volumetricTexture || ppResize) {
+        if (volumetricTexture)
+            SDL_ReleaseGPUTexture(device, volumetricTexture);
         volumetricTexture = makeRGBA16F(w / 2, h / 2);
-    if (!taaHistory[0]) {
+    }
+    if (!taaHistory[0] || ppResize) {
+        for (auto*& t : taaHistory) {
+            if (t)
+                SDL_ReleaseGPUTexture(device, t);
+        }
         taaHistory[0] = makeRGBA16F(w, h);
         taaHistory[1] = makeRGBA16F(w, h);
     }
-    if (!motionVectorTexture) {
+    if (!motionVectorTexture || ppResize) {
+        if (motionVectorTexture)
+            SDL_ReleaseGPUTexture(device, motionVectorTexture);
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
         ci.format = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
@@ -2229,6 +2255,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
         motionVectorTexture = SDL_CreateGPUTexture(device, &ci);
     }
+
+    postProcW = w;
+    postProcH = h;
 
     camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
@@ -2973,27 +3002,33 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         if (tonemapPipeline && tonemapSampler && hdrTarget) {
             SDL_BindGPUGraphicsPipeline(pass, tonemapPipeline);
 
+            // Only use a post-processing texture if BOTH its toggle is on AND its
+            // pipeline initialised successfully.  Otherwise fall back to a neutral
+            // 1×1 texture so we never sample an uninitialised / never-written-to
+            // texture (which triggers a GPU fault on the Metal backend).
+            const bool useBloom = toggles.bloom && bloomDownsamplePipeline && bloomMips[0];
+            const bool useSSAO = toggles.ssao && ssaoPipeline && ssaoBlurTexture;
+            const bool useSSR = toggles.ssr && ssrPipeline && ssrTexture[ssrCurrentIdx];
+            const bool useVol = toggles.volumetrics && volumetricPipeline && volumetricTexture;
+
             TonemapParamsUBO params{};
             params.exposure = 1.0f;
             params.gamma = 2.2f;
             params.tonemapMode = 0; // ACES
-            params.bloomStrength = (toggles.bloom && bloomMips[0]) ? bloomStr : 0.0f;
-            params.ssaoStrength = (toggles.ssao && ssaoBlurTexture) ? ssaoStr : 0.0f;
-            params.ssrStrength = (toggles.ssr && ssrTexture[0]) ? ssrStr : 0.0f;
-            params.volumetricStrength = (toggles.volumetrics && volumetricTexture) ? volStr : 0.0f;
-            params.sharpenStrength = (toggles.taa) ? sharpenStr : 0.0f;
+            params.bloomStrength = useBloom ? bloomStr : 0.0f;
+            params.ssaoStrength = useSSAO ? ssaoStr : 0.0f;
+            params.ssrStrength = useSSR ? ssrStr : 0.0f;
+            params.volumetricStrength = useVol ? volStr : 0.0f;
+            params.sharpenStrength = (toggles.taa && taaPipeline) ? sharpenStr : 0.0f;
             SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
 
             // Bind all 5 post-process textures for compositing.
             const SDL_GPUTextureSamplerBinding tonemapSamplers[5] = {
                 {.texture = hdrTarget, .sampler = tonemapSampler},
-                {.texture = (toggles.bloom && bloomMips[0]) ? bloomMips[0] : fallbackBlack, .sampler = tonemapSampler},
-                {.texture = (toggles.ssao && ssaoBlurTexture) ? ssaoBlurTexture : fallbackWhite,
-                 .sampler = tonemapSampler},
-                {.texture = (toggles.ssr && ssrTexture[ssrCurrentIdx]) ? ssrTexture[ssrCurrentIdx] : fallbackBlack,
-                 .sampler = tonemapSampler},
-                {.texture = (toggles.volumetrics && volumetricTexture) ? volumetricTexture : fallbackBlack,
-                 .sampler = tonemapSampler},
+                {.texture = useBloom ? bloomMips[0] : fallbackBlack, .sampler = tonemapSampler},
+                {.texture = useSSAO ? ssaoBlurTexture : fallbackWhite, .sampler = tonemapSampler},
+                {.texture = useSSR ? ssrTexture[ssrCurrentIdx] : fallbackBlack, .sampler = tonemapSampler},
+                {.texture = useVol ? volumetricTexture : fallbackBlack, .sampler = tonemapSampler},
             };
             SDL_BindGPUFragmentSamplers(pass, 0, tonemapSamplers, 5);
 
