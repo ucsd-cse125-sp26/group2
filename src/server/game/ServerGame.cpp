@@ -86,18 +86,7 @@ void ServerGame::eventHandler(Event event)
         return;
 
     InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
-    const MovementIntent& movement = event.movementIntent;
-
-    input.forward = movement.forward;
-    input.back = movement.back;
-    input.left = movement.left;
-    input.right = movement.right;
-    input.jump = movement.jump;
-    input.crouch = movement.crouch;
-    input.yaw = movement.yaw;
-    input.pitch = movement.pitch;
-    input.roll = movement.roll;
-    input.shooting = event.shootIntent;
+    input = event.movementIntent;
 }
 
 void ServerGame::tick(float dt, Uint64 nextTick)
@@ -131,7 +120,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // }
 }
 
-void ServerGame::initNewPlayer(int clientId)
+void ServerGame::initNewPlayer(ClientId clientId)
 {
     const entt::entity player = registry.create();
     clientEntities[clientId] = player;
@@ -141,5 +130,5 @@ void ServerGame::initNewPlayer(int clientId)
     registry.emplace<Velocity>(player);
     registry.emplace<CollisionShape>(player);
     registry.emplace<PlayerState>(player);
-    SDL_Log("[server] spawned player entity for client %d", clientId);
+    SDL_Log("[server] spawned player entity for client %d", clientId.value);
 }

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ecs/components/ClientId.hpp"
 #include "network/MessageStream.hpp"
 #include "systems/EventQueue.hpp"
 
@@ -49,7 +50,7 @@ private:
     struct Connection
     {
         MessageStream msgStream; ///< Framed message stream for this client.
-        uint8_t clientId;        ///< Unique identifier assigned on accept.
+        ClientId clientId;       ///< Unique identifier assigned on accept.
     };
 
     /// @brief Dispatch a single decoded message from a client.
@@ -58,10 +59,13 @@ private:
     /// @param len    Payload length in bytes.
     void handleMessage(Connection& client, const void* data, Uint32 len);
 
+    /// @brief Generate next unique client ID
+    ClientId getNextClientId();
+
     NET_Server* server = nullptr;    ///< Underlying SDL_net server handle.
 
     std::vector<Connection> clients; ///< Currently connected clients.
     EventQueue eventQueue;           ///< Incoming events awaiting processing.
 
-    uint8_t nextClientId = 0;        ///< Counter for assigning client IDs.
+    ClientId nextClientId;           ///< Counter for assigning client IDs.
 };
