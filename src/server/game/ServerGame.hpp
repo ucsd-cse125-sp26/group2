@@ -32,9 +32,6 @@ public:
     /// @brief Signal the loop to stop and release all resources.
     void shutdown();
 
-    /// @brief Create a new player entity and map it to the given client ID.
-    /// @param clientId Network client identifier for the new player.
-    void initNewPlayer(ClientId clientId);
 
 private:
     /// @brief Apply a single event to the ECS registry.
@@ -45,6 +42,14 @@ private:
     /// @param dt       Fixed delta time in seconds (1 / tickRateHz).
     /// @param nextTick Performance counter deadline for the current tick.
     void tick(float dt, Uint64 nextTick);
+
+    /// @brief Create a new player entity and map it to the given client ID.
+    /// @param clientId Network client identifier for the new player.
+    void initNewPlayerEntity(ClientId clientId);
+
+    /// @brief Remove player entity from ECS.
+    /// @param clientId Network client identifier for the player.
+    void deletePlayerEntity(ClientId clientId);
 
     Server server;                                             ///< Owns the TCP socket and network I/O.
     Registry registry;                                         ///< ECS entity/component store.

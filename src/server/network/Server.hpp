@@ -11,6 +11,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <vector>
+#include <entt/entity/entity.hpp>
 
 /// @brief TCP stream socket — receives client packets and echoes them back.
 ///
@@ -45,12 +46,17 @@ public:
     /// @return The front event.
     Event dequeueEvent();
 
+    /// @brief Update client with new entity id.
+    /// @return true if sent, otherwise false.
+    static bool notifyPlayerClientId(ClientId clientId, entt::entity playerEntity);
+
 private:
     /// @brief Per-client connection state.
     struct Connection
     {
         MessageStream msgStream; ///< Framed message stream for this client.
         ClientId clientId;       ///< Unique identifier assigned on accept.
+        bool pendingInitialization; ///< True if waiting for Game to initialize player entity.
     };
 
     /// @brief Dispatch a single decoded message from a client.
