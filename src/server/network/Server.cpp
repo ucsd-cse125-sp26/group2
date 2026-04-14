@@ -68,6 +68,7 @@ void Server::acceptClients()
         clients.emplace_back();
         clients.back().msgStream.socket = socket;
         clients.back().clientId = clientId;
+        eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected});
     }
 }
 
@@ -105,25 +106,27 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
     eventQueue.enqueue(event);
     conn.msgStream.send("Message received", 16);
 
-    SDL_Log("Server: received input packet:\n"
-            "\tforward=%d\n"
-            "\tback=%d\n"
-            "\tleft=%d\n"
-            "\tright=%d\n"
-            "\tjump=%d\n"
-            "\tcrouch=%d\n"
-            "\tyaw=%.2f\n"
-            "\tpitch=%.2f\n"
-            "\troll=%.2f",
-            event.movementIntent.forward,
-            event.movementIntent.back,
-            event.movementIntent.left,
-            event.movementIntent.right,
-            event.movementIntent.jump,
-            event.movementIntent.crouch,
-            event.movementIntent.yaw,
-            event.movementIntent.pitch,
-            event.movementIntent.roll);
+    SDL_Log("Server: received input packet from client %d", event.clientId.value);
+
+    // SDL_Log("Server: received input packet:\n"
+    //         "\tforward=%d\n"
+    //         "\tback=%d\n"
+    //         "\tleft=%d\n"
+    //         "\tright=%d\n"
+    //         "\tjump=%d\n"
+    //         "\tcrouch=%d\n"
+    //         "\tyaw=%.2f\n"
+    //         "\tpitch=%.2f\n"
+    //         "\troll=%.2f",
+    //         event.movementIntent.forward,
+    //         event.movementIntent.back,
+    //         event.movementIntent.left,
+    //         event.movementIntent.right,
+    //         event.movementIntent.jump,
+    //         event.movementIntent.crouch,
+    //         event.movementIntent.yaw,
+    //         event.movementIntent.pitch,
+    //         event.movementIntent.roll);
 }
 
 ClientId Server::getNextClientId()
