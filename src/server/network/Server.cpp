@@ -3,6 +3,7 @@
 
 #include "Server.hpp"
 
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "systems/EventQueue.hpp"
 #include "systems/InputReceiveSystem.hpp"
@@ -30,7 +31,7 @@ bool Server::init(const char* addr, Uint16 port)
     eventQueue = EventQueue();
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
 
-    nextClientId = 0;
+    nextClientId.value = 0;
     return true;
 }
 
@@ -63,7 +64,7 @@ void Server::acceptClients()
         return;
     } else if (socket) {
         SDL_Log("Server: accepted new client");
-        auto clientId = nextClientId++;
+        ClientId clientId = getNextClientId();
         clients.emplace_back();
         clients.back().msgStream.socket = socket;
         clients.back().clientId = clientId;
@@ -123,6 +124,13 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
             event.movementIntent.yaw,
             event.movementIntent.pitch,
             event.movementIntent.roll);
+}
+
+ClientId Server::getNextClientId()
+{
+    ClientId id = nextClientId;
+    nextClientId.value++;
+    return id;
 }
 
 bool Server::isEmpty()

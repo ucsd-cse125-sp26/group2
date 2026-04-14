@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Server.hpp"
 
@@ -33,7 +34,7 @@ public:
 
     /// @brief Create a new player entity and map it to the given client ID.
     /// @param clientId Network client identifier for the new player.
-    void initNewPlayer(int clientId);
+    void initNewPlayer(ClientId clientId);
 
 private:
     /// @brief Apply a single event to the ECS registry.
@@ -45,10 +46,10 @@ private:
     /// @param nextTick Performance counter deadline for the current tick.
     void tick(float dt, Uint64 nextTick);
 
-    Server server;                                        ///< Owns the TCP socket and network I/O.
-    Registry registry;                                    ///< ECS entity/component store.
-    std::unordered_map<int, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
-    bool running = false;                                 ///< Loop continues while true.
-    int tickRateHz = 128;                                 ///< Physics ticks per second.
-    int tickCount = 0;                                    ///< Total ticks since start, used for periodic logging.
+    Server server;                                             ///< Owns the TCP socket and network I/O.
+    Registry registry;                                         ///< ECS entity/component store.
+    std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
+    bool running = false;                                      ///< Loop continues while true.
+    int tickRateHz = 128;                                      ///< Physics ticks per second.
+    int tickCount = 0;                                         ///< Total ticks since start, used for periodic logging.
 };
