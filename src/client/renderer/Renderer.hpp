@@ -164,9 +164,6 @@ private:
     SDL_GPUTextureFormat swapchainFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUShaderFormat shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
 
-    float fovyDegrees = 60.0f;
-    float nearPlane = 5.0f;
-    float farPlane = 15000.0f;
     Camera camera;
 
     // Pipelines
