@@ -3,6 +3,8 @@
 
 #include "Server.hpp"
 
+#include <entt/entity/entity.hpp>
+
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "systems/EventQueue.hpp"
@@ -68,7 +70,8 @@ void Server::acceptClients()
         clients.emplace_back();
         clients.back().msgStream.socket = socket;
         clients.back().clientId = clientId;
-        eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::connected});
+        clients.back().pendingInitialization = true;
+        eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected});
     }
 }
 
@@ -144,4 +147,17 @@ bool Server::isEmpty()
 Event Server::dequeueEvent()
 {
     return eventQueue.dequeue();
+}
+
+// NOTE: playerEntity is the entity id of the player
+bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
+{
+    /* TODO: This function should notify the client that its entity has been initialized by the
+     * game server and should send the entity id to the client so it knows which local player it is. */
+
+    // Send playerEntity to client
+    // Set client.pendingInitialization to false in client list
+    // return true
+
+    return false;
 }

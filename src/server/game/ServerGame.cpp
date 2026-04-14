@@ -76,17 +76,41 @@ void ServerGame::shutdown()
 
 void ServerGame::eventHandler(Event event)
 {
-    // Handle input snapshot
-    const auto entityIt = clientEntities.find(event.clientId);
-    if (entityIt == clientEntities.end())
-        return;
+    switch (event.type)
+    {
+        case EventType::Connected:
+            {
+                initNewPlayerEntity(event.clientId);
+                const bool sent = server.notifyPlayerClientId(event.clientId, clientEntities[event.clientId]);
+                if (!sent)
+                {
+                    deletePlayerEntity(event.clientId);
+                }
+                break;
+            }
+        case EventType::Disconenected:
+            {
+                deletePlayerEntity(event.clientId);
+                break;
+            }
+        case EventType::Input:
+            {
+                // Handle input snapshot
+                const auto entityIt = clientEntities.find(event.clientId);
+                if (entityIt == clientEntities.end())
+                    return;
 
-    const entt::entity player = entityIt->second;
-    if (!registry.valid(player))
-        return;
+                const entt::entity player = entityIt->second;
+                if (!registry.valid(player))
+                    return;
+                InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
+                input = event.movementIntent;
+                break;
+            }
+        default:
+            break;
+    }
 
-    InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
-    input = event.movementIntent;
 }
 
 void ServerGame::tick(float dt, Uint64 nextTick)
@@ -96,7 +120,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         eventHandler(event);
 
         // Check tick time --> move to next if over
-        if (const Uint64 k_now = SDL_GetPerformanceCounter(); k_now >= nextTick) {
+        if (const Uint64 kNow = SDL_GetPerformanceCounter(); kNow >= nextTick) {
             // TODO: Drop events in queue
             SDL_Log("[server] Exceeded tick time for event handling.");
             break;
@@ -105,6 +129,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
+
+    // Update Client by sending the registry
+    // server.updateClient(registry);
+
     ++tickCount;
 
     // Log once per second so we can watch the test entity fall and land.
@@ -120,7 +148,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // }
 }
 
-void ServerGame::initNewPlayer(ClientId clientId)
+void ServerGame::initNewPlayerEntity(ClientId clientId)
 {
     const entt::entity player = registry.create();
     clientEntities[clientId] = player;
@@ -131,4 +159,17 @@ void ServerGame::initNewPlayer(ClientId clientId)
     registry.emplace<CollisionShape>(player);
     registry.emplace<PlayerState>(player);
     SDL_Log("[server] spawned player entity for client %d", clientId.value);
+}
+
+void ServerGame::deletePlayerEntity(ClientId clientId)
+{
+    if (const auto it = clientEntities.find(clientId); it != clientEntities.end())
+    {
+        const entt::entity player = clientEntities[clientId];
+        if (!registry.valid(player))
+        {
+            registry.destroy(player);
+        }
+        clientEntities.erase(it);
+    }
 }
