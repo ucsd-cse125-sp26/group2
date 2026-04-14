@@ -286,15 +286,46 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
 
     # SPIR-V → MSL (Metal backend on macOS)
+    #
+    # spirv-cross may reorder resource bindings when targeting MSL.  SDL3 GPU's
+    # Metal backend expects binding indices to follow its own slot model:
+    #
+    #   Vertex / Fragment shaders:
+    #     sampler  slot N  →  [[texture(N)]], [[sampler(N)]]
+    #     UBO      slot N  →  [[buffer(N)]]
+    #     --msl-decoration-binding tells spirv-cross to preserve the SPIR-V
+    #     binding decoration as the Metal index, which matches SDL3.
+    #
+    #   Compute shaders:
+    #     --msl-decoration-binding cannot be used because storage textures
+    #     (set 1) and sampler textures (set 0) share the Metal texture
+    #     namespace and their binding numbers would overlap.  Instead, we
+    #     let spirv-cross generate default indices then run a fixup script
+    #     that renumbers them to match SDL3's convention:
+    #       texture(0..N-1)  = read-write storage textures
+    #       texture(N..N+M)  = sampler textures (in binding order)
+    #       sampler(0..M-1)  = samplers
+    #       buffer(0..K-1)   = uniform buffers
+    #
     if(SPIRV_CROSS)
         set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
+
+        # spirv-cross default MSL output may reorder resource bindings.
+        # Run the fixup script on ALL shader types to match SDL3 Metal's
+        # binding convention (samplers first, then storage; UBOs first,
+        # then storage buffers).
         add_custom_command(
             OUTPUT  "${MSL_OUT}"
             COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
+            COMMAND python3
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
+                    "${SPIRV_CROSS}" "${SPV_OUT}" "${MSL_OUT}"
             DEPENDS "${SPV_OUT}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
             COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
             VERBATIM
         )
+
         list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
     endif()
 endforeach()
@@ -413,6 +444,11 @@ add_custom_command(TARGET group2 POST_BUILD
 if(SPIRV_CROSS)
     target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
 endif()
+
+# SDL3 GPU uses [0, 1] depth range on all backends (Vulkan + Metal).
+# Without this define, glm::perspective maps depth to [-1, 1] (OpenGL convention)
+# and fragments in the near half of the frustum are clipped on Metal.
+target_compile_definitions(group2 PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 # ---- Client link libraries ----
 target_link_libraries(group2 PRIVATE

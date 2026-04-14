@@ -1699,12 +1699,13 @@ bool Renderer::init(SDL_Window* win)
 #endif
         ;
 
-    device = SDL_CreateGPUDevice(k_wantedFormats, /*debug_mode=*/false, nullptr);
+    device = SDL_CreateGPUDevice(k_wantedFormats, /*debug_mode=*/true, nullptr);
     if (!device) {
         SDL_Log("Renderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
     }
     SDL_Log("Renderer: GPU driver = %s", SDL_GetGPUDeviceDriver(device));
+    SDL_Log("Renderer: available shader formats = 0x%x", SDL_GetGPUShaderFormats(device));
 
     if (!SDL_ClaimWindowForGPUDevice(device, window)) {
         SDL_Log("Renderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
@@ -1712,18 +1713,28 @@ bool Renderer::init(SDL_Window* win)
     }
 
     // Detect shader format and cache swapchain format.
+    // Prefer MSL on the Metal backend: our spirv-cross pipeline produces MSL
+    // with correct resource bindings for SDL3 GPU's slot model.  SDL3's
+    // built-in SPIR-V translation (shadercross) may also work, but using our
+    // pre-compiled MSL avoids a runtime dependency on shadercross and gives us
+    // explicit control over Metal argument indices.
     const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
     shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
-    if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
-        shaderFormat = SDL_GPU_SHADERFORMAT_SPIRV;
 #ifdef HAVE_MSL_SHADERS
-    else if (k_available & SDL_GPU_SHADERFORMAT_MSL)
+    if (k_available & SDL_GPU_SHADERFORMAT_MSL)
         shaderFormat = SDL_GPU_SHADERFORMAT_MSL;
+    else
 #endif
+        if (k_available & SDL_GPU_SHADERFORMAT_SPIRV)
+        shaderFormat = SDL_GPU_SHADERFORMAT_SPIRV;
     if (shaderFormat == SDL_GPU_SHADERFORMAT_INVALID) {
         SDL_Log("Renderer: no supported shader format");
         return false;
     }
+    SDL_Log("Renderer: selected shader format = %s",
+            (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)     ? "MSL"
+            : (shaderFormat == SDL_GPU_SHADERFORMAT_SPIRV) ? "SPIR-V"
+                                                           : "unknown");
 
     swapchainFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
 
@@ -2362,7 +2373,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     {
         SDL_GPUColorTargetInfo ct{};
         ct.texture = hdrTarget;
-        ct.clear_color = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+        ct.clear_color = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
         ct.load_op = SDL_GPU_LOADOP_CLEAR;
         ct.store_op = SDL_GPU_STOREOP_STORE;
 
