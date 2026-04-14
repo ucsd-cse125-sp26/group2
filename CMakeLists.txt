@@ -231,6 +231,23 @@ endif()
 
 if(SPIRV_CROSS)
     message(STATUS "MSL transpiler:  spirv-cross (${SPIRV_CROSS})")
+
+    # spv_to_msl: pre-built CLI tool that converts SPIR-V → MSL with explicit
+    # resource bindings matching SDL3 GPU's Metal backend slot model.
+    # Source in cmake/spv_to_msl.cpp; rebuild with:
+    #   c++ -std=c++17 -O2 -I$(brew --prefix spirv-cross)/include \
+    #       cmake/spv_to_msl.cpp \
+    #       -L$(brew --prefix spirv-cross)/lib \
+    #       -lspirv-cross-msl -lspirv-cross-glsl -lspirv-cross-core \
+    #       -o cmake/spv_to_msl
+    find_program(SPV_TO_MSL spv_to_msl
+        HINTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    if(SPV_TO_MSL)
+        message(STATUS "spv_to_msl:      ${SPV_TO_MSL}")
+    else()
+        message(WARNING "spv_to_msl not found — falling back to spirv-cross --msl (bindings may be wrong)")
+    endif()
 elseif(APPLE)
     message(FATAL_ERROR
         "spirv-cross not found — required on macOS for the SDL3 GPU Metal backend.\n"
@@ -287,33 +304,27 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
 
     # SPIR-V → MSL (Metal backend on macOS)
     #
-    # spirv-cross may reorder resource bindings when targeting MSL.  SDL3 GPU's
-    # Metal backend expects binding indices to follow its own slot model:
+    # spirv-cross --msl reorders resource bindings arbitrarily, which breaks
+    # SDL3 GPU's Metal backend.  We use a small build tool (spv_to_msl) that
+    # calls the spirv-cross C++ API with explicit MSLResourceBinding entries
+    # to assign Metal indices matching SDL3's slot model:
     #
-    #   Vertex / Fragment shaders:
-    #     sampler  slot N  →  [[texture(N)]], [[sampler(N)]]
-    #     UBO      slot N  →  [[buffer(N)]]
-    #     --msl-decoration-binding tells spirv-cross to preserve the SPIR-V
-    #     binding decoration as the Metal index, which matches SDL3.
+    #   Textures: samplers(0..)  → RO-storage  → RW-storage
+    #   Buffers:  UBOs(0..)      → RO-storage  → RW-storage
+    #   Samplers: 0..N-1
     #
-    #   Compute shaders:
-    #     --msl-decoration-binding cannot be used because storage textures
-    #     (set 1) and sampler textures (set 0) share the Metal texture
-    #     namespace and their binding numbers would overlap.  Instead, we
-    #     let spirv-cross generate default indices then run a fixup script
-    #     that renumbers them to match SDL3's convention:
-    #       texture(0..N-1)  = read-write storage textures
-    #       texture(N..N+M)  = sampler textures (in binding order)
-    #       sampler(0..M-1)  = samplers
-    #       buffer(0..K-1)   = uniform buffers
-    #
-    if(SPIRV_CROSS)
+    if(SPV_TO_MSL)
         set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
-
-        # spirv-cross default MSL output may reorder resource bindings.
-        # Run the fixup script on ALL shader types to match SDL3 Metal's
-        # binding convention (samplers first, then storage; UBOs first,
-        # then storage buffers).
+        add_custom_command(
+            OUTPUT  "${MSL_OUT}"
+            COMMAND "${SPV_TO_MSL}" "${SPV_OUT}" "${MSL_OUT}"
+            DEPENDS "${SPV_OUT}"
+            COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
+            VERBATIM
+        )
+        list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+    elseif(SPIRV_CROSS)
+        set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
         add_custom_command(
             OUTPUT  "${MSL_OUT}"
             COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
@@ -322,10 +333,9 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
                     "${SPIRV_CROSS}" "${SPV_OUT}" "${MSL_OUT}"
             DEPENDS "${SPV_OUT}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
-            COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
+            COMMENT "Transpiling shader ${SHADER_SRC} → MSL (fallback)"
             VERBATIM
         )
-
         list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
     endif()
 endforeach()
