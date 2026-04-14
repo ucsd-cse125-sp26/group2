@@ -2727,7 +2727,11 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     // Compute passes: SSAO, Bloom, SSR, Volumetrics (between HDR and tonemap)
 
     // GTAO (Phase 7) -- Ground Truth Ambient Occlusion
-    if (toggles.ssao && ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
+    // Always dispatch compute passes when pipeline/textures exist — toggling
+    // is handled in the tonemap compositing strength.  Skipping entire compute
+    // passes on the Metal backend breaks resource-transition tracking between
+    // encoders, causing GPU faults when the set of active passes changes.
+    if (ssaoPipeline && ssaoBlurPipeline && ssaoTexture && ssaoBlurTexture && depthTexture) {
         // GTAO main pass → ssaoTexture (raw AO).
         struct
         {
@@ -2781,7 +2785,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // Bloom (Phase 8)
-    if (toggles.bloom && bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
+    if (bloomDownsamplePipeline && bloomUpsamplePipeline && bloomMips[0]) {
         // Downsample chain.
         Uint32 srcW = w, srcH = h;
         for (int i = 0; i < k_bloomMips; ++i) {
@@ -2841,7 +2845,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     static uint64_t ssrFrameCounter = 0;
     ++ssrFrameCounter;
 
-    if (toggles.ssr && ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
+    if (ssrPipeline && ssrTexture[0] && depthTexture && hdrTarget) {
         // Ping-pong: write to current, read history from previous.
         const int ssrSrc = ssrCurrentIdx;     // previous frame's result
         const int ssrDst = 1 - ssrCurrentIdx; // this frame's output
@@ -2885,7 +2889,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // Volumetrics (Phase 10)
-    if (toggles.volumetrics && volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
+    if (volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
         struct
         {
             glm::mat4 invViewProj;
@@ -2931,9 +2935,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // TAA (Phase 11) -- motion vectors + temporal resolve
-    if (toggles.taa && motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] &&
-        depthTexture)
-    {
+    if (motionVectorPipeline && taaPipeline && motionVectorTexture && taaHistory[0] && taaHistory[1] && depthTexture) {
         const glm::mat4 currentVP = camera.getViewProjection();
 
         // Motion vectors.
