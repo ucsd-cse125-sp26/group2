@@ -2,18 +2,9 @@
 /// @brief Thread-safe event queue for passing network events to the game loop.
 
 #pragma once
-#include "ecs/components/ClientId.hpp"
-#include "ecs/components/InputSnapshot.hpp"
+#include "Event.hpp"
 
 #include <queue>
-
-/// @brief A single gameplay event produced by network input processing.
-class Event
-{
-public:
-    ClientId clientId;            ///< Originating client identifier.
-    InputSnapshot movementIntent; ///< Decoded movement fields.
-};
 
 /// @brief FIFO queue of gameplay events awaiting processing each tick.
 class EventQueue
