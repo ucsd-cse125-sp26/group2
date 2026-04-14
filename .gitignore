@@ -85,3 +85,5 @@ dist/
 
 # Local-only deployment scripts (personal server paths — not for the repo)
 scripts/deploy-*.sh
+
+imgui.ini

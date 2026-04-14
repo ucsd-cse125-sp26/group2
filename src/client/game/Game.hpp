@@ -8,6 +8,7 @@
 #include "debug/FrameRecorder.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
+#include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "renderer/Renderer.hpp"
 
@@ -45,6 +46,7 @@ private:
     static constexpr int k_maxTicksPerFrame = 8; ///< Spiral-of-death guard: max physics ticks per iterate().
     static constexpr int k_fpsHistorySize = 512; ///< Samples in the rolling FPS ring buffer.
 
+    NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
     Renderer renderer;                           ///< Owns the GPU pipeline and ImGui render backend.

@@ -18,6 +18,7 @@ inline Event runInputReceive(const void* data)
     auto* snap = static_cast<const InputSnapshot*>(data);
     Event event;
     event.movementIntent = *snap;
+    event.type = EventType::Input;
 
     return event;
 }

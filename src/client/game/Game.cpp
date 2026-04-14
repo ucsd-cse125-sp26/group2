@@ -43,6 +43,12 @@ bool Game::init()
         return false;
     }
 
+    {
+        const char* base = SDL_GetBasePath();
+        std::string cfgPath = std::string(base ? base : "") + "config.toml";
+        netCfg = loadNetworkConfig(cfgPath.c_str());
+    }
+
     window = SDL_CreateWindow("group2", 1280, 720, SDL_WINDOW_RESIZABLE);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
@@ -79,7 +85,7 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
 
-    if (!client.init("127.0.0.1", 9999)) {
+    if (!client.init(netCfg.host.c_str(), netCfg.port)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
         renderer.quit();

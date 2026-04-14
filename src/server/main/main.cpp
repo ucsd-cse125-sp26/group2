@@ -2,6 +2,7 @@
 /// @brief Server application entry point.
 
 #include "game/ServerGame.hpp"
+#include "network/NetworkConfig.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -13,8 +14,12 @@ int main()
     SDL_Init(0);
     NET_Init();
 
+    const char* base = SDL_GetBasePath();
+    std::string cfgPath = std::string(base ? base : "") + "config.toml";
+    const NetworkConfig cfg = loadNetworkConfig(cfgPath.c_str());
+
     ServerGame game;
-    if (!game.init("127.0.0.1", 9999)) // default 128 Hz
+    if (!game.init(cfg.host.c_str(), cfg.port)) // default 128 Hz
     {
         NET_Quit();
         SDL_Quit();
