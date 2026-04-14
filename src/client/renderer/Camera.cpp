@@ -1,112 +1,79 @@
-/// @file Camera.cpp
-/// @brief Camera implementation -- view/projection matrix computation and orbit controls.
-
 #include "Camera.hpp"
 
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
-Camera::Camera(glm::vec3 eye,
-               glm::vec3 target,
-               glm::vec3 up,
-               float fovyDegrees,
-               float aspectRatio,
-               float nearPlane,
-               float farPlane)
-    : eye(eye)
-    , target(target)
-    , up(glm::normalize(up))
-    , fovy(fovyDegrees)
-    , aspect(aspectRatio)
-    , nearPlane(nearPlane)
-    , farPlane(farPlane)
-    , eyeDefault(eye)
-    , targetDefault(target)
-    , upDefault(glm::normalize(up))
-    , fovyDefault(fovyDegrees)
-    , aspectDefault(aspectRatio)
-    , nearDefault(nearPlane)
-    , farDefault(farPlane)
+Camera::Camera()
 {
-    computeMatrices();
+    computeViewMatrix();
+    computeProjectionMatrix();
 }
 
-void Camera::reset()
+void Camera::setAspect(float width, float height)
 {
-    eye = eyeDefault;
-    target = targetDefault;
-    up = upDefault;
-    fovy = fovyDefault;
-    aspect = aspectDefault;
-    nearPlane = nearDefault;
-    farPlane = farDefault;
-
-    computeMatrices();
+    aspect_ = (height == 0.0f) ? 1.0f : width / height;
+    computeViewMatrix();
 }
 
-void Camera::setAspect(float aspectRatio)
+void Camera::setFov(float fovyDegrees)
 {
-    aspect = aspectRatio;
-    computeMatrices();
+    fovy_ = glm::radians(fovyDegrees);
+    computeViewMatrix();
 }
 
-void Camera::setPerspective(float fovyDegrees, float aspectRatio, float nearPlaneValue, float farPlaneValue)
+void Camera::setZNear(float zNear)
 {
-    fovy = fovyDegrees;
-    aspect = aspectRatio;
-    nearPlane = nearPlaneValue;
-    farPlane = farPlaneValue;
-    computeMatrices();
+    zNear_ = zNear;
+    computeViewMatrix();
 }
 
-void Camera::setLookAt(glm::vec3 eyePos, glm::vec3 targetPos, glm::vec3 upDir)
+void Camera::setZFar(float zFar)
 {
-    eye = eyePos;
-    target = targetPos;
-    up = glm::normalize(upDir);
-    computeMatrices();
+    zFar = zFar_;
+    computeViewMatrix();
 }
 
-void Camera::rotateRight(float degrees)
+void Camera::setEye(glm::vec3 eye)
 {
-    const glm::vec3 axis = glm::normalize(up);
-    const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), glm::radians(degrees), axis);
-
-    const glm::vec3 offset = eye - target;
-    eye = target + glm::vec3(rot * glm::vec4(offset, 0.0f));
-    up = glm::normalize(glm::vec3(rot * glm::vec4(up, 0.0f)));
-
-    computeMatrices();
+    eye_ = eye;
+    computeProjectionMatrix();
 }
 
-void Camera::rotateUp(float degrees)
+void Camera::setTarget(float pitch, float yaw, float _roll)
 {
-    const glm::vec3 forward = glm::normalize(target - eye);
-    const glm::vec3 right = glm::normalize(glm::cross(forward, up));
-    const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), glm::radians(degrees), right);
+    const float cosPitch = std::cos(pitch);
 
-    const glm::vec3 offset = eye - target;
-    eye = target + glm::vec3(rot * glm::vec4(offset, 0.0f));
-    up = glm::normalize(glm::vec3(rot * glm::vec4(up, 0.0f)));
+    // Forward vector from yaw (horizontal) and pitch (vertical).
+    // Convention matches InputSnapshot: yaw=0 → +Z, pitch>0 → looking down.
+    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
 
-    computeMatrices();
+    target_ = eye_ + forward;
+    computeProjectionMatrix();
 }
 
-void Camera::computeMatrices()
+void Camera::setUp(glm::vec3 up)
 {
-    view = glm::lookAt(eye, target, up);
-    proj = glm::perspective(glm::radians(fovy), aspect, nearPlane, farPlane);
-    // Vulkan NDC has Y pointing downward (opposite of OpenGL).  GLM generates
-    // OpenGL-style projection, so flip Y to avoid rendering upside-down.
-    proj[1][1] *= -1.0f;
+    up_ = up;
+    computeProjectionMatrix();
 }
 
-glm::vec3 Camera::getForward() const
+void Camera::computeViewMatrix()
 {
-    return glm::normalize(target - eye);
+    view_ = glm::lookAt(eye_, target_, up_);
 }
 
-glm::vec3 Camera::getRight() const
+void Camera::computeProjectionMatrix()
 {
-    return glm::normalize(glm::cross(getForward(), up));
+    projection_ = glm::perspective(fovy_, aspect_, zNear_, zFar_);
+    projection_[1][1] *= -1.0f;
+}
+
+const glm::vec3 Camera::getForward() const
+{
+    return glm::normalize(target_ - eye_);
+}
+
+const glm::vec3 Camera::getRight() const
+{
+    return glm::normalize(glm::cross(getForward(), up_));
 }

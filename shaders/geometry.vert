@@ -14,7 +14,7 @@ layout(set = 1, binding = 0) uniform Matrices
 } ubo;
 
 
-const float width = 1.0f;
+const float width = 100.0f;
 const float width_over_2 = width * 0.5f;
 
 const vec3 cubeMin = -vec3(width_over_2,width_over_2,width_over_2);

@@ -1835,13 +1835,7 @@ bool Renderer::init(SDL_Window* win)
     loadAndPlace("bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
 
     // Camera — overridden every frame by drawFrame().
-    camera = Camera(glm::vec3{0.0f, 100.0f, 0.0f},
-                    glm::vec3{0.0f, 100.0f, 1.0f},
-                    glm::vec3{0.0f, 1.0f, 0.0f},
-                    fovyDegrees,
-                    1.0f,
-                    nearPlane,
-                    farPlane);
+    camera = Camera();
 
     // Load default HDR skybox
     scanHDRFiles();
@@ -2077,21 +2071,23 @@ static std::array<CascadeInfo, 4> computeCascades(
 
 void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, const float roll)
 {
-    // Camera setup
-    const float cosPitch = std::cos(pitch);
-    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
+    // // Camera setup
+    // const float cosPitch = std::cos(pitch);
+    // const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
 
-    // Compute an up vector that incorporates roll (camera tilt).
-    // Roll rotates the up vector around the forward axis.
-    glm::vec3 camUp{0.0f, 1.0f, 0.0f};
-    if (std::abs(roll) > 0.001f) {
-        const glm::vec3 right = glm::normalize(glm::cross(forward, camUp));
-        const glm::vec3 trueUp = glm::normalize(glm::cross(right, forward));
-        const float cosR = std::cos(roll);
-        const float sinR = std::sin(roll);
-        camUp = trueUp * cosR + right * sinR;
-    }
-    camera.setLookAt(eye, eye + forward, camUp);
+    // // Compute an up vector that incorporates roll (camera tilt).
+    // // Roll rotates the up vector around the forward axis.
+    // glm::vec3 camUp{0.0f, 1.0f, 0.0f};
+    // if (std::abs(roll) > 0.001f) {
+    //     const glm::vec3 right = glm::normalize(glm::cross(forward, camUp));
+    //     const glm::vec3 trueUp = glm::normalize(glm::cross(right, forward));
+    //     const float cosR = std::cos(roll);
+    //     const float sinR = std::sin(roll);
+    //     camUp = trueUp * cosR + right * sinR;
+    // }
+    // camera.setLookAt(eye, eye + forward, camUp);
+    camera.setEye(eye);
+    camera.setTarget(pitch, yaw, 0.0f);
 
     // Acquire GPU resources
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
@@ -2259,7 +2255,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     postProcW = w;
     postProcH = h;
 
-    camera.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
+    camera.setAspect(static_cast<float>(w), static_cast<float>(h));
 
     // Upload particle data (BEFORE any render pass)
     if (particleSystem && toggles.particles)
@@ -2382,8 +2378,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
             SceneMatrices sceneMats{};
             sceneMats.model = glm::mat4(1.0f);
-            sceneMats.view = camera.getView();
-            sceneMats.projection = camera.getProjection();
+            sceneMats.view = camera.getViewMatrix();
+            sceneMats.projection = camera.getProjectionMatrix();
             SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
 
             // Push cascade shadow data for the scene fragment shader.
@@ -2394,7 +2390,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                                                   cascades[1].splitDistance,
                                                   cascades[2].splitDistance,
                                                   cascades[3].splitDistance);
-            sceneShadow.cameraView = camera.getView();
+            sceneShadow.cameraView = camera.getViewMatrix();
             sceneShadow.shadowBias = shadowBiasVal;
             sceneShadow.shadowNormalBias = shadowNormalBiasVal;
             sceneShadow.lightDirWorld = glm::vec4(getSunDirection(), 0.0f);
@@ -2436,8 +2432,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                         continue;
                     Matrices modelMats{};
                     modelMats.model = model.transform;
-                    modelMats.view = camera.getView();
-                    modelMats.projection = camera.getProjection();
+                    modelMats.view = camera.getViewMatrix();
+                    modelMats.projection = camera.getProjectionMatrix();
                     modelMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(model.transform)));
                     SDL_PushGPUVertexUniformData(cmd, 0, &modelMats, sizeof(modelMats));
 
@@ -2492,7 +2488,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                                                  cascades[1].splitDistance,
                                                  cascades[2].splitDistance,
                                                  cascades[3].splitDistance);
-            shadowData.cameraView = camera.getView();
+            shadowData.cameraView = camera.getViewMatrix();
             shadowData.shadowBias = shadowBiasVal;
             shadowData.shadowNormalBias = shadowNormalBiasVal;
             shadowData.lightDirWorld = glm::vec4(getSunDirection(), 0.0f);
@@ -2515,10 +2511,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                 SDL_BindGPUGraphicsPipeline(pass, skyboxPipeline);
 
                 SkyboxMatricesUBO skyMats{};
-                glm::mat4 viewRot = camera.getView();
+                glm::mat4 viewRot = camera.getViewMatrix();
                 viewRot[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
                 skyMats.viewRotation = viewRot;
-                skyMats.projection = camera.getProjection();
+                skyMats.projection = camera.getProjectionMatrix();
                 SDL_PushGPUVertexUniformData(cmd, 0, &skyMats, sizeof(skyMats));
 
                 // Skybox fragment UBO: cubemap vs procedural selection + sun position.
@@ -2560,8 +2556,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
                     Matrices entMats{};
                     entMats.model = ecmd.worldTransform;
-                    entMats.view = camera.getView();
-                    entMats.projection = camera.getProjection();
+                    entMats.view = camera.getViewMatrix();
+                    entMats.projection = camera.getProjectionMatrix();
                     entMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(ecmd.worldTransform)));
                     SDL_PushGPUVertexUniformData(cmd, 0, &entMats, sizeof(entMats));
 
@@ -2635,8 +2631,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             };
 
             ParticleUniforms pu{};
-            pu.view = camera.getView();
-            pu.proj = camera.getProjection();
+            pu.view = camera.getViewMatrix();
+            pu.proj = camera.getProjectionMatrix();
             pu.camPos = camera.getEye();
             pu.camRight = camera.getRight();
             pu.camUp = camera.getUp();
@@ -2659,8 +2655,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
             Matrices vmMats{};
             vmMats.model = weaponVM.transform;
-            vmMats.view = camera.getView();
-            vmMats.projection = camera.getProjection();
+            vmMats.view = camera.getViewMatrix();
+            vmMats.projection = camera.getProjectionMatrix();
             vmMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(weaponVM.transform)));
             SDL_PushGPUVertexUniformData(cmd, 0, &vmMats, sizeof(vmMats));
 
@@ -2740,8 +2736,8 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             int numSteps;
             float _p1, _p2;
         } gtaoUBO{};
-        gtaoUBO.proj = camera.getProjection();
-        gtaoUBO.invProj = glm::inverse(camera.getProjection());
+        gtaoUBO.proj = camera.getProjectionMatrix();
+        gtaoUBO.invProj = glm::inverse(camera.getProjectionMatrix());
         gtaoUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
         gtaoUBO.radius = 40.0f;
         gtaoUBO.falloffExp = 2.0f;
@@ -2858,9 +2854,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             int ssrModeVal;
             float _pad1, _pad2, _pad3;
         } ssrUBO{};
-        ssrUBO.proj = camera.getProjection();
-        ssrUBO.invProj = glm::inverse(camera.getProjection());
-        ssrUBO.view = camera.getView();
+        ssrUBO.proj = camera.getProjectionMatrix();
+        ssrUBO.invProj = glm::inverse(camera.getProjectionMatrix());
+        ssrUBO.view = camera.getViewMatrix();
         ssrUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
         ssrUBO.maxDist = 500.0f;
         ssrUBO.thickness = 5.0f;
@@ -2905,7 +2901,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         volUBO.invViewProj = glm::inverse(camera.getViewProjection());
         for (int ci = 0; ci < k_shadowCascades; ++ci)
             volUBO.lightVP_vol[ci] = cascades[static_cast<size_t>(ci)].lightVP;
-        volUBO.cameraView_vol = camera.getView();
+        volUBO.cameraView_vol = camera.getViewMatrix();
         volUBO.cascadeSplits_vol = glm::vec4(
             cascades[0].splitDistance, cascades[1].splitDistance, cascades[2].splitDistance, cascades[3].splitDistance);
         volUBO.lightDir_vol = glm::vec4(getSunDirection(), 0.0f);
