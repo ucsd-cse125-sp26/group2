@@ -432,6 +432,7 @@ SDL_AppResult Game::iterate()
 
     // 4. Physics -- always 128 Hz, up to k_maxTicksPerFrame catch-up
     bool physicsRan = false;
+    int ticksThisFrame = 0;
 
     if (accumulator >= k_physicsDt) {
         // Movement keys: sample once for this whole group of ticks.
@@ -439,6 +440,20 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry);
 
         physicsRan = true;
+
+        // Interpolate position between last two server updates
+        while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
+            accumulator -= k_physicsDt;
+
+            // Snapshot position before each tick so the last tick's delta is
+            // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
+            registry.view<Position, PreviousPosition>().each(
+                [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+            ++tickCount;
+            ++ticksThisFrame;
+            ++statsPhysTicks;
+        }
 
         client.poll(registry);
     }
