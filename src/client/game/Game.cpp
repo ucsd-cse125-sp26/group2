@@ -85,6 +85,16 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
 
+    client.onLocalPlayerReady([this](entt::entity local) {
+        registry.emplace<LocalPlayer>(local);
+        registry.emplace<InputSnapshot>(local);
+        registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        if (wraithModelIdx >= 0)
+            registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
+
+        SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
+    });
     if (!client.init(netCfg.host.c_str(), netCfg.port)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
@@ -122,23 +132,6 @@ bool Game::init()
             SDL_Log("[client] WARNING: animated model failed to load — animation disabled");
         }
     }
-
-    // Spawn the local player entity with all physics and input components.
-    const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
-    const entt::entity k_player = registry.create();
-    registry.emplace<Position>(k_player, k_startPos);
-    registry.emplace<PreviousPosition>(k_player, k_startPos);
-    registry.emplace<Velocity>(k_player);
-    registry.emplace<CollisionShape>(k_player);
-    registry.emplace<PlayerState>(k_player);
-    registry.emplace<InputSnapshot>(k_player);
-    registry.emplace<LocalPlayer>(k_player);
-    registry.emplace<WeaponState>(k_player);
-
-    // Attach a Renderable for the player model (Wraith).
-    // The local player's model is rendered for other clients (skipped for self in 1P mode).
-    if (wraithModelIdx >= 0)
-        registry.emplace<Renderable>(k_player, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
 
     // Spawn a visible animated character in the world (Mixamo run animation).
     if (animatedModelIdx >= 0) {
@@ -446,6 +439,9 @@ SDL_AppResult Game::iterate()
         if (inputSyncedWithPhysics && mouseCaptured)
             systems::runMovementKeys(registry);
 
+        physicsRan = true;
+
+        // Interpolate position between last two server updates
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
 
@@ -454,17 +450,12 @@ SDL_AppResult Game::iterate()
             registry.view<Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
-            systems::runMovement(registry, k_physicsDt, physics::testWorld());
-            systems::runCollision(registry, k_physicsDt, physics::testWorld());
             ++tickCount;
             ++ticksThisFrame;
             ++statsPhysTicks;
         }
 
-        while (client.poll()) {
-        }
-
-        physicsRan = true;
+        client.poll(registry);
     }
 
     // 5. Bail out early if there is nothing new to render

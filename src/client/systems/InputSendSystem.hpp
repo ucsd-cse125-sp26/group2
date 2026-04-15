@@ -17,7 +17,7 @@ namespace systems
 /// @param conn      Network connection to the server.
 inline void runInputSend(Registry& registry, Client& conn)
 {
-    registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) { conn.send(&snap, sizeof(snap)); });
+    registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) { conn.sendInputSnapshot(snap); });
 }
 
 } // namespace systems

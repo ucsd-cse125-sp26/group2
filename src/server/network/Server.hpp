@@ -4,14 +4,15 @@
 #pragma once
 
 #include "ecs/components/ClientId.hpp"
+#include "ecs/registry/Registry.hpp"
 #include "network/MessageStream.hpp"
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
 #include <SDL3_net/SDL_net.h>
-#include <vector>
 #include <entt/entity/entity.hpp>
+#include <vector>
 
 /// @brief TCP stream socket — receives client packets and echoes them back.
 ///
@@ -32,12 +33,6 @@ public:
     /// @brief Drain all pending messages for this tick.
     void poll();
 
-    /// @brief Accept up to one new client connection per call.
-    void acceptClients();
-
-    /// @brief Read and process pending messages from all connected clients.
-    void readClients();
-
     /// @brief Check whether the event queue is empty.
     /// @return True if no events are pending.
     bool isEmpty();
@@ -48,14 +43,17 @@ public:
 
     /// @brief Update client with new entity id.
     /// @return true if sent, otherwise false.
-    static bool notifyPlayerClientId(ClientId clientId, entt::entity playerEntity);
+    bool notifyPlayerClientId(ClientId clientId, entt::entity playerEntity);
+
+    /// @brief Broadcast the full registry state to all clients.
+    void broadcastRegistry(const Registry& registry);
 
 private:
     /// @brief Per-client connection state.
     struct Connection
     {
-        MessageStream msgStream; ///< Framed message stream for this client.
-        ClientId clientId;       ///< Unique identifier assigned on accept.
+        MessageStream msgStream;    ///< Framed message stream for this client.
+        ClientId clientId;          ///< Unique identifier assigned on accept.
         bool pendingInitialization; ///< True if waiting for Game to initialize player entity.
     };
 
@@ -65,13 +63,25 @@ private:
     /// @param len    Payload length in bytes.
     void handleMessage(Connection& client, const void* data, Uint32 len);
 
+    /// @brief Accept up to one new client connection per call.
+    void acceptClients();
+
+    /// @brief Disconnect a client and clean up resources.
+    /// @param conn The client connection to disconnect.
+    void disconnectClient(Connection conn);
+
+    /// @brief Read and process pending messages from all connected clients.
+    void readClients();
+
     /// @brief Generate next unique client ID
     ClientId getNextClientId();
 
-    NET_Server* server = nullptr;    ///< Underlying SDL_net server handle.
+    bool send(const ClientId& clientId, const void* data, int len);
 
-    std::vector<Connection> clients; ///< Currently connected clients.
-    EventQueue eventQueue;           ///< Incoming events awaiting processing.
+    NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 
-    ClientId nextClientId;           ///< Counter for assigning client IDs.
+    std::unordered_map<ClientId, Connection> clients; ///< Currently connected clients.
+    EventQueue eventQueue;                            ///< Incoming events awaiting processing.
+
+    ClientId nextClientId;                            ///< Counter for assigning client IDs.
 };

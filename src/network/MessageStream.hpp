@@ -19,6 +19,8 @@ class MessageStream
 {
 
 public:
+    MessageStream(NET_StreamSocket* sock) : socket(sock) {}
+
     NET_StreamSocket* socket = nullptr; ///< Underlying SDL_net stream socket.
 
     /// @brief Send a framed message over the socket.
