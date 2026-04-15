@@ -53,7 +53,7 @@ void Server::shutdown()
 
 bool Server::send(const ClientId& clientId, const void* data, int len)
 {
-    auto msgStream = clients.at(clientId).msgStream;
+    auto& msgStream = clients.at(clientId).msgStream;
 
     auto msgLen = static_cast<Uint32>(len);
     NET_WriteToStreamSocket(msgStream.socket, &msgLen, sizeof(msgLen));
@@ -174,7 +174,7 @@ Event Server::dequeueEvent()
 // NOTE: playerEntity is the entity id of the player
 bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 {
-    auto conn = clients.at(clientId);
+    auto& conn = clients.at(clientId);
     uint8_t buf[1 + sizeof(entt::entity)];
     buf[0] = static_cast<uint8_t>(PacketType::ASSIGN_CLIENT_ID);
     std::memcpy(buf + 1, &playerEntity, sizeof(entt::entity));
@@ -183,7 +183,7 @@ bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
         return false;
     }
 
-    clients.at(clientId).pendingInitialization = false;
+    conn.pendingInitialization = false;
     return true;
 }
 

@@ -7,7 +7,6 @@
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/registry/Registry.hpp"
-#include "entt/entity/fwd.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
@@ -17,7 +16,6 @@
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
-#include <optional>
 
 /// @brief Top-level client game object.
 ///
@@ -52,7 +50,6 @@ private:
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
     Renderer renderer;                           ///< Owns the GPU pipeline and ImGui render backend.
-    std::optional<entt::entity> playerEntity;    ///< The local player's entity, if sent by server.
     Registry registry;                           ///< The shared ECS registry.
     Client client;                               ///< UDP network client.
     ParticleSystem particleSystem;               ///< Client-side VFX particle system.

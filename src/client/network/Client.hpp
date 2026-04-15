@@ -18,6 +18,8 @@
 class Client
 {
 public:
+    using LocalPlayerReadyFn = std::function<void(entt::entity localEntity)>;
+
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr  Hostname or IP address of the server.
     /// @param port  TCP port the server is listening on.
@@ -35,13 +37,17 @@ public:
 
     bool sendInputSnapshot(const InputSnapshot& snap);
 
+    void onLocalPlayerReady(LocalPlayerReadyFn fn) { localPlayerReadyFn = std::move(fn); }
+
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
-    bool poll(Registry& registry, std::optional<entt::entity>& playerEntity);
+    bool poll(Registry& registry);
 
 private:
-    MessageStream msgStream{nullptr};  ///< Framed message stream for server communication.
-    NET_Address* serverAddr = nullptr; ///< Resolved server address.
+    MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
+    NET_Address* serverAddr = nullptr;             ///< Resolved server address.
     std::optional<registry_serialization::Loader> registryLoader;
-    bool localPlayerTagged = false;
+    LocalPlayerReadyFn localPlayerReadyFn;         ///< Called once the server assigns a player entity.
+    std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
+    bool localPlayerReadyNotified = false;         ///< True if localPlayerReadyFn has been called.
 };

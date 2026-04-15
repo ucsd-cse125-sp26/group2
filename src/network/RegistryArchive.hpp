@@ -1,5 +1,7 @@
-#include <entt/entt.hpp>
+#pragma once
+
 #include <type_traits>
+#include <vector>
 
 class OutputArchive
 {

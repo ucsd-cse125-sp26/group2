@@ -3,10 +3,6 @@
 
 #include "Client.hpp"
 
-#include "ecs/components/CollisionShape.hpp"
-#include "ecs/components/LocalPlayer.hpp"
-#include "ecs/components/Position.hpp"
-#include "ecs/components/PreviousPosition.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 
@@ -68,7 +64,7 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     return send(buf, sizeof(buf));
 }
 
-bool Client::poll(Registry& registry, std::optional<entt::entity>& playerEntity)
+bool Client::poll(Registry& registry)
 {
     // packet format is 4 byte length prefix
     bool ok = msgStream.poll([&](const void* data, Uint32 size) {
@@ -88,22 +84,22 @@ bool Client::poll(Registry& registry, std::optional<entt::entity>& playerEntity)
             }
             entt::entity assignedEntity;
             std::memcpy(&assignedEntity, payload, sizeof(entt::entity));
-            playerEntity = assignedEntity;
+            localPlayerEntity = assignedEntity;
             break;
         case PacketType::UPDATE_REGISTRY:
             if (!registryLoader)
                 registryLoader.emplace(registry);
             registryLoader->apply(payload, payloadSize);
 
-            if (playerEntity) {
-                auto local = registryLoader->map(*playerEntity);
-                if (local != entt::null && !registry.all_of<LocalPlayer>(local)) {
-                    registry.emplace<LocalPlayer>(local);
-                    registry.emplace<InputSnapshot>(local);
-                    registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
-                    registry.emplace<CollisionShape>(local);
+            // call the local player ready callback once we have the registry update that includes the local player
+            if (!localPlayerReadyNotified && localPlayerEntity && localPlayerReadyFn) {
+                auto local = registryLoader->map(*localPlayerEntity);
+                if (local != entt::null) {
+                    localPlayerReadyFn(local);
+                    localPlayerReadyNotified = true;
                 }
-            };
+            }
+
             break;
         default:
             SDL_Log("Client: unknown message type %d", static_cast<int>(type));
