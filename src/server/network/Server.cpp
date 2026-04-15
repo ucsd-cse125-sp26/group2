@@ -3,8 +3,6 @@
 
 #include "Server.hpp"
 
-#include <entt/entity/entity.hpp>
-
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "systems/EventQueue.hpp"
@@ -13,6 +11,7 @@
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <entt/entity/entity.hpp>
 
 bool Server::init(const char* addr, Uint16 port)
 {
@@ -75,6 +74,13 @@ void Server::acceptClients()
     }
 }
 
+void Server::disconnectClient(Connection conn)
+{
+    SDL_Log("Server: disconnecting client %d", conn.clientId.value);
+    NET_DestroyStreamSocket(conn.msgStream.socket);
+    eventQueue.enqueue(Event{.clientId = conn.clientId, .type = EventType::Disconnected});
+}
+
 void Server::readClients()
 {
     // packet format is 4 byte length prefix
@@ -85,8 +91,7 @@ void Server::readClients()
             conn.msgStream.poll([this, &conn](const void* data, Uint32 size) { handleMessage(conn, data, size); });
 
         if (!ok) {
-            SDL_Log("Server: client dead");
-            NET_DestroyStreamSocket(conn.msgStream.socket);
+            disconnectClient(conn);
             it = clients.erase(it);
             continue;
         }

@@ -76,41 +76,35 @@ void ServerGame::shutdown()
 
 void ServerGame::eventHandler(Event event)
 {
-    switch (event.type)
-    {
-        case EventType::Connected:
-            {
-                initNewPlayerEntity(event.clientId);
-                const bool sent = server.notifyPlayerClientId(event.clientId, clientEntities[event.clientId]);
-                if (!sent)
-                {
-                    deletePlayerEntity(event.clientId);
-                }
-                break;
-            }
-        case EventType::Disconenected:
-            {
-                deletePlayerEntity(event.clientId);
-                break;
-            }
-        case EventType::Input:
-            {
-                // Handle input snapshot
-                const auto entityIt = clientEntities.find(event.clientId);
-                if (entityIt == clientEntities.end())
-                    return;
-
-                const entt::entity player = entityIt->second;
-                if (!registry.valid(player))
-                    return;
-                InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
-                input = event.movementIntent;
-                break;
-            }
-        default:
-            break;
+    switch (event.type) {
+    case EventType::Connected: {
+        initNewPlayerEntity(event.clientId);
+        const bool sent = server.notifyPlayerClientId(event.clientId, clientEntities[event.clientId]);
+        if (!sent) {
+            deletePlayerEntity(event.clientId);
+        }
+        break;
     }
+    case EventType::Disconnected: {
+        deletePlayerEntity(event.clientId);
+        break;
+    }
+    case EventType::Input: {
+        // Handle input snapshot
+        const auto entityIt = clientEntities.find(event.clientId);
+        if (entityIt == clientEntities.end())
+            return;
 
+        const entt::entity player = entityIt->second;
+        if (!registry.valid(player))
+            return;
+        InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
+        input = event.movementIntent;
+        break;
+    }
+    default:
+        break;
+    }
 }
 
 void ServerGame::tick(float dt, Uint64 nextTick)
@@ -163,11 +157,9 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 
 void ServerGame::deletePlayerEntity(ClientId clientId)
 {
-    if (const auto it = clientEntities.find(clientId); it != clientEntities.end())
-    {
+    if (const auto it = clientEntities.find(clientId); it != clientEntities.end()) {
         const entt::entity player = clientEntities[clientId];
-        if (!registry.valid(player))
-        {
+        if (!registry.valid(player)) {
             registry.destroy(player);
         }
         clientEntities.erase(it);

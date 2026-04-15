@@ -9,7 +9,7 @@
 class Event
 {
 public:
-    ClientId clientId;            ///< Originating client identifier.
+    ClientId clientId;                 ///< Originating client identifier.
     EventType type;
-    InputSnapshot movementIntent; ///< Decoded movement fields.
+    InputSnapshot movementIntent = {}; ///< Decoded movement fields.
 };
