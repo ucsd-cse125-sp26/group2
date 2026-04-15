@@ -85,7 +85,7 @@ void ServerGame::eventHandler(Event event)
         }
         break;
     }
-    case EventType::Disconenected: {
+    case EventType::Disconnected: {
         deletePlayerEntity(event.clientId);
         break;
     }
@@ -158,8 +158,8 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 void ServerGame::deletePlayerEntity(ClientId clientId)
 {
     if (const auto it = clientEntities.find(clientId); it != clientEntities.end()) {
-        const entt::entity player = clientEntities[clientId];
-        if (!registry.valid(player)) {
+        const entt::entity player = it->second;
+        if (registry.valid(player)) {
             registry.destroy(player);
         }
         clientEntities.erase(it);

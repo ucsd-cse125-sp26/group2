@@ -4,6 +4,6 @@
 enum class EventType
 {
     Connected,
-    Disconenected,
+    Disconnected,
     Input,
 };
