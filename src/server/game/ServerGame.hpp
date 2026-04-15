@@ -32,7 +32,6 @@ public:
     /// @brief Signal the loop to stop and release all resources.
     void shutdown();
 
-
 private:
     /// @brief Apply a single event to the ECS registry.
     /// @param event The event to process.

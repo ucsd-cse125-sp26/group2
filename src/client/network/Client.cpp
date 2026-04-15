@@ -3,6 +3,13 @@
 
 #include "Client.hpp"
 
+#include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/Position.hpp"
+#include "ecs/components/PreviousPosition.hpp"
+#include "network/PacketType.hpp"
+#include "network/RegistrySerialization.hpp"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_timer.h>
 
@@ -48,17 +55,66 @@ void Client::shutdown()
     }
 }
 
-bool Client::send(const void* data, int len)
+bool Client::send(const void* data, uint32_t len)
 {
-    auto msgLen = static_cast<Uint32>(len);
-    NET_WriteToStreamSocket(msgStream.socket, &msgLen, sizeof(msgLen));
-    return NET_WriteToStreamSocket(msgStream.socket, data, len);
+    return msgStream.send(data, len);
 }
 
-bool Client::poll()
+bool Client::sendInputSnapshot(const InputSnapshot& snap)
 {
-    msgStream.poll([](const void* data, Uint32 size) {
-        SDL_Log("Received (%d bytes): %.*s", size, size, reinterpret_cast<const char*>(data));
+    uint8_t buf[1 + sizeof(InputSnapshot)];
+    buf[0] = static_cast<uint8_t>(PacketType::INPUT);
+    std::memcpy(buf + 1, &snap, sizeof(InputSnapshot));
+    return send(buf, sizeof(buf));
+}
+
+bool Client::poll(Registry& registry, std::optional<entt::entity>& playerEntity)
+{
+    // packet format is 4 byte length prefix
+    bool ok = msgStream.poll([&](const void* data, Uint32 size) {
+        if (size < 1)
+            return;
+        auto type = static_cast<PacketType>(static_cast<const uint8_t*>(data)[0]);
+        const uint8_t* payload = static_cast<const uint8_t*>(data) + 1;
+        uint32_t payloadSize = size - 1;
+
+        switch (type) {
+        case PacketType::ASSIGN_CLIENT_ID:
+            if (payloadSize != sizeof(entt::entity)) {
+                SDL_Log("Client: received ASSIGN_CLIENT_ID packet of invalid size %u (expected %zu)",
+                        payloadSize,
+                        sizeof(entt::entity));
+                return;
+            }
+            entt::entity assignedEntity;
+            std::memcpy(&assignedEntity, payload, sizeof(entt::entity));
+            playerEntity = assignedEntity;
+            break;
+        case PacketType::UPDATE_REGISTRY:
+            if (!registryLoader)
+                registryLoader.emplace(registry);
+            registryLoader->apply(payload, payloadSize);
+
+            if (playerEntity) {
+                auto local = registryLoader->map(*playerEntity);
+                if (local != entt::null && !registry.all_of<LocalPlayer>(local)) {
+                    registry.emplace<LocalPlayer>(local);
+                    registry.emplace<InputSnapshot>(local);
+                    registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+                    registry.emplace<CollisionShape>(local);
+                }
+            };
+            break;
+        default:
+            SDL_Log("Client: unknown message type %d", static_cast<int>(type));
+        }
     });
-    return false;
+
+    if (!ok) {
+        SDL_Log("Client: server dead");
+        NET_DestroyStreamSocket(msgStream.socket);
+        return false;
+    }
+
+    return ok;
 }

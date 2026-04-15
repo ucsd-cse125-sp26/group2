@@ -4,14 +4,15 @@
 #pragma once
 
 #include "ecs/components/ClientId.hpp"
+#include "ecs/registry/Registry.hpp"
 #include "network/MessageStream.hpp"
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
 #include <SDL3_net/SDL_net.h>
-#include <vector>
 #include <entt/entity/entity.hpp>
+#include <vector>
 
 /// @brief TCP stream socket — receives client packets and echoes them back.
 ///
@@ -48,14 +49,17 @@ public:
 
     /// @brief Update client with new entity id.
     /// @return true if sent, otherwise false.
-    static bool notifyPlayerClientId(ClientId clientId, entt::entity playerEntity);
+    bool notifyPlayerClientId(ClientId clientId, entt::entity playerEntity);
+
+    /// @brief Broadcast the full registry state to all clients.
+    void broadcastRegistry(const Registry& registry);
 
 private:
     /// @brief Per-client connection state.
     struct Connection
     {
-        MessageStream msgStream; ///< Framed message stream for this client.
-        ClientId clientId;       ///< Unique identifier assigned on accept.
+        MessageStream msgStream;    ///< Framed message stream for this client.
+        ClientId clientId;          ///< Unique identifier assigned on accept.
         bool pendingInitialization; ///< True if waiting for Game to initialize player entity.
     };
 
@@ -68,10 +72,12 @@ private:
     /// @brief Generate next unique client ID
     ClientId getNextClientId();
 
-    NET_Server* server = nullptr;    ///< Underlying SDL_net server handle.
+    bool send(const ClientId& clientId, const void* data, int len);
 
-    std::vector<Connection> clients; ///< Currently connected clients.
-    EventQueue eventQueue;           ///< Incoming events awaiting processing.
+    NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 
-    ClientId nextClientId;           ///< Counter for assigning client IDs.
+    std::unordered_map<ClientId, Connection> clients; ///< Currently connected clients.
+    EventQueue eventQueue;                            ///< Incoming events awaiting processing.
+
+    ClientId nextClientId;                            ///< Counter for assigning client IDs.
 };

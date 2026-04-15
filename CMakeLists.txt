@@ -439,6 +439,9 @@ add_executable(group2
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/RegistryArchive.hpp
+        src/network/RegistrySerialization.hpp
+        src/network/RegistrySerialization.cpp
         src/ecs/components/ClientId.hpp
 )
 
@@ -547,6 +550,9 @@ add_executable(server
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/RegistryArchive.hpp
+        src/network/RegistrySerialization.hpp
+        src/network/RegistrySerialization.cpp
         src/ecs/components/ClientId.hpp
 )
 

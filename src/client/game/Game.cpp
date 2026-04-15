@@ -124,21 +124,21 @@ bool Game::init()
     }
 
     // Spawn the local player entity with all physics and input components.
-    const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
-    const entt::entity k_player = registry.create();
-    registry.emplace<Position>(k_player, k_startPos);
-    registry.emplace<PreviousPosition>(k_player, k_startPos);
-    registry.emplace<Velocity>(k_player);
-    registry.emplace<CollisionShape>(k_player);
-    registry.emplace<PlayerState>(k_player);
-    registry.emplace<InputSnapshot>(k_player);
-    registry.emplace<LocalPlayer>(k_player);
-    registry.emplace<WeaponState>(k_player);
+    // const glm::vec3 k_startPos{0.0f, 200.0f, 0.0f};
+    // const entt::entity k_player = registry.create();
+    // registry.emplace<Position>(k_player, k_startPos);
+    // registry.emplace<PreviousPosition>(k_player, k_startPos);
+    // registry.emplace<Velocity>(k_player);
+    // registry.emplace<CollisionShape>(k_player);
+    // registry.emplace<PlayerState>(k_player);
+    // registry.emplace<InputSnapshot>(k_player);
+    // registry.emplace<LocalPlayer>(k_player);
+    // registry.emplace<WeaponState>(k_player);
 
-    // Attach a Renderable for the player model (Wraith).
-    // The local player's model is rendered for other clients (skipped for self in 1P mode).
-    if (wraithModelIdx >= 0)
-        registry.emplace<Renderable>(k_player, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
+    // // Attach a Renderable for the player model (Wraith).
+    // // The local player's model is rendered for other clients (skipped for self in 1P mode).
+    // if (wraithModelIdx >= 0)
+    //     registry.emplace<Renderable>(k_player, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
 
     // Spawn a visible animated character in the world (Mixamo run animation).
     if (animatedModelIdx >= 0) {
@@ -446,23 +446,22 @@ SDL_AppResult Game::iterate()
         if (inputSyncedWithPhysics && mouseCaptured)
             systems::runMovementKeys(registry);
 
-        while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
-            accumulator -= k_physicsDt;
+        // while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
+        //     accumulator -= k_physicsDt;
+        //
+        //     // Snapshot position before each tick so the last tick's delta is
+        //     // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
+        //     registry.view<Position, PreviousPosition>().each(
+        //         [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+        //
+        //     systems::runMovement(registry, k_physicsDt, physics::testWorld());
+        //     systems::runCollision(registry, k_physicsDt, physics::testWorld());
+        //     ++tickCount;
+        //     ++ticksThisFrame;
+        //     ++statsPhysTicks;
+        // }
 
-            // Snapshot position before each tick so the last tick's delta is
-            // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
-            registry.view<Position, PreviousPosition>().each(
-                [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
-
-            systems::runMovement(registry, k_physicsDt, physics::testWorld());
-            systems::runCollision(registry, k_physicsDt, physics::testWorld());
-            ++tickCount;
-            ++ticksThisFrame;
-            ++statsPhysTicks;
-        }
-
-        while (client.poll()) {
-        }
+        client.poll(registry, playerEntity);
 
         physicsRan = true;
     }

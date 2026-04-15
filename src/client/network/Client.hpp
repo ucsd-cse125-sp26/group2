@@ -3,11 +3,16 @@
 
 #pragma once
 
+#include "ecs/components/InputSnapshot.hpp"
+#include "ecs/registry/Registry.hpp"
 #include "network/MessageStream.hpp"
+#include "network/RegistrySerialization.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <entt/entt.hpp>
+#include <optional>
 
 /// @brief TCP stream client — sends input to the server and receives state updates.
 class Client
@@ -26,13 +31,17 @@ public:
     /// @param data  Pointer to the payload bytes.
     /// @param size  Payload length in bytes.
     /// @return False if the send fails.
-    bool send(const void* data, int size);
+    bool send(const void* data, uint32_t size);
+
+    bool sendInputSnapshot(const InputSnapshot& snap);
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
-    bool poll();
+    bool poll(Registry& registry, std::optional<entt::entity>& playerEntity);
 
 private:
-    MessageStream msgStream;           ///< Framed message stream for server communication.
+    MessageStream msgStream{nullptr};  ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr; ///< Resolved server address.
+    std::optional<registry_serialization::Loader> registryLoader;
+    bool localPlayerTagged = false;
 };
