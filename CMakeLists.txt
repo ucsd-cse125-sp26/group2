@@ -47,7 +47,7 @@ block()
     set(BUILD_SHARED_LIBS OFF)
     FetchContent_Declare(
         SDL3_net
-        GIT_REPOSITORY https://github.com/libsdl-org/SDL_net.git
+        GIT_REPOSITORY https://github.com/cedricdvd/SDL_net.git
         GIT_TAG        main
         GIT_SHALLOW    TRUE
     )
@@ -95,6 +95,10 @@ set(ASSIMP_BUILD_FBX_IMPORTER            ON  CACHE BOOL "" FORCE)
 # Use Assimp's own bundled minizip — avoids needing system unzip.h in a
 # non-standard include path (e.g. /usr/include/minizip/ on Ubuntu 24.04).
 set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)
+# Use Assimp's own bundled zlib — prevents assimp from adding the Xcode SDK
+# usr/include path as a plain -I flag, which breaks LLVM 18's libc++ header
+# ordering on macOS (the C++ headers can't find their C counterparts).
+set(ASSIMP_BUILD_ZLIB                    ON  CACHE BOOL "" FORCE)
 # Don't let Assimp turn its own -Wall warnings into -Werror; newer Clang
 # emits -Wnontrivial-memcall on Assimp internals that we cannot patch.
 set(ASSIMP_WARNINGS_AS_ERRORS            OFF CACHE BOOL "" FORCE)
@@ -108,6 +112,18 @@ block()
     )
     FetchContent_MakeAvailable(assimp)
 endblock()
+# Patch assimp's bundled zlib/zutil.h: the legacy fdopen-as-NULL macro
+# triggers a hard parse error under clang 18 + macOS 26 SDK because NULL
+# expands to ((void*)0), which breaks _stdio.h's fdopen declaration.
+# Modern macOS has fdopen, so we just remove the bogus macro.
+if(EXISTS "${assimp_SOURCE_DIR}/contrib/zlib/zutil.h")
+    file(READ "${assimp_SOURCE_DIR}/contrib/zlib/zutil.h" _zutil)
+    string(REPLACE
+        "#        define fdopen(fd,mode) NULL /* No fdopen() */"
+        "/* fdopen is available on modern macOS — macro removed */"
+        _zutil "${_zutil}")
+    file(WRITE "${assimp_SOURCE_DIR}/contrib/zlib/zutil.h" "${_zutil}")
+endif()
 
 # stb — single-header image decoding (used by ModelLoader to decompress the
 # PNG/JPEG textures embedded in GLB files).  stb ships no CMakeLists.txt, so

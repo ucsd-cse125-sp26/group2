@@ -76,6 +76,7 @@ void Server::acceptClients()
         return;
     } else if (socket) {
         SDL_Log("Server: accepted new client");
+        NET_SetStreamSocketNoDelay(socket, true);
         ClientId clientId = getNextClientId();
         clients.insert(
             {clientId,

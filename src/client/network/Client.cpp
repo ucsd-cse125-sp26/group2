@@ -24,6 +24,7 @@ bool Client::init(const char* addr, Uint16 port)
         SDL_Log("Failed to create client %s", SDL_GetError());
         return false;
     }
+    NET_SetStreamSocketNoDelay(sock, true);
 
     if (NET_WaitUntilConnected(sock, -1) == NET_FAILURE) {
         SDL_Log("Client: connection failed: %s", SDL_GetError());
