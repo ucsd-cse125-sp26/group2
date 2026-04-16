@@ -25,6 +25,52 @@ option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
 
+# ---- Build acceleration ----
+
+# ccache — cache compiled object files so rebuilds (even after rm -rf build/)
+# return cached results instantly.  Auto-detected; install once per machine:
+#   Linux:   sudo apt install ccache
+#   macOS:   brew install ccache
+#   Windows: choco install ccache
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER   "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    message(STATUS "Compiler cache: ccache (${CCACHE_PROGRAM})")
+else()
+    message(STATUS "ccache not found — builds will not be cached "
+                   "(install for much faster rebuilds)")
+endif()
+
+# After the first successful configure, skip git-fetch checks on every
+# subsequent re-configure.  This shaves seconds off every cmake invocation
+# and allows fully-offline rebuilds.
+# To update a dep: cmake --preset debug -DFETCHCONTENT_UPDATES_DISCONNECTED=OFF
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL
+    "Skip FetchContent git-fetch after first successful populate")
+
+# Use the mold linker on Linux for ~5-10× faster linking.
+# Gracefully falls back to the default linker if mold is not installed.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(MOLD_LINKER mold)
+    if(MOLD_LINKER)
+        set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=mold")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=mold")
+        message(STATUS "Linker: mold (${MOLD_LINKER})")
+    else()
+        message(STATUS "mold not found — using default linker "
+                       "(install with: sudo apt install mold)")
+    endif()
+endif()
+
+# Split DWARF debug info on Linux — keeps .o files smaller and dramatically
+# speeds up linking for Debug builds.  Not supported by Apple Clang or MSVC.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options($<$<CONFIG:Debug>:-gsplit-dwarf>)
+    message(STATUS "Debug builds will use -gsplit-dwarf")
+endif()
+
 # ---- Dependencies ----
 
 # SDL3 — window, input, GPU pipeline (Vulkan/Metal/DX12) + OpenGL context
@@ -566,6 +612,25 @@ target_link_libraries(group2 PRIVATE
     tomlplusplus::tomlplusplus
 )
 
+# ---- Client precompiled header ----
+# Heavy headers used across most client sources — compiled once, reused everywhere.
+target_precompile_headers(group2 PRIVATE
+    <string>
+    <vector>
+    <array>
+    <memory>
+    <cstdint>
+    <unordered_map>
+    <functional>
+    <algorithm>
+    <cmath>
+    <glm/glm.hpp>
+    <glm/gtc/matrix_transform.hpp>
+    <glm/gtc/quaternion.hpp>
+    <entt/entt.hpp>
+    <SDL3/SDL.h>
+)
+
 # Copy assets (models, textures, …) next to the binary so the renderer can
 # find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
@@ -637,6 +702,21 @@ target_link_libraries(server PRIVATE
     EnTT::EnTT
     glm::glm
     tomlplusplus::tomlplusplus
+)
+
+# ---- Server precompiled header ----
+target_precompile_headers(server PRIVATE
+    <string>
+    <vector>
+    <array>
+    <memory>
+    <cstdint>
+    <unordered_map>
+    <functional>
+    <algorithm>
+    <glm/glm.hpp>
+    <entt/entt.hpp>
+    <SDL3/SDL.h>
 )
 
 # Copy config.toml next to the server binary.
