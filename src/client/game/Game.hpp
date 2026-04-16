@@ -88,6 +88,9 @@ private:
     int fpsHistoryCount = 0;                 ///< Valid sample count (saturates at k_fpsHistorySize).
     Uint64 prevRenderTime = 0;               ///< Perf counter at the last render call.
 
+    // Network ping timer
+    float pingTimer = 0.0f; ///< Accumulator for periodic PING sends.
+
     // Performance stats -- refreshed every 0.5 s
     Uint64 statsPrevTime = 0;       ///< Perf counter at the last stats snapshot.
     int statsPhysTicks = 0;         ///< Physics ticks accumulated since last snapshot.

@@ -428,6 +428,14 @@ SDL_AppResult Game::iterate()
 
     systems::runInputSend(registry, client);
 
+    // Network stats: send periodic pings and update bandwidth counters
+    client.updateStats(frameTime);
+    pingTimer += frameTime;
+    if (pingTimer >= 1.0f) {
+        client.sendPing();
+        pingTimer = 0.0f;
+    }
+
     // 4. Physics -- always 128 Hz, up to k_maxTicksPerFrame catch-up
     bool physicsRan = false;
     int ticksThisFrame = 0;
@@ -742,6 +750,7 @@ SDL_AppResult Game::iterate()
                     statsFPSMax,
                     statsFPS1pLow,
                     statsFPS5pLow);
+    debugUI.buildNetworkUI(client.getNetStats());
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     debugUI.buildRenderTogglesUI(renderer.toggles);
     debugUI.buildLightingUI(renderer);

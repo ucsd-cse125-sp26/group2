@@ -129,28 +129,17 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         Event event = systems::runInputReceive(payload);
         event.clientId = conn.clientId;
         eventQueue.enqueue(event);
-        // SDL_Log("Server: received INPUT packet from client %d", event.clientId.value);
+        break;
+    }
 
-        // SDL_Log("Server: received input packet:\n"
-        //         "\tforward=%d\n"
-        //         "\tback=%d\n"
-        //         "\tleft=%d\n"
-        //         "\tright=%d\n"
-        //         "\tjump=%d\n"
-        //         "\tcrouch=%d\n"
-        //         "\tyaw=%.2f\n"
-        //         "\tpitch=%.2f\n"
-        //         "\troll=%.2f",
-        //         event.movementIntent.forward,
-        //         event.movementIntent.back,
-        //         event.movementIntent.left,
-        //         event.movementIntent.right,
-        //         event.movementIntent.jump,
-        //         event.movementIntent.crouch,
-        //         event.movementIntent.yaw,
-        //         event.movementIntent.pitch,
-        //         event.movementIntent.roll);
-
+    case PacketType::PING: {
+        // Echo the payload back as a PONG so the client can measure RTT.
+        uint8_t buf[1 + sizeof(Uint64)];
+        buf[0] = static_cast<uint8_t>(PacketType::PONG);
+        if (payloadLen == sizeof(Uint64)) {
+            std::memcpy(buf + 1, payload, sizeof(Uint64));
+            conn.msgStream.send(buf, static_cast<Uint32>(sizeof(buf)));
+        }
         break;
     }
 
