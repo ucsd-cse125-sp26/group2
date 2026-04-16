@@ -10,7 +10,7 @@
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
-#include "renderer/Renderer.hpp"
+#include "renderer/HybridRenderer.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -49,7 +49,7 @@ private:
     NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-    Renderer renderer;                           ///< Owns the GPU pipeline and ImGui render backend.
+    HybridRenderer renderer;                     ///< Routes each call to the legacy or new renderer.
     Registry registry;                           ///< The shared ECS registry.
     Client client;                               ///< UDP network client.
     ParticleSystem particleSystem;               ///< Client-side VFX particle system.

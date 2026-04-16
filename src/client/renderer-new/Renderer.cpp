@@ -134,15 +134,6 @@ ImGui_ImplSDLGPU3_InitInfo createImGuiInfo(SDL_GPUDevice* device, SDL_Window* wi
 }
 
 /// @brief Load a compiled shader from disk and create an SDL GPU shader object.
-/// @param dev                  The GPU device.
-/// @param path                 Path to the compiled shader file (.spv or .msl).
-/// @param format               Shader format (SPIR-V or MSL).
-/// @param stage                Vertex or fragment stage.
-/// @param samplerCount         Number of texture samplers declared in the shader.
-/// @param uniformBufferCount   Number of uniform buffers declared in the shader.
-/// @param storageBufferCount   Number of storage buffers declared in the shader.
-/// @param storageTextureCount  Number of storage textures declared in the shader.
-/// @return The created shader, or nullptr on failure (error logged via SDL_Log).
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
                           const char* path,
                           SDL_GPUShaderFormat format,
@@ -161,7 +152,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     size_t codeSize = 0;
     void* code = SDL_LoadFile(fullPath, &codeSize);
     if (!code) {
-        SDL_Log("Renderer: failed to load shader %s: %s", fullPath, SDL_GetError());
+        SDL_Log("NewRenderer: failed to load shader %s: %s", fullPath, SDL_GetError());
         return nullptr;
     }
 
@@ -175,37 +166,30 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     info.num_storage_buffers = storageBufferCount;
     info.num_storage_textures = storageTextureCount;
 
-    // SPIR-V entry point is "main"; spirv-cross renames it to "main0" in MSL
-    // (Metal forbids a function literally named "main").
     info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(dev, &info);
     SDL_free(code);
 
     if (!shader)
-        SDL_Log("Renderer: SDL_CreateGPUShader(%s) failed: %s", path, SDL_GetError());
+        SDL_Log("NewRenderer: SDL_CreateGPUShader(%s) failed: %s", path, SDL_GetError());
     return shader;
 }
 
 SDL_GPUGraphicsPipeline*
 createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderFormat shaderFormat)
 {
-    // --- Geometry Shaders
-    // --- If you change the shader names/locations or
-    // --- buffer/texture counts, then update them here
-    // Vertex Shader
     const char* const vertexShaderPath = "shaders/geometry.vert";
     Uint32 vertexShaderSamplerCount = 0;
     Uint32 vertexShaderUniformBufferCount = 1;
     Uint32 vertexShaderStorageBufferCount = 0;
     Uint32 vertexShaderStorageTextureCount = 0;
-    // Fragment Shader
+
     const char* const fragmentShaderPath = "shaders/geometry.frag";
     Uint32 fragmentShaderSamplerCount = 0;
     Uint32 fragmentShaderUniformBufferCount = 0;
     Uint32 fragmentShaderStorageBufferCount = 0;
     Uint32 fragmentShaderStorageTextureCount = 0;
-    // ---
 
     SDL_GPUShader* vertexShader = loadShader(device,
                                              vertexShaderPath,
@@ -227,16 +211,12 @@ createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderF
     if (!vertexShader || !fragmentShader) {
         SDL_ReleaseGPUShader(device, vertexShader);
         SDL_ReleaseGPUShader(device, fragmentShader);
-        return nullptr; // false
+        return nullptr;
     }
 
     SDL_GPUColorTargetDescription colorTarget{};
     colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
 
-    //////////////////////////////////////////////////////////// VERTEX_INPUT_STATE: INTERLEAVED POS/NORM/UV
-    ///////////////////////////////////////////////////////////////
-
-    //////////////////////////////////////////////////////////// VERTEX DESCRIPTIONS
     std::vector<SDL_GPUVertexBufferDescription> vertexBufferDescriptions;
 
     SDL_GPUVertexBufferDescription vBufferDescrFullInterleaved;
@@ -247,7 +227,6 @@ createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderF
 
     vertexBufferDescriptions.push_back(vBufferDescrFullInterleaved);
 
-    //////////////////////////////////////////////////////////// VERTEX ATTRIBUTES
     std::vector<SDL_GPUVertexAttribute> vertexAttributes;
 
     SDL_GPUVertexAttribute vertexAttribPos{};
@@ -278,10 +257,7 @@ createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderF
     vertexInputState.num_vertex_attributes = static_cast<Uint32>(vertexAttributes.size());
     vertexInputState.vertex_attributes = vertexAttributes.data();
 
-    //////////////////////////////////////////////////////////// PIPELINE CREATE INFO
-    ///////////////////////////////////////////////////////////////
-
-    SDL_GPUGraphicsPipelineCreateInfo pci{}; // Missing .multisample_state
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
     pci.vertex_shader = vertexShader;
     pci.fragment_shader = fragmentShader;
     pci.vertex_input_state = vertexInputState;
@@ -296,7 +272,6 @@ createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderF
     pci.depth_stencil_state.enable_depth_write = true;
 
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    // pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
     pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
@@ -309,58 +284,82 @@ createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderF
 
 } // namespace
 
-bool Renderer::init(SDL_Window* win)
+bool NewRenderer::supports(RendererFeature feature) const
 {
-    // Register window
-    window_ = win;
+    // As the graphics team re-implements more of the pipeline here, flip each
+    // feature on below. Anything left as `false` will fall through to the
+    // legacy renderer via the HybridRenderer dispatcher.
+    switch (feature) {
+    case RendererFeature::Init:
+    case RendererFeature::DrawFrame:
+    case RendererFeature::Quit:
+        return true;
+    default:
+        return false;
+    }
+}
 
-    // Register device
+bool NewRenderer::init(SDL_Window* win)
+{
+    window_ = win;
+    ownsDevice_ = true;
+    ownsWindowClaim_ = true;
+
     device_ = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, false, nullptr);
     if (!device_) {
-        SDL_Log("Renderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
+        SDL_Log("NewRenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
     }
-    SDL_Log("Renderer: GPU driver = %s", SDL_GetGPUDeviceDriver(device_));
+    SDL_Log("NewRenderer: GPU driver = %s", SDL_GetGPUDeviceDriver(device_));
 
-    // Register window to device
     if (!SDL_ClaimWindowForGPUDevice(device_, window_)) {
-        SDL_Log("Renderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
+        SDL_Log("NewRenderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
         return false;
     }
 
-    // Select shader format
-    SDL_GPUShaderFormat activeFormat = selectFormat(device_);
-    if (activeFormat == SDL_GPU_SHADERFORMAT_INVALID) {
-        SDL_Log("Renderer: no supported shader format (got 0x%x)",
+    // Standalone path also initialises the ImGui GPU backend. The shared-device
+    // path (used by HybridRenderer) skips this because the legacy renderer owns it.
+    ImGui_ImplSDLGPU3_InitInfo imguiInfo = createImGuiInfo(device_, window_);
+    if (!ImGui_ImplSDLGPU3_Init(&imguiInfo)) {
+        SDL_Log("NewRenderer: ImGui_ImplSDLGPU3_Init failed");
+        return false;
+    }
+
+    return initCommon(win);
+}
+
+bool NewRenderer::init(SDL_Window* win, SDL_GPUDevice* sharedDevice)
+{
+    window_ = win;
+    device_ = sharedDevice;
+    ownsDevice_ = false;      ///< Device lifetime belongs to the other renderer.
+    ownsWindowClaim_ = false; ///< Window claim also belongs to the other renderer.
+    // ImGui GPU backend is initialised by the device owner -- don't double-init here.
+    return initCommon(win);
+}
+
+bool NewRenderer::initCommon(SDL_Window* /*win*/)
+{
+    shaderFormat_ = selectFormat(device_);
+    if (shaderFormat_ == SDL_GPU_SHADERFORMAT_INVALID) {
+        SDL_Log("NewRenderer: no supported shader format (got 0x%x)",
                 static_cast<unsigned>(SDL_GetGPUShaderFormats(device_)));
         return false;
     }
 
-    // ImGui GPU backend setup.
-    // The ImGui context and SDL3 input backend were already initialised by
-    // DebugUI::init(). We just hook up the GPU render backend here.
-    ImGui_ImplSDLGPU3_InitInfo imguiInfo = createImGuiInfo(device_, window_);
-    if (!ImGui_ImplSDLGPU3_Init(&imguiInfo)) {
-        SDL_Log("Renderer: ImGui_ImplSDLGPU3_Init failed");
-        return false;
-    }
-
-    // Geometry pipeline
-    pipeline_ = createGeometryPipeline(device_, window_, activeFormat);
+    pipeline_ = createGeometryPipeline(device_, window_, shaderFormat_);
     if (!pipeline_) {
-        SDL_Log("Renderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
+        SDL_Log("NewRenderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
         return false;
     }
 
-    // Initial camera — eye/target are overridden every frame by drawFrame().
-    // near/far must be set correctly here; they persist across setAspect() calls.
-    camera_ = Camera(glm::vec3{0.0f, 0.0f, 20.0f},  // eye  (overridden each frame)
-                     glm::vec3{0.0f, 100.0f, 1.0f}, // target
-                     glm::vec3{0.0f, 1.0f, 0.0f},   // up
-                     fovyDegrees_,
-                     1.0f,
-                     nearPlane_,
-                     farPlane_);
+    camera_ = NewCamera(glm::vec3{0.0f, 0.0f, 20.0f},
+                        glm::vec3{0.0f, 100.0f, 1.0f},
+                        glm::vec3{0.0f, 1.0f, 0.0f},
+                        fovyDegrees_,
+                        1.0f,
+                        nearPlane_,
+                        farPlane_);
 
     for (int i = 0; i < CUBE_VERTEX_COUNT; i++) {
         constexpr auto k_uvNot = glm::vec2(0.0f);
@@ -371,8 +370,6 @@ bool Renderer::init(SDL_Window* win)
         cubeVertexData[i] = vi;
     }
 
-    //////////////////////////////////////////////////////////////////// CREATE VAO BUFFERS
-    //////////////////////////////////////////////////////////////////////////
     Uint32 numVertices = sizeof(cubeVertexData) / sizeof(Vertex);
     Uint32 numIndices = sizeof(indices) / sizeof(Uint32);
 
@@ -383,12 +380,7 @@ bool Renderer::init(SDL_Window* win)
     iBufferInfo_.bufferSize = numIndices * sizeof(Uint32);
     iBufferInfo_.gpuBuff = createGPUBuffer(iBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
     iBufferInfo_.srcData = nullptr;
-    //////////////////////////////////////////////////////////////////// CREATE VAO BUFFERS
-    //////////////////////////////////////////////////////////////////////////
 
-    std::cout << "copy vao data to new transfer buffer" << std::endl;
-    //////////////////////////////////////////////////////////////////// COPY VAO DATA TO NEW TRANSFERBUFFER
-    //////////////////////////////////////////////////////////////////////////
     size_t vaoTransferBufferSize = vBufferInfo_.bufferSize + iBufferInfo_.bufferSize;
     SDL_GPUTransferBuffer* vaoTransferBuffer = createTransferBuffer(vaoTransferBufferSize, true);
 
@@ -400,50 +392,34 @@ bool Renderer::init(SDL_Window* win)
     SDL_memcpy(indexTransferBufferData, indices, iBufferInfo_.bufferSize);
 
     SDL_UnmapGPUTransferBuffer(device_, vaoTransferBuffer);
-    //////////////////////////////////////////////////////////////////// COPY VAO DATA TO NEW TRANSFERBUFFER
-    //////////////////////////////////////////////////////////////////////////
 
-    std::cout << "upload transfer buffer to gpu buffer" << std::endl;
-    //////////////////////////////////////////////////////////////////// UPLOAD TRANSFERBUFFER DATA TO GPU BUFFER
-    //////////////////////////////////////////////////////////////////////////
     SDL_GPUCommandBuffer* cmdCopyBuff = SDL_AcquireGPUCommandBuffer(device_);
     SDL_GPUCopyPass* vaoCopyPass = SDL_BeginGPUCopyPass(cmdCopyBuff);
 
-    std::cout << "upload vertexBuffer Data" << std::endl;
     SDL_GPUTransferBufferLocation vertexTransferBufferLocation = {.transfer_buffer = vaoTransferBuffer, .offset = 0};
     SDL_GPUBufferRegion vertexBufferRegion = {
         .buffer = vBufferInfo_.gpuBuff, .offset = 0, .size = vBufferInfo_.bufferSize};
     SDL_UploadToGPUBuffer(vaoCopyPass, &vertexTransferBufferLocation, &vertexBufferRegion, false);
 
-    std::cout << "upload indexBuffer Data" << std::endl;
     SDL_GPUTransferBufferLocation indexTransferBufferLocation = {.transfer_buffer = vaoTransferBuffer,
                                                                  .offset = vBufferInfo_.bufferSize};
     SDL_GPUBufferRegion indexBufferRegion = {
         .buffer = iBufferInfo_.gpuBuff, .offset = 0, .size = iBufferInfo_.bufferSize};
     SDL_UploadToGPUBuffer(vaoCopyPass, &indexTransferBufferLocation, &indexBufferRegion, false);
 
-    std::cout << "end GPU copy pass" << std::endl;
     SDL_EndGPUCopyPass(vaoCopyPass);
-    std::cout << "release Transfer buffer" << std::endl;
     SDL_ReleaseGPUTransferBuffer(device_, vaoTransferBuffer);
-    //////////////////////////////////////////////////////////////////// UPLOAD TRANSFERBUFFER DATA TO GPU BUFFER
-    //////////////////////////////////////////////////////////////////////////
     SDL_SubmitGPUCommandBuffer(cmdCopyBuff);
 
     return true;
 }
 
-void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch)
+void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, float /*roll*/)
 {
-
-    // ── first-person camera ─────────────────────────────────────────────────
-    // Forward vector from yaw (horizontal) and pitch (vertical).
-    // Convention matches InputSnapshot: yaw=0 → +Z, pitch>0 → looking down.
     const float cosPitch = std::cos(pitch);
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
     camera_.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
 
-    // ── GPU frame ───────────────────────────────────────────────────────────
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
         return;
@@ -463,7 +439,6 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     camera_.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
-    // All geometry is pre-positioned in world space, so model = identity.
     Matrices mats{};
     mats.model = glm::mat4(1.0f);
     mats.model[3] = glm::vec4(0.0f, 100.0f, 0.0f, 1.0f);
@@ -472,15 +447,13 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
 
-    // Upload ImGui vertex/index buffers via an internal copy pass.
-    // This must happen BEFORE the render pass begins.
     ImDrawData* const k_drawData = ImGui::GetDrawData();
     if (k_drawData)
         ImGui_ImplSDLGPU3_PrepareDrawData(k_drawData, cmd);
 
     SDL_GPUColorTargetInfo ct{};
     ct.texture = swapchain;
-    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}; // dark-blue sky
+    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f};
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
     ct.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -496,33 +469,26 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
     SDL_BindGPUGraphicsPipeline(pass, pipeline_);
-    /////////////////////////////////////////////////////////////////// BIND GPUBUFFERBINDINGS TO RENDERPASS
-    //////////////////////////////////////////////////////////////////////////
-    std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
 
+    std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
     vertexBufferBindings.push_back(SDL_GPUBufferBinding{.buffer = vBufferInfo_.gpuBuff, .offset = 0});
     SDL_BindGPUVertexBuffers(pass, 0, vertexBufferBindings.data(), static_cast<Uint32>(vertexBufferBindings.size()));
 
     SDL_GPUBufferBinding indexBufferBinding = {.buffer = iBufferInfo_.gpuBuff, .offset = 0};
     SDL_BindGPUIndexBuffer(pass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-    /////////////////////////////////////////////////////////////////// BIND GPUBUFFERBINDINGS TO RENDERPASS
-    //////////////////////////////////////////////////////////////////////////
 
     SDL_DrawGPUIndexedPrimitives(pass, 36, 1, 0, 0, 0);
-    // ImGui overlay — drawn last so it sits on top of scene geometry.
+
     if (k_drawData)
         ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
 
     SDL_EndGPURenderPass(pass);
-
     SDL_SubmitGPUCommandBuffer(cmd);
-    return;
 }
 
-void Renderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
-                                     const std::vector<ModelBufferInfo>& modelBuffersInfo) const
+void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
+                                        const std::vector<ModelBufferInfo>& modelBuffersInfo) const
 {
-    ///////////////////////////////// TRANSFERBUFFER SETUP
     size_t vaoTransferBufferSize = 0;
     for (const auto k_bufferInfo : modelBuffersInfo) {
         vaoTransferBufferSize += k_bufferInfo.bufferSize;
@@ -530,18 +496,15 @@ void Renderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
     SDL_GPUTransferBuffer* vaoTransferBuffer = createTransferBuffer(vaoTransferBufferSize, true);
     auto* vaoTransferData = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(device_, vaoTransferBuffer, false));
 
-    ///////////////////////////////// COPY DATA TO TRANSFERBUFFER
     Uint32 vaoTransferBufferOffset = 0;
     for (const auto k_bufferInfo : modelBuffersInfo) {
         auto* transferBufferData = (vaoTransferData + vaoTransferBufferOffset);
         SDL_memcpy(transferBufferData, cubeVertexData, k_bufferInfo.bufferSize);
-
         vaoTransferBufferOffset += k_bufferInfo.bufferSize;
     }
 
     SDL_UnmapGPUTransferBuffer(device_, vaoTransferBuffer);
 
-    ///////////////////////////////// UPLOAD TRANSFERBUFFER TO GPU
     SDL_GPUCopyPass* vaoCopyPass = SDL_BeginGPUCopyPass(cmd);
 
     SDL_GPUTransferBufferLocation vaoTransferBufferLocation = {.transfer_buffer = vaoTransferBuffer, .offset = 0};
@@ -559,25 +522,25 @@ void Renderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
     SDL_ReleaseGPUTransferBuffer(device_, vaoTransferBuffer);
 }
 
-SDL_GPUBuffer* Renderer::createGPUBuffer(const size_t bufferSize, const SDL_GPUBufferUsageFlags usage) const
+SDL_GPUBuffer* NewRenderer::createGPUBuffer(const size_t bufferSize, const SDL_GPUBufferUsageFlags usage) const
 {
     SDL_GPUBufferCreateInfo indexBufferCreateInfo{};
     indexBufferCreateInfo.size = bufferSize;
     indexBufferCreateInfo.usage = usage;
 
     return SDL_CreateGPUBuffer(device_, &indexBufferCreateInfo);
-};
+}
 
-SDL_GPUTransferBuffer* Renderer::createTransferBuffer(const size_t transferBufferSize, const bool upload) const
+SDL_GPUTransferBuffer* NewRenderer::createTransferBuffer(const size_t transferBufferSize, const bool upload) const
 {
     SDL_GPUTransferBufferCreateInfo transferBufferCreateInfo{};
     transferBufferCreateInfo.size = transferBufferSize;
     transferBufferCreateInfo.usage = upload ? SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD : SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 
     return SDL_CreateGPUTransferBuffer(device_, &transferBufferCreateInfo);
-};
+}
 
-bool Renderer::ensureDepthTexture(Uint32 w, Uint32 h)
+bool NewRenderer::ensureDepthTexture(Uint32 w, Uint32 h)
 {
     if (depthTexture && depthWidth_ == w && depthHeight_ == h)
         return true;
@@ -599,7 +562,7 @@ bool Renderer::ensureDepthTexture(Uint32 w, Uint32 h)
 
     depthTexture = SDL_CreateGPUTexture(device_, &info);
     if (!depthTexture) {
-        SDL_Log("Renderer: failed to create depth texture: %s", SDL_GetError());
+        SDL_Log("NewRenderer: failed to create depth texture: %s", SDL_GetError());
         return false;
     }
 
@@ -608,7 +571,7 @@ bool Renderer::ensureDepthTexture(Uint32 w, Uint32 h)
     return true;
 }
 
-void Renderer::quit()
+void NewRenderer::quit()
 {
     if (device_) {
         SDL_WaitForGPUIdle(device_);
@@ -616,17 +579,29 @@ void Renderer::quit()
         if (depthTexture)
             SDL_ReleaseGPUTexture(device_, depthTexture);
 
-        ImGui_ImplSDLGPU3_Shutdown();
+        if (vBufferInfo_.gpuBuff)
+            SDL_ReleaseGPUBuffer(device_, vBufferInfo_.gpuBuff);
+        if (iBufferInfo_.gpuBuff)
+            SDL_ReleaseGPUBuffer(device_, iBufferInfo_.gpuBuff);
 
         if (pipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
 
-        SDL_ReleaseWindowFromGPUDevice(device_, window_);
-        SDL_DestroyGPUDevice(device_);
+        if (ownsDevice_) {
+            // Only the device-owner tears down ImGui + the device itself.
+            ImGui_ImplSDLGPU3_Shutdown();
+            if (ownsWindowClaim_)
+                SDL_ReleaseWindowFromGPUDevice(device_, window_);
+            SDL_DestroyGPUDevice(device_);
+        }
     }
 
     depthTexture = nullptr;
     pipeline_ = nullptr;
+    vBufferInfo_ = {};
+    iBufferInfo_ = {};
     device_ = nullptr;
     window_ = nullptr;
+    ownsDevice_ = false;
+    ownsWindowClaim_ = false;
 }

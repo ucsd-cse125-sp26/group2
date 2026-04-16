@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Camera.hpp"
+#include "renderer/Camera.hpp" // legacy Camera type required by IRenderer contract
+#include "renderer/IRenderer.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -28,55 +30,98 @@ struct ModelBufferInfo
     Uint32 bufferSize;
 };
 
-/// @brief SDL3 GPU pipeline (Vulkan · Metal · DX12).
+/// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
 ///
-/// Also owns the `imgui_impl_sdlgpu3` render backend. The ImGui context and
-/// SDL3 input backend are owned by DebugUI — initialise DebugUI first, shut it down last.
+/// Implements `IRenderer` but only a handful of methods are meaningful today
+/// (`init`, `drawFrame`, `quit`). Everything else returns a no-op / sentinel;
+/// `supports(...)` reflects the truth so `HybridRenderer` routes unimplemented
+/// calls back to the legacy renderer.
+///
+/// As each feature comes online here, flip its entry on in `supports(...)` and
+/// remove the corresponding pass-through from the legacy renderer when ready.
 ///
 /// Shaders: `shaders/projective.vert` + `shaders/normal.frag`
 /// (compiled GLSL → SPIR-V at build time via glslc/glslangValidator).
-class Renderer
+class NewRenderer : public IRenderer
 {
 public:
+    /// @brief Report which `RendererFeature` entries the new renderer implements.
+    [[nodiscard]] bool supports(RendererFeature feature) const override;
+
     /// @brief Initialise the GPU device, pipeline, and ImGui GPU backend.
     /// @param window  The SDL window to render into.
     /// @return False on any fatal GPU error.
     /// @pre An ImGui context must already exist (created by DebugUI::init).
-    bool init(SDL_Window* window);
+    bool init(SDL_Window* window) override;
+
+    /// @brief Initialise against a pre-existing GPU device (shared with another
+    /// renderer). The provided device must already have claimed `window`.
+    /// Used by `HybridRenderer` so both renderers operate on the same device
+    /// — SDL3 only allows a single device to claim a given window.
+    bool init(SDL_Window* window, SDL_GPUDevice* sharedDevice);
 
     /// @brief Submit the scene geometry and ImGui draw data for one frame.
     /// @param eye    World-space camera eye position (interpolated, in Quake units).
     /// @param yaw    Horizontal look angle in radians (matches InputSnapshot::yaw).
     /// @param pitch  Vertical look angle in radians (positive = looking down).
-    void drawFrame(glm::vec3 eye, float yaw, float pitch);
+    /// @param roll   Camera roll in radians (currently ignored by the new renderer).
+    void drawFrame(glm::vec3 eye, float yaw, float pitch, float roll) override;
 
     /// @brief Release all GPU resources. Waits for GPU idle before freeing.
     /// @pre Call before the SDL window is destroyed.
-    void quit();
+    void quit() override;
+
+    // ---- Unimplemented IRenderer methods ----
+    // Marked as "not supported" via `supports()`. HybridRenderer never calls
+    // these, but they must exist for the class to be concrete.
+    [[nodiscard]] SDL_GPUDevice* getDevice() const override { return device_; }
+    [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const override { return shaderFormat_; }
+    [[nodiscard]] const Camera& getCamera() const override { return legacyCameraStub_; }
+    void setParticleSystem(ParticleSystem* /*ps*/) override {}
+    int loadSceneModel(const char* /*filename*/, glm::vec3 /*pos*/, float /*scale*/, bool /*flipUVs*/) override
+    {
+        return -1;
+    }
+    int uploadSceneModel(const LoadedModel& /*model*/) override { return -1; }
+    bool setVSync(bool /*enabled*/) override { return false; }
+    void updateModelMeshVertices(int /*modelIndex*/,
+                                 int /*meshIndex*/,
+                                 const ModelVertex* /*vertices*/,
+                                 Uint32 /*vertexCount*/) override
+    {}
+    void setEntityRenderList(std::vector<EntityRenderCmd> /*cmds*/) override {}
+    void setWeaponViewmodel(const WeaponViewmodel& /*vm*/) override {}
+    void requestScreenshot(const std::string& /*path*/) override {}
+    [[nodiscard]] int modelCount() const override { return 0; }
 
 private:
     SDL_Window* window_ = nullptr;                ///< The SDL window being rendered into.
     SDL_GPUDevice* device_ = nullptr;             ///< The SDL GPU device.
+    SDL_GPUShaderFormat shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
+    bool ownsDevice_ = false;                     ///< True if we created device_ ourselves.
+    bool ownsWindowClaim_ = false;                ///< True if we called ClaimWindow.
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr; ///< The scene graphics pipeline.
 
-    // Camera parameters used during init. Near/far are sized for Quake units.
     float fovyDegrees_ = 60.0f;
-    float nearPlane_ = 5.0f;                ///< Near clip (Quake units); 5 ≈ half a foot.
-    float farPlane_ = 15000.0f;             ///< Far clip; covers the 4 000-unit play area with margin.
+    float nearPlane_ = 5.0f;
+    float farPlane_ = 15000.0f;
 
-    Camera camera_;                         ///< First-person camera — driven by player position + yaw/pitch each frame.
+    NewCamera camera_;
 
-    SDL_GPUTexture* depthTexture = nullptr; ///< Depth buffer, recreated on resize.
+    SDL_GPUTexture* depthTexture = nullptr;
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
 
     ModelBufferInfo vBufferInfo_;
     ModelBufferInfo iBufferInfo_;
 
-    /// @brief (Re-)create the depth texture when the swapchain size changes.
+    Camera legacyCameraStub_{}; ///< Default-constructed legacy camera used to satisfy getCamera().
+
     bool ensureDepthTexture(Uint32 w, Uint32 h);
 
     [[nodiscard]] SDL_GPUTransferBuffer* createTransferBuffer(size_t transferBufferSize, bool upload) const;
     [[nodiscard]] SDL_GPUBuffer* createGPUBuffer(size_t bufferSize, SDL_GPUBufferUsageFlags usage) const;
     void uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd, const std::vector<ModelBufferInfo>& modelBuffersInfo) const;
+
+    bool initCommon(SDL_Window* window);
 };

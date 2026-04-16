@@ -74,7 +74,7 @@ bool Game::init()
     // colorFmt must match the render target particles draw into (HDR = RGBA16F),
     // NOT the swapchain format.  shaderFmt must be the single format the
     // renderer selected, not the bitmask of all supported formats.
-    if (!particleSystem.init(renderer.getDevice(), Renderer::getHdrFormat(), renderer.getShaderFormat())) {
+    if (!particleSystem.init(renderer.getDevice(), HybridRenderer::getHdrFormat(), renderer.getShaderFormat())) {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
         renderer.setParticleSystem(&particleSystem);
@@ -504,10 +504,10 @@ SDL_AppResult Game::iterate()
     dispatcher.update();
 
     // Update particle system (render-rate, not physics-rate)
-    //particleSystem.update(frameTime, renderer.getCamera(), registry);
+    // particleSystem.update(frameTime, renderer.getCamera(), registry);
 
     // Draw persistent HUD text each frame
-    //particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
+    // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
 
     // Speedometer HUD
     // Shows km/h with a horizontal bar that fills with speed.
@@ -524,7 +524,7 @@ SDL_AppResult Game::iterate()
         // Speed number (bottom-right area of screen).
         char speedText[32];
         std::snprintf(speedText, sizeof(speedText), "%.0f km/h", static_cast<double>(k_kmh));
-        //particleSystem.drawScreenText({10.f, 38.f}, speedText, {0.8f, 0.9f, 1.0f, 1.0f}, 18.f);
+        // particleSystem.drawScreenText({10.f, 38.f}, speedText, {0.8f, 0.9f, 1.0f, 1.0f}, 18.f);
 
         // Speed bar: use block characters to draw a filled bar.
         const float k_fraction = std::clamp(k_kmh / k_maxKmh, 0.0f, 1.0f);
@@ -549,11 +549,13 @@ SDL_AppResult Game::iterate()
         for (int i = 0; i < 20 - k_barLen && i < 20; ++i)
             bgStr[i] = '.';
 
-        if (k_barLen > 0)
-            //particleSystem.drawScreenText({10.f, 58.f}, barStr, barColor, 16.f);
-        if (k_barLen < 20)
-            //particleSystem.drawScreenText(
-                {10.f + static_cast<float>(k_barLen) * 8.f, 58.f}, bgStr, {0.3f, 0.3f, 0.3f, 0.4f}, 16.f);
+        if (k_barLen > 0) {
+            // particleSystem.drawScreenText({10.f, 58.f}, barStr, barColor, 16.f);
+        }
+        if (k_barLen < 20) {
+            // particleSystem.drawScreenText(
+            //     {10.f + static_cast<float>(k_barLen) * 8.f, 58.f}, bgStr, {0.3f, 0.3f, 0.3f, 0.4f}, 16.f);
+        }
     }
 
     // Grapple cable visual
@@ -564,7 +566,7 @@ SDL_AppResult Game::iterate()
             const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
             const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
             const glm::vec3 hand = renderEye + right * 15.f - glm::vec3{0, 1, 0} * 8.f + fwd * 5.f;
-            //particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
+            // particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
         }
     });
 
@@ -746,8 +748,8 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     debugUI.buildRenderTogglesUI(renderer.toggles);
-    debugUI.buildLightingUI(renderer);
-    debugUI.buildSkyboxUI(renderer);
+    debugUI.buildLightingUI(renderer.legacy());
+    debugUI.buildSkyboxUI(renderer.legacy());
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).

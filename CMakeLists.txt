@@ -364,6 +364,10 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
@@ -449,6 +453,8 @@ add_executable(group2
         src/ecs/components/ClientId.hpp
         src/client/renderer-new/Renderer.cpp
         src/client/renderer-new/Renderer.hpp
+        src/client/renderer-new/Camera.cpp
+        src/client/renderer-new/Camera.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

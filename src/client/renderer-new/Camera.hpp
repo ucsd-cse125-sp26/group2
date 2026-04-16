@@ -2,18 +2,18 @@
 
 #include <glm/glm.hpp>
 
-class Camera
+class NewCamera
 {
 public:
-    Camera() = default;
+    NewCamera() = default;
 
-    Camera(glm::vec3 eye,
-           glm::vec3 target,
-           glm::vec3 up,
-           float fovyDegrees,
-           float aspectRatio,
-           float nearPlane,
-           float farPlane);
+    NewCamera(glm::vec3 eye,
+              glm::vec3 target,
+              glm::vec3 up,
+              float fovyDegrees,
+              float aspectRatio,
+              float nearPlane,
+              float farPlane);
 
     void reset();
 
