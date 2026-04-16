@@ -353,6 +353,62 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     endif()
 endforeach()
 
+# ---------------------------------------------------------------------------
+# New-renderer shaders (shaders-new/ directory)
+# ---------------------------------------------------------------------------
+# Compiled separately so the new renderer can load from "shaders-new/" at
+# runtime without colliding with the legacy renderer's shader directory.
+set(SHADER_NEW_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders-new")
+set(SHADER_NEW_OUT_DIR "${CMAKE_BINARY_DIR}/shaders-new")
+file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
+
+set(SHADER_NEW_SOURCES
+    geometry.vert geometry.frag
+)
+
+foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
+    # GLSL → SPIR-V
+    set(SPV_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.spv")
+    add_custom_command(
+        OUTPUT  "${SPV_OUT}"
+        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
+                -o "${SPV_OUT}" "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}"
+        DEPENDS "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}"
+        COMMENT "Compiling new-renderer shader ${SHADER_SRC} → SPIR-V"
+        VERBATIM
+    )
+    list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
+
+    # SPIR-V → MSL (Metal backend on macOS)
+    if(APPLE)
+        if(SPV_TO_MSL)
+            set(MSL_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.msl")
+            add_custom_command(
+                OUTPUT  "${MSL_OUT}"
+                COMMAND "${SPV_TO_MSL}" "${SPV_OUT}" "${MSL_OUT}"
+                DEPENDS "${SPV_OUT}"
+                COMMENT "Transpiling new-renderer shader ${SHADER_SRC} → MSL"
+                VERBATIM
+            )
+            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+        elseif(SPIRV_CROSS)
+            set(MSL_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.msl")
+            add_custom_command(
+                OUTPUT  "${MSL_OUT}"
+                COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
+                COMMAND python3
+                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
+                        "${SPIRV_CROSS}" "${SPV_OUT}" "${MSL_OUT}"
+                DEPENDS "${SPV_OUT}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
+                COMMENT "Transpiling new-renderer shader ${SHADER_SRC} → MSL (fallback)"
+                VERBATIM
+            )
+            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+        endif()
+    endif()
+endforeach()
+
 add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
 
 # ===========================================================================

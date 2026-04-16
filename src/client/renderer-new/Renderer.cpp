@@ -176,7 +176,10 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     return shader;
 }
 
-SDL_GPUGraphicsPipeline* createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderFormat shaderFormat,const std::string& k_shadersDir)
+SDL_GPUGraphicsPipeline* createGeometryPipeline(SDL_GPUDevice* device,
+                                                SDL_Window* window,
+                                                SDL_GPUShaderFormat shaderFormat,
+                                                const std::string& k_shadersDir)
 {
     const std::string vertexShaderPath = k_shadersDir + "geometry.vert";
     Uint32 vertexShaderSamplerCount = 0;
@@ -346,8 +349,8 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
         return false;
     }
 
-    shadersDir_ = "shaders-new";
-    pipeline_ = createGeometryPipeline(device_, window_, shaderFormat_,shadersDir_);
+    shadersDir_ = "shaders-new/";
+    pipeline_ = createGeometryPipeline(device_, window_, shaderFormat_, shadersDir_);
     if (!pipeline_) {
         SDL_Log("NewRenderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
         return false;
@@ -422,17 +425,20 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
+        SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
         return;
     }
 
     SDL_GPUTexture* swapchain = nullptr;
     Uint32 w = 0, h = 0;
     if (!SDL_AcquireGPUSwapchainTexture(cmd, window_, &swapchain, &w, &h) || !swapchain) {
+        SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUSwapchainTexture failed: %s", SDL_GetError());
         SDL_SubmitGPUCommandBuffer(cmd);
         return;
     }
 
     if (!ensureDepthTexture(w, h)) {
+        SDL_Log("NewRenderer::drawFrame: ensureDepthTexture failed");
         SDL_SubmitGPUCommandBuffer(cmd);
         return;
     }

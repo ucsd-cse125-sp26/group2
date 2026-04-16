@@ -69,4 +69,5 @@ private:
     /// tear down exactly what `init()` brought up, in the right order.
     bool legacyInitialised_ = false;
     bool nextInitialised_ = false;
+    bool drawFrameLogged_ = false; ///< True after the first drawFrame routing decision is logged.
 };

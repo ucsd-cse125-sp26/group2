@@ -5,6 +5,68 @@
 
 #include <SDL3/SDL.h>
 
+namespace
+{
+
+/// @brief Human-readable name for each renderer feature (for logging).
+const char* featureName(RendererFeature f)
+{
+    switch (f) {
+    case RendererFeature::Init:
+        return "Init";
+    case RendererFeature::DrawFrame:
+        return "DrawFrame";
+    case RendererFeature::Quit:
+        return "Quit";
+    case RendererFeature::GetDevice:
+        return "GetDevice";
+    case RendererFeature::GetShaderFormat:
+        return "GetShaderFormat";
+    case RendererFeature::GetCamera:
+        return "GetCamera";
+    case RendererFeature::SetParticleSystem:
+        return "SetParticleSystem";
+    case RendererFeature::LoadSceneModel:
+        return "LoadSceneModel";
+    case RendererFeature::UploadSceneModel:
+        return "UploadSceneModel";
+    case RendererFeature::SetVSync:
+        return "SetVSync";
+    case RendererFeature::UpdateModelMeshVertices:
+        return "UpdateModelMeshVertices";
+    case RendererFeature::SetEntityRenderList:
+        return "SetEntityRenderList";
+    case RendererFeature::SetWeaponViewmodel:
+        return "SetWeaponViewmodel";
+    case RendererFeature::RequestScreenshot:
+        return "RequestScreenshot";
+    case RendererFeature::ModelCount:
+        return "ModelCount";
+    }
+    return "Unknown";
+}
+
+/// @brief All features whose routing is interesting to report at init.
+constexpr RendererFeature k_allFeatures[] = {
+    RendererFeature::Init,
+    RendererFeature::DrawFrame,
+    RendererFeature::Quit,
+    RendererFeature::GetDevice,
+    RendererFeature::GetShaderFormat,
+    RendererFeature::GetCamera,
+    RendererFeature::SetParticleSystem,
+    RendererFeature::LoadSceneModel,
+    RendererFeature::UploadSceneModel,
+    RendererFeature::SetVSync,
+    RendererFeature::UpdateModelMeshVertices,
+    RendererFeature::SetEntityRenderList,
+    RendererFeature::SetWeaponViewmodel,
+    RendererFeature::RequestScreenshot,
+    RendererFeature::ModelCount,
+};
+
+} // namespace
+
 HybridRenderer::HybridRenderer() : ssrMode(legacy_.ssrMode), toggles(legacy_.toggles) {}
 
 bool HybridRenderer::supports(RendererFeature /*feature*/) const
@@ -15,31 +77,62 @@ bool HybridRenderer::supports(RendererFeature /*feature*/) const
 
 bool HybridRenderer::init(SDL_Window* window)
 {
+    SDL_Log("HybridRenderer: ==== INIT BEGIN ====");
+
     // The legacy renderer owns the GPU device + window claim + ImGui GPU
     // backend, because (a) it's fully functional and (b) most routed calls
     // still land on it. The new renderer piggy-backs on the same device.
     if (!legacy_.init(window)) {
-        SDL_Log("HybridRenderer: legacy renderer init failed");
+        SDL_Log("HybridRenderer: FATAL -- legacy renderer init failed");
         return false;
     }
     legacyInitialised_ = true;
+    SDL_Log("HybridRenderer: legacy renderer init OK");
 
     // If the new renderer implements drawFrame, bring it up too -- sharing
     // the legacy renderer's device so both can issue commands.
     if (next_.supports(RendererFeature::DrawFrame) || next_.supports(RendererFeature::Init)) {
+        SDL_Log("HybridRenderer: new renderer claims DrawFrame/Init support -- attempting init...");
         if (!next_.init(window, legacy_.getDevice())) {
-            SDL_Log("HybridRenderer: new renderer init failed -- continuing with legacy only");
+            SDL_Log("HybridRenderer: ERROR -- new renderer init FAILED");
+            SDL_Log("HybridRenderer: new renderer will NOT be used for any feature");
         } else {
             nextInitialised_ = true;
+            SDL_Log("HybridRenderer: new renderer init OK");
         }
+    } else {
+        SDL_Log("HybridRenderer: new renderer does not claim DrawFrame or Init -- skipping init");
     }
+
+    // Print the full routing table so it's unambiguous which renderer handles
+    // each feature. This runs once at startup.
+    SDL_Log("HybridRenderer: ---- ROUTING TABLE ----");
+    for (RendererFeature f : k_allFeatures) {
+        const bool newClaims = next_.supports(f);
+        const bool useNew = nextInitialised_ && newClaims;
+        SDL_Log("HybridRenderer:   %-25s -> %s%s",
+                featureName(f),
+                useNew ? "NEW" : "LEGACY",
+                (newClaims && !nextInitialised_) ? "  (new claims support but init failed!)" : "");
+    }
+    SDL_Log("HybridRenderer: ==== INIT DONE (drawFrame -> %s) ====",
+            (nextInitialised_ && next_.supports(RendererFeature::DrawFrame)) ? "NEW" : "LEGACY");
 
     return true;
 }
 
 void HybridRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
-    if (nextInitialised_ && next_.supports(RendererFeature::DrawFrame))
+    const bool useNew = nextInitialised_ && next_.supports(RendererFeature::DrawFrame);
+
+    // Log once on the very first frame so the user sees it even without scrolling
+    // back to init.
+    if (!drawFrameLogged_) {
+        SDL_Log("HybridRenderer::drawFrame: first frame -> %s renderer", useNew ? "NEW" : "LEGACY");
+        drawFrameLogged_ = true;
+    }
+
+    if (useNew)
         next_.drawFrame(eye, yaw, pitch, roll);
     else
         legacy_.drawFrame(eye, yaw, pitch, roll);
@@ -49,10 +142,12 @@ void HybridRenderer::quit()
 {
     // Tear down new first so its buffers release before the shared device dies.
     if (nextInitialised_) {
+        SDL_Log("HybridRenderer: quitting new renderer");
         next_.quit();
         nextInitialised_ = false;
     }
     if (legacyInitialised_) {
+        SDL_Log("HybridRenderer: quitting legacy renderer");
         legacy_.quit();
         legacyInitialised_ = false;
     }
