@@ -468,14 +468,19 @@ add_custom_command(TARGET group2 POST_BUILD
     VERBATIM
 )
 
-# Copy config.toml next to the client binary.
-add_custom_command(TARGET group2 POST_BUILD
+# Copy config.toml next to the client binary when it changes.
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/config_client.stamp"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
             "$<TARGET_FILE_DIR:group2>/config.toml"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_client.stamp"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
     COMMENT "Copying config.toml to client binary directory"
     VERBATIM
 )
+add_custom_target(copy_client_config DEPENDS "${CMAKE_BINARY_DIR}/config_client.stamp")
+add_dependencies(group2 copy_client_config)
 
 # Tell the renderer which shader formats were compiled.
 if(SPIRV_CROSS)
@@ -575,14 +580,19 @@ target_link_libraries(server PRIVATE
     tomlplusplus::tomlplusplus
 )
 
-# Copy config.toml next to the server binary.
-add_custom_command(TARGET server POST_BUILD
+# Copy config.toml next to the server binary when it changes.
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/config_server.stamp"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
             "$<TARGET_FILE_DIR:server>/config.toml"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_server.stamp"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
     COMMENT "Copying config.toml to server binary directory"
     VERBATIM
 )
+add_custom_target(copy_server_config DEPENDS "${CMAKE_BINARY_DIR}/config_server.stamp")
+add_dependencies(server copy_server_config)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
