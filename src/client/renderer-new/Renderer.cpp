@@ -4,6 +4,7 @@
 
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
+#include <filesystem>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <imgui.h>
@@ -134,6 +135,9 @@ ImGui_ImplSDLGPU3_InitInfo createImGuiInfo(SDL_GPUDevice* device, SDL_Window* wi
 }
 
 /// @brief Load a compiled shader from disk and create an SDL GPU shader object.
+///
+/// Path construction uses std::filesystem::path so separators are always
+/// native (no mixed `\` / `/` on Windows).
 SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
                           const char* path,
                           SDL_GPUShaderFormat format,
@@ -146,13 +150,15 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     const char* const k_base = SDL_GetBasePath();
     const char* const k_ext = (format == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
 
-    char fullPath[512];
-    SDL_snprintf(fullPath, sizeof(fullPath), "%s%s%s", k_base ? k_base : "", path, k_ext);
+    // Build <base_dir> / <relative_path>.spv  with native separators.
+    std::filesystem::path fullPath = std::filesystem::path(k_base ? k_base : "") / path;
+    fullPath += k_ext;
+    const std::string fullPathStr = fullPath.string();
 
     size_t codeSize = 0;
-    void* code = SDL_LoadFile(fullPath, &codeSize);
+    void* code = SDL_LoadFile(fullPathStr.c_str(), &codeSize);
     if (!code) {
-        SDL_Log("NewRenderer: failed to load shader %s: %s", fullPath, SDL_GetError());
+        SDL_Log("NewRenderer: failed to load shader %s: %s", fullPathStr.c_str(), SDL_GetError());
         return nullptr;
     }
 
@@ -172,7 +178,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     SDL_free(code);
 
     if (!shader)
-        SDL_Log("NewRenderer: SDL_CreateGPUShader(%s) failed: %s", path, SDL_GetError());
+        SDL_Log("NewRenderer: SDL_CreateGPUShader(%s) failed: %s", fullPathStr.c_str(), SDL_GetError());
     return shader;
 }
 
@@ -181,13 +187,13 @@ SDL_GPUGraphicsPipeline* createGeometryPipeline(SDL_GPUDevice* device,
                                                 SDL_GPUShaderFormat shaderFormat,
                                                 const std::string& k_shadersDir)
 {
-    const std::string vertexShaderPath = k_shadersDir + "geometry.vert";
+    const std::string vertexShaderPath = (std::filesystem::path(k_shadersDir) / "geometry.vert").string();
     Uint32 vertexShaderSamplerCount = 0;
     Uint32 vertexShaderUniformBufferCount = 1;
     Uint32 vertexShaderStorageBufferCount = 0;
     Uint32 vertexShaderStorageTextureCount = 0;
 
-    const std::string fragmentShaderPath = k_shadersDir + "geometry.frag";
+    const std::string fragmentShaderPath = (std::filesystem::path(k_shadersDir) / "geometry.frag").string();
     Uint32 fragmentShaderSamplerCount = 0;
     Uint32 fragmentShaderUniformBufferCount = 0;
     Uint32 fragmentShaderStorageBufferCount = 0;
@@ -349,7 +355,7 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
         return false;
     }
 
-    shadersDir_ = "shaders-new/";
+    shadersDir_ = "shaders-new";
     pipeline_ = createGeometryPipeline(device_, window_, shaderFormat_, shadersDir_);
     if (!pipeline_) {
         SDL_Log("NewRenderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
