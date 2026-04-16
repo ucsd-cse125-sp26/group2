@@ -25,6 +25,16 @@
     },
 
     {
+      "name": "base-apple-clang",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER":   "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++"
+      }
+    },
+
+    {
       "name": "base-msvc",
       "hidden": true,
       "inherits": "base",
@@ -33,7 +43,7 @@
 
     {
       "name": "debug",
-      "displayName": "Debug (Linux/macOS — ASan + UBSan)",
+      "displayName": "Debug (Linux — ASan + UBSan)",
       "inherits": "base-clang",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -41,9 +51,25 @@
         "ENABLE_UBSAN":     "ON"
       },
       "condition": {
-        "type": "notEquals",
+        "type": "equals",
         "lhs": "${hostSystemName}",
-        "rhs": "Windows"
+        "rhs": "Linux"
+      }
+    },
+
+    {
+      "name": "debug-mac",
+      "displayName": "Debug (macOS — ASan + UBSan)",
+      "inherits": "base-apple-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ASAN":      "ON",
+        "ENABLE_UBSAN":     "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
       }
     },
 
@@ -64,15 +90,29 @@
 
     {
       "name": "release",
-      "displayName": "Release",
+      "displayName": "Release (Linux)",
       "inherits": "base-clang",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       },
       "condition": {
-        "type": "notEquals",
+        "type": "equals",
         "lhs": "${hostSystemName}",
-        "rhs": "Windows"
+        "rhs": "Linux"
+      }
+    },
+
+    {
+      "name": "release-mac",
+      "displayName": "Release (macOS)",
+      "inherits": "base-apple-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
       }
     },
 
@@ -92,15 +132,29 @@
 
     {
       "name": "relwithdebinfo",
-      "displayName": "RelWithDebInfo",
+      "displayName": "RelWithDebInfo (Linux)",
       "inherits": "base-clang",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       },
       "condition": {
-        "type": "notEquals",
+        "type": "equals",
         "lhs": "${hostSystemName}",
-        "rhs": "Windows"
+        "rhs": "Linux"
+      }
+    },
+
+    {
+      "name": "relwithdebinfo-mac",
+      "displayName": "RelWithDebInfo (macOS)",
+      "inherits": "base-apple-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
       }
     },
 
@@ -121,10 +175,13 @@
 
   "buildPresets": [
     { "name": "debug",             "configurePreset": "debug" },
+    { "name": "debug-mac",         "configurePreset": "debug-mac" },
     { "name": "debug-win",         "configurePreset": "debug-win" },
     { "name": "release",           "configurePreset": "release" },
+    { "name": "release-mac",       "configurePreset": "release-mac" },
     { "name": "release-win",       "configurePreset": "release-win" },
     { "name": "relwithdebinfo",    "configurePreset": "relwithdebinfo" },
+    { "name": "relwithdebinfo-mac","configurePreset": "relwithdebinfo-mac" },
     { "name": "relwithdebinfo-win","configurePreset": "relwithdebinfo-win" }
   ]
 }
