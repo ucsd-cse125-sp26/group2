@@ -1,11 +1,13 @@
-/// @file geometry.vert
-/// @brief Procedural cube geometry vertex shader with per-face colors.
 #version 450
+
+
+layout(location = 0) in vec3 modelSpacePosition;
+layout(location = 1) in vec3 vertNormal;
+layout(location = 2) in vec2 uv;
 
 layout(location = 0) out vec3 diffuse;
 layout(location = 1) flat out vec3 fragNormal;
 
-/// @brief Per-frame camera and model matrices.
 layout(set = 1, binding = 0) uniform Matrices
 {
     mat4 model;
@@ -13,8 +15,7 @@ layout(set = 1, binding = 0) uniform Matrices
     mat4 projection;
 } ubo;
 
-
-const float width = 100.0f;
+const float width = 10.0f;
 const float width_over_2 = width * 0.5f;
 
 const vec3 cubeMin = -vec3(width_over_2,width_over_2,width_over_2);
@@ -57,7 +58,7 @@ const vec3 cubeMax = -cubeMin;
         vec3(cubeMax.x, cubeMax.y, cubeMax.z)
     );
 
-    // Normals per vertex
+    // Specify normals
     const vec3 normals[24] = vec3[](
         // Front
         vec3(0, 0, 1),
@@ -96,7 +97,7 @@ const vec3 cubeMax = -cubeMin;
         vec3(1, 0, 0)
     );
 
-    // Index buffer
+    // Specify indices
     const uint indices[36] = uint[](
         0, 1, 2, 0, 2, 3,        // Front
         4, 5, 6, 4, 6, 7,        // Back
@@ -113,9 +114,13 @@ const vec3 colors[6] = vec3[](
 
 void main()
 {
-    vec4 p = vec4(positions[indices[gl_VertexIndex]], 1.0f);
+
+    vec4 pIn = vec4(modelSpacePosition,1.0f);
+    vec4 nIn = vec4(vertNormal,0.0f);
+    //vec4 pIn = vec4(positions[indices[gl_VertexIndex]], 1.0f);
+    //vec4 nIn = vec4(normals[indices[gl_VertexIndex]],0.0f);
     mat4 mvp = ubo.projection * ubo.view * ubo.model;
-    gl_Position = mvp * p;
-    diffuse = colors[gl_VertexIndex / 6];
-    fragNormal = vec3(ubo.model * vec4(normals[indices[gl_VertexIndex]],0.0f));
+    gl_Position = mvp * pIn;
+    diffuse = vertNormal * 0.5f + 0.5f;
+    fragNormal = vec3(ubo.model * nIn);
 }

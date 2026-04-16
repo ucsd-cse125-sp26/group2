@@ -13,7 +13,7 @@
 
 #define CUBE_VERTEX_COUNT 24
 
-const float width = 10.0f;
+const float width = 20.0f;
 const float width_over_2 = width * 0.5f;
 
 const glm::vec3 cubeMin = -glm::vec3(width_over_2, width_over_2, width_over_2);
@@ -453,7 +453,7 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
 
     Matrices mats{};
     mats.model = glm::mat4(1.0f);
-    mats.model[3] = glm::vec4(0.0f, 100.0f, 0.0f, 1.0f);
+    mats.model[3] = glm::vec4(0.0f, 50.0f, 0.0f, 1.0f);
     mats.view = camera_.getView();
     mats.projection = camera_.getProjection();
 

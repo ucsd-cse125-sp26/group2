@@ -1,5 +1,4 @@
-/// @file geometry.frag
-/// @brief Simple lit fragment shader with single directional light.
+// normal.frag
 #version 450
 
 layout(location = 0) in vec3 diffuse;
@@ -9,11 +8,14 @@ layout(location = 0) out vec4 outColor;
 const vec3 directionalLight0Direction = normalize(-vec3(1.0f,1.0f,1.0f));
 const vec3 directionalLight0Color = vec3(1.0f,1.0f,1.0f);
 
-const vec3 ambientColor = 0.0625f * directionalLight0Color;
+const vec3 skyColor = vec3(0.08f, 0.08f,0.12f); // dark-blue sky
+//const vec3 ambientColor = 0.125f * directionalLight0Color;
+const vec3 ambientColor = skyColor;
 
 void main()
 {
     float cosThetaTerm = max(0.0f,dot(-directionalLight0Direction,fragNormal));
     vec3 irradiance = directionalLight0Color * cosThetaTerm + ambientColor;
     outColor = vec4(diffuse * irradiance,1.0f);
+    //outColor = vec4(diffuse ,1.0f);
 }
