@@ -129,7 +129,7 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         Event event = systems::runInputReceive(payload);
         event.clientId = conn.clientId;
         eventQueue.enqueue(event);
-        SDL_Log("Server: received INPUT packet from client %d", event.clientId.value);
+        // SDL_Log("Server: received INPUT packet from client %d", event.clientId.value);
 
         // SDL_Log("Server: received input packet:\n"
         //         "\tforward=%d\n"

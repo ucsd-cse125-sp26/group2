@@ -11,10 +11,6 @@
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
-#include "ecs/components/WeaponState.hpp"
-#include "ecs/physics/WorldData.hpp"
-#include "ecs/systems/CollisionSystem.hpp"
-#include "ecs/systems/MovementSystem.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
@@ -85,13 +81,24 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
 
+    // Load models for entity rendering
+    wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+    if (wraithModelIdx < 0)
+        SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
+
+    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f);
+    if (weaponModelIdx < 0)
+        SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
+
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
 
-        if (wraithModelIdx >= 0)
-            registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
+        // if (wraithModelIdx >= 0) {
+        //     SDL_Log("[client] assigning Wraith model to local player entity %d", static_cast<int>(local));
+        //     registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
+        // }
 
         SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
     });
@@ -107,15 +114,6 @@ bool Game::init()
     // Grab the mouse into relative mode so camera look works immediately.
     SDL_SetWindowRelativeMouseMode(window, true);
     mouseCaptured = true;
-
-    // Load models for entity rendering
-    wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
-    if (wraithModelIdx < 0)
-        SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
-
-    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f);
-    if (weaponModelIdx < 0)
-        SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
 
     // Load animated model (Mixamo FBX)
     {
