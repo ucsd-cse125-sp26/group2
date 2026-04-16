@@ -4,6 +4,9 @@ out/
 cmake-build-debug/
 .cache/
 
+# FetchContent cache (persists across clean builds for speed)
+.deps/
+
 imgui.ini
 assets/
 

@@ -51,6 +51,9 @@ winget install --id LLVM.LLVM --silent --accept-source-agreements --accept-packa
 Write-Host "==> Installing Git LFS..." -ForegroundColor Cyan
 winget install --id GitHub.GitLFS --silent --accept-source-agreements --accept-package-agreements
 
+Write-Host "==> Installing ccache (compiler cache for faster rebuilds)..." -ForegroundColor Cyan
+winget install --id Ccache.Ccache --silent --accept-source-agreements --accept-package-agreements
+
 Write-Host "==> Installing Vulkan SDK (glslc + spirv-cross shader tools)..." -ForegroundColor Cyan
 # The Vulkan SDK bundles glslc (GLSL → SPIR-V) and spirv-cross (SPIR-V → MSL),
 # both required by the SDL3 GPU shader build pipeline.

@@ -15,7 +15,9 @@ sudo pacman -S --needed --noconfirm \
     clang \
     lldb \
     git \
-    git-lfs
+    git-lfs \
+    ccache \
+    mold
 
 echo "==> Installing shader tools..."
 # shaderc     — GLSL → SPIR-V compiler (glslc); preferred over glslangValidator
