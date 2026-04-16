@@ -462,6 +462,7 @@ SDL_AppResult Game::iterate()
         }
 
         client.poll(registry);
+        refreshRemotePlayerRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -602,7 +603,7 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
-            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value);
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
@@ -785,4 +786,27 @@ void Game::quit()
     SDL_DestroyWindow(window);
     NET_Quit();
     SDL_Quit();
+}
+
+
+void Game::refreshRemotePlayerRenderables()
+{
+    constexpr float kWraithScale = 34.5f;
+    constexpr float kWraithVerticalOffset = -35.45f;
+    const glm::quat importFix =
+        glm::angleAxis(glm::radians(90.0f), glm::vec3{1, 0, 0});
+
+    registry.view<Position, PlayerState, InputSnapshot>().each(
+        [&](entt::entity e, const Position&, const PlayerState&, const InputSnapshot& input) {
+            if (registry.all_of<LocalPlayer>(e))
+                return;
+
+            auto& rend = registry.get_or_emplace<Renderable>(e);
+            rend.modelIndex = wraithModelIdx;
+            rend.translation = glm::vec3(0.0f, kWraithVerticalOffset, 0.0f);
+            rend.scale = glm::vec3(kWraithScale); // 72.0f / 2.088f
+            rend.orientation =
+                glm::angleAxis(input.yaw, glm::vec3{0, 1, 0}) * importFix;
+            rend.visible = true;
+        });
 }

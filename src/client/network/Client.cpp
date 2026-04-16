@@ -118,7 +118,7 @@ bool Client::poll(Registry& registry)
         case PacketType::UPDATE_REGISTRY:
             if (!registryLoader)
                 registryLoader.emplace(registry);
-            registryLoader->apply(payload, payloadSize);
+            registryLoader->apply(payload, payloadSize, localPlayerEntity);
             stats.registryUpdateSize = payloadSize;
             ++registryUpdatesWindow;
 
