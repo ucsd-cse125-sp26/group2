@@ -176,23 +176,22 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
     return shader;
 }
 
-SDL_GPUGraphicsPipeline*
-createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderFormat shaderFormat)
+SDL_GPUGraphicsPipeline* createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderFormat shaderFormat,const std::string& k_shadersDir)
 {
-    const char* const vertexShaderPath = "shaders/geometry.vert";
+    const std::string vertexShaderPath = k_shadersDir + "geometry.vert";
     Uint32 vertexShaderSamplerCount = 0;
     Uint32 vertexShaderUniformBufferCount = 1;
     Uint32 vertexShaderStorageBufferCount = 0;
     Uint32 vertexShaderStorageTextureCount = 0;
 
-    const char* const fragmentShaderPath = "shaders/geometry.frag";
+    const std::string fragmentShaderPath = k_shadersDir + "geometry.frag";
     Uint32 fragmentShaderSamplerCount = 0;
     Uint32 fragmentShaderUniformBufferCount = 0;
     Uint32 fragmentShaderStorageBufferCount = 0;
     Uint32 fragmentShaderStorageTextureCount = 0;
 
     SDL_GPUShader* vertexShader = loadShader(device,
-                                             vertexShaderPath,
+                                             vertexShaderPath.c_str(),
                                              shaderFormat,
                                              SDL_GPU_SHADERSTAGE_VERTEX,
                                              vertexShaderSamplerCount,
@@ -200,7 +199,7 @@ createGeometryPipeline(SDL_GPUDevice* device, SDL_Window* window, SDL_GPUShaderF
                                              vertexShaderStorageBufferCount,
                                              vertexShaderStorageTextureCount);
     SDL_GPUShader* fragmentShader = loadShader(device,
-                                               fragmentShaderPath,
+                                               fragmentShaderPath.c_str(),
                                                shaderFormat,
                                                SDL_GPU_SHADERSTAGE_FRAGMENT,
                                                fragmentShaderSamplerCount,
@@ -347,7 +346,8 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
         return false;
     }
 
-    pipeline_ = createGeometryPipeline(device_, window_, shaderFormat_);
+    shadersDir_ = "shaders-new";
+    pipeline_ = createGeometryPipeline(device_, window_, shaderFormat_,shadersDir_);
     if (!pipeline_) {
         SDL_Log("NewRenderer: SDL_CreateGPUGraphicsPipeline failed: %s", SDL_GetError());
         return false;

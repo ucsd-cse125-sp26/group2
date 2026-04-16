@@ -45,6 +45,7 @@ struct ModelBufferInfo
 class NewRenderer : public IRenderer
 {
 public:
+    std::string shadersDir_;
     /// @brief Report which `RendererFeature` entries the new renderer implements.
     [[nodiscard]] bool supports(RendererFeature feature) const override;
 
