@@ -447,6 +447,8 @@ add_executable(group2
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
         src/ecs/components/ClientId.hpp
+        src/client/renderer-new/Renderer.cpp
+        src/client/renderer-new/Renderer.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
