@@ -5,6 +5,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdlib> // abort()
+
 namespace
 {
 
@@ -89,17 +91,20 @@ bool HybridRenderer::init(SDL_Window* window)
     legacyInitialised_ = true;
     SDL_Log("HybridRenderer: legacy renderer init OK");
 
-    // If the new renderer implements drawFrame, bring it up too -- sharing
-    // the legacy renderer's device so both can issue commands.
+    // If the new renderer claims DrawFrame or Init, it MUST initialise
+    // successfully.  Silent fallback to legacy is not allowed -- if the new
+    // renderer says it can do something, it has to actually work.
     if (next_.supports(RendererFeature::DrawFrame) || next_.supports(RendererFeature::Init)) {
         SDL_Log("HybridRenderer: new renderer claims DrawFrame/Init support -- attempting init...");
         if (!next_.init(window, legacy_.getDevice())) {
-            SDL_Log("HybridRenderer: ERROR -- new renderer init FAILED");
-            SDL_Log("HybridRenderer: new renderer will NOT be used for any feature");
-        } else {
-            nextInitialised_ = true;
-            SDL_Log("HybridRenderer: new renderer init OK");
+            SDL_LogCritical(SDL_LOG_CATEGORY_RENDER,
+                            "HybridRenderer: FATAL -- new renderer claims DrawFrame support but init FAILED.\n"
+                            "    Fix the new renderer or remove DrawFrame from NewRenderer::supports().\n"
+                            "    Will NOT silently fall back to legacy.");
+            std::abort();
         }
+        nextInitialised_ = true;
+        SDL_Log("HybridRenderer: new renderer init OK");
     } else {
         SDL_Log("HybridRenderer: new renderer does not claim DrawFrame or Init -- skipping init");
     }
