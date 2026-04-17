@@ -8,122 +8,46 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/auto.cmake",
       "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "FETCHCONTENT_BASE_DIR": "${sourceDir}/.deps"
       }
-    },
-
-    {
-      "name": "base-clang",
-      "hidden": true,
-      "inherits": "base",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER":   "clang",
-        "CMAKE_CXX_COMPILER": "clang++"
-      }
-    },
-
-    {
-      "name": "base-msvc",
-      "hidden": true,
-      "inherits": "base",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/msvc.cmake"
     },
 
     {
       "name": "debug",
-      "displayName": "Debug (Linux/macOS — ASan + UBSan)",
-      "inherits": "base-clang",
+      "displayName": "Debug (ASan + UBSan)",
+      "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_ASAN":      "ON",
         "ENABLE_UBSAN":     "ON"
-      },
-      "condition": {
-        "type": "notEquals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      }
-    },
-
-    {
-      "name": "debug-win",
-      "displayName": "Debug (Windows — ASan via MSVC)",
-      "inherits": "base-msvc",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "ENABLE_ASAN":      "ON"
-      },
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
       }
     },
 
     {
       "name": "release",
       "displayName": "Release",
-      "inherits": "base-clang",
+      "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
-      },
-      "condition": {
-        "type": "notEquals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      }
-    },
-
-    {
-      "name": "release-win",
-      "displayName": "Release (Windows)",
-      "inherits": "base-msvc",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
-      },
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
       }
     },
 
     {
       "name": "relwithdebinfo",
       "displayName": "RelWithDebInfo",
-      "inherits": "base-clang",
+      "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
-      },
-      "condition": {
-        "type": "notEquals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      }
-    },
-
-    {
-      "name": "relwithdebinfo-win",
-      "displayName": "RelWithDebInfo (Windows)",
-      "inherits": "base-msvc",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
-      },
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
       }
     }
   ],
 
   "buildPresets": [
-    { "name": "debug",             "configurePreset": "debug" },
-    { "name": "debug-win",         "configurePreset": "debug-win" },
-    { "name": "release",           "configurePreset": "release" },
-    { "name": "release-win",       "configurePreset": "release-win" },
-    { "name": "relwithdebinfo",    "configurePreset": "relwithdebinfo" },
-    { "name": "relwithdebinfo-win","configurePreset": "relwithdebinfo-win" }
+    { "name": "debug",          "configurePreset": "debug" },
+    { "name": "release",        "configurePreset": "release" },
+    { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo" }
   ]
 }

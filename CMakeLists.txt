@@ -25,6 +25,52 @@ option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
 
+# ---- Build acceleration ----
+
+# ccache — cache compiled object files so rebuilds (even after rm -rf build/)
+# return cached results instantly.  Auto-detected; install once per machine:
+#   Linux:   sudo apt install ccache
+#   macOS:   brew install ccache
+#   Windows: choco install ccache
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER   "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    message(STATUS "Compiler cache: ccache (${CCACHE_PROGRAM})")
+else()
+    message(STATUS "ccache not found — builds will not be cached "
+                   "(install for much faster rebuilds)")
+endif()
+
+# After the first successful configure, skip git-fetch checks on every
+# subsequent re-configure.  This shaves seconds off every cmake invocation
+# and allows fully-offline rebuilds.
+# To update a dep: cmake --preset debug -DFETCHCONTENT_UPDATES_DISCONNECTED=OFF
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL
+    "Skip FetchContent git-fetch after first successful populate")
+
+# Use the mold linker on Linux for ~5-10× faster linking.
+# Gracefully falls back to the default linker if mold is not installed.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(MOLD_LINKER mold)
+    if(MOLD_LINKER)
+        set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=mold")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=mold")
+        message(STATUS "Linker: mold (${MOLD_LINKER})")
+    else()
+        message(STATUS "mold not found — using default linker "
+                       "(install with: sudo apt install mold)")
+    endif()
+endif()
+
+# Split DWARF debug info on Linux — keeps .o files smaller and dramatically
+# speeds up linking for Debug builds.  Not supported by Apple Clang or MSVC.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options($<$<CONFIG:Debug>:-gsplit-dwarf>)
+    message(STATUS "Debug builds will use -gsplit-dwarf")
+endif()
+
 # ---- Dependencies ----
 
 # SDL3 — window, input, GPU pipeline (Vulkan/Metal/DX12) + OpenGL context
@@ -353,6 +399,62 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     endif()
 endforeach()
 
+# ---------------------------------------------------------------------------
+# New-renderer shaders (shaders-new/ directory)
+# ---------------------------------------------------------------------------
+# Compiled separately so the new renderer can load from "shaders-new/" at
+# runtime without colliding with the legacy renderer's shader directory.
+set(SHADER_NEW_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders-new")
+set(SHADER_NEW_OUT_DIR "${CMAKE_BINARY_DIR}/shaders-new")
+file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
+
+set(SHADER_NEW_SOURCES
+    geometry.vert geometry.frag
+)
+
+foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
+    # GLSL → SPIR-V
+    set(SPV_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.spv")
+    add_custom_command(
+        OUTPUT  "${SPV_OUT}"
+        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
+                -o "${SPV_OUT}" "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}"
+        DEPENDS "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}"
+        COMMENT "Compiling new-renderer shader ${SHADER_SRC} → SPIR-V"
+        VERBATIM
+    )
+    list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
+
+    # SPIR-V → MSL (Metal backend on macOS)
+    if(APPLE)
+        if(SPV_TO_MSL)
+            set(MSL_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.msl")
+            add_custom_command(
+                OUTPUT  "${MSL_OUT}"
+                COMMAND "${SPV_TO_MSL}" "${SPV_OUT}" "${MSL_OUT}"
+                DEPENDS "${SPV_OUT}"
+                COMMENT "Transpiling new-renderer shader ${SHADER_SRC} → MSL"
+                VERBATIM
+            )
+            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+        elseif(SPIRV_CROSS)
+            set(MSL_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.msl")
+            add_custom_command(
+                OUTPUT  "${MSL_OUT}"
+                COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
+                COMMAND python3
+                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
+                        "${SPIRV_CROSS}" "${SPV_OUT}" "${MSL_OUT}"
+                DEPENDS "${SPV_OUT}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
+                COMMENT "Transpiling new-renderer shader ${SHADER_SRC} → MSL (fallback)"
+                VERBATIM
+            )
+            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
+        endif()
+    endif()
+endforeach()
+
 add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
 
 # ===========================================================================
@@ -364,6 +466,210 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    # Particle system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticlePool.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleEvents.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/GpuParticleBuffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/GpuParticleBuffer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ImpactEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ImpactEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/RibbonTrail.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/RibbonTrail.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
+    # Skeletal animation
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.hpp"
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/components/Position.hpp
+        src/ecs/components/Velocity.hpp
+        src/ecs/components/CollisionShape.hpp
+        src/ecs/components/PlayerState.hpp
+        src/ecs/components/InputSnapshot.hpp
+        src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/LocalPlayer.hpp
+        src/ecs/components/Renderable.hpp
+        src/ecs/components/Projectile.hpp
+        src/ecs/components/WeaponState.hpp
+        src/ecs/components/TracerEmitter.hpp
+        src/ecs/components/RibbonEmitter.hpp
+        src/ecs/components/ParticleEmitterTag.hpp
+        src/ecs/physics/PhysicsConstants.hpp
+        src/ecs/physics/Movement.hpp
+        src/ecs/physics/Movement.cpp
+        src/ecs/physics/SweptCollision.hpp
+        src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/WallDetection.hpp
+        src/ecs/physics/WallDetection.cpp
+        src/ecs/physics/TitanfallConstants.hpp
+        src/ecs/systems/MovementSystem.hpp
+        src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/CollisionSystem.hpp
+        src/ecs/systems/CollisionSystem.cpp
+        src/client/systems/InputSampleSystem.hpp
+        src/client/systems/PredictionSystem.hpp
+        src/client/systems/InputSendSystem.hpp
+        src/client/systems/ReconciliationSystem.hpp
+        src/client/debug/DebugUI.hpp
+        src/client/debug/DebugUI.cpp
+        src/network/MessageStream.hpp
+        src/network/MessageStream.cpp
+        src/network/NetworkConfig.hpp
+        src/network/NetworkConfig.cpp
+        src/network/RegistryArchive.hpp
+        src/network/RegistrySerialization.hpp
+        src/network/RegistrySerialization.cpp
+        src/ecs/components/ClientId.hpp
+        src/client/renderer-new/Renderer.cpp
+        src/client/renderer-new/Renderer.hpp
+        src/client/renderer-new/Camera.cpp
+        src/client/renderer-new/Camera.hpp
+)
+
+# src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
+# src/client/ — for client-local headers (game/Game.hpp, network/Client.hpp, etc.)
+target_include_directories(group2 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+
+# Compile shaders before linking the binary.
+add_dependencies(group2 shaders)
+
+# Copy compiled SPIR-V shaders next to the binary so SDL_GetBasePath() finds them.
+add_custom_command(TARGET group2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SHADER_OUT_DIR}"
+            "$<TARGET_FILE_DIR:group2>/shaders"
+    COMMENT "Copying shaders to binary directory"
+    VERBATIM
+)
+
+# Copy new-renderer SPIR-V shaders next to the binary (shaders-new/ subdirectory).
+add_custom_command(TARGET group2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SHADER_NEW_OUT_DIR}"
+            "$<TARGET_FILE_DIR:group2>/shaders-new"
+    COMMENT "Copying new-renderer shaders to binary directory"
+    VERBATIM
+)
+
+# Copy config.toml next to the client binary.
+add_custom_command(TARGET group2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "$<TARGET_FILE_DIR:group2>/config.toml"
+    COMMENT "Copying config.toml to client binary directory"
+    VERBATIM
+)
+
+# Tell the renderer which shader formats were compiled.
+if(SPIRV_CROSS)
+    target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
+endif()
+
+# SDL3 GPU uses [0, 1] depth range on all backends (Vulkan + Metal).
+# Without this define, glm::perspective maps depth to [-1, 1] (OpenGL convention)
+# and fragments in the near half of the frustum are clipped on Metal.
+target_compile_definitions(group2 PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
+# group2 uses the HybridRenderer which routes between legacy and new renderers.
+target_compile_definitions(group2 PRIVATE USE_HYBRID_RENDERER)
+
+# ---- Client link libraries ----
+target_link_libraries(group2 PRIVATE
+    SDL3::SDL3-static
+    glm::glm
+    SDL3_net::SDL3_net
+    EnTT::EnTT
+    imgui_lib
+    assimp
+    stb_image
+    ozz_animation_offline
+    ozz_animation
+    ozz_base
+    tomlplusplus::tomlplusplus
+)
+
+# ---- Client precompiled header ----
+# Heavy headers used across most client sources — compiled once, reused everywhere.
+target_precompile_headers(group2 PRIVATE
+    <string>
+    <vector>
+    <array>
+    <memory>
+    <cstdint>
+    <unordered_map>
+    <functional>
+    <algorithm>
+    <cmath>
+    <glm/glm.hpp>
+    <glm/gtc/matrix_transform.hpp>
+    <glm/gtc/quaternion.hpp>
+    <entt/entt.hpp>
+    <SDL3/SDL.h>
+)
+
+# Copy assets (models, textures, …) next to the binary so the renderer can
+# find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    add_custom_command(TARGET group2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+                "$<TARGET_FILE_DIR:group2>/assets"
+        COMMENT "Copying assets to binary directory"
+        VERBATIM
+    )
+else()
+    message(STATUS "assets/ directory not found — skipping asset copy (install Git LFS and run 'git lfs pull')")
+endif()
+
+# ===========================================================================
+# Client executable (legacy renderer only)
+# ===========================================================================
+# Same as group2 but uses the legacy Renderer directly — no HybridRenderer,
+# no renderer-new/ code, no shaders-new/.
+add_executable(client
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/main/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
@@ -449,26 +755,33 @@ add_executable(group2
         src/ecs/components/ClientId.hpp
 )
 
-# src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
-# src/client/ — for client-local headers (game/Game.hpp, network/Client.hpp, etc.)
-target_include_directories(group2 PRIVATE
+target_include_directories(client PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
 )
 
-# Compile shaders before linking the binary.
-add_dependencies(group2 shaders)
+# Compile shaders before linking the binary (legacy shaders only).
+add_dependencies(client shaders)
 
-# Copy compiled SPIR-V shaders next to the binary so SDL_GetBasePath() finds them.
-add_custom_command(TARGET group2 POST_BUILD
+# Copy compiled SPIR-V shaders (legacy only) next to the binary.
+add_custom_command(TARGET client POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${SHADER_OUT_DIR}"
-            "$<TARGET_FILE_DIR:group2>/shaders"
-    COMMENT "Copying shaders to binary directory"
+            "$<TARGET_FILE_DIR:client>/shaders"
+    COMMENT "Copying legacy shaders to client binary directory"
     VERBATIM
 )
 
-# Copy config.toml next to the client binary when it changes.
+# Copy config.toml next to the client binary.
+add_custom_command(TARGET client POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "$<TARGET_FILE_DIR:client>/config.toml"
+    COMMENT "Copying config.toml to client binary directory"
+    VERBATIM
+)
+
+# Copy config.toml next to the group2 binary when it changes.
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/config_client.stamp"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -476,24 +789,19 @@ add_custom_command(
             "$<TARGET_FILE_DIR:group2>/config.toml"
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_client.stamp"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
-    COMMENT "Copying config.toml to client binary directory"
+    COMMENT "Copying config.toml to group2 binary directory"
     VERBATIM
 )
 add_custom_target(copy_client_config DEPENDS "${CMAKE_BINARY_DIR}/config_client.stamp")
 add_dependencies(group2 copy_client_config)
 
-# Tell the renderer which shader formats were compiled.
+# No USE_HYBRID_RENDERER — Game.cpp / Game.hpp use the legacy Renderer directly.
 if(SPIRV_CROSS)
-    target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
+    target_compile_definitions(client PRIVATE HAVE_MSL_SHADERS)
 endif()
+target_compile_definitions(client PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
-# SDL3 GPU uses [0, 1] depth range on all backends (Vulkan + Metal).
-# Without this define, glm::perspective maps depth to [-1, 1] (OpenGL convention)
-# and fragments in the near half of the frustum are clipped on Metal.
-target_compile_definitions(group2 PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
-
-# ---- Client link libraries ----
-target_link_libraries(group2 PRIVATE
+target_link_libraries(client PRIVATE
     SDL3::SDL3-static
     glm::glm
     SDL3_net::SDL3_net
@@ -507,18 +815,32 @@ target_link_libraries(group2 PRIVATE
     tomlplusplus::tomlplusplus
 )
 
-# Copy assets (models, textures, …) next to the binary so the renderer can
-# find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).
+target_precompile_headers(client PRIVATE
+    <string>
+    <vector>
+    <array>
+    <memory>
+    <cstdint>
+    <unordered_map>
+    <functional>
+    <algorithm>
+    <cmath>
+    <glm/glm.hpp>
+    <glm/gtc/matrix_transform.hpp>
+    <glm/gtc/quaternion.hpp>
+    <entt/entt.hpp>
+    <SDL3/SDL.h>
+)
+
+# Copy assets next to the binary (same as group2).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
-    add_custom_command(TARGET group2 POST_BUILD
+    add_custom_command(TARGET client POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_CURRENT_SOURCE_DIR}/assets"
-                "$<TARGET_FILE_DIR:group2>/assets"
-        COMMENT "Copying assets to binary directory"
+                "$<TARGET_FILE_DIR:client>/assets"
+        COMMENT "Copying assets to client binary directory"
         VERBATIM
     )
-else()
-    message(STATUS "assets/ directory not found — skipping asset copy (install Git LFS and run 'git lfs pull')")
 endif()
 
 # ===========================================================================
@@ -580,6 +902,21 @@ target_link_libraries(server PRIVATE
     tomlplusplus::tomlplusplus
 )
 
+# ---- Server precompiled header ----
+target_precompile_headers(server PRIVATE
+    <string>
+    <vector>
+    <array>
+    <memory>
+    <cstdint>
+    <unordered_map>
+    <functional>
+    <algorithm>
+    <glm/glm.hpp>
+    <entt/entt.hpp>
+    <SDL3/SDL.h>
+)
+
 # Copy config.toml next to the server binary when it changes.
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/config_server.stamp"
@@ -596,10 +933,12 @@ add_dependencies(server copy_server_config)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
+set_compiler_warnings(client)
 set_compiler_warnings(server)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
+enable_sanitizers(client)
 enable_sanitizers(server)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
@@ -613,7 +952,14 @@ if(WIN32 AND ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${_asan_dll}"
                     "$<TARGET_FILE_DIR:group2>/clang_rt.asan_dynamic-x86_64.dll"
-            COMMENT "Copying MSVC ASan runtime DLL to output directory"
+            COMMENT "Copying MSVC ASan runtime DLL to group2 output directory"
+            VERBATIM
+        )
+        add_custom_command(TARGET client POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_asan_dll}"
+                    "$<TARGET_FILE_DIR:client>/clang_rt.asan_dynamic-x86_64.dll"
+            COMMENT "Copying MSVC ASan runtime DLL to client output directory"
             VERBATIM
         )
     else()
@@ -626,6 +972,7 @@ endif()
 # ---- Windows: suppress min/max macros from <windows.h> ----
 if(WIN32)
     target_compile_definitions(group2 PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(client PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 # ---- Symlink compile_commands.json to project root for clang-tidy ----

@@ -10,7 +10,11 @@
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
+#ifdef USE_HYBRID_RENDERER
+#include "renderer/HybridRenderer.hpp"
+#else
 #include "renderer/Renderer.hpp"
+#endif
 
 #include <SDL3/SDL.h>
 
@@ -50,16 +54,20 @@ private:
     NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-    Renderer renderer;                           ///< Owns the GPU pipeline and ImGui render backend.
-    Registry registry;                           ///< The shared ECS registry.
-    Client client;                               ///< UDP network client.
-    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
-    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
+#ifdef USE_HYBRID_RENDERER
+    HybridRenderer renderer;                     ///< Routes each call to the legacy or new renderer.
+#else
+    Renderer renderer; ///< Legacy renderer.
+#endif
+    Registry registry;             ///< The shared ECS registry.
+    Client client;                 ///< UDP network client.
+    ParticleSystem particleSystem; ///< Client-side VFX particle system.
+    entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
-    Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
-    float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
-    int tickCount = 0;                           ///< Total physics ticks elapsed since start.
-    bool mouseCaptured = true;                   ///< True when relative mouse mode is active.
+    Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
+    float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
+    int tickCount = 0;             ///< Total physics ticks elapsed since start.
+    bool mouseCaptured = true;     ///< True when relative mouse mode is active.
 
     // Runtime-tunable loop settings (exposed via ImGui)
     float mouseSensitivity = 0.001f;       ///< Radians per pixel of mouse movement.

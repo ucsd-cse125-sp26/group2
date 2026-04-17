@@ -17,7 +17,9 @@ sudo apt-get install -y --no-install-recommends \
     clang-format-18 \
     lldb \
     git \
-    git-lfs
+    git-lfs \
+    ccache \
+    mold
 
 echo "==> Installing shader tools..."
 # glslang-tools — GLSL → SPIR-V compiler (glslangValidator)

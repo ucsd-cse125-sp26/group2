@@ -9,8 +9,8 @@
 #include "entt/entity/fwd.hpp"
 #include "network/RegistryArchive.hpp"
 
-#include <entt/entt.hpp>
 #include <cstdint>
+#include <entt/entt.hpp>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
