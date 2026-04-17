@@ -14,6 +14,7 @@
 struct Renderable
 {
     int32_t modelIndex = -1;           ///< Index into Renderer::models[]. -1 = no model.
+    glm::vec3 translation{0.0f};       ///< Local-space translation offset applied before rotation/scale.
     glm::vec3 scale{1.0f};             ///< Per-entity scale override.
     glm::quat orientation{1, 0, 0, 0}; ///< Per-entity rotation override (identity by default).
     bool visible = true;               ///< False to skip rendering without removing the component.

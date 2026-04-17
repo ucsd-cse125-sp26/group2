@@ -9,6 +9,7 @@
 
 #include <glm/vec3.hpp>
 
+struct NetworkStats;  ///< Forward-declared; defined in Client.hpp.
 class ParticleSystem; ///< Forward-declared to avoid pulling in heavy particle headers.
 
 /// @brief Live ECS inspector overlay powered by Dear ImGui.
@@ -84,6 +85,9 @@ public:
 
     /// @brief Build the Lighting Controls window for live parameter tuning.
     void buildLightingUI(class Renderer& renderer);
+
+    /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
+    void buildNetworkUI(const NetworkStats& stats);
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();

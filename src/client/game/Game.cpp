@@ -11,10 +11,6 @@
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
-#include "ecs/components/WeaponState.hpp"
-#include "ecs/physics/WorldData.hpp"
-#include "ecs/systems/CollisionSystem.hpp"
-#include "ecs/systems/MovementSystem.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
@@ -85,13 +81,24 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
 
+    // Load models for entity rendering
+    wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+    if (wraithModelIdx < 0)
+        SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
+
+    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f);
+    if (weaponModelIdx < 0)
+        SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
+
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
 
-        if (wraithModelIdx >= 0)
-            registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
+        // if (wraithModelIdx >= 0) {
+        //     SDL_Log("[client] assigning Wraith model to local player entity %d", static_cast<int>(local));
+        //     registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
+        // }
 
         SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
     });
@@ -107,15 +114,6 @@ bool Game::init()
     // Grab the mouse into relative mode so camera look works immediately.
     SDL_SetWindowRelativeMouseMode(window, true);
     mouseCaptured = true;
-
-    // Load models for entity rendering
-    wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
-    if (wraithModelIdx < 0)
-        SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
-
-    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f);
-    if (weaponModelIdx < 0)
-        SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
 
     // Load animated model (Mixamo FBX)
     {
@@ -430,6 +428,14 @@ SDL_AppResult Game::iterate()
 
     systems::runInputSend(registry, client);
 
+    // Network stats: send periodic pings and update bandwidth counters
+    client.updateStats(frameTime);
+    pingTimer += frameTime;
+    if (pingTimer >= 1.0f) {
+        client.sendPing();
+        pingTimer = 0.0f;
+    }
+
     // 4. Physics -- always 128 Hz, up to k_maxTicksPerFrame catch-up
     bool physicsRan = false;
     int ticksThisFrame = 0;
@@ -456,6 +462,7 @@ SDL_AppResult Game::iterate()
         }
 
         client.poll(registry);
+        refreshRemotePlayerRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -596,7 +603,7 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
-            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value);
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
@@ -744,6 +751,7 @@ SDL_AppResult Game::iterate()
                     statsFPSMax,
                     statsFPS1pLow,
                     statsFPS5pLow);
+    debugUI.buildNetworkUI(client.getNetStats());
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     debugUI.buildRenderTogglesUI(renderer.toggles);
     debugUI.buildLightingUI(renderer);
@@ -778,4 +786,27 @@ void Game::quit()
     SDL_DestroyWindow(window);
     NET_Quit();
     SDL_Quit();
+}
+
+
+void Game::refreshRemotePlayerRenderables()
+{
+    constexpr float kWraithScale = 34.5f;
+    constexpr float kWraithVerticalOffset = -35.45f;
+    const glm::quat importFix =
+        glm::angleAxis(glm::radians(90.0f), glm::vec3{1, 0, 0});
+
+    registry.view<Position, PlayerState, InputSnapshot>().each(
+        [&](entt::entity e, const Position&, const PlayerState&, const InputSnapshot& input) {
+            if (registry.all_of<LocalPlayer>(e))
+                return;
+
+            auto& rend = registry.get_or_emplace<Renderable>(e);
+            rend.modelIndex = wraithModelIdx;
+            rend.translation = glm::vec3(0.0f, kWraithVerticalOffset, 0.0f);
+            rend.scale = glm::vec3(kWraithScale); // 72.0f / 2.088f
+            rend.orientation =
+                glm::angleAxis(input.yaw, glm::vec3{0, 1, 0}) * importFix;
+            rend.visible = true;
+        });
 }
