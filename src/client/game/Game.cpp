@@ -74,7 +74,7 @@ bool Game::init()
     // colorFmt must match the render target particles draw into (HDR = RGBA16F),
     // NOT the swapchain format.  shaderFmt must be the single format the
     // renderer selected, not the bitmask of all supported formats.
-    if (!particleSystem.init(renderer.getDevice(), HybridRenderer::getHdrFormat(), renderer.getShaderFormat())) {
+    if (!particleSystem.init(renderer.getDevice(), Renderer::getHdrFormat(), renderer.getShaderFormat())) {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
         renderer.setParticleSystem(&particleSystem);
@@ -748,8 +748,13 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     debugUI.buildRenderTogglesUI(renderer.toggles);
+#ifdef USE_HYBRID_RENDERER
     debugUI.buildLightingUI(renderer.legacy());
     debugUI.buildSkyboxUI(renderer.legacy());
+#else
+    debugUI.buildLightingUI(renderer);
+    debugUI.buildSkyboxUI(renderer);
+#endif
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
