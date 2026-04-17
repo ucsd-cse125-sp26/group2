@@ -93,7 +93,7 @@ block()
     set(BUILD_SHARED_LIBS OFF)
     FetchContent_Declare(
         SDL3_net
-        GIT_REPOSITORY https://github.com/libsdl-org/SDL_net.git
+        GIT_REPOSITORY https://github.com/cedricdvd/SDL_net.git
         GIT_TAG        main
         GIT_SHALLOW    TRUE
     )
@@ -781,6 +781,20 @@ add_custom_command(TARGET client POST_BUILD
     VERBATIM
 )
 
+# Copy config.toml next to the group2 binary when it changes.
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/config_client.stamp"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "$<TARGET_FILE_DIR:group2>/config.toml"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_client.stamp"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+    COMMENT "Copying config.toml to group2 binary directory"
+    VERBATIM
+)
+add_custom_target(copy_client_config DEPENDS "${CMAKE_BINARY_DIR}/config_client.stamp")
+add_dependencies(group2 copy_client_config)
+
 # No USE_HYBRID_RENDERER — Game.cpp / Game.hpp use the legacy Renderer directly.
 if(SPIRV_CROSS)
     target_compile_definitions(client PRIVATE HAVE_MSL_SHADERS)
@@ -903,14 +917,19 @@ target_precompile_headers(server PRIVATE
     <SDL3/SDL.h>
 )
 
-# Copy config.toml next to the server binary.
-add_custom_command(TARGET server POST_BUILD
+# Copy config.toml next to the server binary when it changes.
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/config_server.stamp"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
             "$<TARGET_FILE_DIR:server>/config.toml"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_server.stamp"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
     COMMENT "Copying config.toml to server binary directory"
     VERBATIM
 )
+add_custom_target(copy_server_config DEPENDS "${CMAKE_BINARY_DIR}/config_server.stamp")
+add_dependencies(server copy_server_config)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

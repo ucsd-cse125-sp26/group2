@@ -7,6 +7,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
@@ -152,6 +153,8 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Velocity>(player);
     registry.emplace<CollisionShape>(player);
     registry.emplace<PlayerState>(player);
+    registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
+
     SDL_Log("[server] spawned player entity for client %d", clientId.value);
 }
 

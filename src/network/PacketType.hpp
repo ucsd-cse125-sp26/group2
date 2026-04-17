@@ -10,4 +10,8 @@ enum class PacketType : uint8_t
     // Server -> Client
     ASSIGN_CLIENT_ID,
     UPDATE_REGISTRY,
+
+    // Bidirectional (latency measurement)
+    PING, // Client -> Server (carries uint64_t timestamp)
+    PONG, // Server -> Client (echoes timestamp back)
 };

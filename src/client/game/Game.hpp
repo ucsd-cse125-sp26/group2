@@ -43,6 +43,7 @@ public:
 
     /// @brief Shut down all subsystems in reverse-init order.
     void quit();
+    void refreshRemotePlayerRenderables();
 
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
@@ -95,6 +96,9 @@ private:
     int fpsHistoryHead = 0;                  ///< Next write index.
     int fpsHistoryCount = 0;                 ///< Valid sample count (saturates at k_fpsHistorySize).
     Uint64 prevRenderTime = 0;               ///< Perf counter at the last render call.
+
+    // Network ping timer
+    float pingTimer = 0.0f; ///< Accumulator for periodic PING sends.
 
     // Performance stats -- refreshed every 0.5 s
     Uint64 statsPrevTime = 0;       ///< Perf counter at the last stats snapshot.

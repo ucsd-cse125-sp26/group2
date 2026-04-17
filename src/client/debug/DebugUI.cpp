@@ -12,6 +12,7 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "network/Client.hpp"    // for NetworkStats
 #include "particles/ParticleSystem.hpp"
 #include "renderer/Renderer.hpp" // for RenderToggles
 
@@ -726,6 +727,42 @@ void DebugUI::buildSkyboxUI(Renderer& renderer)
         if (isCurrent)
             ImGui::PopStyleColor();
     }
+
+    ImGui::End();
+}
+
+void DebugUI::buildNetworkUI(const NetworkStats& stats)
+{
+    ImGui::SetNextWindowPos({500.0f, 490.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({300.0f, 200.0f}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Network Stats");
+
+    // Ping / RTT
+    ImGui::SeparatorText("Latency");
+    ImGui::Text("Ping:      %5.1f ms", static_cast<double>(stats.rttMs));
+    ImGui::Text("Avg Ping:  %5.1f ms", static_cast<double>(stats.avgRttMs));
+
+    // Bandwidth
+    ImGui::SeparatorText("Bandwidth");
+    const float recvMBs = stats.recvBytesPerSec / (1024.0f * 1024.0f);
+    const float sendMBs = stats.sendBytesPerSec / (1024.0f * 1024.0f);
+    ImGui::Text("Recv: %6.3f MB/s  (%.0f KB/s)",
+                static_cast<double>(recvMBs),
+                static_cast<double>(stats.recvBytesPerSec / 1024.0f));
+    ImGui::Text("Send: %6.3f MB/s  (%.0f KB/s)",
+                static_cast<double>(sendMBs),
+                static_cast<double>(stats.sendBytesPerSec / 1024.0f));
+
+    // Registry updates
+    ImGui::SeparatorText("Registry");
+    ImGui::Text("Update size:  %5.1f KB", static_cast<double>(stats.registryUpdateSize) / 1024.0);
+    ImGui::Text("Updates/sec:  %5.1f", static_cast<double>(stats.registryUpdatesPerSec));
+
+    // Totals
+    ImGui::SeparatorText("Totals");
+    ImGui::Text("Recv: %.2f MB   Send: %.2f MB",
+                static_cast<double>(stats.bytesRecvTotal) / (1024.0 * 1024.0),
+                static_cast<double>(stats.bytesSentTotal) / (1024.0 * 1024.0));
 
     ImGui::End();
 }
