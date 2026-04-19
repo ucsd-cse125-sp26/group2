@@ -198,9 +198,9 @@ void updateSprint(PlayerState& state, const InputSnapshot& input)
     }
 }
 
-/// @brief Determine the current wish speed based on movement mode and stance.
-/// @param state  Player state.
-/// @return Target movement speed.
+} // namespace
+
+// Public: current wish speed (also used by DebugUI).
 float currentWishSpeed(const PlayerState& state)
 {
     if (state.moveMode == MoveMode::Sliding)
@@ -211,8 +211,6 @@ float currentWishSpeed(const PlayerState& state)
         return tms::k_sprintSpeed;
     return tms::k_walkSpeed;
 }
-
-} // namespace
 
 // Jumping (ground, double, coyote, wall, climb, ledge, slidehop)
 

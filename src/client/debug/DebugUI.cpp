@@ -12,6 +12,8 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "ecs/physics/TitanfallConstants.hpp"
+#include "ecs/systems/MovementSystem.hpp"
 #include "network/Client.hpp"    // for NetworkStats
 #include "particles/ParticleSystem.hpp"
 #include "renderer/Renderer.hpp" // for RenderToggles
@@ -328,8 +330,8 @@ void DebugUI::buildMovementChart(const Registry& registry)
     const float k_posScale = k_side / (2.0f * k_worldHalf); // px per world unit
 
     // Velocity vectors use a separate scale so they're always clearly visible:
-    // k_maxGroundSpeed maps to 28 % of the canvas half-width.
-    const float k_velScale = (k_side * 0.28f) / physics::k_maxGroundSpeed;
+    // max ground wish speed (sprint) maps to 28 % of the canvas half-width.
+    const float k_velScale = (k_side * 0.28f) / tms::k_sprintSpeed;
 
     const auto worldToScreen = [&](float wx, float wz) -> ImVec2 {
         return {k_cursor.x + k_side * 0.5f - wx * k_posScale, // negate X: world -X = screen right
@@ -360,14 +362,14 @@ void DebugUI::buildMovementChart(const Registry& registry)
 
     // Player
     const bool k_hasPlayer =
-        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot>(localPlayer);
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
 
     if (k_hasPlayer) {
         const auto& pos = registry.get<Position>(localPlayer).value;
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const bool grounded =
-            registry.all_of<PlayerState>(localPlayer) && registry.get<PlayerState>(localPlayer).grounded;
+        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const bool grounded = playerState.grounded;
 
         const ImVec2 k_pScreen = worldToScreen(pos.x, pos.z);
 
@@ -390,7 +392,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
         {
             const glm::vec3 wishDir =
                 physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-            const float wishSpeed = grounded ? physics::k_maxGroundSpeed : physics::k_airMaxSpeed;
+            const float wishSpeed = grounded ? systems::currentWishSpeed(playerState) : physics::k_airMaxSpeed;
             drawArrow(
                 dl,
                 k_pScreen,
@@ -428,12 +430,12 @@ void DebugUI::buildMovementChart(const Registry& registry)
     if (k_hasPlayer) {
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const bool grounded =
-            registry.all_of<PlayerState>(localPlayer) && registry.get<PlayerState>(localPlayer).grounded;
+        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const bool grounded = playerState.grounded;
         const float hSpeed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
         const glm::vec3 wishDir =
             physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-        const float wishSpeed = grounded ? physics::k_maxGroundSpeed : physics::k_airMaxSpeed;
+        const float wishSpeed = grounded ? systems::currentWishSpeed(playerState) : physics::k_airMaxSpeed;
         const float wishMag = (wishDir.x != 0.0f || wishDir.z != 0.0f) ? wishSpeed : 0.0f;
 
         ImGui::Text("XZ: %5.0f  |  Y: %+6.1f  |  Wish: %5.0f  |  %s",

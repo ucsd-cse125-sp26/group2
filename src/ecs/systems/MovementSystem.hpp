@@ -6,6 +6,8 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/registry/Registry.hpp"
 
+struct PlayerState;
+
 /// @brief Shared movement system — compiled identically on client and server.
 ///
 /// Any divergence between client and server builds is a bug (breaks prediction).
@@ -24,5 +26,15 @@ namespace systems
 /// @param dt        Fixed physics delta time in seconds.
 /// @param world     World collision geometry (needed for wall/climb/ledge detection).
 void runMovement(Registry& registry, float dt, const physics::WorldGeometry& world);
+
+/// @brief Determine the current ground wish speed based on movement mode and stance.
+///
+/// Returns the speed the player is accelerating toward on the ground this tick:
+/// `tms::k_crouchSpeed` / `k_sprintSpeed` / `k_walkSpeed`, or `0` during a slide.
+/// For air movement use `physics::k_airMaxSpeed` directly.
+///
+/// @param state  Player locomotion state.
+/// @return Target ground wish speed (u/s).
+float currentWishSpeed(const PlayerState& state);
 
 } // namespace systems
