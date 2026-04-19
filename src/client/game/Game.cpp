@@ -216,8 +216,8 @@ SDL_AppResult Game::event(SDL_Event* event)
                 }
             }
             const glm::vec3 hitP = cachedEye_ + cachedCamFwd_ * dist;
-            particleSystem.spawnHitscanBeam(hip, hitP, WeaponType::EnergyRifle);
-            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Energy, WeaponType::EnergyRifle);
+            particleSystem.spawnHitscanBeam(hip, hitP, WeaponType::EnergyGun);
+            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Energy, WeaponType::EnergyGun);
             break;
         }
         case SDLK_Y: {
