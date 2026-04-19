@@ -32,6 +32,7 @@ constexpr float k_coyoteTime = 0.15f; ///< Grace period after leaving ground/wal
 
 // Jump lurch
 
+constexpr int k_enableJumpLurch = 1;             ///< Master enable for jump lurch (1 = enabled, 0 = disabled).
 constexpr float k_jumpLurchGraceMin = 0.2f;      ///< Time after jump where lurch is at max strength (s).
 constexpr float k_jumpLurchGraceMax = 0.5f;      ///< Time after jump where lurch is disabled entirely (s).
 constexpr float k_jumpLurchStrength = 5.0f;      ///< Multiplier for lurch intensity.
@@ -98,7 +99,7 @@ constexpr float k_ledgeExitTime = 0.5f;        ///< Duration of "exiting ledge" 
 
 // Speed cap
 
-constexpr float k_speedCap = 1200.0f; ///< Hard horizontal speed limit (u/s).
+constexpr float k_speedCap = 7000.0f; ///< Hard horizontal speed limit (u/s).
 
 // Player dimensions
 

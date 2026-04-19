@@ -23,9 +23,9 @@ constexpr float k_groundAccel = 15.0f;     ///< Ground acceleration constant. Hi
 
 // Air movement
 constexpr float k_airAccel =
-    5.0f;   ///< Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
+    2000.0f; ///< Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
 constexpr float k_airMaxSpeed =
-    300.0f; ///< Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
+    30.0f;   ///< Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
 
 // Friction
 constexpr float k_friction = 4.0f;    ///< Ground friction coefficient (Quake default).

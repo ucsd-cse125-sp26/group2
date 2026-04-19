@@ -324,7 +324,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpCooldown = tms::k_doubleJumpCooldown;
 
         // Set up jump lurch.
-        state.jumpLurchEnabled = true;
+        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0);
         state.jumpLurchTimer = 0.0f;
         state.moveInputsOnJump = moveInput2D(input);
         return;
@@ -344,7 +344,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpedThisTick = true;
 
         // Lurch resets on double jump too.
-        state.jumpLurchEnabled = true;
+        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0);
         state.jumpLurchTimer = 0.0f;
         state.moveInputsOnJump = moveInput2D(input);
     }
@@ -363,6 +363,13 @@ namespace
 /// @param state  Player state (modified in place).
 void handleJumpLurch(glm::vec3& vel, const InputSnapshot& input, PlayerState& state)
 {
+    if constexpr (tms::k_enableJumpLurch == 0) {
+        // Jump lurch disabled globally: clear state so timers don't accumulate and bail.
+        state.jumpLurchEnabled = false;
+        state.jumpLurchTimer = 0.0f;
+        return;
+    }
+
     if (!state.jumpLurchEnabled)
         return;
 
