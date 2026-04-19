@@ -210,6 +210,35 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
         }
     }
 
+    // Strip horizontal root motion — Mixamo clips downloaded WITHOUT the
+    // "In Place" toggle bake forward translation into the hip joint, which
+    // makes the character drift during the loop and snap back at loop end.
+    // Game movement is driven by physics/networking, so we want the character
+    // to stay put visually and let the legs cycle in place.
+    //
+    // Fix: for every root joint (parent == kNoParent — in a Mixamo rig this
+    // is `mixamorig:Hips`), freeze translation X/Z to the first-frame value
+    // while leaving Y (vertical bob) intact.  This is the programmatic
+    // equivalent of Mixamo's "In Place" export option.
+    {
+        const auto jointParents = skel->joint_parents();
+        for (int j = 0; j < numJoints; ++j) {
+            if (jointParents[static_cast<size_t>(j)] != ozz::animation::Skeleton::kNoParent)
+                continue;
+
+            auto& track = raw.tracks[static_cast<size_t>(j)];
+            if (track.translations.empty())
+                continue;
+
+            const float lockedX = track.translations.front().value.x;
+            const float lockedZ = track.translations.front().value.z;
+            for (auto& key : track.translations) {
+                key.value.x = lockedX;
+                key.value.z = lockedZ;
+            }
+        }
+    }
+
     if (!raw.Validate()) {
         SDL_Log("AnimationLibrary: raw animation validation failed for '%s'", path.c_str());
         return false;
