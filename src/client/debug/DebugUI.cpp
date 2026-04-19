@@ -830,8 +830,8 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
     ImGui::SameLine();
     if (ImGui::Button("Energy Shot", {110.f, 0.f})) {
         const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
-        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyRifle);
-        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyRifle);
+        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyGun);
+        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyGun);
     }
 
     if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))

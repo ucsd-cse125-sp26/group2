@@ -10,10 +10,15 @@
 enum class WeaponType : uint8_t
 {
     Rifle,       ///< Fast hitscan/projectile (R301-style capsule tracer)
-    Shotgun,     ///< Fast spread projectile burst
     Rocket,      ///< Slow arcing projectile (ribbon trail)
-    EnergyRifle, ///< Hitscan energy weapon (beam + lightning arcs)
-    EnergySMG,   ///< Fast hitscan energy burst
+    RailGun, ///< Hitscan energy weapon (beam + lightning arcs)
+    EnergyGun,   ///< Fast hitscan energy burst
+};
+
+enum class WeaponSlot : uint8_t
+{
+    PRIMARY,
+    SECONDARY,
 };
 
 /// @brief Surface material hit by a projectile — drives impact effect parameters.

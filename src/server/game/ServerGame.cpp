@@ -9,9 +9,12 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "ecs/systems/WeaponSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -99,6 +102,7 @@ void ServerGame::eventHandler(Event event)
         const entt::entity player = entityIt->second;
         if (!registry.valid(player))
             return;
+
         InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
         input = event.movementIntent;
         break;
@@ -122,6 +126,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         }
     }
 
+    systems::runWeapon(registry, dt);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
 
@@ -154,6 +159,25 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<CollisionShape>(player);
     registry.emplace<PlayerState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
+
+    const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
+    const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+    registry.emplace<WeaponState>(player, WeaponState{
+        .primary = GunInstance{
+            .type = WeaponType::Rifle,
+            .totalAmmo = rifleConfig.defaultAmmoCapacity,
+            .currentMagAmmo = rifleConfig.magazineSize,
+            .fireCooldown = 0.0f,
+        },
+        .secondary = GunInstance{
+            .type = WeaponType::RailGun,
+            .totalAmmo = railConfig.defaultAmmoCapacity,
+            .currentMagAmmo = railConfig.magazineSize,
+            .fireCooldown = 0.0f,
+        },
+        .current = WeaponSlot::PRIMARY,
+    });
+
 
     SDL_Log("[server] spawned player entity for client %d", clientId.value);
 }
