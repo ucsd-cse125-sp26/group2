@@ -159,9 +159,10 @@ private:
     SDL_GPUTexture* envCubemap = nullptr;    ///< HDR environment cubemap (512×512, RGBA16F).
 
     // Samplers
-    SDL_GPUSampler* pbrSampler = nullptr;     ///< Linear, repeat, aniso 8×, mipmapped.
-    SDL_GPUSampler* shadowSampler = nullptr;  ///< Comparison, border.
-    SDL_GPUSampler* tonemapSampler = nullptr; ///< Linear, clamp-to-edge (for fullscreen pass).
+    SDL_GPUSampler* pbrSampler = nullptr;          ///< Linear, repeat, aniso 8×, mipmapped.
+    SDL_GPUSampler* shadowSampler = nullptr;       ///< Comparison, border.
+    SDL_GPUSampler* tonemapSampler = nullptr;      ///< Linear, clamp-to-edge (for fullscreen pass).
+    SDL_GPUSampler* nearestDepthSampler = nullptr; ///< Nearest, clamp-to-edge (for depth in GTAO).
 
     // Model rendering
 
@@ -193,7 +194,7 @@ private:
     // Fallback 1x1 textures for missing PBR maps.
     SDL_GPUTexture* fallbackWhite = nullptr;      ///< Albedo / AO default.
     SDL_GPUTexture* fallbackFlatNormal = nullptr; ///< (0.5, 0.5, 1.0, 1.0).
-    SDL_GPUTexture* fallbackMR = nullptr;         ///< (1.0, 0.5, 0, 0) = metallic=1, roughness=0.5.
+    SDL_GPUTexture* fallbackMR = nullptr;         ///< glTF packed MR: metallic=0 (B=0), roughness=0.5 (G=128).
     SDL_GPUTexture* fallbackBlack = nullptr;      ///< Emissive default.
 
     // Particle system
@@ -240,13 +241,31 @@ private:
     SDL_GPUComputePipeline* ssaoBlurPipeline = nullptr;
     SDL_GPUTexture* ssaoNoiseTexture = nullptr; ///< 4×4 random rotations.
 
-    // TAA (Phase 11)
-    SDL_GPUTexture* taaHistory[2] = {};            ///< Ping-pong RGBA16F.
+    // SMAA + Temporal Resolve (replaces old TAA)
+    SDL_GPUGraphicsPipeline* smaaEdgePipeline = nullptr;  ///< Edge detection (smaa_fullscreen.vert + smaa_edge.frag).
+    SDL_GPUGraphicsPipeline* smaaBlendPipeline = nullptr; ///< Blend weights (smaa_fullscreen.vert + smaa_blend.frag).
+    SDL_GPUGraphicsPipeline* smaaNeighborhoodPipeline =
+        nullptr; ///< Neighborhood blend (smaa_fullscreen.vert + smaa_neighborhood.frag).
+    SDL_GPUComputePipeline* smaaResolvePipeline = nullptr; ///< Temporal resolve for T2x (smaa_resolve.comp).
+    SDL_GPUTexture* smaaEdgeTex = nullptr;                 ///< RG8, screen-res.
+    SDL_GPUTexture* smaaBlendTex = nullptr;                ///< RGBA8, screen-res.
+    SDL_GPUTexture* smaaOutputTex = nullptr;               ///< RGBA16F, screen-res.
+    SDL_GPUTexture* smaaAreaTex = nullptr;                 ///< RG8, 160x560 (static lookup).
+    SDL_GPUTexture* smaaSearchTex = nullptr;               ///< R8, 66x33 (static lookup).
+
+    // CAS (Contrast Adaptive Sharpening)
+    SDL_GPUComputePipeline* casPipeline = nullptr; ///< cas.comp.
+    SDL_GPUTexture* casOutputTex = nullptr;        ///< RGBA16F, screen-res.
+
+    // Temporal history + motion vectors (reused from old TAA)
+    SDL_GPUTexture* taaHistory[2] = {};            ///< Ping-pong RGBA16F for temporal resolve.
     int taaCurrentIdx = 0;
     glm::mat4 previousVP{1.0f};                    ///< Previous frame's view-projection for motion vectors.
-    SDL_GPUComputePipeline* taaPipeline = nullptr;
     SDL_GPUTexture* motionVectorTexture = nullptr; ///< RG16F screen-res.
     SDL_GPUComputePipeline* motionVectorPipeline = nullptr;
+
+    // Jitter
+    int frameIndex = 0; ///< Alternates 0/1 for T2x temporal jitter.
 
     // SSR (Phase 9) — ping-pong for temporal accumulation.
     SDL_GPUTexture* ssrTexture[2] = {}; ///< RGBA16F, ping-pong.
@@ -257,17 +276,30 @@ public:
     int ssrMode = 2;       ///< 0=Sharp, 1=Stochastic, 2=Masked (default).
     RenderToggles toggles; ///< Live-tunable feature toggles (checked every frame).
 
+    // Anti-aliasing (live-tunable via ImGui)
+    AAMode aaMode = AAMode::SMAA_T2x; ///< Current AA mode (default: recommended T2x).
+    bool casEnabled = true;           ///< CAS sharpening on/off.
+    float casStrength = 0.5f;         ///< CAS sharpness (0.0 = minimal, 1.0 = max).
+
     // Sun / lighting (live-tunable via ImGui)
     float sunAzimuth = 210.0f;  ///< Degrees, 0=North, 90=East, 180=South (default ~SSW).
     float sunElevation = 60.0f; ///< Degrees above horizon (default 60° ≈ 11am).
     float sunIntensity = 3.0f;  ///< Primary directional light intensity.
     float fillIntensity = 0.8f; ///< Fill/bounce light intensity.
     float ambientR = 0.08f, ambientG = 0.09f, ambientB = 0.12f; ///< PBR ambient color.
-    float bloomStr = 0.04f;                                     ///< Bloom compositing strength.
-    float ssaoStr = 0.8f;                                       ///< SSAO compositing strength.
-    float ssrStr = 0.4f;                                        ///< SSR compositing strength.
-    float volStr = 0.15f;                                       ///< Volumetric compositing strength.
-    float sharpenStr = 0.6f;                                    ///< Post-TAA sharpening strength.
+    float iblDiffuseIntensity = 1.0f;                           ///< Multiplier on IBL diffuse term.
+    /// Multiplier on IBL specular term -- default below 1.0 to tame the
+    /// over-glossy / pseudo-metallic look dielectric surfaces get from
+    /// real-world HDR environment maps.
+    float iblSpecularIntensity = 0.5f;
+    float bloomStr = 0.04f;   ///< Bloom compositing strength.
+    float ssaoStr = 0.8f;     ///< SSAO compositing strength.
+    float ssaoRadius = 0.8f;  ///< GTAO world-space radius.
+    float ssaoFalloff = 2.0f; ///< GTAO distance falloff exponent.
+    float ssaoPower = 1.5f;   ///< AO power curve (1=linear, higher=softer).
+    float ssrStr = 0.4f;      ///< SSR compositing strength.
+    float volStr = 0.15f;     ///< Volumetric compositing strength.
+    float sharpenStr = 0.6f;  ///< Post-TAA sharpening strength.
     float shadowBiasVal = 0.0005f;
     float shadowNormalBiasVal = 1.5f;
     float shadowDistance = 3000.0f; ///< Max shadow range (world units).
@@ -299,7 +331,8 @@ private:
     bool initIBL();
     bool initBloom();
     bool initSSAO();
-    bool initTAA();
+    bool initSMAA(); ///< Upload area/search textures, create SMAA + temporal resolve pipelines.
+    bool initCAS();  ///< Create CAS compute pipeline.
     bool initSSR();
     bool initVolumetrics();
 

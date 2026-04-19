@@ -37,6 +37,18 @@ public:
     [[nodiscard]] float getAspect() const { return aspect_; }
     /// @brief Return the near clip plane distance.
     [[nodiscard]] float getNear() const { return zNear_; }
+    /// @brief Return the far clip plane distance.
+    [[nodiscard]] float getFar() const { return zFar_; }
+
+    /// @brief Apply a sub-pixel jitter offset to the projection matrix.
+    ///
+    /// Used by SMAA T2x temporal supersampling.  Call **after**
+    /// setAspect()/computeProjectionMatrix() so the base projection is
+    /// established first.  The offset is in NDC units (already scaled by
+    /// 2/resolution).
+    /// @param jitterX Horizontal jitter in NDC.
+    /// @param jitterY Vertical jitter in NDC.
+    void applySubpixelJitter(float jitterX, float jitterY);
 
 private:
     glm::vec3 eye_{0.0f, 0.0f, 3.0f};

@@ -68,6 +68,12 @@ void Camera::computeProjectionMatrix()
     projection_[1][1] *= -1.0f;
 }
 
+void Camera::applySubpixelJitter(const float jitterX, const float jitterY)
+{
+    projection_[2][0] += jitterX;
+    projection_[2][1] += jitterY;
+}
+
 const glm::vec3 Camera::getForward() const
 {
     return glm::normalize(target_ - eye_);

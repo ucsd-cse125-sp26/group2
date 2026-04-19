@@ -51,10 +51,12 @@ struct Light
 /// @brief Per-frame lighting uniform block.
 layout(set = 3, binding = 1) uniform LightData
 {
-    vec4  cameraPos;     // xyz = world-space eye
-    vec4  ambientColor;  // rgb = ambient radiance
+    vec4  cameraPos;            // xyz = world-space eye
+    vec4  ambientColor;         // rgb = constant ambient radiance (added to IBL)
     int   numLights;
-    float _pad1, _pad2, _pad3;
+    float iblDiffuseIntensity;  // Multiplier on IBL diffuse (default 1.0).
+    float iblSpecularIntensity; // Multiplier on IBL specular (default <1 to avoid glossy look).
+    float _pad3;
     Light lights[8];
 } lighting;
 
@@ -295,7 +297,14 @@ void main()
     float specOcc = clamp(pow(NdotV_ibl, 0.25 + roughness * 0.5), 0.0, 1.0);
     specularIBL *= specOcc;
 
-    vec3 ambient = diffuseIBL + specularIBL;
+    // Apply per-scene IBL intensities so the user can tame the over-glossy
+    // appearance of dielectric surfaces under bright HDR environments, and
+    // add the constant ambient term so the DebugUI ambient color slider
+    // actually does something.
+    diffuseIBL  *= lighting.iblDiffuseIntensity;
+    specularIBL *= lighting.iblSpecularIntensity;
+
+    vec3 ambient = diffuseIBL + specularIBL + lighting.ambientColor.rgb * albedo;
 
     // Emissive
     // Only use emissive when the material's emissiveFactor is non-zero.

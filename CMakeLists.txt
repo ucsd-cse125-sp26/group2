@@ -332,7 +332,11 @@ set(SHADER_SOURCES
     bloom_downsample.comp bloom_upsample.comp  # Bloom (Phase 8)
     ssr.comp                            # Screen-space reflections (Phase 9)
     volumetric.comp                     # Volumetric lighting (Phase 10)
-    motion_vectors.comp taa.comp        # TAA (Phase 11)
+    motion_vectors.comp                 # Motion vectors (used by SMAA T2x)
+    smaa_fullscreen.vert                # SMAA fullscreen triangle (Y-flipped UVs)
+    smaa_edge.frag smaa_blend.frag smaa_neighborhood.frag  # SMAA spatial passes
+    smaa_resolve.comp                   # SMAA T2x temporal resolve
+    cas.comp                            # CAS (Contrast Adaptive Sharpening)
     pbr_wboit.frag oit_resolve.frag     # OIT (Phase 12)
     sss.comp                            # Subsurface scattering (Phase 13)
     # Particle system shaders (Phase 14)

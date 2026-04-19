@@ -792,12 +792,13 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
-    debugUI.buildRenderTogglesUI(renderer.toggles);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 #ifdef USE_HYBRID_RENDERER
+    debugUI.buildRenderTogglesUI(renderer.legacy());
     debugUI.buildLightingUI(renderer.legacy());
     debugUI.buildSkyboxUI(renderer.legacy());
 #else
+    debugUI.buildRenderTogglesUI(renderer);
     debugUI.buildLightingUI(renderer);
     debugUI.buildSkyboxUI(renderer);
 #endif
