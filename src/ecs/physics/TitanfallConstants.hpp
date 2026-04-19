@@ -67,6 +67,16 @@ constexpr float k_wallrunAccel = 800.0f;          ///< Forward acceleration alon
 constexpr float k_wallrunPushForce = 300.0f;      ///< Force pushing player toward wall (u/s^2).
 constexpr float k_wallrunKickoffDuration = 1.75f; ///< Max time on same wall before kickoff (s).
 constexpr float k_wallrunSpeedLossDelay = 0.1f;   ///< Delay before clamping speed on wall (s).
+constexpr float k_wallrunIntentThreshold = 0.1f;  ///< Min dot(wishDir, -wallNormal) to enter/maintain a
+                                                  ///< wallrun. Rotation-symmetric directional intent —
+                                                  ///< the player's wish direction must have a component
+                                                  ///< pointing into the wall. 0.1 ≈ 84° off-axis tolerance.
+constexpr float k_wallrunGripTime = 0.5f;         ///< Initial zero-gravity "grip" phase on a wall (s).
+                                                  ///< During this window the player is pinned (vel.y = 0);
+                                                  ///< after it, gravity leaks in gradually.
+constexpr float k_wallrunGravityRampTime = 1.0f;  ///< Time to ramp gravity 0 → full after grip ends (s).
+                                                  ///< Produces a natural slide-off so the player can't
+                                                  ///< wallrun indefinitely even before the hard kickoff.
 constexpr float k_wallJumpUpForce = 320.0f;       ///< Upward velocity on wall jump (u/s).
 constexpr float k_wallJumpSideForce = 350.0f;     ///< Sideways velocity on wall jump (away from wall) (u/s).
 constexpr float k_wallrunExitTime = 0.2f;         ///< Duration of "exiting wall" flag after leaving (s).
