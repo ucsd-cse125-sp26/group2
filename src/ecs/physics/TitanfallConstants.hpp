@@ -36,12 +36,12 @@ constexpr int k_enableJumpLurch = 1;               ///< Master enable for jump l
 constexpr float k_jumpLurchMinGroundedTime = 0.3f; ///< Min continuous grounded time before a ground jump re-arms lurch
                                                    ///< (s). Prevents lurch from firing on bhop-chain jumps where the
                                                    ///< player only touches the ground for 1-2 ticks between hops.
-constexpr float k_jumpLurchGraceMin = 0.2f;      ///< Time after jump where lurch is at max strength (s).
-constexpr float k_jumpLurchGraceMax = 0.5f;      ///< Time after jump where lurch is disabled entirely (s).
-constexpr float k_jumpLurchStrength = 5.0f;      ///< Multiplier for lurch intensity.
-constexpr float k_jumpLurchMax = 180.0f;         ///< Maximum lurch velocity magnitude (u/s).
-constexpr float k_jumpLurchBaseVelocity = 60.0f; ///< Base lurch velocity before scaling (u/s).
-constexpr float k_jumpLurchSpeedLoss = 0.125f;   ///< Fraction of speed lost on lurch (12.5%).
+constexpr float k_jumpLurchGraceMin = 0.2f;        ///< Time after jump where lurch is at max strength (s).
+constexpr float k_jumpLurchGraceMax = 0.5f;        ///< Time after jump where lurch is disabled entirely (s).
+constexpr float k_jumpLurchStrength = 5.0f;        ///< Multiplier for lurch intensity.
+constexpr float k_jumpLurchMax = 180.0f;           ///< Maximum lurch velocity magnitude (u/s).
+constexpr float k_jumpLurchBaseVelocity = 60.0f;   ///< Base lurch velocity before scaling (u/s).
+constexpr float k_jumpLurchSpeedLoss = 0.125f;     ///< Fraction of speed lost on lurch (12.5%).
 
 // Sliding
 
