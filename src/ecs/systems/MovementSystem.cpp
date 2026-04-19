@@ -137,6 +137,15 @@ void tickTimers(PlayerState& state, float dt)
             state.jumpLurchEnabled = false;
     }
 
+    // Grounded-duration accumulator. Used to gate lurch arming on ground jumps:
+    // a bhop-chain landing only touches ground for 1-2 ticks, so groundedDuration
+    // stays well below k_jumpLurchMinGroundedTime and lurch stays disarmed for that
+    // jump. A "fresh" ground jump (player standing for ≥ the threshold) re-arms it.
+    if (state.grounded)
+        state.groundedDuration += dt;
+    else
+        state.groundedDuration = 0.0f;
+
     // Slide boost cooldown.
     if (state.slideBoostCooldown > 0.0f)
         state.slideBoostCooldown -= dt;
@@ -321,8 +330,13 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpedThisTick = true;
         state.jumpCooldown = tms::k_doubleJumpCooldown;
 
-        // Set up jump lurch.
-        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0);
+        // Set up jump lurch — only re-arm for "fresh" ground jumps. Bhop-chain
+        // re-jumps have groundedDuration ≈ 1-2 ticks, which stays well below
+        // k_jumpLurchMinGroundedTime, so lurch stays disarmed and doesn't fire
+        // the 180 u/s sideways redirect + 12.5 % speed haircut on the next
+        // strafe change.
+        const bool k_freshGroundJump = state.groundedDuration >= tms::k_jumpLurchMinGroundedTime;
+        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0) && k_freshGroundJump;
         state.jumpLurchTimer = 0.0f;
         state.moveInputsOnJump = moveInput2D(input);
         return;
@@ -341,8 +355,14 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpCount = 2;
         state.jumpedThisTick = true;
 
-        // Lurch resets on double jump too.
-        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0);
+        // Lurch resets on double jump too — but only if the preceding ground jump
+        // was itself "fresh". Since double jump happens mid-air, groundedDuration
+        // is always 0 here, so this gate makes double-jump NEVER re-arm lurch.
+        // That's intentional: bhop+doublejump chains keep lurch disarmed, and
+        // lurch remains the deliberate "direction correction" feature reserved
+        // for standing-start jumps only.
+        const bool k_freshGroundJump = state.groundedDuration >= tms::k_jumpLurchMinGroundedTime;
+        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0) && k_freshGroundJump;
         state.jumpLurchTimer = 0.0f;
         state.moveInputsOnJump = moveInput2D(input);
     }

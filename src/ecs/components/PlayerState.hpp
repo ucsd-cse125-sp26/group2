@@ -46,8 +46,11 @@ struct PlayerState
     float jumpCooldown{0.0f};     ///< Minimum time before double jump is available (s).
 
     // Coyote time
-    float coyoteTimer{0.0f}; ///< Remaining grace time after leaving ground/wall (s).
+    float coyoteTimer{0.0f};      ///< Remaining grace time after leaving ground/wall (s).
     bool wasGroundedLastTick{false};
+    float groundedDuration{0.0f}; ///< Time continuously grounded (s). Resets to 0 on leaving ground.
+                                  ///< Used to distinguish "fresh" ground jumps (lurch-eligible) from bhop-chain
+                                  ///< continuations (where the player only touches ground for a tick or two).
 
     // Jump lurch
     bool jumpLurchEnabled{false};     ///< True during the lurch grace window after jumping.
