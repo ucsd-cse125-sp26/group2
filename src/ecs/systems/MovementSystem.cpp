@@ -1052,6 +1052,23 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             if (state.moveMode == MoveMode::OnFoot)
                 handleCrouchTransition(pos, shape, state, input);
 
+            // 4b. Jump handling — runs BEFORE mode-specific movement.
+            //     This matches the canonical Quake/Source pmove order:
+            //     PM_CheckJump runs before PM_Friction, so a successful ground
+            //     jump sets grounded=false and the ground friction/accel branch
+            //     below is skipped on landing ticks. This is what preserves
+            //     horizontal momentum across bhop chains — without this, each
+            //     landing tick bleeds ~3 % of horizontal speed to ground friction.
+            //
+            //     Skipped during grapple pull (grapple handles its own
+            //     jump-detach internally). `state.grappleActive` here reflects
+            //     the previous tick's grapple state, since tryFireGrapple runs
+            //     after mode-specific movement below — acceptable because
+            //     grapple-rising-edge + jump same-tick is a rare edge case and
+            //     handleGrapple's velocity override wins anyway.
+            if (!state.grappleActive)
+                handleJump(vel.value, input, state, dt);
+
             // 5. Mode-specific movement
             switch (state.moveMode) {
             case MoveMode::OnFoot: {
@@ -1126,9 +1143,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 }
             }
 
-            // 6. Jump handling (works in any mode — but NOT during grapple pull)
-            if (!grapplePulling)
-                handleJump(vel.value, input, state, dt);
+            // 6. Jump handling is now step 4b (before mode-specific movement).
+            //    See the comment there for the bhop-preservation rationale.
 
             // 7. Jump lurch (air only, NOT during grapple)
             if (!grapplePulling && !state.grounded && state.moveMode == MoveMode::OnFoot)
