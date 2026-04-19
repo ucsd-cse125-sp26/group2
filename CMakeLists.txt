@@ -975,14 +975,15 @@ if(WIN32)
     target_compile_definitions(client PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-# ---- Symlink compile_commands.json to project root for clang-tidy ----
-if(NOT WIN32)
-    add_custom_target(symlink_compile_commands ALL
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
-            "${CMAKE_BINARY_DIR}/compile_commands.json"
-            "${CMAKE_SOURCE_DIR}/compile_commands.json"
-        COMMENT "Symlinking compile_commands.json to source root"
-        VERBATIM
+# ---- Symlink compile_commands.json to project root for clang-tidy / LSP ----
+# Done at configure time (not build time) so parallel builds of different
+# presets don't race to overwrite the same symlink.  The link points to
+# whichever preset was last configured — re-run cmake --preset <name> to switch.
+if(NOT WIN32 AND CMAKE_EXPORT_COMPILE_COMMANDS)
+    file(CREATE_LINK
+        "${CMAKE_BINARY_DIR}/compile_commands.json"
+        "${CMAKE_SOURCE_DIR}/compile_commands.json"
+        SYMBOLIC
     )
 endif()
 

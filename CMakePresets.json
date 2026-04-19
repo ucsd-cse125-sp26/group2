@@ -11,12 +11,21 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/auto.cmake",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "FETCHCONTENT_BASE_DIR": "${sourceDir}/.deps"
+        "FETCHCONTENT_BASE_DIR": "${sourceDir}/.deps/${presetName}"
       }
     },
 
     {
       "name": "debug",
+      "displayName": "Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+
+    {
+      "name": "debug-asan",
       "displayName": "Debug (ASan + UBSan)",
       "inherits": "base",
       "cacheVariables": {
@@ -47,6 +56,7 @@
 
   "buildPresets": [
     { "name": "debug",          "configurePreset": "debug" },
+    { "name": "debug-asan",     "configurePreset": "debug-asan" },
     { "name": "release",        "configurePreset": "release" },
     { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo" }
   ]
