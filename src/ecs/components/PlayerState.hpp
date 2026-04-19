@@ -79,6 +79,14 @@ struct PlayerState
     float wallBlacklistHeight{-1e10f};
     bool wallBlacklistActive{false};
 
+    // Wall-jump autobhop lock: true when jump was already held at the moment
+    // the wallrun started (i.e. the player rolled into the run with jump
+    // continuously held from a bhop chain). Wall-jump and coyote-wall-jump are
+    // suppressed while this is true so the player doesn't instantly bounce off
+    // the wall. Cleared as soon as the jump key is released; the next press is
+    // then a genuine "I want to jump off" rising edge.
+    bool wallJumpLocked{false};
+
     // Climbing
     glm::vec3 climbWallNormal{0.0f}; ///< Normal of the wall being climbed.
     float climbTimer{0.0f};          ///< Time on current climb (s).

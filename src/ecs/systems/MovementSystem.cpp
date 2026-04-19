@@ -233,8 +233,12 @@ namespace
 /// @param dt     Fixed physics delta time in seconds (unused).
 void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, float /*dt*/)
 {
-    if (!input.jump)
+    if (!input.jump) {
+        // Key released — clear the wallrun autobhop lock so the next press
+        // registers as intentional and is allowed to wall-jump.
+        state.wallJumpLocked = false;
         return;
+    }
 
     // Ledge jump / mantle
     if (state.moveMode == MoveMode::LedgeGrabbing) {
@@ -255,6 +259,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
 
     // Wall jump
     if (state.moveMode == MoveMode::WallRunning) {
+        // If jump was held from before wallrun entry, swallow it — a release
+        // and re-press is required to wall-jump. Keeps bhop → wallrun flow
+        // smooth when autobhop is on.
+        if (state.wallJumpLocked)
+            return;
+
         vel.y = tms::k_wallJumpUpForce;
         vel += state.wallNormal * tms::k_wallJumpSideForce;
         state.moveMode = MoveMode::OnFoot;
@@ -290,6 +300,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
 
     // Coyote wall jump (off wall within grace period)
     if (!state.grounded && state.coyoteTimer > 0.0f && state.wasWallRunning) {
+        // Same autobhop lock applies — if the player slipped off the wall
+        // while jump was held continuously from pre-entry, don't retroactively
+        // fire a coyote wall jump until they release and re-press.
+        if (state.wallJumpLocked)
+            return;
+
         vel.y = tms::k_wallJumpUpForce;
         vel += state.wallBlacklistNormal * tms::k_wallJumpSideForce;
         state.coyoteTimer = 0.0f;
@@ -611,6 +627,13 @@ void tryEnterWallrun(glm::vec3& vel,
         state.wallRunSpeedTimer = 0.0f;
         state.canDoubleJump = true;
         state.jumpCount = 0;
+
+        // Autobhop lock: if jump was held continuously from before entry (i.e.
+        // last tick AND this tick), the player rolled into this wallrun on a
+        // bhop chain — swallow the held jump so they don't instantly bounce
+        // off. A fresh press on this same tick (jump held now but NOT last
+        // tick) counts as genuine intent and fires normally.
+        state.wallJumpLocked = input.jump && state.jumpHeldLastTick;
 
         // Reduce vertical velocity to near-zero for a smooth wall-grab feel.
         vel.y = std::clamp(vel.y, -25.0f, 25.0f);
