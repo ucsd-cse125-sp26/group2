@@ -193,6 +193,14 @@ SDL_AppResult Game::event(SDL_Event* event)
             //     break;
             // }
 
+        // F2 — toggle all ImGui debug panels at once. Hides them all if any
+        // are visible, shows them all if everything is hidden. Handy for clean
+        // gameplay / screenshots without losing the ability to bring the
+        // overlay back with a single press.
+        case SDLK_F2:
+            debugUI.toggleAllPanels();
+            break;
+
         // Particle system test keys
         case SDLK_T: {
             // Energy beam — hits floor or max range

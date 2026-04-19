@@ -18,14 +18,15 @@ constexpr float k_gravity = 1000.0f;  ///< Downward acceleration (units/s^2). Fa
 constexpr float k_jumpSpeed = 380.0f; ///< Initial upward velocity on jump (units/s). Gives apex ~ 72 units (~6 ft).
 
 // Ground movement
-constexpr float k_maxGroundSpeed = 400.0f; ///< Maximum horizontal speed on ground (units/s).
-constexpr float k_groundAccel = 15.0f;     ///< Ground acceleration constant. Higher = reaches max speed faster.
+// Ground wish speed is stance-dependent — see tms::k_walkSpeed / k_sprintSpeed / k_crouchSpeed
+// and systems::currentWishSpeed() which selects between them.
+constexpr float k_groundAccel = 15.0f; ///< Ground acceleration constant. Higher = reaches max speed faster.
 
 // Air movement
 constexpr float k_airAccel =
-    5.0f;   ///< Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
+    2000.0f; ///< Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
 constexpr float k_airMaxSpeed =
-    300.0f; ///< Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
+    30.0f;   ///< Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
 
 // Friction
 constexpr float k_friction = 4.0f;    ///< Ground friction coefficient (Quake default).

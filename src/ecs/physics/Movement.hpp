@@ -38,7 +38,7 @@ glm::vec3 applyGroundFriction(glm::vec3 vel, float dt);
 ///
 /// @param vel        Current velocity.
 /// @param wishDir    Normalised desired movement direction (from InputSnapshot + yaw).
-/// @param wishSpeed  Target speed (k_maxGroundSpeed on ground, k_airMaxSpeed in air).
+/// @param wishSpeed  Target speed (systems::currentWishSpeed on ground, k_airMaxSpeed in air).
 /// @param accel      Acceleration constant (k_groundAccel or k_airAccel).
 /// @param dt         Delta time in seconds.
 /// @return           New velocity with acceleration applied.

@@ -137,6 +137,15 @@ void tickTimers(PlayerState& state, float dt)
             state.jumpLurchEnabled = false;
     }
 
+    // Grounded-duration accumulator. Used to gate lurch arming on ground jumps:
+    // a bhop-chain landing only touches ground for 1-2 ticks, so groundedDuration
+    // stays well below k_jumpLurchMinGroundedTime and lurch stays disarmed for that
+    // jump. A "fresh" ground jump (player standing for ≥ the threshold) re-arms it.
+    if (state.grounded)
+        state.groundedDuration += dt;
+    else
+        state.groundedDuration = 0.0f;
+
     // Slide boost cooldown.
     if (state.slideBoostCooldown > 0.0f)
         state.slideBoostCooldown -= dt;
@@ -198,9 +207,9 @@ void updateSprint(PlayerState& state, const InputSnapshot& input)
     }
 }
 
-/// @brief Determine the current wish speed based on movement mode and stance.
-/// @param state  Player state.
-/// @return Target movement speed.
+} // namespace
+
+// Public: current wish speed (also used by DebugUI).
 float currentWishSpeed(const PlayerState& state)
 {
     if (state.moveMode == MoveMode::Sliding)
@@ -211,8 +220,6 @@ float currentWishSpeed(const PlayerState& state)
         return tms::k_sprintSpeed;
     return tms::k_walkSpeed;
 }
-
-} // namespace
 
 // Jumping (ground, double, coyote, wall, climb, ledge, slidehop)
 
@@ -323,8 +330,13 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpedThisTick = true;
         state.jumpCooldown = tms::k_doubleJumpCooldown;
 
-        // Set up jump lurch.
-        state.jumpLurchEnabled = true;
+        // Set up jump lurch — only re-arm for "fresh" ground jumps. Bhop-chain
+        // re-jumps have groundedDuration ≈ 1-2 ticks, which stays well below
+        // k_jumpLurchMinGroundedTime, so lurch stays disarmed and doesn't fire
+        // the 180 u/s sideways redirect + 12.5 % speed haircut on the next
+        // strafe change.
+        const bool k_freshGroundJump = state.groundedDuration >= tms::k_jumpLurchMinGroundedTime;
+        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0) && k_freshGroundJump;
         state.jumpLurchTimer = 0.0f;
         state.moveInputsOnJump = moveInput2D(input);
         return;
@@ -343,8 +355,14 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
         state.jumpCount = 2;
         state.jumpedThisTick = true;
 
-        // Lurch resets on double jump too.
-        state.jumpLurchEnabled = true;
+        // Lurch resets on double jump too — but only if the preceding ground jump
+        // was itself "fresh". Since double jump happens mid-air, groundedDuration
+        // is always 0 here, so this gate makes double-jump NEVER re-arm lurch.
+        // That's intentional: bhop+doublejump chains keep lurch disarmed, and
+        // lurch remains the deliberate "direction correction" feature reserved
+        // for standing-start jumps only.
+        const bool k_freshGroundJump = state.groundedDuration >= tms::k_jumpLurchMinGroundedTime;
+        state.jumpLurchEnabled = (tms::k_enableJumpLurch != 0) && k_freshGroundJump;
         state.jumpLurchTimer = 0.0f;
         state.moveInputsOnJump = moveInput2D(input);
     }
@@ -363,6 +381,13 @@ namespace
 /// @param state  Player state (modified in place).
 void handleJumpLurch(glm::vec3& vel, const InputSnapshot& input, PlayerState& state)
 {
+    if constexpr (tms::k_enableJumpLurch == 0) {
+        // Jump lurch disabled globally: clear state so timers don't accumulate and bail.
+        state.jumpLurchEnabled = false;
+        state.jumpLurchTimer = 0.0f;
+        return;
+    }
+
     if (!state.jumpLurchEnabled)
         return;
 
@@ -1047,6 +1072,23 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             if (state.moveMode == MoveMode::OnFoot)
                 handleCrouchTransition(pos, shape, state, input);
 
+            // 4b. Jump handling — runs BEFORE mode-specific movement.
+            //     This matches the canonical Quake/Source pmove order:
+            //     PM_CheckJump runs before PM_Friction, so a successful ground
+            //     jump sets grounded=false and the ground friction/accel branch
+            //     below is skipped on landing ticks. This is what preserves
+            //     horizontal momentum across bhop chains — without this, each
+            //     landing tick bleeds ~3 % of horizontal speed to ground friction.
+            //
+            //     Skipped during grapple pull (grapple handles its own
+            //     jump-detach internally). `state.grappleActive` here reflects
+            //     the previous tick's grapple state, since tryFireGrapple runs
+            //     after mode-specific movement below — acceptable because
+            //     grapple-rising-edge + jump same-tick is a rare edge case and
+            //     handleGrapple's velocity override wins anyway.
+            if (!state.grappleActive)
+                handleJump(vel.value, input, state, dt);
+
             // 5. Mode-specific movement
             switch (state.moveMode) {
             case MoveMode::OnFoot: {
@@ -1121,9 +1163,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 }
             }
 
-            // 6. Jump handling (works in any mode — but NOT during grapple pull)
-            if (!grapplePulling)
-                handleJump(vel.value, input, state, dt);
+            // 6. Jump handling is now step 4b (before mode-specific movement).
+            //    See the comment there for the bhop-preservation rationale.
 
             // 7. Jump lurch (air only, NOT during grapple)
             if (!grapplePulling && !state.grounded && state.moveMode == MoveMode::OnFoot)
