@@ -216,25 +216,55 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
     // Game movement is driven by physics/networking, so we want the character
     // to stay put visually and let the legs cycle in place.
     //
-    // Fix: for every root joint (parent == kNoParent — in a Mixamo rig this
-    // is `mixamorig:Hips`), freeze translation X/Z to the first-frame value
-    // while leaving Y (vertical bob) intact.  This is the programmatic
-    // equivalent of Mixamo's "In Place" export option.
+    // We cannot use `parent == kNoParent` here: `CharacterRig::loadFromFBX`
+    // calls `buildJoint(scene->mRootNode, ...)`, so the ozz skeleton's root
+    // joint is actually the FBX scene root (an unnamed structural node with
+    // no translation keys).  The bone that actually carries root motion sits
+    // a few joints below — `mixamorig:Hips` in Mixamo rigs.
+    //
+    // Fix: match by name.  Any joint whose name contains "Hips" has its
+    // X/Z translation frozen to the first-frame value; Y (vertical bob) is
+    // preserved.  This is the programmatic equivalent of Mixamo's "In Place"
+    // export option.  Belt-and-braces: also strip the topmost translation-
+    // carrying joint, so non-Mixamo rigs (or renamed bones) still get the
+    // correct behaviour.
     {
-        const auto jointParents = skel->joint_parents();
-        for (int j = 0; j < numJoints; ++j) {
-            if (jointParents[static_cast<size_t>(j)] != ozz::animation::Skeleton::kNoParent)
-                continue;
+        bool strippedAny = false;
 
+        auto stripTrack = [&](int j, const char* reason) {
             auto& track = raw.tracks[static_cast<size_t>(j)];
             if (track.translations.empty())
-                continue;
+                return false;
 
             const float lockedX = track.translations.front().value.x;
             const float lockedZ = track.translations.front().value.z;
             for (auto& key : track.translations) {
                 key.value.x = lockedX;
                 key.value.z = lockedZ;
+            }
+            SDL_Log("AnimationLibrary: locked XZ on joint '%s' (%s) in '%s'",
+                    std::string(jointNames[static_cast<size_t>(j)]).c_str(),
+                    reason,
+                    path.c_str());
+            return true;
+        };
+
+        // Primary: every joint whose name contains "Hips" (Mixamo: "mixamorig:Hips").
+        for (int j = 0; j < numJoints; ++j) {
+            const std::string jointName(jointNames[static_cast<size_t>(j)]);
+            if (jointName.find("Hips") != std::string::npos)
+                strippedAny |= stripTrack(j, "name match: Hips");
+        }
+
+        // Fallback: if nothing matched by name (non-Mixamo rig), strip the
+        // topmost joint with translation keys.  Ozz orders joints depth-first,
+        // so the first populated track is the uppermost bone carrying motion.
+        if (!strippedAny) {
+            for (int j = 0; j < numJoints; ++j) {
+                if (!raw.tracks[static_cast<size_t>(j)].translations.empty()) {
+                    stripTrack(j, "fallback: topmost translation track");
+                    break;
+                }
             }
         }
     }
