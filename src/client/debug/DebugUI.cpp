@@ -101,6 +101,35 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
+void DebugUI::toggleAllPanels()
+{
+    // All window-visibility flags in one place — keep this list in sync with
+    // the private members in DebugUI.hpp when adding new top-level panels.
+    bool* const panels[] = {
+        &showInspector,
+        &showMovementChart,
+        &showBhopAnalyzer,
+        &showParticleWindow_,
+        &showRenderToggles,
+        &showLightingControls,
+        &showSkybox,
+        &showNetworkStats,
+    };
+    constexpr int k_panelCount = static_cast<int>(sizeof(panels) / sizeof(panels[0]));
+
+    // If anything is currently visible, hide everything; otherwise show everything.
+    bool anyVisible = false;
+    for (int i = 0; i < k_panelCount; ++i) {
+        if (*panels[i]) {
+            anyVisible = true;
+            break;
+        }
+    }
+    const bool k_newState = !anyVisible;
+    for (int i = 0; i < k_panelCount; ++i)
+        *panels[i] = k_newState;
+}
+
 void DebugUI::buildUI(const Registry& registry,
                       const int tickCount,
                       float& mouseSensitivity,
@@ -115,12 +144,58 @@ void DebugUI::buildUI(const Registry& registry,
                       const float fps1pLow,
                       const float fps5pLow)
 {
-    ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({480.0f, 700.0f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("ECS Inspector");
+    // The Movement Chart and Bhop Analyzer are children of the inspector's
+    // toggle state, but also have their own sub-toggles set from inside this
+    // window. They are drawn after End() below.
+    if (showInspector) {
+        ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({480.0f, 700.0f}, ImGuiCond_FirstUseEver);
+        if (!ImGui::Begin("ECS Inspector", &showInspector)) {
+            ImGui::End();
+            // Fall through so the sub-windows can still render if their flags say so.
+        } else {
+            buildInspectorContents(registry,
+                                   tickCount,
+                                   mouseSensitivity,
+                                   renderSeparateFromPhysics,
+                                   inputSyncedWithPhysics,
+                                   limitFPSToMonitor,
+                                   ssrMode,
+                                   physicsHz,
+                                   fpsCurrent,
+                                   fpsMin,
+                                   fpsMax,
+                                   fps1pLow,
+                                   fps5pLow);
+            ImGui::End();
+        }
+    }
 
+    if (showMovementChart)
+        buildMovementChart(registry);
+
+    if (showBhopAnalyzer)
+        buildBhopAnalyzer(registry);
+}
+
+// Contents of the ECS Inspector window, factored out so the Begin/End wrapping
+// lives in buildUI() and can be skipped cleanly when the window is hidden.
+void DebugUI::buildInspectorContents(const Registry& registry,
+                                     const int tickCount,
+                                     float& mouseSensitivity,
+                                     bool& renderSeparateFromPhysics,
+                                     bool& inputSyncedWithPhysics,
+                                     bool& limitFPSToMonitor,
+                                     int& ssrMode,
+                                     const float physicsHz,
+                                     const float fpsCurrent,
+                                     const float fpsMin,
+                                     const float fpsMax,
+                                     const float fps1pLow,
+                                     const float fps5pLow)
+{
     // Key bindings reminder
-    ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F1: test packet");
+    ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F2: toggle all panels");
     ImGui::Separator();
 
     // Settings
@@ -193,10 +268,8 @@ void DebugUI::buildUI(const Registry& registry,
     ImGui::SameLine();
     ImGui::Checkbox("Movement Chart", &showMovementChart);
 
-    if (!k_entityStorage) {
-        ImGui::End();
+    if (!k_entityStorage)
         return;
-    }
 
     // Per-entity sections
     for (const entt::entity entity : *k_entityStorage) {
@@ -285,14 +358,6 @@ void DebugUI::buildUI(const Registry& registry,
 
         ImGui::PopID();
     }
-
-    ImGui::End();
-
-    if (showMovementChart)
-        buildMovementChart(registry);
-
-    if (showBhopAnalyzer)
-        buildBhopAnalyzer(registry);
 }
 
 void DebugUI::buildMovementChart(const Registry& registry)
@@ -312,7 +377,10 @@ void DebugUI::buildMovementChart(const Registry& registry)
     // Window setup
     ImGui::SetNextWindowPos({500.0f, 10.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({430.0f, 470.0f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Movement Chart");
+    if (!ImGui::Begin("Movement Chart", &showMovementChart)) {
+        ImGui::End();
+        return;
+    }
 
     // Canvas geometry
     // Reserve a square canvas; keep ~52 px below it for the stats line + legend.
@@ -785,9 +853,15 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
 
 void DebugUI::buildRenderTogglesUI(RenderToggles& t)
 {
+    if (!showRenderToggles)
+        return;
+
     ImGui::SetNextWindowPos({940.f, 10.f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({280.f, 460.f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Render Toggles");
+    if (!ImGui::Begin("Render Toggles", &showRenderToggles)) {
+        ImGui::End();
+        return;
+    }
 
     ImGui::TextDisabled("Toggle systems to profile FPS impact.");
     ImGui::TextDisabled("Unchecked = skipped entirely (zero cost).");
@@ -860,9 +934,12 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
 
 void DebugUI::buildLightingUI(Renderer& renderer)
 {
+    if (!showLightingControls)
+        return;
+
     ImGui::SetNextWindowPos({1230.f, 10.f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({300.f, 520.f}, ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Lighting Controls")) {
+    if (!ImGui::Begin("Lighting Controls", &showLightingControls)) {
         ImGui::End();
         return;
     }
@@ -906,9 +983,12 @@ void DebugUI::buildLightingUI(Renderer& renderer)
 
 void DebugUI::buildSkyboxUI(Renderer& renderer)
 {
+    if (!showSkybox)
+        return;
+
     ImGui::SetNextWindowPos({940.f, 480.f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({280.f, 300.f}, ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Skybox")) {
+    if (!ImGui::Begin("Skybox", &showSkybox)) {
         ImGui::End();
         return;
     }
@@ -944,9 +1024,15 @@ void DebugUI::buildSkyboxUI(Renderer& renderer)
 
 void DebugUI::buildNetworkUI(const NetworkStats& stats)
 {
+    if (!showNetworkStats)
+        return;
+
     ImGui::SetNextWindowPos({500.0f, 490.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({300.0f, 200.0f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Network Stats");
+    if (!ImGui::Begin("Network Stats", &showNetworkStats)) {
+        ImGui::End();
+        return;
+    }
 
     // Ping / RTT
     ImGui::SeparatorText("Latency");
