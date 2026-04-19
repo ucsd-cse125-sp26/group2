@@ -15,9 +15,12 @@ public:
 
     // Sets the position of the camera in the world
     void setEye(glm::vec3 eye);
-    // Sets the view direction from the eye based on the pitch and yaw (both radians)
-    void setTarget(float pitch, float yaw, float _roll);
-    // Sets the up direction of the camera (for gravity stuff?)
+    // Sets the view direction from the eye based on the pitch, yaw, and roll
+    // (all in radians). Roll rotates the up vector around the forward axis,
+    // used for camera tilt during wallruns.
+    void setTarget(float pitch, float yaw, float roll);
+    // Sets the up direction of the camera explicitly (overrides whatever
+    // setTarget produced). Useful if you ever need a non-gravity-aligned up.
     void setUp(glm::vec3 up);
 
     void computeViewMatrix();

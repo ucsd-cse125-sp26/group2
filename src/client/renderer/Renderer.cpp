@@ -2259,23 +2259,11 @@ static std::array<CascadeInfo, 4> computeCascades(
 
 void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, const float roll)
 {
-    // // Camera setup
-    // const float cosPitch = std::cos(pitch);
-    // const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
-
-    // // Compute an up vector that incorporates roll (camera tilt).
-    // // Roll rotates the up vector around the forward axis.
-    // glm::vec3 camUp{0.0f, 1.0f, 0.0f};
-    // if (std::abs(roll) > 0.001f) {
-    //     const glm::vec3 right = glm::normalize(glm::cross(forward, camUp));
-    //     const glm::vec3 trueUp = glm::normalize(glm::cross(right, forward));
-    //     const float cosR = std::cos(roll);
-    //     const float sinR = std::sin(roll);
-    //     camUp = trueUp * cosR + right * sinR;
-    // }
-    // camera.setLookAt(eye, eye + forward, camUp);
+    // Camera setup. setTarget() handles the forward-vector math from
+    // pitch/yaw and applies roll by tilting the up vector around forward
+    // (used for wallrun camera tilt).
     camera.setEye(eye);
-    camera.setTarget(pitch, yaw, 0.0f);
+    camera.setTarget(pitch, yaw, roll);
 
     // Acquire GPU resources
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
