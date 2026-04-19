@@ -804,11 +804,22 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
     return true;
 }
 
-// IBL -- generate BRDF LUT, irradiance map, and pre-filtered specular map
+// IBL -- generate BRDF LUT, irradiance map, and pre-filtered specular map.
+//
+// All three are produced by GPU compute shaders:
+//   * brdf_lut.comp     -- analytic BRDF integration; runs once at init.
+//   * irradiance.comp   -- cosine-weighted convolution of envCubemap.
+//   * prefilter.comp    -- GGX-importance-sampled prefilter, per-mip.
+//
+// Both irradiance and prefilter sample envCubemap, so they're called once at
+// init (after uploading the procedural sky) and again whenever a new HDR
+// skybox is loaded -- via Renderer::regenerateIBLFromCubemap().
 
 bool Renderer::initIBL()
 {
-    // BRDF LUT (512x512 RG16F)
+    // ----- Texture resources -------------------------------------------------
+
+    // BRDF LUT (512x512 RG16F). Written by brdf_lut.comp, sampled in pbr.frag.
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
@@ -823,32 +834,11 @@ bool Renderer::initIBL()
             SDL_Log("IBL: failed to create BRDF LUT: %s", SDL_GetError());
             return false;
         }
-
-        SDL_GPUShader* cs = loadShaderFromFile("brdf_lut.comp", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 1);
-        // Note: SDL3 GPU uses VERTEX stage enum for compute shaders in some versions.
-        // If that fails, the actual compute pipeline creation below will catch it.
-        if (!cs) {
-            SDL_Log("IBL: brdf_lut.comp shader load failed");
-            return false;
-        }
-
-        SDL_GPUComputePipelineCreateInfo cpci{};
-        cpci.code = nullptr; // already compiled via SDL_GPUShader
-        // Actually, SDL3 GPU compute pipelines are created differently.
-        // Let me use the correct API.
-        SDL_ReleaseGPUShader(device, cs);
     }
 
-    // For now, generate IBL textures using a simpler approach:
-    // render-to-cubemap with the existing skybox shader, then convolve.
-    // However, SDL3 GPU compute pipeline creation requires specific setup.
-    // Let me check the correct API pattern first.
-
-    // TEMPORARY: Create the IBL textures with solid fallback data so the
-    // shader has valid textures to sample while we implement the compute
-    // pipeline properly.
-
-    // Irradiance map (32x32 per face, cubemap, RGBA16F)
+    // Irradiance map (32x32 per face, cubemap, RGBA16F). Written per-face by
+    // irradiance.comp (one face slice bound at a time -- SDL_GPU storage cube
+    // views are 2D / single-layer).
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_CUBE;
@@ -857,15 +847,16 @@ bool Renderer::initIBL()
         ci.height = 32;
         ci.layer_count_or_depth = 6;
         ci.num_levels = 1;
-        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_TEXTUREUSAGE_SAMPLER;
         irradianceMap = SDL_CreateGPUTexture(device, &ci);
         if (!irradianceMap) {
-            SDL_Log("IBL: failed to create irradiance map");
+            SDL_Log("IBL: failed to create irradiance map: %s", SDL_GetError());
             return false;
         }
     }
 
-    // Pre-filter map (128x128 per face, 5 mip levels, cubemap, RGBA16F)
+    // Pre-filter map (128x128 per face, 5 mip levels, cubemap, RGBA16F).
+    // Mip 0 = mirror, mip 4 = roughness 1.0.
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_CUBE;
@@ -874,10 +865,29 @@ bool Renderer::initIBL()
         ci.height = 128;
         ci.layer_count_or_depth = 6;
         ci.num_levels = 5; // mip 0=128, 1=64, 2=32, 3=16, 4=8
-        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_TEXTUREUSAGE_SAMPLER;
         prefilterMap = SDL_CreateGPUTexture(device, &ci);
         if (!prefilterMap) {
-            SDL_Log("IBL: failed to create prefilter map");
+            SDL_Log("IBL: failed to create prefilter map: %s", SDL_GetError());
+            return false;
+        }
+    }
+
+    // Default environment cubemap (512x512x6 RGBA16F). loadHDRSkybox() may
+    // release and recreate this when a new HDR file is loaded; for the
+    // procedural fallback we fill it in below.
+    {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_CUBE;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ci.width = 512;
+        ci.height = 512;
+        ci.layer_count_or_depth = 6;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        envCubemap = SDL_CreateGPUTexture(device, &ci);
+        if (!envCubemap) {
+            SDL_Log("IBL: failed to create env cubemap: %s", SDL_GetError());
             return false;
         }
     }
@@ -899,162 +909,41 @@ bool Renderer::initIBL()
         }
     }
 
-    // TODO: Run compute shaders to fill brdfLUT, irradianceMap, prefilterMap
-    // with proper IBL data.  For now they're uninitialized (black) which means
-    // IBL contributes zero = same as the old simple ambient.  The compute
-    // pipeline integration is complex and will be done in a follow-up.
-    // For now, fill the BRDF LUT with a reasonable approximation via CPU upload.
-
-    // CPU-side BRDF LUT approximation
-    // Use Karis's analytical fit: scale ≈ 1, bias ≈ 0 gives F0*1+0 = F0
-    // which is the correct limit for a rough surface.  This is a crude
-    // approximation but better than zero.
-    {
-        // Hammersley low-discrepancy sequence for Monte Carlo integration.
-        auto radicalInverseVdC = [](uint32_t bits) -> float {
-            bits = (bits << 16u) | (bits >> 16u);
-            bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-            bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-            bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-            bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-            return static_cast<float>(bits) * 2.3283064365386963e-10f;
-        };
-
-        const int sz = 512;
-        std::vector<uint16_t> lutData(static_cast<size_t>(sz * sz * 2));
-        for (int y = 0; y < sz; ++y) {
-            for (int x = 0; x < sz; ++x) {
-                float NdotV = std::max((static_cast<float>(x) + 0.5f) / static_cast<float>(sz), 0.001f);
-                float rough = std::max((static_cast<float>(y) + 0.5f) / static_cast<float>(sz), 0.001f);
-
-                // Proper Monte Carlo integration of the split-sum BRDF.
-                glm::vec3 V(std::sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV);
-                float A = 0.0f, B = 0.0f;
-                constexpr int NUM_SAMPLES = 256;
-                for (int i = 0; i < NUM_SAMPLES; ++i) {
-                    float xi1 = static_cast<float>(i) / static_cast<float>(NUM_SAMPLES);
-                    float xi2 = radicalInverseVdC(static_cast<uint32_t>(i));
-
-                    // Importance-sample GGX.
-                    float a2 = rough * rough * rough * rough; // a = rough², a² = rough⁴
-                    float phi = 6.28318f * xi1;
-                    float cosTheta = std::sqrt((1.0f - xi2) / (1.0f + (a2 - 1.0f) * xi2));
-                    float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
-                    glm::vec3 H(std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta);
-                    glm::vec3 L = 2.0f * glm::dot(V, H) * H - V;
-
-                    float NdotL = std::max(L.z, 0.0f);
-                    float NdotH = std::max(H.z, 0.0f);
-                    float VdotH = std::max(glm::dot(V, H), 0.0f);
-
-                    if (NdotL > 0.0f) {
-                        // Smith-GGX geometry with IBL remapping: k = rough²/2.
-                        float k = (rough * rough) / 2.0f;
-                        float G1V = NdotV / (NdotV * (1.0f - k) + k);
-                        float G1L = NdotL / (NdotL * (1.0f - k) + k);
-                        float G = G1V * G1L;
-                        float GVis = (G * VdotH) / (NdotH * NdotV + 0.0001f);
-                        float Fc = std::pow(1.0f - VdotH, 5.0f);
-                        A += (1.0f - Fc) * GVis;
-                        B += Fc * GVis;
-                    }
-                }
-                float scale = A / static_cast<float>(NUM_SAMPLES);
-                float bias = B / static_cast<float>(NUM_SAMPLES);
-
-                size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(sz) + static_cast<size_t>(x)) * 2;
-                // Convert float to float16 (half). Use a simple truncation.
-                auto toHalf = [](float v) -> uint16_t {
-                    // Quick float→half conversion (loses precision but works for [0,1]).
-                    uint32_t f;
-                    SDL_memcpy(&f, &v, 4); // memcpy avoids strict-aliasing UB
-                    uint32_t sign = (f >> 16) & 0x8000;
-                    int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
-                    uint32_t mant = (f >> 13) & 0x03FF;
-                    if (exp <= 0)
-                        return static_cast<uint16_t>(sign);
-                    if (exp >= 31)
-                        return static_cast<uint16_t>(sign | 0x7C00);
-                    return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
-                };
-
-                lutData[idx + 0] = toHalf(glm::clamp(scale, 0.0f, 1.0f));
-                lutData[idx + 1] = toHalf(glm::clamp(bias, 0.0f, 1.0f));
-            }
-        }
-
-        // Upload to GPU.
-        const Uint32 dataSize = static_cast<Uint32>(lutData.size() * sizeof(uint16_t));
-        SDL_GPUTransferBufferCreateInfo tbInfo{};
-        tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        tbInfo.size = dataSize;
-        SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
-        if (tb) {
-            void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
-            SDL_memcpy(ptr, lutData.data(), dataSize);
-            SDL_UnmapGPUTransferBuffer(device, tb);
-
-            SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-            SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
-            SDL_GPUTextureTransferInfo src{};
-            src.transfer_buffer = tb;
-            SDL_GPUTextureRegion dst{};
-            dst.texture = brdfLUT;
-            dst.w = 512;
-            dst.h = 512;
-            dst.d = 1;
-            SDL_UploadToGPUTexture(cp, &src, &dst, false);
-            SDL_EndGPUCopyPass(cp);
-            SDL_SubmitGPUCommandBuffer(cmd);
-            SDL_WaitForGPUIdle(device);
-            SDL_ReleaseGPUTransferBuffer(device, tb);
-        }
+    // ----- Compute pipelines -------------------------------------------------
+    //
+    // brdf_lut.comp: 0 samplers, 1 RW storage texture, 0 UBOs.
+    // irradiance.comp / prefilter.comp: 1 sampler (envCubemap), 1 RW storage
+    // texture (output face slice), 1 UBO (face index, plus roughness for
+    // prefilter).
+    brdfLutPipeline = createComputePipeline("brdf_lut.comp", 0, 0, 0, 1, 0, 0, 16, 16, 1);
+    irradiancePipeline = createComputePipeline("irradiance.comp", 1, 0, 0, 1, 0, 1, 16, 16, 1);
+    prefilterPipeline = createComputePipeline("prefilter.comp", 1, 0, 0, 1, 0, 1, 16, 16, 1);
+    if (!brdfLutPipeline || !irradiancePipeline || !prefilterPipeline) {
+        SDL_Log("IBL: failed to create one or more compute pipelines");
+        return false;
     }
 
-    // CPU-side irradiance map approximation
-    // Sample the procedural sky at low resolution for each cubemap face.
+    // ----- Procedural sky upload to envCubemap -------------------------------
+    //
+    // Matches the analytic sky in skybox.frag so the IBL stays consistent with
+    // what the user sees in the sky. Only runs once at startup; loadHDRSkybox()
+    // overwrites envCubemap when the user picks a real HDR file.
     {
-        const int sz = 32;
-        const size_t faceBytes = static_cast<size_t>(sz * sz * 4 * sizeof(uint16_t)); // RGBA16F
-        std::vector<uint16_t> faceData(static_cast<size_t>(sz * sz * 4));
+        constexpr int k_cubeSz = 512;
+        const size_t faceBytes = static_cast<size_t>(k_cubeSz) * k_cubeSz * 4 * sizeof(uint16_t);
+        std::vector<uint16_t> faceData(static_cast<size_t>(k_cubeSz) * k_cubeSz * 4);
 
         auto toHalf = [](float v) -> uint16_t {
-            uint32_t f = *reinterpret_cast<uint32_t*>(&v);
+            uint32_t f;
+            SDL_memcpy(&f, &v, 4);
             uint32_t sign = (f >> 16) & 0x8000;
-            int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
+            int32_t exp = static_cast<int32_t>((f >> 23) & 0xFF) - 127 + 15;
             uint32_t mant = (f >> 13) & 0x03FF;
             if (exp <= 0)
                 return static_cast<uint16_t>(sign);
             if (exp >= 31)
                 return static_cast<uint16_t>(sign | 0x7C00);
             return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
-        };
-
-        // Procedural sky evaluation (matches skybox.frag).
-        auto sky = [](glm::vec3 dir) -> glm::vec3 {
-            float y = dir.y;
-            // Sky values match skybox.frag / prefilter.comp exactly so the
-            // IBL fallback stays physically consistent with what the user
-            // sees in the sky.  (Previously 4× overbright to force metallic
-            // appearance on a specific model -- caused dielectrics to look
-            // overly glossy/mirror-like.  Runtime IBL intensity sliders
-            // give per-scene control instead.)
-            glm::vec3 zenith(0.08f, 0.16f, 0.45f);
-            glm::vec3 horizon(0.6f, 0.45f, 0.35f);
-            glm::vec3 nadir(0.03f, 0.03f, 0.05f);
-            glm::vec3 c;
-            if (y > 0.0f) {
-                float t = std::pow(y, 0.4f);
-                c = glm::mix(horizon, zenith, t);
-            } else {
-                float t = std::pow(-y, 0.6f);
-                c = glm::mix(horizon, nadir, t);
-            }
-            // Sun (simplified — no disc, just glow for irradiance).
-            glm::vec3 sunDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
-            float sunGlow = std::pow(std::max(glm::dot(dir, sunDir), 0.0f), 64.0f);
-            c += glm::vec3(1.0f, 0.9f, 0.7f) * sunGlow * 0.5f;
-            return c;
         };
 
         auto cubeDir = [](int face, float u, float v) -> glm::vec3 {
@@ -1075,46 +964,52 @@ bool Renderer::initIBL()
             return glm::vec3(0);
         };
 
+        // Procedural sky -- mirrors skybox.frag.
+        auto sky = [](glm::vec3 dir) -> glm::vec3 {
+            const float y = dir.y;
+            const glm::vec3 zenith(0.08f, 0.16f, 0.45f);
+            const glm::vec3 horizon(0.6f, 0.45f, 0.35f);
+            const glm::vec3 nadir(0.03f, 0.03f, 0.05f);
+            glm::vec3 c;
+            if (y > 0.0f)
+                c = glm::mix(horizon, zenith, std::pow(y, 0.4f));
+            else
+                c = glm::mix(horizon, nadir, std::pow(-y, 0.6f));
+
+            const glm::vec3 sunDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
+            const float sa = glm::dot(dir, sunDir);
+            const float sunDisc = glm::smoothstep(0.9975f, 0.999f, sa);
+            const float sunGlow = std::pow(std::max(sa, 0.0f), 256.0f);
+            c += glm::vec3(1.0f, 0.95f, 0.85f) * 8.0f * sunDisc;
+            c += glm::vec3(1.0f, 0.8f, 0.5f) * sunGlow * 0.5f;
+            const float horizonGlow = std::exp(-std::abs(y) * 4.0f);
+            c += glm::vec3(0.3f, 0.2f, 0.1f) * horizonGlow * 0.3f;
+            return c;
+        };
+
         SDL_GPUTransferBufferCreateInfo tbInfo{};
         tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
         tbInfo.size = static_cast<Uint32>(faceBytes);
         SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
-        if (!tb)
+        if (!tb) {
+            SDL_Log("IBL: failed to create transfer buffer for procedural sky");
             return false;
+        }
 
         for (int face = 0; face < 6; ++face) {
-            for (int y = 0; y < sz; ++y) {
-                for (int x = 0; x < sz; ++x) {
-                    float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(sz) * 2.0f - 1.0f;
-                    float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(sz) * 2.0f - 1.0f;
-                    glm::vec3 N = cubeDir(face, u, v);
-
-                    // Simple hemisphere integration (low sample count for speed).
-                    glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-                    glm::vec3 right = glm::normalize(glm::cross(up, N));
-                    up = glm::cross(N, right);
-
-                    glm::vec3 irr(0.0f);
-                    int samples = 0;
-                    for (float phi = 0.0f; phi < 6.2832f; phi += 0.1f) {
-                        for (float theta = 0.0f; theta < 1.5708f; theta += 0.1f) {
-                            glm::vec3 samp = std::sin(theta) * std::cos(phi) * right +
-                                             std::sin(theta) * std::sin(phi) * up + std::cos(theta) * N;
-                            irr += sky(samp) * std::cos(theta) * std::sin(theta);
-                            ++samples;
-                        }
-                    }
-                    irr *= 3.14159f / static_cast<float>(samples);
-
-                    size_t idx = (static_cast<size_t>(y) * sz + x) * 4;
-                    faceData[idx + 0] = toHalf(irr.r);
-                    faceData[idx + 1] = toHalf(irr.g);
-                    faceData[idx + 2] = toHalf(irr.b);
+            for (int y = 0; y < k_cubeSz; ++y) {
+                for (int x = 0; x < k_cubeSz; ++x) {
+                    const float u = (static_cast<float>(x) + 0.5f) / k_cubeSz * 2.0f - 1.0f;
+                    const float v = (static_cast<float>(y) + 0.5f) / k_cubeSz * 2.0f - 1.0f;
+                    const glm::vec3 c = sky(cubeDir(face, u, v));
+                    const size_t idx = (static_cast<size_t>(y) * k_cubeSz + x) * 4;
+                    faceData[idx + 0] = toHalf(c.r);
+                    faceData[idx + 1] = toHalf(c.g);
+                    faceData[idx + 2] = toHalf(c.b);
                     faceData[idx + 3] = toHalf(1.0f);
                 }
             }
 
-            // Upload this face.
             void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
             SDL_memcpy(ptr, faceData.data(), faceBytes);
             SDL_UnmapGPUTransferBuffer(device, tb);
@@ -1124,10 +1019,10 @@ bool Renderer::initIBL()
             SDL_GPUTextureTransferInfo src{};
             src.transfer_buffer = tb;
             SDL_GPUTextureRegion dst{};
-            dst.texture = irradianceMap;
+            dst.texture = envCubemap;
             dst.layer = static_cast<Uint32>(face);
-            dst.w = static_cast<Uint32>(sz);
-            dst.h = static_cast<Uint32>(sz);
+            dst.w = k_cubeSz;
+            dst.h = k_cubeSz;
             dst.d = 1;
             SDL_UploadToGPUTexture(cp, &src, &dst, false);
             SDL_EndGPUCopyPass(cp);
@@ -1137,142 +1032,110 @@ bool Renderer::initIBL()
         SDL_ReleaseGPUTransferBuffer(device, tb);
     }
 
-    // CPU-side prefilter map (5 mip levels, roughness = mip/4)
+    // ----- BRDF LUT (one-time) -----------------------------------------------
+    //
+    // Self-contained -- no input cubemap needed. The split-sum BRDF integration
+    // depends only on (NdotV, roughness).
     {
-        auto toHalf = [](float v) -> uint16_t {
-            uint32_t f = *reinterpret_cast<uint32_t*>(&v);
-            uint32_t sign = (f >> 16) & 0x8000;
-            int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
-            uint32_t mant = (f >> 13) & 0x03FF;
-            if (exp <= 0)
-                return static_cast<uint16_t>(sign);
-            if (exp >= 31)
-                return static_cast<uint16_t>(sign | 0x7C00);
-            return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
-        };
+        SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+        SDL_GPUStorageTextureReadWriteBinding rw{};
+        rw.texture = brdfLUT;
+        SDL_GPUComputePass* pass = SDL_BeginGPUComputePass(cmd, &rw, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(pass, brdfLutPipeline);
+        SDL_DispatchGPUCompute(pass, 512 / 16, 512 / 16, 1);
+        SDL_EndGPUComputePass(pass);
+        SDL_SubmitGPUCommandBuffer(cmd);
+        SDL_WaitForGPUIdle(device);
+    }
 
-        auto sky = [](glm::vec3 dir) -> glm::vec3 {
-            float y = dir.y;
-            // Sky values match skybox.frag / prefilter.comp exactly.
-            // (See matching note on the irradiance `sky` lambda above.)
-            glm::vec3 zenith(0.08f, 0.16f, 0.45f);
-            glm::vec3 horizon(0.6f, 0.45f, 0.35f);
-            glm::vec3 nadir(0.03f, 0.03f, 0.05f);
-            glm::vec3 c;
-            if (y > 0.0f)
-                c = glm::mix(horizon, zenith, std::pow(y, 0.4f));
-            else
-                c = glm::mix(horizon, nadir, std::pow(-y, 0.6f));
-            glm::vec3 sunDir = glm::normalize(glm::vec3(0.5f, 0.3f, 0.8f));
-            float sa = glm::dot(dir, sunDir);
-            c += glm::vec3(1.0f, 0.95f, 0.85f) * 8.0f * std::max(0.0f, std::pow(std::max(sa, 0.0f), 2048.0f));
-            c += glm::vec3(1.0f, 0.8f, 0.5f) * std::pow(std::max(sa, 0.0f), 256.0f) * 0.5f;
-            return c;
-        };
+    // ----- Irradiance + prefilter from procedural sky ------------------------
+    if (!regenerateIBLFromCubemap(envCubemap)) {
+        SDL_Log("IBL: regenerateIBLFromCubemap failed for procedural sky");
+        return false;
+    }
 
-        auto cubeDir = [](int face, float u, float v) -> glm::vec3 {
-            switch (face) {
-            case 0:
-                return glm::normalize(glm::vec3(1, -v, -u));
-            case 1:
-                return glm::normalize(glm::vec3(-1, -v, u));
-            case 2:
-                return glm::normalize(glm::vec3(u, 1, v));
-            case 3:
-                return glm::normalize(glm::vec3(u, -1, -v));
-            case 4:
-                return glm::normalize(glm::vec3(u, -v, 1));
-            case 5:
-                return glm::normalize(glm::vec3(-u, -v, -1));
-            }
-            return glm::vec3(0);
-        };
+    SDL_Log("IBL: GPU-prefiltered BRDF LUT (512), irradiance (32x6), prefilter (128x6 + 5 mips)");
+    return true;
+}
 
-        for (int mip = 0; mip < 5; ++mip) {
-            int mipSize = 128 >> mip;             // 128, 64, 32, 16, 8
-            float rough = static_cast<float>(mip) / 4.0f;
-            int numSamples = (mip == 0) ? 1 : 64; // mirror for mip0, blurred for higher
+// Helper: dispatch irradiance.comp + prefilter.comp against `envCube`.
 
-            const size_t faceBytes = static_cast<size_t>(mipSize * mipSize * 4) * sizeof(uint16_t);
-            std::vector<uint16_t> faceData(static_cast<size_t>(mipSize * mipSize * 4));
+bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
+{
+    if (!envCube || !irradianceMap || !prefilterMap || !iblSampler || !irradiancePipeline || !prefilterPipeline) {
+        SDL_Log("IBL: regenerateIBLFromCubemap missing required resources");
+        return false;
+    }
 
-            SDL_GPUTransferBufferCreateInfo tbInfo{};
-            tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-            tbInfo.size = static_cast<Uint32>(faceBytes);
-            SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device, &tbInfo);
-            if (!tb)
-                continue;
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    if (!cmd)
+        return false;
 
-            for (int face = 0; face < 6; ++face) {
-                for (int y = 0; y < mipSize; ++y) {
-                    for (int x = 0; x < mipSize; ++x) {
-                        float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
-                        float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
-                        glm::vec3 N = cubeDir(face, u, v);
+    constexpr int k_irradianceSize = 32;
+    constexpr int k_prefilterBaseSize = 128;
+    constexpr int k_prefilterMips = 5;
 
-                        glm::vec3 color(0.0f);
-                        if (numSamples == 1) {
-                            color = sky(N);
-                        } else {
-                            // Simple cone sampling (not importance-sampled, but adequate for CPU).
-                            glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-                            glm::vec3 right = glm::normalize(glm::cross(up, N));
-                            up = glm::cross(N, right);
-                            float total = 0.0f;
-                            for (int s = 0; s < numSamples; ++s) {
-                                // Quasi-random hemisphere direction biased by roughness.
-                                float xi1 = static_cast<float>(s) / static_cast<float>(numSamples);
-                                float xi2 =
-                                    static_cast<float>((s * 7 + 1) % numSamples) / static_cast<float>(numSamples);
-                                float phi = 6.2832f * xi1;
-                                float cosTheta = std::pow(1.0f - xi2, 1.0f / (1.0f + rough * rough * 100.0f));
-                                float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
-                                glm::vec3 H =
-                                    sinTheta * std::cos(phi) * right + sinTheta * std::sin(phi) * up + cosTheta * N;
-                                glm::vec3 L = glm::normalize(2.0f * glm::dot(N, H) * H - N);
-                                float NdotL = std::max(glm::dot(N, L), 0.0f);
-                                if (NdotL > 0.0f) {
-                                    color += sky(L) * NdotL;
-                                    total += NdotL;
-                                }
-                            }
-                            if (total > 0.0f)
-                                color /= total;
-                        }
+    // Irradiance: one dispatch per cube face.
+    for (int face = 0; face < 6; ++face) {
+        SDL_GPUStorageTextureReadWriteBinding rw{};
+        rw.texture = irradianceMap;
+        rw.mip_level = 0;
+        rw.layer = static_cast<Uint32>(face);
+        SDL_GPUComputePass* pass = SDL_BeginGPUComputePass(cmd, &rw, 1, nullptr, 0);
+        SDL_BindGPUComputePipeline(pass, irradiancePipeline);
 
-                        size_t idx = (static_cast<size_t>(y) * mipSize + x) * 4;
-                        faceData[idx + 0] = toHalf(color.r);
-                        faceData[idx + 1] = toHalf(color.g);
-                        faceData[idx + 2] = toHalf(color.b);
-                        faceData[idx + 3] = toHalf(1.0f);
-                    }
-                }
+        SDL_GPUTextureSamplerBinding samp{};
+        samp.texture = envCube;
+        samp.sampler = iblSampler;
+        SDL_BindGPUComputeSamplers(pass, 0, &samp, 1);
 
-                void* ptr = SDL_MapGPUTransferBuffer(device, tb, false);
-                SDL_memcpy(ptr, faceData.data(), faceBytes);
-                SDL_UnmapGPUTransferBuffer(device, tb);
+        struct
+        {
+            int face;
+            int _p1, _p2, _p3;
+        } params{face, 0, 0, 0};
+        SDL_PushGPUComputeUniformData(cmd, 0, &params, sizeof(params));
 
-                SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-                SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
-                SDL_GPUTextureTransferInfo src{};
-                src.transfer_buffer = tb;
-                SDL_GPUTextureRegion dst{};
-                dst.texture = prefilterMap;
-                dst.mip_level = static_cast<Uint32>(mip);
-                dst.layer = static_cast<Uint32>(face);
-                dst.w = static_cast<Uint32>(mipSize);
-                dst.h = static_cast<Uint32>(mipSize);
-                dst.d = 1;
-                SDL_UploadToGPUTexture(cp, &src, &dst, false);
-                SDL_EndGPUCopyPass(cp);
-                SDL_SubmitGPUCommandBuffer(cmd);
-                SDL_WaitForGPUIdle(device);
-            }
-            SDL_ReleaseGPUTransferBuffer(device, tb);
+        SDL_DispatchGPUCompute(pass, (k_irradianceSize + 15) / 16, (k_irradianceSize + 15) / 16, 1);
+        SDL_EndGPUComputePass(pass);
+    }
+
+    // Prefilter: one dispatch per (mip, face). Mip 0 = mirror, mip 4 = roughness 1.0.
+    for (int mip = 0; mip < k_prefilterMips; ++mip) {
+        const int mipSize = k_prefilterBaseSize >> mip;
+        const float roughness = static_cast<float>(mip) / static_cast<float>(k_prefilterMips - 1);
+
+        for (int face = 0; face < 6; ++face) {
+            SDL_GPUStorageTextureReadWriteBinding rw{};
+            rw.texture = prefilterMap;
+            rw.mip_level = static_cast<Uint32>(mip);
+            rw.layer = static_cast<Uint32>(face);
+            SDL_GPUComputePass* pass = SDL_BeginGPUComputePass(cmd, &rw, 1, nullptr, 0);
+            SDL_BindGPUComputePipeline(pass, prefilterPipeline);
+
+            SDL_GPUTextureSamplerBinding samp{};
+            samp.texture = envCube;
+            samp.sampler = iblSampler;
+            SDL_BindGPUComputeSamplers(pass, 0, &samp, 1);
+
+            struct
+            {
+                float roughness;
+                int face;
+                int _p1, _p2;
+            } params{roughness, face, 0, 0};
+            SDL_PushGPUComputeUniformData(cmd, 0, &params, sizeof(params));
+
+            // Workgroup is 16x16 -- mips 5+ would underflow, but k_prefilterMips
+            // == 5 means smallest mip = 8 which still makes one full workgroup.
+            const Uint32 groups = static_cast<Uint32>(std::max(mipSize / 16, 1));
+            SDL_DispatchGPUCompute(pass, groups, groups, 1);
+            SDL_EndGPUComputePass(pass);
         }
     }
 
-    SDL_Log("IBL: generated BRDF LUT (512x512), irradiance (32x32x6), prefilter (128x128x6 + 4 mips)");
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_WaitForGPUIdle(device);
     return true;
 }
 
@@ -1364,15 +1227,10 @@ bool Renderer::loadHDRSkybox(const std::string& path)
             glm::mix(pixel(x0, y0), pixel(x0 + 1, y0), sx), glm::mix(pixel(x0, y0 + 1), pixel(x0 + 1, y0 + 1), sx), sy);
     };
 
-    // Create cubemap faces (512x512, RGBA16F)
+    // Create cubemap faces (512x512, RGBA16F).
     const int cubeSz = 512;
     const size_t faceBytes = static_cast<size_t>(cubeSz * cubeSz * 4) * sizeof(uint16_t);
     std::vector<uint16_t> faceData(static_cast<size_t>(cubeSz * cubeSz * 4));
-
-    // Also store float cubemap data for IBL regeneration.
-    std::vector<std::vector<glm::vec3>> cubeFaces(6);
-    for (auto& f : cubeFaces)
-        f.resize(static_cast<size_t>(cubeSz * cubeSz));
 
     // Release old cubemap if present.
     if (envCubemap) {
@@ -1415,10 +1273,9 @@ bool Renderer::loadHDRSkybox(const std::string& path)
                 glm::vec3 dir = cubeDir(face, u, v);
                 glm::vec3 color = sampleEquirect(dir);
 
-                // Store for IBL.
-                cubeFaces[static_cast<size_t>(face)][static_cast<size_t>(y * cubeSz + x)] = color;
-
-                // Convert to RGBA16F.
+                // Convert to RGBA16F. The IBL convolution sees this same data
+                // through `envCubemap` once it's uploaded -- no CPU-side copy
+                // required.
                 size_t idx = (static_cast<size_t>(y) * cubeSz + x) * 4;
                 faceData[idx + 0] = toHalf(color.r);
                 faceData[idx + 1] = toHalf(color.g);
@@ -1450,206 +1307,10 @@ bool Renderer::loadHDRSkybox(const std::string& path)
     SDL_ReleaseGPUTransferBuffer(device, tb);
     stbi_image_free(hdrData);
 
-    // Regenerate irradiance map from the loaded cubemap
-    {
-        const int irrSz = 32;
-        const size_t irrFaceBytes = static_cast<size_t>(irrSz * irrSz * 4) * sizeof(uint16_t);
-        std::vector<uint16_t> irrFace(static_cast<size_t>(irrSz * irrSz * 4));
-
-        auto sampleCube = [&](glm::vec3 dir) -> glm::vec3 {
-            // Find which face and UV to sample from the float cubemap data.
-            float ax = std::abs(dir.x), ay = std::abs(dir.y), az = std::abs(dir.z);
-            int faceIdx;
-            float u, v, ma;
-            if (ax >= ay && ax >= az) {
-                ma = ax;
-                faceIdx = dir.x > 0 ? 0 : 1;
-                u = dir.x > 0 ? -dir.z : dir.z;
-                v = -dir.y;
-            } else if (ay >= az) {
-                ma = ay;
-                faceIdx = dir.y > 0 ? 2 : 3;
-                u = dir.x;
-                v = dir.y > 0 ? dir.z : -dir.z;
-            } else {
-                ma = az;
-                faceIdx = dir.z > 0 ? 4 : 5;
-                u = dir.z > 0 ? dir.x : -dir.x;
-                v = -dir.y;
-            }
-            float su = (u / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
-            float sv = (v / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
-            int px = glm::clamp(static_cast<int>(su), 0, cubeSz - 1);
-            int py = glm::clamp(static_cast<int>(sv), 0, cubeSz - 1);
-            return cubeFaces[static_cast<size_t>(faceIdx)][static_cast<size_t>(py * cubeSz + px)];
-        };
-
-        SDL_GPUTransferBufferCreateInfo irrTbInfo{};
-        irrTbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        irrTbInfo.size = static_cast<Uint32>(irrFaceBytes);
-        SDL_GPUTransferBuffer* irrTb = SDL_CreateGPUTransferBuffer(device, &irrTbInfo);
-
-        for (int face = 0; face < 6; ++face) {
-            for (int y = 0; y < irrSz; ++y) {
-                for (int x = 0; x < irrSz; ++x) {
-                    float cu = (static_cast<float>(x) + 0.5f) / static_cast<float>(irrSz) * 2.0f - 1.0f;
-                    float cv = (static_cast<float>(y) + 0.5f) / static_cast<float>(irrSz) * 2.0f - 1.0f;
-                    glm::vec3 N = cubeDir(face, cu, cv);
-
-                    glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-                    glm::vec3 right = glm::normalize(glm::cross(up, N));
-                    up = glm::cross(N, right);
-
-                    glm::vec3 irr(0.0f);
-                    int samples = 0;
-                    for (float p = 0.0f; p < 6.2832f; p += 0.1f) {
-                        for (float t = 0.0f; t < 1.5708f; t += 0.1f) {
-                            glm::vec3 samp =
-                                std::sin(t) * std::cos(p) * right + std::sin(t) * std::sin(p) * up + std::cos(t) * N;
-                            irr += sampleCube(samp) * std::cos(t) * std::sin(t);
-                            ++samples;
-                        }
-                    }
-                    irr *= 3.14159f / static_cast<float>(samples);
-
-                    size_t idx = (static_cast<size_t>(y) * irrSz + x) * 4;
-                    irrFace[idx + 0] = toHalf(irr.r);
-                    irrFace[idx + 1] = toHalf(irr.g);
-                    irrFace[idx + 2] = toHalf(irr.b);
-                    irrFace[idx + 3] = toHalf(1.0f);
-                }
-            }
-
-            void* ptr = SDL_MapGPUTransferBuffer(device, irrTb, false);
-            SDL_memcpy(ptr, irrFace.data(), irrFaceBytes);
-            SDL_UnmapGPUTransferBuffer(device, irrTb);
-
-            SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-            SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
-            SDL_GPUTextureTransferInfo src{};
-            src.transfer_buffer = irrTb;
-            SDL_GPUTextureRegion dst{};
-            dst.texture = irradianceMap;
-            dst.layer = static_cast<Uint32>(face);
-            dst.w = static_cast<Uint32>(irrSz);
-            dst.h = static_cast<Uint32>(irrSz);
-            dst.d = 1;
-            SDL_UploadToGPUTexture(cp, &src, &dst, false);
-            SDL_EndGPUCopyPass(cp);
-            SDL_SubmitGPUCommandBuffer(cmd);
-            SDL_WaitForGPUIdle(device);
-        }
-        SDL_ReleaseGPUTransferBuffer(device, irrTb);
-    }
-
-    // Regenerate prefilter map (5 mip levels) from loaded cubemap
-    {
-        for (int mip = 0; mip < 5; ++mip) {
-            int mipSize = 128 >> mip;
-            float rough = static_cast<float>(mip) / 4.0f;
-            int numSamples = (mip == 0) ? 1 : 64;
-
-            const size_t pfFaceBytes = static_cast<size_t>(mipSize * mipSize * 4) * sizeof(uint16_t);
-            std::vector<uint16_t> pfFace(static_cast<size_t>(mipSize * mipSize * 4));
-
-            SDL_GPUTransferBufferCreateInfo pfTbInfo{};
-            pfTbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-            pfTbInfo.size = static_cast<Uint32>(pfFaceBytes);
-            SDL_GPUTransferBuffer* pfTb = SDL_CreateGPUTransferBuffer(device, &pfTbInfo);
-            if (!pfTb)
-                continue;
-
-            auto sampleCube = [&](glm::vec3 dir) -> glm::vec3 {
-                float ax = std::abs(dir.x), ay = std::abs(dir.y), az = std::abs(dir.z);
-                int faceIdx;
-                float u, v, ma;
-                if (ax >= ay && ax >= az) {
-                    ma = ax;
-                    faceIdx = dir.x > 0 ? 0 : 1;
-                    u = dir.x > 0 ? -dir.z : dir.z;
-                    v = -dir.y;
-                } else if (ay >= az) {
-                    ma = ay;
-                    faceIdx = dir.y > 0 ? 2 : 3;
-                    u = dir.x;
-                    v = dir.y > 0 ? dir.z : -dir.z;
-                } else {
-                    ma = az;
-                    faceIdx = dir.z > 0 ? 4 : 5;
-                    u = dir.z > 0 ? dir.x : -dir.x;
-                    v = -dir.y;
-                }
-                float su = (u / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
-                float sv = (v / ma + 1.0f) * 0.5f * static_cast<float>(cubeSz - 1);
-                int px = glm::clamp(static_cast<int>(su), 0, cubeSz - 1);
-                int py = glm::clamp(static_cast<int>(sv), 0, cubeSz - 1);
-                return cubeFaces[static_cast<size_t>(faceIdx)][static_cast<size_t>(py * cubeSz + px)];
-            };
-
-            for (int face = 0; face < 6; ++face) {
-                for (int y = 0; y < mipSize; ++y) {
-                    for (int x = 0; x < mipSize; ++x) {
-                        float cu = (static_cast<float>(x) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
-                        float cv = (static_cast<float>(y) + 0.5f) / static_cast<float>(mipSize) * 2.0f - 1.0f;
-                        glm::vec3 N = cubeDir(face, cu, cv);
-
-                        glm::vec3 color(0.0f);
-                        if (numSamples == 1) {
-                            color = sampleCube(N);
-                        } else {
-                            glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-                            glm::vec3 right = glm::normalize(glm::cross(up, N));
-                            up = glm::cross(N, right);
-                            float total = 0.0f;
-                            for (int s = 0; s < numSamples; ++s) {
-                                float xi1 = static_cast<float>(s) / static_cast<float>(numSamples);
-                                float xi2 =
-                                    static_cast<float>((s * 7 + 1) % numSamples) / static_cast<float>(numSamples);
-                                float cphi = 6.2832f * xi1;
-                                float cosT = std::pow(1.0f - xi2, 1.0f / (1.0f + rough * rough * 100.0f));
-                                float sinT = std::sqrt(1.0f - cosT * cosT);
-                                glm::vec3 H = sinT * std::cos(cphi) * right + sinT * std::sin(cphi) * up + cosT * N;
-                                glm::vec3 L = glm::normalize(2.0f * glm::dot(N, H) * H - N);
-                                float NdotL = std::max(glm::dot(N, L), 0.0f);
-                                if (NdotL > 0.0f) {
-                                    color += sampleCube(L) * NdotL;
-                                    total += NdotL;
-                                }
-                            }
-                            if (total > 0.0f)
-                                color /= total;
-                        }
-
-                        size_t idx = (static_cast<size_t>(y) * mipSize + x) * 4;
-                        pfFace[idx + 0] = toHalf(color.r);
-                        pfFace[idx + 1] = toHalf(color.g);
-                        pfFace[idx + 2] = toHalf(color.b);
-                        pfFace[idx + 3] = toHalf(1.0f);
-                    }
-                }
-
-                void* ptr = SDL_MapGPUTransferBuffer(device, pfTb, false);
-                SDL_memcpy(ptr, pfFace.data(), pfFaceBytes);
-                SDL_UnmapGPUTransferBuffer(device, pfTb);
-
-                SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-                SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
-                SDL_GPUTextureTransferInfo src{};
-                src.transfer_buffer = pfTb;
-                SDL_GPUTextureRegion dst{};
-                dst.texture = prefilterMap;
-                dst.mip_level = static_cast<Uint32>(mip);
-                dst.layer = static_cast<Uint32>(face);
-                dst.w = static_cast<Uint32>(mipSize);
-                dst.h = static_cast<Uint32>(mipSize);
-                dst.d = 1;
-                SDL_UploadToGPUTexture(cp, &src, &dst, false);
-                SDL_EndGPUCopyPass(cp);
-                SDL_SubmitGPUCommandBuffer(cmd);
-                SDL_WaitForGPUIdle(device);
-            }
-            SDL_ReleaseGPUTransferBuffer(device, pfTb);
-        }
+    // Convolve the new environment cubemap on the GPU -> irradiance + prefilter.
+    if (!regenerateIBLFromCubemap(envCubemap)) {
+        SDL_Log("HDR skybox: GPU IBL regeneration failed for %s", path.c_str());
+        return false;
     }
 
     // Update state.
@@ -3664,6 +3325,12 @@ void Renderer::quit()
         SDL_ReleaseGPUComputePipeline(device, smaaResolvePipeline);
     if (casPipeline)
         SDL_ReleaseGPUComputePipeline(device, casPipeline);
+    if (brdfLutPipeline)
+        SDL_ReleaseGPUComputePipeline(device, brdfLutPipeline);
+    if (irradiancePipeline)
+        SDL_ReleaseGPUComputePipeline(device, irradiancePipeline);
+    if (prefilterPipeline)
+        SDL_ReleaseGPUComputePipeline(device, prefilterPipeline);
 
     // Release SMAA graphics pipelines.
     if (smaaEdgePipeline)

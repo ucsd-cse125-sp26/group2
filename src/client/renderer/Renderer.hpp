@@ -158,6 +158,11 @@ private:
     SDL_GPUSampler* iblSampler = nullptr;    ///< Linear, clamp-to-edge, mipmapped.
     SDL_GPUTexture* envCubemap = nullptr;    ///< HDR environment cubemap (512×512, RGBA16F).
 
+    // IBL compute pipelines (Phase 6) -- run once at startup, plus per HDR swap.
+    SDL_GPUComputePipeline* brdfLutPipeline = nullptr;    ///< brdf_lut.comp
+    SDL_GPUComputePipeline* irradiancePipeline = nullptr; ///< irradiance.comp
+    SDL_GPUComputePipeline* prefilterPipeline = nullptr;  ///< prefilter.comp (per-mip dispatch)
+
     // Samplers
     SDL_GPUSampler* pbrSampler = nullptr;          ///< Linear, repeat, aniso 8×, mipmapped.
     SDL_GPUSampler* shadowSampler = nullptr;       ///< Comparison, border.
@@ -329,6 +334,16 @@ private:
     bool initSceneShadowPipeline();
 
     bool initIBL();
+
+    /// @brief Run the irradiance + prefilter compute passes against `envCube`.
+    ///
+    /// Used both at startup (after uploading the procedural sky into envCubemap)
+    /// and after loading a new HDR file. Assumes irradianceMap and prefilterMap
+    /// already exist with COMPUTE_STORAGE_WRITE usage.
+    /// @param envCube  HDR environment cubemap (already uploaded).
+    /// @return False if the dispatches could not be issued.
+    bool regenerateIBLFromCubemap(SDL_GPUTexture* envCube);
+
     bool initBloom();
     bool initSSAO();
     bool initSMAA(); ///< Upload area/search textures, create SMAA + temporal resolve pipelines.
