@@ -279,7 +279,7 @@ public:
     // Anti-aliasing (live-tunable via ImGui)
     AAMode aaMode = AAMode::SMAA_T2x; ///< Current AA mode (default: recommended T2x).
     bool casEnabled = true;           ///< CAS sharpening on/off.
-    float casStrength = 0.5f;         ///< CAS sharpness (0.0 = minimal, 1.0 = max).
+    float casStrength = 1.0f;         ///< CAS sharpness (0.0 = minimal, 1.0 = max).
 
     // Sun / lighting (live-tunable via ImGui)
     float sunAzimuth = 210.0f;  ///< Degrees, 0=North, 90=East, 180=South (default ~SSW).

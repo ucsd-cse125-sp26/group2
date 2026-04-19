@@ -201,7 +201,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         // gameplay / screenshots without losing the ability to bring the
         // overlay back with a single press.
         case SDLK_F2:
-            debugUI.toggleAllPanels();
+            // Animation Tester is owned by Game (animUI_), not DebugUI, so
+            // pass its visibility flag in so F2 toggles every panel uniformly.
+            debugUI.toggleAllPanels({&animUI_.show});
             break;
 
         // Particle system test keys

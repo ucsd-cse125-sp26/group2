@@ -101,11 +101,13 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
-void DebugUI::toggleAllPanels()
+void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
 {
-    // All window-visibility flags in one place — keep this list in sync with
-    // the private members in DebugUI.hpp when adding new top-level panels.
-    bool* const panels[] = {
+    // All window-visibility flags owned by DebugUI in one place — keep this
+    // list in sync with the private members in DebugUI.hpp when adding new
+    // top-level panels. Panels owned by other systems (e.g. Game's Animation
+    // Tester) are passed in via externalPanels.
+    bool* const ownedPanels[] = {
         &showInspector,
         &showMovementChart,
         &showBhopAnalyzer,
@@ -115,19 +117,31 @@ void DebugUI::toggleAllPanels()
         &showSkybox,
         &showNetworkStats,
     };
-    constexpr int k_panelCount = static_cast<int>(sizeof(panels) / sizeof(panels[0]));
 
-    // If anything is currently visible, hide everything; otherwise show everything.
+    // If anything is currently visible (owned or external), hide everything;
+    // otherwise show everything.
     bool anyVisible = false;
-    for (int i = 0; i < k_panelCount; ++i) {
-        if (*panels[i]) {
+    for (bool* p : ownedPanels) {
+        if (*p) {
             anyVisible = true;
             break;
         }
     }
-    const bool k_newState = !anyVisible;
-    for (int i = 0; i < k_panelCount; ++i)
-        *panels[i] = k_newState;
+    if (!anyVisible) {
+        for (bool* p : externalPanels) {
+            if (p && *p) {
+                anyVisible = true;
+                break;
+            }
+        }
+    }
+    const bool newState = !anyVisible;
+    for (bool* p : ownedPanels)
+        *p = newState;
+    for (bool* p : externalPanels) {
+        if (p)
+            *p = newState;
+    }
 }
 
 void DebugUI::buildUI(const Registry& registry,
