@@ -3,6 +3,8 @@
 
 #include "Game.hpp"
 
+#include "animation/CharacterAnimator.hpp"
+#include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -95,10 +97,10 @@ bool Game::init()
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
 
-        // if (wraithModelIdx >= 0) {
-        //     SDL_Log("[client] assigning Wraith model to local player entity %d", static_cast<int>(local));
-        //     registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
-        // }
+        // Animator runs for local too — future gun-IK / hands-on-weapon work
+        // needs an up-to-date upper-body pose even when the body is invisible.
+        // Rendering is gated by animUI_.showLocalBody (third-person debug).
+        attachAnimatedCharacter(local);
 
         SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
     });
@@ -115,29 +117,30 @@ bool Game::init()
     SDL_SetWindowRelativeMouseMode(window, true);
     mouseCaptured = true;
 
-    // Load animated model (Mixamo FBX)
+    // Load the shared skinned-character rig (skeleton + bind pose + weights).
+    // Loading a single FBX is enough — any file with matching skin data works;
+    // we use standard_walk.fbx because it's guaranteed present for locomotion.
     {
         const char* base = SDL_GetBasePath();
-        std::string fbxPath = std::string(base ? base : "") + "assets/Standard_Run.fbx";
-        if (runAnimation.load(fbxPath)) {
-            animatedModelIdx = renderer.uploadSceneModel(runAnimation.getLoadedModel());
-            if (animatedModelIdx >= 0) {
-                SDL_Log("[client] animated model uploaded — index=%d, duration=%.2fs",
-                        animatedModelIdx,
-                        static_cast<double>(runAnimation.duration()));
-            }
+        const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
+        const std::string rigPath = assetsDir + "standard_walk.fbx";
+        if (!charRig_.loadFromFBX(rigPath)) {
+            SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
-            SDL_Log("[client] WARNING: animated model failed to load — animation disabled");
-        }
-    }
+            SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
 
-    // Spawn a visible animated character in the world (Mixamo run animation).
-    if (animatedModelIdx >= 0) {
-        const glm::vec3 animPos{0.0f, 0.0f, 400.0f};
-        const entt::entity animEntity = registry.create();
-        registry.emplace<Position>(animEntity, animPos);
-        registry.emplace<PreviousPosition>(animEntity, animPos);
-        registry.emplace<Renderable>(animEntity, Renderable{.modelIndex = animatedModelIdx, .scale = glm::vec3(1.0f)});
+            // Load every Mixamo clip onto the shared skeleton.
+            for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
+                const ClipId id = static_cast<ClipId>(i);
+                const std::string clipPath = assetsDir + clipFile(id);
+                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath)) {
+                    SDL_Log("[client] WARNING: failed to load clip '%s'", clipName(id));
+                    continue;
+                }
+                SDL_Log(
+                    "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
+            }
+        }
     }
 
     prevTime = SDL_GetPerformanceCounter();
@@ -593,14 +596,37 @@ SDL_AppResult Game::iterate()
         cachedEye_ = renderEye;
     }
 
-    // Update skeletal animation (CPU skinning)
-    if (runAnimation.isLoaded() && animatedModelIdx >= 0) {
-        runAnimation.update(frameTime);
-        for (size_t m = 0; m < runAnimation.meshCount(); ++m) {
-            const auto& sv = runAnimation.getSkinnedVertices(m);
-            renderer.updateModelMeshVertices(
-                animatedModelIdx, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
-        }
+    // Update skeletal animation (CPU skinning) — per animated entity.
+    //
+    // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
+    // CPU-skins every rig mesh, and streams the resulting vertices into its
+    // per-entity renderer model instance.
+    {
+        std::vector<std::vector<ModelVertex>> skinnedBuffer;
+        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity,
+                                                                                          AnimatedCharacter& ac,
+                                                                                          const Velocity& vel,
+                                                                                          const PlayerState& ps,
+                                                                                          const InputSnapshot& inp) {
+            if (!ac.animator || ac.modelIndex < 0)
+                return;
+
+            AnimationInputs ai{};
+            ai.velocityWorld = vel.value;
+            ai.yawRad = inp.yaw;
+            ai.grounded = ps.grounded;
+            ai.sprinting = ps.sprinting;
+            ai.crouching = ps.crouching;
+            ai.moveMode = static_cast<int>(ps.moveMode);
+            ac.animator->update(ai, frameTime);
+
+            ac.animator->computeSkinnedVertices(skinnedBuffer);
+            for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
+                const auto& sv = skinnedBuffer[m];
+                renderer.updateModelMeshVertices(
+                    ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
+            }
+        });
     }
 
     // Build entity render list
@@ -610,7 +636,10 @@ SDL_AppResult Game::iterate()
             if (!rend.visible || rend.modelIndex < 0)
                 return;
             // Skip local player model in first-person (Option A from the plan).
-            if (registry.all_of<LocalPlayer>(e))
+            // The animator still runs so future gun-IK has an up-to-date pose;
+            // only rendering is suppressed — and optionally re-enabled via the
+            // "Show local body" debug toggle for third-person inspection.
+            if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
             glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
@@ -764,6 +793,7 @@ SDL_AppResult Game::iterate()
     debugUI.buildNetworkUI(client.getNetStats());
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     debugUI.buildRenderTogglesUI(renderer.toggles);
+    buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 #ifdef USE_HYBRID_RENDERER
     debugUI.buildLightingUI(renderer.legacy());
     debugUI.buildSkyboxUI(renderer.legacy());
@@ -805,20 +835,48 @@ void Game::quit()
 
 void Game::refreshRemotePlayerRenderables()
 {
-    constexpr float kWraithScale = 34.5f;
-    constexpr float kWraithVerticalOffset = -35.45f;
-    const glm::quat importFix = glm::angleAxis(glm::radians(90.0f), glm::vec3{1, 0, 0});
-
+    // Remote players use the shared Mixamo rig — no more Wraith placeholder.
+    // Scale + Y offset are driven from the Animation Tester panel so the
+    // artist can tune them in-editor and commit the final values.
     registry.view<Position, PlayerState, InputSnapshot>().each(
         [&](entt::entity e, const Position&, const PlayerState&, const InputSnapshot& input) {
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
+            if (!registry.all_of<AnimatedCharacter>(e))
+                attachAnimatedCharacter(e);
+
+            const auto& ac = registry.get<AnimatedCharacter>(e);
+            if (ac.modelIndex < 0)
+                return; // rig unavailable — leave entity un-rendered rather than crash.
+
             auto& rend = registry.get_or_emplace<Renderable>(e);
-            rend.modelIndex = wraithModelIdx;
-            rend.translation = glm::vec3(0.0f, kWraithVerticalOffset, 0.0f);
-            rend.scale = glm::vec3(kWraithScale); // 72.0f / 2.088f
-            rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0}) * importFix;
+            rend.modelIndex = ac.modelIndex;
+            rend.translation = glm::vec3(0.0f, kRigVerticalOffset_, 0.0f);
+            rend.scale = glm::vec3(kRigScale_);
+            // No importFix quaternion here: rig is loaded with
+            // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
+            // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
+            // facing the wrong axis after a visual check.
+            rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
             rend.visible = true;
         });
+}
+
+void Game::attachAnimatedCharacter(entt::entity e)
+{
+    if (registry.all_of<AnimatedCharacter>(e))
+        return;
+
+    AnimatedCharacter ac;
+    ac.animator = std::make_unique<CharacterAnimator>(charRig_, animLibrary_);
+    ac.animator->setSkinningBackend(&skinBackend_);
+
+    // Each animated entity gets its OWN renderer model instance (clone of the
+    // rig template) so CPU-skinned vertices can stream into a private vertex
+    // buffer without fighting other entities for slots.
+    if (charRig_.isLoaded())
+        ac.modelIndex = renderer.uploadSceneModel(charRig_.templateLoadedModel());
+
+    registry.emplace<AnimatedCharacter>(e, std::move(ac));
 }

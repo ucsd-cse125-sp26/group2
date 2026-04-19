@@ -91,7 +91,7 @@ public:
     /// @brief Load a model and return its index in the models[] vector, or -1 on failure.
     int loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) override;
 
-    /// @brief Upload a pre-built LoadedModel (e.g. from SkinnedModel) and return its index.
+    /// @brief Upload a pre-built LoadedModel (e.g. from CharacterRig::templateLoadedModel()) and return its index.
     int uploadSceneModel(const LoadedModel& model) override;
 
     /// @brief Queue a skinned vertex re-upload for one mesh of an animated model.
