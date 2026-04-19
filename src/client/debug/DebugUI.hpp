@@ -102,11 +102,30 @@ private:
     bool showInputSnapshot = true;  ///< Show InputSnapshot key-state row.
     bool showViewAngles = true;     ///< Show yaw/pitch/roll in degrees (easier to read than radians).
     bool showMovementChart = true;  ///< Show the 2-D overhead movement chart window.
+    bool showBhopAnalyzer = true;   ///< Show the bhop analyzer (player-relative + gain/sync).
 
     /// @brief Draw the standalone 2-D overhead movement chart window.
     /// Shows the local player dot on a 3 000 × 3 000 unit grid together with
     /// view-direction, velocity, and wish-velocity arrows.
     void buildMovementChart(const Registry& registry);
+
+    /// @brief Draw the bhop analyzer window.
+    ///
+    /// Shows velocity/wish vectors rotated into player-local space (player forward
+    /// always points screen-up), plus numeric breakdowns, gain-per-frame, sync %,
+    /// and history plots for horizontal speed and gain.
+    void buildBhopAnalyzer(const Registry& registry);
+
+    // Bhop analyzer rolling state (ring buffers, persist across frames).
+    static constexpr int k_bhopHistorySize = 256;
+    float bhopSpeedHistory_[k_bhopHistorySize] = {};
+    float bhopGainHistory_[k_bhopHistorySize] = {};
+    bool bhopAirborneHistory_[k_bhopHistorySize] = {};
+    bool bhopGainingHistory_[k_bhopHistorySize] = {};
+    int bhopHistoryIdx_ = 0;      ///< Next write slot in the ring buffers.
+    int bhopHistoryFill_ = 0;     ///< Samples collected so far (up to k_bhopHistorySize).
+    float bhopPrevHSpeed_ = 0.0f; ///< Previous frame's horizontal speed (for gain calc).
+    bool bhopHasPrevSample_ = false;
 
     // Particle UI state
     float particleSpawnDist_ = 200.f; ///< Units ahead of camera to spawn effects.

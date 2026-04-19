@@ -20,6 +20,7 @@
 
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
+#include <cfloat>
 #include <cmath>
 #include <filesystem>
 #include <glm/trigonometric.hpp>
@@ -289,6 +290,9 @@ void DebugUI::buildUI(const Registry& registry,
 
     if (showMovementChart)
         buildMovementChart(registry);
+
+    if (showBhopAnalyzer)
+        buildBhopAnalyzer(registry);
 }
 
 void DebugUI::buildMovementChart(const Registry& registry)
@@ -462,6 +466,211 @@ void DebugUI::buildMovementChart(const Registry& registry)
         legendSwatch("View dir", IM_COL32(255, 225, 70, 215));
         legendSwatch("Velocity", IM_COL32(75, 175, 255, 215));
         legendSwatch("Wish vel", IM_COL32(70, 255, 130, 215));
+        ImGui::NewLine();
+    }
+
+    ImGui::End();
+}
+
+// Bhop Analyzer — player-relative vectors, gain, sync, history plots.
+
+void DebugUI::buildBhopAnalyzer(const Registry& registry)
+{
+    // Find the local player entity (same pattern as buildMovementChart).
+    entt::entity localPlayer = entt::null;
+    const auto* const k_es = registry.storage<entt::entity>();
+    if (k_es) {
+        for (auto e : *k_es) {
+            if (registry.all_of<LocalPlayer>(e)) {
+                localPlayer = e;
+                break;
+            }
+        }
+    }
+
+    ImGui::SetNextWindowPos({940.0f, 10.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({440.0f, 600.0f}, ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Bhop Analyzer", &showBhopAnalyzer)) {
+        ImGui::End();
+        return;
+    }
+
+    const bool k_hasPlayer =
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
+
+    if (!k_hasPlayer) {
+        ImGui::TextDisabled("No local player.");
+        ImGui::End();
+        return;
+    }
+
+    const auto& vel = registry.get<Velocity>(localPlayer).value;
+    const auto& input = registry.get<InputSnapshot>(localPlayer);
+    const auto& playerState = registry.get<PlayerState>(localPlayer);
+    const bool grounded = playerState.grounded;
+    const float yaw = input.yaw;
+
+    // Horizontal-speed scalar (what bhop watches).
+    const float k_hSpeed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
+
+    // Gain = Δ horizontal speed since previous frame. First sample has no baseline.
+    const float k_gain = bhopHasPrevSample_ ? (k_hSpeed - bhopPrevHSpeed_) : 0.0f;
+    const bool k_hasInput = input.forward || input.back || input.left || input.right;
+
+    // Push this frame into the ring buffers.
+    bhopSpeedHistory_[bhopHistoryIdx_] = k_hSpeed;
+    bhopGainHistory_[bhopHistoryIdx_] = k_gain;
+    bhopAirborneHistory_[bhopHistoryIdx_] = !grounded && k_hasInput;
+    // A "gaining" frame: airborne, has input, speed went up. The classic bhop sync definition.
+    bhopGainingHistory_[bhopHistoryIdx_] = bhopAirborneHistory_[bhopHistoryIdx_] && k_gain > 0.0f;
+    bhopHistoryIdx_ = (bhopHistoryIdx_ + 1) % k_bhopHistorySize;
+    if (bhopHistoryFill_ < k_bhopHistorySize)
+        ++bhopHistoryFill_;
+    bhopPrevHSpeed_ = k_hSpeed;
+    bhopHasPrevSample_ = true;
+
+    // Rotate world velocity / wishdir into player-local frame.
+    // Player forward at yaw θ in world = (sin θ, 0, cos θ). Rotating by −θ around Y
+    // maps player forward → +Z (world), which our draw convention puts at screen-up.
+    const float k_sinY = std::sin(yaw);
+    const float k_cosY = std::cos(yaw);
+    const auto toLocal = [&](float wx, float wz) -> glm::vec2 {
+        // R(−yaw) * (wx, wz): localX = wx*cos − wz*sin,  localZ = wx*sin + wz*cos
+        return {wx * k_cosY - wz * k_sinY, wx * k_sinY + wz * k_cosY};
+    };
+
+    const glm::vec2 k_velLocal = toLocal(vel.x, vel.z); // right-axis (parallel to strafe), forward-axis
+    const glm::vec3 k_wishDirWorld =
+        physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+    const glm::vec2 k_wishLocal = toLocal(k_wishDirWorld.x, k_wishDirWorld.z);
+
+    // Sync % over the full window, restricted to airborne+input frames.
+    int airborneCount = 0;
+    int gainingCount = 0;
+    for (int i = 0; i < bhopHistoryFill_; ++i) {
+        if (bhopAirborneHistory_[i])
+            ++airborneCount;
+        if (bhopGainingHistory_[i])
+            ++gainingCount;
+    }
+    const float k_syncPct =
+        (airborneCount > 0) ? (100.0f * static_cast<float>(gainingCount) / static_cast<float>(airborneCount)) : 0.0f;
+
+    // Canvas
+    ImGui::SeparatorText("Player-relative vectors");
+    const ImVec2 k_cursor = ImGui::GetCursorScreenPos();
+    const ImVec2 k_avail = ImGui::GetContentRegionAvail();
+    const float k_side = std::max(std::min(k_avail.x, 260.0f), 80.0f);
+    const ImVec2 k_canvasP1 = {k_cursor.x + k_side, k_cursor.y + k_side};
+    ImGui::InvisibleButton("##bhopmap", {k_side, k_side});
+    ImDrawList* const dl = ImGui::GetWindowDrawList();
+    dl->PushClipRect(k_cursor, k_canvasP1, true);
+
+    // Background + axes
+    dl->AddRectFilled(k_cursor, k_canvasP1, IM_COL32(14, 14, 22, 255));
+    const ImVec2 k_center = {k_cursor.x + k_side * 0.5f, k_cursor.y + k_side * 0.5f};
+    dl->AddLine({k_cursor.x, k_center.y}, {k_canvasP1.x, k_center.y}, IM_COL32(50, 50, 75, 255), 1.0f);
+    dl->AddLine({k_center.x, k_cursor.y}, {k_center.x, k_canvasP1.y}, IM_COL32(50, 50, 75, 255), 1.0f);
+    dl->AddText({k_center.x + 4, k_cursor.y + 2}, IM_COL32(110, 110, 155, 200), "Fwd");
+    dl->AddText({k_cursor.x + 4, k_center.y + 2}, IM_COL32(110, 110, 155, 200), "Right");
+
+    // Reference scale: sprint speed → 28% of half-canvas (matches MovementChart convention).
+    const float k_velScale = (k_side * 0.28f) / tms::k_sprintSpeed;
+
+    // 1. Fixed view arrow (always straight up, since this is the player's frame).
+    constexpr float k_viewLen = 48.0f;
+    drawArrow(dl, k_center, {k_center.x, k_center.y - k_viewLen}, IM_COL32(255, 225, 70, 215), 2.0f, 9.0f);
+
+    // 2. Wish-velocity arrow. In this panel we use raw wishDir (no speed scaling) times a fixed length
+    //    so the arrow direction is always readable regardless of current wish speed.
+    if (glm::length(glm::vec2(k_wishLocal.x, k_wishLocal.y)) > 0.001f) {
+        constexpr float k_wishLen = 60.0f;
+        // localX = right-component (world -X was screen right → flip sign for screen).
+        // localZ = forward-component (world +Z was screen up → flip sign for screen).
+        drawArrow(dl,
+                  k_center,
+                  {k_center.x - k_wishLocal.x * k_wishLen, k_center.y - k_wishLocal.y * k_wishLen},
+                  IM_COL32(70, 255, 130, 215),
+                  2.0f,
+                  8.0f);
+    }
+
+    // 3. Velocity arrow, scaled to sprint-speed reference.
+    drawArrow(dl,
+              k_center,
+              {k_center.x - k_velLocal.x * k_velScale, k_center.y - k_velLocal.y * k_velScale},
+              IM_COL32(75, 175, 255, 215),
+              2.5f,
+              10.0f);
+
+    // Player dot on top
+    const ImU32 k_dotColor = grounded ? IM_COL32(255, 80, 80, 255) : IM_COL32(255, 255, 255, 255);
+    dl->AddCircleFilled(k_center, 4.5f, k_dotColor);
+    dl->AddCircle(k_center, 5.0f, IM_COL32(0, 0, 0, 180), 12, 1.5f);
+
+    dl->PopClipRect();
+    dl->AddRect(k_cursor, k_canvasP1, IM_COL32(75, 75, 115, 255), 0.0f, 0, 1.5f);
+
+    // Stats
+    ImGui::Spacing();
+    ImGui::SeparatorText("Vectors");
+    ImGui::Text("Velocity (local):  fwd=%+7.1f  right=%+7.1f  up=%+7.1f",
+                static_cast<double>(k_velLocal.y),
+                static_cast<double>(k_velLocal.x),
+                static_cast<double>(vel.y));
+    ImGui::Text("Wish dir (local):  fwd=%+5.2f  right=%+5.2f",
+                static_cast<double>(k_wishLocal.y),
+                static_cast<double>(k_wishLocal.x));
+    ImGui::Text("|XZ speed|:        %.1f u/s", static_cast<double>(k_hSpeed));
+    ImGui::Text("State:             %s", grounded ? "GROUND" : "AIR");
+
+    ImGui::SeparatorText("Bhop metrics");
+    const ImU32 gainColor = (k_gain > 0.5f)
+                                ? IM_COL32(80, 230, 120, 255)
+                                : (k_gain < -0.5f ? IM_COL32(235, 90, 90, 255) : IM_COL32(180, 180, 180, 255));
+    ImGui::PushStyleColor(ImGuiCol_Text, gainColor);
+    ImGui::Text("Gain (this frame): %+6.2f u/s", static_cast<double>(k_gain));
+    ImGui::PopStyleColor();
+    ImGui::Text("Sync:              %5.1f %%   (%d / %d airborne-input frames)",
+                static_cast<double>(k_syncPct),
+                gainingCount,
+                airborneCount);
+
+    // Plots — assembled in chronological order so the graph scrolls left-to-right.
+    ImGui::SeparatorText("History");
+    float speedOrdered[k_bhopHistorySize];
+    float gainOrdered[k_bhopHistorySize];
+    const int k_count = bhopHistoryFill_;
+    // Ring start depends on whether we've wrapped.
+    const int k_start = (bhopHistoryFill_ < k_bhopHistorySize) ? 0 : bhopHistoryIdx_;
+    for (int i = 0; i < k_count; ++i) {
+        const int src = (k_start + i) % k_bhopHistorySize;
+        speedOrdered[i] = bhopSpeedHistory_[src];
+        gainOrdered[i] = bhopGainHistory_[src];
+    }
+
+    ImGui::PlotLines("XZ speed", speedOrdered, k_count, 0, nullptr, 0.0f, FLT_MAX, {-1.0f, 70.0f});
+    // For gain, force a symmetric y-range around 0 so losses and gains read at the same scale.
+    float gainAbsMax = 1.0f;
+    for (int i = 0; i < k_count; ++i)
+        gainAbsMax = std::max(gainAbsMax, std::abs(gainOrdered[i]));
+    ImGui::PlotLines("Gain", gainOrdered, k_count, 0, nullptr, -gainAbsMax, gainAbsMax, {-1.0f, 70.0f});
+
+    // Legend
+    ImGui::Spacing();
+    {
+        ImDrawList* const ldl = ImGui::GetWindowDrawList();
+        const auto legendSwatch = [&](const char* label, ImU32 color) {
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::Dummy({12.0f, 12.0f});
+            ldl->AddRectFilled({p.x + 1, p.y + 3}, {p.x + 11, p.y + 11}, color);
+            ImGui::SameLine(0.0f, 5.0f);
+            ImGui::TextUnformatted(label);
+            ImGui::SameLine(0.0f, 18.0f);
+        };
+        legendSwatch("View", IM_COL32(255, 225, 70, 215));
+        legendSwatch("Velocity", IM_COL32(75, 175, 255, 215));
+        legendSwatch("Wish", IM_COL32(70, 255, 130, 215));
         ImGui::NewLine();
     }
 
