@@ -35,7 +35,11 @@ public:
     /// @brief Return the combined view-projection matrix.
     [[nodiscard]] glm::mat4 getViewProjection() const { return projection_ * view_; }
     /// @brief Return the vertical field of view in degrees.
-    [[nodiscard]] float getFovy() const { return fovy_; }
+    ///
+    /// Internally fovy_ is stored in radians (matches glm::perspective and
+    /// setFov's conversion).  Convert back here so the public API contract
+    /// stays consistent with setFov(fovyDegrees).
+    [[nodiscard]] float getFovy() const { return glm::degrees(fovy_); }
     /// @brief Return the aspect ratio (width / height).
     [[nodiscard]] float getAspect() const { return aspect_; }
     /// @brief Return the near clip plane distance.
