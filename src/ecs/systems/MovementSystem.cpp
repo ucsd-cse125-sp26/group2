@@ -233,8 +233,12 @@ namespace
 /// @param dt     Fixed physics delta time in seconds (unused).
 void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, float /*dt*/)
 {
-    if (!input.jump)
+    if (!input.jump) {
+        // Key released — clear the wallrun autobhop lock so the next press
+        // registers as intentional and is allowed to wall-jump.
+        state.wallJumpLocked = false;
         return;
+    }
 
     // Ledge jump / mantle
     if (state.moveMode == MoveMode::LedgeGrabbing) {
@@ -255,6 +259,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
 
     // Wall jump
     if (state.moveMode == MoveMode::WallRunning) {
+        // If jump was held from before wallrun entry, swallow it — a release
+        // and re-press is required to wall-jump. Keeps bhop → wallrun flow
+        // smooth when autobhop is on.
+        if (state.wallJumpLocked)
+            return;
+
         vel.y = tms::k_wallJumpUpForce;
         vel += state.wallNormal * tms::k_wallJumpSideForce;
         state.moveMode = MoveMode::OnFoot;
@@ -290,6 +300,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerState& state, 
 
     // Coyote wall jump (off wall within grace period)
     if (!state.grounded && state.coyoteTimer > 0.0f && state.wasWallRunning) {
+        // Same autobhop lock applies — if the player slipped off the wall
+        // while jump was held continuously from pre-entry, don't retroactively
+        // fire a coyote wall jump until they release and re-press.
+        if (state.wallJumpLocked)
+            return;
+
         vel.y = tms::k_wallJumpUpForce;
         vel += state.wallBlacklistNormal * tms::k_wallJumpSideForce;
         state.coyoteTimer = 0.0f;
@@ -571,10 +587,15 @@ void tryEnterWallrun(glm::vec3& vel,
         return;
     if (state.grounded || state.exitingWall)
         return;
-    if (!input.forward) // must hold W
-        return;
     if (walls.groundDistance < tms::k_wallrunMinGroundDist)
         return;
+
+    // Directional intent — the player's wish direction must have a component
+    // pointing INTO the wall (i.e., along -wallNormal). This replaces the old
+    // W-only gate with a rotation-symmetric rule: strafe into the wall, press
+    // W toward a wall you're facing, or any combination whose wishDir has a
+    // positive projection onto -wallNormal will enter the run.
+    const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
 
     // Check each side.
     auto tryWall = [&](bool hasWall, const glm::vec3& wallNorm, WallSide side) {
@@ -582,6 +603,9 @@ void tryEnterWallrun(glm::vec3& vel,
             return false;
         if (isBlacklisted(
                 wallNorm, posY, state.wallBlacklistNormal, state.wallBlacklistHeight, state.wallBlacklistActive))
+            return false;
+        // Intent check is per-side because it depends on this wall's normal.
+        if (glm::dot(k_wishDir, -wallNorm) < tms::k_wallrunIntentThreshold)
             return false;
 
         // Compute forward direction along wall.
@@ -603,6 +627,13 @@ void tryEnterWallrun(glm::vec3& vel,
         state.wallRunSpeedTimer = 0.0f;
         state.canDoubleJump = true;
         state.jumpCount = 0;
+
+        // Autobhop lock: if jump was held continuously from before entry (i.e.
+        // last tick AND this tick), the player rolled into this wallrun on a
+        // bhop chain — swallow the held jump so they don't instantly bounce
+        // off. A fresh press on this same tick (jump held now but NOT last
+        // tick) counts as genuine intent and fires normally.
+        state.wallJumpLocked = input.jump && state.jumpHeldLastTick;
 
         // Reduce vertical velocity to near-zero for a smooth wall-grab feel.
         vel.y = std::clamp(vel.y, -25.0f, 25.0f);
@@ -654,7 +685,14 @@ void handleWallRunning(glm::vec3& vel,
 
     const bool k_stillOnWall = (state.wallRunSide == WallSide::Right && walls.wallRight) ||
                                (state.wallRunSide == WallSide::Left && walls.wallLeft);
-    if (!k_stillOnWall || !input.forward) {
+
+    // Maintenance: same directional-intent rule as entry. Release the "into
+    // the wall" input and the run ends. Uses the stored wallNormal so the
+    // check is valid even if detection stutters for a frame.
+    const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+    const bool k_intentHeld = glm::dot(k_wishDir, -state.wallNormal) >= tms::k_wallrunIntentThreshold;
+
+    if (!k_stillOnWall || !k_intentHeld) {
         exitWallrun(state, posY);
         return;
     }
@@ -689,8 +727,18 @@ void handleWallRunning(glm::vec3& vel,
     // Push toward wall to keep player stuck.
     vel -= state.wallNormal * tms::k_wallrunPushForce * dt;
 
-    // Zero gravity while wallrunning.
-    vel.y = 0.0f;
+    // Gradual slide-off: during the grip window, pin vertical velocity to 0 so
+    // the wallrun feels "stuck." Afterwards, gravity ramps in linearly over
+    // `k_wallrunGravityRampTime`; by the end of the ramp the player is falling
+    // at full gravity, which naturally slides them down the wall and prevents
+    // indefinite runs even if the player stays within the kickoff timer.
+    if (state.wallRunTimer < tms::k_wallrunGripTime) {
+        vel.y = 0.0f;
+    } else {
+        const float k_rampT = (state.wallRunTimer - tms::k_wallrunGripTime) / tms::k_wallrunGravityRampTime;
+        const float k_gravFactor = std::clamp(k_rampT, 0.0f, 1.0f);
+        vel.y -= physics::k_gravity * k_gravFactor * dt;
+    }
 
     // Camera tilt.
     state.targetCameraTilt =
