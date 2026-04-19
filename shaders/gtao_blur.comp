@@ -17,8 +17,17 @@ layout(set = 1, binding = 0, r8) writeonly uniform image2D aoOutput;
 layout(set = 2, binding = 0) uniform BlurParams {
     vec2 screenSize;
     float depthSigma;    // depth similarity threshold
-    float _pad;
+    float projA;         // projection[2][2] for depth linearization
+    float projB;         // projection[3][2] for depth linearization
+    float _pad1, _pad2, _pad3;
 };
+
+/// Linearize a [0,1] NDC depth to view-space distance.
+/// Must match the formula in gtao.comp.
+float linearizeDepth(float d)
+{
+    return projB / (d - projA);
+}
 
 void main()
 {
@@ -38,9 +47,8 @@ void main()
         return;
     }
 
-    // Linearize depth for better edge detection.
-    // Approximate linear depth from NDC depth.
-    float centerLinear = 1.0 / max(centerDepth, 0.0001);
+    // Linearize depth for proper edge detection (matches gtao.comp).
+    float centerLinear = linearizeDepth(centerDepth);
 
     float totalAO = 0.0;
     float totalWeight = 0.0;
@@ -54,14 +62,19 @@ void main()
         for (int x = -RADIUS; x <= RADIUS; ++x) {
             vec2 sampleUV = uv + vec2(float(x), float(y)) * ts;
 
-            float sampleAO = texture(aoInput, sampleUV).r;
             float sampleDepth = texture(depthTexture, sampleUV).r;
+
+            // Skip sky pixels — prevents sky AO (1.0) from bleeding
+            // into object edges.
+            if (sampleDepth >= 0.9999) continue;
+
+            float sampleAO = texture(aoInput, sampleUV).r;
 
             // Spatial weight (Gaussian).
             float spatial = spatialWeights[abs(x)] * spatialWeights[abs(y)];
 
             // Depth-based edge weight (bilateral term).
-            float sampleLinear = 1.0 / max(sampleDepth, 0.0001);
+            float sampleLinear = linearizeDepth(sampleDepth);
             float depthDiff = abs(centerLinear - sampleLinear);
             float depthWeight = exp(-depthDiff * depthDiff * depthSigma);
 

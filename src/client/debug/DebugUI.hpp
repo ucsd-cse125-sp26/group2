@@ -77,8 +77,8 @@ public:
     void buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward);
 
     /// @brief Build the Render Toggles window for live performance profiling.
-    /// @param toggles  The renderer's toggle struct (read/write).
-    void buildRenderTogglesUI(struct RenderToggles& toggles);
+    /// @param renderer  The renderer (for toggles, AA mode).
+    void buildRenderTogglesUI(class Renderer& renderer);
 
     /// @brief Build the Skybox selector window for live HDR skybox swapping.
     void buildSkyboxUI(class Renderer& renderer);

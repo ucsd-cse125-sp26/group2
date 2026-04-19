@@ -36,6 +36,16 @@ vec3 viewPosFromDepth(vec2 uv, float depth)
     return view.xyz / view.w;
 }
 
+/// Linearize a [0,1] NDC depth to a view-space distance.
+float linearizeDepth(float d)
+{
+    // Vulkan NDC: Z ∈ [0,1], near = 0, far = 1.
+    // projection[2][2] = A, projection[3][2] = B  →  linear = B / (d - A).
+    float A = projection[2][2];
+    float B = projection[3][2];
+    return B / (d - A);
+}
+
 // Spatial noise for per-pixel slice rotation (reduces banding).
 float interleavedGradientNoise(vec2 pos)
 {
@@ -91,7 +101,13 @@ void main()
     // Project AO radius to screen pixels.
     float projScale = 0.5 * projection[0][0] * screenSize.x;
     float screenRadius = (radius * projScale) / (-viewPos.z);
-    screenRadius = clamp(screenRadius, 3.0, 256.0);
+    screenRadius = clamp(screenRadius, 3.0, 64.0);
+
+    // Thickness heuristic (XeGTAO-style): samples whose view-space Z differs
+    // from the centre by more than this are behind a thin surface — force-fade
+    // their contribution to avoid bright halos at depth discontinuities.
+    float thickness = radius * 0.6;
+    float centerLinZ = linearizeDepth(depth);
 
     float noise = interleavedGradientNoise(vec2(coord));
     float ao = 0.0;
@@ -123,16 +139,37 @@ void main()
                 vec2 sampleUV = uv + dir * stepPx * ts;
                 if (sampleUV.x > 0.0 && sampleUV.x < 1.0 && sampleUV.y > 0.0 && sampleUV.y < 1.0) {
                     float sd = texture(depthTexture, sampleUV).r;
-                    if (sd < 0.9999) {
-                        vec3 samplePos = viewPosFromDepth(sampleUV, sd);
-                        vec3 delta = samplePos - viewPos;
-                        float dist = length(delta);
-                        if (dist > 0.01) {
-                            float horizAngle = atan(delta.z / max(length(delta.xy), 0.001));
-                            // Distance falloff.
-                            float falloff = clamp(1.0 - pow(dist / radius, falloffExp), 0.0, 1.0);
-                            h1 = max(h1, mix(-n, horizAngle, falloff));
+
+                    vec3 samplePos;
+                    float thickFade = 1.0;
+
+                    if (sd >= 0.9999) {
+                        // Sky sample: extend surface at centre depth
+                        // (phantom sample).  Prevents edge pixels from
+                        // getting less AO than interior pixels.
+                        samplePos = viewPosFromDepth(sampleUV, depth);
+                        thickFade = 0.5; // reduced confidence
+                    } else {
+                        samplePos = viewPosFromDepth(sampleUV, sd);
+                        // Bidirectional thickness heuristic: fade samples
+                        // that are much further OR much closer than centre
+                        // (handles thin geometry from both sides).
+                        float sLinZ = linearizeDepth(sd);
+                        float depthDelta = sLinZ - centerLinZ;
+                        float absDelta = abs(depthDelta);
+                        if (absDelta > thickness) {
+                            thickFade = clamp(1.0 - (absDelta - thickness) / thickness, 0.0, 1.0);
                         }
+                    }
+
+                    vec3 delta = samplePos - viewPos;
+                    float dist = length(delta);
+                    if (dist > 0.01) {
+                        float horizAngle = atan(delta.z / max(length(delta.xy), 0.001));
+                        // Distance falloff.
+                        float falloff = clamp(1.0 - pow(dist / radius, falloffExp), 0.0, 1.0);
+                        falloff *= thickFade;
+                        h1 = max(h1, mix(-n, horizAngle, falloff));
                     }
                 }
             }
@@ -142,15 +179,31 @@ void main()
                 vec2 sampleUV = uv - dir * stepPx * ts;
                 if (sampleUV.x > 0.0 && sampleUV.x < 1.0 && sampleUV.y > 0.0 && sampleUV.y < 1.0) {
                     float sd = texture(depthTexture, sampleUV).r;
-                    if (sd < 0.9999) {
-                        vec3 samplePos = viewPosFromDepth(sampleUV, sd);
-                        vec3 delta = samplePos - viewPos;
-                        float dist = length(delta);
-                        if (dist > 0.01) {
-                            float horizAngle = atan(delta.z / max(length(delta.xy), 0.001));
-                            float falloff = clamp(1.0 - pow(dist / radius, falloffExp), 0.0, 1.0);
-                            h2 = max(h2, mix(-n, horizAngle, falloff));
+
+                    vec3 samplePos;
+                    float thickFade = 1.0;
+
+                    if (sd >= 0.9999) {
+                        // Sky sample: phantom at centre depth.
+                        samplePos = viewPosFromDepth(sampleUV, depth);
+                        thickFade = 0.5;
+                    } else {
+                        samplePos = viewPosFromDepth(sampleUV, sd);
+                        float sLinZ = linearizeDepth(sd);
+                        float depthDelta = sLinZ - centerLinZ;
+                        float absDelta = abs(depthDelta);
+                        if (absDelta > thickness) {
+                            thickFade = clamp(1.0 - (absDelta - thickness) / thickness, 0.0, 1.0);
                         }
+                    }
+
+                    vec3 delta = samplePos - viewPos;
+                    float dist = length(delta);
+                    if (dist > 0.01) {
+                        float horizAngle = atan(delta.z / max(length(delta.xy), 0.001));
+                        float falloff = clamp(1.0 - pow(dist / radius, falloffExp), 0.0, 1.0);
+                        falloff *= thickFade;
+                        h2 = max(h2, mix(-n, horizAngle, falloff));
                     }
                 }
             }

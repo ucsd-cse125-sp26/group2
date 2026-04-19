@@ -851,10 +851,12 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
 
 // Render Toggles window
 
-void DebugUI::buildRenderTogglesUI(RenderToggles& t)
+void DebugUI::buildRenderTogglesUI(Renderer& renderer)
 {
     if (!showRenderToggles)
         return;
+
+    RenderToggles& t = renderer.toggles;
 
     ImGui::SetNextWindowPos({940.f, 10.f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({280.f, 460.f}, ImGuiCond_FirstUseEver);
@@ -878,20 +880,21 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
                         &t.bloom,
                         &t.ssr,
                         &t.volumetrics,
-                        &t.taa,
                         &t.tonemap,
                         &t.particles,
                         &t.sdfText};
-    constexpr int k_flagCount = 14;
+    constexpr int k_flagCount = 13;
 
     if (ImGui::Button("All ON")) {
         for (int i = 0; i < k_flagCount; ++i)
             *allFlags[i] = true;
+        renderer.aaMode = AAMode::SMAA_T2x;
     }
     ImGui::SameLine();
     if (ImGui::Button("All OFF")) {
         for (int i = 0; i < k_flagCount; ++i)
             *allFlags[i] = false;
+        renderer.aaMode = AAMode::Off;
     }
     ImGui::SameLine();
     if (ImGui::Button("Only Post-FX OFF")) {
@@ -899,7 +902,7 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
         t.bloom = false;
         t.ssr = false;
         t.volumetrics = false;
-        t.taa = false;
+        renderer.aaMode = AAMode::Off;
     }
     ImGui::Separator();
 
@@ -921,7 +924,16 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
     ImGui::Checkbox("Bloom", &t.bloom);
     ImGui::Checkbox("SSR (Screen-Space Reflections)", &t.ssr);
     ImGui::Checkbox("Volumetric Lighting", &t.volumetrics);
-    ImGui::Checkbox("TAA (Temporal AA)", &t.taa);
+
+    // Anti-aliasing mode selection
+    const char* aaModes[] = {"Off", "SMAA 1x", "SMAA T2x"};
+    ImGui::Combo("Anti-Aliasing", reinterpret_cast<int*>(&renderer.aaMode), aaModes, 3);
+
+    // CAS sharpening
+    ImGui::Checkbox("CAS Sharpening", &renderer.casEnabled);
+    if (renderer.casEnabled)
+        ImGui::SliderFloat("CAS Strength", &renderer.casStrength, 0.0f, 1.0f, "%.2f");
+
     ImGui::Checkbox("Tone Mapping (HDR->LDR)", &t.tonemap);
 
     // Effects
@@ -963,10 +975,21 @@ void DebugUI::buildLightingUI(Renderer& renderer)
         renderer.ambientB = amb[2];
     }
 
+    // IBL intensity
+    // Dial IBL Specular below 1.0 if dielectric surfaces (plastic, cloth,
+    // skin) look like polished metal -- real-world HDR environments make
+    // smooth dielectrics look artificially reflective.
+    ImGui::SeparatorText("IBL Intensity");
+    ImGui::SliderFloat("IBL Diffuse", &renderer.iblDiffuseIntensity, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("IBL Specular", &renderer.iblSpecularIntensity, 0.0f, 2.0f, "%.2f");
+
     // Post-processing
     ImGui::SeparatorText("Post-Processing");
     ImGui::SliderFloat("Bloom", &renderer.bloomStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("SSAO", &renderer.ssaoStr, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("AO Radius", &renderer.ssaoRadius, 0.1f, 5.0f, "%.2f");
+    ImGui::SliderFloat("AO Falloff", &renderer.ssaoFalloff, 0.5f, 4.0f, "%.1f");
+    ImGui::SliderFloat("AO Power", &renderer.ssaoPower, 0.5f, 3.0f, "%.1f");
     ImGui::SliderFloat("SSR", &renderer.ssrStr, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");

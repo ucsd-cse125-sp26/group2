@@ -24,6 +24,8 @@ void main()
     if (coord.x >= size.x || coord.y >= size.y) return;
 
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    // Remove current frame's jitter for clean world-space reconstruction.
+    vec2 unjitteredUV = uv - jitterOffset;
     float depth = texture(depthBuffer, uv).r;
 
     // Skip sky -- no motion.
@@ -33,7 +35,7 @@ void main()
     }
 
     // Reconstruct world position from current depth.
-    vec4 clipPos = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 clipPos = vec4(unjitteredUV * 2.0 - 1.0, depth, 1.0);
     vec4 worldPos = currentInvVP * clipPos;
     worldPos /= worldPos.w;
 
