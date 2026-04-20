@@ -373,39 +373,42 @@ SDL_AppResult Game::event(SDL_Event* event)
 ///       (true, default, server-consistent) vs. every iterate() call (false).
 ///       Mouse look is always per-frame regardless of this toggle.
 ///
-///   limitFPSToMonitor -- cap at max(physicsHz, monitorHz).
-///       When monitorHz >= physicsHz, uses VSync (locks to monitor refresh).
-///       When monitorHz < physicsHz, uses mailbox present + a software frame
-///       limiter at physicsHz so the renderer is never starved below the
-///       physics tick rate (avoids multi-tick-per-frame jitter).
+///   limitFPSToMonitor -- when ON and monitor >= physicsHz, uses VSync.
+///       When monitor < physicsHz (regardless of this toggle), a software
+///       frame limiter at physicsHz is always active to ensure rock-steady
+///       frame pacing — the monitor can't display above its refresh rate
+///       anyway, and uncapped rendering creates beat-frequency jitter.
 
 void Game::applyFrameRateLimit()
 {
-    if (limitFPSToMonitor) {
-        // Query the monitor's native refresh rate.
-        int monitorHz = 60; // safe fallback
-        const SDL_DisplayID displayID = SDL_GetDisplayForWindow(window);
-        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayID);
-        if (mode && mode->refresh_rate > 0.0f)
-            monitorHz = static_cast<int>(std::ceil(mode->refresh_rate));
+    // Query the monitor's native refresh rate.
+    int monitorHz = 60; // safe fallback
+    const SDL_DisplayID displayID = SDL_GetDisplayForWindow(window);
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayID);
+    if (mode && mode->refresh_rate > 0.0f)
+        monitorHz = static_cast<int>(std::ceil(mode->refresh_rate));
 
-        if (monitorHz >= k_physicsHz) {
-            // Monitor is fast enough — VSync won't starve the physics loop.
-            renderer.setVSync(true);
-            softLimitPeriod = 0;
-        } else {
-            // Monitor refresh is below physics Hz — use mailbox present with a
-            // software frame limiter targeting the physics rate so we never run
-            // fewer frames than physics ticks.
-            renderer.setVSync(false);
-            softLimitPeriod = SDL_GetPerformanceFrequency() / static_cast<Uint64>(k_physicsHz);
-            softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
-            SDL_Log("[client] monitor %d Hz < physics %d Hz — software limiter at %d fps",
-                    monitorHz,
-                    k_physicsHz,
-                    k_physicsHz);
-        }
+    if (limitFPSToMonitor && monitorHz >= k_physicsHz) {
+        // Monitor is fast enough — VSync locks to monitor refresh without
+        // starving the physics loop.
+        renderer.setVSync(true);
+        softLimitPeriod = 0;
+    } else if (monitorHz < k_physicsHz) {
+        // Monitor refresh is below physics Hz.  Regardless of the limiter
+        // toggle, cap at physics Hz with mailbox presentation.  The monitor
+        // can only display monitorHz frames per second anyway, and running
+        // uncapped at extreme fps introduces frame-pacing variance that
+        // creates visible beat-frequency jitter between the display refresh
+        // and the physics tick rate.  The software limiter ensures rock-steady
+        // frame spacing so the frames selected by mailbox presentation have
+        // consistent interpolation coverage.
+        renderer.setVSync(false);
+        softLimitPeriod = SDL_GetPerformanceFrequency() / static_cast<Uint64>(k_physicsHz);
+        softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+        SDL_Log(
+            "[client] monitor %d Hz < physics %d Hz — software limiter at %d fps", monitorHz, k_physicsHz, k_physicsHz);
     } else {
+        // Monitor >= physics Hz, limiter off — truly uncapped.
         renderer.setVSync(false);
         softLimitPeriod = 0;
     }
