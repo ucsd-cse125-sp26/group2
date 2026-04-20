@@ -432,6 +432,7 @@ SDL_AppResult Game::iterate()
         systems::runMouseLook(registry, mouseSensitivity);
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry);
+        systems::runWeaponKeys(registry);
     }
 
     systems::runInputSend(registry, client);

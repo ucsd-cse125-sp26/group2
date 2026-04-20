@@ -765,6 +765,7 @@ add_executable(client
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/health.hpp
 )
 
 target_include_directories(client PRIVATE
@@ -902,6 +903,7 @@ add_executable(server
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/health.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

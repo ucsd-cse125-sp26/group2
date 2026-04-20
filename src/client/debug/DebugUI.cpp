@@ -10,6 +10,8 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/Health.hpp"
+#include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
@@ -353,6 +355,35 @@ void DebugUI::buildInspectorContents(const Registry& registry,
                             c.right ? "Y" : "N",
                             c.jump ? "Y" : "N",
                             c.crouch ? "Y" : "N");
+            }
+
+            // Temp for weapon state
+            if (registry.all_of<WeaponState>(entity)) {
+                const auto& weapon = registry.get<WeaponState>(entity);
+                const GunInstance& gun =
+                    (weapon.current == WeaponSlot::PRIMARY) ? weapon.primary : weapon.secondary;
+
+                const char* currentGunName = "?";
+                switch (gun.type) {
+                case WeaponType::Rifle: currentGunName = "Rifle"; break;
+                case WeaponType::Rocket: currentGunName = "Rocket"; break;
+                case WeaponType::RailGun: currentGunName = "RailGun"; break;
+                case WeaponType::EnergyGun: currentGunName = "EnergyGun"; break;
+                }
+
+                ImGui::Text("WeaponState   current:%s  mag:%d  reserve:%d",
+                            currentGunName,
+                            gun.currentMagAmmo,
+                            gun.totalAmmo);
+            }
+
+            if (registry.all_of<Health>(entity)) {
+                const auto& health = registry.get<Health>(entity);
+                ImGui::Text("Health        hp: %.0f / %.0f   shield: %.0f / %.0f",
+                            static_cast<double>(health.health),
+                            static_cast<double>(health.healthMax),
+                            static_cast<double>(health.armor),
+                            static_cast<double>(health.armorMax));
             }
         }
 

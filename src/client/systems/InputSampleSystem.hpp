@@ -99,6 +99,7 @@ inline void runInputSample(Registry& registry, float mouseSensitivity = 0.001f)
 {
     runMouseLook(registry, mouseSensitivity);
     runMovementKeys(registry);
+    runWeaponKeys(registry);
 }
 
 } // namespace systems
