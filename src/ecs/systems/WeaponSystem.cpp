@@ -254,7 +254,13 @@ inline void handleFire(
             playerHealth.health -= overflow;
         }
     }
-    SDL_Log("[server] Shot fired by (%d)", shooter);
+    // SDL_Log("[server] Shot fired by (%d)", shooter);
+    // registry.view<InputSnapshot, WeaponState>().each(
+    //     [&](entt::entity shooter,
+    //         InputSnapshot& input,
+    //         WeaponState& weapon) {
+    //             SDL_Log("[server] Entity (%d) has (%d) ammo in their primary", shooter, weapon.primary.currentMagAmmo);
+    //     });
 }
 
 void runWeapon(Registry& registry, float dt)
