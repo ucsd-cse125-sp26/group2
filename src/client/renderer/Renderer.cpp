@@ -2089,8 +2089,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         motionVectorTexture = SDL_CreateGPUTexture(device, &ci);
     }
 
-    // SMAA textures (lazy init once).
-    if (!smaaEdgeTex) {
+    // SMAA textures (recreate on resize, same as other post-processing textures).
+    if (!smaaEdgeTex || ppResize) {
+        if (smaaEdgeTex)
+            SDL_ReleaseGPUTexture(device, smaaEdgeTex);
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
         ci.width = w;
@@ -2102,7 +2104,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
         smaaEdgeTex = SDL_CreateGPUTexture(device, &ci);
     }
-    if (!smaaBlendTex) {
+    if (!smaaBlendTex || ppResize) {
+        if (smaaBlendTex)
+            SDL_ReleaseGPUTexture(device, smaaBlendTex);
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
         ci.width = w;
@@ -2114,7 +2118,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
         smaaBlendTex = SDL_CreateGPUTexture(device, &ci);
     }
-    if (!smaaOutputTex) {
+    if (!smaaOutputTex || ppResize) {
+        if (smaaOutputTex)
+            SDL_ReleaseGPUTexture(device, smaaOutputTex);
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
         ci.width = w;
@@ -2126,7 +2132,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
         smaaOutputTex = SDL_CreateGPUTexture(device, &ci);
     }
-    if (!casOutputTex) {
+    if (!casOutputTex || ppResize) {
+        if (casOutputTex)
+            SDL_ReleaseGPUTexture(device, casOutputTex);
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_2D;
         ci.width = w;

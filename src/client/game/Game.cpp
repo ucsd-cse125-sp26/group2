@@ -21,6 +21,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -146,8 +147,8 @@ bool Game::init()
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
 
-    // Apply the default VSync setting now that the renderer is ready.
-    renderer.setVSync(limitFPSToMonitor);
+    // Apply the default frame-rate-limit setting now that the renderer is ready.
+    applyFrameRateLimit();
 
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
@@ -372,7 +373,43 @@ SDL_AppResult Game::event(SDL_Event* event)
 ///       (true, default, server-consistent) vs. every iterate() call (false).
 ///       Mouse look is always per-frame regardless of this toggle.
 ///
-///   limitFPSToMonitor -- VSync on (true) / off (false, default).
+///   limitFPSToMonitor -- cap at max(physicsHz, monitorHz).
+///       When monitorHz >= physicsHz, uses VSync (locks to monitor refresh).
+///       When monitorHz < physicsHz, uses mailbox present + a software frame
+///       limiter at physicsHz so the renderer is never starved below the
+///       physics tick rate (avoids multi-tick-per-frame jitter).
+
+void Game::applyFrameRateLimit()
+{
+    if (limitFPSToMonitor) {
+        // Query the monitor's native refresh rate.
+        int monitorHz = 60; // safe fallback
+        const SDL_DisplayID displayID = SDL_GetDisplayForWindow(window);
+        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayID);
+        if (mode && mode->refresh_rate > 0.0f)
+            monitorHz = static_cast<int>(std::ceil(mode->refresh_rate));
+
+        if (monitorHz >= k_physicsHz) {
+            // Monitor is fast enough — VSync won't starve the physics loop.
+            renderer.setVSync(true);
+            softLimitPeriod = 0;
+        } else {
+            // Monitor refresh is below physics Hz — use mailbox present with a
+            // software frame limiter targeting the physics rate so we never run
+            // fewer frames than physics ticks.
+            renderer.setVSync(false);
+            softLimitPeriod = SDL_GetPerformanceFrequency() / static_cast<Uint64>(k_physicsHz);
+            softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+            SDL_Log("[client] monitor %d Hz < physics %d Hz — software limiter at %d fps",
+                    monitorHz,
+                    k_physicsHz,
+                    k_physicsHz);
+        }
+    } else {
+        renderer.setVSync(false);
+        softLimitPeriod = 0;
+    }
+}
 
 SDL_AppResult Game::iterate()
 {
@@ -524,7 +561,7 @@ SDL_AppResult Game::iterate()
     dispatcher.update();
 
     // Update particle system (render-rate, not physics-rate)
-    // particleSystem.update(frameTime, renderer.getCamera(), registry);
+    particleSystem.update(frameTime, renderer.getCamera(), registry);
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -818,7 +855,22 @@ SDL_AppResult Game::iterate()
     renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
 
     if (limitFPSToMonitor != prevLimitFPS)
-        renderer.setVSync(limitFPSToMonitor);
+        applyFrameRateLimit();
+
+    // Software frame limiter: sleep + spin-wait when targeting above monitor refresh.
+    if (softLimitPeriod != 0) {
+        const Uint64 perfFreq = SDL_GetPerformanceFrequency();
+        const Uint64 now = SDL_GetPerformanceCounter();
+        if (now < softLimitNextFrame) {
+            const Sint64 sleepMs = static_cast<Sint64>((softLimitNextFrame - now) * 1000 / perfFreq) - 1;
+            if (sleepMs > 0)
+                SDL_Delay(static_cast<Uint32>(sleepMs));
+            // Spin-wait for remaining sub-millisecond precision.
+            while (SDL_GetPerformanceCounter() < softLimitNextFrame) {
+            }
+        }
+        softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+    }
 
     return SDL_APP_CONTINUE;
 }

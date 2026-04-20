@@ -231,7 +231,9 @@ void DebugUI::buildInspectorContents(const Registry& registry,
 
     ImGui::Checkbox("Limit FPS to Monitor Refresh", &limitFPSToMonitor);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("ON:  VSync on — fps locked to monitor refresh rate\n"
+        ImGui::SetTooltip("ON:  fps capped at max(physics Hz, monitor Hz)\n"
+                          "     Uses VSync when monitor >= physics Hz,\n"
+                          "     software limiter at physics Hz otherwise\n"
                           "OFF: VSync off — uncapped fps (may use mailbox present)");
 
     // SSR mode selector.

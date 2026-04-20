@@ -80,8 +80,16 @@ private:
                                            ///  vs every iterate() call (false).
     bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false).
 
-    FrameRecorder recorder;                ///< R-key toggled frame-state + screenshot recorder.
-    uint64_t frameCount = 0;               ///< Monotonic render-frame counter.
+    Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
+    Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
+
+    /// @brief Apply FPS-limit strategy based on limitFPSToMonitor, monitor Hz, and physics Hz.
+    /// When monitor refresh >= physics Hz, uses VSync. Otherwise falls back to a
+    /// software frame limiter at physics Hz with mailbox/immediate presentation.
+    void applyFrameRateLimit();
+
+    FrameRecorder recorder;  ///< R-key toggled frame-state + screenshot recorder.
+    uint64_t frameCount = 0; ///< Monotonic render-frame counter.
 
     // Cached camera state — updated each iterate(), used by event() key shortcuts.
     glm::vec3 cachedEye_{0.f, 100.f, 0.f};
