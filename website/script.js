@@ -140,8 +140,8 @@
 
         if (images.length <= 1) return;
 
-        const rotationMs = 5000;
-        const fadeMs = 1000;
+        const rotationMs = 3000;
+        const fadeMs = 800;
         let isTransitioning = false;
 
         heroImage.style.transition = 'opacity ' + fadeMs + 'ms ease';
