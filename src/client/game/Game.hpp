@@ -131,6 +131,9 @@ private:
     float recoilPushBack_ = 0.0f; ///< Current recoil backward offset (Quake units).
     float recoilRoll_ = 0.0f;     ///< Current recoil roll offset (degrees).
 
+    // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
+    float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
+
     // Crosshair settings (ImGui-adjustable)
     float crosshairSize_ = 6.0f;                           ///< Half-length of each crosshair line (pixels).
     float crosshairThickness_ = 2.0f;                      ///< Line thickness (pixels).

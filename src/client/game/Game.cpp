@@ -14,6 +14,7 @@
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
+#include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "network/NetworkConfig.hpp"
@@ -319,84 +320,8 @@ SDL_AppResult Game::event(SDL_Event* event)
         }
     }
 
-    // Left-click fires weapon (dispatches WeaponFiredEvent)
-    if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT && mouseCaptured) {
-        const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-        const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
-
-        // Ray-scene intersection for hit position
-        // Test against the floor plane (y=0) and use the nearest hit.
-        constexpr float k_maxRange = 5000.f;
-        float hitDist = k_maxRange; // fallback: max range
-        glm::vec3 hitNormal = -cachedCamFwd_;
-        SurfaceType hitSurface = SurfaceType::Concrete;
-
-        // Floor plane: y = 0, normal = (0, 1, 0)
-        if (cachedCamFwd_.y < -0.001f) { // looking downward at all
-            const float t = -cachedEye_.y / cachedCamFwd_.y;
-            if (t > 0.f && t < hitDist) {
-                hitDist = t;
-                hitNormal = glm::vec3{0.f, 1.f, 0.f};
-                hitSurface = SurfaceType::Concrete;
-            }
-        }
-
-        // Test against scene objects as rough spheres.
-        struct SceneObj
-        {
-            glm::vec3 center;
-            float radius;
-            SurfaceType surface;
-        };
-        static const SceneObj k_sceneObjects[] = {
-            {{200.f, 60.f, 400.f}, 80.f, SurfaceType::Flesh},   // Wraith
-            {{-200.f, 40.f, 400.f}, 100.f, SurfaceType::Metal}, // Porsche
-            {{0.f, 50.f, 600.f}, 60.f, SurfaceType::Metal},     // Pallet
-            {{100.f, 30.f, 400.f}, 30.f, SurfaceType::Metal},   // Bottle
-        };
-        for (const auto& obj : k_sceneObjects) {
-            // Ray-sphere intersection: |origin + t*dir - center|² = r²
-            const glm::vec3 oc = cachedEye_ - obj.center;
-            const float b = glm::dot(oc, cachedCamFwd_);
-            const float c = glm::dot(oc, oc) - obj.radius * obj.radius;
-            const float disc = b * b - c;
-            if (disc >= 0.f) {
-                const float t = -b - std::sqrt(disc);
-                if (t > 0.f && t < hitDist) {
-                    hitDist = t;
-                    const glm::vec3 p = cachedEye_ + cachedCamFwd_ * t;
-                    hitNormal = glm::normalize(p - obj.center);
-                    hitSurface = obj.surface;
-                }
-            }
-        }
-
-        const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
-        const float tracerRange = hitDist; // tracer ends at the hit point
-
-        WeaponFiredEvent wfe;
-        wfe.type = currentEquippedType_;
-        wfe.origin = hip;
-        wfe.direction = cachedCamFwd_;
-        wfe.isHitscan = true;
-        wfe.hitPos = hitPos;
-        dispatcher.enqueue(wfe);
-
-        // Spawn tracers from muzzle to hit, impact at the hit surface.
-        if (currentEquippedType_ == WeaponType::RailGun || currentEquippedType_ == WeaponType::EnergyGun)
-            particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
-        else
-            particleSystem.spawnBulletTracer(hip, cachedCamFwd_, tracerRange);
-        particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
-
-        // Visual recoil kick (viewmodel-only)
-        {
-            const RecoilParams& rp = getRecoilParams(currentEquippedType_);
-            recoilPitch_ += rp.pitchKick;
-            recoilPushBack_ += rp.pushBack;
-            recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
-        }
-    }
+    // NOTE: Local weapon VFX (tracers, impact, recoil) are handled continuously
+    // in iterate() so held fire (auto weapons) spawns effects every cooldown tick.
 
     // Scroll wheel cycles weapon slots
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
@@ -653,6 +578,63 @@ SDL_AppResult Game::iterate()
                 renderPitch = input.pitch;
                 targetRoll = pstate.targetCameraTilt;
             });
+    }
+
+    // Local weapon VFX — fires continuously while LMB is held, respecting cooldown.
+    // This mirrors the server's fire rate so the local player sees tracers/impacts
+    // at the same cadence as the server processes shots.
+    {
+        localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
+
+        const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
+        const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
+
+        if (shooting && localFireCooldown_ <= 0.0f) {
+            const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
+            localFireCooldown_ = wpnCfg.fireCooldown;
+
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+
+            // Ray-scene intersection for hit position
+            constexpr float k_maxRange = 5000.f;
+            float hitDist = k_maxRange;
+            glm::vec3 hitNormal = -cachedCamFwd_;
+            SurfaceType hitSurface = SurfaceType::Concrete;
+
+            if (cachedCamFwd_.y < -0.001f) {
+                const float t = -cachedEye_.y / cachedCamFwd_.y;
+                if (t > 0.f && t < hitDist) {
+                    hitDist = t;
+                    hitNormal = glm::vec3{0.f, 1.f, 0.f};
+                    hitSurface = SurfaceType::Concrete;
+                }
+            }
+
+            const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
+
+            // Dispatch weapon-fired event for any listeners
+            WeaponFiredEvent wfe;
+            wfe.type = currentEquippedType_;
+            wfe.origin = hip;
+            wfe.direction = cachedCamFwd_;
+            wfe.isHitscan = true;
+            wfe.hitPos = hitPos;
+            dispatcher.enqueue(wfe);
+
+            // Spawn correct particle effect based on weapon type
+            if (currentEquippedType_ == WeaponType::RailGun || currentEquippedType_ == WeaponType::EnergyGun)
+                particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
+            else
+                particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
+            particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
+
+            // Visual recoil kick (viewmodel-only)
+            const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+            recoilPitch_ += rp.pitchKick;
+            recoilPushBack_ += rp.pushBack;
+            recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
+        }
     }
 
     // Flush dispatcher events (weapon fired, impact, explosion)

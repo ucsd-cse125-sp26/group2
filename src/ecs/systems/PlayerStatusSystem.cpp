@@ -41,6 +41,7 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     // Refresh player stats and position
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+    const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
 
     registry.emplace_or_replace<InputSnapshot>(player);
     registry.emplace_or_replace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
@@ -63,6 +64,13 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
                                                          .currentMagAmmo = railConfig.magazineSize,
                                                          .fireCooldown = 0.0f,
                                                      },
+                                                 .tertiary =
+                                                     GunInstance{
+                                                         .type = WeaponType::EnergyGun,
+                                                         .totalAmmo = wingmanConfig.defaultAmmoCapacity,
+                                                         .currentMagAmmo = wingmanConfig.magazineSize,
+                                                         .fireCooldown = 0.0f,
+                                                     },
                                                  .current = WeaponSlot::PRIMARY,
                                              });
 }
@@ -79,6 +87,10 @@ inline void handleDeath(entt::entity& player, Health& playerHealth, entt::entity
 void applyDamage(float damage, entt::entity player, entt::entity& killer, Registry& registry)
 {
     Health& playerHealth = registry.get_or_emplace<Health>(player);
+
+    // Reset heal cooldown on every damage tick
+    playerHealth.healTimer = systems::healCooldown;
+
     if (playerHealth.armor >= damage) {
         playerHealth.armor -= damage;
     } else {
