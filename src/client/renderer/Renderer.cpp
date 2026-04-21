@@ -2642,98 +2642,6 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_EndGPURenderPass(pass);
     }
 
-    // First-person weapon viewmodel — rendered in a SEPARATE pass so the
-    // scene depth buffer doesn't occlude it.  The colour target is LOAD'd
-    // (preserves scene), the depth is CLEAR'd to 1.0 (weapon always wins)
-    // but then DONT_CARE'd so the scene depth that SSAO/SSR/bloom need is
-    // untouched (they read the depth stored by the main HDR pass above).
-    if (toggles.weaponViewmodel && weaponVM.visible && weaponVM.modelIndex >= 0 &&
-        weaponVM.modelIndex < static_cast<int>(models.size()) && pbrPipeline)
-    {
-        SDL_GPUColorTargetInfo weapCt{};
-        weapCt.texture = hdrTarget;
-        weapCt.load_op = SDL_GPU_LOADOP_LOAD; // preserve the scene image
-        weapCt.store_op = SDL_GPU_STOREOP_STORE;
-
-        SDL_GPUDepthStencilTargetInfo weapDt{};
-        weapDt.texture = weaponDepthTexture;         // separate buffer — scene depth untouched
-        weapDt.clear_depth = 1.0f;                   // fresh depth — weapon can't lose
-        weapDt.load_op = SDL_GPU_LOADOP_CLEAR;
-        weapDt.store_op = SDL_GPU_STOREOP_DONT_CARE; // nobody reads this
-        weapDt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-        weapDt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-
-        SDL_GPURenderPass* weapPass = SDL_BeginGPURenderPass(cmd, &weapCt, 1, &weapDt);
-
-        SDL_BindGPUGraphicsPipeline(weapPass, pbrPipeline);
-
-        const auto& wmodel = models[static_cast<size_t>(weaponVM.modelIndex)];
-
-        Matrices vmMats{};
-        vmMats.model = weaponVM.transform;
-        vmMats.view = camera.getViewMatrix();
-        vmMats.projection = camera.getProjectionMatrix();
-        vmMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(weaponVM.transform)));
-        SDL_PushGPUVertexUniformData(cmd, 0, &vmMats, sizeof(vmMats));
-
-        // Lighting for the weapon (same scene lights, no shadows).
-        LightDataUBO weaponLightData{};
-        weaponLightData.cameraPos = glm::vec4(eye, 1.0f);
-        weaponLightData.ambientColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
-        weaponLightData.numLights = 2;
-        weaponLightData.iblDiffuseIntensity = iblDiffuseIntensity;
-        weaponLightData.iblSpecularIntensity = iblSpecularIntensity;
-        weaponLightData.lights[0].position = glm::vec4(getSunDirection(), 0.0f);
-        weaponLightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
-        weaponLightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
-        weaponLightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
-        SDL_PushGPUFragmentUniformData(cmd, 1, &weaponLightData, sizeof(weaponLightData));
-
-        ShadowDataFragUBO weaponShadow{};
-        weaponShadow.shadowMapSize = 0.0f; // No shadows on the viewmodel.
-        SDL_PushGPUFragmentUniformData(cmd, 2, &weaponShadow, sizeof(weaponShadow));
-
-        for (const auto& mesh : wmodel.meshes) {
-            MaterialUBO matUBO{};
-            matUBO.baseColorFactor = mesh.material.baseColorFactor;
-            matUBO.metallicFactor = mesh.material.metallicFactor;
-            matUBO.roughnessFactor = mesh.material.roughnessFactor;
-            matUBO.aoStrength = mesh.material.aoStrength;
-            matUBO.normalScale = mesh.material.normalScale;
-            matUBO.emissiveFactor = mesh.material.emissiveFactor;
-            SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
-
-            const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
-            SDL_BindGPUVertexBuffers(weapPass, 0, &vbBind, 1);
-            const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
-            SDL_BindGPUIndexBuffer(weapPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-            auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
-                if (idx >= 0 && static_cast<size_t>(idx) < wmodel.textures.size() &&
-                    wmodel.textures[static_cast<size_t>(idx)])
-                    return wmodel.textures[static_cast<size_t>(idx)];
-                return fallback;
-            };
-
-            const SDL_GPUTextureSamplerBinding samplers[8] = {
-                {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
-                {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
-                {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
-                {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
-                {.texture = irradianceMap, .sampler = iblSampler},
-                {.texture = prefilterMap, .sampler = iblSampler},
-                {.texture = brdfLUT, .sampler = iblSampler},
-                {.texture = shadowMap ? shadowMap : fallbackWhite,
-                 .sampler = shadowSampler ? shadowSampler : pbrSampler},
-            };
-            SDL_BindGPUFragmentSamplers(weapPass, 0, samplers, 8);
-
-            SDL_DrawGPUIndexedPrimitives(weapPass, mesh.indexCount, 1, 0, 0, 0);
-        }
-
-        SDL_EndGPURenderPass(weapPass);
-    }
-
     // Compute passes: SSAO, Bloom, SSR, Volumetrics (between HDR and tonemap)
 
     // GTAO (Phase 7) -- Ground Truth Ambient Occlusion
@@ -2947,6 +2855,99 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_PushGPUComputeUniformData(cmd, 0, &volUBO, sizeof(volUBO));
         SDL_DispatchGPUCompute(volPass, (w / 2 + 15) / 16, (h / 2 + 15) / 16, 1);
         SDL_EndGPUComputePass(volPass);
+    }
+
+    // First-person weapon viewmodel — rendered AFTER SSAO/bloom/SSR/volumetrics
+    // (so those screen-space effects don't bleed through the weapon) but BEFORE
+    // SMAA/TAA (so the weapon is included in the anti-aliased + tonemapped output).
+    if (toggles.weaponViewmodel && weaponVM.visible && weaponVM.modelIndex >= 0 &&
+        weaponVM.modelIndex < static_cast<int>(models.size()) && pbrPipeline)
+    {
+        SDL_GPUColorTargetInfo weapCt{};
+        weapCt.texture = hdrTarget;
+        weapCt.load_op = SDL_GPU_LOADOP_LOAD;
+        weapCt.store_op = SDL_GPU_STOREOP_STORE;
+
+        SDL_GPUDepthStencilTargetInfo weapDt{};
+        weapDt.texture = weaponDepthTexture;
+        weapDt.clear_depth = 1.0f;
+        weapDt.load_op = SDL_GPU_LOADOP_CLEAR;
+        weapDt.store_op = SDL_GPU_STOREOP_DONT_CARE;
+        weapDt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        weapDt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+
+        SDL_GPURenderPass* weapPass = SDL_BeginGPURenderPass(cmd, &weapCt, 1, &weapDt);
+
+        SDL_BindGPUGraphicsPipeline(weapPass, pbrPipeline);
+
+        const auto& wmodel = models[static_cast<size_t>(weaponVM.modelIndex)];
+
+        Matrices vmMats{};
+        vmMats.model = weaponVM.transform;
+        vmMats.view = camera.getViewMatrix();
+        vmMats.projection = camera.getProjectionMatrix();
+        vmMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(weaponVM.transform)));
+        SDL_PushGPUVertexUniformData(cmd, 0, &vmMats, sizeof(vmMats));
+
+        LightDataUBO weaponLightData{};
+        weaponLightData.cameraPos = glm::vec4(eye, 1.0f);
+        weaponLightData.ambientColor = glm::vec4(0.15f, 0.15f, 0.18f, 1.0f);
+        weaponLightData.numLights = 2;
+        // Suppress IBL specular on the viewmodel — it mirrors the sky cubemap,
+        // making the weapon look transparent (horizon line visible on surface).
+        // Keep a little diffuse IBL for ambient fill.
+        weaponLightData.iblDiffuseIntensity = iblDiffuseIntensity * 0.3f;
+        weaponLightData.iblSpecularIntensity = 0.0f;
+        weaponLightData.lights[0].position = glm::vec4(getSunDirection(), 0.0f);
+        weaponLightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
+        weaponLightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
+        weaponLightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
+        SDL_PushGPUFragmentUniformData(cmd, 1, &weaponLightData, sizeof(weaponLightData));
+
+        ShadowDataFragUBO weaponShadow{};
+        weaponShadow.shadowMapSize = 0.0f;
+        SDL_PushGPUFragmentUniformData(cmd, 2, &weaponShadow, sizeof(weaponShadow));
+
+        for (const auto& mesh : wmodel.meshes) {
+            MaterialUBO matUBO{};
+            matUBO.baseColorFactor = mesh.material.baseColorFactor;
+            matUBO.baseColorFactor.a = 0.0f; // weapon mask: alpha=0 tells tonemap to skip post-FX
+            matUBO.metallicFactor = mesh.material.metallicFactor;
+            matUBO.roughnessFactor = mesh.material.roughnessFactor;
+            matUBO.aoStrength = mesh.material.aoStrength;
+            matUBO.normalScale = mesh.material.normalScale;
+            matUBO.emissiveFactor = mesh.material.emissiveFactor;
+            SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+
+            const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+            SDL_BindGPUVertexBuffers(weapPass, 0, &vbBind, 1);
+            const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+            SDL_BindGPUIndexBuffer(weapPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+            auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                if (idx >= 0 && static_cast<size_t>(idx) < wmodel.textures.size() &&
+                    wmodel.textures[static_cast<size_t>(idx)])
+                    return wmodel.textures[static_cast<size_t>(idx)];
+                return fallback;
+            };
+
+            const SDL_GPUTextureSamplerBinding samplers[8] = {
+                {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                {.texture = irradianceMap, .sampler = iblSampler},
+                {.texture = prefilterMap, .sampler = iblSampler},
+                {.texture = brdfLUT, .sampler = iblSampler},
+                {.texture = shadowMap ? shadowMap : fallbackWhite,
+                 .sampler = shadowSampler ? shadowSampler : pbrSampler},
+            };
+            SDL_BindGPUFragmentSamplers(weapPass, 0, samplers, 8);
+
+            SDL_DrawGPUIndexedPrimitives(weapPass, mesh.indexCount, 1, 0, 0, 0);
+        }
+
+        SDL_EndGPURenderPass(weapPass);
     }
 
     // SMAA + Temporal Resolve (Phase 11) -- replaces old TAA
