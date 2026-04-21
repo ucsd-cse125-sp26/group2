@@ -3,7 +3,10 @@
 
 #pragma once
 
-#include "animation/SkinnedModel.hpp"
+#include "animation/AnimationLibrary.hpp"
+#include "animation/AnimationTesterUI.hpp"
+#include "animation/CharacterRig.hpp"
+#include "animation/SkinningBackend.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -77,8 +80,16 @@ private:
                                            ///  vs every iterate() call (false).
     bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false).
 
-    FrameRecorder recorder;                ///< R-key toggled frame-state + screenshot recorder.
-    uint64_t frameCount = 0;               ///< Monotonic render-frame counter.
+    Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
+    Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
+
+    /// @brief Apply FPS-limit strategy based on limitFPSToMonitor, monitor Hz, and physics Hz.
+    /// When monitor refresh >= physics Hz, uses VSync. Otherwise falls back to a
+    /// software frame limiter at physics Hz with mailbox/immediate presentation.
+    void applyFrameRateLimit();
+
+    FrameRecorder recorder;  ///< R-key toggled frame-state + screenshot recorder.
+    uint64_t frameCount = 0; ///< Monotonic render-frame counter.
 
     // Cached camera state — updated each iterate(), used by event() key shortcuts.
     glm::vec3 cachedEye_{0.f, 100.f, 0.f};
@@ -86,10 +97,17 @@ private:
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
     // Model indices for entity rendering (loaded at init).
-    int wraithModelIdx = -1;   ///< Wraith player model index.
-    int weaponModelIdx = -1;   ///< R-301 weapon model index.
-    SkinnedModel runAnimation; ///< Mixamo animated character (skeletal animation).
-    int animatedModelIdx = -1; ///< Renderer model index for the animated character.
+    int wraithModelIdx = -1; ///< Wraith player model index.
+    int weaponModelIdx = -1; ///< R-301 weapon model index.
+
+    // Animation subsystem — shared rig + clip library + skinning backend.
+    // CharacterAnimators (one per animated entity) hold non-owning refs.
+    CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
+    AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
+    CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
+    AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
+    float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (tunable).
+    float kRigVerticalOffset_ = -90.0f; ///< Per-renderable Y translation for animated characters (tunable).
 
     // FPS ring buffer -- inter-render deltas, newest at (head-1) % size
     float fpsHistory[k_fpsHistorySize] = {}; ///< Circular buffer of per-frame FPS samples.
@@ -109,4 +127,12 @@ private:
     float statsFPSMax = 0.0f;       ///< Maximum FPS in the ring buffer.
     float statsFPS1pLow = 0.0f;     ///< 1st-percentile FPS (1 % low).
     float statsFPS5pLow = 0.0f;     ///< 5th-percentile FPS (5 % low).
+
+    /// @brief Attach a fresh `AnimatedCharacter` component to an entity.
+    ///
+    /// Creates a new CharacterAnimator wired to the shared rig + clip library +
+    /// skinning backend, uploads a per-entity clone of the rig's template model,
+    /// and emplaces the component.  Safe to call even if the rig failed to load
+    /// (logs a warning and leaves the entity un-animated).
+    void attachAnimatedCharacter(entt::entity e);
 };

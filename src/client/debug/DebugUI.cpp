@@ -103,11 +103,13 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
-void DebugUI::toggleAllPanels()
+void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
 {
-    // All window-visibility flags in one place — keep this list in sync with
-    // the private members in DebugUI.hpp when adding new top-level panels.
-    bool* const panels[] = {
+    // All window-visibility flags owned by DebugUI in one place — keep this
+    // list in sync with the private members in DebugUI.hpp when adding new
+    // top-level panels. Panels owned by other systems (e.g. Game's Animation
+    // Tester) are passed in via externalPanels.
+    bool* const ownedPanels[] = {
         &showInspector,
         &showMovementChart,
         &showBhopAnalyzer,
@@ -117,19 +119,31 @@ void DebugUI::toggleAllPanels()
         &showSkybox,
         &showNetworkStats,
     };
-    constexpr int k_panelCount = static_cast<int>(sizeof(panels) / sizeof(panels[0]));
 
-    // If anything is currently visible, hide everything; otherwise show everything.
+    // If anything is currently visible (owned or external), hide everything;
+    // otherwise show everything.
     bool anyVisible = false;
-    for (int i = 0; i < k_panelCount; ++i) {
-        if (*panels[i]) {
+    for (bool* p : ownedPanels) {
+        if (*p) {
             anyVisible = true;
             break;
         }
     }
-    const bool k_newState = !anyVisible;
-    for (int i = 0; i < k_panelCount; ++i)
-        *panels[i] = k_newState;
+    if (!anyVisible) {
+        for (bool* p : externalPanels) {
+            if (p && *p) {
+                anyVisible = true;
+                break;
+            }
+        }
+    }
+    const bool newState = !anyVisible;
+    for (bool* p : ownedPanels)
+        *p = newState;
+    for (bool* p : externalPanels) {
+        if (p)
+            *p = newState;
+    }
 }
 
 void DebugUI::buildUI(const Registry& registry,
@@ -221,8 +235,12 @@ void DebugUI::buildInspectorContents(const Registry& registry,
 
     ImGui::Checkbox("Limit FPS to Monitor Refresh", &limitFPSToMonitor);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("ON:  VSync on — fps locked to monitor refresh rate\n"
-                          "OFF: VSync off — uncapped fps (may use mailbox present)");
+        ImGui::SetTooltip("ON + monitor >= physics Hz: VSync (locks to monitor refresh)\n"
+                          "ON + monitor <  physics Hz: software limiter at physics Hz\n"
+                          "OFF + monitor >= physics Hz: uncapped (mailbox present)\n"
+                          "OFF + monitor <  physics Hz: software limiter at physics Hz\n"
+                          "  (sub-physics-Hz monitors always cap at physics Hz for\n"
+                          "   smooth frame pacing — the monitor can't display faster)");
 
     // SSR mode selector.
     {
@@ -855,10 +873,12 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
 
 // Render Toggles window
 
-void DebugUI::buildRenderTogglesUI(RenderToggles& t)
+void DebugUI::buildRenderTogglesUI(Renderer& renderer)
 {
     if (!showRenderToggles)
         return;
+
+    RenderToggles& t = renderer.toggles;
 
     ImGui::SetNextWindowPos({940.f, 10.f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({280.f, 460.f}, ImGuiCond_FirstUseEver);
@@ -882,20 +902,21 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
                         &t.bloom,
                         &t.ssr,
                         &t.volumetrics,
-                        &t.taa,
                         &t.tonemap,
                         &t.particles,
                         &t.sdfText};
-    constexpr int k_flagCount = 14;
+    constexpr int k_flagCount = 13;
 
     if (ImGui::Button("All ON")) {
         for (int i = 0; i < k_flagCount; ++i)
             *allFlags[i] = true;
+        renderer.aaMode = AAMode::SMAA_T2x;
     }
     ImGui::SameLine();
     if (ImGui::Button("All OFF")) {
         for (int i = 0; i < k_flagCount; ++i)
             *allFlags[i] = false;
+        renderer.aaMode = AAMode::Off;
     }
     ImGui::SameLine();
     if (ImGui::Button("Only Post-FX OFF")) {
@@ -903,7 +924,7 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
         t.bloom = false;
         t.ssr = false;
         t.volumetrics = false;
-        t.taa = false;
+        renderer.aaMode = AAMode::Off;
     }
     ImGui::Separator();
 
@@ -925,7 +946,16 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
     ImGui::Checkbox("Bloom", &t.bloom);
     ImGui::Checkbox("SSR (Screen-Space Reflections)", &t.ssr);
     ImGui::Checkbox("Volumetric Lighting", &t.volumetrics);
-    ImGui::Checkbox("TAA (Temporal AA)", &t.taa);
+
+    // Anti-aliasing mode selection
+    const char* aaModes[] = {"Off", "SMAA 1x", "SMAA T2x"};
+    ImGui::Combo("Anti-Aliasing", reinterpret_cast<int*>(&renderer.aaMode), aaModes, 3);
+
+    // CAS sharpening
+    ImGui::Checkbox("CAS Sharpening", &renderer.casEnabled);
+    if (renderer.casEnabled)
+        ImGui::SliderFloat("CAS Strength", &renderer.casStrength, 0.0f, 1.0f, "%.2f");
+
     ImGui::Checkbox("Tone Mapping (HDR->LDR)", &t.tonemap);
 
     // Effects
@@ -967,10 +997,21 @@ void DebugUI::buildLightingUI(Renderer& renderer)
         renderer.ambientB = amb[2];
     }
 
+    // IBL intensity
+    // Dial IBL Specular below 1.0 if dielectric surfaces (plastic, cloth,
+    // skin) look like polished metal -- real-world HDR environments make
+    // smooth dielectrics look artificially reflective.
+    ImGui::SeparatorText("IBL Intensity");
+    ImGui::SliderFloat("IBL Diffuse", &renderer.iblDiffuseIntensity, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("IBL Specular", &renderer.iblSpecularIntensity, 0.0f, 2.0f, "%.2f");
+
     // Post-processing
     ImGui::SeparatorText("Post-Processing");
     ImGui::SliderFloat("Bloom", &renderer.bloomStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("SSAO", &renderer.ssaoStr, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("AO Radius", &renderer.ssaoRadius, 0.1f, 5.0f, "%.2f");
+    ImGui::SliderFloat("AO Falloff", &renderer.ssaoFalloff, 0.5f, 4.0f, "%.1f");
+    ImGui::SliderFloat("AO Power", &renderer.ssaoPower, 0.5f, 3.0f, "%.1f");
     ImGui::SliderFloat("SSR", &renderer.ssrStr, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");

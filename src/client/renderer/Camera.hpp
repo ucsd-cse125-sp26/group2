@@ -15,9 +15,12 @@ public:
 
     // Sets the position of the camera in the world
     void setEye(glm::vec3 eye);
-    // Sets the view direction from the eye based on the pitch and yaw (both radians)
-    void setTarget(float pitch, float yaw, float _roll);
-    // Sets the up direction of the camera (for gravity stuff?)
+    // Sets the view direction from the eye based on the pitch, yaw, and roll
+    // (all in radians). Roll rotates the up vector around the forward axis,
+    // used for camera tilt during wallruns.
+    void setTarget(float pitch, float yaw, float roll);
+    // Sets the up direction of the camera explicitly (overrides whatever
+    // setTarget produced). Useful if you ever need a non-gravity-aligned up.
     void setUp(glm::vec3 up);
 
     void computeViewMatrix();
@@ -32,11 +35,27 @@ public:
     /// @brief Return the combined view-projection matrix.
     [[nodiscard]] glm::mat4 getViewProjection() const { return projection_ * view_; }
     /// @brief Return the vertical field of view in degrees.
-    [[nodiscard]] float getFovy() const { return fovy_; }
+    ///
+    /// Internally fovy_ is stored in radians (matches glm::perspective and
+    /// setFov's conversion).  Convert back here so the public API contract
+    /// stays consistent with setFov(fovyDegrees).
+    [[nodiscard]] float getFovy() const { return glm::degrees(fovy_); }
     /// @brief Return the aspect ratio (width / height).
     [[nodiscard]] float getAspect() const { return aspect_; }
     /// @brief Return the near clip plane distance.
     [[nodiscard]] float getNear() const { return zNear_; }
+    /// @brief Return the far clip plane distance.
+    [[nodiscard]] float getFar() const { return zFar_; }
+
+    /// @brief Apply a sub-pixel jitter offset to the projection matrix.
+    ///
+    /// Used by SMAA T2x temporal supersampling.  Call **after**
+    /// setAspect()/computeProjectionMatrix() so the base projection is
+    /// established first.  The offset is in NDC units (already scaled by
+    /// 2/resolution).
+    /// @param jitterX Horizontal jitter in NDC.
+    /// @param jitterY Vertical jitter in NDC.
+    void applySubpixelJitter(float jitterX, float jitterY);
 
 private:
     glm::vec3 eye_{0.0f, 0.0f, 3.0f};

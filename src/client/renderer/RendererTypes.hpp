@@ -8,6 +8,14 @@
 
 #include <glm/glm.hpp>
 
+/// @brief Anti-aliasing mode selection -- exposed to ImGui.
+enum class AAMode : int
+{
+    Off = 0,      ///< No anti-aliasing.
+    SMAA_1x = 1,  ///< Spatial SMAA only, zero ghosting.
+    SMAA_T2x = 2, ///< 2-sample temporal + spatial SMAA (recommended).
+};
+
 /// @brief Live toggles for every render system -- exposed to ImGui.
 ///
 /// All default to true (everything on). The legacy renderer checks these each
@@ -29,7 +37,6 @@ struct RenderToggles
     bool bloom = true;       ///< Bloom downsample + upsample chain.
     bool ssr = true;         ///< Screen-space reflections.
     bool volumetrics = true; ///< Volumetric lighting / god rays.
-    bool taa = true;         ///< Temporal anti-aliasing.
     bool tonemap = true;     ///< HDR -> LDR tone mapping (disabling = raw HDR blit).
 
     // Effects

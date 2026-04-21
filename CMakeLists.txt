@@ -332,7 +332,11 @@ set(SHADER_SOURCES
     bloom_downsample.comp bloom_upsample.comp  # Bloom (Phase 8)
     ssr.comp                            # Screen-space reflections (Phase 9)
     volumetric.comp                     # Volumetric lighting (Phase 10)
-    motion_vectors.comp taa.comp        # TAA (Phase 11)
+    motion_vectors.comp                 # Motion vectors (used by SMAA T2x)
+    smaa_fullscreen.vert                # SMAA fullscreen triangle (Y-flipped UVs)
+    smaa_edge.frag smaa_blend.frag smaa_neighborhood.frag  # SMAA spatial passes
+    smaa_resolve.comp                   # SMAA T2x temporal resolve
+    cas.comp                            # CAS (Contrast Adaptive Sharpening)
     pbr_wboit.frag oit_resolve.frag     # OIT (Phase 12)
     sss.comp                            # Subsurface scattering (Phase 13)
     # Particle system shaders (Phase 14)
@@ -510,8 +514,18 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
     # Skeletal animation
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -527,6 +541,7 @@ add_executable(group2
         src/ecs/components/TracerEmitter.hpp
         src/ecs/components/RibbonEmitter.hpp
         src/ecs/components/ParticleEmitterTag.hpp
+        src/ecs/components/AnimatedCharacter.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
         src/ecs/physics/Movement.cpp
@@ -717,8 +732,18 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
     # Skeletal animation
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -734,6 +759,7 @@ add_executable(client
         src/ecs/components/TracerEmitter.hpp
         src/ecs/components/RibbonEmitter.hpp
         src/ecs/components/ParticleEmitterTag.hpp
+        src/ecs/components/AnimatedCharacter.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
         src/ecs/physics/Movement.cpp

@@ -28,6 +28,8 @@ layout(set = 3, binding = 0) uniform TonemapParams
     float ssrStrength;
     float volumetricStrength;
     float sharpenStrength;
+    float ssaoPower;
+    float _padTM1, _padTM2, _padTM3;
 };
 
 // ACES filmic tone mapping (Narkowicz 2015).
@@ -78,6 +80,7 @@ void main()
 
     // Apply SSAO (multiplicative on the result).
     float ao = texture(ssaoBuffer, fragTexCoord).r;
+    ao = pow(ao, ssaoPower);
     hdr *= mix(1.0, ao, ssaoStrength);
 
     // Apply exposure.

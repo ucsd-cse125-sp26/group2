@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include <glm/vec3.hpp>
+#include <initializer_list>
 
 struct NetworkStats;  ///< Forward-declared; defined in Client.hpp.
 class ParticleSystem; ///< Forward-declared to avoid pulling in heavy particle headers.
@@ -77,8 +78,8 @@ public:
     void buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward);
 
     /// @brief Build the Render Toggles window for live performance profiling.
-    /// @param toggles  The renderer's toggle struct (read/write).
-    void buildRenderTogglesUI(struct RenderToggles& toggles);
+    /// @param renderer  The renderer (for toggles, AA mode).
+    void buildRenderTogglesUI(class Renderer& renderer);
 
     /// @brief Build the Skybox selector window for live HDR skybox swapping.
     void buildSkyboxUI(class Renderer& renderer);
@@ -99,7 +100,12 @@ public:
     /// hidden, all panels become visible. Intended to be bound to a hotkey so the
     /// user can clear the overlay for clean gameplay/screenshots and bring it
     /// back with the same press.
-    void toggleAllPanels();
+    /// @param externalPanels  Visibility flags for panels owned outside DebugUI
+    ///                        (e.g. the Animation Tester lives on Game). They
+    ///                        participate in both the "any visible?" check and
+    ///                        the bulk show/hide so the hotkey behavior stays
+    ///                        consistent across all debug windows.
+    void toggleAllPanels(std::initializer_list<bool*> externalPanels = {});
 
 private:
     /// Per-window visibility toggles — persistent across frames.

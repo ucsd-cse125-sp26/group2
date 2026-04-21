@@ -1,5 +1,6 @@
 #include "Camera.hpp"
 
+#include <cmath>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
@@ -12,34 +13,34 @@ Camera::Camera()
 void Camera::setAspect(float width, float height)
 {
     aspect_ = (height == 0.0f) ? 1.0f : width / height;
-    computeViewMatrix();
+    computeProjectionMatrix();
 }
 
 void Camera::setFov(float fovyDegrees)
 {
     fovy_ = glm::radians(fovyDegrees);
-    computeViewMatrix();
+    computeProjectionMatrix();
 }
 
 void Camera::setZNear(float zNear)
 {
     zNear_ = zNear;
-    computeViewMatrix();
+    computeProjectionMatrix();
 }
 
 void Camera::setZFar(float zFar)
 {
-    zFar = zFar_;
-    computeViewMatrix();
+    zFar_ = zFar;
+    computeProjectionMatrix();
 }
 
 void Camera::setEye(glm::vec3 eye)
 {
     eye_ = eye;
-    computeProjectionMatrix();
+    computeViewMatrix();
 }
 
-void Camera::setTarget(float pitch, float yaw, float _roll)
+void Camera::setTarget(float pitch, float yaw, float roll)
 {
     const float cosPitch = std::cos(pitch);
 
@@ -48,13 +49,27 @@ void Camera::setTarget(float pitch, float yaw, float _roll)
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
 
     target_ = eye_ + forward;
-    computeProjectionMatrix();
+
+    // Apply roll by rotating the world-up vector around the forward axis.
+    // Skip the trig when roll is effectively zero to avoid losing precision
+    // on the up vector (and to keep wallrun tilt cleanly off when not needed).
+    glm::vec3 camUp{0.0f, 1.0f, 0.0f};
+    if (std::abs(roll) > 0.001f) {
+        const glm::vec3 right = glm::normalize(glm::cross(forward, camUp));
+        const glm::vec3 trueUp = glm::normalize(glm::cross(right, forward));
+        const float cosR = std::cos(roll);
+        const float sinR = std::sin(roll);
+        camUp = trueUp * cosR + right * sinR;
+    }
+    up_ = camUp;
+
+    computeViewMatrix();
 }
 
 void Camera::setUp(glm::vec3 up)
 {
     up_ = up;
-    computeProjectionMatrix();
+    computeViewMatrix();
 }
 
 void Camera::computeViewMatrix()
@@ -66,6 +81,12 @@ void Camera::computeProjectionMatrix()
 {
     projection_ = glm::perspective(fovy_, aspect_, zNear_, zFar_);
     projection_[1][1] *= -1.0f;
+}
+
+void Camera::applySubpixelJitter(const float jitterX, const float jitterY)
+{
+    projection_[2][0] += jitterX;
+    projection_[2][1] += jitterY;
 }
 
 const glm::vec3 Camera::getForward() const

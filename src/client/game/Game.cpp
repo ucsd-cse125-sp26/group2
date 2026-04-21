@@ -3,6 +3,8 @@
 
 #include "Game.hpp"
 
+#include "animation/CharacterAnimator.hpp"
+#include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -20,6 +22,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -96,10 +99,10 @@ bool Game::init()
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
 
-        // if (wraithModelIdx >= 0) {
-        //     SDL_Log("[client] assigning Wraith model to local player entity %d", static_cast<int>(local));
-        //     registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
-        // }
+        // Animator runs for local too — future gun-IK / hands-on-weapon work
+        // needs an up-to-date upper-body pose even when the body is invisible.
+        // Rendering is gated by animUI_.showLocalBody (third-person debug).
+        attachAnimatedCharacter(local);
 
         SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
     });
@@ -118,36 +121,37 @@ bool Game::init()
     SDL_SetWindowRelativeMouseMode(window, true);
     mouseCaptured = true;
 
-    // Load animated model (Mixamo FBX)
+    // Load the shared skinned-character rig (skeleton + bind pose + weights).
+    // Loading a single FBX is enough — any file with matching skin data works;
+    // we use standard_walk.fbx because it's guaranteed present for locomotion.
     {
         const char* base = SDL_GetBasePath();
-        std::string fbxPath = std::string(base ? base : "") + "assets/Standard_Run.fbx";
-        if (runAnimation.load(fbxPath)) {
-            animatedModelIdx = renderer.uploadSceneModel(runAnimation.getLoadedModel());
-            if (animatedModelIdx >= 0) {
-                SDL_Log("[client] animated model uploaded — index=%d, duration=%.2fs",
-                        animatedModelIdx,
-                        static_cast<double>(runAnimation.duration()));
-            }
+        const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
+        const std::string rigPath = assetsDir + "standard_walk.fbx";
+        if (!charRig_.loadFromFBX(rigPath)) {
+            SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
-            SDL_Log("[client] WARNING: animated model failed to load — animation disabled");
-        }
-    }
+            SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
 
-    // Spawn a visible animated character in the world (Mixamo run animation).
-    if (animatedModelIdx >= 0) {
-        const glm::vec3 animPos{0.0f, 0.0f, 400.0f};
-        const entt::entity animEntity = registry.create();
-        registry.emplace<Position>(animEntity, animPos);
-        registry.emplace<PreviousPosition>(animEntity, animPos);
-        registry.emplace<Renderable>(animEntity, Renderable{.modelIndex = animatedModelIdx, .scale = glm::vec3(1.0f)});
+            // Load every Mixamo clip onto the shared skeleton.
+            for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
+                const ClipId id = static_cast<ClipId>(i);
+                const std::string clipPath = assetsDir + clipFile(id);
+                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath)) {
+                    SDL_Log("[client] WARNING: failed to load clip '%s'", clipName(id));
+                    continue;
+                }
+                SDL_Log(
+                    "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
+            }
+        }
     }
 
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
 
-    // Apply the default VSync setting now that the renderer is ready.
-    renderer.setVSync(limitFPSToMonitor);
+    // Apply the default frame-rate-limit setting now that the renderer is ready.
+    applyFrameRateLimit();
 
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
@@ -186,7 +190,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         // gameplay / screenshots without losing the ability to bring the
         // overlay back with a single press.
         case SDLK_F2:
-            debugUI.toggleAllPanels();
+            // Animation Tester is owned by Game (animUI_), not DebugUI, so
+            // pass its visibility flag in so F2 toggles every panel uniformly.
+            debugUI.toggleAllPanels({&animUI_.show});
             break;
 
         // Particle system test keys
@@ -355,7 +361,46 @@ SDL_AppResult Game::event(SDL_Event* event)
 ///       (true, default, server-consistent) vs. every iterate() call (false).
 ///       Mouse look is always per-frame regardless of this toggle.
 ///
-///   limitFPSToMonitor -- VSync on (true) / off (false, default).
+///   limitFPSToMonitor -- when ON and monitor >= physicsHz, uses VSync.
+///       When monitor < physicsHz (regardless of this toggle), a software
+///       frame limiter at physicsHz is always active to ensure rock-steady
+///       frame pacing — the monitor can't display above its refresh rate
+///       anyway, and uncapped rendering creates beat-frequency jitter.
+
+void Game::applyFrameRateLimit()
+{
+    // Query the monitor's native refresh rate.
+    int monitorHz = 60; // safe fallback
+    const SDL_DisplayID displayID = SDL_GetDisplayForWindow(window);
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayID);
+    if (mode && mode->refresh_rate > 0.0f)
+        monitorHz = static_cast<int>(std::ceil(mode->refresh_rate));
+
+    if (limitFPSToMonitor && monitorHz >= k_physicsHz) {
+        // Monitor is fast enough — VSync locks to monitor refresh without
+        // starving the physics loop.
+        renderer.setVSync(true);
+        softLimitPeriod = 0;
+    } else if (monitorHz < k_physicsHz) {
+        // Monitor refresh is below physics Hz.  Regardless of the limiter
+        // toggle, cap at physics Hz with mailbox presentation.  The monitor
+        // can only display monitorHz frames per second anyway, and running
+        // uncapped at extreme fps introduces frame-pacing variance that
+        // creates visible beat-frequency jitter between the display refresh
+        // and the physics tick rate.  The software limiter ensures rock-steady
+        // frame spacing so the frames selected by mailbox presentation have
+        // consistent interpolation coverage.
+        renderer.setVSync(false);
+        softLimitPeriod = SDL_GetPerformanceFrequency() / static_cast<Uint64>(k_physicsHz);
+        softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+        SDL_Log(
+            "[client] monitor %d Hz < physics %d Hz — software limiter at %d fps", monitorHz, k_physicsHz, k_physicsHz);
+    } else {
+        // Monitor >= physics Hz, limiter off — truly uncapped.
+        renderer.setVSync(false);
+        softLimitPeriod = 0;
+    }
+}
 
 SDL_AppResult Game::iterate()
 {
@@ -508,7 +553,7 @@ SDL_AppResult Game::iterate()
     dispatcher.update();
 
     // Update particle system (render-rate, not physics-rate)
-    // particleSystem.update(frameTime, renderer.getCamera(), registry);
+    particleSystem.update(frameTime, renderer.getCamera(), registry);
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -582,14 +627,37 @@ SDL_AppResult Game::iterate()
         cachedEye_ = renderEye;
     }
 
-    // Update skeletal animation (CPU skinning)
-    if (runAnimation.isLoaded() && animatedModelIdx >= 0) {
-        runAnimation.update(frameTime);
-        for (size_t m = 0; m < runAnimation.meshCount(); ++m) {
-            const auto& sv = runAnimation.getSkinnedVertices(m);
-            renderer.updateModelMeshVertices(
-                animatedModelIdx, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
-        }
+    // Update skeletal animation (CPU skinning) — per animated entity.
+    //
+    // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
+    // CPU-skins every rig mesh, and streams the resulting vertices into its
+    // per-entity renderer model instance.
+    {
+        std::vector<std::vector<ModelVertex>> skinnedBuffer;
+        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity,
+                                                                                          AnimatedCharacter& ac,
+                                                                                          const Velocity& vel,
+                                                                                          const PlayerState& ps,
+                                                                                          const InputSnapshot& inp) {
+            if (!ac.animator || ac.modelIndex < 0)
+                return;
+
+            AnimationInputs ai{};
+            ai.velocityWorld = vel.value;
+            ai.yawRad = inp.yaw;
+            ai.grounded = ps.grounded;
+            ai.sprinting = ps.sprinting;
+            ai.crouching = ps.crouching;
+            ai.moveMode = static_cast<int>(ps.moveMode);
+            ac.animator->update(ai, frameTime);
+
+            ac.animator->computeSkinnedVertices(skinnedBuffer);
+            for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
+                const auto& sv = skinnedBuffer[m];
+                renderer.updateModelMeshVertices(
+                    ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
+            }
+        });
     }
 
     // Build entity render list
@@ -599,7 +667,10 @@ SDL_AppResult Game::iterate()
             if (!rend.visible || rend.modelIndex < 0)
                 return;
             // Skip local player model in first-person (Option A from the plan).
-            if (registry.all_of<LocalPlayer>(e))
+            // The animator still runs so future gun-IK has an up-to-date pose;
+            // only rendering is suppressed — and optionally re-enabled via the
+            // "Show local body" debug toggle for third-person inspection.
+            if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
             glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
@@ -752,11 +823,13 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
-    debugUI.buildRenderTogglesUI(renderer.toggles);
+    buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 #ifdef USE_HYBRID_RENDERER
+    debugUI.buildRenderTogglesUI(renderer.legacy());
     debugUI.buildLightingUI(renderer.legacy());
     debugUI.buildSkyboxUI(renderer.legacy());
 #else
+    debugUI.buildRenderTogglesUI(renderer);
     debugUI.buildLightingUI(renderer);
     debugUI.buildSkyboxUI(renderer);
 #endif
@@ -774,7 +847,22 @@ SDL_AppResult Game::iterate()
     renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
 
     if (limitFPSToMonitor != prevLimitFPS)
-        renderer.setVSync(limitFPSToMonitor);
+        applyFrameRateLimit();
+
+    // Software frame limiter: sleep + spin-wait when targeting above monitor refresh.
+    if (softLimitPeriod != 0) {
+        const Uint64 perfFreq = SDL_GetPerformanceFrequency();
+        const Uint64 now = SDL_GetPerformanceCounter();
+        if (now < softLimitNextFrame) {
+            const Sint64 sleepMs = static_cast<Sint64>((softLimitNextFrame - now) * 1000 / perfFreq) - 1;
+            if (sleepMs > 0)
+                SDL_Delay(static_cast<Uint32>(sleepMs));
+            // Spin-wait for remaining sub-millisecond precision.
+            while (SDL_GetPerformanceCounter() < softLimitNextFrame) {
+            }
+        }
+        softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+    }
 
     return SDL_APP_CONTINUE;
 }
@@ -794,20 +882,48 @@ void Game::quit()
 
 void Game::refreshRemotePlayerRenderables()
 {
-    constexpr float kWraithScale = 34.5f;
-    constexpr float kWraithVerticalOffset = -35.45f;
-    const glm::quat importFix = glm::angleAxis(glm::radians(90.0f), glm::vec3{1, 0, 0});
-
+    // Remote players use the shared Mixamo rig — no more Wraith placeholder.
+    // Scale + Y offset are driven from the Animation Tester panel so the
+    // artist can tune them in-editor and commit the final values.
     registry.view<Position, PlayerState, InputSnapshot>().each(
         [&](entt::entity e, const Position&, const PlayerState&, const InputSnapshot& input) {
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
+            if (!registry.all_of<AnimatedCharacter>(e))
+                attachAnimatedCharacter(e);
+
+            const auto& ac = registry.get<AnimatedCharacter>(e);
+            if (ac.modelIndex < 0)
+                return; // rig unavailable — leave entity un-rendered rather than crash.
+
             auto& rend = registry.get_or_emplace<Renderable>(e);
-            rend.modelIndex = wraithModelIdx;
-            rend.translation = glm::vec3(0.0f, kWraithVerticalOffset, 0.0f);
-            rend.scale = glm::vec3(kWraithScale); // 72.0f / 2.088f
-            rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0}) * importFix;
+            rend.modelIndex = ac.modelIndex;
+            rend.translation = glm::vec3(0.0f, kRigVerticalOffset_, 0.0f);
+            rend.scale = glm::vec3(kRigScale_);
+            // No importFix quaternion here: rig is loaded with
+            // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
+            // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
+            // facing the wrong axis after a visual check.
+            rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
             rend.visible = true;
         });
+}
+
+void Game::attachAnimatedCharacter(entt::entity e)
+{
+    if (registry.all_of<AnimatedCharacter>(e))
+        return;
+
+    AnimatedCharacter ac;
+    ac.animator = std::make_unique<CharacterAnimator>(charRig_, animLibrary_);
+    ac.animator->setSkinningBackend(&skinBackend_);
+
+    // Each animated entity gets its OWN renderer model instance (clone of the
+    // rig template) so CPU-skinned vertices can stream into a private vertex
+    // buffer without fighting other entities for slots.
+    if (charRig_.isLoaded())
+        ac.modelIndex = renderer.uploadSceneModel(charRig_.templateLoadedModel());
+
+    registry.emplace<AnimatedCharacter>(e, std::move(ac));
 }
