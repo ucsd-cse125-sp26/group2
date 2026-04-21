@@ -97,7 +97,7 @@ const glm::vec3 normals[CUBE_VERTEX_COUNT] = {
 static Vertex cubeVertexData[CUBE_VERTEX_COUNT];
 
 // Specify indices
-const Uint32 indices[36] = {
+static Uint32 indices[36] = {
     0,  1,  2,  0,  2,  3,  // Front
     4,  5,  6,  4,  6,  7,  // Back
     8,  9,  10, 8,  10, 11, // Top
@@ -379,45 +379,27 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
         cubeVertexData[i] = vi;
     }
 
+
     Uint32 numVertices = sizeof(cubeVertexData) / sizeof(Vertex);
     Uint32 numIndices = sizeof(indices) / sizeof(Uint32);
 
     vBufferInfo_.bufferSize = numVertices * sizeof(Vertex);
     vBufferInfo_.gpuBuff = createGPUBuffer(vBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
-    vBufferInfo_.srcData = nullptr;
+    vBufferInfo_.srcData = cubeVertexData;
 
     iBufferInfo_.bufferSize = numIndices * sizeof(Uint32);
     iBufferInfo_.gpuBuff = createGPUBuffer(iBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
-    iBufferInfo_.srcData = nullptr;
+    iBufferInfo_.srcData = indices;
 
-    size_t vaoTransferBufferSize = vBufferInfo_.bufferSize + iBufferInfo_.bufferSize;
-    SDL_GPUTransferBuffer* vaoTransferBuffer = createTransferBuffer(vaoTransferBufferSize, true);
-
-    auto* vaoTransferData = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(device_, vaoTransferBuffer, false));
-    auto* vertexTransferBufferData = (vaoTransferData);
-    auto* indexTransferBufferData = (vaoTransferData + vBufferInfo_.bufferSize);
-
-    SDL_memcpy(vertexTransferBufferData, cubeVertexData, vBufferInfo_.bufferSize);
-    SDL_memcpy(indexTransferBufferData, indices, iBufferInfo_.bufferSize);
-
-    SDL_UnmapGPUTransferBuffer(device_, vaoTransferBuffer);
 
     SDL_GPUCommandBuffer* cmdCopyBuff = SDL_AcquireGPUCommandBuffer(device_);
-    SDL_GPUCopyPass* vaoCopyPass = SDL_BeginGPUCopyPass(cmdCopyBuff);
+    //SDL_GPUCopyPass* vaoCopyPass = SDL_BeginGPUCopyPass(cmdCopyBuff);
 
-    SDL_GPUTransferBufferLocation vertexTransferBufferLocation = {.transfer_buffer = vaoTransferBuffer, .offset = 0};
-    SDL_GPUBufferRegion vertexBufferRegion = {
-        .buffer = vBufferInfo_.gpuBuff, .offset = 0, .size = vBufferInfo_.bufferSize};
-    SDL_UploadToGPUBuffer(vaoCopyPass, &vertexTransferBufferLocation, &vertexBufferRegion, false);
+    std::vector<ModelBufferInfo> geoBuffers;
+    geoBuffers.push_back(vBufferInfo_);
+    geoBuffers.push_back(iBufferInfo_);
+    uploadDataToGPUBuffer(cmdCopyBuff,geoBuffers);
 
-    SDL_GPUTransferBufferLocation indexTransferBufferLocation = {.transfer_buffer = vaoTransferBuffer,
-                                                                 .offset = vBufferInfo_.bufferSize};
-    SDL_GPUBufferRegion indexBufferRegion = {
-        .buffer = iBufferInfo_.gpuBuff, .offset = 0, .size = iBufferInfo_.bufferSize};
-    SDL_UploadToGPUBuffer(vaoCopyPass, &indexTransferBufferLocation, &indexBufferRegion, false);
-
-    SDL_EndGPUCopyPass(vaoCopyPass);
-    SDL_ReleaseGPUTransferBuffer(device_, vaoTransferBuffer);
     SDL_SubmitGPUCommandBuffer(cmdCopyBuff);
 
     return true;
@@ -511,7 +493,7 @@ void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
     Uint32 vaoTransferBufferOffset = 0;
     for (const auto k_bufferInfo : modelBuffersInfo) {
         auto* transferBufferData = (vaoTransferData + vaoTransferBufferOffset);
-        SDL_memcpy(transferBufferData, cubeVertexData, k_bufferInfo.bufferSize);
+        SDL_memcpy(transferBufferData, k_bufferInfo.srcData, k_bufferInfo.bufferSize);
         vaoTransferBufferOffset += k_bufferInfo.bufferSize;
     }
 
@@ -524,10 +506,12 @@ void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
     vaoTransferBufferOffset = 0;
     for (const auto k_bufferInfo : modelBuffersInfo) {
         SDL_GPUBufferRegion bufferRegion = {
-            .buffer = k_bufferInfo.gpuBuff, .offset = vaoTransferBufferOffset, .size = k_bufferInfo.bufferSize};
+            .buffer = k_bufferInfo.gpuBuff, .offset = 0, .size = k_bufferInfo.bufferSize};
         SDL_UploadToGPUBuffer(vaoCopyPass, &vaoTransferBufferLocation, &bufferRegion, false);
 
-        vaoTransferBufferOffset += k_bufferInfo.bufferSize;
+
+        vaoTransferBufferLocation.offset += k_bufferInfo.bufferSize;
+        //vaoTransferBufferOffset += k_bufferInfo.bufferSize;
     }
 
     SDL_EndGPUCopyPass(vaoCopyPass);
