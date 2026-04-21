@@ -103,11 +103,11 @@ private:
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;       ///< Weapon model scale (model is in mm).
     float vmForward = 21.0f;     ///< Forward offset from eye (Quake units).
-    float vmRight = 13.5f;       ///< Right offset from eye.
-    float vmDown = 23.0f;        ///< Downward offset from eye.
-    float vmYawOffset = -58.0f;  ///< Extra yaw (degrees) applied to the model before camera orient.
-    float vmPitchOffset = 10.0f; ///< Extra pitch (degrees).
-    float vmRollOffset = -2.0f;  ///< Extra roll (degrees).
+    float vmRight = 5.5f;        ///< Right offset from eye.
+    float vmDown = 22.5f;        ///< Downward offset from eye.
+    float vmYawOffset = 58.0f;   ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 12.0f; ///< Extra pitch (degrees).
+    float vmRollOffset = 2.0f;   ///< Extra roll (degrees).
     bool showViewmodelUI = true; ///< Show the Viewmodel Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.

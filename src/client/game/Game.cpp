@@ -92,7 +92,7 @@ bool Game::init()
     if (wraithModelIdx < 0)
         SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
 
-    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f);
+    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f, true);
     if (weaponModelIdx < 0)
         SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
 
@@ -772,7 +772,10 @@ SDL_AppResult Game::iterate()
             glm::mat4 weaponWorld = glm::translate(glm::mat4(1.0f), weaponPos);
             weaponWorld *= cameraOrient;
             weaponWorld *= localRot;
-            weaponWorld = glm::scale(weaponWorld, glm::vec3(vmScale));
+            // Negate X to cancel the reflection in the camera orient matrix
+            // (right, up, forward has det = −1).  This restores correct face
+            // normals so lighting works on all faces, fixing the see-through look.
+            weaponWorld = glm::scale(weaponWorld, glm::vec3(-vmScale, vmScale, vmScale));
 
             vm.transform = weaponWorld;
         }
@@ -898,11 +901,11 @@ SDL_AppResult Game::iterate()
             if (ImGui::Button("Reset defaults")) {
                 vmScale = 0.03f;
                 vmForward = 21.0f;
-                vmRight = 13.5f;
-                vmDown = 23.0f;
-                vmYawOffset = -58.0f;
-                vmPitchOffset = 10.0f;
-                vmRollOffset = -2.0f;
+                vmRight = 5.5f;
+                vmDown = 22.5f;
+                vmYawOffset = 58.0f;
+                vmPitchOffset = 12.0f;
+                vmRollOffset = 2.0f;
             }
         }
         ImGui::End();
