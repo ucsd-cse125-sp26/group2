@@ -25,8 +25,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
     static constexpr std::array<WeaponConfig, 4> k_kWeaponConfigs{{
         WeaponConfig{
             .fireCooldown = 0.10f,
-            .magazineSize = 30,
-            .defaultAmmoCapacity = 150,
+            .magazineSize = 50,
+            .defaultAmmoCapacity = 500,
             .damage = 15.0f,
             .hitscan = true,
         }, // Rifle
