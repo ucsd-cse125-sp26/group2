@@ -578,7 +578,9 @@ add_executable(group2
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/ViewmodelConfig.hpp
         src/ecs/systems/WeaponSystem.cpp
+        src/network/ShotEvent.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -792,8 +794,10 @@ add_executable(client
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
+        src/network/ShotEvent.hpp
 )
 
 target_include_directories(client PRIVATE
@@ -931,8 +935,10 @@ add_executable(server
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
+        src/network/ShotEvent.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

@@ -6,6 +6,7 @@
 #include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MessageStream.hpp"
+#include "network/ShotEvent.hpp"
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL_stdinc.h>
@@ -47,6 +48,9 @@ public:
 
     /// @brief Broadcast the full registry state to all clients.
     void broadcastRegistry(const Registry& registry);
+
+    /// @brief Broadcast particle events to all clients for effect replication.
+    void broadcastParticleEvents(const std::vector<NetParticleEvent>& events);
 
 private:
     /// @brief Per-client connection state.

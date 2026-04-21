@@ -16,6 +16,7 @@
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
+#include "network/ShotEvent.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -113,12 +114,14 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         }
     }
 
-    systems::runWeapon(registry, dt);
+    std::vector<NetParticleEvent> particleEvents;
+    systems::runWeapon(registry, dt, particleEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
 
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
+    server.broadcastParticleEvents(particleEvents);
 
     ++tickCount;
 

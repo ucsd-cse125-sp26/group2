@@ -1,6 +1,8 @@
 /// @file WeaponSystem.cpp
 /// @brief Weapon state manager system.
 
+#include "ecs/systems/WeaponSystem.hpp"
+
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -237,7 +239,8 @@ inline void handleFire(Registry& registry,
                        const InputSnapshot& input,
                        const Position& pos,
                        const CollisionShape& shape,
-                       WeaponState& weapon)
+                       WeaponState& weapon,
+                       std::vector<NetParticleEvent>& outParticles)
 {
     if (!input.shooting) {
         return;
@@ -265,7 +268,7 @@ inline void handleFire(Registry& registry,
     const glm::vec3 direction = viewForward(input.yaw, input.pitch);
     const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
 
-    // TODO: apply damage to hit.entity and emit a replicated shot event for client FX.
+    // Apply damage
     if (hit.entity != entt::null && registry.valid(hit.entity)) {
         Health& playerHealth = registry.get_or_emplace<Health>(hit.entity);
         if (playerHealth.armor >= config.damage) {
@@ -275,17 +278,40 @@ inline void handleFire(Registry& registry,
             playerHealth.health -= overflow;
         }
     }
-    // SDL_Log("[server] Shot fired by (%d)", shooter);
-    // registry.view<InputSnapshot, WeaponState>().each(
-    //     [&](entt::entity shooter,
-    //         InputSnapshot& input,
-    //         WeaponState& weapon) {
-    //             SDL_Log("[server] Entity (%d) has (%d) ammo in their primary", shooter,
-    //             weapon.primary.currentMagAmmo);
-    //     });
+
+    // Emit replicated particle events for client FX.
+    // 1) Tracer or beam from muzzle to hit point.
+    {
+        NetParticleEvent tracerEvt;
+        tracerEvt.source = shooter;
+        tracerEvt.weaponType = gun.type;
+        if (gun.type == WeaponType::RailGun || gun.type == WeaponType::EnergyGun) {
+            tracerEvt.effectType = ParticleEffectType::HitscanBeam;
+            tracerEvt.pos1 = eye;
+            tracerEvt.pos2 = hit.point;
+        } else {
+            tracerEvt.effectType = ParticleEffectType::BulletTracer;
+            tracerEvt.pos1 = eye;
+            // Compute direction from origin→hitPoint (convention-independent)
+            tracerEvt.pos2 = glm::normalize(hit.point - eye);
+            tracerEvt.param = hit.distance;
+        }
+        outParticles.push_back(tracerEvt);
+    }
+    // 2) Impact effect at hit location.
+    {
+        NetParticleEvent impactEvt;
+        impactEvt.source = shooter;
+        impactEvt.effectType = ParticleEffectType::Impact;
+        impactEvt.weaponType = gun.type;
+        impactEvt.surfaceType = hit.surface;
+        impactEvt.pos1 = hit.point;
+        impactEvt.pos2 = hit.normal;
+        outParticles.push_back(impactEvt);
+    }
 }
 
-void runWeapon(Registry& registry, float dt)
+void runWeapon(Registry& registry, float dt, std::vector<NetParticleEvent>& outParticles)
 {
     registry.view<InputSnapshot, Position, CollisionShape, WeaponState>().each([&](entt::entity shooter,
                                                                                    InputSnapshot& input,
@@ -294,7 +320,7 @@ void runWeapon(Registry& registry, float dt)
                                                                                    WeaponState& weapon) {
         handleSwitch(input, weapon);
         handleCooldown(weapon, dt);
-        handleFire(registry, shooter, input, pos, shape, weapon);
+        handleFire(registry, shooter, input, pos, shape, weapon, outParticles);
         if (input.reload) {
             GunInstance& gun = getEquippedGun(weapon);
             handleReload(gun);
