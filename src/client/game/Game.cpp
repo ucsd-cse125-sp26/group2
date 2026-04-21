@@ -818,7 +818,7 @@ SDL_AppResult Game::iterate()
             // Build transform: translate -> yaw -> pitch -> roll -> scale
             glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);
             wpnWorld *= glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
-            float clampedPitch = std::clamp(-input.pitch, glm::radians(-30.0f), glm::radians(30.0f));
+            float clampedPitch = std::clamp(input.pitch, glm::radians(-30.0f), glm::radians(30.0f));
             wpnWorld *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
             wpnWorld *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
             wpnWorld = glm::scale(wpnWorld, glm::vec3(tp.scale));

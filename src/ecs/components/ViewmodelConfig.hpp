@@ -69,14 +69,14 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
          .yawOffset = -9.0f,
          .pitchOffset = 93.0f,
          .rollOffset = -8.0f},
-        // EnergyGun (Wingman) — pistol, closer & smaller
-        {.scale = 0.035f,
-         .forward = 18.0f,
-         .right = 7.0f,
-         .down = 20.0f,
-         .yawOffset = 58.0f,
-         .pitchOffset = 14.0f,
-         .rollOffset = 2.5f},
+        // EnergyGun (Wingman)
+        {.scale = 1.5f,
+         .forward = 23.5f,
+         .right = 11.5f,
+         .down = 12.0f,
+         .yawOffset = 2.0f,
+         .pitchOffset = 90.0f,
+         .rollOffset = 4.5f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -100,12 +100,8 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .rollOffset = 0.0f},
         // RailGun (Triple Take)
         {.scale = 1.0f, .handOffset = {7.5f, 7.5f, 15.0f}, .yawOffset = 0.0f, .pitchOffset = 96.0f, .rollOffset = 2.0f},
-        // EnergyGun (Wingman) — pistol, smaller
-        {.scale = 0.9f,
-         .handOffset = {14.0f, 13.0f, 6.0f},
-         .yawOffset = 58.0f,
-         .pitchOffset = 0.0f,
-         .rollOffset = 0.0f},
+        // EnergyGun (Wingman)
+        {.scale = 1.0f, .handOffset = {7.5f, 7.0f, 6.0f}, .yawOffset = 6.0f, .pitchOffset = 94.0f, .rollOffset = 0.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
