@@ -86,7 +86,8 @@ inline void runWeaponKeys(Registry& registry)
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
 
     registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
-        snap.shooting = (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
+        snap.shooting =
+            (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
         snap.reload = kKeys[SDL_SCANCODE_R];

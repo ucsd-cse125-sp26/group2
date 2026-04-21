@@ -4,13 +4,13 @@
 #include "debug/DebugUI.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
-#include "ecs/components/Health.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
@@ -1148,10 +1148,18 @@ void DebugUI::buildWeaponUI(const Registry& registry)
 
     const char* currentGunName = "?";
     switch (gun.type) {
-    case WeaponType::Rifle: currentGunName = "Rifle"; break;
-    case WeaponType::Rocket: currentGunName = "Rocket"; break;
-    case WeaponType::RailGun: currentGunName = "RailGun"; break;
-    case WeaponType::EnergyGun: currentGunName = "EnergyGun"; break;
+    case WeaponType::Rifle:
+        currentGunName = "Rifle";
+        break;
+    case WeaponType::Rocket:
+        currentGunName = "Rocket";
+        break;
+    case WeaponType::RailGun:
+        currentGunName = "RailGun";
+        break;
+    case WeaponType::EnergyGun:
+        currentGunName = "EnergyGun";
+        break;
     }
 
     ImGui::SeparatorText("Weapon");
@@ -1161,12 +1169,8 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     ImGui::SeparatorText("Vitals");
     if (registry.all_of<Health>(localPlayer)) {
         const Health& health = registry.get<Health>(localPlayer);
-        ImGui::Text("Armor:   %.0f / %.0f",
-                    static_cast<double>(health.armor),
-                    static_cast<double>(health.armorMax));
-        ImGui::Text("Health:  %.0f / %.0f",
-                    static_cast<double>(health.health),
-                    static_cast<double>(health.healthMax));
+        ImGui::Text("Armor:   %.0f / %.0f", static_cast<double>(health.armor), static_cast<double>(health.armorMax));
+        ImGui::Text("Health:  %.0f / %.0f", static_cast<double>(health.health), static_cast<double>(health.healthMax));
     } else {
         ImGui::TextDisabled("Health state unavailable");
     }

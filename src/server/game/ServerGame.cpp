@@ -150,22 +150,24 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    registry.emplace<WeaponState>(player, WeaponState{
-        .primary = GunInstance{
-            .type = WeaponType::Rifle,
-            .totalAmmo = rifleConfig.defaultAmmoCapacity,
-            .currentMagAmmo = rifleConfig.magazineSize,
-            .fireCooldown = 0.0f,
-        },
-        .secondary = GunInstance{
-            .type = WeaponType::RailGun,
-            .totalAmmo = railConfig.defaultAmmoCapacity,
-            .currentMagAmmo = railConfig.magazineSize,
-            .fireCooldown = 0.0f,
-        },
-        .current = WeaponSlot::PRIMARY,
-    });
-
+    registry.emplace<WeaponState>(player,
+                                  WeaponState{
+                                      .primary =
+                                          GunInstance{
+                                              .type = WeaponType::Rifle,
+                                              .totalAmmo = rifleConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = rifleConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .secondary =
+                                          GunInstance{
+                                              .type = WeaponType::RailGun,
+                                              .totalAmmo = railConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = railConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .current = WeaponSlot::PRIMARY,
+                                  });
 
     SDL_Log("[server] spawned player entity for client %d", clientId.value);
 }
