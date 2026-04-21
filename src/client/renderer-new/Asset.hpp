@@ -18,6 +18,13 @@ using TexIdInt = uint32_t;
 namespace Asset
 {
 
+struct GeoBufferInfo
+{
+    void* srcData;
+    SDL_GPUBuffer* gpuBuff;
+    Uint32 bufferSize;
+};
+
 struct Vertex
 {
     glm::vec3 position;
@@ -29,6 +36,8 @@ struct Mesh
 {
     std::vector<Vertex> vertexData_;
     std::vector<uint32_t> indexData_;
+    GeoBufferInfo vBufferInfo_;
+    GeoBufferInfo iBufferInfo_;
 };
 
 struct Model
@@ -36,6 +45,7 @@ struct Model
     MeshIdInt meshId_;
     TexIdInt texId_[TEX_CHANNELS];
 };
+
 
 inline std::unordered_map<MeshIdInt,Mesh> meshes_;
 inline std::unordered_map<MeshIdInt,Model> models_;

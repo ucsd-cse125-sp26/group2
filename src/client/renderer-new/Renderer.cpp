@@ -1,5 +1,7 @@
 #include "Renderer.hpp"
 
+#include "Asset.hpp"
+#include "AssetLoader.hpp"
 #include "Camera.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
@@ -378,31 +380,66 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
         vi.texUV = k_uvNot;
         cubeVertexData[i] = vi;
     }
+    std::cout << "loading models" << std::endl;
+    AssetLoader::loadModelsList();
+    std::cout << "loaded models" << std::endl;
 
+    std::vector<Asset::GeoBufferInfo> geoBuffers;
+    // geoBuffers.push_back(vBufferInfo_);
+    // geoBuffers.push_back(iBufferInfo_);
+    // Uint32 numVertices = sizeof(cubeVertexData) / sizeof(Vertex);
+    // Uint32 numIndices = sizeof(indices) / sizeof(Uint32);
+    //
+    // vBufferInfo_.bufferSize = numVertices * sizeof(Vertex);
+    // vBufferInfo_.gpuBuff = createGPUBuffer(vBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
+    // vBufferInfo_.srcData = cubeVertexData;
+    //
+    // iBufferInfo_.bufferSize = numIndices * sizeof(Uint32);
+    // iBufferInfo_.gpuBuff = createGPUBuffer(iBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
+    // iBufferInfo_.srcData = indices;
 
-    Uint32 numVertices = sizeof(cubeVertexData) / sizeof(Vertex);
-    Uint32 numIndices = sizeof(indices) / sizeof(Uint32);
+    for (auto modelPair : Asset::models_) {
+        MeshIdInt meshId =  modelPair.second.meshId_;
+        Asset::Mesh &mesh = Asset::meshes_[meshId];
 
-    vBufferInfo_.bufferSize = numVertices * sizeof(Vertex);
-    vBufferInfo_.gpuBuff = createGPUBuffer(vBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
-    vBufferInfo_.srcData = cubeVertexData;
+        std::cout << "meshId:" << meshId << std::endl;
 
-    iBufferInfo_.bufferSize = numIndices * sizeof(Uint32);
-    iBufferInfo_.gpuBuff = createGPUBuffer(iBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
-    iBufferInfo_.srcData = indices;
-
+        genMeshBuffers(meshId);
+        geoBuffers.push_back(mesh.vBufferInfo_);
+        geoBuffers.push_back(mesh.iBufferInfo_);
+    }
+    std::cout << "0" << std::endl;
 
     SDL_GPUCommandBuffer* cmdCopyBuff = SDL_AcquireGPUCommandBuffer(device_);
     //SDL_GPUCopyPass* vaoCopyPass = SDL_BeginGPUCopyPass(cmdCopyBuff);
+    std::cout << "1" << std::endl;
 
-    std::vector<ModelBufferInfo> geoBuffers;
-    geoBuffers.push_back(vBufferInfo_);
-    geoBuffers.push_back(iBufferInfo_);
     uploadDataToGPUBuffer(cmdCopyBuff,geoBuffers);
+    std::cout << "2" << std::endl;
 
     SDL_SubmitGPUCommandBuffer(cmdCopyBuff);
+    std::cout << "3" << std::endl;
 
     return true;
+}
+
+void NewRenderer::genMeshBuffers(const MeshIdInt meshId)
+{
+    std::cout << "genMeshBuffers" << std::endl;
+    Asset::Mesh &mesh = Asset::meshes_.at(meshId);
+
+    std::cout << "getting sizes" << std::endl;
+    Uint32 numVertices = mesh.vertexData_.size();
+    Uint32 numIndices = mesh.indexData_.size();
+
+    std::cout << "setting buffer Info" << std::endl;
+    mesh.vBufferInfo_.bufferSize = numVertices * sizeof(Vertex);
+    mesh.vBufferInfo_.gpuBuff = createGPUBuffer(mesh.vBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
+    mesh.vBufferInfo_.srcData = mesh.vertexData_.data();
+
+    mesh.iBufferInfo_.bufferSize = numIndices * sizeof(Uint32);
+    mesh.iBufferInfo_.gpuBuff = createGPUBuffer(mesh.iBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
+    mesh.iBufferInfo_.srcData = mesh.indexData_.data();
 }
 
 void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, float /*roll*/)
@@ -434,8 +471,9 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     camera_.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
     Matrices mats{};
-    mats.model = glm::mat4(1.0f);
-    mats.model[3] = glm::vec4(0.0f, 50.0f, 0.0f, 1.0f);
+    float scale = 10.0f;
+    mats.model = glm::mat4(scale);
+    mats.model[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
     mats.view = camera_.getView();
     mats.projection = camera_.getProjection();
 
@@ -464,14 +502,24 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
     SDL_BindGPUGraphicsPipeline(pass, pipeline_);
 
-    std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
-    vertexBufferBindings.push_back(SDL_GPUBufferBinding{.buffer = vBufferInfo_.gpuBuff, .offset = 0});
-    SDL_BindGPUVertexBuffers(pass, 0, vertexBufferBindings.data(), static_cast<Uint32>(vertexBufferBindings.size()));
 
-    SDL_GPUBufferBinding indexBufferBinding = {.buffer = iBufferInfo_.gpuBuff, .offset = 0};
-    SDL_BindGPUIndexBuffer(pass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+    SDL_GPUIndexElementSize iElementSizeSdlType = SDL_GPU_INDEXELEMENTSIZE_32BIT;
 
-    SDL_DrawGPUIndexedPrimitives(pass, 36, 1, 0, 0, 0);
+    for (auto model: Asset::models_) {
+        Asset::Mesh mesh = Asset::meshes_.at(model.second.meshId_);
+        drawMesh(pass,iElementSizeSdlType,mesh);
+    }
+    //////////////////////////////////////////////////////////////////////////////////
+    // std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
+    // vertexBufferBindings.push_back(SDL_GPUBufferBinding{.buffer = vBufferInfo_.gpuBuff, .offset = 0});
+    // SDL_BindGPUVertexBuffers(pass, 0, vertexBufferBindings.data(), static_cast<Uint32>(vertexBufferBindings.size()));
+    //
+    // SDL_GPUBufferBinding indexBufferBinding = {.buffer = iBufferInfo_.gpuBuff, .offset = 0};
+    // SDL_BindGPUIndexBuffer(pass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+    //
+    // SDL_DrawGPUIndexedPrimitives(pass, 36, 1, 0, 0, 0);
+
+    //////////////////////////////////////////////////////////////////////////////////
 
     if (k_drawData)
         ImGui_ImplSDLGPU3_RenderDrawData(k_drawData, cmd, pass);
@@ -480,9 +528,29 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
-void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
-                                        const std::vector<ModelBufferInfo>& modelBuffersInfo) const
+void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass,SDL_GPUIndexElementSize iElementSizeSdlType,Asset::Mesh m)
 {
+    std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
+    vertexBufferBindings.push_back(SDL_GPUBufferBinding{.buffer = m.vBufferInfo_.gpuBuff, .offset = 0});
+    SDL_BindGPUVertexBuffers(renderPass, 0, vertexBufferBindings.data(), static_cast<Uint32>(vertexBufferBindings.size()));
+
+    SDL_GPUBufferBinding indexBufferBinding = {.buffer = m.iBufferInfo_.gpuBuff, .offset = 0};
+    SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, iElementSizeSdlType);
+
+    size_t iElementSizeInt;
+    switch (iElementSizeSdlType){
+        case SDL_GPU_INDEXELEMENTSIZE_32BIT: iElementSizeInt = 4; break;
+        case SDL_GPU_INDEXELEMENTSIZE_16BIT: iElementSizeInt = 2; break;
+        default: iElementSizeInt = 4; break;
+    }
+
+    SDL_DrawGPUIndexedPrimitives(renderPass, m.iBufferInfo_.bufferSize/iElementSizeInt, 1, 0, 0, 0);
+}
+
+void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
+                                        const std::vector<Asset::GeoBufferInfo>& modelBuffersInfo) const
+{
+
     size_t vaoTransferBufferSize = 0;
     for (const auto k_bufferInfo : modelBuffersInfo) {
         vaoTransferBufferSize += k_bufferInfo.bufferSize;
@@ -491,8 +559,10 @@ void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
     auto* vaoTransferData = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(device_, vaoTransferBuffer, false));
 
     Uint32 vaoTransferBufferOffset = 0;
+
     for (const auto k_bufferInfo : modelBuffersInfo) {
         auto* transferBufferData = (vaoTransferData + vaoTransferBufferOffset);
+        std::cout << "SDL_memcpy " << std::endl;
         SDL_memcpy(transferBufferData, k_bufferInfo.srcData, k_bufferInfo.bufferSize);
         vaoTransferBufferOffset += k_bufferInfo.bufferSize;
     }

@@ -17,9 +17,11 @@
 class AssetLoader {
     public:
         static bool loadModel(const ModelIdInt id,const std::string& modelFileName,const std::vector<std::string>& texFileNames);
+        static bool loadModelsList();
     private:
         static bool loadMesh(MeshIdInt id ,const aiMesh &asimpMeshResult);
-        static const aiScene *loadAsset(const std::string& fileName);
+        static const aiScene *loadAsset(Assimp::Importer& importer, const std::string& fileName);
+
 };
 
 

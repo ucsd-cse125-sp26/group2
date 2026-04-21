@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Asset.hpp"
 #include "Camera.hpp"
 #include "renderer/Camera.hpp" // legacy Camera type required by IRenderer contract
 #include "renderer/IRenderer.hpp"
@@ -23,12 +24,6 @@ struct Vertex
     glm::vec2 texUV;
 };
 
-struct ModelBufferInfo
-{
-    void* srcData;
-    SDL_GPUBuffer* gpuBuff;
-    Uint32 bufferSize;
-};
 
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
 ///
@@ -113,8 +108,8 @@ private:
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
 
-    ModelBufferInfo vBufferInfo_;
-    ModelBufferInfo iBufferInfo_;
+    Asset::GeoBufferInfo vBufferInfo_;
+    Asset::GeoBufferInfo iBufferInfo_;
 
     Camera legacyCameraStub_{}; ///< Default-constructed legacy camera used to satisfy getCamera().
 
@@ -122,7 +117,9 @@ private:
 
     [[nodiscard]] SDL_GPUTransferBuffer* createTransferBuffer(size_t transferBufferSize, bool upload) const;
     [[nodiscard]] SDL_GPUBuffer* createGPUBuffer(size_t bufferSize, SDL_GPUBufferUsageFlags usage) const;
-    void uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd, const std::vector<ModelBufferInfo>& modelBuffersInfo) const;
+    void uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd, const std::vector<Asset::GeoBufferInfo>& modelBuffersInfo) const;
+    void drawMesh(SDL_GPURenderPass* renderPass,SDL_GPUIndexElementSize iElementSizeSdlType,Asset::Mesh m);
 
     bool initCommon(SDL_Window* window);
+    void genMeshBuffers(MeshIdInt meshId);
 };

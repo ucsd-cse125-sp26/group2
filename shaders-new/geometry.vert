@@ -5,7 +5,7 @@ layout(location = 0) in vec3 modelSpacePosition;
 layout(location = 1) in vec3 vertNormal;
 layout(location = 2) in vec2 uv;
 
-layout(location = 0) out vec3 diffuse;
+layout(location = 0) flat out vec3 diffuse;
 layout(location = 1) flat out vec3 fragNormal;
 
 layout(set = 1, binding = 0) uniform Matrices
@@ -122,5 +122,5 @@ void main()
     mat4 mvp = ubo.projection * ubo.view * ubo.model;
     gl_Position = mvp * pIn;
     diffuse = vertNormal * 0.5f + 0.5f;
-    fragNormal = vec3(ubo.model * nIn);
+    fragNormal = normalize(vec3(ubo.model * nIn));
 }
