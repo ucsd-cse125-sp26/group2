@@ -714,8 +714,12 @@ SDL_AppResult Game::iterate()
     }
 
     // Build weapon viewmodel
-    // R-301 model bounds: X ±0.6, Y −3.4..+1.3, Z −8.4..+7.2
-    // Model's +Z axis is the barrel direction.  Origin is near the grip.
+    // R-301 model actual bounds (from Sketchfab GLB, likely in millimetres):
+    //   X: −722 to +613  (1336 mm, ~53 in — side-to-side / stock-to-muzzle)
+    //   Y:  183 to  772  ( 588 mm, ~23 in — bottom-to-top, entirely above origin)
+    //   Z: −476 to +392  ( 868 mm, ~34 in)
+    // Model centre ≈ (−55, 478, −42) in model space.
+    // Model's +Z axis is the barrel direction.  Origin is well below the model.
     {
         WeaponViewmodel vm;
         if (weaponModelIdx >= 0) {
@@ -743,11 +747,14 @@ SDL_AppResult Game::iterate()
             const float bobY = std::sin(bobPhase * 2.0f) * bobAmplitude * 0.5f;
 
             // FPS weapon position: lower-right of screen, slightly forward.
-            // R-301 model bounds: Z ≈ 15.6 units (barrel axis).
-            // At scale 2.2 the weapon is ~34 units long (≈ 34 inches, matching
-            // the real R-301).  Player standing height is 72 Quake-units.
-            constexpr float k_weaponScale = 2.2f;
-            glm::vec3 weaponPos = renderEye + forward * 15.f + right * 10.f - up * 10.f;
+            // The model is in millimetres (~1336 mm longest axis).  Scale
+            // 0.03 brings the barrel (Z, 868 mm) down to ~26 Quake-units
+            // (≈ 26 inches), a good FPS-viewmodel size.  The model centre
+            // is at Y ≈ 478 mm, so at scale 0.03 it sits ~14 units above
+            // the anchor — we push `up` down by 25 to compensate and land
+            // the weapon in the lower-right of the screen.
+            constexpr float k_weaponScale = 0.03f;
+            glm::vec3 weaponPos = renderEye + forward * 20.f + right * 10.f - up * 25.f;
             weaponPos += right * bobX + up * bobY;
 
             // Build world transform: translate → rotate → scale.

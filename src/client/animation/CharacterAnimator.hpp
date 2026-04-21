@@ -20,6 +20,7 @@ struct AnimationInputs
 {
     glm::vec3 velocityWorld{0.0f}; ///< World-space velocity (u/s).
     float yawRad = 0.0f;           ///< Player yaw (radians).
+    float pitchRad = 0.0f;         ///< Player pitch (radians, positive = looking down).
     bool grounded = false;         ///< Touching the ground this tick.
     bool sprinting = false;        ///< Sprint key currently held.
     bool crouching = false;        ///< Crouch currently held (phase 1: note-only).
