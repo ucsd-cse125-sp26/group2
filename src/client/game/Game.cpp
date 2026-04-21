@@ -675,6 +675,7 @@ SDL_AppResult Game::iterate()
             AnimationInputs ai{};
             ai.velocityWorld = vel.value;
             ai.yawRad = inp.yaw;
+            ai.pitchRad = inp.pitch;
             ai.grounded = ps.grounded;
             ai.sprinting = ps.sprinting;
             ai.crouching = ps.crouching;

@@ -1788,6 +1788,8 @@ bool Renderer::ensureDepthTexture(const Uint32 w, const Uint32 h)
 
     if (depthTexture)
         SDL_ReleaseGPUTexture(device, depthTexture);
+    if (weaponDepthTexture)
+        SDL_ReleaseGPUTexture(device, weaponDepthTexture);
 
     SDL_GPUTextureCreateInfo info{};
     info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -1800,9 +1802,15 @@ bool Renderer::ensureDepthTexture(const Uint32 w, const Uint32 h)
     info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
     depthTexture = SDL_CreateGPUTexture(device, &info);
+
+    // Weapon-only depth buffer — the weapon pass clears & draws into this
+    // so the scene depthTexture (read by SSAO/SSR) is never clobbered.
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET; // no sampler needed
+    weaponDepthTexture = SDL_CreateGPUTexture(device, &info);
+
     depthWidth = w;
     depthHeight = h;
-    return depthTexture != nullptr;
+    return depthTexture != nullptr && weaponDepthTexture != nullptr;
 }
 
 bool Renderer::ensureHDRTarget(const Uint32 w, const Uint32 h)
@@ -2648,10 +2656,10 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         weapCt.store_op = SDL_GPU_STOREOP_STORE;
 
         SDL_GPUDepthStencilTargetInfo weapDt{};
-        weapDt.texture = depthTexture;
+        weapDt.texture = weaponDepthTexture;         // separate buffer — scene depth untouched
         weapDt.clear_depth = 1.0f;                   // fresh depth — weapon can't lose
         weapDt.load_op = SDL_GPU_LOADOP_CLEAR;
-        weapDt.store_op = SDL_GPU_STOREOP_DONT_CARE; // don't clobber scene depth for SSAO/SSR
+        weapDt.store_op = SDL_GPU_STOREOP_DONT_CARE; // nobody reads this
         weapDt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
         weapDt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 
@@ -3399,6 +3407,8 @@ void Renderer::quit()
         SDL_ReleaseGPUTexture(device, hdrTarget);
     if (depthTexture)
         SDL_ReleaseGPUTexture(device, depthTexture);
+    if (weaponDepthTexture)
+        SDL_ReleaseGPUTexture(device, weaponDepthTexture);
     if (shadowMap)
         SDL_ReleaseGPUTexture(device, shadowMap);
 
