@@ -1081,8 +1081,8 @@ void DebugUI::buildWeaponUI(const Registry& registry)
         }
     }
 
-    ImGui::SetNextWindowPos({980.0f, 600.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({290.0f, 110.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({980.0f, 500.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({290.0f, 160.0f}, ImGuiCond_FirstUseEver);
     constexpr ImGuiWindowFlags k_flags =
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
     if (!ImGui::Begin("Weapon HUD", nullptr, k_flags)) {

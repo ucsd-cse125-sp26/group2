@@ -196,9 +196,25 @@ inline void handleCooldown(WeaponState& weapon, float dt)
     reduce(weapon.secondary);
 }
 
+inline void handleReload(GunInstance& gun)
+{
+    const WeaponConfig& config = getWeaponConfig(gun.type);
+    if (gun.totalAmmo > 0 && gun.currentMagAmmo < config.magazineSize) {
+        int reloadAmount = config.magazineSize - gun.currentMagAmmo;
+        if ((gun.totalAmmo - reloadAmount) >= 0) {
+            gun.currentMagAmmo += reloadAmount;
+            gun.totalAmmo -= reloadAmount;
+        } else {
+            gun.currentMagAmmo += gun.totalAmmo;
+            gun.totalAmmo = 0;
+        }
+    }
+}
+
 inline bool handleAmmo(GunInstance& gun)
 {
     if (gun.currentMagAmmo <= 0) {
+        // handleReload(gun);
         return false;
     }
 
@@ -274,6 +290,10 @@ void runWeapon(Registry& registry, float dt)
             handleSwitch(input, weapon);
             handleCooldown(weapon, dt);
             handleFire(registry, shooter, input, pos, shape, weapon);
+            if (input.reload) {
+                GunInstance& gun = getEquippedGun(weapon);
+                handleReload(gun);
+            }
         });
 }
 

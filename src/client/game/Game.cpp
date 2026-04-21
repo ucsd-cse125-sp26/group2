@@ -164,21 +164,6 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_Q:
             return SDL_APP_SUCCESS;
 
-        // R — toggle frame recording (state CSV + per-frame PNG screenshots).
-        // Output lands in <binary_dir>/recordings/<timestamp>/ next to the game.
-        case SDLK_R: {
-            if (recorder.isRecording()) {
-                recorder.stopRecording();
-                SDL_Log("[client] recording stopped");
-            } else {
-                const char* base = SDL_GetBasePath();
-                std::string baseDir = std::string(base ? base : "") + "recordings";
-                recorder.startRecording(baseDir);
-                SDL_Log("[client] recording started → %s", recorder.sessionDir().c_str());
-            }
-            break;
-        }
-
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
         case SDLK_ESCAPE:
             mouseCaptured = !mouseCaptured;
