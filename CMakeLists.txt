@@ -792,7 +792,7 @@ add_executable(client
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
-        src/ecs/components/health.hpp
+        src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
 )
 
@@ -931,7 +931,7 @@ add_executable(server
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
-        src/ecs/components/health.hpp
+        src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
 )
 
