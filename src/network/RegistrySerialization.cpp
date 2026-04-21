@@ -1,6 +1,7 @@
 #include "RegistrySerialization.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
@@ -31,7 +32,7 @@ namespace registry_serialization
 
 // NOTE: this is where any component that should be sent to clients must be listed.
 // The order of components in this tuple is the order they will be serialized in.
-using Synced = std::tuple<entt::entity, Position, Velocity, PlayerState, CollisionShape, WeaponState>;
+using Synced = std::tuple<entt::entity, Position, Velocity, PlayerState, CollisionShape, WeaponState, Health>;
 
 std::vector<uint8_t> serialize(const entt::registry& registry)
 {

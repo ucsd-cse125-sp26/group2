@@ -167,21 +167,6 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_Q:
             return SDL_APP_SUCCESS;
 
-        // R — toggle frame recording (state CSV + per-frame PNG screenshots).
-        // Output lands in <binary_dir>/recordings/<timestamp>/ next to the game.
-        case SDLK_R: {
-            if (recorder.isRecording()) {
-                recorder.stopRecording();
-                SDL_Log("[client] recording stopped");
-            } else {
-                const char* base = SDL_GetBasePath();
-                std::string baseDir = std::string(base ? base : "") + "recordings";
-                recorder.startRecording(baseDir);
-                SDL_Log("[client] recording started → %s", recorder.sessionDir().c_str());
-            }
-            break;
-        }
-
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
         case SDLK_ESCAPE:
             mouseCaptured = !mouseCaptured;
@@ -219,8 +204,8 @@ SDL_AppResult Game::event(SDL_Event* event)
                 }
             }
             const glm::vec3 hitP = cachedEye_ + cachedCamFwd_ * dist;
-            particleSystem.spawnHitscanBeam(hip, hitP, WeaponType::EnergyRifle);
-            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Energy, WeaponType::EnergyRifle);
+            particleSystem.spawnHitscanBeam(hip, hitP, WeaponType::EnergyGun);
+            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Energy, WeaponType::EnergyGun);
             break;
         }
         case SDLK_Y: {
@@ -435,6 +420,7 @@ SDL_AppResult Game::iterate()
         systems::runMouseLook(registry, mouseSensitivity);
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry);
+        systems::runWeaponKeys(registry);
     }
 
     systems::runInputSend(registry, client);

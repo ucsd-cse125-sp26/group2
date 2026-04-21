@@ -10,6 +10,8 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/Health.hpp"
+#include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
@@ -176,6 +178,8 @@ void DebugUI::buildUI(const Registry& registry,
 
     if (showBhopAnalyzer)
         buildBhopAnalyzer(registry);
+
+    buildWeaponUI(registry);
 }
 
 // Contents of the ECS Inspector window, factored out so the Begin/End wrapping
@@ -830,8 +834,8 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
     ImGui::SameLine();
     if (ImGui::Button("Energy Shot", {110.f, 0.f})) {
         const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
-        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyRifle);
-        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyRifle);
+        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyGun);
+        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyGun);
     }
 
     if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))
@@ -1060,6 +1064,71 @@ void DebugUI::buildNetworkUI(const NetworkStats& stats)
     ImGui::Text("Recv: %.2f MB   Send: %.2f MB",
                 static_cast<double>(stats.bytesRecvTotal) / (1024.0 * 1024.0),
                 static_cast<double>(stats.bytesSentTotal) / (1024.0 * 1024.0));
+
+    ImGui::End();
+}
+
+void DebugUI::buildWeaponUI(const Registry& registry)
+{
+    entt::entity localPlayer = entt::null;
+    const auto* const k_es = registry.storage<entt::entity>();
+    if (k_es) {
+        for (auto e : *k_es) {
+            if (registry.valid(e) && registry.all_of<LocalPlayer>(e)) {
+                localPlayer = e;
+                break;
+            }
+        }
+    }
+
+    ImGui::SetNextWindowPos({980.0f, 500.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({290.0f, 160.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags =
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin("Weapon HUD", nullptr, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    if (localPlayer == entt::null) {
+        ImGui::TextDisabled("Local player not available");
+        ImGui::End();
+        return;
+    }
+
+    if (!registry.all_of<WeaponState>(localPlayer)) {
+        ImGui::TextDisabled("Weapon state unavailable");
+        ImGui::End();
+        return;
+    }
+
+    const WeaponState& weapon = registry.get<WeaponState>(localPlayer);
+    const GunInstance& gun = (weapon.current == WeaponSlot::PRIMARY) ? weapon.primary : weapon.secondary;
+
+    const char* currentGunName = "?";
+    switch (gun.type) {
+    case WeaponType::Rifle: currentGunName = "Rifle"; break;
+    case WeaponType::Rocket: currentGunName = "Rocket"; break;
+    case WeaponType::RailGun: currentGunName = "RailGun"; break;
+    case WeaponType::EnergyGun: currentGunName = "EnergyGun"; break;
+    }
+
+    ImGui::SeparatorText("Weapon");
+    ImGui::Text("Current: %s", currentGunName);
+    ImGui::Text("Ammo:    %d / %d", gun.currentMagAmmo, gun.totalAmmo);
+
+    ImGui::SeparatorText("Vitals");
+    if (registry.all_of<Health>(localPlayer)) {
+        const Health& health = registry.get<Health>(localPlayer);
+        ImGui::Text("Armor:   %.0f / %.0f",
+                    static_cast<double>(health.armor),
+                    static_cast<double>(health.armorMax));
+        ImGui::Text("Health:  %.0f / %.0f",
+                    static_cast<double>(health.health),
+                    static_cast<double>(health.healthMax));
+    } else {
+        ImGui::TextDisabled("Health state unavailable");
+    }
 
     ImGui::End();
 }
