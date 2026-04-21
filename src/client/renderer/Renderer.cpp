@@ -836,9 +836,27 @@ bool Renderer::initIBL()
         }
     }
 
-    // Irradiance map (32x32 per face, cubemap, RGBA16F). Written per-face by
-    // irradiance.comp (one face slice bound at a time -- SDL_GPU storage cube
-    // views are 2D / single-layer).
+    // Irradiance map work target (32x32 per face, 2D array, RGBA16F).
+    // Compute writes one layer at a time here, then we copy the result into the
+    // sampled cubemap below. This avoids Metal's restriction that cube texture
+    // views must span all 6 faces.
+    {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ci.width = 32;
+        ci.height = 32;
+        ci.layer_count_or_depth = 6;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        irradianceWorkMap = SDL_CreateGPUTexture(device, &ci);
+        if (!irradianceWorkMap) {
+            SDL_Log("IBL: failed to create irradiance work map: %s", SDL_GetError());
+            return false;
+        }
+    }
+
+    // Irradiance cubemap sampled by pbr.frag.
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_CUBE;
@@ -847,16 +865,33 @@ bool Renderer::initIBL()
         ci.height = 32;
         ci.layer_count_or_depth = 6;
         ci.num_levels = 1;
-        ci.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
         irradianceMap = SDL_CreateGPUTexture(device, &ci);
         if (!irradianceMap) {
-            SDL_Log("IBL: failed to create irradiance map: %s", SDL_GetError());
+            SDL_Log("IBL: failed to create irradiance cubemap: %s", SDL_GetError());
             return false;
         }
     }
 
-    // Pre-filter map (128x128 per face, 5 mip levels, cubemap, RGBA16F).
-    // Mip 0 = mirror, mip 4 = roughness 1.0.
+    // Pre-filter work target (128x128 per face, 5 mip levels, 2D array,
+    // RGBA16F). Mip 0 = mirror, mip 4 = roughness 1.0.
+    {
+        SDL_GPUTextureCreateInfo ci{};
+        ci.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        ci.width = 128;
+        ci.height = 128;
+        ci.layer_count_or_depth = 6;
+        ci.num_levels = 5; // mip 0=128, 1=64, 2=32, 3=16, 4=8
+        ci.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        prefilterWorkMap = SDL_CreateGPUTexture(device, &ci);
+        if (!prefilterWorkMap) {
+            SDL_Log("IBL: failed to create prefilter work map: %s", SDL_GetError());
+            return false;
+        }
+    }
+
+    // Pre-filter cubemap sampled by pbr.frag.
     {
         SDL_GPUTextureCreateInfo ci{};
         ci.type = SDL_GPU_TEXTURETYPE_CUBE;
@@ -865,10 +900,10 @@ bool Renderer::initIBL()
         ci.height = 128;
         ci.layer_count_or_depth = 6;
         ci.num_levels = 5; // mip 0=128, 1=64, 2=32, 3=16, 4=8
-        ci.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
         prefilterMap = SDL_CreateGPUTexture(device, &ci);
         if (!prefilterMap) {
-            SDL_Log("IBL: failed to create prefilter map: %s", SDL_GetError());
+            SDL_Log("IBL: failed to create prefilter cubemap: %s", SDL_GetError());
             return false;
         }
     }
@@ -1062,7 +1097,8 @@ bool Renderer::initIBL()
 
 bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
 {
-    if (!envCube || !irradianceMap || !prefilterMap || !iblSampler || !irradiancePipeline || !prefilterPipeline) {
+    if (!envCube || !irradianceMap || !prefilterMap || !irradianceWorkMap || !prefilterWorkMap || !iblSampler ||
+        !irradiancePipeline || !prefilterPipeline) {
         SDL_Log("IBL: regenerateIBLFromCubemap missing required resources");
         return false;
     }
@@ -1078,7 +1114,7 @@ bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
     // Irradiance: one dispatch per cube face.
     for (int face = 0; face < 6; ++face) {
         SDL_GPUStorageTextureReadWriteBinding rw{};
-        rw.texture = irradianceMap;
+        rw.texture = irradianceWorkMap;
         rw.mip_level = 0;
         rw.layer = static_cast<Uint32>(face);
         SDL_GPUComputePass* pass = SDL_BeginGPUComputePass(cmd, &rw, 1, nullptr, 0);
@@ -1100,6 +1136,23 @@ bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
         SDL_EndGPUComputePass(pass);
     }
 
+    {
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
+        for (int face = 0; face < 6; ++face) {
+            SDL_GPUTextureLocation src{};
+            src.texture = irradianceWorkMap;
+            src.layer = static_cast<Uint32>(face);
+
+            SDL_GPUTextureLocation dst{};
+            dst.texture = irradianceMap;
+            dst.layer = static_cast<Uint32>(face);
+
+            SDL_CopyGPUTextureToTexture(
+                copyPass, &src, &dst, static_cast<Uint32>(k_irradianceSize), static_cast<Uint32>(k_irradianceSize), 1, false);
+        }
+        SDL_EndGPUCopyPass(copyPass);
+    }
+
     // Prefilter: one dispatch per (mip, face). Mip 0 = mirror, mip 4 = roughness 1.0.
     for (int mip = 0; mip < k_prefilterMips; ++mip) {
         const int mipSize = k_prefilterBaseSize >> mip;
@@ -1107,7 +1160,7 @@ bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
 
         for (int face = 0; face < 6; ++face) {
             SDL_GPUStorageTextureReadWriteBinding rw{};
-            rw.texture = prefilterMap;
+            rw.texture = prefilterWorkMap;
             rw.mip_level = static_cast<Uint32>(mip);
             rw.layer = static_cast<Uint32>(face);
             SDL_GPUComputePass* pass = SDL_BeginGPUComputePass(cmd, &rw, 1, nullptr, 0);
@@ -1132,6 +1185,27 @@ bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
             SDL_DispatchGPUCompute(pass, groups, groups, 1);
             SDL_EndGPUComputePass(pass);
         }
+    }
+
+    {
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
+        for (int mip = 0; mip < k_prefilterMips; ++mip) {
+            const Uint32 mipSize = static_cast<Uint32>(k_prefilterBaseSize >> mip);
+            for (int face = 0; face < 6; ++face) {
+                SDL_GPUTextureLocation src{};
+                src.texture = prefilterWorkMap;
+                src.mip_level = static_cast<Uint32>(mip);
+                src.layer = static_cast<Uint32>(face);
+
+                SDL_GPUTextureLocation dst{};
+                dst.texture = prefilterMap;
+                dst.mip_level = static_cast<Uint32>(mip);
+                dst.layer = static_cast<Uint32>(face);
+
+                SDL_CopyGPUTextureToTexture(copyPass, &src, &dst, mipSize, mipSize, 1, false);
+            }
+        }
+        SDL_EndGPUCopyPass(copyPass);
     }
 
     SDL_SubmitGPUCommandBuffer(cmd);
@@ -3272,6 +3346,10 @@ void Renderer::quit()
         SDL_ReleaseGPUTexture(device, irradianceMap);
     if (prefilterMap)
         SDL_ReleaseGPUTexture(device, prefilterMap);
+    if (irradianceWorkMap)
+        SDL_ReleaseGPUTexture(device, irradianceWorkMap);
+    if (prefilterWorkMap)
+        SDL_ReleaseGPUTexture(device, prefilterWorkMap);
     if (iblSampler)
         SDL_ReleaseGPUSampler(device, iblSampler);
 

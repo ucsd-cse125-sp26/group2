@@ -153,8 +153,10 @@ private:
 
     // IBL textures (Phase 6)
     SDL_GPUTexture* brdfLUT = nullptr;       ///< 512×512 RG16F split-sum LUT.
-    SDL_GPUTexture* irradianceMap = nullptr; ///< 32×32 per face, RGBA16F cubemap.
-    SDL_GPUTexture* prefilterMap = nullptr;  ///< 128×128 per face, 5 mip levels, RGBA16F cubemap.
+    SDL_GPUTexture* irradianceMap = nullptr;     ///< 32×32 per face, RGBA16F cubemap for shader sampling.
+    SDL_GPUTexture* prefilterMap = nullptr;      ///< 128×128 per face, 5 mip levels, RGBA16F cubemap for shader sampling.
+    SDL_GPUTexture* irradianceWorkMap = nullptr; ///< 32×32 per face, RGBA16F 2D-array compute target.
+    SDL_GPUTexture* prefilterWorkMap = nullptr;  ///< 128×128 per face, 5 mip levels, RGBA16F 2D-array compute target.
     SDL_GPUSampler* iblSampler = nullptr;    ///< Linear, clamp-to-edge, mipmapped.
     SDL_GPUTexture* envCubemap = nullptr;    ///< HDR environment cubemap (512×512, RGBA16F).
 
