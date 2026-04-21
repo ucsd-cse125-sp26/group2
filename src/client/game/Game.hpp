@@ -101,6 +101,7 @@ private:
     int wraithModelIdx = -1;                             ///< Wraith player model index.
     int weaponModelIndices_[4] = {-1, -1, -1, -1};       ///< Per WeaponType, loaded at init.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
+    WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
 
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;       ///< Weapon model scale (model is in mm).

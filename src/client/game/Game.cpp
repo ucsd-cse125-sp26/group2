@@ -826,11 +826,12 @@ SDL_AppResult Game::iterate()
             glm::vec3 wpnPos =
                 pos.value + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
 
-            // Build transform: translate -> yaw -> pitch -> scale
+            // Build transform: translate -> yaw -> pitch -> roll -> scale
             glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);
             wpnWorld *= glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
             float clampedPitch = std::clamp(-input.pitch, glm::radians(-30.0f), glm::radians(30.0f));
             wpnWorld *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
+            wpnWorld *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
             wpnWorld = glm::scale(wpnWorld, glm::vec3(tp.scale));
 
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
@@ -844,6 +845,19 @@ SDL_AppResult Game::iterate()
         const GunInstance& gun = (ws.current == WeaponSlot::PRIMARY) ? ws.primary : ws.secondary;
         currentEquippedType_ = gun.type;
     });
+
+    // Auto-apply per-weapon viewmodel defaults when weapon changes
+    if (currentEquippedType_ != lastEquippedType_) {
+        const auto& vp = getViewmodelParams(currentEquippedType_);
+        vmScale = vp.scale;
+        vmForward = vp.forward;
+        vmRight = vp.right;
+        vmDown = vp.down;
+        vmYawOffset = vp.yawOffset;
+        vmPitchOffset = vp.pitchOffset;
+        vmRollOffset = vp.rollOffset;
+        lastEquippedType_ = currentEquippedType_;
+    }
 
     const int currentWeaponModelIdx = weaponModelIndices_[static_cast<int>(currentEquippedType_)];
 
@@ -1112,16 +1126,6 @@ SDL_AppResult Game::iterate()
                 vmPitchOffset = vp.pitchOffset;
                 vmRollOffset = vp.rollOffset;
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Reset defaults")) {
-                vmScale = 0.03f;
-                vmForward = 21.0f;
-                vmRight = 5.5f;
-                vmDown = 22.5f;
-                vmYawOffset = 58.0f;
-                vmPitchOffset = 12.0f;
-                vmRollOffset = 2.0f;
-            }
 
             ImGui::SeparatorText("Sway");
             ImGui::DragFloat("Sway Yaw Amp", &swayAmplitudeYaw_, 0.1f, 0.0f, 20.0f);
@@ -1188,9 +1192,10 @@ SDL_AppResult Game::iterate()
             ImGui::SeparatorText("Rotation (degrees)");
             ImGui::DragFloat("TP Yaw", &tp.yawOffset, 1.0f, -180.0f, 180.0f, "%.1f");
             ImGui::DragFloat("TP Pitch", &tp.pitchOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("TP Roll", &tp.rollOffset, 1.0f, -180.0f, 180.0f, "%.1f");
 
             ImGui::SeparatorText("Scale");
-            ImGui::DragFloat("TP Scale", &tp.scale, 0.01f, 0.01f, 10.0f, "%.3f");
+            ImGui::DragFloat("TP Scale", &tp.scale, 0.0001f, 0.0001f, 10.0f, "%.5f");
 
             ImGui::Separator();
             if (ImGui::Button("Reset to defaults")) {
@@ -1198,14 +1203,15 @@ SDL_AppResult Game::iterate()
             }
             ImGui::SameLine();
             if (ImGui::Button("Save as new defaults")) {
-                SDL_Log("[client] 3P weapon %d: scale=%.3f offset=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f",
+                SDL_Log("[client] 3P weapon %d: scale=%.5f offset=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f roll=%.1f",
                         tpTuneWeaponIdx_,
                         static_cast<double>(tp.scale),
                         static_cast<double>(tp.handOffset.x),
                         static_cast<double>(tp.handOffset.y),
                         static_cast<double>(tp.handOffset.z),
                         static_cast<double>(tp.yawOffset),
-                        static_cast<double>(tp.pitchOffset));
+                        static_cast<double>(tp.pitchOffset),
+                        static_cast<double>(tp.rollOffset));
             }
         }
         ImGui::End();

@@ -21,8 +21,8 @@ struct ViewmodelParams
 struct ThirdPersonWeaponParams
 {
     float scale;
-    glm::vec3 handOffset;         // relative to player center (right, up, forward)
-    float yawOffset, pitchOffset; // degrees
+    glm::vec3 handOffset;                     // relative to player center (right, up, forward)
+    float yawOffset, pitchOffset, rollOffset; // degrees
 };
 
 /// @brief Asset filename + load flags for a weapon model.
@@ -87,13 +87,29 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 {
     static const std::array<ThirdPersonWeaponParams, 4> k_params{{
         // Rifle (R-301)
-        {.scale = 0.8f, .handOffset = {12.0f, 15.0f, 8.0f}, .yawOffset = 58.0f, .pitchOffset = 0.0f},
+        {.scale = 0.025f,
+         .handOffset = {1.5f, -3.5f, 14.0f},
+         .yawOffset = -47.0f,
+         .pitchOffset = 13.0f,
+         .rollOffset = 0.0f},
         // Rocket — fallback to R-301
-        {.scale = 0.8f, .handOffset = {12.0f, 15.0f, 8.0f}, .yawOffset = 58.0f, .pitchOffset = 0.0f},
+        {.scale = 0.025f,
+         .handOffset = {1.5f, -3.5f, 14.0f},
+         .yawOffset = -47.0f,
+         .pitchOffset = 13.0f,
+         .rollOffset = 0.0f},
         // RailGun (Triple Take) — longer weapon
-        {.scale = 0.75f, .handOffset = {12.0f, 15.0f, 10.0f}, .yawOffset = 58.0f, .pitchOffset = 0.0f},
+        {.scale = 0.75f,
+         .handOffset = {12.0f, 15.0f, 10.0f},
+         .yawOffset = 58.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f},
         // EnergyGun (Wingman) — pistol, smaller
-        {.scale = 0.9f, .handOffset = {14.0f, 13.0f, 6.0f}, .yawOffset = 58.0f, .pitchOffset = 0.0f},
+        {.scale = 0.9f,
+         .handOffset = {14.0f, 13.0f, 6.0f},
+         .yawOffset = 58.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
