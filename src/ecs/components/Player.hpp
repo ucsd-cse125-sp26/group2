@@ -3,4 +3,5 @@
 
 #pragma once
 
-struct Player {};
+struct Player
+{};

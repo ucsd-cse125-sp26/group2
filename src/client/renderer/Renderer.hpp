@@ -139,7 +139,8 @@ private:
     SDL_GPUGraphicsPipeline* sceneShadowPipeline = nullptr;    ///< Scene geometry into shadow map.
 
     // Render targets
-    SDL_GPUTexture* depthTexture = nullptr; ///< Scene depth, D32_FLOAT.
+    SDL_GPUTexture* depthTexture = nullptr;       ///< Scene depth, D32_FLOAT.
+    SDL_GPUTexture* weaponDepthTexture = nullptr; ///< Weapon-only depth (keeps scene depth untouched).
     Uint32 depthWidth = 0;
     Uint32 depthHeight = 0;
 
@@ -153,12 +154,12 @@ private:
 
     // IBL textures (Phase 6)
     SDL_GPUTexture* brdfLUT = nullptr;       ///< 512×512 RG16F split-sum LUT.
-    SDL_GPUTexture* irradianceMap = nullptr;     ///< 32×32 per face, RGBA16F cubemap for shader sampling.
-    SDL_GPUTexture* prefilterMap = nullptr;      ///< 128×128 per face, 5 mip levels, RGBA16F cubemap for shader sampling.
+    SDL_GPUTexture* irradianceMap = nullptr; ///< 32×32 per face, RGBA16F cubemap for shader sampling.
+    SDL_GPUTexture* prefilterMap = nullptr;  ///< 128×128 per face, 5 mip levels, RGBA16F cubemap for shader sampling.
     SDL_GPUTexture* irradianceWorkMap = nullptr; ///< 32×32 per face, RGBA16F 2D-array compute target.
     SDL_GPUTexture* prefilterWorkMap = nullptr;  ///< 128×128 per face, 5 mip levels, RGBA16F 2D-array compute target.
-    SDL_GPUSampler* iblSampler = nullptr;    ///< Linear, clamp-to-edge, mipmapped.
-    SDL_GPUTexture* envCubemap = nullptr;    ///< HDR environment cubemap (512×512, RGBA16F).
+    SDL_GPUSampler* iblSampler = nullptr;        ///< Linear, clamp-to-edge, mipmapped.
+    SDL_GPUTexture* envCubemap = nullptr;        ///< HDR environment cubemap (512×512, RGBA16F).
 
     // IBL compute pipelines (Phase 6) -- run once at startup, plus per HDR swap.
     SDL_GPUComputePipeline* brdfLutPipeline = nullptr;    ///< brdf_lut.comp

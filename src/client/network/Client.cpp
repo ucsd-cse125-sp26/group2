@@ -132,6 +132,28 @@ bool Client::poll(Registry& registry)
             }
 
             break;
+        case PacketType::PARTICLE_SPAWN: {
+            if (payloadSize < sizeof(uint32_t))
+                break;
+            uint32_t count = 0;
+            std::memcpy(&count, payload, sizeof(uint32_t));
+            const uint8_t* eventData = payload + sizeof(uint32_t);
+            const uint32_t expectedSize = sizeof(uint32_t) + count * sizeof(NetParticleEvent);
+            if (payloadSize < expectedSize)
+                break;
+
+            if (particleEventFn_ && registryLoader && localPlayerEntity) {
+                entt::entity localE = registryLoader->map(*localPlayerEntity);
+                for (uint32_t i = 0; i < count; ++i) {
+                    NetParticleEvent evt;
+                    std::memcpy(&evt, eventData + i * sizeof(NetParticleEvent), sizeof(NetParticleEvent));
+                    // Map server entity to client entity
+                    evt.source = registryLoader->map(evt.source);
+                    particleEventFn_(evt, localE);
+                }
+            }
+            break;
+        }
         case PacketType::PONG: {
             if (payloadSize != sizeof(Uint64))
                 break;

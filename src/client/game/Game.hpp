@@ -9,6 +9,7 @@
 #include "animation/SkinningBackend.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
+#include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
@@ -97,8 +98,54 @@ private:
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
     // Model indices for entity rendering (loaded at init).
-    int wraithModelIdx = -1; ///< Wraith player model index.
-    int weaponModelIdx = -1; ///< R-301 weapon model index.
+    int wraithModelIdx = -1;                             ///< Wraith player model index.
+    int weaponModelIndices_[4] = {-1, -1, -1, -1};       ///< Per WeaponType, loaded at init.
+    WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
+    WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
+
+    // Viewmodel tuning (live-adjustable via ImGui)
+    float vmScale = 0.03f;       ///< Weapon model scale (model is in mm).
+    float vmForward = 21.0f;     ///< Forward offset from eye (Quake units).
+    float vmRight = 5.5f;        ///< Right offset from eye.
+    float vmDown = 22.5f;        ///< Downward offset from eye.
+    float vmYawOffset = 58.0f;   ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 12.0f; ///< Extra pitch (degrees).
+    float vmRollOffset = 2.0f;   ///< Extra roll (degrees).
+    bool showViewmodelUI = true; ///< Show the Viewmodel Tweaker window.
+
+    // Weapon sway state (CoD-style barrel lead)
+    float prevSwayYaw_ = 0.0f;
+    float prevSwayPitch_ = 0.0f;
+    float swayOffsetX_ = 0.0f;     ///< Current horizontal sway (right axis, Quake units).
+    float swayOffsetY_ = 0.0f;     ///< Current vertical sway (up axis).
+    bool swayInitialized_ = false; ///< Guard against initial delta spike.
+
+    // Sway tuning (ImGui-adjustable)
+    float swayAmplitudeYaw_ = 3.0f;
+    float swayAmplitudePitch_ = 2.0f;
+    float swayDecayRate_ = 8.0f;  ///< Exponential decay speed.
+    float swaySmoothing_ = 0.15f; ///< Input smoothing (0..1, lower = smoother).
+
+    // Visual recoil state (viewmodel-only, does not affect aim)
+    float recoilPitch_ = 0.0f;    ///< Current recoil pitch offset (degrees).
+    float recoilPushBack_ = 0.0f; ///< Current recoil backward offset (Quake units).
+    float recoilRoll_ = 0.0f;     ///< Current recoil roll offset (degrees).
+
+    // Crosshair settings (ImGui-adjustable)
+    float crosshairSize_ = 6.0f;                           ///< Half-length of each crosshair line (pixels).
+    float crosshairThickness_ = 2.0f;                      ///< Line thickness (pixels).
+    float crosshairGap_ = 3.0f;                            ///< Gap from center to start of each line (pixels).
+    glm::vec4 crosshairColor_ = {0.0f, 1.0f, 0.0f, 0.85f}; ///< RGBA (default: green).
+    bool crosshairDot_ = true;                             ///< Draw center dot.
+    bool showCrosshair_ = true;                            ///< Master toggle.
+
+    // Scroll-wheel weapon switching
+    int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = prev slot, consumed each frame.
+
+    // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
+    ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
+    int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
+    bool showTPWeaponUI_ = true;                ///< Show the 3P Weapon Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
@@ -106,8 +153,10 @@ private:
     AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
     CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
-    float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (tunable).
-    float kRigVerticalOffset_ = -90.0f; ///< Per-renderable Y translation for animated characters (tunable).
+    float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (auto-calculated, tunable).
+    float kRigVerticalOffset_ =
+        -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).
+    float rigMeshMinY_ = 0.0f; ///< Minimum Y of the bind-pose mesh vertices (model space).
 
     // FPS ring buffer -- inter-render deltas, newest at (head-1) % size
     float fpsHistory[k_fpsHistorySize] = {}; ///< Circular buffer of per-frame FPS samples.

@@ -1,20 +1,21 @@
 /// @file WeaponSystem.cpp
 /// @brief Weapon state manager system.
 
+#include "ecs/systems/WeaponSystem.hpp"
+
+#include "PlayerStatusSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
-#include "ecs/components/Health.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>
-
-#include "PlayerStatusSystem.hpp"
 
 namespace
 {
@@ -32,8 +33,12 @@ struct HitscanHit
     entt::entity entity{entt::null};
 };
 
-bool raycastAABB(
-    glm::vec3 origin, glm::vec3 direction, const physics::WorldAABB& box, float maxDistance, float& outDistance, glm::vec3& outNormal)
+bool raycastAABB(glm::vec3 origin,
+                 glm::vec3 direction,
+                 const physics::WorldAABB& box,
+                 float maxDistance,
+                 float& outDistance,
+                 glm::vec3& outNormal)
 {
     float tMin = 0.0f;
     float tMax = maxDistance;
@@ -117,35 +122,36 @@ HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const physics::Wo
     return bestHit;
 }
 
-HitscanHit raycastPlayers(
-    Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction, float maxDistance)
+HitscanHit
+raycastPlayers(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction, float maxDistance)
 {
     HitscanHit bestHit;
     bestHit.distance = maxDistance;
 
-    registry.view<Position, CollisionShape>().each([&](entt::entity entity, const Position& pos, const CollisionShape& shape) {
-        if (entity == shooter) {
-            return;
-        }
+    registry.view<Position, CollisionShape>().each(
+        [&](entt::entity entity, const Position& pos, const CollisionShape& shape) {
+            if (entity == shooter) {
+                return;
+            }
 
-        const physics::WorldAABB bounds{
-            .min = pos.value - shape.halfExtents,
-            .max = pos.value + shape.halfExtents,
-        };
+            const physics::WorldAABB bounds{
+                .min = pos.value - shape.halfExtents,
+                .max = pos.value + shape.halfExtents,
+            };
 
-        float distance = bestHit.distance;
-        glm::vec3 normal{0.0f};
-        if (!raycastAABB(origin, direction, bounds, bestHit.distance, distance, normal)) {
-            return;
-        }
+            float distance = bestHit.distance;
+            glm::vec3 normal{0.0f};
+            if (!raycastAABB(origin, direction, bounds, bestHit.distance, distance, normal)) {
+                return;
+            }
 
-        bestHit.hit = true;
-        bestHit.distance = distance;
-        bestHit.point = origin + direction * distance;
-        bestHit.normal = normal;
-        bestHit.surface = SurfaceType::Flesh;
-        bestHit.entity = entity;
-    });
+            bestHit.hit = true;
+            bestHit.distance = distance;
+            bestHit.point = origin + direction * distance;
+            bestHit.normal = normal;
+            bestHit.surface = SurfaceType::Flesh;
+            bestHit.entity = entity;
+        });
 
     return bestHit;
 }
@@ -173,10 +179,16 @@ HitscanHit resolveHitscan(Registry& registry, entt::entity shooter, glm::vec3 or
 namespace systems
 {
 
-
 inline GunInstance& getEquippedGun(WeaponState& weapon)
 {
-    return (weapon.current == WeaponSlot::PRIMARY) ? weapon.primary : weapon.secondary;
+    switch (weapon.current) {
+    case WeaponSlot::SECONDARY:
+        return weapon.secondary;
+    case WeaponSlot::TERTIARY:
+        return weapon.tertiary;
+    default:
+        return weapon.primary;
+    }
 }
 
 void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
@@ -185,17 +197,18 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary) {
         weapon.current = WeaponSlot::SECONDARY;
+    } else if (input.switchToTertiary) {
+        weapon.current = WeaponSlot::TERTIARY;
     }
 }
 
 inline void handleCooldown(WeaponState& weapon, float dt)
 {
-    auto reduce = [dt](GunInstance& gun) {
-        gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt);
-    };
+    auto reduce = [dt](GunInstance& gun) { gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt); };
 
     reduce(weapon.primary);
     reduce(weapon.secondary);
+    reduce(weapon.tertiary);
 }
 
 inline void handleReload(GunInstance& gun)
@@ -216,7 +229,7 @@ inline void handleReload(GunInstance& gun)
 inline bool handleAmmo(GunInstance& gun)
 {
     if (gun.currentMagAmmo <= 0) {
-        //TODO: Need to implement reload state so it is not instant.
+        // TODO: Need to implement reload state so it is not instant.
         handleReload(gun);
         return false;
     }
@@ -227,15 +240,25 @@ inline bool handleAmmo(GunInstance& gun)
 
 inline glm::vec3 viewForward(float yaw, float pitch)
 {
+    // Must match client camera convention:
+    //   X = sin(yaw) * cos(pitch)
+    //   Y = -sin(pitch)
+    //   Z = cos(yaw) * cos(pitch)
+    const float cp = std::cos(pitch);
     return glm::normalize(glm::vec3{
-        std::sin(yaw) * std::cos(pitch),
-         -std::sin(pitch),
-        std::cos(yaw) * std::cos(pitch),
+        std::sin(yaw) * cp,
+        -std::sin(pitch),
+        std::cos(yaw) * cp,
     });
 }
 
-inline void handleFire(
-    Registry& registry, entt::entity shooter, const InputSnapshot& input, const Position& pos, const CollisionShape& shape, WeaponState& weapon)
+inline void handleFire(Registry& registry,
+                       entt::entity shooter,
+                       const InputSnapshot& input,
+                       const Position& pos,
+                       const CollisionShape& shape,
+                       WeaponState& weapon,
+                       std::vector<NetParticleEvent>& outParticles)
 {
     if (!input.shooting) {
         return;
@@ -263,35 +286,58 @@ inline void handleFire(
     const glm::vec3 direction = viewForward(input.yaw, input.pitch);
     const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
 
-    // TODO: apply damage to hit.entity and emit a replicated shot event for client FX.
+    // Apply damage
     if (hit.entity != entt::null && registry.valid(hit.entity)) {
         applyDamage(config.damage, hit.entity, shooter, registry);
     }
-    // SDL_Log("[server] Shot fired by (%d)", shooter);
-    // registry.view<InputSnapshot, WeaponState>().each(
-    //     [&](entt::entity shooter,
-    //         InputSnapshot& input,
-    //         WeaponState& weapon) {
-    //             SDL_Log("[server] Entity (%d) has (%d) ammo in their primary", shooter, weapon.primary.currentMagAmmo);
-    //     });
+
+    // Emit replicated particle events for client FX.
+    // 1) Tracer or beam from muzzle to hit point.
+    {
+        NetParticleEvent tracerEvt;
+        tracerEvt.source = shooter;
+        tracerEvt.weaponType = gun.type;
+        if (gun.type == WeaponType::RailGun || gun.type == WeaponType::EnergyGun) {
+            tracerEvt.effectType = ParticleEffectType::HitscanBeam;
+            tracerEvt.pos1 = eye;
+            tracerEvt.pos2 = hit.point;
+        } else {
+            tracerEvt.effectType = ParticleEffectType::BulletTracer;
+            tracerEvt.pos1 = eye;
+            // Compute direction from origin→hitPoint (convention-independent)
+            tracerEvt.pos2 = glm::normalize(hit.point - eye);
+            tracerEvt.param = hit.distance;
+        }
+        outParticles.push_back(tracerEvt);
+    }
+    // 2) Impact effect at hit location.
+    {
+        NetParticleEvent impactEvt;
+        impactEvt.source = shooter;
+        impactEvt.effectType = ParticleEffectType::Impact;
+        impactEvt.weaponType = gun.type;
+        impactEvt.surfaceType = hit.surface;
+        impactEvt.pos1 = hit.point;
+        impactEvt.pos2 = hit.normal;
+        outParticles.push_back(impactEvt);
+    }
 }
 
-void runWeapon(Registry& registry, float dt)
+void runWeapon(Registry& registry, float dt, std::vector<NetParticleEvent>& outParticles)
 {
-    registry.view<InputSnapshot, Position, CollisionShape, WeaponState>().each(
-        [&](entt::entity shooter,
-            InputSnapshot& input,
-            const Position& pos,
-            const CollisionShape& shape,
-            WeaponState& weapon) {
-            handleSwitch(input, weapon);
-            handleCooldown(weapon, dt);
-            handleFire(registry, shooter, input, pos, shape, weapon);
-            if (input.reload) {
-                GunInstance& gun = getEquippedGun(weapon);
-                handleReload(gun);
-            }
-        });
+    registry.view<InputSnapshot, Position, CollisionShape, WeaponState>().each([&](entt::entity shooter,
+                                                                                   InputSnapshot& input,
+                                                                                   const Position& pos,
+                                                                                   const CollisionShape& shape,
+                                                                                   WeaponState& weapon) {
+        handleSwitch(input, weapon);
+        handleCooldown(weapon, dt);
+        handleFire(registry, shooter, input, pos, shape, weapon, outParticles);
+        if (input.reload) {
+            GunInstance& gun = getEquippedGun(weapon);
+            handleReload(gun);
+        }
+    });
 }
 
 } // namespace systems

@@ -15,109 +15,101 @@
 
 namespace systems
 {
-    void applyHeal(float amount, Health& playerHealth)
-    {
-        if (amount < 0) return;
+void applyHeal(float amount, Health& playerHealth)
+{
+    if (amount < 0)
+        return;
 
-        if (playerHealth.health < systems::healthMax)
-        {
-            if ((playerHealth.health + amount) > systems::healthMax)
-            {
-                amount -= systems::healthMax - playerHealth.health;
-                playerHealth.health = systems::healthMax;
-                playerHealth.armor = amount;
-            } else
-            {
-                playerHealth.health += amount;
-            }
-
-        } else if ((playerHealth.armor + amount) <= systems::armorMax)
-        {
-            playerHealth.armor += amount;
-        } else
-        {
-            playerHealth.armor = systems::armorMax;
-        }
-    }
-
-    inline void handleRespawn(entt::entity &player, Registry& registry)
-    {
-        // Refresh player stats and position
-        const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
-        const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-
-        registry.emplace_or_replace<InputSnapshot>(player);
-        registry.emplace_or_replace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
-        registry.emplace_or_replace<Velocity>(player);
-        registry.emplace_or_replace<PlayerState>(player);
-        registry.emplace_or_replace<Health>(player, Health{});
-        registry.emplace_or_replace<WeaponState>(player, WeaponState{
-                                      .primary =
-                                          GunInstance{
-                                              .type = WeaponType::Rifle,
-                                              .totalAmmo = rifleConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = rifleConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .secondary =
-                                          GunInstance{
-                                              .type = WeaponType::RailGun,
-                                              .totalAmmo = railConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = railConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .current = WeaponSlot::PRIMARY,
-                                  });
-
-    }
-
-    inline void handleDeath(entt::entity &player, Health& playerHealth, entt::entity &killer, Registry& registry)
-    {
-        if (playerHealth.health <= 0)
-        {
-            registry.get_or_emplace<PlayerState>(player).IsDead = true;
-            //TODO: award score to killer
-            handleRespawn(player, registry);
-        }
-    }
-
-    void applyDamage(float damage, entt::entity player, entt::entity &killer, Registry& registry)
-    {
-        Health& playerHealth = registry.get_or_emplace<Health>(player);
-        if (playerHealth.armor >= damage) {
-            playerHealth.armor -= damage;
+    if (playerHealth.health < systems::healthMax) {
+        if ((playerHealth.health + amount) > systems::healthMax) {
+            amount -= systems::healthMax - playerHealth.health;
+            playerHealth.health = systems::healthMax;
+            playerHealth.armor = amount;
         } else {
-            const float overflow = damage - playerHealth.armor;
-            playerHealth.armor = 0;
-            if (playerHealth.health - overflow <= 0)
-            {
-                playerHealth.health = 0;
-                handleDeath(player, playerHealth, killer, registry);
-            } else
-            {
-                playerHealth.health -= overflow;
-            }
+            playerHealth.health += amount;
+        }
+
+    } else if ((playerHealth.armor + amount) <= systems::armorMax) {
+        playerHealth.armor += amount;
+    } else {
+        playerHealth.armor = systems::armorMax;
+    }
+}
+
+inline void handleRespawn(entt::entity& player, Registry& registry)
+{
+    // Refresh player stats and position
+    const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
+    const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+
+    registry.emplace_or_replace<InputSnapshot>(player);
+    registry.emplace_or_replace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
+    registry.emplace_or_replace<Velocity>(player);
+    registry.emplace_or_replace<PlayerState>(player);
+    registry.emplace_or_replace<Health>(player, Health{});
+    registry.emplace_or_replace<WeaponState>(player,
+                                             WeaponState{
+                                                 .primary =
+                                                     GunInstance{
+                                                         .type = WeaponType::Rifle,
+                                                         .totalAmmo = rifleConfig.defaultAmmoCapacity,
+                                                         .currentMagAmmo = rifleConfig.magazineSize,
+                                                         .fireCooldown = 0.0f,
+                                                     },
+                                                 .secondary =
+                                                     GunInstance{
+                                                         .type = WeaponType::RailGun,
+                                                         .totalAmmo = railConfig.defaultAmmoCapacity,
+                                                         .currentMagAmmo = railConfig.magazineSize,
+                                                         .fireCooldown = 0.0f,
+                                                     },
+                                                 .current = WeaponSlot::PRIMARY,
+                                             });
+}
+
+inline void handleDeath(entt::entity& player, Health& playerHealth, entt::entity& killer, Registry& registry)
+{
+    if (playerHealth.health <= 0) {
+        registry.get_or_emplace<PlayerState>(player).IsDead = true;
+        // TODO: award score to killer
+        handleRespawn(player, registry);
+    }
+}
+
+void applyDamage(float damage, entt::entity player, entt::entity& killer, Registry& registry)
+{
+    Health& playerHealth = registry.get_or_emplace<Health>(player);
+    if (playerHealth.armor >= damage) {
+        playerHealth.armor -= damage;
+    } else {
+        const float overflow = damage - playerHealth.armor;
+        playerHealth.armor = 0;
+        if (playerHealth.health - overflow <= 0) {
+            playerHealth.health = 0;
+            handleDeath(player, playerHealth, killer, registry);
+        } else {
+            playerHealth.health -= overflow;
         }
     }
+}
 
-    inline void handleHealing(Health& playerHealth, float dt)
-    {
-        if (playerHealth.healTimer == 0)
-        {
-            const float healingAmount = healingRate * dt;
-            applyHeal(healingAmount, playerHealth);
-        } else
-        {
-            playerHealth.healTimer -= dt;
-            if (playerHealth.healTimer < 0) playerHealth.healTimer = 0;
-        }
+inline void handleHealing(Health& playerHealth, float dt)
+{
+    if (playerHealth.healTimer == 0) {
+        const float healingAmount = healingRate * dt;
+        applyHeal(healingAmount, playerHealth);
+    } else {
+        playerHealth.healTimer -= dt;
+        if (playerHealth.healTimer < 0)
+            playerHealth.healTimer = 0;
     }
+}
 
-    void runPlayerStatus(Registry& registry, float dt)
-    {
-        registry.view<Player>().each([&registry, dt](entt::entity e) {
-            Health& playerHealth = registry.get_or_emplace<Health>(e);
-            handleHealing(playerHealth, dt);
-        });
-    }
-}// namespace
+void runPlayerStatus(Registry& registry, float dt)
+{
+    registry.view<Player>().each([&registry, dt](entt::entity e) {
+        Health& playerHealth = registry.get_or_emplace<Health>(e);
+        handleHealing(playerHealth, dt);
+    });
+}
+} // namespace systems

@@ -52,7 +52,13 @@ void main()
 {
     // Sharpening (unsharp mask on HDR, counters TAA blur)
     vec2 ts = 1.0 / vec2(textureSize(hdrBuffer, 0));
-    vec3 center = texture(hdrBuffer, fragTexCoord).rgb;
+    vec4 centerSample = texture(hdrBuffer, fragTexCoord);
+    vec3 center = centerSample.rgb;
+    // Alpha carries the weapon viewmodel mask: 0 = weapon pixel, 1 = scene.
+    // Screen-space post-FX (bloom, SSR, SSAO, volumetrics) were computed
+    // before the weapon was drawn, so compositing them over weapon pixels
+    // would bleed the scene through the gun.  Skip them for weapon pixels.
+    float sceneMask = centerSample.a;
     vec3 hdr;
 
     if (sharpenStrength > 0.0) {
@@ -66,22 +72,22 @@ void main()
         hdr = center;
     }
 
-    // Composite bloom (additive).
+    // Composite bloom (additive) — scene only.
     vec3 bloom = texture(bloomBuffer, fragTexCoord).rgb;
-    hdr += bloom * bloomStrength;
+    hdr += bloom * bloomStrength * sceneMask;
 
-    // Composite SSR. RGB = reflection color, A = confidence/blend weight.
+    // Composite SSR — scene only.
     vec4 ssr = texture(ssrBuffer, fragTexCoord);
-    hdr = mix(hdr, ssr.rgb, ssr.a * ssrStrength);
+    hdr = mix(hdr, ssr.rgb, ssr.a * ssrStrength * sceneMask);
 
-    // Composite volumetrics (additive).
+    // Composite volumetrics (additive) — scene only.
     vec4 vol = texture(volumetricBuffer, fragTexCoord);
-    hdr += vol.rgb * volumetricStrength;
+    hdr += vol.rgb * volumetricStrength * sceneMask;
 
-    // Apply SSAO (multiplicative on the result).
+    // Apply SSAO (multiplicative) — scene only.
     float ao = texture(ssaoBuffer, fragTexCoord).r;
     ao = pow(ao, ssaoPower);
-    hdr *= mix(1.0, ao, ssaoStrength);
+    hdr *= mix(1.0, ao, ssaoStrength * sceneMask);
 
     // Apply exposure.
     hdr *= exposure;

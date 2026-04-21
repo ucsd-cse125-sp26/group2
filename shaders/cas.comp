@@ -59,5 +59,7 @@ void main()
     float maxComponent = max(max(center.r, center.g), center.b);
     result = clamp(result, minC, vec3(max(maxComponent, 1.0)));
 
-    imageStore(outputImage, coord, vec4(result, 1.0));
+    // Preserve alpha (carries weapon viewmodel mask: 0 = weapon pixel).
+    float alpha = texture(inputTex, uv).a;
+    imageStore(outputImage, coord, vec4(result, alpha));
 }

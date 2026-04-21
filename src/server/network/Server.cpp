@@ -196,3 +196,24 @@ void Server::broadcastRegistry(const Registry& registry)
         }
     }
 }
+
+void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events)
+{
+    if (events.empty())
+        return;
+
+    // Pack: [PacketType::PARTICLE_SPAWN (1B)] [count (4B)] [NetParticleEvent * count]
+    const auto count = static_cast<uint32_t>(events.size());
+    const size_t payloadSize = 1 + sizeof(uint32_t) + count * sizeof(NetParticleEvent);
+    std::vector<uint8_t> buf(payloadSize);
+
+    buf[0] = static_cast<uint8_t>(PacketType::PARTICLE_SPAWN);
+    std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
+    std::memcpy(buf.data() + 1 + sizeof(uint32_t), events.data(), count * sizeof(NetParticleEvent));
+
+    for (const auto& [clientId, conn] : clients) {
+        if (!send(clientId, buf.data(), static_cast<int>(buf.size()))) {
+            SDL_Log("Server: failed to send PARTICLE_SPAWN packet to client %d", clientId.value);
+        }
+    }
+}

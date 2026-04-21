@@ -6,6 +6,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -15,12 +16,11 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
+#include "network/ShotEvent.hpp"
 
 #include <SDL3/SDL.h>
-
-#include "ecs/components/Player.hpp"
-#include "ecs/systems/PlayerStatusSystem.hpp"
 
 bool ServerGame::init(const char* addr, Uint16 port, int hz)
 {
@@ -116,13 +116,15 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         }
     }
 
-    systems::runWeapon(registry, dt);
+    std::vector<NetParticleEvent> particleEvents;
+    systems::runWeapon(registry, dt, particleEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
     systems::runPlayerStatus(registry, dt);
 
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
+    server.broadcastParticleEvents(particleEvents);
 
     ++tickCount;
 
@@ -155,6 +157,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+    const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
     registry.emplace<WeaponState>(player,
                                   WeaponState{
                                       .primary =
@@ -169,6 +172,13 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                               .type = WeaponType::RailGun,
                                               .totalAmmo = railConfig.defaultAmmoCapacity,
                                               .currentMagAmmo = railConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .tertiary =
+                                          GunInstance{
+                                              .type = WeaponType::EnergyGun,
+                                              .totalAmmo = wingmanConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = wingmanConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .current = WeaponSlot::PRIMARY,

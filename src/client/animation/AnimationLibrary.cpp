@@ -56,6 +56,20 @@ const char* clipName(ClipId id)
         return "Slide";
     case ClipId::WallRun:
         return "Wall Run";
+    case ClipId::Jump:
+        return "Jump";
+    case ClipId::StrafeLeft:
+        return "Strafe Left";
+    case ClipId::StrafeRight:
+        return "Strafe Right";
+    case ClipId::StrafeLeftWalk:
+        return "Strafe Left Walk";
+    case ClipId::StrafeRightWalk:
+        return "Strafe Right Walk";
+    case ClipId::TurnLeft90:
+        return "Turn Left 90";
+    case ClipId::TurnRight90:
+        return "Turn Right 90";
     case ClipId::_Count:
         return "(none)";
     }
@@ -66,11 +80,11 @@ const char* clipFile(ClipId id)
 {
     switch (id) {
     case ClipId::Idle:
-        return "idle.fbx";
+        return "male_locomotion_pack/idle.fbx";
     case ClipId::Walk:
-        return "standard_walk.fbx";
+        return "male_locomotion_pack/walking.fbx";
     case ClipId::Run:
-        return "running.fbx";
+        return "male_locomotion_pack/standard run.fbx";
     case ClipId::RunBackward:
         return "running_backward.fbx";
     case ClipId::SlowRun:
@@ -79,6 +93,20 @@ const char* clipFile(ClipId id)
         return "running_slide.fbx";
     case ClipId::WallRun:
         return "wall_run.fbx";
+    case ClipId::Jump:
+        return "male_locomotion_pack/jump.fbx";
+    case ClipId::StrafeLeft:
+        return "male_locomotion_pack/left strafe.fbx";
+    case ClipId::StrafeRight:
+        return "male_locomotion_pack/right strafe.fbx";
+    case ClipId::StrafeLeftWalk:
+        return "male_locomotion_pack/left strafe walking.fbx";
+    case ClipId::StrafeRightWalk:
+        return "male_locomotion_pack/right strafe walking.fbx";
+    case ClipId::TurnLeft90:
+        return "male_locomotion_pack/left turn 90.fbx";
+    case ClipId::TurnRight90:
+        return "male_locomotion_pack/right turn 90.fbx";
     case ClipId::_Count:
         return "";
     }

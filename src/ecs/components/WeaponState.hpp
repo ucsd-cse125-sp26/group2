@@ -19,5 +19,6 @@ struct WeaponState
 {
     GunInstance primary;
     GunInstance secondary;
+    GunInstance tertiary;
     WeaponSlot current = WeaponSlot::PRIMARY; ///< Currently equipped weapon slot.
 };
