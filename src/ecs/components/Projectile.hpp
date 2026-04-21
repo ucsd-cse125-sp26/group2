@@ -19,6 +19,7 @@ enum class WeaponSlot : uint8_t
 {
     PRIMARY,
     SECONDARY,
+    TERTIARY,
 };
 
 /// @brief Surface material hit by a projectile — drives impact effect parameters.

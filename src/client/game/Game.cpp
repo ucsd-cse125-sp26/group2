@@ -559,29 +559,16 @@ SDL_AppResult Game::iterate()
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
                 // Determine current slot from WeaponState
-                WeaponSlot currentSlot = WeaponSlot::PRIMARY;
+                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2
                 registry.view<LocalPlayer, WeaponState>().each(
-                    [&](const WeaponState& ws) { currentSlot = ws.current; });
+                    [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
 
-                if (pendingScrollSwitch_ > 0) {
-                    // Next slot: PRIMARY→SECONDARY, SECONDARY→PRIMARY
-                    if (currentSlot == WeaponSlot::PRIMARY) {
-                        snap.switchToPrimary = false;
-                        snap.switchToSecondary = true;
-                    } else {
-                        snap.switchToPrimary = true;
-                        snap.switchToSecondary = false;
-                    }
-                } else {
-                    // Previous slot: same toggle logic
-                    if (currentSlot == WeaponSlot::SECONDARY) {
-                        snap.switchToPrimary = true;
-                        snap.switchToSecondary = false;
-                    } else {
-                        snap.switchToPrimary = false;
-                        snap.switchToSecondary = true;
-                    }
-                }
+                // Cycle: add direction, wrap around 3 slots
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 3) % 3;
+
+                snap.switchToPrimary = (slotIdx == 0);
+                snap.switchToSecondary = (slotIdx == 1);
+                snap.switchToTertiary = (slotIdx == 2);
             });
             pendingScrollSwitch_ = 0;
         }
@@ -810,7 +797,9 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::PRIMARY) ? ws.primary : ws.secondary;
+            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                             : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
                 return;
@@ -842,7 +831,9 @@ SDL_AppResult Game::iterate()
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::PRIMARY) ? ws.primary : ws.secondary;
+        const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                 : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                         : ws.primary;
         currentEquippedType_ = gun.type;
     });
 

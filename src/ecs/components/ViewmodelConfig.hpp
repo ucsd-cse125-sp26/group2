@@ -98,12 +98,8 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .yawOffset = -47.0f,
          .pitchOffset = 13.0f,
          .rollOffset = 0.0f},
-        // RailGun (Triple Take) — longer weapon
-        {.scale = 0.75f,
-         .handOffset = {12.0f, 15.0f, 10.0f},
-         .yawOffset = 58.0f,
-         .pitchOffset = 0.0f,
-         .rollOffset = 0.0f},
+        // RailGun (Triple Take)
+        {.scale = 1.0f, .handOffset = {7.5f, 7.5f, 15.0f}, .yawOffset = 0.0f, .pitchOffset = 96.0f, .rollOffset = 2.0f},
         // EnergyGun (Wingman) — pistol, smaller
         {.scale = 0.9f,
          .handOffset = {14.0f, 13.0f, 6.0f},

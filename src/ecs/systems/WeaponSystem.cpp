@@ -179,7 +179,14 @@ namespace systems
 
 inline GunInstance& getEquippedGun(WeaponState& weapon)
 {
-    return (weapon.current == WeaponSlot::PRIMARY) ? weapon.primary : weapon.secondary;
+    switch (weapon.current) {
+    case WeaponSlot::SECONDARY:
+        return weapon.secondary;
+    case WeaponSlot::TERTIARY:
+        return weapon.tertiary;
+    default:
+        return weapon.primary;
+    }
 }
 
 void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
@@ -188,6 +195,8 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary) {
         weapon.current = WeaponSlot::SECONDARY;
+    } else if (input.switchToTertiary) {
+        weapon.current = WeaponSlot::TERTIARY;
     }
 }
 
@@ -197,6 +206,7 @@ inline void handleCooldown(WeaponState& weapon, float dt)
 
     reduce(weapon.primary);
     reduce(weapon.secondary);
+    reduce(weapon.tertiary);
 }
 
 inline void handleReload(GunInstance& gun)
@@ -227,10 +237,15 @@ inline bool handleAmmo(GunInstance& gun)
 
 inline glm::vec3 viewForward(float yaw, float pitch)
 {
+    // Must match client camera convention:
+    //   X = sin(yaw) * cos(pitch)
+    //   Y = -sin(pitch)
+    //   Z = cos(yaw) * cos(pitch)
+    const float cp = std::cos(pitch);
     return glm::normalize(glm::vec3{
-        -std::sin(yaw) * std::cos(pitch),
-        std::sin(pitch),
-        -std::cos(yaw) * std::cos(pitch),
+        std::sin(yaw) * cp,
+        -std::sin(pitch),
+        std::cos(yaw) * cp,
     });
 }
 
