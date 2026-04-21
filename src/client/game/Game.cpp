@@ -13,6 +13,7 @@
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/physics/TitanfallConstants.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
@@ -133,7 +134,36 @@ bool Game::init()
         } else {
             SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
 
-            // Load every Mixamo clip onto the shared skeleton.
+            // Auto-calculate rig scale so the animated model matches the
+            // player's standing hitbox height, and compute the vertical
+            // offset so the model's feet sit at the bottom of the AABB.
+            {
+                float meshMinY = 0.0f;
+                float meshMaxY = 1.0f;
+                charRig_.verticalBounds(meshMinY, meshMaxY);
+                rigMeshMinY_ = meshMinY;
+
+                const float meshHeight = meshMaxY - meshMinY;
+                const float targetHeight = 2.0f * tms::k_standingHalfHeight; // 72 units
+                if (meshHeight > 0.001f) {
+                    kRigScale_ = targetHeight / meshHeight;
+                } else {
+                    kRigScale_ = 1.0f;
+                }
+                // Offset: move the model so its feet (meshMinY) align with
+                // the bottom of the standing AABB (pos.y - standingHalfHeight).
+                // Translation is relative to the entity's Position (AABB centre),
+                // so: translation.y = -halfHeight - meshMinY * scale.
+                kRigVerticalOffset_ = -tms::k_standingHalfHeight - rigMeshMinY_ * kRigScale_;
+                SDL_Log("[client] rig auto-scale: meshY=[%.1f, %.1f] height=%.1f -> scale=%.4f, vertOffset=%.1f",
+                        static_cast<double>(meshMinY),
+                        static_cast<double>(meshMaxY),
+                        static_cast<double>(meshHeight),
+                        static_cast<double>(kRigScale_),
+                        static_cast<double>(kRigVerticalOffset_));
+            }
+
+            // Load every animation clip onto the shared skeleton.
             for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
                 const ClipId id = static_cast<ClipId>(i);
                 const std::string clipPath = assetsDir + clipFile(id);
@@ -649,6 +679,7 @@ SDL_AppResult Game::iterate()
             ai.sprinting = ps.sprinting;
             ai.crouching = ps.crouching;
             ai.moveMode = static_cast<int>(ps.moveMode);
+            ai.wallRunSide = static_cast<int>(ps.wallRunSide);
             ac.animator->update(ai, frameTime);
 
             ac.animator->computeSkinnedVertices(skinnedBuffer);
@@ -712,10 +743,11 @@ SDL_AppResult Game::iterate()
             const float bobY = std::sin(bobPhase * 2.0f) * bobAmplitude * 0.5f;
 
             // FPS weapon position: lower-right of screen, slightly forward.
-            // The model at scale 5 is ~75 units long, realistic for a rifle
-            // in Quake-unit scale (1 unit ≈ 1 inch).
-            constexpr float k_weaponScale = 5.0f;
-            glm::vec3 weaponPos = renderEye + forward * 25.f + right * 18.f - up * 18.f;
+            // R-301 model bounds: Z ≈ 15.6 units (barrel axis).
+            // At scale 2.2 the weapon is ~34 units long (≈ 34 inches, matching
+            // the real R-301).  Player standing height is 72 Quake-units.
+            constexpr float k_weaponScale = 2.2f;
+            glm::vec3 weaponPos = renderEye + forward * 15.f + right * 10.f - up * 10.f;
             weaponPos += right * bobX + up * bobY;
 
             // Build world transform: translate → rotate → scale.
@@ -883,31 +915,40 @@ void Game::quit()
 void Game::refreshRemotePlayerRenderables()
 {
     // Remote players use the shared Mixamo rig — no more Wraith placeholder.
-    // Scale + Y offset are driven from the Animation Tester panel so the
-    // artist can tune them in-editor and commit the final values.
-    registry.view<Position, PlayerState, InputSnapshot>().each(
-        [&](entt::entity e, const Position&, const PlayerState&, const InputSnapshot& input) {
-            if (registry.all_of<LocalPlayer>(e))
-                return;
+    // Scale + Y offset are driven from the auto-calculated values (and tunable
+    // via the Animation Tester panel).
+    //
+    // The vertical offset places the model's feet at the bottom of the
+    // collision AABB: translation.y = -halfExtents.y - meshMinY * scale.
+    // This ensures the model tracks the AABB bottom automatically when
+    // crouching changes the half-height — no manual offset update needed.
+    registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
+                                                                                   const Position&,
+                                                                                   const PlayerState&,
+                                                                                   const InputSnapshot& input,
+                                                                                   const CollisionShape& shape) {
+        if (registry.all_of<LocalPlayer>(e))
+            return;
 
-            if (!registry.all_of<AnimatedCharacter>(e))
-                attachAnimatedCharacter(e);
+        if (!registry.all_of<AnimatedCharacter>(e))
+            attachAnimatedCharacter(e);
 
-            const auto& ac = registry.get<AnimatedCharacter>(e);
-            if (ac.modelIndex < 0)
-                return; // rig unavailable — leave entity un-rendered rather than crash.
+        const auto& ac = registry.get<AnimatedCharacter>(e);
+        if (ac.modelIndex < 0)
+            return; // rig unavailable — leave entity un-rendered rather than crash.
 
-            auto& rend = registry.get_or_emplace<Renderable>(e);
-            rend.modelIndex = ac.modelIndex;
-            rend.translation = glm::vec3(0.0f, kRigVerticalOffset_, 0.0f);
-            rend.scale = glm::vec3(kRigScale_);
-            // No importFix quaternion here: rig is loaded with
-            // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
-            // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
-            // facing the wrong axis after a visual check.
-            rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-            rend.visible = true;
-        });
+        auto& rend = registry.get_or_emplace<Renderable>(e);
+        rend.modelIndex = ac.modelIndex;
+        // Bottom-of-AABB reference: align model feet with the AABB bottom.
+        rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        rend.scale = glm::vec3(kRigScale_);
+        // No importFix quaternion here: rig is loaded with
+        // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
+        // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
+        // facing the wrong axis after a visual check.
+        rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        rend.visible = true;
+    });
 }
 
 void Game::attachAnimatedCharacter(entt::entity e)

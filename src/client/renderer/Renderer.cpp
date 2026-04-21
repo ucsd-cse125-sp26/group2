@@ -1098,7 +1098,8 @@ bool Renderer::initIBL()
 bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
 {
     if (!envCube || !irradianceMap || !prefilterMap || !irradianceWorkMap || !prefilterWorkMap || !iblSampler ||
-        !irradiancePipeline || !prefilterPipeline) {
+        !irradiancePipeline || !prefilterPipeline)
+    {
         SDL_Log("IBL: regenerateIBLFromCubemap missing required resources");
         return false;
     }
@@ -1147,8 +1148,13 @@ bool Renderer::regenerateIBLFromCubemap(SDL_GPUTexture* envCube)
             dst.texture = irradianceMap;
             dst.layer = static_cast<Uint32>(face);
 
-            SDL_CopyGPUTextureToTexture(
-                copyPass, &src, &dst, static_cast<Uint32>(k_irradianceSize), static_cast<Uint32>(k_irradianceSize), 1, false);
+            SDL_CopyGPUTextureToTexture(copyPass,
+                                        &src,
+                                        &dst,
+                                        static_cast<Uint32>(k_irradianceSize),
+                                        static_cast<Uint32>(k_irradianceSize),
+                                        1,
+                                        false);
         }
         SDL_EndGPUCopyPass(copyPass);
     }
@@ -2625,84 +2631,99 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             particleSystem->render(pass, cmd);
         }
 
-        // First-person weapon viewmodel
-        // Rendered last in the HDR pass. The weapon should always be in front,
-        // so we don't clear depth — it just draws over the scene at close range.
-        if (toggles.weaponViewmodel && weaponVM.visible && weaponVM.modelIndex >= 0 &&
-            weaponVM.modelIndex < static_cast<int>(models.size()) && pbrPipeline)
-        {
+        SDL_EndGPURenderPass(pass);
+    }
 
-            SDL_BindGPUGraphicsPipeline(pass, pbrPipeline);
+    // First-person weapon viewmodel — rendered in a SEPARATE pass so the
+    // scene depth buffer doesn't occlude it.  The colour target is LOAD'd
+    // (preserves scene), the depth is CLEAR'd to 1.0 (weapon always wins)
+    // but then DONT_CARE'd so the scene depth that SSAO/SSR/bloom need is
+    // untouched (they read the depth stored by the main HDR pass above).
+    if (toggles.weaponViewmodel && weaponVM.visible && weaponVM.modelIndex >= 0 &&
+        weaponVM.modelIndex < static_cast<int>(models.size()) && pbrPipeline)
+    {
+        SDL_GPUColorTargetInfo weapCt{};
+        weapCt.texture = hdrTarget;
+        weapCt.load_op = SDL_GPU_LOADOP_LOAD; // preserve the scene image
+        weapCt.store_op = SDL_GPU_STOREOP_STORE;
 
-            const auto& wmodel = models[static_cast<size_t>(weaponVM.modelIndex)];
+        SDL_GPUDepthStencilTargetInfo weapDt{};
+        weapDt.texture = depthTexture;
+        weapDt.clear_depth = 1.0f;                   // fresh depth — weapon can't lose
+        weapDt.load_op = SDL_GPU_LOADOP_CLEAR;
+        weapDt.store_op = SDL_GPU_STOREOP_DONT_CARE; // don't clobber scene depth for SSAO/SSR
+        weapDt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        weapDt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 
-            Matrices vmMats{};
-            vmMats.model = weaponVM.transform;
-            vmMats.view = camera.getViewMatrix();
-            vmMats.projection = camera.getProjectionMatrix();
-            vmMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(weaponVM.transform)));
-            SDL_PushGPUVertexUniformData(cmd, 0, &vmMats, sizeof(vmMats));
+        SDL_GPURenderPass* weapPass = SDL_BeginGPURenderPass(cmd, &weapCt, 1, &weapDt);
 
-            // Light data for weapon (same as scene).
-            LightDataUBO weaponLightData{};
-            weaponLightData.cameraPos = glm::vec4(eye, 1.0f);
-            weaponLightData.ambientColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
-            weaponLightData.numLights = 2;
-            weaponLightData.iblDiffuseIntensity = iblDiffuseIntensity;
-            weaponLightData.iblSpecularIntensity = iblSpecularIntensity;
-            weaponLightData.lights[0].position = glm::vec4(getSunDirection(), 0.0f);
-            weaponLightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
-            weaponLightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
-            weaponLightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
-            SDL_PushGPUFragmentUniformData(cmd, 1, &weaponLightData, sizeof(weaponLightData));
+        SDL_BindGPUGraphicsPipeline(weapPass, pbrPipeline);
 
-            ShadowDataFragUBO weaponShadow{};
-            weaponShadow.shadowMapSize = 0.0f; // No shadows for weapon viewmodel.
-            SDL_PushGPUFragmentUniformData(cmd, 2, &weaponShadow, sizeof(weaponShadow));
+        const auto& wmodel = models[static_cast<size_t>(weaponVM.modelIndex)];
 
-            for (const auto& mesh : wmodel.meshes) {
-                if (mesh.isTransparent)
-                    continue;
+        Matrices vmMats{};
+        vmMats.model = weaponVM.transform;
+        vmMats.view = camera.getViewMatrix();
+        vmMats.projection = camera.getProjectionMatrix();
+        vmMats.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(weaponVM.transform)));
+        SDL_PushGPUVertexUniformData(cmd, 0, &vmMats, sizeof(vmMats));
 
-                MaterialUBO matUBO{};
-                matUBO.baseColorFactor = mesh.material.baseColorFactor;
-                matUBO.metallicFactor = mesh.material.metallicFactor;
-                matUBO.roughnessFactor = mesh.material.roughnessFactor;
-                matUBO.aoStrength = mesh.material.aoStrength;
-                matUBO.normalScale = mesh.material.normalScale;
-                matUBO.emissiveFactor = mesh.material.emissiveFactor;
-                SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+        // Lighting for the weapon (same scene lights, no shadows).
+        LightDataUBO weaponLightData{};
+        weaponLightData.cameraPos = glm::vec4(eye, 1.0f);
+        weaponLightData.ambientColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
+        weaponLightData.numLights = 2;
+        weaponLightData.iblDiffuseIntensity = iblDiffuseIntensity;
+        weaponLightData.iblSpecularIntensity = iblSpecularIntensity;
+        weaponLightData.lights[0].position = glm::vec4(getSunDirection(), 0.0f);
+        weaponLightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
+        weaponLightData.lights[1].position = glm::vec4(glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f)), 0.0f);
+        weaponLightData.lights[1].color = glm::vec4(0.3f, 0.4f, 0.6f, 1.0f);
+        SDL_PushGPUFragmentUniformData(cmd, 1, &weaponLightData, sizeof(weaponLightData));
 
-                const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
-                SDL_BindGPUVertexBuffers(pass, 0, &vbBind, 1);
-                const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
-                SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        ShadowDataFragUBO weaponShadow{};
+        weaponShadow.shadowMapSize = 0.0f; // No shadows on the viewmodel.
+        SDL_PushGPUFragmentUniformData(cmd, 2, &weaponShadow, sizeof(weaponShadow));
 
-                auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
-                    if (idx >= 0 && static_cast<size_t>(idx) < wmodel.textures.size() &&
-                        wmodel.textures[static_cast<size_t>(idx)])
-                        return wmodel.textures[static_cast<size_t>(idx)];
-                    return fallback;
-                };
+        for (const auto& mesh : wmodel.meshes) {
+            MaterialUBO matUBO{};
+            matUBO.baseColorFactor = mesh.material.baseColorFactor;
+            matUBO.metallicFactor = mesh.material.metallicFactor;
+            matUBO.roughnessFactor = mesh.material.roughnessFactor;
+            matUBO.aoStrength = mesh.material.aoStrength;
+            matUBO.normalScale = mesh.material.normalScale;
+            matUBO.emissiveFactor = mesh.material.emissiveFactor;
+            SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
 
-                const SDL_GPUTextureSamplerBinding samplers[8] = {
-                    {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
-                    {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
-                    {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
-                    {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
-                    {.texture = irradianceMap, .sampler = iblSampler},
-                    {.texture = prefilterMap, .sampler = iblSampler},
-                    {.texture = brdfLUT, .sampler = iblSampler},
-                    {.texture = shadowMap ? shadowMap : fallbackWhite,
-                     .sampler = shadowSampler ? shadowSampler : pbrSampler},
-                };
-                SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
+            const SDL_GPUBufferBinding vbBind = {.buffer = mesh.vertexBuffer, .offset = 0};
+            SDL_BindGPUVertexBuffers(weapPass, 0, &vbBind, 1);
+            const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+            SDL_BindGPUIndexBuffer(weapPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-                SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
-            }
+            auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                if (idx >= 0 && static_cast<size_t>(idx) < wmodel.textures.size() &&
+                    wmodel.textures[static_cast<size_t>(idx)])
+                    return wmodel.textures[static_cast<size_t>(idx)];
+                return fallback;
+            };
+
+            const SDL_GPUTextureSamplerBinding samplers[8] = {
+                {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                {.texture = irradianceMap, .sampler = iblSampler},
+                {.texture = prefilterMap, .sampler = iblSampler},
+                {.texture = brdfLUT, .sampler = iblSampler},
+                {.texture = shadowMap ? shadowMap : fallbackWhite,
+                 .sampler = shadowSampler ? shadowSampler : pbrSampler},
+            };
+            SDL_BindGPUFragmentSamplers(weapPass, 0, samplers, 8);
+
+            SDL_DrawGPUIndexedPrimitives(weapPass, mesh.indexCount, 1, 0, 0, 0);
         }
 
-        SDL_EndGPURenderPass(pass);
+        SDL_EndGPURenderPass(weapPass);
     }
 
     // Compute passes: SSAO, Bloom, SSR, Volumetrics (between HDR and tonemap)
@@ -3245,6 +3266,50 @@ int Renderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, b
         SDL_Log("Renderer::loadSceneModel: failed to load '%s'", filename);
         return -1;
     }
+
+    // ── DEBUG: dump vertex data stats for every loaded model ──
+    SDL_Log("[LOAD-DBG] '%s': %zu mesh(es)", filename, loaded.meshes.size());
+    for (size_t mi = 0; mi < loaded.meshes.size(); ++mi) {
+        const auto& md = loaded.meshes[mi];
+        SDL_Log("[LOAD-DBG]   mesh[%zu]: %zu verts, %zu indices", mi, md.vertices.size(), md.indices.size());
+        // Compute bounds & print first 3 vertices
+        glm::vec3 bmin(1e9f), bmax(-1e9f);
+        for (size_t vi = 0; vi < md.vertices.size(); ++vi) {
+            const auto& v = md.vertices[vi];
+            bmin = glm::min(bmin, v.position);
+            bmax = glm::max(bmax, v.position);
+            if (vi < 3) {
+                SDL_Log("[LOAD-DBG]     v[%zu] pos=(%.4f, %.4f, %.4f) nrm=(%.3f,%.3f,%.3f) uv=(%.3f,%.3f)",
+                        vi,
+                        v.position.x,
+                        v.position.y,
+                        v.position.z,
+                        v.normal.x,
+                        v.normal.y,
+                        v.normal.z,
+                        v.texCoord.x,
+                        v.texCoord.y);
+            }
+        }
+        SDL_Log("[LOAD-DBG]     bounds: min=(%.4f,%.4f,%.4f) max=(%.4f,%.4f,%.4f)",
+                bmin.x,
+                bmin.y,
+                bmin.z,
+                bmax.x,
+                bmax.y,
+                bmax.z);
+        // Print first 6 indices (2 triangles)
+        if (md.indices.size() >= 6) {
+            SDL_Log("[LOAD-DBG]     first indices: %u %u %u | %u %u %u",
+                    md.indices[0],
+                    md.indices[1],
+                    md.indices[2],
+                    md.indices[3],
+                    md.indices[4],
+                    md.indices[5]);
+        }
+    }
+    // ── END DEBUG ──
 
     ModelInstance inst;
     inst.transform = glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(scale));

@@ -76,6 +76,13 @@ public:
     /// an animation channel in a given clip).
     [[nodiscard]] const std::unordered_map<std::string, anim_utils::JointRestPose>& restPoses() const noexcept;
 
+    /// @brief Compute the vertical (Y) extent of the bind-pose mesh.
+    ///
+    /// Scans all vertices across all meshes and returns the minimum and
+    /// maximum Y coordinates.  Used to auto-calculate the rig scale so the
+    /// animated model matches the player's collision AABB height.
+    void verticalBounds(float& outMinY, float& outMaxY) const;
+
     /// @brief A LoadedModel built from the rig's bind-pose meshes, suitable
     /// for cloning into a renderer model instance per animated entity.
     ///

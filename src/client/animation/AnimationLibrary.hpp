@@ -26,7 +26,14 @@ enum class ClipId : uint8_t
     SlowRun,
     Slide,
     WallRun,
-    _Count, ///< Sentinel; also used as "no clip / no override".
+    Jump,            ///< Airborne jump animation.
+    StrafeLeft,      ///< Running strafe left.
+    StrafeRight,     ///< Running strafe right.
+    StrafeLeftWalk,  ///< Walking strafe left.
+    StrafeRightWalk, ///< Walking strafe right.
+    TurnLeft90,      ///< 90-degree turn left (standing).
+    TurnRight90,     ///< 90-degree turn right (standing).
+    _Count,          ///< Sentinel; also used as "no clip / no override".
 };
 
 /// @brief Human-readable name for a clip (for UI / logging).

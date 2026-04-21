@@ -33,6 +33,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <limits>
 #include <unordered_set>
 
 struct CharacterRig::Impl
@@ -89,6 +90,25 @@ const std::unordered_map<std::string, anim_utils::JointRestPose>& CharacterRig::
 const LoadedModel& CharacterRig::templateLoadedModel() const noexcept
 {
     return impl_->templateLoadedModel;
+}
+
+void CharacterRig::verticalBounds(float& outMinY, float& outMaxY) const
+{
+    outMinY = std::numeric_limits<float>::max();
+    outMaxY = std::numeric_limits<float>::lowest();
+    for (const auto& mesh : impl_->meshes) {
+        for (const auto& vert : mesh.baseVertices) {
+            if (vert.position.y < outMinY)
+                outMinY = vert.position.y;
+            if (vert.position.y > outMaxY)
+                outMaxY = vert.position.y;
+        }
+    }
+    if (outMinY > outMaxY) {
+        // Fallback if no vertices exist.
+        outMinY = 0.0f;
+        outMaxY = 1.0f;
+    }
 }
 
 bool CharacterRig::loadFromFBX(const std::string& path)

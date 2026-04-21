@@ -24,7 +24,17 @@ struct AnimationInputs
     bool sprinting = false;        ///< Sprint key currently held.
     bool crouching = false;        ///< Crouch currently held (phase 1: note-only).
     int moveMode = 0;              ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning, 3=Climbing, 4=LedgeGrabbing.
+    int wallRunSide = 0;           ///< WallSide value: 0=None, 1=Left, 2=Right.
 };
+
+/// Number of sampler slots available for the per-frame blend.
+///
+///  [0] locomotion primary    (Idle / Walk / Run / RunBackward)
+///  [1] locomotion secondary  (for 1-D speed band blend)
+///  [2] locomotion strafe     (StrafeLeft/Right, WalkStrafe/RunStrafe)
+///  [3] override              (Slide / WallRun / Jump / debug clip)
+///  [4] reserved              (future: additive upper-body layer)
+static constexpr size_t kNumSamplerSlots = 5;
 
 /// @brief One active sampler slot contributing to the per-frame blend.
 struct ClipSampler
@@ -77,7 +87,7 @@ public:
     [[nodiscard]] ClipId debugOverride() const noexcept;
 
     /// @brief Snapshot of the current sampler slots (for UI inspection).
-    [[nodiscard]] const std::array<ClipSampler, 4>& samplers() const noexcept;
+    [[nodiscard]] const std::array<ClipSampler, kNumSamplerSlots>& samplers() const noexcept;
 
     /// @brief Playback-speed multiplier applied in debug-override mode.
     void setDebugPlaybackSpeed(float mul) noexcept;
