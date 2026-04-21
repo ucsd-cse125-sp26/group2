@@ -29,6 +29,7 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <imgui.h>
 
 bool Game::init()
 {
@@ -715,12 +716,11 @@ SDL_AppResult Game::iterate()
     }
 
     // Build weapon viewmodel
-    // R-301 model actual bounds (from Sketchfab GLB, likely in millimetres):
-    //   X: −722 to +613  (1336 mm, ~53 in — side-to-side / stock-to-muzzle)
-    //   Y:  183 to  772  ( 588 mm, ~23 in — bottom-to-top, entirely above origin)
-    //   Z: −476 to +392  ( 868 mm, ~34 in)
+    // R-301 model actual bounds (from Sketchfab GLB, in millimetres):
+    //   X: −722 to +613  (1336 mm — longest axis, barrel direction)
+    //   Y:  183 to  772  ( 588 mm — bottom-to-top, entirely above origin)
+    //   Z: −476 to +392  ( 868 mm)
     // Model centre ≈ (−55, 478, −42) in model space.
-    // Model's +Z axis is the barrel direction.  Origin is well below the model.
     {
         WeaponViewmodel vm;
         if (weaponModelIdx >= 0) {
@@ -747,28 +747,32 @@ SDL_AppResult Game::iterate()
             const float bobX = std::sin(bobPhase) * bobAmplitude;
             const float bobY = std::sin(bobPhase * 2.0f) * bobAmplitude * 0.5f;
 
-            // FPS weapon position: lower-right of screen, slightly forward.
-            // The model is in millimetres (~1336 mm longest axis).  Scale
-            // 0.03 brings the barrel (Z, 868 mm) down to ~26 Quake-units
-            // (≈ 26 inches), a good FPS-viewmodel size.  The model centre
-            // is at Y ≈ 478 mm, so at scale 0.03 it sits ~14 units above
-            // the anchor — we push `up` down by 25 to compensate and land
-            // the weapon in the lower-right of the screen.
-            constexpr float k_weaponScale = 0.03f;
-            glm::vec3 weaponPos = renderEye + forward * 20.f + right * 10.f - up * 25.f;
+            // Position the weapon in camera space, then convert to world.
+            glm::vec3 weaponPos = renderEye + forward * vmForward + right * vmRight - up * vmDown;
             weaponPos += right * bobX + up * bobY;
 
-            // Build world transform: translate → rotate → scale.
-            // Rotation: model +Z (barrel) → camera forward,
-            //           model +Y (rail)   → camera up,
-            //           model +X (side)   → camera right.
+            // Build world transform: translate → local-rotate → camera-orient → scale.
+            //
+            // 1) Camera orientation: maps model axes into camera space.
+            //    Column 0 (model X) → camera right
+            //    Column 1 (model Y) → camera up
+            //    Column 2 (model Z) → camera forward
+            const glm::mat4 cameraOrient = glm::mat4(glm::vec4(right, 0.0f),
+                                                     glm::vec4(up, 0.0f),
+                                                     glm::vec4(forward, 0.0f),
+                                                     glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+            // 2) Local rotation offsets (yaw/pitch/roll in degrees) let us
+            //    re-orient the model so the barrel points the right way.
+            //    Default yaw −90° rotates model +X (barrel) into +Z (forward).
+            const glm::mat4 localRot = glm::rotate(glm::mat4(1.0f), glm::radians(vmYawOffset), glm::vec3(0, 1, 0)) *
+                                       glm::rotate(glm::mat4(1.0f), glm::radians(vmPitchOffset), glm::vec3(1, 0, 0)) *
+                                       glm::rotate(glm::mat4(1.0f), glm::radians(vmRollOffset), glm::vec3(0, 0, 1));
+
             glm::mat4 weaponWorld = glm::translate(glm::mat4(1.0f), weaponPos);
-            const glm::mat4 rotMat = glm::mat4(glm::vec4(right, 0.0f),   // column 0: model X → right
-                                               glm::vec4(up, 0.0f),      // column 1: model Y → up
-                                               glm::vec4(forward, 0.0f), // column 2: model Z → forward (barrel)
-                                               glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-            weaponWorld *= rotMat;
-            weaponWorld = glm::scale(weaponWorld, glm::vec3(k_weaponScale));
+            weaponWorld *= cameraOrient;
+            weaponWorld *= localRot;
+            weaponWorld = glm::scale(weaponWorld, glm::vec3(vmScale));
 
             vm.transform = weaponWorld;
         }
@@ -873,6 +877,36 @@ SDL_AppResult Game::iterate()
     debugUI.buildLightingUI(renderer);
     debugUI.buildSkyboxUI(renderer);
 #endif
+
+    // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
+    if (showViewmodelUI) {
+        if (ImGui::Begin("Viewmodel Tweaker", &showViewmodelUI)) {
+            ImGui::SeparatorText("Position (Quake units)");
+            ImGui::DragFloat("Forward", &vmForward, 0.5f, -50.0f, 100.0f, "%.1f");
+            ImGui::DragFloat("Right", &vmRight, 0.5f, -50.0f, 50.0f, "%.1f");
+            ImGui::DragFloat("Down", &vmDown, 0.5f, -50.0f, 80.0f, "%.1f");
+
+            ImGui::SeparatorText("Rotation (degrees)");
+            ImGui::DragFloat("Yaw", &vmYawOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Pitch", &vmPitchOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Roll", &vmRollOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+
+            ImGui::SeparatorText("Scale");
+            ImGui::DragFloat("Scale", &vmScale, 0.001f, 0.001f, 1.0f, "%.4f");
+
+            ImGui::Separator();
+            if (ImGui::Button("Reset defaults")) {
+                vmScale = 0.03f;
+                vmForward = 21.0f;
+                vmRight = 13.5f;
+                vmDown = 23.0f;
+                vmYawOffset = -58.0f;
+                vmPitchOffset = 10.0f;
+                vmRollOffset = -2.0f;
+            }
+        }
+        ImGui::End();
+    }
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
