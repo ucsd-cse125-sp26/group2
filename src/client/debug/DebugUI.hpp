@@ -88,6 +88,7 @@ public:
 
     /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
     void buildNetworkUI(const NetworkStats& stats);
+    void buildWeaponUI(const Registry& registry);
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();

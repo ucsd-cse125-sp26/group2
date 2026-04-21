@@ -27,6 +27,9 @@ struct InputSnapshot
     bool sprint{false};   ///< Left Shift key.
     bool grapple{false};  ///< Middle mouse button / E key.
     bool shooting{false}; ///< Primary fire button.
+    bool reload{false}; ///< Reload button.
+    bool switchToPrimary{false}; ///< Switch to gun in primary slot.
+    bool switchToSecondary{false}; ///<Switch to gun in secondary slot.
 
     float yaw{0.0f};      ///< Horizontal look angle in radians (accumulated from mouse X deltas).
     float pitch{0.0f};    ///< Vertical look angle in radians, clamped to [-89°, +89°] by InputSampleSystem.
