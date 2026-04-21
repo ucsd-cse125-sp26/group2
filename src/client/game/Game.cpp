@@ -11,6 +11,7 @@
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "network/NetworkConfig.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
@@ -102,7 +103,9 @@ bool Game::init()
 
         SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
     });
-    if (!client.init(netCfg.host.c_str(), netCfg.port)) {
+
+    const NetworkAddress clientNet = netCfg.clientNetwork;
+    if (!client.init(clientNet.host.c_str(), clientNet.port)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
         renderer.quit();

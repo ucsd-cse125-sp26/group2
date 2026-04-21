@@ -17,9 +17,10 @@ int main()
     const char* base = SDL_GetBasePath();
     std::string cfgPath = std::string(base ? base : "") + "config.toml";
     const NetworkConfig cfg = loadNetworkConfig(cfgPath.c_str());
+    const NetworkAddress& serverNet = cfg.serverNetwork;
 
     ServerGame game;
-    if (!game.init(cfg.host.c_str(), cfg.port)) // default 128 Hz
+    if (!game.init(serverNet.host.c_str(), serverNet.port)) // default 128 Hz
     {
         NET_Quit();
         SDL_Quit();
