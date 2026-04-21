@@ -14,6 +14,8 @@
 #include <cmath>
 #include <glm/geometric.hpp>
 
+#include "PlayerStatusSystem.hpp"
+
 namespace
 {
 
@@ -121,8 +123,7 @@ HitscanHit raycastPlayers(
     HitscanHit bestHit;
     bestHit.distance = maxDistance;
 
-    registry.view<Position, CollisionShape>().each([&](
-                                                     entt::entity entity, const Position& pos, const CollisionShape& shape) {
+    registry.view<Position, CollisionShape>().each([&](entt::entity entity, const Position& pos, const CollisionShape& shape) {
         if (entity == shooter) {
             return;
         }
@@ -156,6 +157,7 @@ HitscanHit resolveHitscan(Registry& registry, entt::entity shooter, glm::vec3 or
     const HitscanHit playerHit = raycastPlayers(registry, shooter, origin, direction, bestHit.distance);
     if (playerHit.hit && (!bestHit.hit || playerHit.distance < bestHit.distance)) {
         bestHit = playerHit;
+        SDL_Log("PLAYER HIT!!");
     }
 
     if (!bestHit.hit) {
@@ -214,7 +216,8 @@ inline void handleReload(GunInstance& gun)
 inline bool handleAmmo(GunInstance& gun)
 {
     if (gun.currentMagAmmo <= 0) {
-        // handleReload(gun);
+        //TODO: Need to implement reload state so it is not instant.
+        handleReload(gun);
         return false;
     }
 
@@ -225,9 +228,9 @@ inline bool handleAmmo(GunInstance& gun)
 inline glm::vec3 viewForward(float yaw, float pitch)
 {
     return glm::normalize(glm::vec3{
-        -std::sin(yaw) * std::cos(pitch),
-         std::sin(pitch),
-        -std::cos(yaw) * std::cos(pitch),
+        std::sin(yaw) * std::cos(pitch),
+         -std::sin(pitch),
+        std::cos(yaw) * std::cos(pitch),
     });
 }
 
@@ -262,13 +265,7 @@ inline void handleFire(
 
     // TODO: apply damage to hit.entity and emit a replicated shot event for client FX.
     if (hit.entity != entt::null && registry.valid(hit.entity)) {
-        Health& playerHealth = registry.get_or_emplace<Health>(hit.entity);
-        if (playerHealth.armor >= config.damage) {
-            playerHealth.armor -= config.damage;
-        } else {
-            float overflow = config.damage - playerHealth.armor;
-            playerHealth.health -= overflow;
-        }
+        applyDamage(config.damage, hit.entity, shooter, registry);
     }
     // SDL_Log("[server] Shot fired by (%d)", shooter);
     // registry.view<InputSnapshot, WeaponState>().each(

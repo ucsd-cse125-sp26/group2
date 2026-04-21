@@ -32,6 +32,7 @@ struct PlayerState
 {
     // Core state
     MoveMode moveMode{MoveMode::OnFoot};
+    bool IsDead{false};        ///< Is dead, skill issue...
     bool grounded{false};            ///< True when touching a floor surface this tick.
     bool crouching{false};           ///< True when crouch input is held.
     bool sprinting{false};           ///< True when sprint is active.

@@ -19,6 +19,9 @@
 
 #include <SDL3/SDL.h>
 
+#include "ecs/components/Player.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
+
 bool ServerGame::init(const char* addr, Uint16 port, int hz)
 {
     tickRateHz = hz;
@@ -116,6 +119,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     systems::runWeapon(registry, dt);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
+    systems::runPlayerStatus(registry, dt);
 
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
@@ -140,6 +144,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     const entt::entity player = registry.create();
     clientEntities[clientId] = player;
 
+    registry.emplace<Player>(player, Player{});
     registry.emplace<InputSnapshot>(player);
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);

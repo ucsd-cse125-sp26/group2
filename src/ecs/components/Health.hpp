@@ -6,7 +6,6 @@
 struct Health
 {
     float health = 100.0f;
-    float healthMax = 100.0f;
     float armor = 100.0f;
-    float armorMax = 100.0f;
+    float healTimer = 0.0f;
 };
