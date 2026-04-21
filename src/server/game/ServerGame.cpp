@@ -6,6 +6,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -15,6 +16,7 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/ShotEvent.hpp"
 
@@ -118,6 +120,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     systems::runWeapon(registry, dt, particleEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
+    systems::runPlayerStatus(registry, dt);
 
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
@@ -143,6 +146,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     const entt::entity player = registry.create();
     clientEntities[clientId] = player;
 
+    registry.emplace<Player>(player, Player{});
     registry.emplace<InputSnapshot>(player);
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);

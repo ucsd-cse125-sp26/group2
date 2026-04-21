@@ -3,6 +3,7 @@
 
 #include "ecs/systems/WeaponSystem.hpp"
 
+#include "PlayerStatusSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -162,6 +163,7 @@ HitscanHit resolveHitscan(Registry& registry, entt::entity shooter, glm::vec3 or
     const HitscanHit playerHit = raycastPlayers(registry, shooter, origin, direction, bestHit.distance);
     if (playerHit.hit && (!bestHit.hit || playerHit.distance < bestHit.distance)) {
         bestHit = playerHit;
+        SDL_Log("PLAYER HIT!!");
     }
 
     if (!bestHit.hit) {
@@ -227,7 +229,8 @@ inline void handleReload(GunInstance& gun)
 inline bool handleAmmo(GunInstance& gun)
 {
     if (gun.currentMagAmmo <= 0) {
-        // handleReload(gun);
+        // TODO: Need to implement reload state so it is not instant.
+        handleReload(gun);
         return false;
     }
 
@@ -285,13 +288,7 @@ inline void handleFire(Registry& registry,
 
     // Apply damage
     if (hit.entity != entt::null && registry.valid(hit.entity)) {
-        Health& playerHealth = registry.get_or_emplace<Health>(hit.entity);
-        if (playerHealth.armor >= config.damage) {
-            playerHealth.armor -= config.damage;
-        } else {
-            float overflow = config.damage - playerHealth.armor;
-            playerHealth.health -= overflow;
-        }
+        applyDamage(config.damage, hit.entity, shooter, registry);
     }
 
     // Emit replicated particle events for client FX.

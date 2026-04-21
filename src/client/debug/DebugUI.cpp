@@ -16,6 +16,7 @@
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/Client.hpp"    // for NetworkStats
 #include "particles/ParticleSystem.hpp"
 #include "renderer/Renderer.hpp" // for RenderToggles
@@ -1169,8 +1170,9 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     ImGui::SeparatorText("Vitals");
     if (registry.all_of<Health>(localPlayer)) {
         const Health& health = registry.get<Health>(localPlayer);
-        ImGui::Text("Armor:   %.0f / %.0f", static_cast<double>(health.armor), static_cast<double>(health.armorMax));
-        ImGui::Text("Health:  %.0f / %.0f", static_cast<double>(health.health), static_cast<double>(health.healthMax));
+        ImGui::Text("Armor:   %.0f / %.0f", static_cast<double>(health.armor), static_cast<double>(systems::armorMax));
+        ImGui::Text(
+            "Health:  %.0f / %.0f", static_cast<double>(health.health), static_cast<double>(systems::healthMax));
     } else {
         ImGui::TextDisabled("Health state unavailable");
     }
