@@ -38,7 +38,12 @@
 
 bool Game::init()
 {
-    SDL_SetAppMetadata("group2", "0.1.0", "com.cse125.group2");
+#ifdef USE_HYBRID_RENDERER
+    static constexpr const char* k_appName = "group2";
+#else
+    static constexpr const char* k_appName = "client";
+#endif
+    SDL_SetAppMetadata(k_appName, "0.1.0", "com.cse125.group2");
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
@@ -56,7 +61,7 @@ bool Game::init()
         netCfg = loadNetworkConfig(cfgPath.c_str());
     }
 
-    window = SDL_CreateWindow("group2", 1280, 720, SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
         return false;
@@ -86,8 +91,11 @@ bool Game::init()
     } else {
         renderer.setParticleSystem(&particleSystem);
 
-        // Wire dispatcher events to particle system
-        dispatcher.sink<WeaponFiredEvent>().connect<&ParticleSystem::onWeaponFired>(particleSystem);
+        // Wire dispatcher events to particle system.
+        // NOTE: WeaponFiredEvent is NOT wired here — local weapon VFX (tracers,
+        // beams, impacts) are spawned explicitly in iterate() so we control
+        // exactly which effect plays per weapon type.  onWeaponFired would
+        // unconditionally spawn a hitscan beam for every hitscan weapon.
         dispatcher.sink<ProjectileImpactEvent>().connect<&ParticleSystem::onImpact>(particleSystem);
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
