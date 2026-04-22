@@ -91,6 +91,9 @@ public:
     void buildNetworkUI(const NetworkStats& stats);
     void buildWeaponUI(const Registry& registry);
 
+    /// @brief Build the persistent scoreboard HUD showing all players' kills, deaths, and score.
+    void buildScoreboardUI(const Registry& registry);
+
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
@@ -114,6 +117,7 @@ private:
     bool showLightingControls = true; ///< Show the Lighting Controls window.
     bool showSkybox = true;           ///< Show the Skybox window.
     bool showNetworkStats = true;     ///< Show the Network Stats window.
+    bool showScoreboard_ = true;      ///< Show the scoreboard HUD window.
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.

@@ -6,6 +6,7 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
+#include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -78,8 +79,14 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
 inline void handleDeath(entt::entity& player, Health& playerHealth, entt::entity& killer, Registry& registry)
 {
     if (playerHealth.health <= 0) {
+        // Update death
         registry.get_or_emplace<PlayerState>(player).IsDead = true;
-        // TODO: award score to killer
+        registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
+
+        // Award killer
+        registry.patch<PlayerMatchStats>(killer, [&](PlayerMatchStats& stats) { stats.kills++; });
+
+        // Respawn
         handleRespawn(player, registry);
     }
 }
