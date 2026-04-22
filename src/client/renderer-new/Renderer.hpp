@@ -24,7 +24,6 @@ struct Vertex
     glm::vec2 texUV;
 };
 
-
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
 ///
 /// Implements `IRenderer` but only a handful of methods are meaningful today
@@ -117,8 +116,9 @@ private:
 
     [[nodiscard]] SDL_GPUTransferBuffer* createTransferBuffer(size_t transferBufferSize, bool upload) const;
     [[nodiscard]] SDL_GPUBuffer* createGPUBuffer(size_t bufferSize, SDL_GPUBufferUsageFlags usage) const;
-    void uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd, const std::vector<Asset::GeoBufferInfo>& modelBuffersInfo) const;
-    void drawMesh(SDL_GPURenderPass* renderPass,SDL_GPUIndexElementSize iElementSizeSdlType,Asset::Mesh m);
+    void uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
+                               const std::vector<Asset::GeoBufferInfo>& modelBuffersInfo) const;
+    void drawMesh(SDL_GPURenderPass* renderPass, SDL_GPUIndexElementSize iElementSizeSdlType, Asset::Mesh m);
 
     bool initCommon(SDL_Window* window);
     void genMeshBuffers(MeshIdInt meshId);

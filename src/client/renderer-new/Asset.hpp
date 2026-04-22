@@ -8,8 +8,8 @@
 #define TEX_CHANNELS 1
 #include "glm/glm.hpp"
 
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 using MeshIdInt = uint32_t;
 using ModelIdInt = uint32_t;
@@ -46,10 +46,9 @@ struct Model
     TexIdInt texId_[TEX_CHANNELS];
 };
 
-
-inline std::unordered_map<MeshIdInt,Mesh> meshes_;
-inline std::unordered_map<MeshIdInt,Model> models_;
-inline std::unordered_map<MeshIdInt,uint32_t> textures_;
+inline std::unordered_map<MeshIdInt, Mesh> meshes_;
+inline std::unordered_map<MeshIdInt, Model> models_;
+inline std::unordered_map<MeshIdInt, uint32_t> textures_;
 
 } // namespace Asset
-#endif //GROUP2_MODEL_H
+#endif // GROUP2_MODEL_H
