@@ -6,6 +6,7 @@
 #include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Server.hpp"
+#include "systems/MatchController.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -52,6 +53,7 @@ private:
 
     Server server;                                             ///< Owns the TCP socket and network I/O.
     Registry registry;                                         ///< ECS entity/component store.
+    MatchController matchController;                           ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     bool running = false;                                      ///< Loop continues while true.
     int tickRateHz = 128;                                      ///< Physics ticks per second.

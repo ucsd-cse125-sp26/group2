@@ -5,6 +5,7 @@
 
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "network/ShotEvent.hpp"
@@ -34,6 +35,7 @@ class Client
 public:
     using LocalPlayerReadyFn = std::function<void(entt::entity localEntity)>;
     using ParticleEventCallback = std::function<void(const NetParticleEvent& evt, entt::entity localEntity)>;
+    using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
 
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr  Hostname or IP address of the server.
@@ -60,6 +62,7 @@ public:
 
     void onLocalPlayerReady(LocalPlayerReadyFn fn) { localPlayerReadyFn = std::move(fn); }
     void onParticleEvent(ParticleEventCallback fn) { particleEventFn_ = std::move(fn); }
+    void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
@@ -74,6 +77,7 @@ private:
     std::optional<registry_serialization::Loader> registryLoader;
     LocalPlayerReadyFn localPlayerReadyFn;         ///< Called once the server assigns a player entity.
     ParticleEventCallback particleEventFn_;        ///< Called for each replicated particle event from server.
+    MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     bool localPlayerReadyNotified = false;         ///< True if localPlayerReadyFn has been called.
 

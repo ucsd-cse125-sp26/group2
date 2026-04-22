@@ -197,7 +197,6 @@ void DebugUI::buildUI(const Registry& registry,
         buildBhopAnalyzer(registry);
 
     buildWeaponUI(registry);
-    buildScoreboardUI(registry);
 }
 
 // Contents of the ECS Inspector window, factored out so the Begin/End wrapping
@@ -1183,7 +1182,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     ImGui::End();
 }
 
-void DebugUI::buildScoreboardUI(const Registry& registry)
+void DebugUI::buildScoreboardUI(const Registry& registry, MatchPhase phase, float countdownTimer)
 {
     if (!showScoreboard_)
         return;
@@ -1207,6 +1206,26 @@ void DebugUI::buildScoreboardUI(const Registry& registry)
         ImGui::End();
         return;
     }
+
+    // Phase banner
+    const char* phaseStr = "Warmup";
+    switch (phase) {
+    case MatchPhase::COUNTDOWN:
+        phaseStr = "Starting...";
+        break;
+    case MatchPhase::IN_PROGRESS:
+        phaseStr = "In Progress";
+        break;
+    case MatchPhase::FINISHED:
+        phaseStr = "Finished";
+        break;
+    default:
+        break;
+    }
+    ImGui::TextUnformatted(phaseStr);
+    if (phase == MatchPhase::COUNTDOWN || phase == MatchPhase::FINISHED)
+        ImGui::Text("%.1fs", static_cast<double>(countdownTimer));
+    ImGui::Separator();
 
     constexpr ImGuiTableFlags k_tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
     if (ImGui::BeginTable("scores", 4, k_tableFlags)) {

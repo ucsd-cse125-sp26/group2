@@ -12,6 +12,7 @@
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
+#include "network/MatchStatus.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
 #ifdef USE_HYBRID_RENDERER
@@ -187,4 +188,8 @@ private:
     /// and emplaces the component.  Safe to call even if the rig failed to load
     /// (logs a warning and leaves the entity un-animated).
     void attachAnimatedCharacter(entt::entity e);
+
+    // Match State
+    MatchPhase currentMatchPhase = MatchPhase::WARMUP; ///< Latest match phase update from the server.
+    float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
 };

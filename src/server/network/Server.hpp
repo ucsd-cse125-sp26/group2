@@ -5,6 +5,7 @@
 
 #include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/ShotEvent.hpp"
 #include "systems/EventQueue.hpp"
@@ -51,6 +52,13 @@ public:
 
     /// @brief Broadcast particle events to all clients for effect replication.
     void broadcastParticleEvents(const std::vector<NetParticleEvent>& events);
+
+    /// @brief Get the number of currently connected clients.
+    /// @return The client count.
+    int getClientCount();
+
+    /// @brief Broadcast match status updates to clients.
+    void broadcastMatchStatus(MatchStatePacket packet);
 
 private:
     /// @brief Per-client connection state.

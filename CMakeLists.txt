@@ -804,6 +804,7 @@ add_executable(client
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
+        src/network/MatchStatus.hpp
 )
 
 target_include_directories(client PRIVATE
@@ -948,6 +949,9 @@ add_executable(server
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
+        src/network/MatchStatus.hpp
+        src/server/systems/MatchController.hpp
+        src/server/systems/MatchController.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

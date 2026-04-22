@@ -123,6 +123,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     systems::runCollision(registry, dt, physics::testWorld());
     systems::runPlayerStatus(registry, dt);
 
+    matchController.update(dt, registry, server);
+
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
     server.broadcastParticleEvents(particleEvents);

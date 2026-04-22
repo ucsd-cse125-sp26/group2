@@ -5,6 +5,7 @@
 
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "systems/EventQueue.hpp"
@@ -214,6 +215,24 @@ void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events
     for (const auto& [clientId, conn] : clients) {
         if (!send(clientId, buf.data(), static_cast<int>(buf.size()))) {
             SDL_Log("Server: failed to send PARTICLE_SPAWN packet to client %d", clientId.value);
+        }
+    }
+}
+
+int Server::getClientCount()
+{
+    return static_cast<int>(clients.size());
+}
+
+void Server::broadcastMatchStatus(MatchStatePacket packet)
+{
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(MatchStatePacket));
+    buf[0] = static_cast<uint8_t>(PacketType::MATCH_STATE);
+    std::memcpy(buf.data() + 1, &packet, sizeof(MatchStatePacket));
+
+    for (const auto& [clientId, conn] : clients) {
+        if (!send(clientId, buf.data(), static_cast<int>(buf.size()))) {
+            SDL_Log("Server: failed to send MATCH_STATE packet to client %d", clientId.value);
         }
     }
 }
