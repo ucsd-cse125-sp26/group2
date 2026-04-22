@@ -138,6 +138,7 @@ set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_GLTF_IMPORTER           ON  CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_FBX_IMPORTER            ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_OBJ_IMPORTER            ON  CACHE BOOL "" FORCE)
 # Use Assimp's own bundled minizip — avoids needing system unzip.h in a
 # non-standard include path (e.g. /usr/include/minizip/ on Ubuntu 24.04).
 set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)

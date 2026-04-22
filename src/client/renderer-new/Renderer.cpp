@@ -399,8 +399,8 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
     // iBufferInfo_.srcData = indices;
 
     for (auto modelPair : Asset::models_) {
-        MeshIdInt meshId =  modelPair.second.meshId_;
-        Asset::Mesh &mesh = Asset::meshes_[meshId];
+        MeshIdInt meshId = modelPair.second.meshId_;
+        Asset::Mesh& mesh = Asset::meshes_[meshId];
 
         std::cout << "meshId:" << meshId << std::endl;
 
@@ -411,10 +411,10 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
     std::cout << "0" << std::endl;
 
     SDL_GPUCommandBuffer* cmdCopyBuff = SDL_AcquireGPUCommandBuffer(device_);
-    //SDL_GPUCopyPass* vaoCopyPass = SDL_BeginGPUCopyPass(cmdCopyBuff);
+    // SDL_GPUCopyPass* vaoCopyPass = SDL_BeginGPUCopyPass(cmdCopyBuff);
     std::cout << "1" << std::endl;
 
-    uploadDataToGPUBuffer(cmdCopyBuff,geoBuffers);
+    uploadDataToGPUBuffer(cmdCopyBuff, geoBuffers);
     std::cout << "2" << std::endl;
 
     SDL_SubmitGPUCommandBuffer(cmdCopyBuff);
@@ -426,7 +426,7 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
 void NewRenderer::genMeshBuffers(const MeshIdInt meshId)
 {
     std::cout << "genMeshBuffers" << std::endl;
-    Asset::Mesh &mesh = Asset::meshes_.at(meshId);
+    Asset::Mesh& mesh = Asset::meshes_.at(meshId);
 
     std::cout << "getting sizes" << std::endl;
     Uint32 numVertices = mesh.vertexData_.size();
@@ -471,9 +471,9 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     camera_.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
 
     Matrices mats{};
-    float scale = 10.0f;
+    float scale = 100.0f;
     mats.model = glm::mat4(scale);
-    mats.model[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    mats.model[3] = glm::vec4(0.0f, 50.0f, 0.0f, 1.0f);
     mats.view = camera_.getView();
     mats.projection = camera_.getProjection();
 
@@ -502,12 +502,11 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
     SDL_BindGPUGraphicsPipeline(pass, pipeline_);
 
-
     SDL_GPUIndexElementSize iElementSizeSdlType = SDL_GPU_INDEXELEMENTSIZE_32BIT;
 
-    for (auto model: Asset::models_) {
+    for (auto model : Asset::models_) {
         Asset::Mesh mesh = Asset::meshes_.at(model.second.meshId_);
-        drawMesh(pass,iElementSizeSdlType,mesh);
+        drawMesh(pass, iElementSizeSdlType, mesh);
     }
     //////////////////////////////////////////////////////////////////////////////////
     // std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
@@ -528,23 +527,30 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
-void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass,SDL_GPUIndexElementSize iElementSizeSdlType,Asset::Mesh m)
+void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, SDL_GPUIndexElementSize iElementSizeSdlType, Asset::Mesh m)
 {
     std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
     vertexBufferBindings.push_back(SDL_GPUBufferBinding{.buffer = m.vBufferInfo_.gpuBuff, .offset = 0});
-    SDL_BindGPUVertexBuffers(renderPass, 0, vertexBufferBindings.data(), static_cast<Uint32>(vertexBufferBindings.size()));
+    SDL_BindGPUVertexBuffers(
+        renderPass, 0, vertexBufferBindings.data(), static_cast<Uint32>(vertexBufferBindings.size()));
 
     SDL_GPUBufferBinding indexBufferBinding = {.buffer = m.iBufferInfo_.gpuBuff, .offset = 0};
     SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, iElementSizeSdlType);
 
     size_t iElementSizeInt;
-    switch (iElementSizeSdlType){
-        case SDL_GPU_INDEXELEMENTSIZE_32BIT: iElementSizeInt = 4; break;
-        case SDL_GPU_INDEXELEMENTSIZE_16BIT: iElementSizeInt = 2; break;
-        default: iElementSizeInt = 4; break;
+    switch (iElementSizeSdlType) {
+    case SDL_GPU_INDEXELEMENTSIZE_32BIT:
+        iElementSizeInt = 4;
+        break;
+    case SDL_GPU_INDEXELEMENTSIZE_16BIT:
+        iElementSizeInt = 2;
+        break;
+    default:
+        iElementSizeInt = 4;
+        break;
     }
 
-    SDL_DrawGPUIndexedPrimitives(renderPass, m.iBufferInfo_.bufferSize/iElementSizeInt, 1, 0, 0, 0);
+    SDL_DrawGPUIndexedPrimitives(renderPass, m.iBufferInfo_.bufferSize / iElementSizeInt, 1, 0, 0, 0);
 }
 
 void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
@@ -579,9 +585,8 @@ void NewRenderer::uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
             .buffer = k_bufferInfo.gpuBuff, .offset = 0, .size = k_bufferInfo.bufferSize};
         SDL_UploadToGPUBuffer(vaoCopyPass, &vaoTransferBufferLocation, &bufferRegion, false);
 
-
         vaoTransferBufferLocation.offset += k_bufferInfo.bufferSize;
-        //vaoTransferBufferOffset += k_bufferInfo.bufferSize;
+        // vaoTransferBufferOffset += k_bufferInfo.bufferSize;
     }
 
     SDL_EndGPUCopyPass(vaoCopyPass);
