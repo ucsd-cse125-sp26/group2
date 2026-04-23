@@ -90,6 +90,9 @@ private:
 
     bool send(const ClientId& clientId, const void* data, int len);
 
+    /// @brief Broadcast raw data to all clients.
+    bool broadcast(const void* data, int len);
+
     NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 
     std::unordered_map<ClientId, Connection> clients; ///< Currently connected clients.

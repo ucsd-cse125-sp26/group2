@@ -190,11 +190,8 @@ void Server::broadcastRegistry(const Registry& registry)
 
     buf.insert(buf.begin(), static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
 
-    for (const auto& [clientId, conn] : clients) {
-        if (!send(clientId, buf.data(), static_cast<int>(buf.size()))) {
-            // might need to do more on failure in the future
-            SDL_Log("Server: failed to send UPDATE_REGISTRY packet to client %d", clientId.value);
-        }
+    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
+        SDL_Log("Server: failed to broadcast UPDATE_REGISTRY packet to clients");
     }
 }
 
@@ -212,10 +209,8 @@ void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events
     std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
     std::memcpy(buf.data() + 1 + sizeof(uint32_t), events.data(), count * sizeof(NetParticleEvent));
 
-    for (const auto& [clientId, conn] : clients) {
-        if (!send(clientId, buf.data(), static_cast<int>(buf.size()))) {
-            SDL_Log("Server: failed to send PARTICLE_SPAWN packet to client %d", clientId.value);
-        }
+    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
+        SDL_Log("Server: failed to broadcast PARTICLE_SPAWN packet to clients");
     }
 }
 
@@ -230,9 +225,20 @@ void Server::broadcastMatchStatus(MatchStatePacket packet)
     buf[0] = static_cast<uint8_t>(PacketType::MATCH_STATE);
     std::memcpy(buf.data() + 1, &packet, sizeof(MatchStatePacket));
 
+    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
+        SDL_Log("Server: failed to broadcast MATCH_STATE packet to clients");
+    }
+}
+
+bool Server::broadcast(const void* data, int len)
+{
+    bool success = true;
     for (const auto& [clientId, conn] : clients) {
-        if (!send(clientId, buf.data(), static_cast<int>(buf.size()))) {
-            SDL_Log("Server: failed to send MATCH_STATE packet to client %d", clientId.value);
+        if (!send(clientId, data, len)) {
+            SDL_Log("Server: failed to send broadcast packet to client %d", clientId.value);
+            success = false;
         }
     }
+
+    return success;
 }
