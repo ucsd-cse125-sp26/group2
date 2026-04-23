@@ -126,6 +126,16 @@ bool Game::init()
             SDL_Log("[client] glow sphere uploaded (model index %d)", glowSphereModelIdx_);
     }
 
+    // Movable glow sphere — smaller sphere that follows the player for dynamic lighting tests.
+    {
+        LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
+        movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
+        if (movableSphereModelIdx_ < 0)
+            SDL_Log("[client] WARNING: movable glow sphere failed to upload");
+        else
+            SDL_Log("[client] movable glow sphere uploaded (model index %d)", movableSphereModelIdx_);
+    }
+
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
@@ -262,7 +272,7 @@ SDL_AppResult Game::event(SDL_Event* event)
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
-        case SDLK_Q:
+        case SDLK_MINUS:
             return SDL_APP_SUCCESS;
 
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
@@ -833,14 +843,57 @@ SDL_AppResult Game::iterate()
         });
 
         // Glow sphere — always rendered at a fixed world position for bloom testing.
+        constexpr glm::vec3 glowSpherePos{0.0f, 80.0f, 300.0f};
         if (glowSphereModelIdx_ >= 0) {
             entityCmds.push_back(EntityRenderCmd{
                 .modelIndex = glowSphereModelIdx_,
-                .worldTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 80.0f, 300.0f)),
+                .worldTransform = glm::translate(glm::mat4(1.0f), glowSpherePos),
+            });
+        }
+
+        // Movable glow sphere — follows the player's view direction.
+        const glm::vec3 movableSpherePos = cachedEye_ + cachedCamFwd_ * sphereFollowDist_;
+        if (movableSphereEnabled_ && movableSphereModelIdx_ >= 0) {
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = movableSphereModelIdx_,
+                .worldTransform = glm::translate(glm::mat4(1.0f), movableSpherePos),
             });
         }
 
         renderer.setEntityRenderList(std::move(entityCmds));
+
+        // Build dynamic point lights list.
+        std::vector<PointLight> dynLights;
+
+        // Static glow sphere point light.
+        dynLights.push_back(PointLight{
+            .position = glowSpherePos,
+            .color = glm::vec3(1.0f, 0.6f, 0.2f),
+            .intensity = 5.0f,
+            .range = 500.0f,
+        });
+
+        // Flashlight — point light near the camera.
+        if (flashlightEnabled_) {
+            dynLights.push_back(PointLight{
+                .position = cachedEye_ + cachedCamFwd_ * flashlightOffset_,
+                .color = glm::vec3(1.0f, 0.95f, 0.9f),
+                .intensity = flashlightIntensity_,
+                .range = flashlightRange_,
+            });
+        }
+
+        // Movable glow sphere point light.
+        if (movableSphereEnabled_) {
+            dynLights.push_back(PointLight{
+                .position = movableSpherePos,
+                .color = glm::vec3(0.4f, 0.7f, 1.0f), // cool blue, matching emissive tint
+                .intensity = sphereIntensity_,
+                .range = sphereRange_,
+            });
+        }
+
+        renderer.setPointLights(std::move(dynLights));
     }
 
     // Determine equipped weapon type from WeaponState
@@ -1218,6 +1271,30 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(tp.yawOffset),
                         static_cast<double>(tp.pitchOffset),
                         static_cast<double>(tp.rollOffset));
+            }
+        }
+        ImGui::End();
+    }
+
+    // Dynamic Lighting debug panel.
+    if (showDynLightUI_) {
+        ImGui::SetNextWindowPos({10.f, 400.f}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({280.f, 320.f}, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Dynamic Lighting", &showDynLightUI_)) {
+            ImGui::SeparatorText("Flashlight");
+            ImGui::Checkbox("Enable Flashlight", &flashlightEnabled_);
+            if (flashlightEnabled_) {
+                ImGui::DragFloat("FL Intensity", &flashlightIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("FL Range", &flashlightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+                ImGui::DragFloat("FL Offset", &flashlightOffset_, 1.0f, 0.0f, 100.0f, "%.0f");
+            }
+
+            ImGui::SeparatorText("Movable Glow Sphere");
+            ImGui::Checkbox("Enable Sphere", &movableSphereEnabled_);
+            if (movableSphereEnabled_) {
+                ImGui::DragFloat("Follow Dist", &sphereFollowDist_, 5.0f, 30.0f, 500.0f, "%.0f");
+                ImGui::DragFloat("Sph Intensity", &sphereIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("Sph Range", &sphereRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
             }
         }
         ImGui::End();

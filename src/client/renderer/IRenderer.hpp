@@ -42,6 +42,7 @@ enum class RendererFeature
     UpdateModelMeshVertices,
     SetEntityRenderList,
     SetWeaponViewmodel,
+    SetPointLights,
     RequestScreenshot,
     ModelCount,
 };
@@ -71,6 +72,7 @@ public:
     virtual void
     updateModelMeshVertices(int modelIndex, int meshIndex, const ModelVertex* vertices, Uint32 vertexCount) = 0;
     virtual void setEntityRenderList(std::vector<EntityRenderCmd> cmds) = 0;
+    virtual void setPointLights(std::vector<PointLight> lights) = 0;
     virtual void setWeaponViewmodel(const WeaponViewmodel& vm) = 0;
     virtual void requestScreenshot(const std::string& path) = 0;
     [[nodiscard]] virtual int modelCount() const = 0;
