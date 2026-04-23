@@ -57,7 +57,7 @@ layout(set = 3, binding = 1) uniform LightData
     float iblDiffuseIntensity;  // Multiplier on IBL diffuse (default 1.0).
     float iblSpecularIntensity; // Multiplier on IBL specular (default <1 to avoid glossy look).
     float _pad3;
-    Light lights[8];
+    Light lights[16];
 } lighting;
 
 /// @brief Cascaded shadow map data (pushed once per frame).
@@ -224,7 +224,7 @@ void main()
     // Per-light accumulation
     vec3 Lo = vec3(0.0);
 
-    for (int i = 0; i < lighting.numLights && i < 8; ++i) {
+    for (int i = 0; i < lighting.numLights && i < 16; ++i) {
         Light light = lighting.lights[i];
         vec3 L;
         float attenuation = light.color.a;
