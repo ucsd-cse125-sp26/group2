@@ -3,6 +3,8 @@
 
 #include "MatchController.hpp"
 
+#include "ecs/systems/MatchSystem.hpp"
+
 void MatchController::update(float deltaTime, Registry& registry, Server& server)
 {
     switch (currentPhase) {
@@ -27,10 +29,8 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
     case MatchPhase::IN_PROGRESS: {
-        // TODO: check for win condition (e.g. a player reaches k_killsToWin)
-        // upon win, set winnerId and transition to FINISHED phase
-        if (winnerId != -1) {
-            SDL_Log("MatchController: player %d wins, ending match", winnerId);
+        if (systems::handleWinCondition(registry, k_killsToWin)) {
+            SDL_Log("MatchController: player has won, ending match");
             currentPhase = MatchPhase::FINISHED;
             countdownTimer = k_finishedDuration;
         }
@@ -43,6 +43,7 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
             SDL_Log("MatchController: finished duration elapsed");
             currentPhase = MatchPhase::WARMUP;
             countdownTimer = 0.0f;
+            systems::resetStats(registry);
         }
         break;
     }

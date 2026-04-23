@@ -1228,11 +1228,12 @@ void DebugUI::buildScoreboardUI(const Registry& registry, MatchPhase phase, floa
     ImGui::Separator();
 
     constexpr ImGuiTableFlags k_tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
-    if (ImGui::BeginTable("scores", 4, k_tableFlags)) {
+    if (ImGui::BeginTable("scores", 5, k_tableFlags)) {
         ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 30.0f);
         ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 30.0f);
         ImGui::TableSetupColumn("Sc", ImGuiTableColumnFlags_WidthFixed, 35.0f);
+        ImGui::TableSetupColumn("Won", ImGuiTableColumnFlags_WidthFixed, 35.0f);
         ImGui::TableHeadersRow();
 
         int row = 0;
@@ -1257,6 +1258,8 @@ void DebugUI::buildScoreboardUI(const Registry& registry, MatchPhase phase, floa
                 ImGui::Text("%d", stats.deaths);
                 ImGui::TableSetColumnIndex(3);
                 ImGui::Text("%d", stats.score);
+                ImGui::TableSetColumnIndex(4);
+                ImGui::Text("%s", stats.hasWon ? "Yes" : "No");
 
                 ++row;
             }

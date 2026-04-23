@@ -952,6 +952,8 @@ add_executable(server
         src/network/MatchStatus.hpp
         src/server/systems/MatchController.hpp
         src/server/systems/MatchController.cpp
+        src/ecs/systems/MatchSystem.hpp
+        src/ecs/systems/MatchSystem.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
