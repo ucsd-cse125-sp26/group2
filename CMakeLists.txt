@@ -170,6 +170,18 @@ FetchContent_MakeAvailable(stb)
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
+# minimp3 — single-header MP3 decoder (used by SfxSystem to load MP3 sound assets).
+# Same FetchContent+INTERFACE pattern as stb above.
+FetchContent_Declare(
+    minimp3
+    GIT_REPOSITORY https://github.com/lieff/minimp3.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(minimp3)
+add_library(minimp3 INTERFACE)
+target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
+
 # ozz-animation — runtime skeletal animation (CPU skinning, sampling, blending).
 # We only need the runtime + offline builders; disable all extras.
 set(ozz_build_tests     OFF CACHE BOOL "" FORCE)
@@ -514,6 +526,11 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
+    # Sound effects system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxEvents.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxTypes.hpp"
     # Skeletal animation
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
@@ -651,6 +668,7 @@ target_link_libraries(group2 PRIVATE
     imgui_lib
     assimp
     stb_image
+    minimp3
     ozz_animation_offline
     ozz_animation
     ozz_base
@@ -742,6 +760,11 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
+    # Sound effects system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxEvents.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxTypes.hpp"
     # Skeletal animation
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
@@ -870,6 +893,7 @@ target_link_libraries(client PRIVATE
     imgui_lib
     assimp
     stb_image
+    minimp3
     ozz_animation_offline
     ozz_animation
     ozz_base

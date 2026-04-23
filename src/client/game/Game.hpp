@@ -15,6 +15,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
+#include "sfx/SfxSystem.hpp"
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
 #else
@@ -67,6 +68,7 @@ private:
     Registry registry;             ///< The shared ECS registry.
     Client client;                 ///< UDP network client.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;           ///< Client-side sound effects system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
     Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.

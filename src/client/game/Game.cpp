@@ -102,6 +102,17 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
 
+    // Sound effects system — initialised after particles so audio can mirror the
+    // same event-driven pattern.  Failure is non-fatal: the game runs silently.
+    if (!sfxSystem.init()) {
+        SDL_Log("[client] SfxSystem init failed (non-fatal — sound effects disabled)");
+    } else {
+        // WeaponFiredEvent: play the weapon fire sound for every shot.
+        dispatcher.sink<WeaponFiredEvent>().connect<&SfxSystem::onWeaponFired>(sfxSystem);
+        // ExplosionEvent: also play the explosion SFX alongside the particle effect.
+        dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
+    }
+
     // Load models for entity rendering
     wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
     if (wraithModelIdx < 0)
@@ -161,7 +172,17 @@ bool Game::init()
     });
 
     client.onParticleEvent([this](const NetParticleEvent& evt, entt::entity localPlayer) {
-        // Skip own effects (already handled locally for instant feedback)
+        // Hitmarker SFX: local player's shot was confirmed by the server to have
+        // hit an enemy (surface == Flesh).  This check runs BEFORE the skip-self
+        // guard so the shooter still hears the hitmarker even though their own
+        // particle VFX was already spawned client-side for instant feedback.
+        if (sfxSystem.isInitialized() && evt.source == localPlayer && evt.effectType == ParticleEffectType::Impact &&
+            evt.surfaceType == SurfaceType::Flesh)
+        {
+            sfxSystem.play(SfxId::FleshHit);
+        }
+
+        // Skip own VFX effects (already spawned locally for instant feedback).
         if (evt.source == localPlayer)
             return;
 
@@ -687,6 +708,9 @@ SDL_AppResult Game::iterate()
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
+
+    // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
+    sfxSystem.update(frameTime, registry);
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -1400,6 +1424,7 @@ void Game::quit()
 {
     if (recorder.isRecording())
         recorder.stopRecording();
+    sfxSystem.quit();
     particleSystem.quit();
     renderer.quit();
     debugUI.shutdown();
