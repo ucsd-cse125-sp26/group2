@@ -38,6 +38,8 @@ const char* featureName(RendererFeature f)
         return "UpdateModelMeshVertices";
     case RendererFeature::SetEntityRenderList:
         return "SetEntityRenderList";
+    case RendererFeature::SetPointLights:
+        return "SetPointLights";
     case RendererFeature::SetWeaponViewmodel:
         return "SetWeaponViewmodel";
     case RendererFeature::RequestScreenshot:
@@ -62,6 +64,7 @@ constexpr RendererFeature k_allFeatures[] = {
     RendererFeature::SetVSync,
     RendererFeature::UpdateModelMeshVertices,
     RendererFeature::SetEntityRenderList,
+    RendererFeature::SetPointLights,
     RendererFeature::SetWeaponViewmodel,
     RendererFeature::RequestScreenshot,
     RendererFeature::ModelCount,
@@ -225,6 +228,20 @@ void HybridRenderer::setEntityRenderList(std::vector<EntityRenderCmd> cmds)
         next_.setEntityRenderList(std::move(cmds));
     else
         legacy_.setEntityRenderList(std::move(cmds));
+}
+
+void HybridRenderer::setPointLights(std::vector<PointLight> lights)
+{
+    if (next_.supports(RendererFeature::SetPointLights))
+        next_.setPointLights(std::move(lights));
+    else
+        legacy_.setPointLights(std::move(lights));
+}
+
+void HybridRenderer::setModelEmissive(int modelIndex, glm::vec4 emissiveFactor)
+{
+    // Always route to legacy — model indices are owned by the legacy renderer.
+    legacy_.setModelEmissive(modelIndex, emissiveFactor);
 }
 
 void HybridRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)

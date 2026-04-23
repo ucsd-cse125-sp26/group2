@@ -20,6 +20,8 @@
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
+#include "renderer/GlowCylinder.hpp"
+#include "renderer/GlowSphere.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
 
@@ -113,6 +115,36 @@ bool Game::init()
             if (weaponModelIndices_[i] < 0)
                 SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
         }
+    }
+
+    // Glow sphere — procedural emissive sphere for bloom / dynamic lighting test.
+    {
+        LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
+        glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
+        if (glowSphereModelIdx_ < 0)
+            SDL_Log("[client] WARNING: glow sphere failed to upload");
+        else
+            SDL_Log("[client] glow sphere uploaded (model index %d)", glowSphereModelIdx_);
+    }
+
+    // Movable glow sphere — smaller sphere that follows the player for dynamic lighting tests.
+    {
+        LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
+        movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
+        if (movableSphereModelIdx_ < 0)
+            SDL_Log("[client] WARNING: movable glow sphere failed to upload");
+        else
+            SDL_Log("[client] movable glow sphere uploaded (model index %d)", movableSphereModelIdx_);
+    }
+
+    // Glow cylinder (beam) — unit cylinder, oriented at runtime via transform.
+    {
+        LoadedModel cylModel = createGlowCylinder(24, 1, glm::vec3(8.0f, 2.0f, 10.0f));
+        glowCylinderModelIdx_ = renderer.uploadSceneModel(cylModel);
+        if (glowCylinderModelIdx_ < 0)
+            SDL_Log("[client] WARNING: glow cylinder failed to upload");
+        else
+            SDL_Log("[client] glow cylinder uploaded (model index %d)", glowCylinderModelIdx_);
     }
 
     client.onLocalPlayerReady([this](entt::entity local) {
@@ -251,7 +283,7 @@ SDL_AppResult Game::event(SDL_Event* event)
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
-        case SDLK_Q:
+        case SDLK_MINUS:
             return SDL_APP_SUCCESS;
 
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
@@ -821,7 +853,93 @@ SDL_AppResult Game::iterate()
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
         });
 
+        // Glow sphere — always rendered at a fixed world position for bloom testing.
+        constexpr glm::vec3 glowSpherePos{0.0f, 80.0f, 300.0f};
+        if (glowSphereModelIdx_ >= 0) {
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowSphereModelIdx_,
+                .worldTransform = glm::translate(glm::mat4(1.0f), glowSpherePos),
+            });
+        }
+
+        // Movable glow sphere — follows the player's view direction.
+        const glm::vec3 movableSpherePos = cachedEye_ + cachedCamFwd_ * sphereFollowDist_;
+        if (movableSphereEnabled_ && movableSphereModelIdx_ >= 0) {
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = movableSphereModelIdx_,
+                .worldTransform = glm::translate(glm::mat4(1.0f), movableSpherePos),
+            });
+        }
+
+        // Glow beam cylinder.
+        if (beamEnabled_ && glowCylinderModelIdx_ >= 0) {
+            // Update visual emissive color to match the color picker (HDR scaled).
+            const float emScale = 10.0f; // HDR boost so bloom triggers
+            renderer.setModelEmissive(glowCylinderModelIdx_, glm::vec4(beamColor_ * emScale, 0.0f));
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowCylinderModelIdx_,
+                .worldTransform = cylinderTransform(beamStart_, beamEnd_, beamRadius_),
+            });
+        }
+
         renderer.setEntityRenderList(std::move(entityCmds));
+
+        // Build dynamic point lights list.
+        std::vector<PointLight> dynLights;
+
+        // Static glow sphere point light.
+        dynLights.push_back(PointLight{
+            .position = glowSpherePos,
+            .color = glm::vec3(1.0f, 0.6f, 0.2f),
+            .intensity = 5.0f,
+            .range = 500.0f,
+        });
+
+        // Flashlight — point light near the camera.
+        if (flashlightEnabled_) {
+            dynLights.push_back(PointLight{
+                .position = cachedEye_ + cachedCamFwd_ * flashlightOffset_,
+                .color = glm::vec3(1.0f, 0.95f, 0.9f),
+                .intensity = flashlightIntensity_,
+                .range = flashlightRange_,
+            });
+        }
+
+        // Movable glow sphere point light.
+        if (movableSphereEnabled_) {
+            dynLights.push_back(PointLight{
+                .position = movableSpherePos,
+                .color = glm::vec3(0.4f, 0.7f, 1.0f),
+                .intensity = sphereIntensity_,
+                .range = sphereRange_,
+            });
+        }
+
+        // Beam point lights — place lights at the start, middle, and end of the beam.
+        if (beamEnabled_) {
+            const glm::vec3 beamMid = (beamStart_ + beamEnd_) * 0.5f;
+            const glm::vec3 beamLightColor = beamColor_ * 1.5f; // boost slightly for light
+            dynLights.push_back(PointLight{
+                .position = beamStart_,
+                .color = beamLightColor,
+                .intensity = beamLightIntensity_,
+                .range = beamLightRange_,
+            });
+            dynLights.push_back(PointLight{
+                .position = beamMid,
+                .color = beamLightColor,
+                .intensity = beamLightIntensity_,
+                .range = beamLightRange_,
+            });
+            dynLights.push_back(PointLight{
+                .position = beamEnd_,
+                .color = beamLightColor,
+                .intensity = beamLightIntensity_,
+                .range = beamLightRange_,
+            });
+        }
+
+        renderer.setPointLights(std::move(dynLights));
     }
 
     // Determine equipped weapon type from WeaponState
@@ -1199,6 +1317,41 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(tp.yawOffset),
                         static_cast<double>(tp.pitchOffset),
                         static_cast<double>(tp.rollOffset));
+            }
+        }
+        ImGui::End();
+    }
+
+    // Dynamic Lighting debug panel.
+    if (showDynLightUI_) {
+        ImGui::SetNextWindowPos({10.f, 400.f}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({280.f, 320.f}, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Dynamic Lighting", &showDynLightUI_)) {
+            ImGui::SeparatorText("Flashlight");
+            ImGui::Checkbox("Enable Flashlight", &flashlightEnabled_);
+            if (flashlightEnabled_) {
+                ImGui::DragFloat("FL Intensity", &flashlightIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("FL Range", &flashlightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+                ImGui::DragFloat("FL Offset", &flashlightOffset_, 1.0f, 0.0f, 100.0f, "%.0f");
+            }
+
+            ImGui::SeparatorText("Movable Glow Sphere");
+            ImGui::Checkbox("Enable Sphere", &movableSphereEnabled_);
+            if (movableSphereEnabled_) {
+                ImGui::DragFloat("Follow Dist", &sphereFollowDist_, 5.0f, 30.0f, 500.0f, "%.0f");
+                ImGui::DragFloat("Sph Intensity", &sphereIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("Sph Range", &sphereRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+            }
+
+            ImGui::SeparatorText("Bloom Beam");
+            ImGui::Checkbox("Enable Beam", &beamEnabled_);
+            if (beamEnabled_) {
+                ImGui::DragFloat3("Start", &beamStart_.x, 5.0f, -5000.0f, 5000.0f, "%.0f");
+                ImGui::DragFloat3("End", &beamEnd_.x, 5.0f, -5000.0f, 5000.0f, "%.0f");
+                ImGui::DragFloat("Radius", &beamRadius_, 0.5f, 0.5f, 50.0f, "%.1f");
+                ImGui::ColorEdit3("Beam Color", &beamColor_.x);
+                ImGui::DragFloat("Beam Intensity", &beamLightIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("Beam Lt Range", &beamLightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
             }
         }
         ImGui::End();
