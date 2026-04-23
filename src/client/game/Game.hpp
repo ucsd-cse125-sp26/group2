@@ -114,6 +114,14 @@ private:
     float sphereFollowDist_ = 150.0f;                    ///< Distance ahead of player.
     float sphereIntensity_ = 5.0f;                       ///< Point light intensity of movable sphere.
     float sphereRange_ = 500.0f;                         ///< Point light range of movable sphere.
+    int glowCylinderModelIdx_ = -1;                      ///< Glow cylinder (beam) model index.
+    bool beamEnabled_ = false;                           ///< Show the bloom beam.
+    glm::vec3 beamStart_{0.0f, 60.0f, 250.0f};           ///< Beam start position.
+    glm::vec3 beamEnd_{0.0f, 60.0f, 450.0f};             ///< Beam end position.
+    float beamRadius_ = 5.0f;                            ///< Beam cylinder radius.
+    glm::vec3 beamColor_{0.6f, 0.1f, 1.0f};              ///< Beam emissive colour (purple).
+    float beamLightIntensity_ = 6.0f;                    ///< Point light intensity along beam.
+    float beamLightRange_ = 400.0f;                      ///< Point light range along beam.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
 

@@ -91,6 +91,17 @@ public:
     /// for the directional sun + fill).  Excess lights are silently dropped.
     void setPointLights(std::vector<PointLight> lights) override { pointLights = std::move(lights); }
 
+    /// @brief Update the emissive factor on every mesh of a loaded model.
+    ///
+    /// Takes effect on the next drawFrame — the material UBO is pushed from CPU
+    /// each frame, so no GPU re-upload is needed.
+    void setModelEmissive(int modelIndex, glm::vec4 emissiveFactor) override
+    {
+        if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < models.size())
+            for (auto& m : models[static_cast<size_t>(modelIndex)].meshes)
+                m.material.emissiveFactor = emissiveFactor;
+    }
+
     /// @brief Set the first-person weapon viewmodel for this frame.
     void setWeaponViewmodel(const WeaponViewmodel& vm) override { weaponVM = vm; }
 

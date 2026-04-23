@@ -238,6 +238,12 @@ void HybridRenderer::setPointLights(std::vector<PointLight> lights)
         legacy_.setPointLights(std::move(lights));
 }
 
+void HybridRenderer::setModelEmissive(int modelIndex, glm::vec4 emissiveFactor)
+{
+    // Always route to legacy — model indices are owned by the legacy renderer.
+    legacy_.setModelEmissive(modelIndex, emissiveFactor);
+}
+
 void HybridRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
 {
     if (next_.supports(RendererFeature::SetWeaponViewmodel))
