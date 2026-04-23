@@ -125,7 +125,7 @@ bool SfxSystem::init()
     // ------------------------------------------------------------------
 
     // Weapons — fire sounds
-    loadClip(SfxId::RifleFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.6f, 0.10f);
+    loadClip(SfxId::RifleFire, "pubg-ak.wav", SfxCategory::Weapons, 0.8f, 0.10f);
     loadClip(SfxId::RocketFire, "Voicy_Minecraft TNT Explosion.mp3", SfxCategory::Weapons, 0.7f, 0.80f);
     loadClip(SfxId::RailGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.8f, 0.50f);
     loadClip(SfxId::EnergyGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.5f, 0.08f);
@@ -375,51 +375,91 @@ bool SfxSystem::loadClip(SfxId id, const char* filename, SfxCategory cat, float 
     const char* base = SDL_GetBasePath();
     const std::string path = std::string(base ? base : "") + "assets/sounds/" + filename;
 
-    mp3dec_t dec{};
-    mp3dec_file_info_t info{};
-
-    const int rc = mp3dec_load(&dec, path.c_str(), &info, nullptr, nullptr);
-    if (rc != 0 || info.samples == 0) {
-        SDL_Log("[sfx] Failed to load '%s' (rc=%d, path=%s)", filename, rc, path.c_str());
-        if (info.buffer)
-            free(info.buffer);
-        return false;
-    }
-
     SoundClip& clip = clips_[static_cast<size_t>(id)];
 
-    // Copy PCM from minimp3's malloc'd buffer into our managed vector.
-    const size_t byteCount = info.samples * sizeof(mp3d_sample_t);
-    clip.pcmData.assign(reinterpret_cast<const uint8_t*>(info.buffer),
-                        reinterpret_cast<const uint8_t*>(info.buffer) + byteCount);
-    free(info.buffer);
+    // Dispatch to the appropriate decoder based on file extension.
+    const std::string fname = filename;
+    const bool isWav = fname.ends_with(".wav") || fname.ends_with(".WAV");
 
-    // minimp3 always outputs signed 16-bit little-endian interleaved PCM.
-    clip.spec.format = SDL_AUDIO_S16LE;
-    clip.spec.channels = info.channels;
-    clip.spec.freq = info.hz;
+    if (isWav) {
+        // --- WAV path: use SDL3's built-in WAV loader ---
+        SDL_AudioSpec wavSpec{};
+        Uint8* wavBuf = nullptr;
+        Uint32 wavLen = 0;
 
-    // Duration: total samples divided by (channels × sample_rate) = seconds.
-    // Cast channels to size_t before dividing to avoid sign-conversion warnings;
-    // integer division here is intentional (frame count), then convert to float.
-    if (info.channels > 0 && info.hz > 0) {
-        const size_t frames = info.samples / static_cast<size_t>(info.channels);
-        clip.durationSeconds = static_cast<float>(frames) / static_cast<float>(info.hz);
+        if (!SDL_LoadWAV(path.c_str(), &wavSpec, &wavBuf, &wavLen) || !wavBuf) {
+            SDL_Log("[sfx] SDL_LoadWAV failed for '%s': %s", filename, SDL_GetError());
+            if (wavBuf)
+                SDL_free(wavBuf);
+            return false;
+        }
+
+        clip.pcmData.assign(wavBuf, wavBuf + wavLen);
+        SDL_free(wavBuf);
+        clip.spec = wavSpec;
+
+        // Duration: bytes ÷ (bytes-per-sample × channels × freq).
+        // SDL_AUDIO_BITSIZE gives bits per sample; divide by 8 for bytes.
+        const int bitsPerSample = SDL_AUDIO_BITSIZE(wavSpec.format);
+        const int bytesPerFrame = (bitsPerSample / 8) * wavSpec.channels;
+        if (bytesPerFrame > 0 && wavSpec.freq > 0) {
+            const size_t frames = wavLen / static_cast<size_t>(bytesPerFrame);
+            clip.durationSeconds = static_cast<float>(frames) / static_cast<float>(wavSpec.freq);
+        } else {
+            clip.durationSeconds = 1.0f;
+        }
+
+        SDL_Log("[sfx]   %-45s  %.2fs  %5dHz  %dch  %5u KB  [wav]",
+                filename,
+                static_cast<double>(clip.durationSeconds),
+                wavSpec.freq,
+                wavSpec.channels,
+                wavLen / 1024u);
+
     } else {
-        clip.durationSeconds = 1.0f; // safe fallback
+        // --- MP3 path: use minimp3 ---
+        mp3dec_t dec{};
+        mp3dec_file_info_t info{};
+
+        const int rc = mp3dec_load(&dec, path.c_str(), &info, nullptr, nullptr);
+        if (rc != 0 || info.samples == 0) {
+            SDL_Log("[sfx] Failed to load '%s' (rc=%d, path=%s)", filename, rc, path.c_str());
+            if (info.buffer)
+                free(info.buffer);
+            return false;
+        }
+
+        // Copy PCM from minimp3's malloc'd buffer into our managed vector.
+        const size_t byteCount = info.samples * sizeof(mp3d_sample_t);
+        clip.pcmData.assign(reinterpret_cast<const uint8_t*>(info.buffer),
+                            reinterpret_cast<const uint8_t*>(info.buffer) + byteCount);
+        free(info.buffer);
+
+        // minimp3 always outputs signed 16-bit little-endian interleaved PCM.
+        clip.spec.format = SDL_AUDIO_S16LE;
+        clip.spec.channels = info.channels;
+        clip.spec.freq = info.hz;
+
+        // Duration: total samples ÷ (channels × sample_rate) = seconds.
+        if (info.channels > 0 && info.hz > 0) {
+            const size_t frames = info.samples / static_cast<size_t>(info.channels);
+            clip.durationSeconds = static_cast<float>(frames) / static_cast<float>(info.hz);
+        } else {
+            clip.durationSeconds = 1.0f;
+        }
+
+        SDL_Log("[sfx]   %-45s  %.2fs  %5dHz  %dch  %5zu KB  [mp3]",
+                filename,
+                static_cast<double>(clip.durationSeconds),
+                info.hz,
+                info.channels,
+                byteCount / 1024);
     }
 
     clip.category = cat;
     clip.defaultGain = gain;
     clip.minCooldown = cooldownSecs;
     clip.loaded = true;
-
-    SDL_Log("[sfx]   %-45s  %.2fs  %5dHz  %dch  %5zu KB",
-            filename,
-            static_cast<double>(clip.durationSeconds),
-            info.hz,
-            info.channels,
-            byteCount / 1024);
 
     return true;
 }
