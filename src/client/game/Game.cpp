@@ -20,6 +20,7 @@
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
+#include "renderer/GlowSphere.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
 
@@ -113,6 +114,16 @@ bool Game::init()
             if (weaponModelIndices_[i] < 0)
                 SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
         }
+    }
+
+    // Glow sphere — procedural emissive sphere for bloom / dynamic lighting test.
+    {
+        LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
+        glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
+        if (glowSphereModelIdx_ < 0)
+            SDL_Log("[client] WARNING: glow sphere failed to upload");
+        else
+            SDL_Log("[client] glow sphere uploaded (model index %d)", glowSphereModelIdx_);
     }
 
     client.onLocalPlayerReady([this](entt::entity local) {
@@ -820,6 +831,14 @@ SDL_AppResult Game::iterate()
 
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
         });
+
+        // Glow sphere — always rendered at a fixed world position for bloom testing.
+        if (glowSphereModelIdx_ >= 0) {
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowSphereModelIdx_,
+                .worldTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 80.0f, 300.0f)),
+            });
+        }
 
         renderer.setEntityRenderList(std::move(entityCmds));
     }

@@ -100,6 +100,7 @@ private:
 
     // Model indices for entity rendering (loaded at init).
     int wraithModelIdx = -1;                             ///< Wraith player model index.
+    int glowSphereModelIdx_ = -1;                        ///< Glow sphere for bloom testing.
     int weaponModelIndices_[4] = {-1, -1, -1, -1};       ///< Per WeaponType, loaded at init.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
