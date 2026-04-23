@@ -576,6 +576,8 @@ add_executable(group2
         src/client/renderer-new/Asset.hpp
         src/client/renderer-new/AssetLoader.cpp
         src/client/renderer-new/AssetLoader.hpp
+        src/client/renderer-new/Boilerplate.cpp
+        src/client/renderer-new/Boilerplate.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.cpp

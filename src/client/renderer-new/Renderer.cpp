@@ -2,6 +2,7 @@
 
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
+#include "Boilerplate.hpp"
 #include "Camera.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
@@ -12,101 +13,6 @@
 #include <imgui.h>
 #include <iostream>
 #include <vector>
-
-#define CUBE_VERTEX_COUNT 24
-
-const float width = 20.0f;
-const float width_over_2 = width * 0.5f;
-
-const glm::vec3 cubeMin = -glm::vec3(width_over_2, width_over_2, width_over_2);
-const glm::vec3 cubeMax = -cubeMin;
-
-const glm::vec3 positions[CUBE_VERTEX_COUNT] = {
-    // Front
-    glm::vec3(cubeMin.x, cubeMin.y, cubeMax.z),
-    glm::vec3(cubeMax.x, cubeMin.y, cubeMax.z),
-    glm::vec3(cubeMax.x, cubeMax.y, cubeMax.z),
-    glm::vec3(cubeMin.x, cubeMax.y, cubeMax.z),
-
-    // Back
-    glm::vec3(cubeMax.x, cubeMin.y, cubeMin.z),
-    glm::vec3(cubeMin.x, cubeMin.y, cubeMin.z),
-    glm::vec3(cubeMin.x, cubeMax.y, cubeMin.z),
-    glm::vec3(cubeMax.x, cubeMax.y, cubeMin.z),
-
-    // Top
-    glm::vec3(cubeMin.x, cubeMax.y, cubeMax.z),
-    glm::vec3(cubeMax.x, cubeMax.y, cubeMax.z),
-    glm::vec3(cubeMax.x, cubeMax.y, cubeMin.z),
-    glm::vec3(cubeMin.x, cubeMax.y, cubeMin.z),
-
-    // Bottom
-    glm::vec3(cubeMin.x, cubeMin.y, cubeMin.z),
-    glm::vec3(cubeMax.x, cubeMin.y, cubeMin.z),
-    glm::vec3(cubeMax.x, cubeMin.y, cubeMax.z),
-    glm::vec3(cubeMin.x, cubeMin.y, cubeMax.z),
-
-    // Left
-    glm::vec3(cubeMin.x, cubeMin.y, cubeMin.z),
-    glm::vec3(cubeMin.x, cubeMin.y, cubeMax.z),
-    glm::vec3(cubeMin.x, cubeMax.y, cubeMax.z),
-    glm::vec3(cubeMin.x, cubeMax.y, cubeMin.z),
-
-    // Right
-    glm::vec3(cubeMax.x, cubeMin.y, cubeMax.z),
-    glm::vec3(cubeMax.x, cubeMin.y, cubeMin.z),
-    glm::vec3(cubeMax.x, cubeMax.y, cubeMin.z),
-    glm::vec3(cubeMax.x, cubeMax.y, cubeMax.z)};
-
-// Specify normals
-const glm::vec3 normals[CUBE_VERTEX_COUNT] = {
-    // Front
-    glm::vec3(0, 0, 1),
-    glm::vec3(0, 0, 1),
-    glm::vec3(0, 0, 1),
-    glm::vec3(0, 0, 1),
-
-    // Back
-    glm::vec3(0, 0, -1),
-    glm::vec3(0, 0, -1),
-    glm::vec3(0, 0, -1),
-    glm::vec3(0, 0, -1),
-
-    // Top
-    glm::vec3(0, 1, 0),
-    glm::vec3(0, 1, 0),
-    glm::vec3(0, 1, 0),
-    glm::vec3(0, 1, 0),
-
-    // Bottom
-    glm::vec3(0, -1, 0),
-    glm::vec3(0, -1, 0),
-    glm::vec3(0, -1, 0),
-    glm::vec3(0, -1, 0),
-
-    // Left
-    glm::vec3(-1, 0, 0),
-    glm::vec3(-1, 0, 0),
-    glm::vec3(-1, 0, 0),
-    glm::vec3(-1, 0, 0),
-
-    // Right
-    glm::vec3(1, 0, 0),
-    glm::vec3(1, 0, 0),
-    glm::vec3(1, 0, 0),
-    glm::vec3(1, 0, 0)};
-
-static Vertex cubeVertexData[CUBE_VERTEX_COUNT];
-
-// Specify indices
-static Uint32 indices[36] = {
-    0,  1,  2,  0,  2,  3,  // Front
-    4,  5,  6,  4,  6,  7,  // Back
-    8,  9,  10, 8,  10, 11, // Top
-    12, 13, 14, 12, 14, 15, // Bottom
-    16, 17, 18, 16, 18, 19, // Left
-    20, 21, 22, 20, 22, 23  // Right
-};
 
 namespace
 {
@@ -136,54 +42,6 @@ ImGui_ImplSDLGPU3_InitInfo createImGuiInfo(SDL_GPUDevice* device, SDL_Window* wi
     return imguiInfo;
 }
 
-/// @brief Load a compiled shader from disk and create an SDL GPU shader object.
-///
-/// Path construction uses std::filesystem::path so separators are always
-/// native (no mixed `\` / `/` on Windows).
-SDL_GPUShader* loadShader(SDL_GPUDevice* dev,
-                          const char* path,
-                          SDL_GPUShaderFormat format,
-                          SDL_GPUShaderStage stage,
-                          Uint32 samplerCount,
-                          Uint32 uniformBufferCount,
-                          Uint32 storageBufferCount,
-                          Uint32 storageTextureCount)
-{
-    const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (format == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
-
-    // Build <base_dir> / <relative_path>.spv  with native separators.
-    std::filesystem::path fullPath = std::filesystem::path(k_base ? k_base : "") / path;
-    fullPath += k_ext;
-    const std::string fullPathStr = fullPath.string();
-
-    size_t codeSize = 0;
-    void* code = SDL_LoadFile(fullPathStr.c_str(), &codeSize);
-    if (!code) {
-        SDL_Log("NewRenderer: failed to load shader %s: %s", fullPathStr.c_str(), SDL_GetError());
-        return nullptr;
-    }
-
-    SDL_GPUShaderCreateInfo info{};
-    info.code = static_cast<const Uint8*>(code);
-    info.code_size = static_cast<Uint32>(codeSize);
-    info.format = format;
-    info.stage = stage;
-    info.num_samplers = samplerCount;
-    info.num_uniform_buffers = uniformBufferCount;
-    info.num_storage_buffers = storageBufferCount;
-    info.num_storage_textures = storageTextureCount;
-
-    info.entrypoint = (format == SDL_GPU_SHADERFORMAT_MSL) ? "main0" : "main";
-
-    SDL_GPUShader* shader = SDL_CreateGPUShader(dev, &info);
-    SDL_free(code);
-
-    if (!shader)
-        SDL_Log("NewRenderer: SDL_CreateGPUShader(%s) failed: %s", fullPathStr.c_str(), SDL_GetError());
-    return shader;
-}
-
 SDL_GPUGraphicsPipeline* createGeometryPipeline(SDL_GPUDevice* device,
                                                 SDL_Window* window,
                                                 SDL_GPUShaderFormat shaderFormat,
@@ -191,7 +49,7 @@ SDL_GPUGraphicsPipeline* createGeometryPipeline(SDL_GPUDevice* device,
 {
     const std::string vertexShaderPath = (std::filesystem::path(k_shadersDir) / "geometry.vert").string();
     Uint32 vertexShaderSamplerCount = 0;
-    Uint32 vertexShaderUniformBufferCount = 1;
+    Uint32 vertexShaderUniformBufferCount = 2;
     Uint32 vertexShaderStorageBufferCount = 0;
     Uint32 vertexShaderStorageTextureCount = 0;
 
@@ -201,22 +59,22 @@ SDL_GPUGraphicsPipeline* createGeometryPipeline(SDL_GPUDevice* device,
     Uint32 fragmentShaderStorageBufferCount = 0;
     Uint32 fragmentShaderStorageTextureCount = 0;
 
-    SDL_GPUShader* vertexShader = loadShader(device,
-                                             vertexShaderPath.c_str(),
-                                             shaderFormat,
-                                             SDL_GPU_SHADERSTAGE_VERTEX,
-                                             vertexShaderSamplerCount,
-                                             vertexShaderUniformBufferCount,
-                                             vertexShaderStorageBufferCount,
-                                             vertexShaderStorageTextureCount);
-    SDL_GPUShader* fragmentShader = loadShader(device,
-                                               fragmentShaderPath.c_str(),
-                                               shaderFormat,
-                                               SDL_GPU_SHADERSTAGE_FRAGMENT,
-                                               fragmentShaderSamplerCount,
-                                               fragmentShaderUniformBufferCount,
-                                               fragmentShaderStorageBufferCount,
-                                               fragmentShaderStorageTextureCount);
+    SDL_GPUShader* vertexShader = Boilerplate::loadShader(device,
+                                                          vertexShaderPath.c_str(),
+                                                          shaderFormat,
+                                                          SDL_GPU_SHADERSTAGE_VERTEX,
+                                                          vertexShaderSamplerCount,
+                                                          vertexShaderUniformBufferCount,
+                                                          vertexShaderStorageBufferCount,
+                                                          vertexShaderStorageTextureCount);
+    SDL_GPUShader* fragmentShader = Boilerplate::loadShader(device,
+                                                            fragmentShaderPath.c_str(),
+                                                            shaderFormat,
+                                                            SDL_GPU_SHADERSTAGE_FRAGMENT,
+                                                            fragmentShaderSamplerCount,
+                                                            fragmentShaderUniformBufferCount,
+                                                            fragmentShaderStorageBufferCount,
+                                                            fragmentShaderStorageTextureCount);
 
     if (!vertexShader || !fragmentShader) {
         SDL_ReleaseGPUShader(device, vertexShader);
@@ -364,22 +222,8 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
         return false;
     }
 
-    camera_ = NewCamera(glm::vec3{0.0f, 0.0f, 20.0f},
-                        glm::vec3{0.0f, 100.0f, 1.0f},
-                        glm::vec3{0.0f, 1.0f, 0.0f},
-                        fovyDegrees_,
-                        1.0f,
-                        nearPlane_,
-                        farPlane_);
+    camera_ = NewCamera();
 
-    for (int i = 0; i < CUBE_VERTEX_COUNT; i++) {
-        constexpr auto k_uvNot = glm::vec2(0.0f);
-        Vertex vi{};
-        vi.position = positions[i];
-        vi.normal = normals[i];
-        vi.texUV = k_uvNot;
-        cubeVertexData[i] = vi;
-    }
     std::cout << "loading models" << std::endl;
     AssetLoader::loadModelsList();
     std::cout << "loaded models" << std::endl;
@@ -444,10 +288,6 @@ void NewRenderer::genMeshBuffers(const MeshIdInt meshId)
 
 void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, float /*roll*/)
 {
-    const float cosPitch = std::cos(pitch);
-    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
-    camera_.setLookAt(eye, eye + forward, glm::vec3{0.0f, 1.0f, 0.0f});
-
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
         SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
@@ -468,16 +308,14 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
         return;
     }
 
-    camera_.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
+    camera_.setEye(eye);
+    camera_.setTarget(pitch, yaw, 0.0f);
+    camera_.setAspect(static_cast<float>(w), static_cast<float>(h));
+    camera_.computeViewProjectionMatrix();
 
-    Matrices mats{};
-    float scale = 100.0f;
-    mats.model = glm::mat4(scale);
-    mats.model[3] = glm::vec4(0.0f, 50.0f, 0.0f, 1.0f);
-    mats.view = camera_.getView();
-    mats.projection = camera_.getProjection();
+    glm::mat4 view_projection = camera_.getViewProjectionMatrix();
 
-    SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
+    SDL_PushGPUVertexUniformData(cmd, 0, &view_projection, sizeof(glm::mat4));
 
     ImDrawData* const k_drawData = ImGui::GetDrawData();
     if (k_drawData)
@@ -505,6 +343,10 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     SDL_GPUIndexElementSize iElementSizeSdlType = SDL_GPU_INDEXELEMENTSIZE_32BIT;
 
     for (auto model : Asset::models_) {
+        glm::mat4 modelMatrix = glm::mat4(100.0f);
+        modelMatrix[3] = glm::vec4(0.0f, 50.0f, 0.0f, 1.0f);
+        SDL_PushGPUVertexUniformData(cmd, 1, &modelMatrix, sizeof(glm::mat4));
+
         Asset::Mesh mesh = Asset::meshes_.at(model.second.meshId_);
         drawMesh(pass, iElementSizeSdlType, mesh);
     }

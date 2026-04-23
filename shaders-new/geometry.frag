@@ -1,21 +1,19 @@
 // normal.frag
 #version 450
 
-layout(location = 0) in vec3 diffuse;
-layout(location = 1) in vec3 fragNormal;
-layout(location = 0) out vec4 outColor;
+layout(location = 0) in vec3 frag_color;
+layout(location = 1) in vec3 frag_normal;
+layout(location = 0) out vec4 color;
 
-const vec3 directionalLight0Direction = normalize(-vec3(1.0f,1.0f,1.0f));
-const vec3 directionalLight0Color = vec3(1.0f,1.0f,1.0f);
-
-const vec3 skyColor = vec3(0.08f, 0.08f,0.12f); // dark-blue sky
-//const vec3 ambientColor = 0.125f * directionalLight0Color;
-const vec3 ambientColor = skyColor;
+// Just a single directional light for now...
+const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
+const vec3 light_color = vec3(1.0f,1.0f,1.0f);
+const vec3 ambient_color = vec3(0.08f, 0.08f,0.12f); // dark-blue
 
 void main()
 {
-    float cosThetaTerm = max(0.0f,dot(-directionalLight0Direction,fragNormal));
-    vec3 irradiance = directionalLight0Color * cosThetaTerm + ambientColor;
-    // outColor = vec4(diffuse * irradiance,1.0f);
-    outColor = vec4(diffuse ,1.0f);
+    float cosT = max(0.0f,dot(-light_direction,frag_normal));
+    vec3 irradiance = light_color * cosT + ambient_color;
+    // color = vec4(frag_color * irradiance,1.0f);
+    color = vec4(frag_color ,1.0f);
 }
