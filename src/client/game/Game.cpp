@@ -871,14 +871,22 @@ SDL_AppResult Game::iterate()
             });
         }
 
-        // Glow beam cylinder.
+        // Glow beam cylinder — follows player position and view direction.
+        // Offsets are (forward, up, right) relative to camera.
+        const glm::vec3 camRight = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+        const glm::vec3 camUp = glm::normalize(glm::cross(camRight, cachedCamFwd_));
+        const glm::vec3 beamWorldStart =
+            cachedEye_ + cachedCamFwd_ * beamStartOff_.x + camUp * beamStartOff_.y + camRight * beamStartOff_.z;
+        const glm::vec3 beamWorldEnd =
+            cachedEye_ + cachedCamFwd_ * beamEndOff_.x + camUp * beamEndOff_.y + camRight * beamEndOff_.z;
+
         if (beamEnabled_ && glowCylinderModelIdx_ >= 0) {
             // Update visual emissive color to match the color picker (HDR scaled).
-            const float emScale = 10.0f; // HDR boost so bloom triggers
+            const float emScale = 10.0f;
             renderer.setModelEmissive(glowCylinderModelIdx_, glm::vec4(beamColor_ * emScale, 0.0f));
             entityCmds.push_back(EntityRenderCmd{
                 .modelIndex = glowCylinderModelIdx_,
-                .worldTransform = cylinderTransform(beamStart_, beamEnd_, beamRadius_),
+                .worldTransform = cylinderTransform(beamWorldStart, beamWorldEnd, beamRadius_),
             });
         }
 
@@ -915,28 +923,23 @@ SDL_AppResult Game::iterate()
             });
         }
 
-        // Beam point lights — place lights at the start, middle, and end of the beam.
+        // Beam point lights — evenly distributed along the beam length.
         if (beamEnabled_) {
-            const glm::vec3 beamMid = (beamStart_ + beamEnd_) * 0.5f;
-            const glm::vec3 beamLightColor = beamColor_ * 1.5f; // boost slightly for light
-            dynLights.push_back(PointLight{
-                .position = beamStart_,
-                .color = beamLightColor,
-                .intensity = beamLightIntensity_,
-                .range = beamLightRange_,
-            });
-            dynLights.push_back(PointLight{
-                .position = beamMid,
-                .color = beamLightColor,
-                .intensity = beamLightIntensity_,
-                .range = beamLightRange_,
-            });
-            dynLights.push_back(PointLight{
-                .position = beamEnd_,
-                .color = beamLightColor,
-                .intensity = beamLightIntensity_,
-                .range = beamLightRange_,
-            });
+            const glm::vec3 beamDelta = beamWorldEnd - beamWorldStart;
+            const float beamLen = glm::length(beamDelta);
+            const int numBeamLights = (beamLightSpacing_ > 1.0f && beamLen > 0.1f)
+                                          ? std::max(2, static_cast<int>(beamLen / beamLightSpacing_) + 1)
+                                          : 2;
+            const glm::vec3 beamLightColor = beamColor_ * 1.5f;
+            for (int i = 0; i < numBeamLights; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numBeamLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = beamWorldStart + beamDelta * t,
+                    .color = beamLightColor,
+                    .intensity = beamLightIntensity_,
+                    .range = beamLightRange_,
+                });
+            }
         }
 
         renderer.setPointLights(std::move(dynLights));
@@ -1346,12 +1349,14 @@ SDL_AppResult Game::iterate()
             ImGui::SeparatorText("Bloom Beam");
             ImGui::Checkbox("Enable Beam", &beamEnabled_);
             if (beamEnabled_) {
-                ImGui::DragFloat3("Start", &beamStart_.x, 5.0f, -5000.0f, 5000.0f, "%.0f");
-                ImGui::DragFloat3("End", &beamEnd_.x, 5.0f, -5000.0f, 5000.0f, "%.0f");
+                ImGui::Text("Offsets: (fwd, up, right) from eye");
+                ImGui::DragFloat3("Start Off", &beamStartOff_.x, 1.0f, -500.0f, 500.0f, "%.0f");
+                ImGui::DragFloat3("End Off", &beamEndOff_.x, 1.0f, -500.0f, 500.0f, "%.0f");
                 ImGui::DragFloat("Radius", &beamRadius_, 0.5f, 0.5f, 50.0f, "%.1f");
                 ImGui::ColorEdit3("Beam Color", &beamColor_.x);
                 ImGui::DragFloat("Beam Intensity", &beamLightIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
                 ImGui::DragFloat("Beam Lt Range", &beamLightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+                ImGui::DragFloat("Light Spacing", &beamLightSpacing_, 5.0f, 10.0f, 200.0f, "%.0f");
             }
         }
         ImGui::End();
