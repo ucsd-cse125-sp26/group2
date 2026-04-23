@@ -125,10 +125,13 @@ struct ShadowDataFragUBO
     float shadowNormalBias;
     float shadowMapSize;
     float _pad;
-    glm::vec4 lightDirWorld; ///< xyz = direction TO sun.
-    glm::vec4 lightColor;    ///< rgb = sun color, a = sun intensity.
-    glm::vec4 ambientColor;  ///< rgb = ambient (used by normal.frag).
-    glm::vec4 fillColor;     ///< rgb = fill light color, a = fill intensity.
+    glm::vec4 lightDirWorld;   ///< xyz = direction TO sun.
+    glm::vec4 lightColor;      ///< rgb = sun color, a = sun intensity.
+    glm::vec4 ambientColor;    ///< rgb = ambient (used by normal.frag).
+    glm::vec4 fillColor;       ///< rgb = fill light color, a = fill intensity.
+    int numPointLights;        ///< Number of active dynamic point lights (0..6).
+    float _pad2, _pad3, _pad4;
+    LightGPU scenePtLights[6]; ///< Dynamic point lights for scene geometry.
 };
 
 /// @brief Tonemap fragment UBO -- matches tonemap.frag TonemapParams.
@@ -2394,6 +2397,18 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             sceneShadow.fillColor = glm::vec4(0.25f, 0.30f, 0.45f, fillIntensity);
             sceneShadow.shadowMapSize =
                 (shadowMap && shadowPipeline && toggles.shadows) ? static_cast<float>(k_shadowMapSize) : 0.0f;
+
+            // Inject dynamic point lights into scene shadow UBO.
+            sceneShadow.numPointLights = 0;
+            for (size_t pi = 0; pi < pointLights.size() && sceneShadow.numPointLights < 6; ++pi) {
+                const auto& pl = pointLights[pi];
+                auto& slot = sceneShadow.scenePtLights[sceneShadow.numPointLights];
+                slot.position = glm::vec4(pl.position, 1.0f);
+                slot.color = glm::vec4(pl.color, pl.intensity);
+                slot.params = glm::vec4(pl.range, 0.0f, 0.0f, 0.0f);
+                ++sceneShadow.numPointLights;
+            }
+
             SDL_PushGPUFragmentUniformData(cmd, 0, &sceneShadow, sizeof(sceneShadow));
 
             // Bind the shadow map for scene geometry shadow receiving.
@@ -2420,6 +2435,16 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             lightData.lights[0].color = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
             lightData.lights[1].position = glm::vec4(-sunDir, 0.0f);
             lightData.lights[1].color = glm::vec4(0.25f, 0.30f, 0.45f, fillIntensity);
+
+            // Inject dynamic point lights (up to 6 — slots 2..7).
+            for (size_t pi = 0; pi < pointLights.size() && lightData.numLights < 8; ++pi) {
+                const auto& pl = pointLights[pi];
+                auto& slot = lightData.lights[lightData.numLights];
+                slot.position = glm::vec4(pl.position, 1.0f); // w=1 → point light
+                slot.color = glm::vec4(pl.color, pl.intensity);
+                slot.params = glm::vec4(pl.range, 0.0f, 0.0f, 0.0f);
+                ++lightData.numLights;
+            }
 
             // Helper: draw all scene-placed meshes matching the transparency filter.
             // Entity/weapon models (drawInScenePass==false) are handled separately.

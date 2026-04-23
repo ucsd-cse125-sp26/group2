@@ -80,7 +80,7 @@ private:
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
                                            ///  vs every iterate() call (false).
-    bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false).
+    bool limitFPSToMonitor = true;         ///< VSync on (true) / off (false).
 
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
@@ -99,8 +99,21 @@ private:
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
     // Model indices for entity rendering (loaded at init).
-    int wraithModelIdx = -1;                             ///< Wraith player model index.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1};       ///< Per WeaponType, loaded at init.
+    int wraithModelIdx = -1;                       ///< Wraith player model index.
+    int glowSphereModelIdx_ = -1;                  ///< Glow sphere for bloom testing (static).
+    int movableSphereModelIdx_ = -1;               ///< Glow sphere that follows the player.
+    int weaponModelIndices_[4] = {-1, -1, -1, -1}; ///< Per WeaponType, loaded at init.
+
+    // Dynamic lighting test controls (ImGui-tunable)
+    bool showDynLightUI_ = true;                         ///< Show the Dynamic Lighting panel.
+    bool flashlightEnabled_ = false;                     ///< Point light at camera position.
+    float flashlightIntensity_ = 8.0f;                   ///< Flashlight brightness.
+    float flashlightRange_ = 800.0f;                     ///< Flashlight attenuation range.
+    float flashlightOffset_ = 30.0f;                     ///< Forward offset from eye.
+    bool movableSphereEnabled_ = false;                  ///< Glow sphere following the player.
+    float sphereFollowDist_ = 150.0f;                    ///< Distance ahead of player.
+    float sphereIntensity_ = 5.0f;                       ///< Point light intensity of movable sphere.
+    float sphereRange_ = 500.0f;                         ///< Point light range of movable sphere.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
 
