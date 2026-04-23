@@ -138,6 +138,7 @@ set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_GLTF_IMPORTER           ON  CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_FBX_IMPORTER            ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_OBJ_IMPORTER            ON  CACHE BOOL "" FORCE)
 # Use Assimp's own bundled minizip — avoids needing system unzip.h in a
 # non-standard include path (e.g. /usr/include/minizip/ on Ubuntu 24.04).
 set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)
@@ -572,6 +573,9 @@ add_executable(group2
         src/client/renderer-new/Renderer.hpp
         src/client/renderer-new/Camera.cpp
         src/client/renderer-new/Camera.hpp
+        src/client/renderer-new/Asset.hpp
+        src/client/renderer-new/AssetLoader.cpp
+        src/client/renderer-new/AssetLoader.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.cpp
@@ -791,6 +795,9 @@ add_executable(client
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
         src/ecs/components/ClientId.hpp
+        src/client/renderer-new/Asset.hpp
+        src/client/renderer-new/AssetLoader.cpp
+        src/client/renderer-new/AssetLoader.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.cpp
