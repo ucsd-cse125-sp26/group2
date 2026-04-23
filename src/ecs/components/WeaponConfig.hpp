@@ -31,10 +31,10 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = true,
         }, // Rifle
         WeaponConfig{
-            .fireCooldown = 0.80f,
-            .magazineSize = 2,
-            .defaultAmmoCapacity = 10,
-            .damage = 100.0f,
+            .fireCooldown = 1.0f,
+            .magazineSize = 4,
+            .defaultAmmoCapacity = 12,
+            .damage = 200.0f,
             .hitscan = false,
         }, // Rocket
         WeaponConfig{

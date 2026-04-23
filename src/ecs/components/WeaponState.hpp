@@ -3,7 +3,22 @@
 
 #pragma once
 
-#include "Projectile.hpp"
+
+/// @brief Weapon type — determines tracer style, damage, sound, and impact effects.
+enum class WeaponType : uint8_t
+{
+    Rifle,     ///< Fast hitscan/projectile (R301-style capsule tracer)
+    Rocket,    ///< Slow arcing projectile (ribbon trail)
+    RailGun,   ///< Hitscan energy weapon (beam + lightning arcs)
+    EnergyGun, ///< Fast hitscan energy burst
+};
+
+enum class WeaponSlot : uint8_t
+{
+    PRIMARY,
+    SECONDARY,
+    TERTIARY,
+};
 
 /// @brief Struct that defines this weapon's type, cooldown, and ammo.
 struct GunInstance

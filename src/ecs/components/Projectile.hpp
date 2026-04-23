@@ -6,21 +6,8 @@
 #include <cstdint>
 #include <entt/entt.hpp>
 
-/// @brief Weapon type — determines tracer style, damage, sound, and impact effects.
-enum class WeaponType : uint8_t
-{
-    Rifle,     ///< Fast hitscan/projectile (R301-style capsule tracer)
-    Rocket,    ///< Slow arcing projectile (ribbon trail)
-    RailGun,   ///< Hitscan energy weapon (beam + lightning arcs)
-    EnergyGun, ///< Fast hitscan energy burst
-};
+#include "WeaponState.hpp"
 
-enum class WeaponSlot : uint8_t
-{
-    PRIMARY,
-    SECONDARY,
-    TERTIARY,
-};
 
 /// @brief Surface material hit by a projectile — drives impact effect parameters.
 enum class SurfaceType : uint8_t
@@ -39,6 +26,6 @@ enum class SurfaceType : uint8_t
 struct Projectile
 {
     WeaponType type = WeaponType::Rifle; ///< Weapon that spawned this projectile.
-    float damage = 15.f;                 ///< Damage dealt on hit.
+    float damage = 0.0f;                 ///< Damage dealt on hit.
     entt::entity owner = entt::null;     ///< Entity that fired this projectile.
 };
