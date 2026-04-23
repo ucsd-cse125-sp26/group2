@@ -7,6 +7,7 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
+#include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -122,6 +123,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     systems::runCollision(registry, dt, physics::testWorld());
     systems::runPlayerStatus(registry, dt);
 
+    matchController.update(dt, registry, server);
+
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
     server.broadcastParticleEvents(particleEvents);
@@ -154,6 +157,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<PlayerState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
+    registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);

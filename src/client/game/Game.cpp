@@ -152,6 +152,11 @@ bool Game::init()
         }
     });
 
+    client.onMatchStateUpdate([this](const MatchStatePacket& packet) {
+        currentMatchPhase = packet.phase;
+        countdownTimer = packet.countdownTimer;
+    });
+
     // Initialize runtime 3P weapon params from defaults
     for (int i = 0; i < 4; ++i)
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
@@ -1065,6 +1070,7 @@ SDL_AppResult Game::iterate()
                     statsFPS1pLow,
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
+    debugUI.buildScoreboardUI(registry, currentMatchPhase, countdownTimer);
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 #ifdef USE_HYBRID_RENDERER

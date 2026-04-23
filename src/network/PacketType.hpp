@@ -17,4 +17,7 @@ enum class PacketType : uint8_t
     // Bidirectional (latency measurement)
     PING, // Client -> Server (carries uint64_t timestamp)
     PONG, // Server -> Client (echoes timestamp back)
+
+    // Server -> All clients (match status updates)
+    MATCH_STATE,
 };

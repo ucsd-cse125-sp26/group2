@@ -3,6 +3,7 @@
 
 #include "Client.hpp"
 
+#include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 
@@ -168,6 +169,15 @@ bool Client::poll(Registry& registry)
                 stats.avgRttMs = rtt;
             else
                 stats.avgRttMs = stats.avgRttMs * 0.8f + rtt * 0.2f;
+            break;
+        }
+        case PacketType::MATCH_STATE: {
+            if (payloadSize != sizeof(MatchStatePacket))
+                break;
+            MatchStatePacket matchState;
+            std::memcpy(&matchState, payload, sizeof(MatchStatePacket));
+            if (matchStateUpdateFn_)
+                matchStateUpdateFn_(matchState);
             break;
         }
         default:
