@@ -4,16 +4,20 @@
 #include "debug/DebugUI.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/Client.hpp"    // for NetworkStats
 #include "particles/ParticleSystem.hpp"
 #include "renderer/Renderer.hpp" // for RenderToggles
@@ -101,11 +105,13 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
-void DebugUI::toggleAllPanels()
+void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
 {
-    // All window-visibility flags in one place — keep this list in sync with
-    // the private members in DebugUI.hpp when adding new top-level panels.
-    bool* const panels[] = {
+    // All window-visibility flags owned by DebugUI in one place — keep this
+    // list in sync with the private members in DebugUI.hpp when adding new
+    // top-level panels. Panels owned by other systems (e.g. Game's Animation
+    // Tester) are passed in via externalPanels.
+    bool* const ownedPanels[] = {
         &showInspector,
         &showMovementChart,
         &showBhopAnalyzer,
@@ -114,20 +120,33 @@ void DebugUI::toggleAllPanels()
         &showLightingControls,
         &showSkybox,
         &showNetworkStats,
+        &showScoreboard_,
     };
-    constexpr int k_panelCount = static_cast<int>(sizeof(panels) / sizeof(panels[0]));
 
-    // If anything is currently visible, hide everything; otherwise show everything.
+    // If anything is currently visible (owned or external), hide everything;
+    // otherwise show everything.
     bool anyVisible = false;
-    for (int i = 0; i < k_panelCount; ++i) {
-        if (*panels[i]) {
+    for (bool* p : ownedPanels) {
+        if (*p) {
             anyVisible = true;
             break;
         }
     }
-    const bool k_newState = !anyVisible;
-    for (int i = 0; i < k_panelCount; ++i)
-        *panels[i] = k_newState;
+    if (!anyVisible) {
+        for (bool* p : externalPanels) {
+            if (p && *p) {
+                anyVisible = true;
+                break;
+            }
+        }
+    }
+    const bool newState = !anyVisible;
+    for (bool* p : ownedPanels)
+        *p = newState;
+    for (bool* p : externalPanels) {
+        if (p)
+            *p = newState;
+    }
 }
 
 void DebugUI::buildUI(const Registry& registry,
@@ -176,6 +195,8 @@ void DebugUI::buildUI(const Registry& registry,
 
     if (showBhopAnalyzer)
         buildBhopAnalyzer(registry);
+
+    buildWeaponUI(registry);
 }
 
 // Contents of the ECS Inspector window, factored out so the Begin/End wrapping
@@ -217,8 +238,12 @@ void DebugUI::buildInspectorContents(const Registry& registry,
 
     ImGui::Checkbox("Limit FPS to Monitor Refresh", &limitFPSToMonitor);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("ON:  VSync on — fps locked to monitor refresh rate\n"
-                          "OFF: VSync off — uncapped fps (may use mailbox present)");
+        ImGui::SetTooltip("ON + monitor >= physics Hz: VSync (locks to monitor refresh)\n"
+                          "ON + monitor <  physics Hz: software limiter at physics Hz\n"
+                          "OFF + monitor >= physics Hz: uncapped (mailbox present)\n"
+                          "OFF + monitor <  physics Hz: software limiter at physics Hz\n"
+                          "  (sub-physics-Hz monitors always cap at physics Hz for\n"
+                          "   smooth frame pacing — the monitor can't display faster)");
 
     // SSR mode selector.
     {
@@ -830,8 +855,8 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
     ImGui::SameLine();
     if (ImGui::Button("Energy Shot", {110.f, 0.f})) {
         const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
-        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyRifle);
-        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyRifle);
+        ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyGun);
+        ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyGun);
     }
 
     if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))
@@ -851,10 +876,12 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
 
 // Render Toggles window
 
-void DebugUI::buildRenderTogglesUI(RenderToggles& t)
+void DebugUI::buildRenderTogglesUI(Renderer& renderer)
 {
     if (!showRenderToggles)
         return;
+
+    RenderToggles& t = renderer.toggles;
 
     ImGui::SetNextWindowPos({940.f, 10.f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({280.f, 460.f}, ImGuiCond_FirstUseEver);
@@ -878,20 +905,21 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
                         &t.bloom,
                         &t.ssr,
                         &t.volumetrics,
-                        &t.taa,
                         &t.tonemap,
                         &t.particles,
                         &t.sdfText};
-    constexpr int k_flagCount = 14;
+    constexpr int k_flagCount = 13;
 
     if (ImGui::Button("All ON")) {
         for (int i = 0; i < k_flagCount; ++i)
             *allFlags[i] = true;
+        renderer.aaMode = AAMode::SMAA_T2x;
     }
     ImGui::SameLine();
     if (ImGui::Button("All OFF")) {
         for (int i = 0; i < k_flagCount; ++i)
             *allFlags[i] = false;
+        renderer.aaMode = AAMode::Off;
     }
     ImGui::SameLine();
     if (ImGui::Button("Only Post-FX OFF")) {
@@ -899,7 +927,7 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
         t.bloom = false;
         t.ssr = false;
         t.volumetrics = false;
-        t.taa = false;
+        renderer.aaMode = AAMode::Off;
     }
     ImGui::Separator();
 
@@ -921,7 +949,16 @@ void DebugUI::buildRenderTogglesUI(RenderToggles& t)
     ImGui::Checkbox("Bloom", &t.bloom);
     ImGui::Checkbox("SSR (Screen-Space Reflections)", &t.ssr);
     ImGui::Checkbox("Volumetric Lighting", &t.volumetrics);
-    ImGui::Checkbox("TAA (Temporal AA)", &t.taa);
+
+    // Anti-aliasing mode selection
+    const char* aaModes[] = {"Off", "SMAA 1x", "SMAA T2x"};
+    ImGui::Combo("Anti-Aliasing", reinterpret_cast<int*>(&renderer.aaMode), aaModes, 3);
+
+    // CAS sharpening
+    ImGui::Checkbox("CAS Sharpening", &renderer.casEnabled);
+    if (renderer.casEnabled)
+        ImGui::SliderFloat("CAS Strength", &renderer.casStrength, 0.0f, 1.0f, "%.2f");
+
     ImGui::Checkbox("Tone Mapping (HDR->LDR)", &t.tonemap);
 
     // Effects
@@ -963,10 +1000,21 @@ void DebugUI::buildLightingUI(Renderer& renderer)
         renderer.ambientB = amb[2];
     }
 
+    // IBL intensity
+    // Dial IBL Specular below 1.0 if dielectric surfaces (plastic, cloth,
+    // skin) look like polished metal -- real-world HDR environments make
+    // smooth dielectrics look artificially reflective.
+    ImGui::SeparatorText("IBL Intensity");
+    ImGui::SliderFloat("IBL Diffuse", &renderer.iblDiffuseIntensity, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("IBL Specular", &renderer.iblSpecularIntensity, 0.0f, 2.0f, "%.2f");
+
     // Post-processing
     ImGui::SeparatorText("Post-Processing");
     ImGui::SliderFloat("Bloom", &renderer.bloomStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("SSAO", &renderer.ssaoStr, 0.0f, 2.0f, "%.2f");
+    ImGui::SliderFloat("AO Radius", &renderer.ssaoRadius, 0.1f, 5.0f, "%.2f");
+    ImGui::SliderFloat("AO Falloff", &renderer.ssaoFalloff, 0.5f, 4.0f, "%.1f");
+    ImGui::SliderFloat("AO Power", &renderer.ssaoPower, 0.5f, 3.0f, "%.1f");
     ImGui::SliderFloat("SSR", &renderer.ssrStr, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
     ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");
@@ -1060,6 +1108,167 @@ void DebugUI::buildNetworkUI(const NetworkStats& stats)
     ImGui::Text("Recv: %.2f MB   Send: %.2f MB",
                 static_cast<double>(stats.bytesRecvTotal) / (1024.0 * 1024.0),
                 static_cast<double>(stats.bytesSentTotal) / (1024.0 * 1024.0));
+
+    ImGui::End();
+}
+
+void DebugUI::buildWeaponUI(const Registry& registry)
+{
+    entt::entity localPlayer = entt::null;
+    const auto* const k_es = registry.storage<entt::entity>();
+    if (k_es) {
+        for (auto e : *k_es) {
+            if (registry.valid(e) && registry.all_of<LocalPlayer>(e)) {
+                localPlayer = e;
+                break;
+            }
+        }
+    }
+
+    ImGui::SetNextWindowPos({980.0f, 500.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({290.0f, 160.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags =
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin("Weapon HUD", nullptr, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    if (localPlayer == entt::null) {
+        ImGui::TextDisabled("Local player not available");
+        ImGui::End();
+        return;
+    }
+
+    if (!registry.all_of<WeaponState>(localPlayer)) {
+        ImGui::TextDisabled("Weapon state unavailable");
+        ImGui::End();
+        return;
+    }
+
+    const WeaponState& weapon = registry.get<WeaponState>(localPlayer);
+    const GunInstance& gun = (weapon.current == WeaponSlot::PRIMARY) ? weapon.primary : weapon.secondary;
+
+    const char* currentGunName = "?";
+    switch (gun.type) {
+    case WeaponType::Rifle:
+        currentGunName = "Rifle";
+        break;
+    case WeaponType::Rocket:
+        currentGunName = "Rocket";
+        break;
+    case WeaponType::RailGun:
+        currentGunName = "RailGun";
+        break;
+    case WeaponType::EnergyGun:
+        currentGunName = "EnergyGun";
+        break;
+    }
+
+    ImGui::SeparatorText("Weapon");
+    ImGui::Text("Current: %s", currentGunName);
+    ImGui::Text("Ammo:    %d / %d", gun.currentMagAmmo, gun.totalAmmo);
+
+    ImGui::SeparatorText("Vitals");
+    if (registry.all_of<Health>(localPlayer)) {
+        const Health& health = registry.get<Health>(localPlayer);
+        ImGui::Text("Armor:   %.0f / %.0f", static_cast<double>(health.armor), static_cast<double>(systems::armorMax));
+        ImGui::Text(
+            "Health:  %.0f / %.0f", static_cast<double>(health.health), static_cast<double>(systems::healthMax));
+    } else {
+        ImGui::TextDisabled("Health state unavailable");
+    }
+
+    ImGui::End();
+}
+
+void DebugUI::buildScoreboardUI(const Registry& registry, MatchPhase phase, float countdownTimer)
+{
+    if (!showScoreboard_)
+        return;
+
+    // Find local player entity to highlight it in the table.
+    entt::entity localPlayer = entt::null;
+    const auto* const k_es = registry.storage<entt::entity>();
+    if (k_es) {
+        for (auto e : *k_es) {
+            if (registry.valid(e) && registry.all_of<LocalPlayer>(e)) {
+                localPlayer = e;
+                break;
+            }
+        }
+    }
+
+    ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::Begin("Scoreboard", &showScoreboard_, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    // Phase banner
+    const char* phaseStr = "Warmup";
+    switch (phase) {
+    case MatchPhase::COUNTDOWN:
+        phaseStr = "Starting...";
+        break;
+    case MatchPhase::IN_PROGRESS:
+        phaseStr = "In Progress";
+        break;
+    case MatchPhase::FINISHED:
+        phaseStr = "Finished";
+        break;
+    default:
+        break;
+    }
+    ImGui::TextUnformatted(phaseStr);
+    if (phase == MatchPhase::COUNTDOWN || phase == MatchPhase::FINISHED)
+        ImGui::Text("%.1fs", static_cast<double>(countdownTimer));
+    ImGui::Separator();
+
+    constexpr ImGuiTableFlags k_tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
+    if (ImGui::BeginTable("scores", 5, k_tableFlags)) {
+        ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 30.0f);
+        ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 30.0f);
+        ImGui::TableSetupColumn("Sc", ImGuiTableColumnFlags_WidthFixed, 35.0f);
+        ImGui::TableSetupColumn("Won", ImGuiTableColumnFlags_WidthFixed, 35.0f);
+        ImGui::TableHeadersRow();
+
+        int row = 0;
+        if (k_es) {
+            for (auto e : *k_es) {
+                if (!registry.valid(e) || !registry.all_of<PlayerMatchStats>(e))
+                    continue;
+
+                const auto& stats = registry.get<PlayerMatchStats>(e);
+                const bool k_isLocal = (e == localPlayer);
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                if (k_isLocal)
+                    ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "> You");
+                else
+                    ImGui::Text("Player %d", row + 1);
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%d", stats.kills);
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%d", stats.deaths);
+                ImGui::TableSetColumnIndex(3);
+                ImGui::Text("%d", stats.score);
+                ImGui::TableSetColumnIndex(4);
+                ImGui::Text("%s", stats.hasWon ? "Yes" : "No");
+
+                ++row;
+            }
+        }
+        if (row == 0)
+            ImGui::TextDisabled("No players");
+
+        ImGui::EndTable();
+    }
 
     ImGui::End();
 }

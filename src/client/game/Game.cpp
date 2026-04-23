@@ -3,6 +3,8 @@
 
 #include "Game.hpp"
 
+#include "animation/CharacterAnimator.hpp"
+#include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -11,6 +13,12 @@
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/ViewmodelConfig.hpp"
+#include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/TitanfallConstants.hpp"
+#include "network/NetworkConfig.hpp"
+#include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
@@ -19,15 +27,23 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <imgui.h>
 
 bool Game::init()
 {
-    SDL_SetAppMetadata("group2", "0.1.0", "com.cse125.group2");
+#ifdef USE_HYBRID_RENDERER
+    static constexpr const char* k_appName = "group2";
+#else
+    static constexpr const char* k_appName = "client";
+#endif
+    SDL_SetAppMetadata(k_appName, "0.1.0", "com.cse125.group2");
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
@@ -45,7 +61,7 @@ bool Game::init()
         netCfg = loadNetworkConfig(cfgPath.c_str());
     }
 
-    window = SDL_CreateWindow("group2", 1280, 720, SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
         return false;
@@ -75,8 +91,11 @@ bool Game::init()
     } else {
         renderer.setParticleSystem(&particleSystem);
 
-        // Wire dispatcher events to particle system
-        dispatcher.sink<WeaponFiredEvent>().connect<&ParticleSystem::onWeaponFired>(particleSystem);
+        // Wire dispatcher events to particle system.
+        // NOTE: WeaponFiredEvent is NOT wired here — local weapon VFX (tracers,
+        // beams, impacts) are spawned explicitly in iterate() so we control
+        // exactly which effect plays per weapon type.  onWeaponFired would
+        // unconditionally spawn a hitscan beam for every hitscan weapon.
         dispatcher.sink<ProjectileImpactEvent>().connect<&ParticleSystem::onImpact>(particleSystem);
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
@@ -86,23 +105,64 @@ bool Game::init()
     if (wraithModelIdx < 0)
         SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
 
-    weaponModelIdx = renderer.loadSceneModel("r-301_-_apex_legends.glb", glm::vec3(0.0f), 1.0f);
-    if (weaponModelIdx < 0)
-        SDL_Log("[client] WARNING: R-301 model failed to load — weapon will be invisible");
+    // Load all weapon models (per WeaponType)
+    for (int i = 0; i < 4; ++i) {
+        const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
+        if (info.filename) {
+            weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
+            if (weaponModelIndices_[i] < 0)
+                SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+        }
+    }
 
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
 
-        // if (wraithModelIdx >= 0) {
-        //     SDL_Log("[client] assigning Wraith model to local player entity %d", static_cast<int>(local));
-        //     registry.emplace<Renderable>(local, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
-        // }
+        // Animator runs for local too — future gun-IK / hands-on-weapon work
+        // needs an up-to-date upper-body pose even when the body is invisible.
+        // Rendering is gated by animUI_.showLocalBody (third-person debug).
+        attachAnimatedCharacter(local);
 
         SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
     });
-    if (!client.init(netCfg.host.c_str(), netCfg.port)) {
+
+    client.onParticleEvent([this](const NetParticleEvent& evt, entt::entity localPlayer) {
+        // Skip own effects (already handled locally for instant feedback)
+        if (evt.source == localPlayer)
+            return;
+
+        switch (evt.effectType) {
+        case ParticleEffectType::BulletTracer:
+            particleSystem.spawnBulletTracer(evt.pos1, evt.pos2, evt.param);
+            break;
+        case ParticleEffectType::HitscanBeam:
+            particleSystem.spawnHitscanBeam(evt.pos1, evt.pos2, evt.weaponType);
+            break;
+        case ParticleEffectType::Impact:
+            particleSystem.spawnImpactEffect(evt.pos1, evt.pos2, evt.surfaceType, evt.weaponType);
+            break;
+        case ParticleEffectType::Explosion:
+            particleSystem.spawnExplosion(evt.pos1, evt.param);
+            break;
+        case ParticleEffectType::Smoke:
+            particleSystem.spawnSmoke(evt.pos1, evt.param);
+            break;
+        }
+    });
+
+    client.onMatchStateUpdate([this](const MatchStatePacket& packet) {
+        currentMatchPhase = packet.phase;
+        countdownTimer = packet.countdownTimer;
+    });
+
+    // Initialize runtime 3P weapon params from defaults
+    for (int i = 0; i < 4; ++i)
+        tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
+
+    const NetworkAddress clientNet = netCfg.clientNetwork;
+    if (!client.init(clientNet.host.c_str(), clientNet.port)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
         renderer.quit();
@@ -115,36 +175,66 @@ bool Game::init()
     SDL_SetWindowRelativeMouseMode(window, true);
     mouseCaptured = true;
 
-    // Load animated model (Mixamo FBX)
+    // Load the shared skinned-character rig (skeleton + bind pose + weights).
+    // Loading a single FBX is enough — any file with matching skin data works;
+    // we use standard_walk.fbx because it's guaranteed present for locomotion.
     {
         const char* base = SDL_GetBasePath();
-        std::string fbxPath = std::string(base ? base : "") + "assets/Standard_Run.fbx";
-        if (runAnimation.load(fbxPath)) {
-            animatedModelIdx = renderer.uploadSceneModel(runAnimation.getLoadedModel());
-            if (animatedModelIdx >= 0) {
-                SDL_Log("[client] animated model uploaded — index=%d, duration=%.2fs",
-                        animatedModelIdx,
-                        static_cast<double>(runAnimation.duration()));
-            }
+        const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
+        const std::string rigPath = assetsDir + "standard_walk.fbx";
+        if (!charRig_.loadFromFBX(rigPath)) {
+            SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
-            SDL_Log("[client] WARNING: animated model failed to load — animation disabled");
-        }
-    }
+            SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
 
-    // Spawn a visible animated character in the world (Mixamo run animation).
-    if (animatedModelIdx >= 0) {
-        const glm::vec3 animPos{0.0f, 0.0f, 400.0f};
-        const entt::entity animEntity = registry.create();
-        registry.emplace<Position>(animEntity, animPos);
-        registry.emplace<PreviousPosition>(animEntity, animPos);
-        registry.emplace<Renderable>(animEntity, Renderable{.modelIndex = animatedModelIdx, .scale = glm::vec3(1.0f)});
+            // Auto-calculate rig scale so the animated model matches the
+            // player's standing hitbox height, and compute the vertical
+            // offset so the model's feet sit at the bottom of the AABB.
+            {
+                float meshMinY = 0.0f;
+                float meshMaxY = 1.0f;
+                charRig_.verticalBounds(meshMinY, meshMaxY);
+                rigMeshMinY_ = meshMinY;
+
+                const float meshHeight = meshMaxY - meshMinY;
+                const float targetHeight = 2.0f * tms::k_standingHalfHeight; // 72 units
+                if (meshHeight > 0.001f) {
+                    kRigScale_ = targetHeight / meshHeight;
+                } else {
+                    kRigScale_ = 1.0f;
+                }
+                // Offset: move the model so its feet (meshMinY) align with
+                // the bottom of the standing AABB (pos.y - standingHalfHeight).
+                // Translation is relative to the entity's Position (AABB centre),
+                // so: translation.y = -halfHeight - meshMinY * scale.
+                kRigVerticalOffset_ = -tms::k_standingHalfHeight - rigMeshMinY_ * kRigScale_;
+                SDL_Log("[client] rig auto-scale: meshY=[%.1f, %.1f] height=%.1f -> scale=%.4f, vertOffset=%.1f",
+                        static_cast<double>(meshMinY),
+                        static_cast<double>(meshMaxY),
+                        static_cast<double>(meshHeight),
+                        static_cast<double>(kRigScale_),
+                        static_cast<double>(kRigVerticalOffset_));
+            }
+
+            // Load every animation clip onto the shared skeleton.
+            for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
+                const ClipId id = static_cast<ClipId>(i);
+                const std::string clipPath = assetsDir + clipFile(id);
+                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath)) {
+                    SDL_Log("[client] WARNING: failed to load clip '%s'", clipName(id));
+                    continue;
+                }
+                SDL_Log(
+                    "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
+            }
+        }
     }
 
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
 
-    // Apply the default VSync setting now that the renderer is ready.
-    renderer.setVSync(limitFPSToMonitor);
+    // Apply the default frame-rate-limit setting now that the renderer is ready.
+    applyFrameRateLimit();
 
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
@@ -163,21 +253,6 @@ SDL_AppResult Game::event(SDL_Event* event)
         switch (event->key.key) {
         case SDLK_Q:
             return SDL_APP_SUCCESS;
-
-        // R — toggle frame recording (state CSV + per-frame PNG screenshots).
-        // Output lands in <binary_dir>/recordings/<timestamp>/ next to the game.
-        case SDLK_R: {
-            if (recorder.isRecording()) {
-                recorder.stopRecording();
-                SDL_Log("[client] recording stopped");
-            } else {
-                const char* base = SDL_GetBasePath();
-                std::string baseDir = std::string(base ? base : "") + "recordings";
-                recorder.startRecording(baseDir);
-                SDL_Log("[client] recording started → %s", recorder.sessionDir().c_str());
-            }
-            break;
-        }
 
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
         case SDLK_ESCAPE:
@@ -198,7 +273,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         // gameplay / screenshots without losing the ability to bring the
         // overlay back with a single press.
         case SDLK_F2:
-            debugUI.toggleAllPanels();
+            // Animation Tester is owned by Game (animUI_), not DebugUI, so
+            // pass its visibility flag in so F2 toggles every panel uniformly.
+            debugUI.toggleAllPanels({&animUI_.show});
             break;
 
         // Particle system test keys
@@ -216,8 +293,8 @@ SDL_AppResult Game::event(SDL_Event* event)
                 }
             }
             const glm::vec3 hitP = cachedEye_ + cachedCamFwd_ * dist;
-            particleSystem.spawnHitscanBeam(hip, hitP, WeaponType::EnergyRifle);
-            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Energy, WeaponType::EnergyRifle);
+            particleSystem.spawnHitscanBeam(hip, hitP, WeaponType::EnergyGun);
+            particleSystem.spawnImpactEffect(hitP, hitN, SurfaceType::Energy, WeaponType::EnergyGun);
             break;
         }
         case SDLK_Y: {
@@ -256,72 +333,15 @@ SDL_AppResult Game::event(SDL_Event* event)
         }
     }
 
-    // Left-click fires weapon (dispatches WeaponFiredEvent)
-    if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT && mouseCaptured) {
-        const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-        const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+    // NOTE: Local weapon VFX (tracers, impact, recoil) are handled continuously
+    // in iterate() so held fire (auto weapons) spawns effects every cooldown tick.
 
-        // Ray-scene intersection for hit position
-        // Test against the floor plane (y=0) and use the nearest hit.
-        constexpr float k_maxRange = 5000.f;
-        float hitDist = k_maxRange; // fallback: max range
-        glm::vec3 hitNormal = -cachedCamFwd_;
-        SurfaceType hitSurface = SurfaceType::Concrete;
-
-        // Floor plane: y = 0, normal = (0, 1, 0)
-        if (cachedCamFwd_.y < -0.001f) { // looking downward at all
-            const float t = -cachedEye_.y / cachedCamFwd_.y;
-            if (t > 0.f && t < hitDist) {
-                hitDist = t;
-                hitNormal = glm::vec3{0.f, 1.f, 0.f};
-                hitSurface = SurfaceType::Concrete;
-            }
-        }
-
-        // Test against scene objects as rough spheres.
-        struct SceneObj
-        {
-            glm::vec3 center;
-            float radius;
-            SurfaceType surface;
-        };
-        static const SceneObj k_sceneObjects[] = {
-            {{200.f, 60.f, 400.f}, 80.f, SurfaceType::Flesh},   // Wraith
-            {{-200.f, 40.f, 400.f}, 100.f, SurfaceType::Metal}, // Porsche
-            {{0.f, 50.f, 600.f}, 60.f, SurfaceType::Metal},     // Pallet
-            {{100.f, 30.f, 400.f}, 30.f, SurfaceType::Metal},   // Bottle
-        };
-        for (const auto& obj : k_sceneObjects) {
-            // Ray-sphere intersection: |origin + t*dir - center|² = r²
-            const glm::vec3 oc = cachedEye_ - obj.center;
-            const float b = glm::dot(oc, cachedCamFwd_);
-            const float c = glm::dot(oc, oc) - obj.radius * obj.radius;
-            const float disc = b * b - c;
-            if (disc >= 0.f) {
-                const float t = -b - std::sqrt(disc);
-                if (t > 0.f && t < hitDist) {
-                    hitDist = t;
-                    const glm::vec3 p = cachedEye_ + cachedCamFwd_ * t;
-                    hitNormal = glm::normalize(p - obj.center);
-                    hitSurface = obj.surface;
-                }
-            }
-        }
-
-        const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
-        const float tracerRange = hitDist; // tracer ends at the hit point
-
-        WeaponFiredEvent wfe;
-        wfe.type = WeaponType::Rifle;
-        wfe.origin = hip;
-        wfe.direction = cachedCamFwd_;
-        wfe.isHitscan = true;
-        wfe.hitPos = hitPos;
-        dispatcher.enqueue(wfe);
-
-        // Spawn tracers from muzzle to hit, impact at the hit surface.
-        particleSystem.spawnBulletTracer(hip, cachedCamFwd_, tracerRange);
-        particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, WeaponType::Rifle);
+    // Scroll wheel cycles weapon slots
+    if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
+        if (event->wheel.y > 0)
+            pendingScrollSwitch_ = -1; // scroll up → previous slot
+        else if (event->wheel.y < 0)
+            pendingScrollSwitch_ = 1;  // scroll down → next slot
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
@@ -367,7 +387,46 @@ SDL_AppResult Game::event(SDL_Event* event)
 ///       (true, default, server-consistent) vs. every iterate() call (false).
 ///       Mouse look is always per-frame regardless of this toggle.
 ///
-///   limitFPSToMonitor -- VSync on (true) / off (false, default).
+///   limitFPSToMonitor -- when ON and monitor >= physicsHz, uses VSync.
+///       When monitor < physicsHz (regardless of this toggle), a software
+///       frame limiter at physicsHz is always active to ensure rock-steady
+///       frame pacing — the monitor can't display above its refresh rate
+///       anyway, and uncapped rendering creates beat-frequency jitter.
+
+void Game::applyFrameRateLimit()
+{
+    // Query the monitor's native refresh rate.
+    int monitorHz = 60; // safe fallback
+    const SDL_DisplayID displayID = SDL_GetDisplayForWindow(window);
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayID);
+    if (mode && mode->refresh_rate > 0.0f)
+        monitorHz = static_cast<int>(std::ceil(mode->refresh_rate));
+
+    if (limitFPSToMonitor && monitorHz >= k_physicsHz) {
+        // Monitor is fast enough — VSync locks to monitor refresh without
+        // starving the physics loop.
+        renderer.setVSync(true);
+        softLimitPeriod = 0;
+    } else if (monitorHz < k_physicsHz) {
+        // Monitor refresh is below physics Hz.  Regardless of the limiter
+        // toggle, cap at physics Hz with mailbox presentation.  The monitor
+        // can only display monitorHz frames per second anyway, and running
+        // uncapped at extreme fps introduces frame-pacing variance that
+        // creates visible beat-frequency jitter between the display refresh
+        // and the physics tick rate.  The software limiter ensures rock-steady
+        // frame spacing so the frames selected by mailbox presentation have
+        // consistent interpolation coverage.
+        renderer.setVSync(false);
+        softLimitPeriod = SDL_GetPerformanceFrequency() / static_cast<Uint64>(k_physicsHz);
+        softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+        SDL_Log(
+            "[client] monitor %d Hz < physics %d Hz — software limiter at %d fps", monitorHz, k_physicsHz, k_physicsHz);
+    } else {
+        // Monitor >= physics Hz, limiter off — truly uncapped.
+        renderer.setVSync(false);
+        softLimitPeriod = 0;
+    }
+}
 
 SDL_AppResult Game::iterate()
 {
@@ -432,6 +491,25 @@ SDL_AppResult Game::iterate()
         systems::runMouseLook(registry, mouseSensitivity);
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry);
+        systems::runWeaponKeys(registry);
+
+        // Apply scroll-wheel weapon switch (overrides key-based switch for this frame)
+        if (pendingScrollSwitch_ != 0) {
+            registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
+                // Determine current slot from WeaponState
+                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2
+                registry.view<LocalPlayer, WeaponState>().each(
+                    [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
+
+                // Cycle: add direction, wrap around 3 slots
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 3) % 3;
+
+                snap.switchToPrimary = (slotIdx == 0);
+                snap.switchToSecondary = (slotIdx == 1);
+                snap.switchToTertiary = (slotIdx == 2);
+            });
+            pendingScrollSwitch_ = 0;
+        }
     }
 
     systems::runInputSend(registry, client);
@@ -515,11 +593,68 @@ SDL_AppResult Game::iterate()
             });
     }
 
+    // Local weapon VFX — fires continuously while LMB is held, respecting cooldown.
+    // This mirrors the server's fire rate so the local player sees tracers/impacts
+    // at the same cadence as the server processes shots.
+    {
+        localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
+
+        const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
+        const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
+
+        if (shooting && localFireCooldown_ <= 0.0f) {
+            const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
+            localFireCooldown_ = wpnCfg.fireCooldown;
+
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+
+            // Ray-scene intersection for hit position
+            constexpr float k_maxRange = 5000.f;
+            float hitDist = k_maxRange;
+            glm::vec3 hitNormal = -cachedCamFwd_;
+            SurfaceType hitSurface = SurfaceType::Concrete;
+
+            if (cachedCamFwd_.y < -0.001f) {
+                const float t = -cachedEye_.y / cachedCamFwd_.y;
+                if (t > 0.f && t < hitDist) {
+                    hitDist = t;
+                    hitNormal = glm::vec3{0.f, 1.f, 0.f};
+                    hitSurface = SurfaceType::Concrete;
+                }
+            }
+
+            const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
+
+            // Dispatch weapon-fired event for any listeners
+            WeaponFiredEvent wfe;
+            wfe.type = currentEquippedType_;
+            wfe.origin = hip;
+            wfe.direction = cachedCamFwd_;
+            wfe.isHitscan = true;
+            wfe.hitPos = hitPos;
+            dispatcher.enqueue(wfe);
+
+            // Spawn correct particle effect based on weapon type
+            if (currentEquippedType_ == WeaponType::RailGun || currentEquippedType_ == WeaponType::EnergyGun)
+                particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
+            else
+                particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
+            particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
+
+            // Visual recoil kick (viewmodel-only)
+            const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+            recoilPitch_ += rp.pitchKick;
+            recoilPushBack_ += rp.pushBack;
+            recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
+        }
+    }
+
     // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
 
     // Update particle system (render-rate, not physics-rate)
-    // particleSystem.update(frameTime, renderer.getCamera(), registry);
+    particleSystem.update(frameTime, renderer.getCamera(), registry);
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -593,14 +728,39 @@ SDL_AppResult Game::iterate()
         cachedEye_ = renderEye;
     }
 
-    // Update skeletal animation (CPU skinning)
-    if (runAnimation.isLoaded() && animatedModelIdx >= 0) {
-        runAnimation.update(frameTime);
-        for (size_t m = 0; m < runAnimation.meshCount(); ++m) {
-            const auto& sv = runAnimation.getSkinnedVertices(m);
-            renderer.updateModelMeshVertices(
-                animatedModelIdx, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
-        }
+    // Update skeletal animation (CPU skinning) — per animated entity.
+    //
+    // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
+    // CPU-skins every rig mesh, and streams the resulting vertices into its
+    // per-entity renderer model instance.
+    {
+        std::vector<std::vector<ModelVertex>> skinnedBuffer;
+        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity,
+                                                                                          AnimatedCharacter& ac,
+                                                                                          const Velocity& vel,
+                                                                                          const PlayerState& ps,
+                                                                                          const InputSnapshot& inp) {
+            if (!ac.animator || ac.modelIndex < 0)
+                return;
+
+            AnimationInputs ai{};
+            ai.velocityWorld = vel.value;
+            ai.yawRad = inp.yaw;
+            ai.pitchRad = inp.pitch;
+            ai.grounded = ps.grounded;
+            ai.sprinting = ps.sprinting;
+            ai.crouching = ps.crouching;
+            ai.moveMode = static_cast<int>(ps.moveMode);
+            ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+            ac.animator->update(ai, frameTime);
+
+            ac.animator->computeSkinnedVertices(skinnedBuffer);
+            for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
+                const auto& sv = skinnedBuffer[m];
+                renderer.updateModelMeshVertices(
+                    ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
+            }
+        });
     }
 
     // Build entity render list
@@ -610,7 +770,10 @@ SDL_AppResult Game::iterate()
             if (!rend.visible || rend.modelIndex < 0)
                 return;
             // Skip local player model in first-person (Option A from the plan).
-            if (registry.all_of<LocalPlayer>(e))
+            // The animator still runs so future gun-IK has an up-to-date pose;
+            // only rendering is suppressed — and optionally re-enabled via the
+            // "Show local body" debug toggle for third-person inspection.
+            if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
             glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
@@ -619,16 +782,76 @@ SDL_AppResult Game::iterate()
 
             entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world});
         });
+
+        // Third-person weapons for remote players
+        registry.view<Position, InputSnapshot, WeaponState, CollisionShape>().each([&](entt::entity e,
+                                                                                       const Position& pos,
+                                                                                       const InputSnapshot& input,
+                                                                                       const WeaponState& ws,
+                                                                                       const CollisionShape&) {
+            if (registry.all_of<LocalPlayer>(e))
+                return;
+
+            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                             : ws.primary;
+            const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
+            if (wpnIdx < 0)
+                return;
+
+            const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
+
+            // Player orientation vectors (horizontal plane)
+            const float yaw = input.yaw;
+            const glm::vec3 pFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
+            const glm::vec3 pRight = glm::normalize(glm::cross(pFwd, glm::vec3{0, 1, 0}));
+
+            // Weapon world position = player center + hand offset
+            glm::vec3 wpnPos =
+                pos.value + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
+
+            // Build transform: translate -> yaw -> pitch -> roll -> scale
+            glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);
+            wpnWorld *= glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
+            float clampedPitch = std::clamp(input.pitch, glm::radians(-30.0f), glm::radians(30.0f));
+            wpnWorld *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
+            wpnWorld *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
+            wpnWorld = glm::scale(wpnWorld, glm::vec3(tp.scale));
+
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
+        });
+
         renderer.setEntityRenderList(std::move(entityCmds));
     }
 
+    // Determine equipped weapon type from WeaponState
+    registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+        const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                 : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                         : ws.primary;
+        currentEquippedType_ = gun.type;
+    });
+
+    // Auto-apply per-weapon viewmodel defaults when weapon changes
+    if (currentEquippedType_ != lastEquippedType_) {
+        const auto& vp = getViewmodelParams(currentEquippedType_);
+        vmScale = vp.scale;
+        vmForward = vp.forward;
+        vmRight = vp.right;
+        vmDown = vp.down;
+        vmYawOffset = vp.yawOffset;
+        vmPitchOffset = vp.pitchOffset;
+        vmRollOffset = vp.rollOffset;
+        lastEquippedType_ = currentEquippedType_;
+    }
+
+    const int currentWeaponModelIdx = weaponModelIndices_[static_cast<int>(currentEquippedType_)];
+
     // Build weapon viewmodel
-    // R-301 model bounds: X ±0.6, Y −3.4..+1.3, Z −8.4..+7.2
-    // Model's +Z axis is the barrel direction.  Origin is near the grip.
     {
         WeaponViewmodel vm;
-        if (weaponModelIdx >= 0) {
-            vm.modelIndex = weaponModelIdx;
+        if (currentWeaponModelIdx >= 0) {
+            vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
 
             const float cosPitch = std::cos(renderPitch);
@@ -637,38 +860,123 @@ SDL_AppResult Game::iterate()
             const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
             const glm::vec3 up = glm::normalize(glm::cross(right, forward));
 
-            // Weapon bob: subtle sinusoidal offset based on movement speed
-            float bobPhase = 0.0f;
-            float bobAmplitude = 0.0f;
-            registry.view<LocalPlayer, Velocity>().each([&](const Velocity& vel) {
-                const float hSpeed = std::sqrt(vel.value.x * vel.value.x + vel.value.z * vel.value.z);
-                if (hSpeed > 10.0f) {
-                    bobAmplitude = std::min(hSpeed / 800.0f, 1.5f);
-                    bobPhase = static_cast<float>(SDL_GetTicks()) * 0.008f;
+            // --- Weapon sway (CoD-style barrel lead) ---
+            {
+                if (!swayInitialized_) {
+                    prevSwayYaw_ = renderYaw;
+                    prevSwayPitch_ = renderPitch;
+                    swayInitialized_ = true;
                 }
+
+                float yawDelta = renderYaw - prevSwayYaw_;
+                float pitchDelta = renderPitch - prevSwayPitch_;
+                prevSwayYaw_ = renderYaw;
+                prevSwayPitch_ = renderPitch;
+
+                // Wrap yaw delta for -pi/+pi boundary
+                if (yawDelta > glm::pi<float>())
+                    yawDelta -= glm::two_pi<float>();
+                if (yawDelta < -glm::pi<float>())
+                    yawDelta += glm::two_pi<float>();
+
+                if (frameTime > 0.0001f) {
+                    float targetX = std::clamp(yawDelta / frameTime * 0.05f * swayAmplitudeYaw_,
+                                               -swayAmplitudeYaw_ * 3.0f,
+                                               swayAmplitudeYaw_ * 3.0f);
+                    float targetY = std::clamp(pitchDelta / frameTime * 0.05f * swayAmplitudePitch_,
+                                               -swayAmplitudePitch_ * 3.0f,
+                                               swayAmplitudePitch_ * 3.0f);
+
+                    float alpha = std::min(1.0f, swaySmoothing_ * frameTime * 60.0f);
+                    swayOffsetX_ = glm::mix(swayOffsetX_, targetX, alpha);
+                    swayOffsetY_ = glm::mix(swayOffsetY_, targetY, alpha);
+                }
+                float decay = std::exp(-swayDecayRate_ * frameTime);
+                swayOffsetX_ *= decay;
+                swayOffsetY_ *= decay;
+            }
+
+            // --- Recoil decay ---
+            {
+                const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+                float decay = std::exp(-rp.recoverySpeed * frameTime);
+                recoilPitch_ *= decay;
+                recoilPushBack_ *= decay;
+                recoilRoll_ *= decay;
+
+                // Kill tiny residuals
+                if (std::abs(recoilPitch_) < 0.01f)
+                    recoilPitch_ = 0.0f;
+                if (std::abs(recoilPushBack_) < 0.01f)
+                    recoilPushBack_ = 0.0f;
+                if (std::abs(recoilRoll_) < 0.01f)
+                    recoilRoll_ = 0.0f;
+            }
+
+            // --- Velocity-direction-dependent bobbing ---
+            float bobPhase = 0.0f;
+            float bobAmpFwd = 0.0f;
+            float bobAmpStrafe = 0.0f;
+
+            registry.view<LocalPlayer, Velocity>().each([&](const Velocity& vel) {
+                glm::vec3 hVel{vel.value.x, 0.0f, vel.value.z};
+                glm::vec3 hFwd{forward.x, 0.0f, forward.z};
+                float hFwdLen = glm::length(hFwd);
+                if (hFwdLen < 0.001f) {
+                    hFwd = glm::vec3{std::sin(renderYaw), 0.0f, std::cos(renderYaw)};
+                } else {
+                    hFwd /= hFwdLen;
+                }
+                glm::vec3 hRight = glm::normalize(glm::cross(hFwd, glm::vec3{0, 1, 0}));
+
+                float fwdSpeed = std::abs(glm::dot(hVel, hFwd));
+                float strafeSpeed = std::abs(glm::dot(hVel, hRight));
+
+                bobPhase = static_cast<float>(SDL_GetTicks()) * 0.008f;
+
+                if (fwdSpeed > 10.0f)
+                    bobAmpFwd = std::min(fwdSpeed / 800.0f, 1.5f);
+                if (strafeSpeed > 10.0f)
+                    bobAmpStrafe = std::min(strafeSpeed / 800.0f, 1.0f);
             });
 
-            const float bobX = std::sin(bobPhase) * bobAmplitude;
-            const float bobY = std::sin(bobPhase * 2.0f) * bobAmplitude * 0.5f;
+            // Forward: classic vertical-dominant bob
+            float bobX = std::sin(bobPhase) * bobAmpFwd * 0.3f;
+            float bobY = std::sin(bobPhase * 2.0f) * bobAmpFwd * 0.5f;
 
-            // FPS weapon position: lower-right of screen, slightly forward.
-            // The model at scale 5 is ~75 units long, realistic for a rifle
-            // in Quake-unit scale (1 unit ≈ 1 inch).
-            constexpr float k_weaponScale = 5.0f;
-            glm::vec3 weaponPos = renderEye + forward * 25.f + right * 18.f - up * 18.f;
+            // Strafe: horizontal-dominant bob at slightly different frequency
+            bobX += std::sin(bobPhase * 0.9f) * bobAmpStrafe * 0.8f;
+            bobY += std::sin(bobPhase * 1.8f) * bobAmpStrafe * 0.2f;
+
+            // Position the weapon in camera space, then convert to world.
+            glm::vec3 weaponPos = renderEye + forward * vmForward + right * vmRight - up * vmDown;
+            // Apply sway
+            weaponPos += right * swayOffsetX_ + up * swayOffsetY_;
+            // Apply bob
             weaponPos += right * bobX + up * bobY;
+            // Apply recoil pushback
+            weaponPos -= forward * recoilPushBack_;
 
-            // Build world transform: translate → rotate → scale.
-            // Rotation: model +Z (barrel) → camera forward,
-            //           model +Y (rail)   → camera up,
-            //           model +X (side)   → camera right.
+            // Build world transform: translate -> local-rotate -> camera-orient -> scale.
+            //
+            // 1) Camera orientation: maps model axes into camera space.
+            const glm::mat4 cameraOrient = glm::mat4(glm::vec4(right, 0.0f),
+                                                     glm::vec4(up, 0.0f),
+                                                     glm::vec4(forward, 0.0f),
+                                                     glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+            // 2) Local rotation offsets (yaw/pitch/roll in degrees) with recoil.
+            const glm::mat4 localRot =
+                glm::rotate(glm::mat4(1.0f), glm::radians(vmYawOffset), glm::vec3(0, 1, 0)) *
+                glm::rotate(glm::mat4(1.0f), glm::radians(vmPitchOffset + recoilPitch_), glm::vec3(1, 0, 0)) *
+                glm::rotate(glm::mat4(1.0f), glm::radians(vmRollOffset + recoilRoll_), glm::vec3(0, 0, 1));
+
             glm::mat4 weaponWorld = glm::translate(glm::mat4(1.0f), weaponPos);
-            const glm::mat4 rotMat = glm::mat4(glm::vec4(right, 0.0f),   // column 0: model X → right
-                                               glm::vec4(up, 0.0f),      // column 1: model Y → up
-                                               glm::vec4(forward, 0.0f), // column 2: model Z → forward (barrel)
-                                               glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-            weaponWorld *= rotMat;
-            weaponWorld = glm::scale(weaponWorld, glm::vec3(k_weaponScale));
+            weaponWorld *= cameraOrient;
+            weaponWorld *= localRot;
+            // Negate X to cancel the reflection in the camera orient matrix
+            // (right, up, forward has det = -1).
+            weaponWorld = glm::scale(weaponWorld, glm::vec3(-vmScale, vmScale, vmScale));
 
             vm.transform = weaponWorld;
         }
@@ -762,15 +1070,140 @@ SDL_AppResult Game::iterate()
                     statsFPS1pLow,
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
+    debugUI.buildScoreboardUI(registry, currentMatchPhase, countdownTimer);
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
-    debugUI.buildRenderTogglesUI(renderer.toggles);
+    buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 #ifdef USE_HYBRID_RENDERER
+    debugUI.buildRenderTogglesUI(renderer.legacy());
     debugUI.buildLightingUI(renderer.legacy());
     debugUI.buildSkyboxUI(renderer.legacy());
 #else
+    debugUI.buildRenderTogglesUI(renderer);
     debugUI.buildLightingUI(renderer);
     debugUI.buildSkyboxUI(renderer);
 #endif
+
+    // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
+    if (showViewmodelUI) {
+        if (ImGui::Begin("Viewmodel Tweaker", &showViewmodelUI)) {
+            ImGui::SeparatorText("Position (Quake units)");
+            ImGui::DragFloat("Forward", &vmForward, 0.5f, -50.0f, 100.0f, "%.1f");
+            ImGui::DragFloat("Right", &vmRight, 0.5f, -50.0f, 50.0f, "%.1f");
+            ImGui::DragFloat("Down", &vmDown, 0.5f, -50.0f, 80.0f, "%.1f");
+
+            ImGui::SeparatorText("Rotation (degrees)");
+            ImGui::DragFloat("Yaw", &vmYawOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Pitch", &vmPitchOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Roll", &vmRollOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+
+            ImGui::SeparatorText("Scale");
+            ImGui::DragFloat("Scale", &vmScale, 0.001f, 0.001f, 10.0f, "%.4f");
+
+            ImGui::Separator();
+            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)"};
+            ImGui::Text("Equipped: %s", weaponNames[static_cast<int>(currentEquippedType_)]);
+
+            if (ImGui::Button("Load weapon defaults")) {
+                const auto& vp = getViewmodelParams(currentEquippedType_);
+                vmScale = vp.scale;
+                vmForward = vp.forward;
+                vmRight = vp.right;
+                vmDown = vp.down;
+                vmYawOffset = vp.yawOffset;
+                vmPitchOffset = vp.pitchOffset;
+                vmRollOffset = vp.rollOffset;
+            }
+
+            ImGui::SeparatorText("Sway");
+            ImGui::DragFloat("Sway Yaw Amp", &swayAmplitudeYaw_, 0.1f, 0.0f, 20.0f);
+            ImGui::DragFloat("Sway Pitch Amp", &swayAmplitudePitch_, 0.1f, 0.0f, 20.0f);
+            ImGui::DragFloat("Sway Decay", &swayDecayRate_, 0.5f, 1.0f, 30.0f);
+            ImGui::DragFloat("Sway Smooth", &swaySmoothing_, 0.01f, 0.01f, 1.0f);
+
+            ImGui::SeparatorText("Recoil");
+            ImGui::Text("Pitch: %.2f  PushBack: %.2f  Roll: %.2f",
+                        static_cast<double>(recoilPitch_),
+                        static_cast<double>(recoilPushBack_),
+                        static_cast<double>(recoilRoll_));
+
+            ImGui::SeparatorText("Crosshair");
+            ImGui::Checkbox("Show Crosshair", &showCrosshair_);
+            ImGui::DragFloat("CH Size", &crosshairSize_, 0.5f, 1.0f, 30.0f);
+            ImGui::DragFloat("CH Gap", &crosshairGap_, 0.5f, 0.0f, 20.0f);
+            ImGui::DragFloat("CH Thickness", &crosshairThickness_, 0.5f, 0.5f, 5.0f);
+            ImGui::ColorEdit4("CH Color", &crosshairColor_.x);
+            ImGui::Checkbox("CH Dot", &crosshairDot_);
+        }
+        ImGui::End();
+    }
+
+    // Draw screen crosshair via ImGui foreground draw list
+    if (showCrosshair_ && mouseCaptured) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        const float cx = static_cast<float>(winW) * 0.5f;
+        const float cy = static_cast<float>(winH) * 0.5f;
+
+        const ImU32 col = ImGui::ColorConvertFloat4ToU32(
+            ImVec4(crosshairColor_.r, crosshairColor_.g, crosshairColor_.b, crosshairColor_.a));
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+        const float g = crosshairGap_;
+        const float s = crosshairSize_;
+        const float t = crosshairThickness_;
+
+        // Four lines: top, bottom, left, right
+        dl->AddLine(ImVec2(cx, cy - g - s), ImVec2(cx, cy - g), col, t); // up
+        dl->AddLine(ImVec2(cx, cy + g), ImVec2(cx, cy + g + s), col, t); // down
+        dl->AddLine(ImVec2(cx - g - s, cy), ImVec2(cx - g, cy), col, t); // left
+        dl->AddLine(ImVec2(cx + g, cy), ImVec2(cx + g + s, cy), col, t); // right
+
+        // Optional center dot
+        if (crosshairDot_)
+            dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
+    }
+
+    // Third-person weapon tweaker — per-weapon tuning for remote player weapons.
+    if (showTPWeaponUI_) {
+        if (ImGui::Begin("3P Weapon Tweaker", &showTPWeaponUI_)) {
+            const char* tpWeaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)"};
+            ImGui::Combo("Weapon", &tpTuneWeaponIdx_, tpWeaponNames, 4);
+
+            auto& tp = tpWeaponParams_[tpTuneWeaponIdx_];
+
+            ImGui::SeparatorText("Hand Offset (right, up, forward)");
+            ImGui::DragFloat("TP Right", &tp.handOffset.x, 0.5f, -50.0f, 50.0f, "%.1f");
+            ImGui::DragFloat("TP Up", &tp.handOffset.y, 0.5f, -50.0f, 50.0f, "%.1f");
+            ImGui::DragFloat("TP Forward", &tp.handOffset.z, 0.5f, -50.0f, 50.0f, "%.1f");
+
+            ImGui::SeparatorText("Rotation (degrees)");
+            ImGui::DragFloat("TP Yaw", &tp.yawOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("TP Pitch", &tp.pitchOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("TP Roll", &tp.rollOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+
+            ImGui::SeparatorText("Scale");
+            ImGui::DragFloat("TP Scale", &tp.scale, 0.0001f, 0.0001f, 10.0f, "%.5f");
+
+            ImGui::Separator();
+            if (ImGui::Button("Reset to defaults")) {
+                tp = getThirdPersonWeaponParams(static_cast<WeaponType>(tpTuneWeaponIdx_));
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Save as new defaults")) {
+                SDL_Log("[client] 3P weapon %d: scale=%.5f offset=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f roll=%.1f",
+                        tpTuneWeaponIdx_,
+                        static_cast<double>(tp.scale),
+                        static_cast<double>(tp.handOffset.x),
+                        static_cast<double>(tp.handOffset.y),
+                        static_cast<double>(tp.handOffset.z),
+                        static_cast<double>(tp.yawOffset),
+                        static_cast<double>(tp.pitchOffset),
+                        static_cast<double>(tp.rollOffset));
+            }
+        }
+        ImGui::End();
+    }
+
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
@@ -785,7 +1218,22 @@ SDL_AppResult Game::iterate()
     renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
 
     if (limitFPSToMonitor != prevLimitFPS)
-        renderer.setVSync(limitFPSToMonitor);
+        applyFrameRateLimit();
+
+    // Software frame limiter: sleep + spin-wait when targeting above monitor refresh.
+    if (softLimitPeriod != 0) {
+        const Uint64 perfFreq = SDL_GetPerformanceFrequency();
+        const Uint64 now = SDL_GetPerformanceCounter();
+        if (now < softLimitNextFrame) {
+            const Sint64 sleepMs = static_cast<Sint64>((softLimitNextFrame - now) * 1000 / perfFreq) - 1;
+            if (sleepMs > 0)
+                SDL_Delay(static_cast<Uint32>(sleepMs));
+            // Spin-wait for remaining sub-millisecond precision.
+            while (SDL_GetPerformanceCounter() < softLimitNextFrame) {
+            }
+        }
+        softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+    }
 
     return SDL_APP_CONTINUE;
 }
@@ -805,20 +1253,57 @@ void Game::quit()
 
 void Game::refreshRemotePlayerRenderables()
 {
-    constexpr float kWraithScale = 34.5f;
-    constexpr float kWraithVerticalOffset = -35.45f;
-    const glm::quat importFix = glm::angleAxis(glm::radians(90.0f), glm::vec3{1, 0, 0});
+    // Remote players use the shared Mixamo rig — no more Wraith placeholder.
+    // Scale + Y offset are driven from the auto-calculated values (and tunable
+    // via the Animation Tester panel).
+    //
+    // The vertical offset places the model's feet at the bottom of the
+    // collision AABB: translation.y = -halfExtents.y - meshMinY * scale.
+    // This ensures the model tracks the AABB bottom automatically when
+    // crouching changes the half-height — no manual offset update needed.
+    registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
+                                                                                   const Position&,
+                                                                                   const PlayerState&,
+                                                                                   const InputSnapshot& input,
+                                                                                   const CollisionShape& shape) {
+        if (registry.all_of<LocalPlayer>(e))
+            return;
 
-    registry.view<Position, PlayerState, InputSnapshot>().each(
-        [&](entt::entity e, const Position&, const PlayerState&, const InputSnapshot& input) {
-            if (registry.all_of<LocalPlayer>(e))
-                return;
+        if (!registry.all_of<AnimatedCharacter>(e))
+            attachAnimatedCharacter(e);
 
-            auto& rend = registry.get_or_emplace<Renderable>(e);
-            rend.modelIndex = wraithModelIdx;
-            rend.translation = glm::vec3(0.0f, kWraithVerticalOffset, 0.0f);
-            rend.scale = glm::vec3(kWraithScale); // 72.0f / 2.088f
-            rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0}) * importFix;
-            rend.visible = true;
-        });
+        const auto& ac = registry.get<AnimatedCharacter>(e);
+        if (ac.modelIndex < 0)
+            return; // rig unavailable — leave entity un-rendered rather than crash.
+
+        auto& rend = registry.get_or_emplace<Renderable>(e);
+        rend.modelIndex = ac.modelIndex;
+        // Bottom-of-AABB reference: align model feet with the AABB bottom.
+        rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        rend.scale = glm::vec3(kRigScale_);
+        // No importFix quaternion here: rig is loaded with
+        // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
+        // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
+        // facing the wrong axis after a visual check.
+        rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        rend.visible = true;
+    });
+}
+
+void Game::attachAnimatedCharacter(entt::entity e)
+{
+    if (registry.all_of<AnimatedCharacter>(e))
+        return;
+
+    AnimatedCharacter ac;
+    ac.animator = std::make_unique<CharacterAnimator>(charRig_, animLibrary_);
+    ac.animator->setSkinningBackend(&skinBackend_);
+
+    // Each animated entity gets its OWN renderer model instance (clone of the
+    // rig template) so CPU-skinned vertices can stream into a private vertex
+    // buffer without fighting other entities for slots.
+    if (charRig_.isLoaded())
+        ac.modelIndex = renderer.uploadSceneModel(charRig_.templateLoadedModel());
+
+    registry.emplace<AnimatedCharacter>(e, std::move(ac));
 }

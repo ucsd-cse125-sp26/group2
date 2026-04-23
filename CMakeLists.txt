@@ -333,7 +333,11 @@ set(SHADER_SOURCES
     bloom_downsample.comp bloom_upsample.comp  # Bloom (Phase 8)
     ssr.comp                            # Screen-space reflections (Phase 9)
     volumetric.comp                     # Volumetric lighting (Phase 10)
-    motion_vectors.comp taa.comp        # TAA (Phase 11)
+    motion_vectors.comp                 # Motion vectors (used by SMAA T2x)
+    smaa_fullscreen.vert                # SMAA fullscreen triangle (Y-flipped UVs)
+    smaa_edge.frag smaa_blend.frag smaa_neighborhood.frag  # SMAA spatial passes
+    smaa_resolve.comp                   # SMAA T2x temporal resolve
+    cas.comp                            # CAS (Contrast Adaptive Sharpening)
     pbr_wboit.frag oit_resolve.frag     # OIT (Phase 12)
     sss.comp                            # Subsurface scattering (Phase 13)
     # Particle system shaders (Phase 14)
@@ -511,8 +515,18 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
     # Skeletal animation
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -528,6 +542,7 @@ add_executable(group2
         src/ecs/components/TracerEmitter.hpp
         src/ecs/components/RibbonEmitter.hpp
         src/ecs/components/ParticleEmitterTag.hpp
+        src/ecs/components/AnimatedCharacter.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
         src/ecs/physics/Movement.cpp
@@ -561,6 +576,18 @@ add_executable(group2
         src/client/renderer-new/Asset.hpp
         src/client/renderer-new/AssetLoader.cpp
         src/client/renderer-new/AssetLoader.hpp
+        src/ecs/systems/WeaponSystem.hpp
+        src/ecs/systems/WeaponSystem.hpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/network/ShotEvent.hpp
+        src/ecs/systems/PlayerStatusSystem.hpp
+        src/ecs/systems/PlayerStatusSystem.cpp
+        src/ecs/components/Player.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -714,8 +741,18 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
     # Skeletal animation
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinnedModel.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -731,6 +768,7 @@ add_executable(client
         src/ecs/components/TracerEmitter.hpp
         src/ecs/components/RibbonEmitter.hpp
         src/ecs/components/ParticleEmitterTag.hpp
+        src/ecs/components/AnimatedCharacter.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
         src/ecs/physics/Movement.cpp
@@ -760,6 +798,20 @@ add_executable(client
         src/client/renderer-new/Asset.hpp
         src/client/renderer-new/AssetLoader.cpp
         src/client/renderer-new/AssetLoader.hpp
+        src/ecs/systems/WeaponSystem.hpp
+        src/ecs/systems/WeaponSystem.hpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/Health.hpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/network/ShotEvent.hpp
+        src/ecs/systems/PlayerStatusSystem.hpp
+        src/ecs/systems/PlayerStatusSystem.cpp
+        src/ecs/components/Player.hpp
+        src/network/MatchStatus.hpp
 )
 
 target_include_directories(client PRIVATE
@@ -891,6 +943,24 @@ add_executable(server
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
         src/ecs/components/ClientId.hpp
+        src/ecs/systems/WeaponSystem.hpp
+        src/ecs/systems/WeaponSystem.hpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/Health.hpp
+        src/ecs/systems/WeaponSystem.cpp
+        src/network/ShotEvent.hpp
+        src/ecs/systems/PlayerStatusSystem.hpp
+        src/ecs/systems/PlayerStatusSystem.cpp
+        src/ecs/components/Player.hpp
+        src/network/MatchStatus.hpp
+        src/server/systems/MatchController.hpp
+        src/server/systems/MatchController.cpp
+        src/ecs/systems/MatchSystem.hpp
+        src/ecs/systems/MatchSystem.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

@@ -4,10 +4,12 @@
 #pragma once
 
 #include "ecs/registry/Registry.hpp"
+#include "network/MatchStatus.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <glm/vec3.hpp>
+#include <initializer_list>
 
 struct NetworkStats;  ///< Forward-declared; defined in Client.hpp.
 class ParticleSystem; ///< Forward-declared to avoid pulling in heavy particle headers.
@@ -77,8 +79,8 @@ public:
     void buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward);
 
     /// @brief Build the Render Toggles window for live performance profiling.
-    /// @param toggles  The renderer's toggle struct (read/write).
-    void buildRenderTogglesUI(struct RenderToggles& toggles);
+    /// @param renderer  The renderer (for toggles, AA mode).
+    void buildRenderTogglesUI(class Renderer& renderer);
 
     /// @brief Build the Skybox selector window for live HDR skybox swapping.
     void buildSkyboxUI(class Renderer& renderer);
@@ -88,6 +90,12 @@ public:
 
     /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
     void buildNetworkUI(const NetworkStats& stats);
+    void buildWeaponUI(const Registry& registry);
+
+    /// @brief Build the persistent scoreboard HUD showing all players' kills, deaths, and score.
+    /// @param phase          Current match phase received from the server.
+    /// @param countdownTimer Seconds remaining; displayed only during COUNTDOWN and FINISHED phases.
+    void buildScoreboardUI(const Registry& registry, MatchPhase phase, float countdownTimer);
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
@@ -98,7 +106,12 @@ public:
     /// hidden, all panels become visible. Intended to be bound to a hotkey so the
     /// user can clear the overlay for clean gameplay/screenshots and bring it
     /// back with the same press.
-    void toggleAllPanels();
+    /// @param externalPanels  Visibility flags for panels owned outside DebugUI
+    ///                        (e.g. the Animation Tester lives on Game). They
+    ///                        participate in both the "any visible?" check and
+    ///                        the bulk show/hide so the hotkey behavior stays
+    ///                        consistent across all debug windows.
+    void toggleAllPanels(std::initializer_list<bool*> externalPanels = {});
 
 private:
     /// Per-window visibility toggles — persistent across frames.
@@ -107,6 +120,7 @@ private:
     bool showLightingControls = true; ///< Show the Lighting Controls window.
     bool showSkybox = true;           ///< Show the Skybox window.
     bool showNetworkStats = true;     ///< Show the Network Stats window.
+    bool showScoreboard_ = true;      ///< Show the scoreboard HUD window.
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.

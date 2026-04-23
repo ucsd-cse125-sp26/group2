@@ -5,10 +5,20 @@
 
 #include "Projectile.hpp"
 
-/// @brief Component attached to armed entities (players, bots).
+/// @brief Struct that defines this weapon's type, cooldown, and ammo.
+struct GunInstance
+{
+    WeaponType type = WeaponType::Rifle;
+    int totalAmmo = 0;
+    int currentMagAmmo = 0;
+    float fireCooldown = 0.f;
+};
+
+/// @brief Component attached to armed entities (players).
 struct WeaponState
 {
-    WeaponType current = WeaponType::Rifle; ///< Currently equipped weapon type.
-    float fireCooldown = 0.f;               ///< Counts down toward 0 each frame (seconds).
-    int ammo = 30;                          ///< Remaining ammunition for the current weapon.
+    GunInstance primary;
+    GunInstance secondary;
+    GunInstance tertiary;
+    WeaponSlot current = WeaponSlot::PRIMARY; ///< Currently equipped weapon slot.
 };

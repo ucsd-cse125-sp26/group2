@@ -4,14 +4,22 @@
 #include "ServerGame.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Player.hpp"
+#include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/WeaponSystem.hpp"
+#include "network/ShotEvent.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -24,18 +32,6 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
     if (!server.init(addr, port))
         return false;
 
-    // // Spawn a test entity: starts at y=200, not grounded — will fall and land.
-    // const int k_testClientId = 0;
-    // const entt::entity k_testEntity = registry.create();
-    //
-    // clientEntities[k_testClientId] = k_testEntity;
-    //
-    // registry.emplace<InputSnapshot>(k_testEntity);
-    // registry.emplace<Position>(k_testEntity, glm::vec3{0.0f, 200.0f, 0.0f});
-    // registry.emplace<Velocity>(k_testEntity);
-    // registry.emplace<CollisionShape>(k_testEntity);
-    // registry.emplace<PlayerState>(k_testEntity);
-    // SDL_Log("[server] spawned test entity at (0, 200, 0), tickRateHz=%d", tickRateHz);
     return true;
 }
 
@@ -50,8 +46,6 @@ void ServerGame::run()
 
     while (running) {
         server.poll();
-        // Server needs to map connection to clientId and return that to the game
-        // Game can then init entity and map to clientId in private map
 
         nextTick += k_tickDuration;
         tick(k_dt, nextTick);
@@ -99,6 +93,7 @@ void ServerGame::eventHandler(Event event)
         const entt::entity player = entityIt->second;
         if (!registry.valid(player))
             return;
+
         InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
         input = event.movementIntent;
         break;
@@ -122,11 +117,17 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         }
     }
 
+    std::vector<NetParticleEvent> particleEvents;
+    systems::runWeapon(registry, dt, particleEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
+    systems::runPlayerStatus(registry, dt);
+
+    matchController.update(dt, registry, server);
 
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
+    server.broadcastParticleEvents(particleEvents);
 
     ++tickCount;
 
@@ -148,12 +149,44 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     const entt::entity player = registry.create();
     clientEntities[clientId] = player;
 
+    registry.emplace<Player>(player, Player{});
     registry.emplace<InputSnapshot>(player);
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);
     registry.emplace<CollisionShape>(player);
     registry.emplace<PlayerState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
+    registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
+    registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
+
+    const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
+    const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+    const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
+    registry.emplace<WeaponState>(player,
+                                  WeaponState{
+                                      .primary =
+                                          GunInstance{
+                                              .type = WeaponType::Rifle,
+                                              .totalAmmo = rifleConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = rifleConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .secondary =
+                                          GunInstance{
+                                              .type = WeaponType::RailGun,
+                                              .totalAmmo = railConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = railConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .tertiary =
+                                          GunInstance{
+                                              .type = WeaponType::EnergyGun,
+                                              .totalAmmo = wingmanConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = wingmanConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .current = WeaponSlot::PRIMARY,
+                                  });
 
     SDL_Log("[server] spawned player entity for client %d", clientId.value);
 }

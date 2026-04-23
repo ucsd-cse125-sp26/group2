@@ -1,0 +1,65 @@
+/// @file cas.comp
+/// @brief AMD FidelityFX Contrast Adaptive Sharpening (CAS).
+/// Applies adaptive sharpening that increases detail in low-contrast
+/// regions while avoiding ringing in high-contrast areas.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+/// @brief Input image (AA output to sharpen).
+layout(set = 0, binding = 0) uniform sampler2D inputTex;
+
+/// @brief Sharpened output image.
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D outputImage;
+
+/// @brief CAS parameters.
+layout(set = 2, binding = 0) uniform CASParams {
+    vec2 screenSize;
+    float sharpness; // 0.0 to 1.0
+    float _pad;
+};
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(outputImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    vec2 ps = 1.0 / screenSize;
+
+    // 5-tap cross pattern.
+    vec3 center = texture(inputTex, uv).rgb;
+    vec3 top    = texture(inputTex, uv + vec2( 0.0, -1.0) * ps).rgb;
+    vec3 bot    = texture(inputTex, uv + vec2( 0.0,  1.0) * ps).rgb;
+    vec3 left   = texture(inputTex, uv + vec2(-1.0,  0.0) * ps).rgb;
+    vec3 right  = texture(inputTex, uv + vec2( 1.0,  0.0) * ps).rgb;
+
+    // Per-channel min/max across the cross neighborhood.
+    vec3 minC = min(center, min(min(top, bot), min(left, right)));
+    vec3 maxC = max(center, max(max(top, bot), max(left, right)));
+
+    // Adaptive sharpening amplitude per channel:
+    //   Higher in low-contrast areas, lower in high-contrast (prevents ringing).
+    //   amp = sqrt(saturate(min(1-max, min) / max))
+    vec3 amp = sqrt(clamp(min(vec3(1.0) - maxC, minC) / max(maxC, vec3(1e-5)), 0.0, 1.0));
+
+    // Scale by sharpness parameter.
+    //   w ranges from -0.125 (minimal) to -0.2 (strong) based on sharpness.
+    vec3 w = amp * mix(-0.125, -0.2, sharpness);
+
+    // Apply sharpening filter: weighted sum normalized by total weight.
+    //   result = (center + (top + bot + left + right) * w) / (1 + 4 * w)
+    vec3 cross_sum = top + bot + left + right;
+    vec3 result = (center + cross_sum * w) / (vec3(1.0) + 4.0 * w);
+
+    // Clamp: floor at the neighbourhood minimum to prevent dark halos
+    // at silhouette edges (where sharpening can drive sky pixels to black).
+    // Ceiling at the centre's brightest component preserves HDR range.
+    float maxComponent = max(max(center.r, center.g), center.b);
+    result = clamp(result, minC, vec3(max(maxComponent, 1.0)));
+
+    // Preserve alpha (carries weapon viewmodel mask: 0 = weapon pixel).
+    float alpha = texture(inputTex, uv).a;
+    imageStore(outputImage, coord, vec4(result, alpha));
+}

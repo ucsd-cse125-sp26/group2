@@ -59,17 +59,39 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity)
 /// @param registry  The ECS registry.
 inline void runMovementKeys(Registry& registry)
 {
-    const bool* const k_keys = SDL_GetKeyboardState(nullptr);
+    const bool* const kKeys = SDL_GetKeyboardState(nullptr);
 
     registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
-        snap.forward = k_keys[SDL_SCANCODE_W];
-        snap.back = k_keys[SDL_SCANCODE_S];
-        snap.left = k_keys[SDL_SCANCODE_A];
-        snap.right = k_keys[SDL_SCANCODE_D];
-        snap.jump = k_keys[SDL_SCANCODE_SPACE];
-        snap.crouch = k_keys[SDL_SCANCODE_LCTRL];
-        snap.sprint = k_keys[SDL_SCANCODE_LSHIFT];
-        snap.grapple = k_keys[SDL_SCANCODE_E];
+        snap.forward = kKeys[SDL_SCANCODE_W];
+        snap.back = kKeys[SDL_SCANCODE_S];
+        snap.left = kKeys[SDL_SCANCODE_A];
+        snap.right = kKeys[SDL_SCANCODE_D];
+        snap.jump = kKeys[SDL_SCANCODE_SPACE];
+        snap.crouch = kKeys[SDL_SCANCODE_LCTRL];
+        snap.sprint = kKeys[SDL_SCANCODE_LSHIFT];
+        snap.grapple = kKeys[SDL_SCANCODE_E];
+    });
+}
+
+/// @brief Sample keyboard state into the weapon flags.
+///
+/// Should be called **once per physics tick group** when input is synced
+/// with physics (the default) so movement calculations match the server.
+/// Can also be called every iterate() when the sync toggle is off.
+///
+/// @param registry  The ECS registry.
+inline void runWeaponKeys(Registry& registry)
+{
+    const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+    const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
+
+    registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
+        snap.shooting =
+            (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
+        snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
+        snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
+        snap.switchToTertiary = kKeys[SDL_SCANCODE_3];
+        snap.reload = kKeys[SDL_SCANCODE_R];
     });
 }
 
@@ -80,6 +102,7 @@ inline void runInputSample(Registry& registry, float mouseSensitivity = 0.001f)
 {
     runMouseLook(registry, mouseSensitivity);
     runMovementKeys(registry);
+    runWeaponKeys(registry);
 }
 
 } // namespace systems

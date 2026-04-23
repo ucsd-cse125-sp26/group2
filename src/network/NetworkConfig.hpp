@@ -6,14 +6,21 @@
 #include <cstdint>
 #include <string>
 
+/// @brief Network address parameters.
+struct NetworkAddress
+{
+    std::string host = "127.0.0.1";
+    uint16_t port = 9999;
+};
+
 /// @brief Runtime network connection parameters.
 ///
 /// Populated by loadNetworkConfig(). If the config file is absent or a key
 /// is missing, the field retains its default value — no exception is thrown.
 struct NetworkConfig
 {
-    std::string host = "127.0.0.1"; ///< Server hostname or IP address.
-    uint16_t port = 9999;           ///< Server TCP port.
+    NetworkAddress clientNetwork; ///< Client network config (host and port).
+    NetworkAddress serverNetwork; ///< Server network config (host and port).
 };
 
 /// @brief Load network config from a TOML file.
