@@ -5,6 +5,7 @@
 
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
+#include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -16,7 +17,9 @@
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -649,57 +652,52 @@ SDL_AppResult Game::iterate()
     // Local weapon VFX — fires continuously while LMB is held, respecting cooldown.
     // This mirrors the server's fire rate so the local player sees tracers/impacts
     // at the same cadence as the server processes shots.
+    // Beam weapons (EnergyGun) are driven by BeamState from the registry,
+    // so they skip per-shot VFX here.
     {
-        localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
+        const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
 
-        const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
-        const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
+        if (!wpnCfg.isBeam) {
+            localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
-        if (shooting && localFireCooldown_ <= 0.0f) {
-            const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
-            localFireCooldown_ = wpnCfg.fireCooldown;
+            const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
+            const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
 
-            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            if (shooting && localFireCooldown_ <= 0.0f) {
+                localFireCooldown_ = wpnCfg.fireCooldown;
 
-            // Ray-scene intersection for hit position
-            constexpr float k_maxRange = 5000.f;
-            float hitDist = k_maxRange;
-            glm::vec3 hitNormal = -cachedCamFwd_;
-            SurfaceType hitSurface = SurfaceType::Concrete;
+                const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+                const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
-            if (cachedCamFwd_.y < -0.001f) {
-                const float t = -cachedEye_.y / cachedCamFwd_.y;
-                if (t > 0.f && t < hitDist) {
-                    hitDist = t;
-                    hitNormal = glm::vec3{0.f, 1.f, 0.f};
-                    hitSurface = SurfaceType::Concrete;
-                }
+                // Raycast against full world geometry (floor + boxes + brushes).
+                const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::testWorld());
+                const float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
+                const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
+                const glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
+                const SurfaceType hitSurface = worldHit.surface;
+
+                // Dispatch weapon-fired event for any listeners
+                WeaponFiredEvent wfe;
+                wfe.type = currentEquippedType_;
+                wfe.origin = hip;
+                wfe.direction = cachedCamFwd_;
+                wfe.isHitscan = true;
+                wfe.hitPos = hitPos;
+                dispatcher.enqueue(wfe);
+
+                // Spawn correct particle effect based on weapon type
+                if (currentEquippedType_ == WeaponType::RailGun)
+                    particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
+                else
+                    particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
+                particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
+
+                // Visual recoil kick (viewmodel-only)
+                const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+                recoilPitch_ += rp.pitchKick;
+                recoilPushBack_ += rp.pushBack;
+                recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
             }
-
-            const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
-
-            // Dispatch weapon-fired event for any listeners
-            WeaponFiredEvent wfe;
-            wfe.type = currentEquippedType_;
-            wfe.origin = hip;
-            wfe.direction = cachedCamFwd_;
-            wfe.isHitscan = true;
-            wfe.hitPos = hitPos;
-            dispatcher.enqueue(wfe);
-
-            // Spawn correct particle effect based on weapon type
-            if (currentEquippedType_ == WeaponType::RailGun || currentEquippedType_ == WeaponType::EnergyGun)
-                particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
-            else
-                particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
-            particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
-
-            // Visual recoil kick (viewmodel-only)
-            const RecoilParams& rp = getRecoilParams(currentEquippedType_);
-            recoilPitch_ += rp.pitchKick;
-            recoilPushBack_ += rp.pushBack;
-            recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
         }
     }
 
@@ -914,6 +912,35 @@ SDL_AppResult Game::iterate()
             });
         }
 
+        // Weapon beam visuals — driven by BeamState synced from server registry.
+        // Local player: beam starts from viewmodel muzzle position.
+        // Remote players: beam starts from the server-computed eye position.
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+            if (!beam.active || glowCylinderModelIdx_ < 0)
+                return;
+
+            glm::vec3 beamOrigin = beam.origin;
+
+            // For local player: override origin with viewmodel muzzle offset
+            // so the beam appears to come from the first-person gun.
+            if (registry.all_of<LocalPlayer>(e)) {
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
+                const glm::vec3 up = glm::normalize(glm::cross(rgt, fwd));
+                beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
+            }
+
+            // Green Zarya-style tint, HDR-scaled for bloom.
+            renderer.setModelEmissive(glowCylinderModelIdx_, glm::vec4(glm::vec3(0.3f, 1.0f, 0.2f) * 10.0f, 0.0f));
+
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowCylinderModelIdx_,
+                .worldTransform = cylinderTransform(beamOrigin, beam.hitPoint, 2.0f),
+            });
+        });
+
         renderer.setEntityRenderList(std::move(entityCmds));
 
         // Build dynamic point lights list.
@@ -965,6 +992,27 @@ SDL_AppResult Game::iterate()
                 });
             }
         }
+
+        // Weapon beam point lights — from BeamState, evenly distributed.
+        registry.view<BeamState>().each([&](const BeamState& beam) {
+            if (!beam.active)
+                return;
+            const glm::vec3 delta = beam.hitPoint - beam.origin;
+            const float len = glm::length(delta);
+            if (len < 1.0f)
+                return;
+            const int numLights = std::max(2, static_cast<int>(len / 80.0f) + 1);
+            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f}; // green beam light
+            for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = beam.origin + delta * t,
+                    .color = lightColor,
+                    .intensity = 3.0f,
+                    .range = 200.0f,
+                });
+            }
+        });
 
         renderer.setPointLights(std::move(dynLights));
     }

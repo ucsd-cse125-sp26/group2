@@ -17,6 +17,9 @@ struct WeaponConfig
     int defaultAmmoCapacity = 0;
     float damage = 0.0f;
     bool hitscan = true;
+    bool isBeam = false;        ///< True for continuous beam weapons (no per-shot cooldown).
+    float dps = 0.0f;           ///< Damage per second (beam weapons only; discrete weapons use `damage`).
+    float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
 };
 
 /// @brief Returns the gameplay config for a weapon type.
@@ -45,12 +48,15 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = true,
         }, // RailGun
         WeaponConfig{
-            .fireCooldown = 0.05f,
+            .fireCooldown = 0.0f,
             .magazineSize = 200,
             .defaultAmmoCapacity = 200,
             .damage = 5.0f,
             .hitscan = true,
-        }, // EnergyGun
+            .isBeam = true,
+            .dps = 80.0f,
+            .ammoPerSecond = 20.0f,
+        }, // EnergyGun (Zarya beam)
     }};
 
     return k_kWeaponConfigs[static_cast<std::size_t>(type)];
