@@ -3,7 +3,24 @@
 
 #pragma once
 
-#include "Projectile.hpp"
+#include <cstdint>
+
+/// @brief Weapon type — determines tracer style, damage, sound, and impact effects.
+enum class WeaponType : uint8_t
+{
+    Rifle,     ///< Fast hitscan/projectile (R301-style capsule tracer)
+    Rocket,    ///< Slow arcing projectile (ribbon trail)
+    RailGun,   ///< Hitscan energy weapon (beam + lightning arcs)
+    EnergyGun, ///< Fast hitscan energy burst
+};
+
+enum class WeaponSlot : uint8_t
+{
+    PRIMARY,
+    SECONDARY,
+    TERTIARY,
+    QUATERNARY,
+};
 
 /// @brief Struct that defines this weapon's type, cooldown, and ammo.
 struct GunInstance
@@ -12,6 +29,7 @@ struct GunInstance
     int totalAmmo = 0;
     int currentMagAmmo = 0;
     float fireCooldown = 0.f;
+    float chargeTime = 0.f; ///< Accumulated charge time (charge weapons only).
 };
 
 /// @brief Component attached to armed entities (players).
@@ -20,5 +38,6 @@ struct WeaponState
     GunInstance primary;
     GunInstance secondary;
     GunInstance tertiary;
+    GunInstance quaternary;
     WeaponSlot current = WeaponSlot::PRIMARY; ///< Currently equipped weapon slot.
 };

@@ -43,6 +43,7 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
     const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
+    const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
 
     registry.emplace_or_replace<InputSnapshot>(player);
     registry.emplace_or_replace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
@@ -70,6 +71,13 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
                                                          .type = WeaponType::EnergyGun,
                                                          .totalAmmo = wingmanConfig.defaultAmmoCapacity,
                                                          .currentMagAmmo = wingmanConfig.magazineSize,
+                                                         .fireCooldown = 0.0f,
+                                                     },
+                                                 .quaternary =
+                                                     GunInstance{
+                                                         .type = WeaponType::Rocket,
+                                                         .totalAmmo = rocketConfig.defaultAmmoCapacity,
+                                                         .currentMagAmmo = rocketConfig.magazineSize,
                                                          .fireCooldown = 0.0f,
                                                      },
                                                  .current = WeaponSlot::PRIMARY,

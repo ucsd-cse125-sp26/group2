@@ -2,9 +2,9 @@
 # All keys are optional; missing keys fall back to compiled-in defaults.
 
 [client-network]
-host = "127.0.0.1"
+host = "192.168.1.1"
 port = 9999
 
 [server-network]
-host = "127.0.0.1"
+host = "192.168.1.1"
 port = 9999
