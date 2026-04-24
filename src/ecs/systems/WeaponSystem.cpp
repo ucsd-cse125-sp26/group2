@@ -227,6 +227,19 @@ void runWeapon(Registry& registry, float dt, std::vector<NetParticleEvent>& outP
             GunInstance& gun = getEquippedGun(weapon);
             handleReload(gun);
         }
+
+        // Debug: refill all weapons when the client requests it.
+        if (input.refillAmmo) {
+            auto refill = [](GunInstance& g) {
+                const WeaponConfig& c = getWeaponConfig(g.type);
+                g.currentMagAmmo = c.magazineSize;
+                g.totalAmmo = c.defaultAmmoCapacity;
+            };
+            refill(weapon.primary);
+            refill(weapon.secondary);
+            refill(weapon.tertiary);
+            input.refillAmmo = false; // consume the flag
+        }
     });
 }
 
