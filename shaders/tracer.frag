@@ -12,20 +12,25 @@ void main()
 {
     float dist = abs(vUV.y);
 
-    // Three-layer cross-section profile
-    float core  = 1.0 - smoothstep(0.0, 0.18, dist); // white-hot centre line
-    float mid   = 1.0 - smoothstep(0.0, 0.30, dist); // orange glow
-    float glow  = 1.0 - smoothstep(0.05, 0.55, dist); // broad diffuse aura
+    // Two-layer profile: solid core + tight falloff
+    float core = 1.0 - smoothstep(0.0, 0.25, dist);  // bright centre
+    float body = 1.0 - smoothstep(0.0, 0.50, dist);  // visible body
+    float edge = 1.0 - smoothstep(0.20, 0.70, dist); // soft outer edge
 
-    // Tip-to-tail brightness falloff: tip (u=1) is brightest
-    float tipFade = 0.25 + 0.75 * vUV.x;
+    // Tip-to-tail brightness: tail stays visible
+    float tipFade = 0.45 + 0.55 * vUV.x;
 
-    // Base color: edge -> core
-    vec4 col = mix(vEdgeColor, vCoreColor, mid) * glow * vBrightness * tipFade;
+    // Base color — fully saturated orange, not washed out
+    vec3 baseRGB = mix(vEdgeColor.rgb, vCoreColor.rgb, body);
 
-    // Bright orange-hot core with slight HDR overdrive
-    col.rgb += vec3(1.4, 0.8, 0.3) * core * vBrightness * tipFade * 1.5;
-    col.a    = max(col.a, glow * vBrightness * tipFade);
+    // HDR push — values well above 1.0 trigger bloom, making the tracer
+    // glow visibly even against bright lit surfaces.
+    vec3 hdrColor = baseRGB * 3.0 * vBrightness * tipFade;
+    hdrColor += vec3(2.5, 1.0, 0.2) * core * vBrightness * tipFade;
 
-    outColor = col;
+    // Nearly fully opaque across the entire body so it reads as a solid
+    // streak, not a ghostly overlay. Only the outer fringe fades.
+    float alpha = mix(edge * 0.8, 1.0, body) * vBrightness * tipFade;
+
+    outColor = vec4(hdrColor, alpha);
 }
