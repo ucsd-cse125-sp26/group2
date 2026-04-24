@@ -1265,11 +1265,13 @@ SDL_AppResult Game::iterate()
     debugUI.buildNetworkUI(client.getNetStats());
     debugUI.buildScoreboardUI(registry, currentMatchPhase, countdownTimer);
 
-    // Process ammo refill request — set the flag on InputSnapshot so the
-    // server handles it authoritatively and the next registry sync reflects it.
-    if (debugUI.pendingAmmoRefill_) {
+    // Process ammo refill request — pulse refillAmmo on InputSnapshot for
+    // exactly one frame so the server handles it once then stops.
+    {
+        const bool wantRefill = debugUI.pendingAmmoRefill_;
         debugUI.pendingAmmoRefill_ = false;
-        registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) { snap.refillAmmo = true; });
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
     }
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
