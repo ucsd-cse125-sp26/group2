@@ -59,6 +59,7 @@ constexpr size_t k_slotOverride = 3;
 enum class Mode : uint8_t
 {
     Locomotion,
+    Crouch,
     Airborne, ///< In the air (not wallrunning/sliding/climbing).
     Slide,
     WallRun,
@@ -287,6 +288,31 @@ ClipId pickStrafeClip(float smoothedRight, float speed)
     return right ? ClipId::StrafeLeft : ClipId::StrafeRight;
 }
 
+/// @brief Pick crouch forward/backward locomotion clips + blend from current speed.
+void pickCrouchLocomotion(float speed, float smoothedForward, ClipId& outA, ClipId& outB, float& outBlend)
+{
+    const bool reverseLike = (smoothedForward < -k_idleCutoff);
+
+    if (speed < k_idleCutoff) {
+        outA = ClipId::CrouchIdle;
+        outB = ClipId::CrouchIdle;
+        outBlend = 0.0f;
+        return;
+    }
+    // Crouch only has walk-speed clips — blend from idle to walk, capped at walkSpeedRef.
+    outA = ClipId::CrouchIdle;
+    outB = reverseLike ? ClipId::CrouchWalkBackward : ClipId::CrouchWalk;
+    outBlend = std::clamp((speed - k_idleCutoff) / (k_walkSpeedRef - k_idleCutoff), 0.0f, 1.0f);
+}
+
+/// @brief Pick crouch strafe clip based on lateral speed.
+ClipId pickCrouchStrafeClip(float smoothedRight)
+{
+    if (std::abs(smoothedRight) < k_idleCutoff)
+        return ClipId::_Count;
+    return (smoothedRight > 0.0f) ? ClipId::CrouchWalkLeft : ClipId::CrouchWalkRight;
+}
+
 /// @brief Weighted-average loop duration used for phase-sync.
 float blendedDuration(const AnimationLibrary& lib, ClipId a, ClipId b, float blend)
 {
@@ -364,6 +390,8 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         default:
             if (!inputs.grounded)
                 targetMode = Mode::Airborne;
+            else if (inputs.crouching)
+                targetMode = Mode::Crouch;
             else
                 targetMode = Mode::Locomotion;
             break;
@@ -398,10 +426,18 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     ClipId locoA = ClipId::Idle;
     ClipId locoB = ClipId::Idle;
     float locoBlend = 0.0f;
-    pickLocomotion(impl_->smoothedSpeed, impl_->smoothedForwardSpeed, locoA, locoB, locoBlend);
+    ClipId strafeClip = ClipId::_Count;
+    float strafeRatio = 0.0f;
 
-    const ClipId strafeClip = pickStrafeClip(impl_->smoothedRightSpeed, impl_->smoothedSpeed);
-    const float strafeRatio =
+    const bool crouchActive = (impl_->currentMode == Mode::Crouch);
+    if (crouchActive) {
+        pickCrouchLocomotion(impl_->smoothedSpeed, impl_->smoothedForwardSpeed, locoA, locoB, locoBlend);
+        strafeClip = pickCrouchStrafeClip(impl_->smoothedRightSpeed);
+    } else {
+        pickLocomotion(impl_->smoothedSpeed, impl_->smoothedForwardSpeed, locoA, locoB, locoBlend);
+        strafeClip = pickStrafeClip(impl_->smoothedRightSpeed, impl_->smoothedSpeed);
+    }
+    strafeRatio =
         (impl_->smoothedSpeed > k_idleCutoff && strafeClip != ClipId::_Count)
             ? std::clamp(std::abs(impl_->smoothedRightSpeed) / std::max(impl_->smoothedSpeed, 1.0f), 0.0f, 1.0f)
             : 0.0f;
@@ -617,7 +653,6 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     }
 
     (void)inputs.sprinting;
-    (void)inputs.crouching;
 }
 
 void CharacterAnimator::computeSkinnedVertices(std::vector<std::vector<ModelVertex>>& out) const

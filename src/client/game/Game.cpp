@@ -179,10 +179,12 @@ bool Game::init()
         // hit an enemy (surface == Flesh).  This check runs BEFORE the skip-self
         // guard so the shooter still hears the hitmarker even though their own
         // particle VFX was already spawned client-side for instant feedback.
-        if (sfxSystem.isInitialized() && evt.source == localPlayer && evt.effectType == ParticleEffectType::Impact &&
+        if (evt.source == localPlayer && evt.effectType == ParticleEffectType::Impact &&
             evt.surfaceType == SurfaceType::Flesh)
         {
-            sfxSystem.play(SfxId::FleshHit);
+            if (sfxSystem.isInitialized())
+                sfxSystem.play(SfxId::FleshHit);
+            hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
         }
 
         // Skip own effects that were already spawned locally for instant feedback.
@@ -1442,6 +1444,28 @@ SDL_AppResult Game::iterate()
         // Optional center dot
         if (crosshairDot_)
             dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
+    }
+
+    // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.
+    if (hitmarkerTimer_ > 0.0f) {
+        hitmarkerTimer_ -= frameTime;
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        const float cx = static_cast<float>(winW) * 0.5f;
+        const float cy = static_cast<float>(winH) * 0.5f;
+
+        const float alpha = std::min(hitmarkerTimer_ / 0.15f, 1.0f); // fade out last 150ms
+        const float hmSize = 8.0f;
+        const float hmGap = 4.0f;
+        const float hmThick = 2.5f;
+        const ImU32 hmCol = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+        // Four diagonal lines forming an X, offset from center by hmGap
+        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy - hmGap - hmSize), ImVec2(cx - hmGap, cy - hmGap), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx + hmGap, cy - hmGap), ImVec2(cx + hmGap + hmSize, cy - hmGap - hmSize), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy + hmGap + hmSize), ImVec2(cx - hmGap, cy + hmGap), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx + hmGap, cy + hmGap), ImVec2(cx + hmGap + hmSize, cy + hmGap + hmSize), hmCol, hmThick);
     }
 
     // Third-person weapon tweaker — per-weapon tuning for remote player weapons.

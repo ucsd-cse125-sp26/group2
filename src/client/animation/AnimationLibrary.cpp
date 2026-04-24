@@ -70,6 +70,16 @@ const char* clipName(ClipId id)
         return "Turn Left 90";
     case ClipId::TurnRight90:
         return "Turn Right 90";
+    case ClipId::CrouchIdle:
+        return "Crouch Idle";
+    case ClipId::CrouchWalk:
+        return "Crouch Walk";
+    case ClipId::CrouchWalkLeft:
+        return "Crouch Walk Left";
+    case ClipId::CrouchWalkRight:
+        return "Crouch Walk Right";
+    case ClipId::CrouchWalkBackward:
+        return "Crouch Walk Backward";
     case ClipId::_Count:
         return "(none)";
     }
@@ -107,6 +117,16 @@ const char* clipFile(ClipId id)
         return "male_locomotion_pack/left turn 90.fbx";
     case ClipId::TurnRight90:
         return "male_locomotion_pack/right turn 90.fbx";
+    case ClipId::CrouchIdle:
+        return "crouch/Idle Crouching.fbx";
+    case ClipId::CrouchWalk:
+        return "crouch/Walk Crouching Backward.fbx";
+    case ClipId::CrouchWalkLeft:
+        return "crouch/Walk Crouching Left.fbx";
+    case ClipId::CrouchWalkRight:
+        return "crouch/Walk Crouching Right.fbx";
+    case ClipId::CrouchWalkBackward:
+        return "crouch/Walk Crouching Backward.fbx";
     case ClipId::_Count:
         return "";
     }

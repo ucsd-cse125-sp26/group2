@@ -132,6 +132,9 @@ private:
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
 
+    // Hitmarker
+    float hitmarkerTimer_ = 0.0f; ///< Remaining display time (fades out over this).
+
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;       ///< Weapon model scale (model is in mm).
     float vmForward = 21.0f;     ///< Forward offset from eye (Quake units).
