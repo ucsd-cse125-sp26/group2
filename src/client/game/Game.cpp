@@ -206,12 +206,20 @@ bool Game::init()
             }
         }
 
+        // For local player's charge weapon: override beam origin with
+        // viewmodel muzzle position so the lightning comes from the gun.
+        glm::vec3 evtOrigin = evt.pos1;
+        if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            evtOrigin = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+        }
+
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
-            particleSystem.spawnBulletTracer(evt.pos1, evt.pos2, evt.param);
+            particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
             break;
         case ParticleEffectType::HitscanBeam:
-            particleSystem.spawnHitscanBeam(evt.pos1, evt.pos2, evt.weaponType);
+            particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
             break;
         case ParticleEffectType::Impact:
             particleSystem.spawnImpactEffect(evt.pos1, evt.pos2, evt.surfaceType, evt.weaponType);
