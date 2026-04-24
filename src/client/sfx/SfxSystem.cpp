@@ -129,6 +129,9 @@ bool SfxSystem::init()
     loadClip(SfxId::RocketFire, "Voicy_Minecraft TNT Explosion.mp3", SfxCategory::Weapons, 0.7f, 0.80f);
     loadClip(SfxId::RailGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.8f, 0.50f);
     loadClip(SfxId::EnergyGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.5f, 0.08f);
+    loadClip(SfxId::ChargeRifleLoad, "charge-rifle-load.wav", SfxCategory::Weapons, 0.9f, 0.0f);
+    loadClip(SfxId::ChargeRifleShoot, "charge-rifle-shoot.wav", SfxCategory::Weapons, 1.0f, 0.20f);
+    loadClip(SfxId::EnergyBeamLoop, "Voicy_Thunderstruck into.mp3", SfxCategory::Weapons, 0.6f, 0.0f);
 
     // Impacts / hitmarkers
     loadClip(SfxId::FleshHit, "Voicy_Flesh Bullet Impact SFX.mp3", SfxCategory::Impacts, 0.7f, 0.08f);
@@ -228,8 +231,23 @@ void SfxSystem::play(SfxId id, float gain)
     // Record into the voice pool for lifecycle management.
     voice->stream = stream;
     voice->active = true;
+    voice->playingId = id;
     voice->duration = clip.durationSeconds;
     voice->elapsed = 0.0f;
+}
+
+void SfxSystem::stop(SfxId id)
+{
+    for (Voice& v : voices_) {
+        if (v.active && v.playingId == id) {
+            if (v.stream) {
+                SDL_UnbindAudioStream(v.stream);
+                SDL_DestroyAudioStream(v.stream);
+                v.stream = nullptr;
+            }
+            v.active = false;
+        }
+    }
 }
 
 void SfxSystem::setCategoryVolume(SfxCategory cat, float v)
@@ -256,10 +274,10 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
         play(SfxId::RocketFire);
         break;
     case WeaponType::RailGun:
-        play(SfxId::RailGunFire);
+        play(SfxId::ChargeRifleShoot);
         break;
     case WeaponType::EnergyGun:
-        play(SfxId::EnergyGunFire);
+        // Beam weapon — sound is handled in Game::iterate() via BeamState.
         break;
     }
 }

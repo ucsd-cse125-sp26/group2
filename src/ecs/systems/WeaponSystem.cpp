@@ -145,7 +145,67 @@ inline void handleFire(Registry& registry,
         return;
     }
 
-    // ── Discrete weapon path (unchanged logic) ──
+    // ── Charge weapon path ──
+    // Hold fire to charge, release to fire.  chargeTime accumulates while
+    // holding; the shot fires on the first tick where shooting becomes false.
+    if (config.isCharge) {
+        if (input.shooting) {
+            // Charging — accumulate time, do not fire yet.
+            gun.chargeTime += dt;
+            return;
+        }
+        if (gun.chargeTime <= 0.0f) {
+            // Not charging, not shooting — nothing to do.
+            return;
+        }
+
+        // Button released with charge built up → fire the shot.
+        if (gun.fireCooldown > 0.0f) {
+            gun.chargeTime = 0.0f;
+            return;
+        }
+        if (!handleAmmo(gun)) {
+            gun.chargeTime = 0.0f;
+            return;
+        }
+
+        gun.fireCooldown = config.fireCooldown;
+
+        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+        const glm::vec3 direction = viewForward(input.yaw, input.pitch);
+        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+
+        // Charge damage — significantly higher than normal.
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            applyDamage(config.chargeDamage, hit.entity, shooter, registry);
+        }
+
+        // Emit particle events (beam + impact).
+        {
+            NetParticleEvent tracerEvt;
+            tracerEvt.source = shooter;
+            tracerEvt.weaponType = gun.type;
+            tracerEvt.effectType = ParticleEffectType::HitscanBeam;
+            tracerEvt.pos1 = eye;
+            tracerEvt.pos2 = hit.point;
+            outParticles.push_back(tracerEvt);
+        }
+        {
+            NetParticleEvent impactEvt;
+            impactEvt.source = shooter;
+            impactEvt.effectType = ParticleEffectType::Impact;
+            impactEvt.weaponType = gun.type;
+            impactEvt.surfaceType = hit.surface;
+            impactEvt.pos1 = hit.point;
+            impactEvt.pos2 = hit.normal;
+            outParticles.push_back(impactEvt);
+        }
+
+        gun.chargeTime = 0.0f;
+        return;
+    }
+
+    // ── Discrete weapon path ──
     if (!input.shooting) {
         return;
     }

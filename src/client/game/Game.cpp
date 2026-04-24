@@ -657,13 +657,24 @@ SDL_AppResult Game::iterate()
     {
         const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
 
-        if (!wpnCfg.isBeam) {
+        // Skip beam weapons (driven by BeamState) and charge weapons
+        // (VFX arrive from server via NetParticleEvent on release).
+        if (!wpnCfg.isBeam && !wpnCfg.isCharge) {
             localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
             const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
             const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
 
-            if (shooting && localFireCooldown_ <= 0.0f) {
+            // Check ammo — don't spawn VFX if the magazine is empty.
+            bool hasAmmo = false;
+            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                         : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                                 : ws.primary;
+                hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
+            });
+
+            if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
                 localFireCooldown_ = wpnCfg.fireCooldown;
 
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
@@ -685,11 +696,8 @@ SDL_AppResult Game::iterate()
                 wfe.hitPos = hitPos;
                 dispatcher.enqueue(wfe);
 
-                // Spawn correct particle effect based on weapon type
-                if (currentEquippedType_ == WeaponType::RailGun)
-                    particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
-                else
-                    particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
+                // Spawn tracer + impact (discrete weapons only).
+                particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
                 particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only)
@@ -709,6 +717,31 @@ SDL_AppResult Game::iterate()
 
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
+
+    // Weapon-specific sound state (charge rifle load, beam loop).
+    if (sfxSystem.isInitialized()) {
+        // Charge rifle: play load sound once when charging starts.
+        bool isChargingNow = false;
+        registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                             : ws.primary;
+            if (getWeaponConfig(gun.type).isCharge && gun.chargeTime > 0.0f)
+                isChargingNow = true;
+        });
+        if (isChargingNow && !wasChargingRailgun_)
+            sfxSystem.play(SfxId::ChargeRifleLoad);
+        wasChargingRailgun_ = isChargingNow;
+
+        // Energy beam: play/stop loop sound on beam active transitions.
+        bool isBeamNow = false;
+        registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
+        if (isBeamNow && !wasBeamActive_)
+            sfxSystem.play(SfxId::EnergyBeamLoop);
+        if (!isBeamNow && wasBeamActive_)
+            sfxSystem.stop(SfxId::EnergyBeamLoop);
+        wasBeamActive_ = isBeamNow;
+    }
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);

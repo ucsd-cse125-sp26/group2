@@ -128,6 +128,10 @@ private:
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
 
+    // Sound state tracking
+    bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
+    bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
+
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;       ///< Weapon model scale (model is in mm).
     float vmForward = 21.0f;     ///< Forward offset from eye (Quake units).

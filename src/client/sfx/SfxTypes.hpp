@@ -29,6 +29,13 @@ enum class SfxId : uint8_t
     Respawn,     ///< Voicy_totem of undying sfx .mp3
     KillConfirm, ///< Voicy_Pilot Killed Indicator SFX.mp3
 
+    // Charge rifle
+    ChargeRifleLoad,  ///< charge-rifle-load.wav (play once when charge starts)
+    ChargeRifleShoot, ///< charge-rifle-shoot.wav (play on release)
+
+    // Energy beam
+    EnergyBeamLoop, ///< Voicy_Thunderstruck into.mp3 (play while beam active)
+
     // Healing / Shield
     Healing,        ///< Voicy_Syringe SFX .mp3
     ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3

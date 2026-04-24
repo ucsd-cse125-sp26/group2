@@ -18,8 +18,10 @@ struct WeaponConfig
     float damage = 0.0f;
     bool hitscan = true;
     bool isBeam = false;        ///< True for continuous beam weapons (no per-shot cooldown).
+    bool isCharge = false;      ///< True for charge weapons (hold to charge, release to fire).
     float dps = 0.0f;           ///< Damage per second (beam weapons only; discrete weapons use `damage`).
     float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
+    float chargeDamage = 0.0f;  ///< Damage dealt on release (charge weapons only).
 };
 
 /// @brief Returns the gameplay config for a weapon type.
@@ -41,12 +43,14 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = false,
         }, // Rocket
         WeaponConfig{
-            .fireCooldown = 0.50f,
-            .magazineSize = 5,
-            .defaultAmmoCapacity = 20,
+            .fireCooldown = 0.30f,
+            .magazineSize = 8,
+            .defaultAmmoCapacity = 32,
             .damage = 60.0f,
             .hitscan = true,
-        }, // RailGun
+            .isCharge = true,
+            .chargeDamage = 150.0f,
+        }, // RailGun (charge sniper)
         WeaponConfig{
             .fireCooldown = 0.0f,
             .magazineSize = 200,
