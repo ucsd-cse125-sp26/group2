@@ -44,6 +44,9 @@ public:
     /// @param gain  Extra volume multiplier (stacks on top of master × category × clip gain).
     void play(SfxId id, float gain = 1.0f);
 
+    /// @brief Stop all active voices playing the given sound.
+    void stop(SfxId id);
+
     // --- Volume control ---
     void setMasterVolume(float v) { masterVolume_ = v; }
     void setCategoryVolume(SfxCategory cat, float v);
@@ -67,6 +70,7 @@ private:
     {
         SDL_AudioStream* stream = nullptr; ///< Bound audio stream (nullptr = slot free).
         bool active = false;
+        SfxId playingId = SfxId::_Count;   ///< Which sound this voice is playing.
         float duration = 0.0f;             ///< Expected playback length in seconds.
         float elapsed = 0.0f;              ///< Seconds since playback started.
     };

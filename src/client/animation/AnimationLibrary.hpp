@@ -33,7 +33,12 @@ enum class ClipId : uint8_t
     StrafeRightWalk, ///< Walking strafe right.
     TurnLeft90,      ///< 90-degree turn left (standing).
     TurnRight90,     ///< 90-degree turn right (standing).
-    _Count,          ///< Sentinel; also used as "no clip / no override".
+    CrouchIdle,
+    CrouchWalk,
+    CrouchWalkLeft,
+    CrouchWalkRight,
+    CrouchWalkBackward,
+    _Count, ///< Sentinel; also used as "no clip / no override".
 };
 
 /// @brief Human-readable name for a clip (for UI / logging).

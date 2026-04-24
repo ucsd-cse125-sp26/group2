@@ -59,9 +59,9 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .explosive = true,
         }, // Rocket
         WeaponConfig{
-            .fireCooldown = 0.50f,
-            .magazineSize = 5,
-            .defaultAmmoCapacity = 20,
+            .fireCooldown = 0.30f,
+            .magazineSize = 8,
+            .defaultAmmoCapacity = 32,
             .damage = 60.0f,
             .hitscan = true,
             .initialProjectileSpeed = 0.0f,

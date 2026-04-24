@@ -179,22 +179,49 @@ bool Game::init()
         // hit an enemy (surface == Flesh).  This check runs BEFORE the skip-self
         // guard so the shooter still hears the hitmarker even though their own
         // particle VFX was already spawned client-side for instant feedback.
-        if (sfxSystem.isInitialized() && evt.source == localPlayer && evt.effectType == ParticleEffectType::Impact &&
+        if (evt.source == localPlayer && evt.effectType == ParticleEffectType::Impact &&
             evt.surfaceType == SurfaceType::Flesh)
         {
-            sfxSystem.play(SfxId::FleshHit);
+            if (sfxSystem.isInitialized())
+                sfxSystem.play(SfxId::FleshHit);
+            hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
         }
 
-        // Skip own VFX effects (already spawned locally for instant feedback).
-        if (evt.source == localPlayer)
-            return;
+        // Skip own effects that were already spawned locally for instant feedback.
+        // Exception: charge weapons (RailGun) skip local VFX entirely and rely
+        // on the server's particle events, so we must NOT skip those here.
+        if (evt.source == localPlayer) {
+            const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
+            if (!isChargeWeapon)
+                return;
+
+            // For charge weapons from self: also dispatch the weapon-fired event
+            // so the shoot sound plays and recoil kicks.
+            if (evt.effectType == ParticleEffectType::HitscanBeam) {
+                WeaponFiredEvent wfe;
+                wfe.type = evt.weaponType;
+                wfe.origin = evt.pos1;
+                wfe.direction = glm::normalize(evt.pos2 - evt.pos1);
+                wfe.isHitscan = true;
+                wfe.hitPos = evt.pos2;
+                dispatcher.enqueue(wfe);
+            }
+        }
+
+        // For local player's charge weapon: override beam origin with
+        // viewmodel muzzle position so the lightning comes from the gun.
+        glm::vec3 evtOrigin = evt.pos1;
+        if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            evtOrigin = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+        }
 
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
-            particleSystem.spawnBulletTracer(evt.pos1, evt.pos2, evt.param);
+            particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
             break;
         case ParticleEffectType::HitscanBeam:
-            particleSystem.spawnHitscanBeam(evt.pos1, evt.pos2, evt.weaponType);
+            particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
             break;
         case ParticleEffectType::Impact:
             particleSystem.spawnImpactEffect(evt.pos1, evt.pos2, evt.surfaceType, evt.weaponType);
@@ -331,7 +358,7 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_F2:
             // Animation Tester is owned by Game (animUI_), not DebugUI, so
             // pass its visibility flag in so F2 toggles every panel uniformly.
-            debugUI.toggleAllPanels({&animUI_.show});
+            debugUI.toggleAllPanels({&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_});
             break;
 
         // Particle system test keys
@@ -659,13 +686,24 @@ SDL_AppResult Game::iterate()
     {
         const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
 
-        if (!wpnCfg.isBeam) {
+        // Skip beam weapons (driven by BeamState) and charge weapons
+        // (VFX arrive from server via NetParticleEvent on release).
+        if (!wpnCfg.isBeam && !wpnCfg.isCharge) {
             localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
             const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
             const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
 
-            if (shooting && localFireCooldown_ <= 0.0f) {
+            // Check ammo — don't spawn VFX if the magazine is empty.
+            bool hasAmmo = false;
+            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                         : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                                 : ws.primary;
+                hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
+            });
+
+            if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
                 localFireCooldown_ = wpnCfg.fireCooldown;
 
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
@@ -687,11 +725,13 @@ SDL_AppResult Game::iterate()
                 wfe.hitPos = hitPos;
                 dispatcher.enqueue(wfe);
 
-                // Spawn correct particle effect based on weapon type
-                if (currentEquippedType_ == WeaponType::RailGun)
-                    particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
-                else
-                    particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
+                // Spawn tracer from hip toward the crosshair hit point (not along
+                // cachedCamFwd_ — the hip is offset from the eye, so the direction
+                // to the hit point differs slightly from the camera forward).
+                const glm::vec3 hipToHit = hitPos - hip;
+                const float hipHitDist = glm::length(hipToHit);
+                const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
+                particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
                 particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only)
@@ -711,6 +751,31 @@ SDL_AppResult Game::iterate()
 
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
+
+    // Weapon-specific sound state (charge rifle load, beam loop).
+    if (sfxSystem.isInitialized()) {
+        // Charge rifle: play load sound once when charging starts.
+        bool isChargingNow = false;
+        registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                             : ws.primary;
+            if (getWeaponConfig(gun.type).isCharge && gun.chargeTime > 0.0f)
+                isChargingNow = true;
+        });
+        if (isChargingNow && !wasChargingRailgun_)
+            sfxSystem.play(SfxId::ChargeRifleLoad);
+        wasChargingRailgun_ = isChargingNow;
+
+        // Energy beam: play/stop loop sound on beam active transitions.
+        bool isBeamNow = false;
+        registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
+        if (isBeamNow && !wasBeamActive_)
+            sfxSystem.play(SfxId::EnergyBeamLoop);
+        if (!isBeamNow && wasBeamActive_)
+            sfxSystem.stop(SfxId::EnergyBeamLoop);
+        wasBeamActive_ = isBeamNow;
+    }
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -1388,6 +1453,28 @@ SDL_AppResult Game::iterate()
         // Optional center dot
         if (crosshairDot_)
             dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
+    }
+
+    // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.
+    if (hitmarkerTimer_ > 0.0f) {
+        hitmarkerTimer_ -= frameTime;
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        const float cx = static_cast<float>(winW) * 0.5f;
+        const float cy = static_cast<float>(winH) * 0.5f;
+
+        const float alpha = std::min(hitmarkerTimer_ / 0.15f, 1.0f); // fade out last 150ms
+        const float hmSize = 8.0f;
+        const float hmGap = 4.0f;
+        const float hmThick = 2.5f;
+        const ImU32 hmCol = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+        // Four diagonal lines forming an X, offset from center by hmGap
+        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy - hmGap - hmSize), ImVec2(cx - hmGap, cy - hmGap), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx + hmGap, cy - hmGap), ImVec2(cx + hmGap + hmSize, cy - hmGap - hmSize), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy + hmGap + hmSize), ImVec2(cx - hmGap, cy + hmGap), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx + hmGap, cy + hmGap), ImVec2(cx + hmGap + hmSize, cy + hmGap + hmSize), hmCol, hmThick);
     }
 
     // Third-person weapon tweaker — per-weapon tuning for remote player weapons.

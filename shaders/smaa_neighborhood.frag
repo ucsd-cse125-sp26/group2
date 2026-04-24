@@ -35,7 +35,11 @@ void main()
     // If there are no blend weights at all, pass through (still bake AO).
     if (dot(a, vec4(1.0)) < 1e-5) {
         vec4 c = texture(colorTex, fragTexCoord);
-        c.rgb *= mix(1.0, pow(texture(ssaoBuffer, fragTexCoord).r, ssaoPower), ssaoStrength);
+        // Alpha carries the weapon viewmodel mask (0 = weapon, 1 = scene).
+        // Particle blend states preserve destination alpha (ZERO, ONE), so
+        // only weapon pixels have alpha == 0.0.
+        float sceneMask = c.a;
+        c.rgb *= mix(1.0, pow(texture(ssaoBuffer, fragTexCoord).r, ssaoPower), ssaoStrength * sceneMask);
         outColor = c;
         return;
     }
@@ -72,8 +76,12 @@ void main()
     vec4 current  = texture(colorTex, fragTexCoord);
     vec4 neighbor = texture(colorTex, fragTexCoord + offset);
 
-    float aoCur  = mix(1.0, pow(texture(ssaoBuffer, fragTexCoord).r,          ssaoPower), ssaoStrength);
-    float aoNeig = mix(1.0, pow(texture(ssaoBuffer, fragTexCoord + offset).r, ssaoPower), ssaoStrength);
+    // Skip SSAO for weapon pixels (alpha == 0.0).  Particle blend states
+    // preserve destination alpha (ZERO, ONE), so scene alpha stays 1.0.
+    float maskCur  = current.a;
+    float maskNeig = neighbor.a;
+    float aoCur  = mix(1.0, pow(texture(ssaoBuffer, fragTexCoord).r,          ssaoPower), ssaoStrength * maskCur);
+    float aoNeig = mix(1.0, pow(texture(ssaoBuffer, fragTexCoord + offset).r, ssaoPower), ssaoStrength * maskNeig);
     current.rgb  *= aoCur;
     neighbor.rgb *= aoNeig;
 

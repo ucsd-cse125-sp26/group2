@@ -120,7 +120,7 @@ void HitscanEffect::randomizeCP(
     // Secondary perpendicular for out-of-plane curvature
     const glm::vec3 perp2 = glm::normalize(glm::cross(axisN, perp));
 
-    const float maxBulge = len * 0.22f;
+    const float maxBulge = len * 0.012f;
     cp1 = origin + axis * 0.30f + perp * ((randf() * 2.f - 1.f) * maxBulge) +
           perp2 * ((randf() * 2.f - 1.f) * maxBulge * 0.40f);
     cp2 = hitPos - axis * 0.30f + perp * ((randf() * 2.f - 1.f) * maxBulge) +
@@ -134,8 +134,8 @@ void HitscanEffect::rerandomizeBranches(BezierBeam& beam, glm::vec3 /*camForward
     for (int i = 0; i < beam.branchCount; ++i) {
         auto& b = beam.branches[i];
         b.tStart = 0.10f + randf() * 0.75f;              // spread over the bolt body
-        b.length = 0.07f + randf() * 0.17f;              // 7-24 % of main bolt length
-        b.angle = (randf() - 0.5f) * glm::radians(60.f); // +/-30 deg divergence
+        b.length = 0.03f + randf() * 0.08f;              // 3-11 % of main bolt length (shorter, tighter)
+        b.angle = (randf() - 0.5f) * glm::radians(25.f); // +/-12.5 deg divergence (tighter)
         b.seed = randf() * 50.f;
     }
 }
@@ -291,7 +291,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
         const glm::vec3 perp2 = glm::normalize(glm::cross(axisN, perp));
 
         // baseAmp: 16 % of beam length -- controls overall path deviation
-        const float baseAmp = len * 0.16f;
+        const float baseAmp = len * 0.008f;
 
         // Fade envelope (ramp in 8 %, ramp out 25 %)
         const float tLife = elapsed / k_beamLifetime;
@@ -321,7 +321,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
             // fBm along V-axis (secondary, 3 octaves only, smaller amplitude)
             const float dv = wfbm(t, beam.noiseSeed + 33.f, beam.warpSeed + 19.f, beam.time, 3);
 
-            pt += perp * (du * baseAmp * env) + perp2 * (dv * baseAmp * 0.45f * env);
+            pt += perp * (du * baseAmp * env) + perp2 * (dv * baseAmp * 0.30f * env);
             mainPts.push_back(pt);
         }
 
@@ -332,13 +332,13 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
         // screen area; the tight high-alpha core looks white-hot.
 
         // Layer 1 -- outer bloom halo  (wide, dim -- simulates atmospheric scatter)
-        appendArcStrip(mainPts, 6.5f, {0.20f, 0.50f, 1.00f, 0.07f * fade}, camForward);
+        appendArcStrip(mainPts, 3.5f, {0.30f, 0.60f, 1.00f, 0.12f * fade}, camForward);
 
         // Layer 2 -- inner energy channel  (the main visible arc body)
-        appendArcStrip(mainPts, 1.8f, {0.45f, 0.80f, 1.00f, 0.55f * fade}, camForward);
+        appendArcStrip(mainPts, 1.2f, {0.55f, 0.85f, 1.00f, 0.75f * fade}, camForward);
 
         // Layer 3 -- white-hot centerline  (overdriven -- simulates HDR core)
-        appendArcStrip(mainPts, 0.40f, {0.92f, 0.97f, 1.00f, 0.96f * fade}, camForward);
+        appendArcStrip(mainPts, 0.55f, {0.95f, 0.98f, 1.00f, 1.00f * fade}, camForward);
 
         // Branches
         //
@@ -376,7 +376,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
                 const float benv = std::sin(bt * glm::pi<float>());
                 const float du = fbm(bt, br.seed, beam.time * 1.8f, 2);
                 const float dv = fbm(bt, br.seed + 7.3f, beam.time * 1.8f, 2);
-                bpt += perp * (du * brLen * 0.22f * benv) + perp2 * (dv * brLen * 0.12f * benv);
+                bpt += perp * (du * brLen * 0.03f * benv) + perp2 * (dv * brLen * 0.015f * benv);
                 brPts.push_back(bpt);
             }
 
