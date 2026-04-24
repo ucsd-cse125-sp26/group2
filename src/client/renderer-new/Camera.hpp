@@ -5,53 +5,40 @@
 class NewCamera
 {
 public:
-    NewCamera() = default;
+    NewCamera();
 
-    NewCamera(glm::vec3 eye,
-              glm::vec3 target,
-              glm::vec3 up,
-              float fovyDegrees,
-              float aspectRatio,
-              float nearPlane,
-              float farPlane);
+    // Camera perspective properties (modifies projection matrix)
+    void setAspect(float width, float height);
+    void setFov(float fovyDegrees);
+    void setZNear(float zNear);
+    void setZFar(float zFar);
 
-    void reset();
+    // Sets the position of the camera in the world (modifies view matrix)
+    void setEye(glm::vec3 eye);
+    // Sets the view direction from the eye based on the pitch, yaw, and roll
+    // (all in radians). Roll rotates the up vector around the forward axis,
+    // used for camera tilt during wallruns.
+    void setTarget(float pitch, float yaw, float roll);
+    // Sets the up direction of the camera explicitly (overrides whatever
+    // setTarget produced). Useful if you ever need a non-gravity-aligned up.
+    void setUp(glm::vec3 up);
 
-    void setAspect(float aspectRatio);
-    void setPerspective(float fovyDegrees, float aspectRatio, float nearPlane, float farPlane);
-    void setLookAt(glm::vec3 eyePos, glm::vec3 targetPos, glm::vec3 upDir);
+    // Matrix computation, always run after using any of the set methods above.
+    void computeViewProjectionMatrix();
 
-    void rotateRight(float degrees);
-    void rotateUp(float degrees);
-
-    void computeMatrices();
-
-    [[nodiscard]] const glm::mat4& getView() const { return view; }
-    [[nodiscard]] const glm::mat4& getProjection() const { return proj; }
-
-    [[nodiscard]] const glm::vec3& getEye() const { return eye; }
-    [[nodiscard]] const glm::vec3& getTarget() const { return target; }
-    [[nodiscard]] const glm::vec3& getUp() const { return up; }
+    /// @brief Return the combined view-projection matrix.
+    [[nodiscard]] glm::mat4 getViewProjectionMatrix() const { return view_projection_; }
 
 private:
-    glm::vec3 eye{0.0f, 0.0f, 3.0f};
-    glm::vec3 target{0.0f, 0.0f, 0.0f};
-    glm::vec3 up{0.0f, 1.0f, 0.0f};
+    glm::vec3 eye_{0.0f, 0.0f, 3.0f};
+    glm::vec3 target_{0.0f, 0.0f, 0.0f};
+    glm::vec3 up_{0.0f, 1.0f, 0.0f};
 
-    float fovy = 60.0f; // degrees
-    float aspect = 1.0f;
-    float nearPlane = 0.1f;
-    float farPlane = 100.0f;
+    // Near/far are sized for Quake units.
+    float fovy_ = glm::radians(60.0f);
+    float aspect_ = 1.0f;
+    float zNear_ = 5.0f;    ///< Near clip (Quake units); 5 ≈ half a foot.
+    float zFar_ = 15000.0f; ///< Far clip; covers the 4 000-unit play area with margin.
 
-    glm::vec3 eyeDefault{0.0f, 0.0f, 3.0f};
-    glm::vec3 targetDefault{0.0f, 0.0f, 0.0f};
-    glm::vec3 upDefault{0.0f, 1.0f, 0.0f};
-
-    float fovyDefault = 60.0f;
-    float aspectDefault = 1.0f;
-    float nearDefault = 0.1f;
-    float farDefault = 100.0f;
-
-    glm::mat4 view{1.0f};
-    glm::mat4 proj{1.0f};
+    glm::mat4 view_projection_{1.0f};
 };

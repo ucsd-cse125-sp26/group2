@@ -5,7 +5,6 @@
 
 #include <cstdint>
 
-
 /// @brief Weapon type — determines tracer style, damage, sound, and impact effects.
 enum class WeaponType : uint8_t
 {
@@ -30,6 +29,7 @@ struct GunInstance
     int totalAmmo = 0;
     int currentMagAmmo = 0;
     float fireCooldown = 0.f;
+    float chargeTime = 0.f; ///< Accumulated charge time (charge weapons only).
 };
 
 /// @brief Component attached to armed entities (players).

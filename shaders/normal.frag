@@ -13,6 +13,13 @@ layout(location = 0) out vec4 outColor;
 /// @brief Cascaded shadow map atlas with comparison sampler.
 layout(set = 2, binding = 0) uniform sampler2DShadow shadowMap;
 
+/// @brief One dynamic point light (matches LightGPU in C++).
+struct PointLight {
+    vec4 position;   // xyz = world position, w = 1.0 (point)
+    vec4 color;      // rgb = colour, a = intensity
+    vec4 params;     // x = range
+};
+
 /// @brief All lighting and cascade shadow data from C++ (matches ShadowDataFragUBO).
 layout(set = 3, binding = 0) uniform SceneShadowData
 {
@@ -27,6 +34,9 @@ layout(set = 3, binding = 0) uniform SceneShadowData
     vec4  lightColor;      // rgb = sun color, a = sun intensity
     vec4  ambientColor;    // rgb = ambient color
     vec4  fillColor;       // rgb = fill color, a = fill intensity
+    int   numPointLights;  // Dynamic point lights (0..14)
+    float _pad2, _pad3, _pad4;
+    PointLight pointLights[14];
 };
 
 // Atlas layout: 2x2 grid, each cascade occupies 0.5 of the atlas per axis.
@@ -116,7 +126,19 @@ void main()
     float fillNdotL = max(dot(N, -sunDir), 0.0);
     vec3 fillLighting = fillColor.rgb * fillColor.a * fillNdotL;
 
-    vec3 lighting = sunLighting + fillLighting + ambient;
+    // Dynamic point lights.
+    vec3 ptLighting = vec3(0.0);
+    for (int i = 0; i < numPointLights && i < 14; ++i) {
+        vec3 toLight  = pointLights[i].position.xyz - fragWorldPos;
+        float dist    = length(toLight);
+        vec3 L        = toLight / max(dist, 0.001);
+        float range   = pointLights[i].params.x;
+        float atten   = pointLights[i].color.a * max(1.0 - (dist * dist) / (range * range), 0.0);
+        float pNdotL  = max(dot(N, L), 0.0);
+        ptLighting   += pointLights[i].color.rgb * atten * pNdotL;
+    }
+
+    vec3 lighting = sunLighting + fillLighting + ptLighting + ambient;
 
     if (fragIsFloor > 0.5) {
         // Red matte floor with thin black grid lines

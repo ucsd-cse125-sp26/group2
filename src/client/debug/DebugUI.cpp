@@ -12,6 +12,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
@@ -1164,13 +1165,17 @@ void DebugUI::buildWeaponUI(const Registry& registry)
         currentGunName = "RailGun";
         break;
     case WeaponType::EnergyGun:
-        currentGunName = "EnergyGun";
+        currentGunName = "EnergyGun (Beam)";
         break;
     }
 
     ImGui::SeparatorText("Weapon");
     ImGui::Text("Current: %s", currentGunName);
     ImGui::Text("Ammo:    %d / %d", gun.currentMagAmmo, gun.totalAmmo);
+
+    // Flag checked by Game::iterate() to refill ammo (registry is const here).
+    if (ImGui::Button("Refill All Ammo"))
+        pendingAmmoRefill_ = true;
 
     ImGui::SeparatorText("Vitals");
     if (registry.all_of<Health>(localPlayer)) {

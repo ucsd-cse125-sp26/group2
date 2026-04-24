@@ -3,12 +3,11 @@
 
 #pragma once
 
+#include "CollisionShape.hpp"
 #include "ecs/components/Projectile.hpp"
 
 #include <array>
 #include <cstddef>
-
-#include "CollisionShape.hpp"
 
 /// @brief Immutable gameplay stats for a weapon type.
 struct WeaponConfig
@@ -20,6 +19,11 @@ struct WeaponConfig
     bool hitscan = true;
     float initialProjectileSpeed = 0.0f;
     bool explosive = false;
+    bool isBeam = false;        ///< True for continuous beam weapons (no per-shot cooldown).
+    bool isCharge = false;      ///< True for charge weapons (hold to charge, release to fire).
+    float dps = 0.0f;           ///< Damage per second (beam weapons only; discrete weapons use `damage`).
+    float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
+    float chargeDamage = 0.0f;  ///< Damage dealt on release (charge weapons only).
 };
 
 struct ProjectileConfig
@@ -62,16 +66,21 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = true,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
-        }, // RailGun
+            .isCharge = true,
+            .chargeDamage = 150.0f,
+        }, // RailGun (charge sniper)
         WeaponConfig{
-            .fireCooldown = 0.05f,
+            .fireCooldown = 0.0f,
             .magazineSize = 200,
             .defaultAmmoCapacity = 200,
             .damage = 5.0f,
             .hitscan = true,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
-        }, // EnergyGun
+            .isBeam = true,
+            .dps = 80.0f,
+            .ammoPerSecond = 20.0f,
+        }, // EnergyGun (Zarya beam)
     }};
 
     return k_kWeaponConfigs[static_cast<std::size_t>(type)];
@@ -89,7 +98,7 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .shape = CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}},
             .maxLifeTime = 5.0f,
             .explosionRadius = 175.0f,
-        }, // Rocket
+        },                  // Rocket
         ProjectileConfig{}, // RailGun
         ProjectileConfig{}, // EnergyGun
     }};
