@@ -210,8 +210,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
     SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
 
     for (const auto& modelPair : Asset::models_) {
-        glm::mat4 modelMatrix = glm::mat4(25.0f);
-        modelMatrix[3] = glm::vec4(0.0f, 25.0f, 0.0f, 1.0f);
+        glm::mat4 modelMatrix = glm::mat4(1.0f);
+        // modelMatrix[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
         SDL_PushGPUVertexUniformData(cmd, 1, &modelMatrix, sizeof(glm::mat4));
 
         const Asset::Mesh& mesh = Asset::meshes_.at(modelPair.second.meshId_);
