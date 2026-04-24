@@ -29,6 +29,7 @@ struct ProjectileConfig
     float scale = 1.0f;
     CollisionShape shape = CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}};
     float maxLifeTime = 5.0f;
+    float explosionRadius = 0.0f;
 };
 
 /// @brief Returns the gameplay config for a weapon type.
@@ -87,6 +88,7 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .scale = 1.0f,
             .shape = CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}},
             .maxLifeTime = 5.0f,
+            .explosionRadius = 175.0f,
         }, // Rocket
         ProjectileConfig{}, // RailGun
         ProjectileConfig{}, // EnergyGun

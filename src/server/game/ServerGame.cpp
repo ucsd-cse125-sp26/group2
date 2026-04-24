@@ -16,6 +16,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
+#include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
@@ -121,6 +122,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     systems::runWeapon(registry, dt, particleEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
+    systems::runExplosion(registry, particleEvents);
     systems::runPlayerStatus(registry, dt);
 
     matchController.update(dt, registry, server);

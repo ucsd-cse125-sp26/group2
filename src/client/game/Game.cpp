@@ -129,8 +129,9 @@ bool Game::init()
     });
 
     client.onParticleEvent([this](const NetParticleEvent& evt, entt::entity localPlayer) {
-        // Skip own effects (already handled locally for instant feedback)
-        if (evt.source == localPlayer)
+        // Skip locally predicted beam/tracer effects for the shooter.
+        if (evt.source == localPlayer &&
+            (evt.effectType == ParticleEffectType::BulletTracer || evt.effectType == ParticleEffectType::HitscanBeam))
             return;
 
         switch (evt.effectType) {

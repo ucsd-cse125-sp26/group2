@@ -10,10 +10,10 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
+#include "ecs/systems/ExplosionSystem.hpp"
 
 #include <glm/geometric.hpp>
 
-#include "../../../.deps/relwithdebinfo/glm-src/glm/gtx/projection.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 
@@ -278,13 +278,21 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
 
     // Projectile entities
     registry.view<Position, Velocity, CollisionShape, Projectile>().each(
-        [dt, &world](Position& pos, Velocity& vel, const CollisionShape& shape, Projectile& projectile) {
+        [dt, &world, &registry](entt::entity e, Position& pos, Velocity& vel, const CollisionShape& shape, Projectile& projectile) {
 
             ProjectileConfig projConfig = getProjectileConfig(projectile.type);
             if (projectile.currentLifeTime >= projConfig.maxLifeTime)
             {
-                // TODO: EXPLODE
+                if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
+                    queueExplosion(registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                }
+                if (registry.valid(e)) {
+                    registry.destroy(e);
+                }
+                return;
+
             }
+            projectile.currentLifeTime += dt;
 
             // Phase 0 — Depenetration
             depenetrate(pos.value, vel.value, shape.halfExtents, world);
@@ -304,7 +312,13 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
-                //TODO: Explode projectile
+                if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
+                    queueExplosion(registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                }
+                if (registry.valid(e)) {
+                    registry.destroy(e);
+                }
+                break;
             }
 
         });
