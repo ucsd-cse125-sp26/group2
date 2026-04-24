@@ -6,8 +6,10 @@
 #include "renderer/IRenderer.hpp"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_gpu.h>
 
 #include <glm/glm.hpp>
+#include <string>
 #include <vector>
 
 struct Vertex
@@ -32,31 +34,11 @@ struct Vertex
 class NewRenderer : public IRenderer
 {
 public:
-    std::string shadersDir_;
-    /// @brief Report which `RendererFeature` entries the new renderer implements.
     [[nodiscard]] bool supports(RendererFeature feature) const override;
 
-    /// @brief Initialise the GPU device, pipeline, and ImGui GPU backend.
-    /// @param window  The SDL window to render into.
-    /// @return False on any fatal GPU error.
-    /// @pre An ImGui context must already exist (created by DebugUI::init).
     bool init(SDL_Window* window) override;
-
-    /// @brief Initialise against a pre-existing GPU device (shared with another
-    /// renderer). The provided device must already have claimed `window`.
-    /// Used by `HybridRenderer` so both renderers operate on the same device
-    /// — SDL3 only allows a single device to claim a given window.
     bool init(SDL_Window* window, SDL_GPUDevice* sharedDevice);
-
-    /// @brief Submit the scene geometry and ImGui draw data for one frame.
-    /// @param eye    World-space camera eye position (interpolated, in Quake units).
-    /// @param yaw    Horizontal look angle in radians (matches InputSnapshot::yaw).
-    /// @param pitch  Vertical look angle in radians (positive = looking down).
-    /// @param roll   Camera roll in radians (currently ignored by the new renderer).
     void drawFrame(glm::vec3 eye, float yaw, float pitch, float roll) override;
-
-    /// @brief Release all GPU resources. Waits for GPU idle before freeing.
-    /// @pre Call before the SDL window is destroyed.
     void quit() override;
 
     // ---- Unimplemented IRenderer methods ----
@@ -65,6 +47,7 @@ public:
     [[nodiscard]] SDL_GPUDevice* getDevice() const override { return device_; }
     [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const override { return shaderFormat_; }
     [[nodiscard]] const Camera& getCamera() const override { return legacyCameraStub_; }
+
     void setParticleSystem(ParticleSystem* /*ps*/) override {}
     int loadSceneModel(const char* /*filename*/, glm::vec3 /*pos*/, float /*scale*/, bool /*flipUVs*/) override
     {
@@ -85,36 +68,31 @@ public:
     [[nodiscard]] int modelCount() const override { return 0; }
 
 private:
-    SDL_Window* window_ = nullptr;                ///< The SDL window being rendered into.
-    SDL_GPUDevice* device_ = nullptr;             ///< The SDL GPU device.
+    SDL_Window* window_ = nullptr;
+    SDL_GPUDevice* device_ = nullptr;
     SDL_GPUShaderFormat shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
-    bool ownsDevice_ = false;                     ///< True if we created device_ ourselves.
-    bool ownsWindowClaim_ = false;                ///< True if we called ClaimWindow.
-    SDL_GPUGraphicsPipeline* pipeline_ = nullptr; ///< The scene graphics pipeline.
 
-    float fovyDegrees_ = 60.0f;
-    float nearPlane_ = 5.0f;
-    float farPlane_ = 15000.0f;
+    bool ownsDevice_ = false;
+    bool ownsWindowClaim_ = false;
 
-    NewCamera camera_;
+    SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
+    SDL_GPUTexture* depthTexture_ = nullptr;
 
-    SDL_GPUTexture* depthTexture = nullptr;
+    // Temp for single texture
+    SDL_GPUTexture* texture_ = nullptr;
+    SDL_GPUSampler* sampler_ = nullptr;
+
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
 
-    Asset::GeoBufferInfo vBufferInfo_;
-    Asset::GeoBufferInfo iBufferInfo_;
+    NewCamera camera_;
+    Camera legacyCameraStub_{};
 
-    Camera legacyCameraStub_{}; ///< Default-constructed legacy camera used to satisfy getCamera().
+    bool initCommon();
+    bool createGeometryPipeline();
+    bool loadSceneAssets();
+    bool ensureDepthTexture(Uint32 width, Uint32 height);
 
-    bool ensureDepthTexture(Uint32 w, Uint32 h);
-
-    [[nodiscard]] SDL_GPUTransferBuffer* createTransferBuffer(size_t transferBufferSize, bool upload) const;
-    [[nodiscard]] SDL_GPUBuffer* createGPUBuffer(size_t bufferSize, SDL_GPUBufferUsageFlags usage) const;
-    void uploadDataToGPUBuffer(SDL_GPUCommandBuffer* cmd,
-                               const std::vector<Asset::GeoBufferInfo>& modelBuffersInfo) const;
-    void drawMesh(SDL_GPURenderPass* renderPass, SDL_GPUIndexElementSize iElementSizeSdlType, Asset::Mesh m);
-
-    bool initCommon(SDL_Window* window);
-    void genMeshBuffers(MeshIdInt meshId);
+    void createMeshBuffers(MeshIdInt meshId);
+    void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
 };
