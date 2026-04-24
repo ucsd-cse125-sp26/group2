@@ -723,8 +723,13 @@ SDL_AppResult Game::iterate()
                 wfe.hitPos = hitPos;
                 dispatcher.enqueue(wfe);
 
-                // Spawn tracer + impact (discrete weapons only).
-                particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
+                // Spawn tracer from hip toward the crosshair hit point (not along
+                // cachedCamFwd_ — the hip is offset from the eye, so the direction
+                // to the hit point differs slightly from the camera forward).
+                const glm::vec3 hipToHit = hitPos - hip;
+                const float hipHitDist = glm::length(hipToHit);
+                const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
+                particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
                 particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only)
