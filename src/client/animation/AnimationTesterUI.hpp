@@ -11,7 +11,7 @@
 /// their selection.  Owned by `Game` (a plain field on the class).
 struct AnimationTesterState
 {
-    bool show = true;              ///< Window visibility toggle.
+    bool show = false;             ///< Window visibility toggle.
     int selectedClip = 0;          ///< Integer value of a `ClipId`.
     int targetEntityRaw = -1;      ///< `entt::entity` raw value, or -1 for "local player".
     bool showLocalBody = false;    ///< Render the local player's own body (third-person debug).

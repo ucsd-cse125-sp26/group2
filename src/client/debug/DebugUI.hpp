@@ -179,5 +179,5 @@ private:
 
     // Particle UI state
     float particleSpawnDist_ = 200.f; ///< Units ahead of camera to spawn effects.
-    bool showParticleWindow_ = true;
+    bool showParticleWindow_ = false;
 };
