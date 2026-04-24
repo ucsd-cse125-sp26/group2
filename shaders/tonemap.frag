@@ -58,10 +58,7 @@ void main()
     // Screen-space post-FX (bloom, SSR, SSAO, volumetrics) were computed
     // before the weapon was drawn, so compositing them over weapon pixels
     // would bleed the scene through the gun.  Skip them for weapon pixels.
-    // Hard threshold: only weapon pixels (alpha exactly 0.0) skip post-FX.
-    // Particles may have partial alpha from additive blending — treat them
-    // as scene so they still receive bloom, SSAO, etc.
-    float sceneMask = step(0.01, centerSample.a);
+    float sceneMask = centerSample.a;
     vec3 hdr;
 
     if (sharpenStrength > 0.0) {

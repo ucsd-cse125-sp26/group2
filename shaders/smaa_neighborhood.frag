@@ -36,11 +36,9 @@ void main()
     if (dot(a, vec4(1.0)) < 1e-5) {
         vec4 c = texture(colorTex, fragTexCoord);
         // Alpha carries the weapon viewmodel mask (0 = weapon, 1 = scene).
-        // Don't bake SSAO into weapon pixels — the AO was computed from
-        // the scene depth before the weapon was drawn.
-        // Only weapon pixels have alpha == 0.0; particles/scene have alpha > 0.
-        // Use a hard threshold so particles still get full SSAO.
-        float sceneMask = step(0.01, c.a);
+        // Particle blend states preserve destination alpha (ZERO, ONE), so
+        // only weapon pixels have alpha == 0.0.
+        float sceneMask = c.a;
         c.rgb *= mix(1.0, pow(texture(ssaoBuffer, fragTexCoord).r, ssaoPower), ssaoStrength * sceneMask);
         outColor = c;
         return;
@@ -78,11 +76,10 @@ void main()
     vec4 current  = texture(colorTex, fragTexCoord);
     vec4 neighbor = texture(colorTex, fragTexCoord + offset);
 
-    // Skip SSAO only for weapon pixels (alpha exactly 0.0).
-    // Particles may have partial alpha from additive blending — they still
-    // need full SSAO, so use a hard threshold instead of a smooth multiplier.
-    float maskCur  = step(0.01, current.a);
-    float maskNeig = step(0.01, neighbor.a);
+    // Skip SSAO for weapon pixels (alpha == 0.0).  Particle blend states
+    // preserve destination alpha (ZERO, ONE), so scene alpha stays 1.0.
+    float maskCur  = current.a;
+    float maskNeig = neighbor.a;
     float aoCur  = mix(1.0, pow(texture(ssaoBuffer, fragTexCoord).r,          ssaoPower), ssaoStrength * maskCur);
     float aoNeig = mix(1.0, pow(texture(ssaoBuffer, fragTexCoord + offset).r, ssaoPower), ssaoStrength * maskNeig);
     current.rgb  *= aoCur;
