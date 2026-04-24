@@ -5,6 +5,7 @@
 
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
+#include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -16,7 +17,9 @@
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -102,6 +105,17 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
 
+    // Sound effects system — initialised after particles so audio can mirror the
+    // same event-driven pattern.  Failure is non-fatal: the game runs silently.
+    if (!sfxSystem.init()) {
+        SDL_Log("[client] SfxSystem init failed (non-fatal — sound effects disabled)");
+    } else {
+        // WeaponFiredEvent: play the weapon fire sound for every shot.
+        dispatcher.sink<WeaponFiredEvent>().connect<&SfxSystem::onWeaponFired>(sfxSystem);
+        // ExplosionEvent: also play the explosion SFX alongside the particle effect.
+        dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
+    }
+
     // Load models for entity rendering
     wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
     if (wraithModelIdx < 0)
@@ -161,7 +175,17 @@ bool Game::init()
     });
 
     client.onParticleEvent([this](const NetParticleEvent& evt, entt::entity localPlayer) {
-        // Skip own effects (already handled locally for instant feedback)
+        // Hitmarker SFX: local player's shot was confirmed by the server to have
+        // hit an enemy (surface == Flesh).  This check runs BEFORE the skip-self
+        // guard so the shooter still hears the hitmarker even though their own
+        // particle VFX was already spawned client-side for instant feedback.
+        if (sfxSystem.isInitialized() && evt.source == localPlayer && evt.effectType == ParticleEffectType::Impact &&
+            evt.surfaceType == SurfaceType::Flesh)
+        {
+            sfxSystem.play(SfxId::FleshHit);
+        }
+
+        // Skip own VFX effects (already spawned locally for instant feedback).
         if (evt.source == localPlayer)
             return;
 
@@ -628,57 +652,52 @@ SDL_AppResult Game::iterate()
     // Local weapon VFX — fires continuously while LMB is held, respecting cooldown.
     // This mirrors the server's fire rate so the local player sees tracers/impacts
     // at the same cadence as the server processes shots.
+    // Beam weapons (EnergyGun) are driven by BeamState from the registry,
+    // so they skip per-shot VFX here.
     {
-        localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
+        const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
 
-        const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
-        const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
+        if (!wpnCfg.isBeam) {
+            localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
-        if (shooting && localFireCooldown_ <= 0.0f) {
-            const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
-            localFireCooldown_ = wpnCfg.fireCooldown;
+            const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
+            const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
 
-            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            if (shooting && localFireCooldown_ <= 0.0f) {
+                localFireCooldown_ = wpnCfg.fireCooldown;
 
-            // Ray-scene intersection for hit position
-            constexpr float k_maxRange = 5000.f;
-            float hitDist = k_maxRange;
-            glm::vec3 hitNormal = -cachedCamFwd_;
-            SurfaceType hitSurface = SurfaceType::Concrete;
+                const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+                const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
-            if (cachedCamFwd_.y < -0.001f) {
-                const float t = -cachedEye_.y / cachedCamFwd_.y;
-                if (t > 0.f && t < hitDist) {
-                    hitDist = t;
-                    hitNormal = glm::vec3{0.f, 1.f, 0.f};
-                    hitSurface = SurfaceType::Concrete;
-                }
+                // Raycast against full world geometry (floor + boxes + brushes).
+                const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::testWorld());
+                const float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
+                const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
+                const glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
+                const SurfaceType hitSurface = worldHit.surface;
+
+                // Dispatch weapon-fired event for any listeners
+                WeaponFiredEvent wfe;
+                wfe.type = currentEquippedType_;
+                wfe.origin = hip;
+                wfe.direction = cachedCamFwd_;
+                wfe.isHitscan = true;
+                wfe.hitPos = hitPos;
+                dispatcher.enqueue(wfe);
+
+                // Spawn correct particle effect based on weapon type
+                if (currentEquippedType_ == WeaponType::RailGun)
+                    particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
+                else
+                    particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
+                particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
+
+                // Visual recoil kick (viewmodel-only)
+                const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+                recoilPitch_ += rp.pitchKick;
+                recoilPushBack_ += rp.pushBack;
+                recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
             }
-
-            const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
-
-            // Dispatch weapon-fired event for any listeners
-            WeaponFiredEvent wfe;
-            wfe.type = currentEquippedType_;
-            wfe.origin = hip;
-            wfe.direction = cachedCamFwd_;
-            wfe.isHitscan = true;
-            wfe.hitPos = hitPos;
-            dispatcher.enqueue(wfe);
-
-            // Spawn correct particle effect based on weapon type
-            if (currentEquippedType_ == WeaponType::RailGun || currentEquippedType_ == WeaponType::EnergyGun)
-                particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
-            else
-                particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
-            particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
-
-            // Visual recoil kick (viewmodel-only)
-            const RecoilParams& rp = getRecoilParams(currentEquippedType_);
-            recoilPitch_ += rp.pitchKick;
-            recoilPushBack_ += rp.pushBack;
-            recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
         }
     }
 
@@ -687,6 +706,9 @@ SDL_AppResult Game::iterate()
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
+
+    // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
+    sfxSystem.update(frameTime, registry);
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -871,16 +893,60 @@ SDL_AppResult Game::iterate()
             });
         }
 
-        // Glow beam cylinder.
+        // Glow beam cylinder — follows player position and view direction.
+        // Offsets are (forward, up, right) relative to camera.
+        const glm::vec3 camRight = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+        const glm::vec3 camUp = glm::normalize(glm::cross(camRight, cachedCamFwd_));
+        const glm::vec3 beamWorldStart =
+            cachedEye_ + cachedCamFwd_ * beamStartOff_.x + camUp * beamStartOff_.y + camRight * beamStartOff_.z;
+        const glm::vec3 beamWorldEnd =
+            cachedEye_ + cachedCamFwd_ * beamEndOff_.x + camUp * beamEndOff_.y + camRight * beamEndOff_.z;
+
         if (beamEnabled_ && glowCylinderModelIdx_ >= 0) {
             // Update visual emissive color to match the color picker (HDR scaled).
-            const float emScale = 10.0f; // HDR boost so bloom triggers
+            const float emScale = 10.0f;
             renderer.setModelEmissive(glowCylinderModelIdx_, glm::vec4(beamColor_ * emScale, 0.0f));
             entityCmds.push_back(EntityRenderCmd{
                 .modelIndex = glowCylinderModelIdx_,
-                .worldTransform = cylinderTransform(beamStart_, beamEnd_, beamRadius_),
+                .worldTransform = cylinderTransform(beamWorldStart, beamWorldEnd, beamRadius_),
             });
         }
+
+        // Weapon beam visuals — driven by BeamState synced from server registry.
+        // Local player: client-side predicted raycast for zero-lag response.
+        // Remote players: use the server-computed positions from BeamState.
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+            if (!beam.active || glowCylinderModelIdx_ < 0)
+                return;
+
+            glm::vec3 beamOrigin = beam.origin;
+            glm::vec3 beamEnd = beam.hitPoint;
+
+            if (registry.all_of<LocalPlayer>(e)) {
+                // Client-side prediction: raycast with this frame's camera
+                // direction so the beam tracks the crosshair with zero latency.
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
+                const glm::vec3 up = glm::normalize(glm::cross(rgt, fwd));
+
+                // Muzzle position from viewmodel offset.
+                beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
+
+                // Predicted endpoint: raycast from eye along current view.
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+            }
+
+            // Green Zarya-style tint, HDR-scaled for bloom.
+            renderer.setModelEmissive(glowCylinderModelIdx_, glm::vec4(glm::vec3(0.3f, 1.0f, 0.2f) * 10.0f, 0.0f));
+
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowCylinderModelIdx_,
+                .worldTransform = cylinderTransform(beamOrigin, beamEnd, 2.0f),
+            });
+        });
 
         renderer.setEntityRenderList(std::move(entityCmds));
 
@@ -915,29 +981,59 @@ SDL_AppResult Game::iterate()
             });
         }
 
-        // Beam point lights — place lights at the start, middle, and end of the beam.
+        // Beam point lights — evenly distributed along the beam length.
         if (beamEnabled_) {
-            const glm::vec3 beamMid = (beamStart_ + beamEnd_) * 0.5f;
-            const glm::vec3 beamLightColor = beamColor_ * 1.5f; // boost slightly for light
-            dynLights.push_back(PointLight{
-                .position = beamStart_,
-                .color = beamLightColor,
-                .intensity = beamLightIntensity_,
-                .range = beamLightRange_,
-            });
-            dynLights.push_back(PointLight{
-                .position = beamMid,
-                .color = beamLightColor,
-                .intensity = beamLightIntensity_,
-                .range = beamLightRange_,
-            });
-            dynLights.push_back(PointLight{
-                .position = beamEnd_,
-                .color = beamLightColor,
-                .intensity = beamLightIntensity_,
-                .range = beamLightRange_,
-            });
+            const glm::vec3 beamDelta = beamWorldEnd - beamWorldStart;
+            const float beamLen = glm::length(beamDelta);
+            const int numBeamLights = (beamLightSpacing_ > 1.0f && beamLen > 0.1f)
+                                          ? std::max(2, static_cast<int>(beamLen / beamLightSpacing_) + 1)
+                                          : 2;
+            const glm::vec3 beamLightColor = beamColor_ * 1.5f;
+            for (int i = 0; i < numBeamLights; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numBeamLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = beamWorldStart + beamDelta * t,
+                    .color = beamLightColor,
+                    .intensity = beamLightIntensity_,
+                    .range = beamLightRange_,
+                });
+            }
         }
+
+        // Weapon beam point lights — from BeamState, evenly distributed.
+        // Local player uses predicted positions (same as the visual beam above).
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+            if (!beam.active)
+                return;
+
+            glm::vec3 lightStart = beam.origin;
+            glm::vec3 lightEnd = beam.hitPoint;
+
+            if (registry.all_of<LocalPlayer>(e)) {
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                lightStart = renderEye;
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+            }
+
+            const glm::vec3 delta = lightEnd - lightStart;
+            const float len = glm::length(delta);
+            if (len < 1.0f)
+                return;
+            const int numLights = std::max(2, static_cast<int>(len / 80.0f) + 1);
+            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f};
+            for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = lightStart + delta * t,
+                    .color = lightColor,
+                    .intensity = 3.0f,
+                    .range = 200.0f,
+                });
+            }
+        });
 
         renderer.setPointLights(std::move(dynLights));
     }
@@ -1189,6 +1285,15 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
     debugUI.buildScoreboardUI(registry, currentMatchPhase, countdownTimer);
+
+    // Process ammo refill request — pulse refillAmmo on InputSnapshot for
+    // exactly one frame so the server handles it once then stops.
+    {
+        const bool wantRefill = debugUI.pendingAmmoRefill_;
+        debugUI.pendingAmmoRefill_ = false;
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
+    }
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 #ifdef USE_HYBRID_RENDERER
@@ -1346,12 +1451,14 @@ SDL_AppResult Game::iterate()
             ImGui::SeparatorText("Bloom Beam");
             ImGui::Checkbox("Enable Beam", &beamEnabled_);
             if (beamEnabled_) {
-                ImGui::DragFloat3("Start", &beamStart_.x, 5.0f, -5000.0f, 5000.0f, "%.0f");
-                ImGui::DragFloat3("End", &beamEnd_.x, 5.0f, -5000.0f, 5000.0f, "%.0f");
+                ImGui::Text("Offsets: (fwd, up, right) from eye");
+                ImGui::DragFloat3("Start Off", &beamStartOff_.x, 1.0f, -500.0f, 500.0f, "%.0f");
+                ImGui::DragFloat3("End Off", &beamEndOff_.x, 1.0f, -500.0f, 500.0f, "%.0f");
                 ImGui::DragFloat("Radius", &beamRadius_, 0.5f, 0.5f, 50.0f, "%.1f");
                 ImGui::ColorEdit3("Beam Color", &beamColor_.x);
                 ImGui::DragFloat("Beam Intensity", &beamLightIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
                 ImGui::DragFloat("Beam Lt Range", &beamLightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+                ImGui::DragFloat("Light Spacing", &beamLightSpacing_, 5.0f, 10.0f, 200.0f, "%.0f");
             }
         }
         ImGui::End();
@@ -1395,6 +1502,7 @@ void Game::quit()
 {
     if (recorder.isRecording())
         recorder.stopRecording();
+    sfxSystem.quit();
     particleSystem.quit();
     renderer.quit();
     debugUI.shutdown();

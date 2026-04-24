@@ -15,6 +15,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
+#include "sfx/SfxSystem.hpp"
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
 #else
@@ -67,6 +68,7 @@ private:
     Registry registry;             ///< The shared ECS registry.
     Client client;                 ///< UDP network client.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;           ///< Client-side sound effects system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
     Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
@@ -116,12 +118,13 @@ private:
     float sphereRange_ = 500.0f;                         ///< Point light range of movable sphere.
     int glowCylinderModelIdx_ = -1;                      ///< Glow cylinder (beam) model index.
     bool beamEnabled_ = false;                           ///< Show the bloom beam.
-    glm::vec3 beamStart_{0.0f, 60.0f, 250.0f};           ///< Beam start position.
-    glm::vec3 beamEnd_{0.0f, 60.0f, 450.0f};             ///< Beam end position.
-    float beamRadius_ = 5.0f;                            ///< Beam cylinder radius.
+    glm::vec3 beamStartOff_{30.0f, -5.0f, 10.0f};        ///< Beam start offset (fwd, up, right) from eye.
+    glm::vec3 beamEndOff_{200.0f, -5.0f, 10.0f};         ///< Beam end offset (fwd, up, right) from eye.
+    float beamRadius_ = 3.0f;                            ///< Beam cylinder radius.
     glm::vec3 beamColor_{0.6f, 0.1f, 1.0f};              ///< Beam emissive colour (purple).
-    float beamLightIntensity_ = 6.0f;                    ///< Point light intensity along beam.
-    float beamLightRange_ = 400.0f;                      ///< Point light range along beam.
+    float beamLightIntensity_ = 4.0f;                    ///< Point light intensity per sample.
+    float beamLightRange_ = 300.0f;                      ///< Point light range per sample.
+    float beamLightSpacing_ = 60.0f;                     ///< Distance between point lights along beam.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
 

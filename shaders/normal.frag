@@ -34,9 +34,9 @@ layout(set = 3, binding = 0) uniform SceneShadowData
     vec4  lightColor;      // rgb = sun color, a = sun intensity
     vec4  ambientColor;    // rgb = ambient color
     vec4  fillColor;       // rgb = fill color, a = fill intensity
-    int   numPointLights;  // Dynamic point lights (0..6)
+    int   numPointLights;  // Dynamic point lights (0..14)
     float _pad2, _pad3, _pad4;
-    PointLight pointLights[6];
+    PointLight pointLights[14];
 };
 
 // Atlas layout: 2x2 grid, each cascade occupies 0.5 of the atlas per axis.
@@ -128,7 +128,7 @@ void main()
 
     // Dynamic point lights.
     vec3 ptLighting = vec3(0.0);
-    for (int i = 0; i < numPointLights && i < 6; ++i) {
+    for (int i = 0; i < numPointLights && i < 14; ++i) {
         vec3 toLight  = pointLights[i].position.xyz - fragWorldPos;
         float dist    = length(toLight);
         vec3 L        = toLight / max(dist, 0.001);
