@@ -120,7 +120,7 @@ void HitscanEffect::randomizeCP(
     // Secondary perpendicular for out-of-plane curvature
     const glm::vec3 perp2 = glm::normalize(glm::cross(axisN, perp));
 
-    const float maxBulge = len * 0.06f;
+    const float maxBulge = len * 0.012f;
     cp1 = origin + axis * 0.30f + perp * ((randf() * 2.f - 1.f) * maxBulge) +
           perp2 * ((randf() * 2.f - 1.f) * maxBulge * 0.40f);
     cp2 = hitPos - axis * 0.30f + perp * ((randf() * 2.f - 1.f) * maxBulge) +
@@ -291,7 +291,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
         const glm::vec3 perp2 = glm::normalize(glm::cross(axisN, perp));
 
         // baseAmp: 16 % of beam length -- controls overall path deviation
-        const float baseAmp = len * 0.04f;
+        const float baseAmp = len * 0.008f;
 
         // Fade envelope (ramp in 8 %, ramp out 25 %)
         const float tLife = elapsed / k_beamLifetime;
@@ -321,7 +321,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
             // fBm along V-axis (secondary, 3 octaves only, smaller amplitude)
             const float dv = wfbm(t, beam.noiseSeed + 33.f, beam.warpSeed + 19.f, beam.time, 3);
 
-            pt += perp * (du * baseAmp * env) + perp2 * (dv * baseAmp * 0.45f * env);
+            pt += perp * (du * baseAmp * env) + perp2 * (dv * baseAmp * 0.30f * env);
             mainPts.push_back(pt);
         }
 
@@ -376,7 +376,7 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
                 const float benv = std::sin(bt * glm::pi<float>());
                 const float du = fbm(bt, br.seed, beam.time * 1.8f, 2);
                 const float dv = fbm(bt, br.seed + 7.3f, beam.time * 1.8f, 2);
-                bpt += perp * (du * brLen * 0.10f * benv) + perp2 * (dv * brLen * 0.05f * benv);
+                bpt += perp * (du * brLen * 0.03f * benv) + perp2 * (dv * brLen * 0.015f * benv);
                 brPts.push_back(bpt);
             }
 
