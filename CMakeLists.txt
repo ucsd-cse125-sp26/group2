@@ -593,6 +593,8 @@ add_executable(group2
         src/client/renderer-new/Asset.hpp
         src/client/renderer-new/AssetLoader.cpp
         src/client/renderer-new/AssetLoader.hpp
+        src/client/renderer-new/Boilerplate.cpp
+        src/client/renderer-new/Boilerplate.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.hpp
         src/ecs/systems/WeaponSystem.cpp
@@ -602,6 +604,9 @@ add_executable(group2
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
+        src/ecs/components/Explosion.hpp
+        src/ecs/systems/ExplosionSystem.hpp
+        src/ecs/systems/ExplosionSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
@@ -831,6 +836,9 @@ add_executable(client
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
+        src/ecs/components/Explosion.hpp
+        src/ecs/systems/ExplosionSystem.hpp
+        src/ecs/systems/ExplosionSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
@@ -977,6 +985,9 @@ add_executable(server
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
+        src/ecs/components/Explosion.hpp
+        src/ecs/systems/ExplosionSystem.hpp
+        src/ecs/systems/ExplosionSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp

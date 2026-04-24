@@ -1,96 +1,58 @@
 #include "Camera.hpp"
 
+#include <cmath>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
-NewCamera::NewCamera(glm::vec3 eye,
-                     glm::vec3 target,
-                     glm::vec3 up,
-                     float fovyDegrees,
-                     float aspectRatio,
-                     float nearPlane,
-                     float farPlane)
-    : eye(eye)
-    , target(target)
-    , up(glm::normalize(up))
-    , fovy(fovyDegrees)
-    , aspect(aspectRatio)
-    , nearPlane(nearPlane)
-    , farPlane(farPlane)
-    , eyeDefault(eye)
-    , targetDefault(target)
-    , upDefault(glm::normalize(up))
-    , fovyDefault(fovyDegrees)
-    , aspectDefault(aspectRatio)
-    , nearDefault(nearPlane)
-    , farDefault(farPlane)
+NewCamera::NewCamera()
 {
-    computeMatrices();
+    computeViewProjectionMatrix();
 }
 
-void NewCamera::reset()
+void NewCamera::setAspect(float width, float height)
 {
-    eye = eyeDefault;
-    target = targetDefault;
-    up = upDefault;
-    fovy = fovyDefault;
-    aspect = aspectDefault;
-    nearPlane = nearDefault;
-    farPlane = farDefault;
-
-    computeMatrices();
+    aspect_ = (height == 0.0f) ? 1.0f : width / height;
 }
 
-void NewCamera::setAspect(float aspectRatio)
+void NewCamera::setFov(float fovyDegrees)
 {
-    aspect = aspectRatio;
-    computeMatrices();
+    fovy_ = glm::radians(fovyDegrees);
 }
 
-void NewCamera::setPerspective(float fovyDegrees, float aspectRatio, float nearPlaneValue, float farPlaneValue)
+void NewCamera::setZNear(float zNear)
 {
-    fovy = fovyDegrees;
-    aspect = aspectRatio;
-    nearPlane = nearPlaneValue;
-    farPlane = farPlaneValue;
-    computeMatrices();
+    zNear_ = zNear;
 }
 
-void NewCamera::setLookAt(glm::vec3 eyePos, glm::vec3 targetPos, glm::vec3 upDir)
+void NewCamera::setZFar(float zFar)
 {
-    eye = eyePos;
-    target = targetPos;
-    up = glm::normalize(upDir);
-    computeMatrices();
+    zFar_ = zFar;
 }
 
-void NewCamera::rotateRight(float degrees)
+void NewCamera::setEye(glm::vec3 eye)
 {
-    const glm::vec3 axis = glm::normalize(up);
-    const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), glm::radians(degrees), axis);
-
-    const glm::vec3 offset = eye - target;
-    eye = target + glm::vec3(rot * glm::vec4(offset, 0.0f));
-    up = glm::normalize(glm::vec3(rot * glm::vec4(up, 0.0f)));
-
-    computeMatrices();
+    eye_ = eye;
 }
 
-void NewCamera::rotateUp(float degrees)
+void NewCamera::setTarget(float pitch, float yaw, float roll)
 {
-    const glm::vec3 forward = glm::normalize(target - eye);
-    const glm::vec3 right = glm::normalize(glm::cross(forward, up));
-    const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), glm::radians(degrees), right);
+    const float cosPitch = std::cos(pitch);
 
-    const glm::vec3 offset = eye - target;
-    eye = target + glm::vec3(rot * glm::vec4(offset, 0.0f));
-    up = glm::normalize(glm::vec3(rot * glm::vec4(up, 0.0f)));
+    // Forward vector from yaw (horizontal) and pitch (vertical).
+    // Convention matches InputSnapshot: yaw=0 → +Z, pitch>0 → looking down.
+    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
 
-    computeMatrices();
+    target_ = eye_ + forward;
 }
 
-void NewCamera::computeMatrices()
+void NewCamera::setUp(glm::vec3 up)
 {
-    view = glm::lookAt(eye, target, up);
-    proj = glm::perspective(glm::radians(fovy), aspect, nearPlane, farPlane);
+    up_ = up;
+}
+
+void NewCamera::computeViewProjectionMatrix()
+{
+    glm::mat4 view = glm::lookAt(eye_, target_, up_);
+    glm::mat4 projection = glm::perspective(fovy_, aspect_, zNear_, zFar_);
+    view_projection_ = projection * view;
 }

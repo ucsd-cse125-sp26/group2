@@ -1,21 +1,13 @@
-// normal.frag
 #version 450
 
-layout(location = 0) in vec3 diffuse;
-layout(location = 1) in vec3 fragNormal;
-layout(location = 0) out vec4 outColor;
+layout(location = 0) in vec3 frag_normal;
+layout(location = 1) in vec2 frag_vt;
 
-const vec3 directionalLight0Direction = normalize(-vec3(1.0f,1.0f,1.0f));
-const vec3 directionalLight0Color = vec3(1.0f,1.0f,1.0f);
+layout(location = 0) out vec4 color;
 
-const vec3 skyColor = vec3(0.08f, 0.08f,0.12f); // dark-blue sky
-//const vec3 ambientColor = 0.125f * directionalLight0Color;
-const vec3 ambientColor = skyColor;
+layout(set = 2, binding = 0) uniform sampler2D tex;
 
 void main()
 {
-    float cosThetaTerm = max(0.0f,dot(-directionalLight0Direction,fragNormal));
-    vec3 irradiance = directionalLight0Color * cosThetaTerm + ambientColor;
-    // outColor = vec4(diffuse * irradiance,1.0f);
-    outColor = vec4(diffuse ,1.0f);
+    color = texture(tex, frag_vt);
 }

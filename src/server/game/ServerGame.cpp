@@ -17,6 +17,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
+#include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
@@ -122,6 +123,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     systems::runWeapon(registry, dt, particleEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
+    systems::runExplosion(registry, particleEvents);
     systems::runPlayerStatus(registry, dt);
 
     matchController.update(dt, registry, server);
@@ -164,6 +166,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
     const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
+    const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
     registry.emplace<WeaponState>(player,
                                   WeaponState{
                                       .primary =
@@ -185,6 +188,13 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                               .type = WeaponType::EnergyGun,
                                               .totalAmmo = wingmanConfig.defaultAmmoCapacity,
                                               .currentMagAmmo = wingmanConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .quaternary =
+                                          GunInstance{
+                                              .type = WeaponType::Rocket,
+                                              .totalAmmo = rocketConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = rocketConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .current = WeaponSlot::PRIMARY,

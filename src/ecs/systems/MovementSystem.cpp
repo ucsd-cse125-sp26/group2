@@ -7,7 +7,9 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
@@ -1266,14 +1268,16 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             state.jumpHeldLastTick = input.jump;
         });
 
-    // Entities WITHOUT InputSnapshot — physics only (NPCs, etc.)
-    registry.view<Velocity, PlayerState>(entt::exclude<InputSnapshot>)
-        .each([dt](Velocity& vel, const PlayerState& state) {
-            if (state.grounded)
-                vel.value = physics::applyGroundFriction(vel.value, dt);
-            else
-                vel.value = physics::applyGravity(vel.value, dt);
-        });
+    // projectile entities
+    // registry.view<Velocity, Projectile>(entt::exclude<InputSnapshot>)
+    //     .each([dt,
+    //      &world](Position& pos, Velocity& vel, Projectile& projectile, CollisionShape& shape) {
+    //          // vel.value = physics::accelerate(vel.value, k_wishDir, k_wishSpeed, physics::k_groundAccel, dt);
+    //          WeaponConfig& config = getWeaponConfig(projectile.type);
+    //          vel.value = ;
+    //
+    //
+    //     });
 }
 
 } // namespace systems

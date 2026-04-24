@@ -580,16 +580,17 @@ SDL_AppResult Game::iterate()
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
                 // Determine current slot from WeaponState
-                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2
+                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2, QUATERNARY=3
                 registry.view<LocalPlayer, WeaponState>().each(
                     [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
 
-                // Cycle: add direction, wrap around 3 slots
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 3) % 3;
+                // Cycle: add direction, wrap around 4 slots
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 4) % 4;
 
                 snap.switchToPrimary = (slotIdx == 0);
                 snap.switchToSecondary = (slotIdx == 1);
                 snap.switchToTertiary = (slotIdx == 2);
+                snap.switchToQuaternary = (slotIdx == 3);
             });
             pendingScrollSwitch_ = 0;
         }
@@ -632,6 +633,7 @@ SDL_AppResult Game::iterate()
 
         client.poll(registry);
         refreshRemotePlayerRenderables();
+        refreshRemoteProjectileRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -911,7 +913,8 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+            const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
+                                     : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
                                      : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
                                                                              : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
@@ -1105,7 +1108,8 @@ SDL_AppResult Game::iterate()
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+        const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
+                                 : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
                                  : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
                                                                          : ws.primary;
         currentEquippedType_ = gun.type;
@@ -1636,6 +1640,20 @@ void Game::refreshRemotePlayerRenderables()
         rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
         rend.visible = true;
     });
+}
+
+void Game::refreshRemoteProjectileRenderables()
+{
+    registry.view<Position, Projectile, Velocity, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& shape) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            rend.modelIndex = 1;
+
+            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+            rend.scale = glm::vec3(10);
+            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+            rend.visible = true;
+        });
 }
 
 void Game::attachAnimatedCharacter(entt::entity e)
