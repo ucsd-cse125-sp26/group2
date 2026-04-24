@@ -23,8 +23,8 @@ void main()
     // Base color: edge -> core
     vec4 col = mix(vEdgeColor, vCoreColor, mid) * glow * vBrightness * tipFade;
 
-    // Overdriven white-hot core (simulates HDR bloom on LDR display)
-    col.rgb += vec3(1.6, 1.5, 1.2) * core * vBrightness * tipFade * 2.0;
+    // Bright orange-hot core with slight HDR overdrive
+    col.rgb += vec3(1.4, 0.8, 0.3) * core * vBrightness * tipFade * 1.5;
     col.a    = max(col.a, glow * vBrightness * tipFade);
 
     outColor = col;
