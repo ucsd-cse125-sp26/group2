@@ -1147,7 +1147,10 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     }
 
     const WeaponState& weapon = registry.get<WeaponState>(localPlayer);
-    const GunInstance& gun = (weapon.current == WeaponSlot::PRIMARY) ? weapon.primary : weapon.secondary;
+    const GunInstance& gun = (weapon.current == WeaponSlot::QUATERNARY)  ? weapon.quaternary
+                             : (weapon.current == WeaponSlot::TERTIARY)  ? weapon.tertiary
+                             : (weapon.current == WeaponSlot::SECONDARY) ? weapon.secondary
+                                                                         : weapon.primary;
 
     const char* currentGunName = "?";
     switch (gun.type) {

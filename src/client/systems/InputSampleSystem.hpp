@@ -91,6 +91,7 @@ inline void runWeaponKeys(Registry& registry)
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
         snap.switchToTertiary = kKeys[SDL_SCANCODE_3];
+        snap.switchToQuaternary = kKeys[SDL_SCANCODE_4];
         snap.reload = kKeys[SDL_SCANCODE_R];
     });
 }

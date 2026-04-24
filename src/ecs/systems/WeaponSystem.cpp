@@ -188,6 +188,8 @@ inline GunInstance& getEquippedGun(WeaponState& weapon)
         return weapon.secondary;
     case WeaponSlot::TERTIARY:
         return weapon.tertiary;
+    case WeaponSlot::QUATERNARY:
+        return weapon.quaternary;
     default:
         return weapon.primary;
     }
@@ -201,6 +203,8 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         weapon.current = WeaponSlot::SECONDARY;
     } else if (input.switchToTertiary) {
         weapon.current = WeaponSlot::TERTIARY;
+    } else if (input.switchToQuaternary) {
+        weapon.current = WeaponSlot::QUATERNARY;
     }
 }
 
@@ -211,6 +215,7 @@ inline void handleCooldown(WeaponState& weapon, float dt)
     reduce(weapon.primary);
     reduce(weapon.secondary);
     reduce(weapon.tertiary);
+    reduce(weapon.quaternary);
 }
 
 inline void handleReload(GunInstance& gun)

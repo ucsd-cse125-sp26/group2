@@ -176,9 +176,9 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                           },
                                       .secondary =
                                           GunInstance{
-                                              .type = WeaponType::Rocket,
-                                              .totalAmmo = rocketConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = rocketConfig.magazineSize,
+                                              .type = WeaponType::RailGun,
+                                              .totalAmmo = railConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = railConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .tertiary =
@@ -186,6 +186,13 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                               .type = WeaponType::EnergyGun,
                                               .totalAmmo = wingmanConfig.defaultAmmoCapacity,
                                               .currentMagAmmo = wingmanConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .quaternary =
+                                          GunInstance{
+                                              .type = WeaponType::Rocket,
+                                              .totalAmmo = rocketConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = rocketConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .current = WeaponSlot::PRIMARY,

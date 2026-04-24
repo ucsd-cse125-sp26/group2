@@ -498,16 +498,17 @@ SDL_AppResult Game::iterate()
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
                 // Determine current slot from WeaponState
-                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2
+                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2, QUATERNARY=3
                 registry.view<LocalPlayer, WeaponState>().each(
                     [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
 
-                // Cycle: add direction, wrap around 3 slots
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 3) % 3;
+                // Cycle: add direction, wrap around 4 slots
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 4) % 4;
 
                 snap.switchToPrimary = (slotIdx == 0);
                 snap.switchToSecondary = (slotIdx == 1);
                 snap.switchToTertiary = (slotIdx == 2);
+                snap.switchToQuaternary = (slotIdx == 3);
             });
             pendingScrollSwitch_ = 0;
         }
@@ -794,9 +795,10 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+            const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
+                                     : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
                                      : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                             : ws.primary;
+                                                                              : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
                 return;
@@ -828,9 +830,10 @@ SDL_AppResult Game::iterate()
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+        const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
+                                 : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
                                  : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                         : ws.primary;
+                                                                          : ws.primary;
         currentEquippedType_ = gun.type;
     });
 
