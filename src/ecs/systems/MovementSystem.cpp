@@ -7,7 +7,9 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
@@ -17,9 +19,6 @@
 #include <cmath>
 #include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
-
-#include "ecs/components/Projectile.hpp"
-#include "ecs/components/WeaponConfig.hpp"
 
 namespace systems
 {

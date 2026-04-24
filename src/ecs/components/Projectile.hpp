@@ -3,11 +3,10 @@
 
 #pragma once
 
-#include <cstdint>
-#include <entt/entt.hpp>
-
 #include "WeaponState.hpp"
 
+#include <cstdint>
+#include <entt/entt.hpp>
 
 /// @brief Surface material hit by a projectile — drives impact effect parameters.
 enum class SurfaceType : uint8_t

@@ -40,8 +40,8 @@ void runExplosion(Registry& registry, std::vector<NetParticleEvent>& outParticle
             const Position& position = players.get<Position>(player);
             const CollisionShape& shape = players.get<CollisionShape>(player);
 
-            const glm::vec3 closestPoint = glm::clamp(
-                explosion.position, position.value - shape.halfExtents, position.value + shape.halfExtents);
+            const glm::vec3 closestPoint =
+                glm::clamp(explosion.position, position.value - shape.halfExtents, position.value + shape.halfExtents);
             const glm::vec3 offset = closestPoint - explosion.position;
             const float distance = glm::length(offset);
             if (distance >= explosion.radius) {

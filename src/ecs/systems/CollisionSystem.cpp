@@ -6,16 +6,15 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 
 #include <glm/geometric.hpp>
-
-#include "ecs/components/Projectile.hpp"
-#include "ecs/components/WeaponConfig.hpp"
 
 namespace systems
 {
@@ -275,22 +274,20 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             }
         });
 
-
     // Projectile entities
     registry.view<Position, Velocity, CollisionShape, Projectile>().each(
-        [dt, &world, &registry](entt::entity e, Position& pos, Velocity& vel, const CollisionShape& shape, Projectile& projectile) {
-
+        [dt, &world, &registry](
+            entt::entity e, Position& pos, Velocity& vel, const CollisionShape& shape, Projectile& projectile) {
             ProjectileConfig projConfig = getProjectileConfig(projectile.type);
-            if (projectile.currentLifeTime >= projConfig.maxLifeTime)
-            {
+            if (projectile.currentLifeTime >= projConfig.maxLifeTime) {
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
-                    queueExplosion(registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                    queueExplosion(
+                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);
                 }
                 return;
-
             }
             projectile.currentLifeTime += dt;
 
@@ -313,14 +310,14 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 remainingTime *= (1.0f - k_hit.tFirst);
 
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
-                    queueExplosion(registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                    queueExplosion(
+                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);
                 }
                 break;
             }
-
         });
 }
 
