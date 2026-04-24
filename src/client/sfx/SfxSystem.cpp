@@ -271,7 +271,8 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
         play(SfxId::RifleFire);
         break;
     case WeaponType::Rocket:
-        play(SfxId::RocketFire);
+        // No fire sound — the TNT explosion sound plays on detonation
+        // via onExplosion(), not on launch.
         break;
     case WeaponType::RailGun:
         play(SfxId::ChargeRifleShoot);

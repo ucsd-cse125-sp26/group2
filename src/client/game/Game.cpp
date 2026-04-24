@@ -188,11 +188,15 @@ bool Game::init()
         }
 
         // Skip own effects that were already spawned locally for instant feedback.
-        // Exception: charge weapons (RailGun) skip local VFX entirely and rely
-        // on the server's particle events, so we must NOT skip those here.
+        // Exceptions that must NOT be skipped:
+        //   - Charge weapons: local VFX is skipped; we rely on server events.
+        //   - Explosions: server-authoritative (not locally predicted).
+        //   - Smoke: server-authoritative.
         if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
-            if (!isChargeWeapon)
+            const bool isServerOnly =
+                evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke;
+            if (!isChargeWeapon && !isServerOnly)
                 return;
 
             // For charge weapons from self: also dispatch the weapon-fired event
@@ -228,6 +232,13 @@ bool Game::init()
             break;
         case ParticleEffectType::Explosion:
             particleSystem.spawnExplosion(evt.pos1, evt.param);
+            // Dispatch ExplosionEvent so SfxSystem plays the explosion sound.
+            {
+                ExplosionEvent expl;
+                expl.pos = evt.pos1;
+                expl.blastRadius = evt.param;
+                dispatcher.enqueue(expl);
+            }
             break;
         case ParticleEffectType::Smoke:
             particleSystem.spawnSmoke(evt.pos1, evt.param);
