@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 
 /// @brief Weapon type — determines tracer style, damage, sound, and impact effects.
 enum class WeaponType : uint8_t

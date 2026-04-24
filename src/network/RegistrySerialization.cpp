@@ -17,6 +17,8 @@
 #include <tuple>
 #include <vector>
 
+#include "ecs/components/Projectile.hpp"
+
 namespace
 {
 
@@ -34,7 +36,7 @@ namespace registry_serialization
 // NOTE: this is where any component that should be sent to clients must be listed.
 // The order of components in this tuple is the order they will be serialized in.
 using Synced =
-    std::tuple<entt::entity, Position, Velocity, PlayerState, CollisionShape, WeaponState, Health, PlayerMatchStats>;
+    std::tuple<entt::entity, Position, Velocity, PlayerState, CollisionShape, WeaponState, Health, PlayerMatchStats, Projectile>;
 
 std::vector<uint8_t> serialize(const entt::registry& registry)
 {

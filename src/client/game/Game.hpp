@@ -49,6 +49,7 @@ public:
     /// @brief Shut down all subsystems in reverse-init order.
     void quit();
     void refreshRemotePlayerRenderables();
+    void refreshRemoteProjectileRenderables();
 
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.

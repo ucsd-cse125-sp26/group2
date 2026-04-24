@@ -17,6 +17,8 @@
 #include <cmath>
 #include <glm/geometric.hpp>
 
+#include "ecs/components/Velocity.hpp"
+
 namespace
 {
 
@@ -252,6 +254,20 @@ inline glm::vec3 viewForward(float yaw, float pitch)
     });
 }
 
+inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
+{
+    constexpr glm::vec3 k_worldUp{0.0f, 1.0f, 0.0f};
+    glm::vec3 right = glm::cross(direction, k_worldUp);
+    if (glm::dot(right, right) < k_parallelEpsilon) {
+        right = glm::vec3{1.0f, 0.0f, 0.0f};
+    } else {
+        right = glm::normalize(right);
+    }
+
+    const glm::vec3 up = glm::normalize(glm::cross(right, direction));
+    return eye + right * 15.0f - up * 8.0f + direction * 5.0f;
+}
+
 inline void handleFire(Registry& registry,
                        entt::entity shooter,
                        const InputSnapshot& input,
@@ -278,58 +294,72 @@ inline void handleFire(Registry& registry,
     // Set the cooldown timer
     gun.fireCooldown = config.fireCooldown;
 
-    if (!config.hitscan) {
-        return;
-    }
-
     const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
     const glm::vec3 direction = viewForward(input.yaw, input.pitch);
-    const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+    const glm::vec3 muzzle = muzzleOrigin(eye, direction);
 
-    // Apply damage
-    if (hit.entity != entt::null && registry.valid(hit.entity)) {
-        applyDamage(config.damage, hit.entity, shooter, registry);
-    }
-
-    // Emit replicated particle events for client FX.
-    // 1) Tracer or beam from muzzle to hit point.
+    if (config.hitscan)
     {
-        NetParticleEvent tracerEvt;
-        tracerEvt.source = shooter;
-        tracerEvt.weaponType = gun.type;
-        if (gun.type == WeaponType::RailGun || gun.type == WeaponType::EnergyGun) {
-            tracerEvt.effectType = ParticleEffectType::HitscanBeam;
-            tracerEvt.pos1 = eye;
-            tracerEvt.pos2 = hit.point;
-        } else {
-            tracerEvt.effectType = ParticleEffectType::BulletTracer;
-            tracerEvt.pos1 = eye;
-            // Compute direction from origin→hitPoint (convention-independent)
-            tracerEvt.pos2 = glm::normalize(hit.point - eye);
-            tracerEvt.param = hit.distance;
+        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+
+        // Apply damage
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            applyDamage(config.damage, hit.entity, shooter, registry);
         }
-        outParticles.push_back(tracerEvt);
-    }
-    // 2) Impact effect at hit location.
+
+        // Emit replicated particle events for client FX.
+        // 1) Tracer or beam from muzzle to hit point.
+        {
+            NetParticleEvent tracerEvt;
+            tracerEvt.source = shooter;
+            tracerEvt.weaponType = gun.type;
+            if (gun.type == WeaponType::RailGun || gun.type == WeaponType::EnergyGun) {
+                tracerEvt.effectType = ParticleEffectType::HitscanBeam;
+                tracerEvt.pos1 = muzzle;
+                tracerEvt.pos2 = hit.point;
+            } else {
+                tracerEvt.effectType = ParticleEffectType::BulletTracer;
+                tracerEvt.pos1 = muzzle;
+                // Compute direction from origin→hitPoint (convention-independent)
+                tracerEvt.pos2 = glm::normalize(hit.point - muzzle);
+                tracerEvt.param = hit.distance;
+            }
+            outParticles.push_back(tracerEvt);
+        }
+        // 2) Impact effect at hit location.
+        {
+            NetParticleEvent impactEvt;
+            impactEvt.source = shooter;
+            impactEvt.effectType = ParticleEffectType::Impact;
+            impactEvt.weaponType = gun.type;
+            impactEvt.surfaceType = hit.surface;
+            impactEvt.pos1 = hit.point;
+            impactEvt.pos2 = hit.normal;
+            outParticles.push_back(impactEvt);
+        }
+
+    } else
     {
-        NetParticleEvent impactEvt;
-        impactEvt.source = shooter;
-        impactEvt.effectType = ParticleEffectType::Impact;
-        impactEvt.weaponType = gun.type;
-        impactEvt.surfaceType = hit.surface;
-        impactEvt.pos1 = hit.point;
-        impactEvt.pos2 = hit.normal;
-        outParticles.push_back(impactEvt);
+        // Spawn projectile
+        ProjectileConfig projConfig = getProjectileConfig(gun.type);
+        const entt::entity projectile = registry.create();
+        registry.emplace<Projectile>(
+            projectile, Projectile{.type = gun.type, .damage = config.damage, .owner = shooter, .explosive = config.explosive});
+        registry.emplace<Position>(projectile, Position{.value = muzzle});
+        registry.emplace<Velocity>(projectile, Velocity{.value = direction * config.initialProjectileSpeed});
+        registry.emplace<CollisionShape>(projectile, projConfig.shape);
     }
+
 }
 
 void runWeapon(Registry& registry, float dt, std::vector<NetParticleEvent>& outParticles)
 {
-    registry.view<InputSnapshot, Position, CollisionShape, WeaponState>().each([&](entt::entity shooter,
-                                                                                   InputSnapshot& input,
-                                                                                   const Position& pos,
-                                                                                   const CollisionShape& shape,
-                                                                                   WeaponState& weapon) {
+    auto view = registry.view<InputSnapshot, Position, CollisionShape, WeaponState>();
+    view.each([&](entt::entity shooter,
+                        InputSnapshot& input,
+                        const Position& pos,
+                        const CollisionShape& shape,
+                        WeaponState& weapon) {
         handleSwitch(input, weapon);
         handleCooldown(weapon, dt);
         handleFire(registry, shooter, input, pos, shape, weapon, outParticles);

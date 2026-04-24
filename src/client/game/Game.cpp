@@ -549,6 +549,7 @@ SDL_AppResult Game::iterate()
 
         client.poll(registry);
         refreshRemotePlayerRenderables();
+        refreshRemoteProjectileRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -1286,6 +1287,23 @@ void Game::refreshRemotePlayerRenderables()
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
         rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        rend.visible = true;
+    });
+}
+
+void Game::refreshRemoteProjectileRenderables()
+{
+    registry.view<Position, Projectile, Velocity, CollisionShape>().each([&](entt::entity e,
+                                                                                   const Position&,
+                                                                                   const Projectile&,
+                                                                                   const Velocity&,
+                                                                                   const CollisionShape& shape) {
+        auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+        rend.modelIndex = 1;
+
+        // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        rend.scale = glm::vec3(10);
+        // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
         rend.visible = true;
     });
 }

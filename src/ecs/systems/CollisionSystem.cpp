@@ -13,6 +13,10 @@
 
 #include <glm/geometric.hpp>
 
+#include "../../../.deps/relwithdebinfo/glm-src/glm/gtx/projection.hpp"
+#include "ecs/components/Projectile.hpp"
+#include "ecs/components/WeaponConfig.hpp"
+
 namespace systems
 {
 
@@ -269,6 +273,40 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     state.groundNormal = k_probe.normal;
                 }
             }
+        });
+
+
+    // Projectile entities
+    registry.view<Position, Velocity, CollisionShape, Projectile>().each(
+        [dt, &world](Position& pos, Velocity& vel, const CollisionShape& shape, Projectile& projectile) {
+
+            ProjectileConfig projConfig = getProjectileConfig(projectile.type);
+            if (projectile.currentLifeTime >= projConfig.maxLifeTime)
+            {
+                // TODO: EXPLODE
+            }
+
+            // Phase 0 — Depenetration
+            depenetrate(pos.value, vel.value, shape.halfExtents, world);
+
+            // Phase 1 — Bump loop (collision response + stair stepping)
+            float remainingTime = dt;
+
+            for (int clip = 0; clip < 4 && remainingTime > 1e-5f; ++clip) {
+                const glm::vec3 k_target = pos.value + vel.value * remainingTime;
+                const physics::HitResult k_hit = physics::sweepAll(shape.halfExtents, pos.value, k_target, world);
+
+                if (!k_hit.hit) {
+                    pos.value = k_target;
+                    break;
+                }
+
+                pos.value += vel.value * k_hit.tFirst * remainingTime;
+                remainingTime *= (1.0f - k_hit.tFirst);
+
+                //TODO: Explode projectile
+            }
+
         });
 }
 
