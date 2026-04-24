@@ -913,23 +913,30 @@ SDL_AppResult Game::iterate()
         }
 
         // Weapon beam visuals — driven by BeamState synced from server registry.
-        // Local player: beam starts from viewmodel muzzle position.
-        // Remote players: beam starts from the server-computed eye position.
+        // Local player: client-side predicted raycast for zero-lag response.
+        // Remote players: use the server-computed positions from BeamState.
         registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
             if (!beam.active || glowCylinderModelIdx_ < 0)
                 return;
 
             glm::vec3 beamOrigin = beam.origin;
+            glm::vec3 beamEnd = beam.hitPoint;
 
-            // For local player: override origin with viewmodel muzzle offset
-            // so the beam appears to come from the first-person gun.
             if (registry.all_of<LocalPlayer>(e)) {
+                // Client-side prediction: raycast with this frame's camera
+                // direction so the beam tracks the crosshair with zero latency.
                 const float cosPitch = std::cos(renderPitch);
                 const glm::vec3 fwd{
                     std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
                 const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
                 const glm::vec3 up = glm::normalize(glm::cross(rgt, fwd));
+
+                // Muzzle position from viewmodel offset.
                 beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
+
+                // Predicted endpoint: raycast from eye along current view.
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
             }
 
             // Green Zarya-style tint, HDR-scaled for bloom.
@@ -937,7 +944,7 @@ SDL_AppResult Game::iterate()
 
             entityCmds.push_back(EntityRenderCmd{
                 .modelIndex = glowCylinderModelIdx_,
-                .worldTransform = cylinderTransform(beamOrigin, beam.hitPoint, 2.0f),
+                .worldTransform = cylinderTransform(beamOrigin, beamEnd, 2.0f),
             });
         });
 
@@ -994,19 +1001,33 @@ SDL_AppResult Game::iterate()
         }
 
         // Weapon beam point lights — from BeamState, evenly distributed.
-        registry.view<BeamState>().each([&](const BeamState& beam) {
+        // Local player uses predicted positions (same as the visual beam above).
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
             if (!beam.active)
                 return;
-            const glm::vec3 delta = beam.hitPoint - beam.origin;
+
+            glm::vec3 lightStart = beam.origin;
+            glm::vec3 lightEnd = beam.hitPoint;
+
+            if (registry.all_of<LocalPlayer>(e)) {
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                lightStart = renderEye;
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+            }
+
+            const glm::vec3 delta = lightEnd - lightStart;
             const float len = glm::length(delta);
             if (len < 1.0f)
                 return;
             const int numLights = std::max(2, static_cast<int>(len / 80.0f) + 1);
-            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f}; // green beam light
+            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f};
             for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
                 dynLights.push_back(PointLight{
-                    .position = beam.origin + delta * t,
+                    .position = lightStart + delta * t,
                     .color = lightColor,
                     .intensity = 3.0f,
                     .range = 200.0f,
