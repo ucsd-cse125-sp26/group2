@@ -113,6 +113,8 @@ public:
     ///                        consistent across all debug windows.
     void toggleAllPanels(std::initializer_list<bool*> externalPanels = {});
 
+    bool pendingAmmoRefill_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
+
 private:
     /// Per-window visibility toggles — persistent across frames.
     bool showInspector = true;        ///< Show the main ECS Inspector window.
