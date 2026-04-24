@@ -185,9 +185,26 @@ bool Game::init()
             sfxSystem.play(SfxId::FleshHit);
         }
 
-        // Skip own VFX effects (already spawned locally for instant feedback).
-        if (evt.source == localPlayer)
-            return;
+        // Skip own effects that were already spawned locally for instant feedback.
+        // Exception: charge weapons (RailGun) skip local VFX entirely and rely
+        // on the server's particle events, so we must NOT skip those here.
+        if (evt.source == localPlayer) {
+            const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
+            if (!isChargeWeapon)
+                return;
+
+            // For charge weapons from self: also dispatch the weapon-fired event
+            // so the shoot sound plays and recoil kicks.
+            if (evt.effectType == ParticleEffectType::HitscanBeam) {
+                WeaponFiredEvent wfe;
+                wfe.type = evt.weaponType;
+                wfe.origin = evt.pos1;
+                wfe.direction = glm::normalize(evt.pos2 - evt.pos1);
+                wfe.isHitscan = true;
+                wfe.hitPos = evt.pos2;
+                dispatcher.enqueue(wfe);
+            }
+        }
 
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
