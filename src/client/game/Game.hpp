@@ -107,7 +107,7 @@ private:
     int weaponModelIndices_[4] = {-1, -1, -1, -1}; ///< Per WeaponType, loaded at init.
 
     // Dynamic lighting test controls (ImGui-tunable)
-    bool showDynLightUI_ = true;                         ///< Show the Dynamic Lighting panel.
+    bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
     bool flashlightEnabled_ = false;                     ///< Point light at camera position.
     float flashlightIntensity_ = 8.0f;                   ///< Flashlight brightness.
     float flashlightRange_ = 800.0f;                     ///< Flashlight attenuation range.
@@ -136,14 +136,14 @@ private:
     float hitmarkerTimer_ = 0.0f; ///< Remaining display time (fades out over this).
 
     // Viewmodel tuning (live-adjustable via ImGui)
-    float vmScale = 0.03f;       ///< Weapon model scale (model is in mm).
-    float vmForward = 21.0f;     ///< Forward offset from eye (Quake units).
-    float vmRight = 5.5f;        ///< Right offset from eye.
-    float vmDown = 22.5f;        ///< Downward offset from eye.
-    float vmYawOffset = 58.0f;   ///< Extra yaw (degrees) applied to the model before camera orient.
-    float vmPitchOffset = 12.0f; ///< Extra pitch (degrees).
-    float vmRollOffset = 2.0f;   ///< Extra roll (degrees).
-    bool showViewmodelUI = true; ///< Show the Viewmodel Tweaker window.
+    float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).
+    float vmForward = 21.0f;      ///< Forward offset from eye (Quake units).
+    float vmRight = 5.5f;         ///< Right offset from eye.
+    float vmDown = 22.5f;         ///< Downward offset from eye.
+    float vmYawOffset = 58.0f;    ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 12.0f;  ///< Extra pitch (degrees).
+    float vmRollOffset = 2.0f;    ///< Extra roll (degrees).
+    bool showViewmodelUI = false; ///< Show the Viewmodel Tweaker window.
 
     // Weapon sway state (CoD-style barrel lead)
     float prevSwayYaw_ = 0.0f;
@@ -180,7 +180,7 @@ private:
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
     int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
-    bool showTPWeaponUI_ = true;                ///< Show the 3P Weapon Tweaker window.
+    bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
