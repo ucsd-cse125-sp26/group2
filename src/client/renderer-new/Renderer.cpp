@@ -399,14 +399,12 @@ bool NewRenderer::initCommon(SDL_Window* /*win*/)
     // iBufferInfo_.srcData = indices;
 
     for (auto modelPair : Asset::models_) {
-        MeshIdInt meshId = modelPair.second.meshId_;
-        Asset::Mesh& mesh = Asset::meshes_[meshId];
-
-        std::cout << "meshId:" << meshId << std::endl;
-
-        genMeshBuffers(meshId);
-        geoBuffers.push_back(mesh.vBufferInfo_);
-        geoBuffers.push_back(mesh.iBufferInfo_);
+        for (auto& element : modelPair.second.modelElements_) {
+            genMeshBuffers(element.meshId_);
+            Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
+            geoBuffers.push_back(mesh.vBufferInfo_);
+            geoBuffers.push_back(mesh.iBufferInfo_);
+        }
     }
     std::cout << "0" << std::endl;
 
@@ -505,8 +503,10 @@ void NewRenderer::drawFrame(const glm::vec3 eye, const float yaw, const float pi
     SDL_GPUIndexElementSize iElementSizeSdlType = SDL_GPU_INDEXELEMENTSIZE_32BIT;
 
     for (auto model : Asset::models_) {
-        Asset::Mesh mesh = Asset::meshes_.at(model.second.meshId_);
-        drawMesh(pass, iElementSizeSdlType, mesh);
+        for (auto& element : model.second.modelElements_) {
+            Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+            drawMesh(pass, iElementSizeSdlType, mesh);
+        }
     }
     //////////////////////////////////////////////////////////////////////////////////
     // std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
