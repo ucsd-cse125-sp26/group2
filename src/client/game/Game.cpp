@@ -462,6 +462,14 @@ SDL_AppResult Game::event(SDL_Event* event)
     // NOTE: Local weapon VFX (tracers, impact, recoil) are handled continuously
     // in iterate() so held fire (auto weapons) spawns effects every cooldown tick.
 
+    // Forward audio-device hot-swap events to the SFX system so it can
+    // gracefully reopen when headphones are plugged / unplugged.
+    if (event->type == SDL_EVENT_AUDIO_DEVICE_ADDED || event->type == SDL_EVENT_AUDIO_DEVICE_REMOVED ||
+        event->type == SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED)
+    {
+        sfxSystem.handleEvent(*event);
+    }
+
     // Scroll wheel cycles weapon slots
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
         if (event->wheel.y > 0)
