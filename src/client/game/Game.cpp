@@ -7,6 +7,7 @@
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -1430,7 +1431,7 @@ SDL_AppResult Game::iterate()
             constexpr ImGuiTableFlags k_tableFlags =
                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit;
             if (ImGui::BeginTable("##scores", 5, k_tableFlags)) {
-                ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+                ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthFixed, 160.0f);
                 ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 40.0f);
                 ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 40.0f);
                 ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, 55.0f);
@@ -1440,13 +1441,17 @@ SDL_AppResult Game::iterate()
                 int row = 0;
                 registry.view<PlayerMatchStats>().each([&](entt::entity e, const PlayerMatchStats& stats) {
                     const bool isLocal = (e == localPlayer);
+                    const int clientId = registry.all_of<ClientId>(e) ? registry.get<ClientId>(e).value : (row + 1);
 
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
-                    if (isLocal)
-                        ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "> You");
-                    else
-                        ImGui::Text("Player %d", row + 1);
+                    if (isLocal) {
+                        char localLabel[40];
+                        std::snprintf(localLabel, sizeof(localLabel), "> You (Player #%d)", clientId);
+                        ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "%s", localLabel);
+                    } else {
+                        ImGui::Text("Player #%d", clientId);
+                    }
 
                     ImGui::TableSetColumnIndex(1);
                     ImGui::Text("%d", stats.kills);
@@ -1583,6 +1588,9 @@ SDL_AppResult Game::iterate()
         static constexpr float k_marginTop = 10.0f;
         static constexpr float k_fadeTime = 1.0f;
 
+        ClientId localClientId{-1};
+        registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
         ImDrawList* dl = ImGui::GetForegroundDrawList();
         ImFont* font = ImGui::GetFont();
         const float fontSize = ImGui::GetFontSize();
@@ -1591,8 +1599,22 @@ SDL_AppResult Game::iterate()
             const auto& evt = killFeed[i];
             const float alpha = std::min(evt.displayTimer / k_fadeTime, 1.0f);
 
+            const bool killerIsLocal = (localClientId.value != -1 && evt.killerId == localClientId);
+            const bool victimIsLocal = (localClientId.value != -1 && evt.victimId == localClientId);
+
             char buf[64];
-            std::snprintf(buf, sizeof(buf), "Player %d killed Player %d", evt.killerId.value, evt.victimId.value);
+            const char* killerName = killerIsLocal ? "You" : nullptr;
+            const char* victimName = victimIsLocal ? "You" : nullptr;
+            char killerBuf[16], victimBuf[16];
+            if (!killerName) {
+                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", evt.killerId.value);
+                killerName = killerBuf;
+            }
+            if (!victimName) {
+                std::snprintf(victimBuf, sizeof(victimBuf), "Player #%d", evt.victimId.value);
+                victimName = victimBuf;
+            }
+            std::snprintf(buf, sizeof(buf), "%s killed %s", killerName, victimName);
 
             const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, buf);
             const float boxW = textSize.x + k_padX * 2.0f;
@@ -1600,7 +1622,13 @@ SDL_AppResult Game::iterate()
             const float x = static_cast<float>(winW) - boxW - k_marginRight;
             const float y = k_marginTop + static_cast<float>(i) * (boxH + 2.0f);
 
-            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.55f * alpha));
+            ImVec4 bgColor = {0.0f, 0.0f, 0.0f, 0.55f * alpha};
+            if (killerIsLocal)
+                bgColor = {0.1f, 0.35f, 0.05f, 0.75f * alpha}; // green tint — you got the kill
+            else if (victimIsLocal)
+                bgColor = {0.4f, 0.05f, 0.05f, 0.75f * alpha}; // red tint — you died
+
+            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(bgColor);
             const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
 
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 3.0f);
