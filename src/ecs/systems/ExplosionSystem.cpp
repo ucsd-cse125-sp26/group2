@@ -8,6 +8,7 @@
 #include "ecs/components/Player.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "network/NetKillEvent.hpp"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -23,7 +24,9 @@ void queueExplosion(Registry& registry, glm::vec3 position, float radius, float 
         explosion, Explosion{.position = position, .radius = radius, .maxDamage = maxDamage, .owner = owner});
 }
 
-void runExplosion(Registry& registry, std::vector<NetParticleEvent>& outParticles)
+void runExplosion(Registry& registry,
+                  std::vector<NetParticleEvent>& outParticles,
+                  std::vector<NetKillEvent>& killEvents)
 {
     std::vector<entt::entity> resolvedExplosions;
 
@@ -57,7 +60,7 @@ void runExplosion(Registry& registry, std::vector<NetParticleEvent>& outParticle
             if (killer == entt::null || !registry.valid(killer)) {
                 killer = player;
             }
-            applyDamage(damage, player, killer, registry);
+            applyDamage(damage, player, killer, registry, killEvents);
         }
 
         resolvedExplosions.push_back(explosionEntity);

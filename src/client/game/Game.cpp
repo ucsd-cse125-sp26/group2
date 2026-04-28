@@ -3,6 +3,7 @@
 
 #include "Game.hpp"
 
+#include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
@@ -642,7 +643,10 @@ SDL_AppResult Game::iterate()
             ++statsPhysTicks;
         }
 
-        client.poll(registry);
+        if (!client.poll(registry)) {
+            return SDL_APP_FAILURE;
+        }
+
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
     }

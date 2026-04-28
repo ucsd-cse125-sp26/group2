@@ -5,6 +5,7 @@
 
 #include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/ShotEvent.hpp"
@@ -59,6 +60,9 @@ public:
 
     /// @brief Broadcast match status updates to clients.
     void broadcastMatchStatus(MatchStatePacket packet);
+
+    /// @brief Broadcast kill events to clients for kill feed updates.
+    void broadcastKillEvents(const std::vector<NetKillEvent>& events);
 
 private:
     /// @brief Per-client connection state.

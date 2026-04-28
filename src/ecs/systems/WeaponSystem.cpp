@@ -125,7 +125,8 @@ inline void handleFire(Registry& registry,
                        const CollisionShape& shape,
                        WeaponState& weapon,
                        float dt,
-                       std::vector<NetParticleEvent>& outParticles)
+                       std::vector<NetParticleEvent>& outParticles,
+                       std::vector<NetKillEvent>& killEvents)
 {
     GunInstance& gun = getEquippedGun(weapon);
     const WeaponConfig& config = getWeaponConfig(gun.type);
@@ -154,7 +155,7 @@ inline void handleFire(Registry& registry,
 
         // Apply DPS-based damage.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.dps * dt, hit.entity, shooter, registry);
+            applyDamage(config.dps * dt, hit.entity, shooter, registry, killEvents);
         }
 
         // Update BeamState (synced to clients via registry snapshot).
@@ -197,7 +198,7 @@ inline void handleFire(Registry& registry,
 
         // Charge damage — significantly higher than normal.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.chargeDamage, hit.entity, shooter, registry);
+            applyDamage(config.chargeDamage, hit.entity, shooter, registry, killEvents);
         }
 
         // Emit particle events (beam + impact).
@@ -249,7 +250,7 @@ inline void handleFire(Registry& registry,
 
         // Apply damage
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.damage, hit.entity, shooter, registry);
+            applyDamage(config.damage, hit.entity, shooter, registry, killEvents);
         }
 
         // Emit replicated particle events for client FX.
@@ -296,7 +297,10 @@ inline void handleFire(Registry& registry,
     }
 }
 
-void runWeapon(Registry& registry, float dt, std::vector<NetParticleEvent>& outParticles)
+void runWeapon(Registry& registry,
+               float dt,
+               std::vector<NetParticleEvent>& outParticles,
+               std::vector<NetKillEvent>& killEvents)
 {
     auto view = registry.view<InputSnapshot, Position, CollisionShape, WeaponState>();
     view.each([&](entt::entity shooter,
@@ -315,7 +319,7 @@ void runWeapon(Registry& registry, float dt, std::vector<NetParticleEvent>& outP
                 beam->active = false;
         }
 
-        handleFire(registry, shooter, input, pos, shape, weapon, dt, outParticles);
+        handleFire(registry, shooter, input, pos, shape, weapon, dt, outParticles, killEvents);
         if (input.reload) {
             GunInstance& gun = getEquippedGun(weapon);
             handleReload(gun);
