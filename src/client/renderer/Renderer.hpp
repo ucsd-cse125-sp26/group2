@@ -105,6 +105,12 @@ public:
     /// @brief Set the first-person weapon viewmodel for this frame.
     void setWeaponViewmodel(const WeaponViewmodel& vm) override { weaponVM = vm; }
 
+    void setModelScenePass(int modelIndex, bool drawInScene) override
+    {
+        if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < models.size())
+            models[static_cast<size_t>(modelIndex)].drawInScenePass = drawInScene;
+    }
+
     /// @brief Load a model and return its index in the models[] vector, or -1 on failure.
     int loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) override;
 

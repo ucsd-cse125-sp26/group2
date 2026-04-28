@@ -166,7 +166,7 @@ raycastPlayers(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::
 /// @brief Full hitscan resolution: world geometry first, then players (closest wins).
 inline HitscanHit resolveHitscan(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction)
 {
-    HitscanHit bestHit = raycastWorld(origin, direction, testWorld());
+    HitscanHit bestHit = raycastWorld(origin, direction, activeWorld());
 
     const HitscanHit playerHit = raycastPlayers(registry, shooter, origin, direction, bestHit.distance);
     if (playerHit.hit && (!bestHit.hit || playerHit.distance < bestHit.distance)) {

@@ -122,6 +122,41 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
     }
 
+    // ── Load map ──────────────────────────────────────────────────────────
+    // Scale: the map was authored in meters; the game uses Quake units (inches).
+    // 1 m = 39.3701 in.
+    {
+        static constexpr float k_metersToInches = 39.3701f;
+
+        const char* base = SDL_GetBasePath();
+        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+
+        // 1) Extract collision geometry (prototype mode: all meshes → collision).
+        physics::MapLoadOptions opts;
+        opts.scale = k_metersToInches;
+        opts.allMeshesAreCollision = true; // Prototype map — every mesh is both visual and collision.
+        opts.addFloorPlane = true;
+
+        if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
+            physics::setActiveWorld(mapCollision_.geometry());
+            SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes",
+                    mapCollision_.planes.size(),
+                    mapCollision_.boxes.size(),
+                    mapCollision_.brushes.size());
+        } else {
+            SDL_Log("[client] WARNING: map collision load failed — falling back to testWorld()");
+        }
+
+        // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
+        mapModelIdx_ = renderer.loadSceneModel("maps/map1.glb", glm::vec3(0.0f), k_metersToInches);
+        if (mapModelIdx_ >= 0) {
+            renderer.setModelScenePass(mapModelIdx_, true);
+            SDL_Log("[client] map visual loaded (model index %d)", mapModelIdx_);
+        } else {
+            SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
+        }
+    }
+
     // Load models for entity rendering
     wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
     if (wraithModelIdx < 0)
@@ -765,7 +800,7 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
                 // Raycast against full world geometry (floor + boxes + brushes).
-                const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::testWorld());
+                const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::activeWorld());
                 const float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
                 const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
                 const glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
@@ -1058,7 +1093,7 @@ SDL_AppResult Game::iterate()
                 beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
 
                 // Predicted endpoint: raycast from eye along current view.
-                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
                 beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
             }
 
@@ -1137,7 +1172,7 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 fwd{
                     std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
                 lightStart = renderEye;
-                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
                 lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
             }
 

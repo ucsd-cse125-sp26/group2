@@ -244,6 +244,12 @@ void HybridRenderer::setModelEmissive(int modelIndex, glm::vec4 emissiveFactor)
     legacy_.setModelEmissive(modelIndex, emissiveFactor);
 }
 
+void HybridRenderer::setModelScenePass(int modelIndex, bool drawInScene)
+{
+    // Always route to legacy — model indices are owned by the legacy renderer.
+    legacy_.setModelScenePass(modelIndex, drawInScene);
+}
+
 void HybridRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
 {
     if (next_.supports(RendererFeature::SetWeaponViewmodel))

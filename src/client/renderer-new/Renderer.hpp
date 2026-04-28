@@ -63,6 +63,7 @@ public:
     void setEntityRenderList(std::vector<EntityRenderCmd> /*cmds*/) override {}
     void setPointLights(std::vector<PointLight> /*lights*/) override {}
     void setModelEmissive(int /*modelIndex*/, glm::vec4 /*emissiveFactor*/) override {}
+    void setModelScenePass(int /*modelIndex*/, bool /*drawInScene*/) override {}
     void setWeaponViewmodel(const WeaponViewmodel& /*vm*/) override {}
     void requestScreenshot(const std::string& /*path*/) override {}
     [[nodiscard]] int modelCount() const override { return 0; }
