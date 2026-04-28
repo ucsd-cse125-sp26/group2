@@ -121,7 +121,6 @@ void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
         &showLightingControls,
         &showSkybox,
         &showNetworkStats,
-        &showScoreboard_,
     };
 
     // If anything is currently visible (owned or external), hide everything;
@@ -1185,97 +1184,6 @@ void DebugUI::buildWeaponUI(const Registry& registry)
             "Health:  %.0f / %.0f", static_cast<double>(health.health), static_cast<double>(systems::healthMax));
     } else {
         ImGui::TextDisabled("Health state unavailable");
-    }
-
-    ImGui::End();
-}
-
-void DebugUI::buildScoreboardUI(const Registry& registry, MatchPhase phase, float countdownTimer)
-{
-    if (!showScoreboard_)
-        return;
-
-    // Find local player entity to highlight it in the table.
-    entt::entity localPlayer = entt::null;
-    const auto* const k_es = registry.storage<entt::entity>();
-    if (k_es) {
-        for (auto e : *k_es) {
-            if (registry.valid(e) && registry.all_of<LocalPlayer>(e)) {
-                localPlayer = e;
-                break;
-            }
-        }
-    }
-
-    ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
-    constexpr ImGuiWindowFlags k_flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-                                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
-    if (!ImGui::Begin("Scoreboard", &showScoreboard_, k_flags)) {
-        ImGui::End();
-        return;
-    }
-
-    // Phase banner
-    const char* phaseStr = "Warmup";
-    switch (phase) {
-    case MatchPhase::COUNTDOWN:
-        phaseStr = "Starting...";
-        break;
-    case MatchPhase::IN_PROGRESS:
-        phaseStr = "In Progress";
-        break;
-    case MatchPhase::FINISHED:
-        phaseStr = "Finished";
-        break;
-    default:
-        break;
-    }
-    ImGui::TextUnformatted(phaseStr);
-    if (phase == MatchPhase::COUNTDOWN || phase == MatchPhase::FINISHED)
-        ImGui::Text("%.1fs", static_cast<double>(countdownTimer));
-    ImGui::Separator();
-
-    constexpr ImGuiTableFlags k_tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
-    if (ImGui::BeginTable("scores", 5, k_tableFlags)) {
-        ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 30.0f);
-        ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 30.0f);
-        ImGui::TableSetupColumn("Sc", ImGuiTableColumnFlags_WidthFixed, 35.0f);
-        ImGui::TableSetupColumn("Won", ImGuiTableColumnFlags_WidthFixed, 35.0f);
-        ImGui::TableHeadersRow();
-
-        int row = 0;
-        if (k_es) {
-            for (auto e : *k_es) {
-                if (!registry.valid(e) || !registry.all_of<PlayerMatchStats>(e))
-                    continue;
-
-                const auto& stats = registry.get<PlayerMatchStats>(e);
-                const bool k_isLocal = (e == localPlayer);
-
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                if (k_isLocal)
-                    ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "> You");
-                else
-                    ImGui::Text("Player %d", row + 1);
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%d", stats.kills);
-                ImGui::TableSetColumnIndex(2);
-                ImGui::Text("%d", stats.deaths);
-                ImGui::TableSetColumnIndex(3);
-                ImGui::Text("%d", stats.score);
-                ImGui::TableSetColumnIndex(4);
-                ImGui::Text("%s", stats.hasWon ? "Yes" : "No");
-
-                ++row;
-            }
-        }
-        if (row == 0)
-            ImGui::TextDisabled("No players");
-
-        ImGui::EndTable();
     }
 
     ImGui::End();
