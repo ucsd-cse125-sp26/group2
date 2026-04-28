@@ -9,6 +9,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -166,10 +167,26 @@ bool Game::init()
             SDL_Log("[client] glow cylinder uploaded (model index %d)", glowCylinderModelIdx_);
     }
 
+    // Remove Controllable when the local player dies (RespawnTimer added),
+    // restore it when they respawn (RespawnTimer removed).
+    registry.on_construct<RespawnTimer>().connect<[](entt::registry& reg, entt::entity e) {
+        if (reg.all_of<LocalPlayer>(e))
+            reg.remove<Controllable>(e);
+    }>();
+    registry.on_destroy<RespawnTimer>().connect<[](entt::registry& reg, entt::entity e) {
+        if (reg.all_of<LocalPlayer>(e))
+            reg.emplace_or_replace<Controllable>(e);
+    }>();
+
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        // Only add Controllable if the player is not already dead (edge case:
+        // joining while mid-death on a long-running server).
+        if (!registry.all_of<RespawnTimer>(local))
+            registry.emplace<Controllable>(local);
 
         // Animator runs for local too — future gun-IK / hands-on-weapon work
         // needs an up-to-date upper-body pose even when the body is invisible.
