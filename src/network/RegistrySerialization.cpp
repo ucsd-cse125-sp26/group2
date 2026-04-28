@@ -1,6 +1,7 @@
 #include "RegistrySerialization.hpp"
 
 #include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -44,7 +45,8 @@ using Synced = std::tuple<entt::entity,
                           Health,
                           PlayerMatchStats,
                           Projectile,
-                          BeamState>;
+                          BeamState,
+                          ClientId>;
 
 std::vector<uint8_t> serialize(const entt::registry& registry)
 {

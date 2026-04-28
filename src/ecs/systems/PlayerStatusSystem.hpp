@@ -6,6 +6,7 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "network/NetKillEvent.hpp"
 
 /// @brief Player status update system.
 namespace systems
@@ -23,7 +24,9 @@ void applyHeal(float amount, Health& playerHealth);
 /// @param player Player who took damage.
 /// @param killer player who delt the final blow.
 /// @param registry  The ECS registry.
-void applyDamage(float damage, entt::entity player, entt::entity& killer, Registry& registry);
+/// @param killEvents  Vector to store kill events.
+void applyDamage(
+    float damage, entt::entity player, entt::entity& killer, Registry& registry, std::vector<NetKillEvent>& killEvents);
 
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.

@@ -4,6 +4,7 @@
 #include "Client.hpp"
 
 #include "network/MatchStatus.hpp"
+#include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 
@@ -179,6 +180,27 @@ bool Client::poll(Registry& registry)
             if (matchStateUpdateFn_)
                 matchStateUpdateFn_(matchState);
             break;
+        }
+        case PacketType::KILL_EVENT: {
+            if (payloadSize < sizeof(uint32_t))
+                break;
+
+            uint32_t count = 0;
+            std::memcpy(&count, payload, sizeof(uint32_t));
+
+            const uint8_t* eventData = payload + sizeof(uint32_t);
+            const uint32_t expectedSize = sizeof(uint32_t) + count * sizeof(NetKillEvent);
+            if (payloadSize < expectedSize)
+                break;
+
+            if (killEventFn_) {
+                for (uint32_t i = 0; i < count; ++i) {
+                    NetKillEvent evt;
+                    std::memcpy(&evt, eventData + i * sizeof(NetKillEvent), sizeof(NetKillEvent));
+
+                    killEventFn_(evt);
+                }
+            }
         }
         default:
             SDL_Log("Client: unknown message type %d", static_cast<int>(type));

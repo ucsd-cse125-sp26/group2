@@ -3,12 +3,15 @@
 
 #include "Game.hpp"
 
+#include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
@@ -249,6 +252,16 @@ bool Game::init()
     client.onMatchStateUpdate([this](const MatchStatePacket& packet) {
         currentMatchPhase = packet.phase;
         countdownTimer = packet.countdownTimer;
+    });
+
+    client.onKillEvent([this](const NetKillEvent& evt) {
+        killFeed.insert(killFeed.begin(),
+                        KillFeedEvent{
+                            evt.killerId,
+                            evt.victimId,
+                        });
+
+        // TODO: Specific handling for local player deaths (display enemy health)
     });
 
     // Initialize runtime 3P weapon params from defaults
@@ -642,7 +655,10 @@ SDL_AppResult Game::iterate()
             ++statsPhysTicks;
         }
 
-        client.poll(registry);
+        if (!client.poll(registry)) {
+            return SDL_APP_FAILURE;
+        }
+
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
     }
@@ -1364,7 +1380,98 @@ SDL_AppResult Game::iterate()
                     statsFPS1pLow,
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
-    debugUI.buildScoreboardUI(registry, currentMatchPhase, countdownTimer);
+
+    // Scoreboard — shown while Tab is held.
+    if (ImGui::IsKeyDown(ImGuiKey_Tab)) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+
+        constexpr ImGuiWindowFlags k_scoreFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
+                                                  ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+        ImGui::SetNextWindowPos(ImVec2(static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f),
+                                ImGuiCond_Always,
+                                ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowBgAlpha(0.80f);
+
+        if (ImGui::Begin("##scoreboard", nullptr, k_scoreFlags)) {
+            // Phase banner
+            const char* phaseStr = "Warmup";
+            switch (currentMatchPhase) {
+            case MatchPhase::COUNTDOWN:
+                phaseStr = "Starting...";
+                break;
+            case MatchPhase::IN_PROGRESS:
+                phaseStr = "In Progress";
+                break;
+            case MatchPhase::FINISHED:
+                phaseStr = "Game Over";
+                break;
+            default:
+                break;
+            }
+
+            const float centerX = ImGui::GetContentRegionAvail().x;
+            const ImVec2 phaseTextSize = ImGui::CalcTextSize(phaseStr);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - phaseTextSize.x) * 0.5f);
+            ImGui::TextUnformatted(phaseStr);
+            if (currentMatchPhase == MatchPhase::COUNTDOWN || currentMatchPhase == MatchPhase::FINISHED) {
+                char timerBuf[16];
+                std::snprintf(timerBuf, sizeof(timerBuf), "%.1fs", static_cast<double>(countdownTimer));
+                const ImVec2 timerSize = ImGui::CalcTextSize(timerBuf);
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - timerSize.x) * 0.5f);
+                ImGui::TextUnformatted(timerBuf);
+            }
+            ImGui::Separator();
+
+            // Find local player to highlight.
+            entt::entity localPlayer = entt::null;
+            registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayer = e; });
+
+            constexpr ImGuiTableFlags k_tableFlags =
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit;
+            if (ImGui::BeginTable("##scores", 5, k_tableFlags)) {
+                ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthFixed, 160.0f);
+                ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+                ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+                ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, 55.0f);
+                ImGui::TableSetupColumn("Won", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+                ImGui::TableHeadersRow();
+
+                int row = 0;
+                registry.view<PlayerMatchStats>().each([&](entt::entity e, const PlayerMatchStats& stats) {
+                    const bool isLocal = (e == localPlayer);
+                    const int clientId = registry.all_of<ClientId>(e) ? registry.get<ClientId>(e).value : (row + 1);
+
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    if (isLocal) {
+                        char localLabel[40];
+                        std::snprintf(localLabel, sizeof(localLabel), "> You (Player #%d)", clientId);
+                        ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "%s", localLabel);
+                    } else {
+                        ImGui::Text("Player #%d", clientId);
+                    }
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%d", stats.kills);
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%d", stats.deaths);
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("%d", stats.score);
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("%s", stats.hasWon ? "Yes" : "-");
+
+                    ++row;
+                });
+                if (row == 0)
+                    ImGui::TextDisabled("No players");
+
+                ImGui::EndTable();
+            }
+        }
+        ImGui::End();
+    }
 
     // Process ammo refill request — pulse refillAmmo on InputSnapshot for
     // exactly one frame so the server handles it once then stops.
@@ -1464,6 +1571,69 @@ SDL_AppResult Game::iterate()
         // Optional center dot
         if (crosshairDot_)
             dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
+    }
+
+    // Kill feed — tick timers and drop expired entries.
+    for (auto& e : killFeed)
+        e.displayTimer -= frameTime;
+    std::erase_if(killFeed, [](const KillFeedEvent& e) { return e.displayTimer <= 0.0f; });
+
+    // Kill feed overlay — top-right corner, always visible.
+    if (!killFeed.empty()) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        static constexpr float k_entryH = 22.0f;
+        static constexpr float k_padX = 12.0f;
+        static constexpr float k_marginRight = 10.0f;
+        static constexpr float k_marginTop = 10.0f;
+        static constexpr float k_fadeTime = 1.0f;
+
+        ClientId localClientId{-1};
+        registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        ImFont* font = ImGui::GetFont();
+        const float fontSize = ImGui::GetFontSize();
+
+        for (size_t i = 0; i < killFeed.size(); ++i) {
+            const auto& evt = killFeed[i];
+            const float alpha = std::min(evt.displayTimer / k_fadeTime, 1.0f);
+
+            const bool killerIsLocal = (localClientId.value != -1 && evt.killerId == localClientId);
+            const bool victimIsLocal = (localClientId.value != -1 && evt.victimId == localClientId);
+
+            char buf[64];
+            const char* killerName = killerIsLocal ? "You" : nullptr;
+            const char* victimName = victimIsLocal ? "You" : nullptr;
+            char killerBuf[16], victimBuf[16];
+            if (!killerName) {
+                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", evt.killerId.value);
+                killerName = killerBuf;
+            }
+            if (!victimName) {
+                std::snprintf(victimBuf, sizeof(victimBuf), "Player #%d", evt.victimId.value);
+                victimName = victimBuf;
+            }
+            std::snprintf(buf, sizeof(buf), "%s killed %s", killerName, victimName);
+
+            const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, buf);
+            const float boxW = textSize.x + k_padX * 2.0f;
+            const float boxH = k_entryH;
+            const float x = static_cast<float>(winW) - boxW - k_marginRight;
+            const float y = k_marginTop + static_cast<float>(i) * (boxH + 2.0f);
+
+            ImVec4 bgColor = {0.0f, 0.0f, 0.0f, 0.55f * alpha};
+            if (killerIsLocal)
+                bgColor = {0.1f, 0.35f, 0.05f, 0.75f * alpha}; // green tint — you got the kill
+            else if (victimIsLocal)
+                bgColor = {0.4f, 0.05f, 0.05f, 0.75f * alpha}; // red tint — you died
+
+            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(bgColor);
+            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 3.0f);
+            dl->AddText(font, fontSize, ImVec2(x + k_padX, y + (boxH - fontSize) * 0.5f), fg, buf);
+        }
     }
 
     // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.

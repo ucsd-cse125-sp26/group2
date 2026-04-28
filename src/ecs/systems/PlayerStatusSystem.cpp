@@ -3,6 +3,7 @@
 
 #include "PlayerStatusSystem.hpp"
 
+#include "SDL3/SDL_log.h"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
@@ -13,6 +14,9 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "network/NetKillEvent.hpp"
+
+#include <vector>
 
 namespace systems
 {
@@ -84,7 +88,11 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
                                              });
 }
 
-inline void handleDeath(entt::entity& player, Health& playerHealth, entt::entity& killer, Registry& registry)
+inline void handleDeath(entt::entity& player,
+                        Health& playerHealth,
+                        entt::entity& killer,
+                        Registry& registry,
+                        std::vector<NetKillEvent>& killEvents)
 {
     if (playerHealth.health <= 0) {
         // Update death
@@ -94,12 +102,22 @@ inline void handleDeath(entt::entity& player, Health& playerHealth, entt::entity
         // Award killer
         registry.patch<PlayerMatchStats>(killer, [&](PlayerMatchStats& stats) { stats.kills++; });
 
+        // Place kill event for network baroadcast
+        NetKillEvent event{
+            .killerId = registry.get<ClientId>(killer),
+            .victimId = registry.get<ClientId>(player),
+            .killerHealth = registry.get<Health>(killer),
+        };
+
+        killEvents.push_back(event);
+
         // Respawn
         handleRespawn(player, registry);
     }
 }
 
-void applyDamage(float damage, entt::entity player, entt::entity& killer, Registry& registry)
+void applyDamage(
+    float damage, entt::entity player, entt::entity& killer, Registry& registry, std::vector<NetKillEvent>& killEvents)
 {
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 
@@ -113,7 +131,7 @@ void applyDamage(float damage, entt::entity player, entt::entity& killer, Regist
         playerHealth.armor = 0;
         if (playerHealth.health - overflow <= 0) {
             playerHealth.health = 0;
-            handleDeath(player, playerHealth, killer, registry);
+            handleDeath(player, playerHealth, killer, registry, killEvents);
         } else {
             playerHealth.health -= overflow;
         }

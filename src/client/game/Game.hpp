@@ -16,6 +16,7 @@
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "sfx/SfxSystem.hpp"
+#include "systems/KillFeedEvent.hpp"
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
 #else
@@ -224,4 +225,7 @@ private:
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::WARMUP; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
+
+    // Kill Feed State
+    std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
 };

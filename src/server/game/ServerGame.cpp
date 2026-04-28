@@ -120,10 +120,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     }
 
     std::vector<NetParticleEvent> particleEvents;
-    systems::runWeapon(registry, dt, particleEvents);
+    systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
-    systems::runExplosion(registry, particleEvents);
+    systems::runExplosion(registry, particleEvents, pendingKillEvents);
     systems::runPlayerStatus(registry, dt);
 
     matchController.update(dt, registry, server);
@@ -131,6 +131,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
     server.broadcastParticleEvents(particleEvents);
+    server.broadcastKillEvents(pendingKillEvents);
+    pendingKillEvents.clear();
 
     ++tickCount;
 
@@ -153,6 +155,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     clientEntities[clientId] = player;
 
     registry.emplace<Player>(player, Player{});
+    registry.emplace<ClientId>(player, clientId);
     registry.emplace<InputSnapshot>(player);
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);

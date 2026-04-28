@@ -8,8 +8,9 @@ cmake-build-debug/
 .deps/
 
 imgui.ini
-assets/
-assets_old/
+/assets/
+/assets_old/
+config.toml
 
 # CMake artifacts (keep cmake/ module directory)
 CMakeFiles/

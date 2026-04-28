@@ -18,6 +18,7 @@ enum class PacketType : uint8_t
     PING, // Client -> Server (carries uint64_t timestamp)
     PONG, // Server -> Client (echoes timestamp back)
 
-    // Server -> All clients (match status updates)
+    // Server -> All clients (match updates)
     MATCH_STATE,
+    KILL_EVENT,
 };
