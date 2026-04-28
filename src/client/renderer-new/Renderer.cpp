@@ -127,12 +127,13 @@ bool NewRenderer::loadSceneAssets()
     std::vector<Boilerplate::BufferUpload> uploads;
 
     for (const auto& modelPair : Asset::models_) {
-        const MeshIdInt meshId = modelPair.second.meshId_;
-        createMeshBuffers(meshId);
+        for (auto& element : modelPair.second.modelElements_) {
+            createMeshBuffers(element.meshId_);
+            Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
+            uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
+            uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
+        }
 
-        Asset::Mesh& mesh = Asset::meshes_.at(meshId);
-        uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
-        uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
     }
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
@@ -214,8 +215,10 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
         // modelMatrix[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
         SDL_PushGPUVertexUniformData(cmd, 1, &modelMatrix, sizeof(glm::mat4));
 
-        const Asset::Mesh& mesh = Asset::meshes_.at(modelPair.second.meshId_);
-        drawMesh(pass, mesh);
+        for (auto& element : modelPair.second.modelElements_) {
+            Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+            drawMesh(pass, mesh);
+        }
     }
 
     if (drawData)

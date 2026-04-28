@@ -16,13 +16,14 @@
 class AssetLoader
 {
 public:
-    static bool
-    loadModel(const ModelIdInt id, const std::string& modelFileName, const std::vector<std::string>& texFileNames);
+    static bool loadModel(ModelIdInt id, const std::string& modelFileName, const std::vector<std::string>& texFileNames,bool k_flatten);
     static bool loadModelsList();
 
 private:
     static bool loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult);
     static const aiScene* loadAsset(Assimp::Importer& importer, const std::string& fileName);
+    static glm::mat4 glmFromAiTransform(const aiMatrix4x4& transformAi);
+    static void pushAiNodeMeshesToModelElements(const std::string &meshNameSpace,const aiNode &nodeAi,const aiScene &sceneAi,const ModelIdInt k_modelId);
 };
 
 #endif // GROUP2_MODELLOADER_H
