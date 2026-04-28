@@ -679,44 +679,69 @@ void handleWallRunning(glm::vec3& vel,
     state.wallRunTimer += dt;
     state.wallRunSpeedTimer += dt;
 
-    // Exit conditions
+    // Exit: max duration
     if (state.wallRunTimer >= tms::k_wallrunKickoffDuration) {
         exitWallrun(state, posY);
         return;
     }
 
+    // Exit: lost wall contact
     const bool k_stillOnWall = (state.wallRunSide == WallSide::Right && walls.wallRight) ||
                                (state.wallRunSide == WallSide::Left && walls.wallLeft);
-
-    // Maintenance: same directional-intent rule as entry. Release the "into
-    // the wall" input and the run ends. Uses the stored wallNormal so the
-    // check is valid even if detection stutters for a frame.
-    const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    const bool k_intentHeld = glm::dot(k_wishDir, -state.wallNormal) >= tms::k_wallrunIntentThreshold;
-
-    if (!k_stillOnWall || !k_intentHeld) {
+    if (!k_stillOnWall) {
         exitWallrun(state, posY);
         return;
     }
 
-    // Movement along wall
-    // Update wall normal from latest detection.
+    // Detach intent: the player can look up to 15° away from the wall plane
+    // before detaching.  This makes jump-off more intuitive — start turning
+    // away, then jump, and you still get the wall-jump boost.
+    const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+    const float k_wishLen = glm::length(k_wishDir);
+    if (k_wishLen > 0.001f) {
+        const float k_intentDot = glm::dot(k_wishDir / k_wishLen, -state.wallNormal);
+        if (k_intentDot < tms::k_wallrunDetachThreshold) {
+            exitWallrun(state, posY);
+            return;
+        }
+    }
+
+    // --- Update wall normal from latest detection (curved surface tracking) ---
     if (state.wallRunSide == WallSide::Right)
         state.wallNormal = walls.rightNormal;
     else
         state.wallNormal = walls.leftNormal;
 
-    // Recompute wall forward.
-    const glm::vec3 k_up{0, 1, 0};
-    glm::vec3 wallFwd = glm::cross(k_up, state.wallNormal);
-    if (state.wallRunSide == WallSide::Left)
-        wallFwd = -wallFwd;
+    // --- Compute wall-tangent acceleration direction ---
+    // Instead of using wishDir projected onto the wall (which makes strafing
+    // into the wall go backward), accelerate along the current horizontal
+    // velocity direction projected onto the wall plane.  As long as wishDir
+    // points into the wall, the player maintains speed — this makes the
+    // controls feel much more intuitive on curved surfaces.
+    const glm::vec3 k_hv = horizVel(vel);
+    const float k_hvLen = glm::length(k_hv);
+
+    glm::vec3 wallFwd;
+    if (k_hvLen > 1.0f) {
+        // Project current velocity onto the wall plane (remove normal component).
+        wallFwd = k_hv - state.wallNormal * glm::dot(k_hv, state.wallNormal);
+        const float k_projLen = glm::length(wallFwd);
+        if (k_projLen > 0.001f)
+            wallFwd /= k_projLen;
+        else
+            wallFwd = state.wallForward; // fallback to stored
+    } else {
+        // Not moving — keep previous direction
+        wallFwd = state.wallForward;
+    }
+
+    // Ensure consistency with stored direction (don't flip 180°).
     if (glm::dot(state.wallForward, wallFwd) < 0.0f)
         wallFwd = -wallFwd;
     state.wallForward = wallFwd;
 
     // Accelerate along the wall.
-    const float k_currentFwdSpeed = glm::dot(horizVel(vel), state.wallForward);
+    const float k_currentFwdSpeed = glm::dot(k_hv, state.wallForward);
     if (k_currentFwdSpeed < tms::k_wallrunMaxSpeed) {
         const float k_addSpeed = std::min(tms::k_wallrunAccel * dt, tms::k_wallrunMaxSpeed - k_currentFwdSpeed);
         vel += state.wallForward * k_addSpeed;
@@ -1095,14 +1120,20 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             tickTimers(state, dt);
 
             // 1. Wall / climb / ledge detection
+            // Pass the previous wall normal so the detector can trace toward
+            // curved surfaces (cylinders, concave walls) whose normal rotates
+            // as the player moves along them.
             physics::WallDetectionResult walls{};
             if (!state.grounded || state.moveMode == MoveMode::WallRunning || state.moveMode == MoveMode::Climbing) {
+                const glm::vec3 prevNormal =
+                    (state.moveMode == MoveMode::WallRunning) ? state.wallNormal : glm::vec3(0.0f);
                 walls = physics::detectWalls(pos.value,
                                              input.yaw,
                                              shape.halfExtents,
                                              world,
                                              tms::k_wallrunCheckDist,
-                                             tms::k_wallrunSphereRadius);
+                                             tms::k_wallrunSphereRadius,
+                                             prevNormal);
             }
 
             // 2. Sprint update
