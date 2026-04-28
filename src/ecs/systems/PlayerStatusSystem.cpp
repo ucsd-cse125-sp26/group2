@@ -4,6 +4,7 @@
 #include "PlayerStatusSystem.hpp"
 
 #include "SDL3/SDL_log.h"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
@@ -52,6 +53,7 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
 
     registry.erase<RespawnTimer>(player);
+    registry.erase<DeathInfo>(player);
     registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = true; });
     registry.emplace_or_replace<InputSnapshot>(player);
     registry.emplace_or_replace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
@@ -108,14 +110,23 @@ inline void handleDeath(entt::entity& player,
         // Award killer
         registry.get_or_emplace<PlayerMatchStats>(killer).kills++;
 
-        // Place kill event for network baroadcast
-        NetKillEvent event{
-            .killerId = registry.get<ClientId>(killer),
-            .victimId = registry.get<ClientId>(player),
-            .killerHealth = registry.get<Health>(killer),
-        };
+        // Get killer info
+        ClientId killerId = registry.get<ClientId>(killer);
+        Health killerHealth = registry.get<Health>(killer);
 
+        // Death info handling
+        NetKillEvent event{
+            .killerId = killerId,
+            .victimId = registry.get<ClientId>(player),
+            .killerHealth = killerHealth,
+        };
         killEvents.push_back(event);
+
+        registry.emplace_or_replace<DeathInfo>(player,
+                                               DeathInfo{
+                                                   .killerId = killerId,
+                                                   .killerHealth = killerHealth,
+                                               });
     }
 }
 

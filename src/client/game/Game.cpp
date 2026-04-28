@@ -9,6 +9,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -16,6 +17,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/components/WeaponConfig.hpp"
@@ -1634,6 +1636,63 @@ SDL_AppResult Game::iterate()
 
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 3.0f);
             dl->AddText(font, fontSize, ImVec2(x + k_padX, y + (boxH - fontSize) * 0.5f), fg, buf);
+        }
+    }
+
+    // Death HUD — bottom bar shown while local player is dead.
+    {
+        entt::entity localPlayer = entt::null;
+        registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayer = e; });
+
+        if (localPlayer != entt::null && registry.all_of<DeathInfo, RespawnTimer>(localPlayer)) {
+            const auto& deathInfo = registry.get<DeathInfo>(localPlayer);
+            const auto& respawnTimer = registry.get<RespawnTimer>(localPlayer);
+
+            ClientId localClientId{-1};
+            registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+            char killerBuf[32];
+            const char* killerName;
+            if (localClientId.value != -1 && deathInfo.killerId == localClientId)
+                killerName = "yourself";
+            else {
+                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", deathInfo.killerId.value);
+                killerName = killerBuf;
+            }
+
+            char line1[64], line2[64];
+            std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
+            std::snprintf(line2,
+                          sizeof(line2),
+                          "Their HP: %.0f  Armor: %.0f  |  Respawning in %.0fs",
+                          static_cast<double>(deathInfo.killerHealth.health),
+                          static_cast<double>(deathInfo.killerHealth.armor),
+                          std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
+
+            int winW = 0, winH = 0;
+            SDL_GetWindowSizeInPixels(window, &winW, &winH);
+
+            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            ImFont* font = ImGui::GetFont();
+            const float fs = ImGui::GetFontSize();
+
+            static constexpr float k_padX = 12.0f;
+            static constexpr float k_padY = 8.0f;
+            static constexpr float k_marginB = 16.0f;
+            static constexpr float k_lineGap = 4.0f;
+
+            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
+            const float boxW = static_cast<float>(winW) * 0.4f;
+            const float x = (static_cast<float>(winW) - boxW) * 0.5f;
+            const float y = static_cast<float>(winH) - boxH - k_marginB;
+
+            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
+            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
+
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
         }
     }
 

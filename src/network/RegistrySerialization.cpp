@@ -3,12 +3,14 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "entt/entity/fwd.hpp"
@@ -46,7 +48,9 @@ using Synced = std::tuple<entt::entity,
                           PlayerMatchStats,
                           Projectile,
                           BeamState,
-                          ClientId>;
+                          ClientId,
+                          DeathInfo,
+                          RespawnTimer>;
 
 std::vector<uint8_t> serialize(const entt::registry& registry)
 {

@@ -612,6 +612,7 @@ add_executable(group2
         src/ecs/components/Player.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
+        src/ecs/components/DeathInfo.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -855,6 +856,7 @@ add_executable(client
         src/network/MatchStatus.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
+        src/ecs/components/DeathInfo.hpp
 )
 
 target_include_directories(client PRIVATE
@@ -1010,6 +1012,7 @@ add_executable(server
         src/ecs/systems/MatchSystem.cpp
         src/network/NetKillEvent.hpp
         src/ecs/components/RespawnTimer.hpp
+        src/ecs/components/DeathInfo.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
