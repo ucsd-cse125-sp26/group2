@@ -895,8 +895,7 @@ void DebugUI::buildRenderTogglesUI(Renderer& renderer)
     ImGui::Separator();
 
     // Count enabled systems for the "all on / all off" buttons.
-    bool* allFlags[] = {&t.sceneGeometry,
-                        &t.pbrModels,
+    bool* allFlags[] = {&t.pbrModels,
                         &t.entityModels,
                         &t.weaponViewmodel,
                         &t.skybox,
@@ -908,7 +907,7 @@ void DebugUI::buildRenderTogglesUI(Renderer& renderer)
                         &t.tonemap,
                         &t.particles,
                         &t.sdfText};
-    constexpr int k_flagCount = 13;
+    constexpr int k_flagCount = 12;
 
     if (ImGui::Button("All ON")) {
         for (int i = 0; i < k_flagCount; ++i)
@@ -933,8 +932,7 @@ void DebugUI::buildRenderTogglesUI(Renderer& renderer)
 
     // Geometry
     ImGui::SeparatorText("Geometry");
-    ImGui::Checkbox("Scene Geometry (cube+floor)", &t.sceneGeometry);
-    ImGui::Checkbox("PBR Models (Wraith, Porsche, etc.)", &t.pbrModels);
+    ImGui::Checkbox("PBR Models (map + scene models)", &t.pbrModels);
     ImGui::Checkbox("Entity Models (ECS Renderable)", &t.entityModels);
     ImGui::Checkbox("Weapon Viewmodel (R-301)", &t.weaponViewmodel);
     ImGui::Checkbox("Skybox", &t.skybox);

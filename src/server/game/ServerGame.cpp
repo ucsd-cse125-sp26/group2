@@ -42,7 +42,7 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         physics::MapLoadOptions opts;
         opts.scale = k_metersToInches;
         opts.allMeshesAreCollision = true; // Prototype map — every mesh is collision.
-        opts.addFloorPlane = true;
+        opts.addFloorPlane = false;        // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
             physics::setActiveWorld(mapCollision_.geometry());

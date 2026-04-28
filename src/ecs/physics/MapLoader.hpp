@@ -72,7 +72,7 @@ struct MapLoadOptions
     /// When true, an infinite floor plane is added at the lowest Y coordinate
     /// found across all collision geometry.  Prevents players from falling
     /// through the world even if the map mesh has tiny cracks.
-    bool addFloorPlane = true;
+    bool addFloorPlane = false;
 };
 
 // ---------------------------------------------------------------------------

@@ -331,7 +331,6 @@ set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
 set(SHADER_SOURCES
-    projective.vert normal.frag         # scene geometry (cube + floor)
     model.vert model.frag               # legacy model shaders (kept for reference)
     geometry.vert geometry.frag          # graphics team Lambertian shaders
     pbr.vert pbr.frag                   # PBR Cook-Torrance (Phase 1)
