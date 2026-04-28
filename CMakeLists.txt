@@ -641,10 +641,18 @@ add_custom_command(TARGET group2 POST_BUILD
     VERBATIM
 )
 
+# Use config.toml if present, otherwise fall back to the template.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml")
+    set(CONFIG_TOML_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/config.toml")
+else()
+    set(CONFIG_TOML_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/config.template.toml")
+    message(STATUS "config.toml not found — using config.template.toml")
+endif()
+
 # Copy config.toml next to the client binary.
 add_custom_command(TARGET group2 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "${CONFIG_TOML_SOURCE}"
             "$<TARGET_FILE_DIR:group2>/config.toml"
     COMMENT "Copying config.toml to client binary directory"
     VERBATIM
@@ -867,7 +875,7 @@ add_custom_command(TARGET client POST_BUILD
 # Copy config.toml next to the client binary.
 add_custom_command(TARGET client POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "${CONFIG_TOML_SOURCE}"
             "$<TARGET_FILE_DIR:client>/config.toml"
     COMMENT "Copying config.toml to client binary directory"
     VERBATIM
@@ -877,10 +885,10 @@ add_custom_command(TARGET client POST_BUILD
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/config_client.stamp"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "${CONFIG_TOML_SOURCE}"
             "$<TARGET_FILE_DIR:group2>/config.toml"
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_client.stamp"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+    DEPENDS "${CONFIG_TOML_SOURCE}"
     COMMENT "Copying config.toml to group2 binary directory"
     VERBATIM
 )
@@ -1036,10 +1044,10 @@ target_precompile_headers(server PRIVATE
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/config_server.stamp"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+            "${CONFIG_TOML_SOURCE}"
             "$<TARGET_FILE_DIR:server>/config.toml"
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_server.stamp"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+    DEPENDS "${CONFIG_TOML_SOURCE}"
     COMMENT "Copying config.toml to server binary directory"
     VERBATIM
 )
