@@ -31,5 +31,4 @@ void applyDamage(
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
 void runPlayerStatus(Registry& registry, float dt);
-
 } // namespace systems

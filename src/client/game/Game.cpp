@@ -656,7 +656,8 @@ SDL_AppResult Game::iterate()
         }
 
         if (!client.poll(registry)) {
-            return SDL_APP_FAILURE;
+            // TODO: Update so reset to menu or some other non-crash state
+            return SDL_APP_SUCCESS;
         }
 
         refreshRemotePlayerRenderables();
@@ -1796,7 +1797,7 @@ void Game::refreshRemotePlayerRenderables()
     // crouching changes the half-height — no manual offset update needed.
     registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
                                                                                    const Position&,
-                                                                                   const PlayerState&,
+                                                                                   const PlayerState& state,
                                                                                    const InputSnapshot& input,
                                                                                    const CollisionShape& shape) {
         if (registry.all_of<LocalPlayer>(e))
@@ -1819,7 +1820,7 @@ void Game::refreshRemotePlayerRenderables()
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
         rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        rend.visible = true;
+        rend.visible = !state.IsDead;
     });
 }
 
