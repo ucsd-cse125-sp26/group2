@@ -192,6 +192,160 @@ HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end
     return result;
 }
 
+// sweepAABBvsCylinder
+
+HitResult sweepAABBvsCylinder(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldCylinder& cyl)
+{
+    HitResult result;
+
+    // Minkowski expansion
+    const float k_effR = cyl.radius + std::max(halfExtents.x, halfExtents.z);
+    const float k_yMin = cyl.base.y - halfExtents.y;
+    const float k_yMax = cyl.base.y + cyl.height + halfExtents.y;
+
+    const glm::vec3 k_delta = end - start;
+
+    // --- Y slab ---
+    float tYentry = -1e30f;
+    float tYexit = 1e30f;
+    bool yCapHitBottom = false; // true if Y entry is the bottom cap
+
+    if (std::abs(k_delta.y) < 1e-8f) {
+        if (start.y < k_yMin || start.y > k_yMax)
+            return result; // parallel and outside
+    } else {
+        const float k_invDy = 1.0f / k_delta.y;
+        float t1 = (k_yMin - start.y) * k_invDy;
+        float t2 = (k_yMax - start.y) * k_invDy;
+        bool t1IsBottom = true;
+        if (t1 > t2) {
+            std::swap(t1, t2);
+            t1IsBottom = false;
+        }
+        tYentry = t1;
+        tYexit = t2;
+        yCapHitBottom = t1IsBottom;
+    }
+
+    // --- XZ circle ---
+    const float k_ox = start.x - cyl.base.x;
+    const float k_oz = start.z - cyl.base.z;
+    const float k_dx = k_delta.x;
+    const float k_dz = k_delta.z;
+
+    const float k_a = k_dx * k_dx + k_dz * k_dz;
+    const float k_b = 2.0f * (k_ox * k_dx + k_oz * k_dz);
+    const float k_c = k_ox * k_ox + k_oz * k_oz - k_effR * k_effR;
+
+    float tXZentry = -1e30f;
+    float tXZexit = 1e30f;
+
+    if (k_a < 1e-12f) {
+        // Moving purely vertically — check if inside the circle
+        if (k_c > 0.0f)
+            return result; // outside circle, moving vertically -> miss
+        // Inside circle, tXZ range is all of (-inf, +inf)
+    } else {
+        const float k_disc = k_b * k_b - 4.0f * k_a * k_c;
+        if (k_disc < 0.0f)
+            return result; // ray misses the infinite cylinder
+
+        const float k_sqrtDisc = std::sqrt(k_disc);
+        const float k_inv2a = 0.5f / k_a;
+        tXZentry = (-k_b - k_sqrtDisc) * k_inv2a;
+        tXZexit = (-k_b + k_sqrtDisc) * k_inv2a;
+    }
+
+    // --- Intersect the two intervals ---
+    bool hitIsYcap = false;
+    float tEntry;
+    if (tYentry > tXZentry) {
+        tEntry = tYentry;
+        hitIsYcap = true;
+    } else {
+        tEntry = tXZentry;
+        hitIsYcap = false;
+    }
+    const float tExit = std::min(tYexit, tXZexit);
+
+    if (tEntry > tExit || tExit < 0.0f)
+        return result;
+
+    // Skip if starting inside
+    if (tEntry < 0.0f)
+        return result;
+
+    if (tEntry >= 1.0f)
+        return result;
+
+    // --- Compute normal ---
+    glm::vec3 hitNormal;
+    if (hitIsYcap) {
+        hitNormal = yCapHitBottom ? glm::vec3(0.0f, -1.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    } else {
+        // Side hit — horizontal normal from axis to hit point
+        const glm::vec3 k_hitPos = start + k_delta * tEntry;
+        hitNormal = glm::vec3(k_hitPos.x - cyl.base.x, 0.0f, k_hitPos.z - cyl.base.z);
+        const float k_len = glm::length(hitNormal);
+        if (k_len > 1e-6f)
+            hitNormal /= k_len;
+        else
+            hitNormal = glm::vec3(1.0f, 0.0f, 0.0f);
+    }
+
+    result.hit = true;
+    result.tFirst = tEntry;
+    result.normal = hitNormal;
+    return result;
+}
+
+// sweepAABBvsSphere
+
+HitResult sweepAABBvsSphere(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldSphere& sph)
+{
+    HitResult result;
+
+    // Conservative Minkowski expansion: use max half-extent component.
+    const float k_effR = sph.radius + std::max({halfExtents.x, halfExtents.y, halfExtents.z});
+
+    const glm::vec3 k_oc = start - sph.center;
+    const glm::vec3 k_delta = end - start;
+
+    const float k_a = glm::dot(k_delta, k_delta);
+    if (k_a < 1e-12f)
+        return result; // not moving
+
+    const float k_b = 2.0f * glm::dot(k_oc, k_delta);
+    const float k_c = glm::dot(k_oc, k_oc) - k_effR * k_effR;
+
+    // Starting inside — skip (depenetration handles)
+    if (k_c <= 0.0f)
+        return result;
+
+    const float k_disc = k_b * k_b - 4.0f * k_a * k_c;
+    if (k_disc < 0.0f)
+        return result;
+
+    const float k_t = (-k_b - std::sqrt(k_disc)) / (2.0f * k_a);
+
+    if (k_t < 0.0f || k_t >= 1.0f)
+        return result;
+
+    // Normal: from sphere centre to hit point.
+    const glm::vec3 k_hitPos = start + k_delta * k_t;
+    glm::vec3 hitNormal = k_hitPos - sph.center;
+    const float k_len = glm::length(hitNormal);
+    if (k_len > 1e-6f)
+        hitNormal /= k_len;
+    else
+        hitNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    result.hit = true;
+    result.tFirst = k_t;
+    result.normal = hitNormal;
+    return result;
+}
+
 // sweepAll
 
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
@@ -206,6 +360,18 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
 
     for (const WorldBrush& brush : world.brushes) {
         const HitResult k_hr = sweepAABBvsBrush(halfExtents, start, end, brush);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
+    for (const WorldCylinder& cyl : world.cylinders) {
+        const HitResult k_hr = sweepAABBvsCylinder(halfExtents, start, end, cyl);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
+    for (const WorldSphere& sph : world.spheres) {
+        const HitResult k_hr = sweepAABBvsSphere(halfExtents, start, end, sph);
         if (k_hr.hit && k_hr.tFirst < best.tFirst)
             best = k_hr;
     }
@@ -341,6 +507,98 @@ SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const W
             best.normal = hitN;
             best.point = start + k_delta * tEntry - hitN * radius;
         }
+    }
+
+    // Test against cylinders (expanded by sphere radius)
+    for (const WorldCylinder& cyl : world.cylinders) {
+        const float k_effR = cyl.radius + radius;
+        const float k_yMin = cyl.base.y - radius;
+        const float k_yMax = cyl.base.y + cyl.height + radius;
+
+        // Y slab
+        float tYentry = -1e30f, tYexit = 1e30f;
+        bool yCapBottom = false;
+        if (std::abs(k_delta.y) < 1e-8f) {
+            if (start.y < k_yMin || start.y > k_yMax)
+                continue;
+        } else {
+            float t1 = (k_yMin - start.y) / k_delta.y;
+            float t2 = (k_yMax - start.y) / k_delta.y;
+            bool t1bot = true;
+            if (t1 > t2) {
+                std::swap(t1, t2);
+                t1bot = false;
+            }
+            tYentry = t1;
+            tYexit = t2;
+            yCapBottom = t1bot;
+        }
+
+        // XZ circle
+        const float ox = start.x - cyl.base.x, oz = start.z - cyl.base.z;
+        const float dx = k_delta.x, dz = k_delta.z;
+        const float a = dx * dx + dz * dz;
+        const float b = 2.0f * (ox * dx + oz * dz);
+        const float c = ox * ox + oz * oz - k_effR * k_effR;
+        float tXZentry = -1e30f, tXZexit = 1e30f;
+        if (a < 1e-12f) {
+            if (c > 0.0f)
+                continue;
+        } else {
+            const float disc = b * b - 4.0f * a * c;
+            if (disc < 0.0f)
+                continue;
+            const float sq = std::sqrt(disc);
+            tXZentry = (-b - sq) / (2.0f * a);
+            tXZexit = (-b + sq) / (2.0f * a);
+        }
+
+        bool isYcap = tYentry > tXZentry;
+        float tE = isYcap ? tYentry : tXZentry;
+        float tX = std::min(tYexit, tXZexit);
+        if (tE > tX || tX < 0.0f || tE < 0.0f || tE >= best.t)
+            continue;
+
+        glm::vec3 n;
+        if (isYcap) {
+            n = yCapBottom ? glm::vec3(0, -1, 0) : glm::vec3(0, 1, 0);
+        } else {
+            glm::vec3 hp = start + k_delta * tE;
+            n = glm::vec3(hp.x - cyl.base.x, 0, hp.z - cyl.base.z);
+            float ln = glm::length(n);
+            n = ln > 1e-6f ? n / ln : glm::vec3(1, 0, 0);
+        }
+        best.hit = true;
+        best.t = tE;
+        best.normal = n;
+        best.point = start + k_delta * tE - n * radius;
+    }
+
+    // Test against world spheres (expanded by cast radius)
+    for (const WorldSphere& ws : world.spheres) {
+        const float k_effR = ws.radius + radius;
+        const glm::vec3 oc = start - ws.center;
+        const float a = glm::dot(k_delta, k_delta);
+        if (a < 1e-12f)
+            continue;
+        const float b = 2.0f * glm::dot(oc, k_delta);
+        const float c = glm::dot(oc, oc) - k_effR * k_effR;
+        if (c <= 0.0f)
+            continue; // inside
+        const float disc = b * b - 4.0f * a * c;
+        if (disc < 0.0f)
+            continue;
+        const float t = (-b - std::sqrt(disc)) / (2.0f * a);
+        if (t < 0.0f || t >= best.t)
+            continue;
+        glm::vec3 hp = start + k_delta * t;
+        glm::vec3 n = hp - ws.center;
+        float ln = glm::length(n);
+        n = ln > 1e-6f ? n / ln : glm::vec3(0, 1, 0);
+        best.hit = true;
+        best.t = t;
+        best.normal = n;
+        best.point = hp - n * radius;
     }
 
     return best;

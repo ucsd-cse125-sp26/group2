@@ -10,8 +10,10 @@
 /// used for *both* rendering and collision.  Handy for blockout maps where the
 /// visual geometry is already simple enough to collide against.
 ///
-/// Collision meshes are converted to axis-aligned bounding boxes (`WorldAABB`).
-/// A floor plane at the lowest Y vertex is optionally generated.
+/// Each collision mesh is **auto-detected** as the best-fitting primitive:
+///   sphere → cylinder → axis-aligned box → convex brush (fallback).
+/// Sub-collections (`Boxes/`, `Cylinders/`, `Spheres/`, `Brushes/`) can override
+/// the auto-detection to force a specific type.
 
 #pragma once
 
@@ -39,13 +41,18 @@ struct MapCollisionData
     std::vector<Plane> planes;
     std::vector<WorldAABB> boxes;
     std::vector<WorldBrush> brushes;
+    std::vector<WorldCylinder> cylinders;
+    std::vector<WorldSphere> spheres;
 
     /// @brief Return a non-owning `WorldGeometry` view into this data.
     ///
     /// The returned spans are valid for as long as the vectors are not
     /// reallocated (i.e. as long as the `MapCollisionData` is alive and
     /// no further push_backs occur).
-    [[nodiscard]] WorldGeometry geometry() const { return {.planes = planes, .boxes = boxes, .brushes = brushes}; }
+    [[nodiscard]] WorldGeometry geometry() const
+    {
+        return {.planes = planes, .boxes = boxes, .brushes = brushes, .cylinders = cylinders, .spheres = spheres};
+    }
 };
 
 // ---------------------------------------------------------------------------

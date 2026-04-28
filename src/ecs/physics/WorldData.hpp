@@ -229,7 +229,7 @@ inline const WorldGeometry& testWorld()
         makeDiagonalWall({300.0f, 0.0f, 1900.0f}, 100.0f, 8.0f, 120.0f, glm::normalize(glm::vec3(1.0f, 0.0f, 1.0f))),
     }};
 
-    static const WorldGeometry k_geo{k_planes, k_boxes, k_brushes};
+    static const WorldGeometry k_geo{k_planes, k_boxes, k_brushes, {}, {}};
     return k_geo;
 }
 
