@@ -124,37 +124,16 @@ bool NewRenderer::loadSceneAssets()
     AssetLoader::loadModelsList();
     std::cout << "loaded models" << std::endl;
 
-    std::vector<Asset::GeoBufferInfo> geoBuffers;
-    // geoBuffers.push_back(vBufferInfo_);
-    // geoBuffers.push_back(iBufferInfo_);
-    // Uint32 numVertices = sizeof(cubeVertexData) / sizeof(Vertex);
-    // Uint32 numIndices = sizeof(indices) / sizeof(Uint32);
-    //
-    // vBufferInfo_.bufferSize = numVertices * sizeof(Vertex);
-    // vBufferInfo_.gpuBuff = createGPUBuffer(vBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
-    // vBufferInfo_.srcData = cubeVertexData;
-    //
-    // iBufferInfo_.bufferSize = numIndices * sizeof(Uint32);
-    // iBufferInfo_.gpuBuff = createGPUBuffer(iBufferInfo_.bufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
-    // iBufferInfo_.srcData = indices;
-
-    for (auto modelPair : Asset::models_) {
-        for (auto& element : modelPair.second.modelElements_) {
-            genMeshBuffers(element.meshId_);
-            Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
-            geoBuffers.push_back(mesh.vBufferInfo_);
-            geoBuffers.push_back(mesh.iBufferInfo_);
-        }
-    }
-    std::cout << "0" << std::endl;
+    std::vector<Boilerplate::BufferUpload> uploads;
 
     for (const auto& modelPair : Asset::models_) {
-        const MeshIdInt meshId = modelPair.second.meshId_;
-        createMeshBuffers(meshId);
+        for (auto& element : modelPair.second.modelElements_) {
+            createMeshBuffers(element.meshId_);
+            Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
+            uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
+            uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
+        }
 
-        Asset::Mesh& mesh = Asset::meshes_.at(meshId);
-        uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
-        uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
     }
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
@@ -208,57 +187,10 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
         return;
     }
 
-    camera_.setAspect((h != 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.0f);
-
-    Matrices mats{};
-    float scale = 100.0f;
-    mats.model = glm::mat4(scale);
-    mats.model[3] = glm::vec4(0.0f, 50.0f, 0.0f, 1.0f);
-    mats.view = camera_.getView();
-    mats.projection = camera_.getProjection();
-
-    SDL_PushGPUVertexUniformData(cmd, 0, &mats, sizeof(mats));
-
-    ImDrawData* const k_drawData = ImGui::GetDrawData();
-    if (k_drawData)
-        ImGui_ImplSDLGPU3_PrepareDrawData(k_drawData, cmd);
-
-    SDL_GPUColorTargetInfo ct{};
-    ct.texture = swapchain;
-    ct.clear_color = {.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f};
-    ct.load_op = SDL_GPU_LOADOP_CLEAR;
-    ct.store_op = SDL_GPU_STOREOP_STORE;
-
-    SDL_GPUDepthStencilTargetInfo dt{};
-    dt.texture = depthTexture;
-    dt.clear_depth = 1.0f;
-    dt.load_op = SDL_GPU_LOADOP_CLEAR;
-    dt.store_op = SDL_GPU_STOREOP_DONT_CARE;
-    dt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-    dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-    dt.cycle = false;
-    dt.clear_stencil = 0;
-
-    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
-    SDL_BindGPUGraphicsPipeline(pass, pipeline_);
-
-    SDL_GPUIndexElementSize iElementSizeSdlType = SDL_GPU_INDEXELEMENTSIZE_32BIT;
-
-    for (auto model : Asset::models_) {
-        for (auto& element : model.second.modelElements_) {
-            Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
-            drawMesh(pass, iElementSizeSdlType, mesh);
-        }
-    }
-    //////////////////////////////////////////////////////////////////////////////////
-    // std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
-    // vertexBufferBindings.push_back(SDL_GPUBufferBinding{.buffer = vBufferInfo_.gpuBuff, .offset = 0});
-    // SDL_BindGPUVertexBuffers(pass, 0, vertexBufferBindings.data(), static_cast<Uint32>(vertexBufferBindings.size()));
-    //
-    // SDL_GPUBufferBinding indexBufferBinding = {.buffer = iBufferInfo_.gpuBuff, .offset = 0};
-    // SDL_BindGPUIndexBuffer(pass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-    //
-    // SDL_DrawGPUIndexedPrimitives(pass, 36, 1, 0, 0, 0);
+    camera_.setEye(eye);
+    camera_.setTarget(pitch, yaw, 0.0f);
+    camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
+    camera_.computeViewProjectionMatrix();
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
@@ -283,8 +215,10 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
         // modelMatrix[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
         SDL_PushGPUVertexUniformData(cmd, 1, &modelMatrix, sizeof(glm::mat4));
 
-        const Asset::Mesh& mesh = Asset::meshes_.at(modelPair.second.meshId_);
-        drawMesh(pass, mesh);
+        for (auto& element : modelPair.second.modelElements_) {
+            Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+            drawMesh(pass, mesh);
+        }
     }
 
     if (drawData)
