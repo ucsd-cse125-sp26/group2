@@ -101,10 +101,11 @@ private:
     float prevArmor_ = 100.0f;
     int prevDeaths_ = 0;
     int prevKills_ = 0;
-    float healingSoundCooldown_ = 0.0f; ///< Throttle the looping heal tick sound.
-    bool stateInitialized_ = false;     ///< Skip sounds on the very first update().
+    float healingSoundCooldown_ = 0.0f;           ///< Throttle the looping heal tick sound.
+    bool stateInitialized_ = false;               ///< Skip sounds on the very first update().
 
-    bool pendingReopen_ = false;        ///< Set by handleEvent(), processed at the start of update().
+    bool pendingReopen_ = false;                  ///< Set by handleEvent(), processed at the start of update().
+    SDL_AudioDeviceID pendingReopenDeviceId_ = 0; ///< Which physical device to switch to (0 = first available).
 
     /// @brief Decode a single MP3 from assets/sounds/ and store it as clip[id].
     bool loadClip(SfxId id, const char* filename, SfxCategory cat, float gain, float cooldownSecs);
@@ -127,4 +128,13 @@ private:
     /// Without this, the first real sound on macOS triggers lazy buffer allocation
     /// inside CoreAudio's AudioQueue, causing an audible latency spike / glitch.
     void warmUpDevice();
+
+    /// @brief Convert every loaded clip to the device's native audio format.
+    ///
+    /// Eliminates per-stream resampling and format conversion inside the audio
+    /// callback.  Without this, every active voice triggers real-time S16LE→F32
+    /// + 44.1→48 kHz resampling on each ~21 ms CoreAudio callback.  Under CPU
+    /// throttling (Low Power Mode) or with many concurrent voices (up to 32),
+    /// the callback can't finish in time → buffer underruns → pops / stutter.
+    void preconvertClips();
 };

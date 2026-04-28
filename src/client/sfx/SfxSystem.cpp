@@ -158,6 +158,10 @@ bool SfxSystem::init()
             static_cast<int>(SfxId::_Count),
             static_cast<unsigned>(device_));
 
+    // Pre-convert all clips to the device's native format so that each
+    // AudioStream in the callback is a straight memcpy (no resampling).
+    preconvertClips();
+
     return true;
 }
 
@@ -295,20 +299,22 @@ void SfxSystem::handleEvent(const SDL_Event& event)
 #ifdef __APPLE__
     // On macOS we opened a specific physical device (see openDevice()), so
     // SDL3 does NOT auto-switch when the default output changes.  We handle
-    // the transition ourselves: when our device disappears, schedule a
-    // reopen on the next update() (main-thread safe).
+    // the transition ourselves on the next update() (main-thread safe).
     if (event.type == SDL_EVENT_AUDIO_DEVICE_REMOVED && !event.adevice.recording) {
         if (physicalDeviceId_ != 0 && event.adevice.which == physicalDeviceId_) {
             SDL_Log("[sfx] Playback device removed (id=%u), scheduling reopen",
                     static_cast<unsigned>(physicalDeviceId_));
+            pendingReopenDeviceId_ = 0; // pick first available
             pendingReopen_ = true;
         }
     } else if (event.type == SDL_EVENT_AUDIO_DEVICE_ADDED && !event.adevice.recording) {
-        if (!device_) {
-            SDL_Log("[sfx] New playback device available (id=%u), scheduling reopen",
-                    static_cast<unsigned>(event.adevice.which));
-            pendingReopen_ = true;
-        }
+        // A new playback device appeared (headphones plugged in, BT connected,
+        // etc.).  On macOS the system default output follows the newly connected
+        // device, so switching to it mirrors expected OS behaviour.
+        SDL_Log("[sfx] New playback device available (id=%u), scheduling switch",
+                static_cast<unsigned>(event.adevice.which));
+        pendingReopenDeviceId_ = event.adevice.which;
+        pendingReopen_ = true;
     }
 #else
     (void)event;
@@ -568,12 +574,28 @@ bool SfxSystem::openDevice()
     // Opening a *specific* physical device instead of the default logical
     // device prevents SDL from registering that listener entirely.  We handle
     // device removal / addition ourselves via handleEvent().
-    int count = 0;
-    SDL_AudioDeviceID* devs = SDL_GetAudioPlaybackDevices(&count);
-    if (devs && count > 0) {
-        physicalDeviceId_ = devs[0];
+
+    // Request larger audio buffers on macOS (2048 frames ≈ 42 ms at 48 kHz).
+    // The default 1024 frames gives only ~21 ms per callback.  With many
+    // concurrent voices the callback can miss its deadline under Low Power
+    // Mode, causing pops.  2048 frames doubles the headroom while keeping
+    // latency well under 50 ms (acceptable for game SFX).
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "2048");
+
+    SDL_AudioDeviceID targetPhysical = pendingReopenDeviceId_;
+    if (!targetPhysical) {
+        // No specific target — pick the first available playback device.
+        int count = 0;
+        SDL_AudioDeviceID* devs = SDL_GetAudioPlaybackDevices(&count);
+        if (devs && count > 0) {
+            targetPhysical = devs[0];
+            SDL_free(devs);
+        }
+    }
+
+    if (targetPhysical) {
+        physicalDeviceId_ = targetPhysical;
         device_ = SDL_OpenAudioDevice(physicalDeviceId_, nullptr);
-        SDL_free(devs);
     }
     if (!device_) {
         SDL_Log("[sfx] SDL_OpenAudioDevice failed (macOS specific-device path): %s", SDL_GetError());
@@ -611,15 +633,20 @@ void SfxSystem::reopenDevice()
     }
     physicalDeviceId_ = 0;
 
-    // 3. Try to open a new device.
+    // 3. Try to open the requested (or first available) device.
     if (openDevice()) {
         warmUpDevice();
+        // Re-convert clips to the new device's native format so the audio
+        // callback stays conversion-free on the new device too.
+        preconvertClips();
         SDL_Log("[sfx] Reopened audio on physical device %u (logical %u)",
                 static_cast<unsigned>(physicalDeviceId_),
                 static_cast<unsigned>(device_));
     } else {
         SDL_Log("[sfx] No audio device available after reopen — running mute");
     }
+
+    pendingReopenDeviceId_ = 0;
 
     // Reset state tracking so the first update after reopen doesn't fire
     // spurious sounds from stale health/death deltas.
@@ -661,4 +688,60 @@ void SfxSystem::warmUpDevice()
 
     SDL_DestroyAudioStream(stream);
     SDL_Log("[sfx] Audio pipeline warmed up");
+}
+
+void SfxSystem::preconvertClips()
+{
+    if (!device_)
+        return;
+
+    // Query what the device actually wants.
+    SDL_AudioSpec deviceSpec{};
+    if (!SDL_GetAudioDeviceFormat(device_, &deviceSpec, nullptr)) {
+        SDL_Log("[sfx] Could not query device format, skipping preconvert: %s", SDL_GetError());
+        return;
+    }
+
+    int converted = 0;
+    for (size_t i = 0; i < clips_.size(); ++i) {
+        SoundClip& clip = clips_[i];
+        if (!clip.loaded || clip.pcmData.empty())
+            continue;
+
+        // Already matches — nothing to do.
+        if (clip.spec.format == deviceSpec.format && clip.spec.channels == deviceSpec.channels &&
+            clip.spec.freq == deviceSpec.freq)
+        {
+            continue;
+        }
+
+        Uint8* dstBuf = nullptr;
+        int dstLen = 0;
+        if (!SDL_ConvertAudioSamples(
+                &clip.spec, clip.pcmData.data(), static_cast<int>(clip.pcmData.size()), &deviceSpec, &dstBuf, &dstLen))
+        {
+            SDL_Log("[sfx] preconvert failed for clip %zu: %s", i, SDL_GetError());
+            continue;
+        }
+
+        clip.pcmData.assign(dstBuf, dstBuf + dstLen);
+        SDL_free(dstBuf);
+        clip.spec = deviceSpec;
+
+        // Recalculate duration from the new format.
+        const int bytesPerFrame = (SDL_AUDIO_BITSIZE(deviceSpec.format) / 8) * deviceSpec.channels;
+        if (bytesPerFrame > 0 && deviceSpec.freq > 0) {
+            const size_t frames = static_cast<size_t>(dstLen) / static_cast<size_t>(bytesPerFrame);
+            clip.durationSeconds = static_cast<float>(frames) / static_cast<float>(deviceSpec.freq);
+        }
+
+        ++converted;
+    }
+
+    SDL_Log("[sfx] Pre-converted %d clips to device format "
+            "(%d Hz, %d ch, %s)",
+            converted,
+            deviceSpec.freq,
+            deviceSpec.channels,
+            SDL_GetAudioFormatName(deviceSpec.format));
 }
