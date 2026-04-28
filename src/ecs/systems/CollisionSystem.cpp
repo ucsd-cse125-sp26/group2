@@ -6,10 +6,13 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
+#include "ecs/systems/ExplosionSystem.hpp"
 
 #include <glm/geometric.hpp>
 
@@ -268,6 +271,52 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     state.grounded = true;
                     state.groundNormal = k_probe.normal;
                 }
+            }
+        });
+
+    // Projectile entities
+    registry.view<Position, Velocity, CollisionShape, Projectile>().each(
+        [dt, &world, &registry](
+            entt::entity e, Position& pos, Velocity& vel, const CollisionShape& shape, Projectile& projectile) {
+            ProjectileConfig projConfig = getProjectileConfig(projectile.type);
+            if (projectile.currentLifeTime >= projConfig.maxLifeTime) {
+                if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
+                    queueExplosion(
+                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                }
+                if (registry.valid(e)) {
+                    registry.destroy(e);
+                }
+                return;
+            }
+            projectile.currentLifeTime += dt;
+
+            // Phase 0 — Depenetration
+            depenetrate(pos.value, vel.value, shape.halfExtents, world);
+
+            // Phase 1 — Bump loop (collision response + stair stepping)
+            float remainingTime = dt;
+
+            for (int clip = 0; clip < 4 && remainingTime > 1e-5f; ++clip) {
+                const glm::vec3 k_target = pos.value + vel.value * remainingTime;
+                const physics::HitResult k_hit = physics::sweepAll(shape.halfExtents, pos.value, k_target, world);
+
+                if (!k_hit.hit) {
+                    pos.value = k_target;
+                    break;
+                }
+
+                pos.value += vel.value * k_hit.tFirst * remainingTime;
+                remainingTime *= (1.0f - k_hit.tFirst);
+
+                if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
+                    queueExplosion(
+                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                }
+                if (registry.valid(e)) {
+                    registry.destroy(e);
+                }
+                break;
             }
         });
 }

@@ -242,3 +242,24 @@ bool Server::broadcast(const void* data, int len)
 
     return success;
 }
+
+void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
+{
+    if (events.empty())
+        return;
+
+    // Pack: [PacketType::KILL_EVENT (1B)] [count (4B)] [NetKillEvent * count]
+    const auto count = static_cast<uint32_t>(events.size());
+    const size_t payloadSize = 1 + sizeof(uint32_t) + count * sizeof(NetKillEvent);
+    std::vector<uint8_t> buf(payloadSize);
+
+    buf[0] = static_cast<uint8_t>(PacketType::KILL_EVENT);
+    std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
+    std::memcpy(buf.data() + 1 + sizeof(uint32_t), events.data(), count * sizeof(NetKillEvent));
+
+    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
+        SDL_Log("Server: failed to broadcast KILL_EVENT packet to clients");
+    }
+
+    SDL_Log("Server: broadcasted %u kill events to clients", count);
+}

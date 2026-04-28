@@ -46,6 +46,6 @@ private:
     // Maps entity -> index into pool (for fast detach / per-entity update)
     std::unordered_map<uint32_t, uint32_t> entityToIdx_;
 
-    static constexpr float k_streakLength = 350.f; ///< Visual streak length in world units.
+    static constexpr float k_streakLength = 200.f; ///< Visual streak length in world units.
     static constexpr float k_fadeTime = 0.15f;     ///< Seconds to fade after entity death.
 };

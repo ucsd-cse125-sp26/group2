@@ -5,6 +5,7 @@
 
 #include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/Server.hpp"
 #include "systems/MatchController.hpp"
 
@@ -55,7 +56,8 @@ private:
     Registry registry;                                         ///< ECS entity/component store.
     MatchController matchController;                           ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
-    bool running = false;                                      ///< Loop continues while true.
-    int tickRateHz = 128;                                      ///< Physics ticks per second.
-    int tickCount = 0;                                         ///< Total ticks since start, used for periodic logging.
+    std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.
+    bool running = false;                        ///< Loop continues while true.
+    int tickRateHz = 128;                        ///< Physics ticks per second.
+    int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
 };

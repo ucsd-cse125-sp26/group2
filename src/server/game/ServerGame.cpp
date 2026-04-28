@@ -3,6 +3,7 @@
 
 #include "ServerGame.hpp"
 
+#include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -16,6 +17,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
+#include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
@@ -118,9 +120,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     }
 
     std::vector<NetParticleEvent> particleEvents;
-    systems::runWeapon(registry, dt, particleEvents);
+    systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
     systems::runMovement(registry, dt, physics::testWorld());
     systems::runCollision(registry, dt, physics::testWorld());
+    systems::runExplosion(registry, particleEvents, pendingKillEvents);
     systems::runPlayerStatus(registry, dt);
 
     matchController.update(dt, registry, server);
@@ -128,6 +131,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // Update Client by sending the registry
     server.broadcastRegistry(registry);
     server.broadcastParticleEvents(particleEvents);
+    server.broadcastKillEvents(pendingKillEvents);
+    pendingKillEvents.clear();
 
     ++tickCount;
 
@@ -150,6 +155,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     clientEntities[clientId] = player;
 
     registry.emplace<Player>(player, Player{});
+    registry.emplace<ClientId>(player, clientId);
     registry.emplace<InputSnapshot>(player);
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);
@@ -158,10 +164,12 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
+    registry.emplace<BeamState>(player);
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
     const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
+    const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
     registry.emplace<WeaponState>(player,
                                   WeaponState{
                                       .primary =
@@ -183,6 +191,13 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                               .type = WeaponType::EnergyGun,
                                               .totalAmmo = wingmanConfig.defaultAmmoCapacity,
                                               .currentMagAmmo = wingmanConfig.magazineSize,
+                                              .fireCooldown = 0.0f,
+                                          },
+                                      .quaternary =
+                                          GunInstance{
+                                              .type = WeaponType::Rocket,
+                                              .totalAmmo = rocketConfig.defaultAmmoCapacity,
+                                              .currentMagAmmo = rocketConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .current = WeaponSlot::PRIMARY,

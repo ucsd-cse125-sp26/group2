@@ -3,23 +3,34 @@
 
 #include "Game.hpp"
 
+#include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
+#include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Controllable.hpp"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
+#include "renderer/GlowCylinder.hpp"
+#include "renderer/GlowSphere.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
 
@@ -100,6 +111,17 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
     }
 
+    // Sound effects system — initialised after particles so audio can mirror the
+    // same event-driven pattern.  Failure is non-fatal: the game runs silently.
+    if (!sfxSystem.init()) {
+        SDL_Log("[client] SfxSystem init failed (non-fatal — sound effects disabled)");
+    } else {
+        // WeaponFiredEvent: play the weapon fire sound for every shot.
+        dispatcher.sink<WeaponFiredEvent>().connect<&SfxSystem::onWeaponFired>(sfxSystem);
+        // ExplosionEvent: also play the explosion SFX alongside the particle effect.
+        dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
+    }
+
     // Load models for entity rendering
     wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
     if (wraithModelIdx < 0)
@@ -115,10 +137,56 @@ bool Game::init()
         }
     }
 
+    // Glow sphere — procedural emissive sphere for bloom / dynamic lighting test.
+    {
+        LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
+        glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
+        if (glowSphereModelIdx_ < 0)
+            SDL_Log("[client] WARNING: glow sphere failed to upload");
+        else
+            SDL_Log("[client] glow sphere uploaded (model index %d)", glowSphereModelIdx_);
+    }
+
+    // Movable glow sphere — smaller sphere that follows the player for dynamic lighting tests.
+    {
+        LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
+        movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
+        if (movableSphereModelIdx_ < 0)
+            SDL_Log("[client] WARNING: movable glow sphere failed to upload");
+        else
+            SDL_Log("[client] movable glow sphere uploaded (model index %d)", movableSphereModelIdx_);
+    }
+
+    // Glow cylinder (beam) — unit cylinder, oriented at runtime via transform.
+    {
+        LoadedModel cylModel = createGlowCylinder(24, 1, glm::vec3(8.0f, 2.0f, 10.0f));
+        glowCylinderModelIdx_ = renderer.uploadSceneModel(cylModel);
+        if (glowCylinderModelIdx_ < 0)
+            SDL_Log("[client] WARNING: glow cylinder failed to upload");
+        else
+            SDL_Log("[client] glow cylinder uploaded (model index %d)", glowCylinderModelIdx_);
+    }
+
+    // Remove Controllable when the local player dies (RespawnTimer added),
+    // restore it when they respawn (RespawnTimer removed).
+    registry.on_construct<RespawnTimer>().connect<[](entt::registry& reg, entt::entity e) {
+        if (reg.all_of<LocalPlayer>(e))
+            reg.remove<Controllable>(e);
+    }>();
+    registry.on_destroy<RespawnTimer>().connect<[](entt::registry& reg, entt::entity e) {
+        if (reg.all_of<LocalPlayer>(e))
+            reg.emplace_or_replace<Controllable>(e);
+    }>();
+
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        // Only add Controllable if the player is not already dead (edge case:
+        // joining while mid-death on a long-running server).
+        if (!registry.all_of<RespawnTimer>(local))
+            registry.emplace<Controllable>(local);
 
         // Animator runs for local too — future gun-IK / hands-on-weapon work
         // needs an up-to-date upper-body pose even when the body is invisible.
@@ -129,22 +197,70 @@ bool Game::init()
     });
 
     client.onParticleEvent([this](const NetParticleEvent& evt, entt::entity localPlayer) {
-        // Skip own effects (already handled locally for instant feedback)
-        if (evt.source == localPlayer)
-            return;
+        // Hitmarker SFX: local player's shot was confirmed by the server to have
+        // hit an enemy (surface == Flesh).  This check runs BEFORE the skip-self
+        // guard so the shooter still hears the hitmarker even though their own
+        // particle VFX was already spawned client-side for instant feedback.
+        if (evt.source == localPlayer && evt.effectType == ParticleEffectType::Impact &&
+            evt.surfaceType == SurfaceType::Flesh)
+        {
+            if (sfxSystem.isInitialized())
+                sfxSystem.play(SfxId::FleshHit);
+            hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
+        }
+
+        // Skip own effects that were already spawned locally for instant feedback.
+        // Exceptions that must NOT be skipped:
+        //   - Charge weapons: local VFX is skipped; we rely on server events.
+        //   - Explosions: server-authoritative (not locally predicted).
+        //   - Smoke: server-authoritative.
+        if (evt.source == localPlayer) {
+            const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
+            const bool isServerOnly =
+                evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke;
+            if (!isChargeWeapon && !isServerOnly)
+                return;
+
+            // For charge weapons from self: also dispatch the weapon-fired event
+            // so the shoot sound plays and recoil kicks.
+            if (evt.effectType == ParticleEffectType::HitscanBeam) {
+                WeaponFiredEvent wfe;
+                wfe.type = evt.weaponType;
+                wfe.origin = evt.pos1;
+                wfe.direction = glm::normalize(evt.pos2 - evt.pos1);
+                wfe.isHitscan = true;
+                wfe.hitPos = evt.pos2;
+                dispatcher.enqueue(wfe);
+            }
+        }
+
+        // For local player's charge weapon: override beam origin with
+        // viewmodel muzzle position so the lightning comes from the gun.
+        glm::vec3 evtOrigin = evt.pos1;
+        if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
+            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+            evtOrigin = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+        }
 
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
-            particleSystem.spawnBulletTracer(evt.pos1, evt.pos2, evt.param);
+            particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
             break;
         case ParticleEffectType::HitscanBeam:
-            particleSystem.spawnHitscanBeam(evt.pos1, evt.pos2, evt.weaponType);
+            particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
             break;
         case ParticleEffectType::Impact:
             particleSystem.spawnImpactEffect(evt.pos1, evt.pos2, evt.surfaceType, evt.weaponType);
             break;
         case ParticleEffectType::Explosion:
             particleSystem.spawnExplosion(evt.pos1, evt.param);
+            // Dispatch ExplosionEvent so SfxSystem plays the explosion sound.
+            {
+                ExplosionEvent expl;
+                expl.pos = evt.pos1;
+                expl.blastRadius = evt.param;
+                dispatcher.enqueue(expl);
+            }
             break;
         case ParticleEffectType::Smoke:
             particleSystem.spawnSmoke(evt.pos1, evt.param);
@@ -155,6 +271,16 @@ bool Game::init()
     client.onMatchStateUpdate([this](const MatchStatePacket& packet) {
         currentMatchPhase = packet.phase;
         countdownTimer = packet.countdownTimer;
+    });
+
+    client.onKillEvent([this](const NetKillEvent& evt) {
+        killFeed.insert(killFeed.begin(),
+                        KillFeedEvent{
+                            evt.killerId,
+                            evt.victimId,
+                        });
+
+        // TODO: Specific handling for local player deaths (display enemy health)
     });
 
     // Initialize runtime 3P weapon params from defaults
@@ -251,7 +377,7 @@ SDL_AppResult Game::event(SDL_Event* event)
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
-        case SDLK_Q:
+        case SDLK_MINUS:
             return SDL_APP_SUCCESS;
 
         // ESC — toggle mouse capture so the player can reach the ImGui windows.
@@ -275,7 +401,7 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_F2:
             // Animation Tester is owned by Game (animUI_), not DebugUI, so
             // pass its visibility flag in so F2 toggles every panel uniformly.
-            debugUI.toggleAllPanels({&animUI_.show});
+            debugUI.toggleAllPanels({&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_});
             break;
 
         // Particle system test keys
@@ -497,16 +623,17 @@ SDL_AppResult Game::iterate()
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
                 // Determine current slot from WeaponState
-                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2
+                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2, QUATERNARY=3
                 registry.view<LocalPlayer, WeaponState>().each(
                     [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
 
-                // Cycle: add direction, wrap around 3 slots
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 3) % 3;
+                // Cycle: add direction, wrap around 4 slots
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 4) % 4;
 
                 snap.switchToPrimary = (slotIdx == 0);
                 snap.switchToSecondary = (slotIdx == 1);
                 snap.switchToTertiary = (slotIdx == 2);
+                snap.switchToQuaternary = (slotIdx == 3);
             });
             pendingScrollSwitch_ = 0;
         }
@@ -547,8 +674,13 @@ SDL_AppResult Game::iterate()
             ++statsPhysTicks;
         }
 
-        client.poll(registry);
+        if (!client.poll(registry)) {
+            // TODO: Update so reset to menu or some other non-crash state
+            return SDL_APP_SUCCESS;
+        }
+
         refreshRemotePlayerRenderables();
+        refreshRemoteProjectileRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -596,57 +728,65 @@ SDL_AppResult Game::iterate()
     // Local weapon VFX — fires continuously while LMB is held, respecting cooldown.
     // This mirrors the server's fire rate so the local player sees tracers/impacts
     // at the same cadence as the server processes shots.
+    // Beam weapons (EnergyGun) are driven by BeamState from the registry,
+    // so they skip per-shot VFX here.
     {
-        localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
+        const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
 
-        const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
-        const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
+        // Skip beam weapons (driven by BeamState) and charge weapons
+        // (VFX arrive from server via NetParticleEvent on release).
+        if (!wpnCfg.isBeam && !wpnCfg.isCharge) {
+            localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
-        if (shooting && localFireCooldown_ <= 0.0f) {
-            const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
-            localFireCooldown_ = wpnCfg.fireCooldown;
+            const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
+            const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
 
-            const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            // Check ammo — don't spawn VFX if the magazine is empty.
+            bool hasAmmo = false;
+            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                         : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                                 : ws.primary;
+                hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
+            });
 
-            // Ray-scene intersection for hit position
-            constexpr float k_maxRange = 5000.f;
-            float hitDist = k_maxRange;
-            glm::vec3 hitNormal = -cachedCamFwd_;
-            SurfaceType hitSurface = SurfaceType::Concrete;
+            if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
+                localFireCooldown_ = wpnCfg.fireCooldown;
 
-            if (cachedCamFwd_.y < -0.001f) {
-                const float t = -cachedEye_.y / cachedCamFwd_.y;
-                if (t > 0.f && t < hitDist) {
-                    hitDist = t;
-                    hitNormal = glm::vec3{0.f, 1.f, 0.f};
-                    hitSurface = SurfaceType::Concrete;
-                }
+                const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+                const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+
+                // Raycast against full world geometry (floor + boxes + brushes).
+                const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::testWorld());
+                const float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
+                const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
+                const glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
+                const SurfaceType hitSurface = worldHit.surface;
+
+                // Dispatch weapon-fired event for any listeners
+                WeaponFiredEvent wfe;
+                wfe.type = currentEquippedType_;
+                wfe.origin = hip;
+                wfe.direction = cachedCamFwd_;
+                wfe.isHitscan = true;
+                wfe.hitPos = hitPos;
+                dispatcher.enqueue(wfe);
+
+                // Spawn tracer from hip toward the crosshair hit point (not along
+                // cachedCamFwd_ — the hip is offset from the eye, so the direction
+                // to the hit point differs slightly from the camera forward).
+                const glm::vec3 hipToHit = hitPos - hip;
+                const float hipHitDist = glm::length(hipToHit);
+                const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
+                particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
+                particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
+
+                // Visual recoil kick (viewmodel-only)
+                const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+                recoilPitch_ += rp.pitchKick;
+                recoilPushBack_ += rp.pushBack;
+                recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
             }
-
-            const glm::vec3 hitPos = cachedEye_ + cachedCamFwd_ * hitDist;
-
-            // Dispatch weapon-fired event for any listeners
-            WeaponFiredEvent wfe;
-            wfe.type = currentEquippedType_;
-            wfe.origin = hip;
-            wfe.direction = cachedCamFwd_;
-            wfe.isHitscan = true;
-            wfe.hitPos = hitPos;
-            dispatcher.enqueue(wfe);
-
-            // Spawn correct particle effect based on weapon type
-            if (currentEquippedType_ == WeaponType::RailGun || currentEquippedType_ == WeaponType::EnergyGun)
-                particleSystem.spawnHitscanBeam(hip, hitPos, currentEquippedType_);
-            else
-                particleSystem.spawnBulletTracer(hip, cachedCamFwd_, hitDist);
-            particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
-
-            // Visual recoil kick (viewmodel-only)
-            const RecoilParams& rp = getRecoilParams(currentEquippedType_);
-            recoilPitch_ += rp.pitchKick;
-            recoilPushBack_ += rp.pushBack;
-            recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
         }
     }
 
@@ -655,6 +795,34 @@ SDL_AppResult Game::iterate()
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
+
+    // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
+    sfxSystem.update(frameTime, registry);
+
+    // Weapon-specific sound state (charge rifle load, beam loop).
+    if (sfxSystem.isInitialized()) {
+        // Charge rifle: play load sound once when charging starts.
+        bool isChargingNow = false;
+        registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
+                                                                             : ws.primary;
+            if (getWeaponConfig(gun.type).isCharge && gun.chargeTime > 0.0f)
+                isChargingNow = true;
+        });
+        if (isChargingNow && !wasChargingRailgun_)
+            sfxSystem.play(SfxId::ChargeRifleLoad);
+        wasChargingRailgun_ = isChargingNow;
+
+        // Energy beam: play/stop loop sound on beam active transitions.
+        bool isBeamNow = false;
+        registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
+        if (isBeamNow && !wasBeamActive_)
+            sfxSystem.play(SfxId::EnergyBeamLoop);
+        if (!isBeamNow && wasBeamActive_)
+            sfxSystem.stop(SfxId::EnergyBeamLoop);
+        wasBeamActive_ = isBeamNow;
+    }
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -792,7 +960,8 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<LocalPlayer>(e))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+            const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
+                                     : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
                                      : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
                                                                              : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
@@ -821,12 +990,173 @@ SDL_AppResult Game::iterate()
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
         });
 
+        // Glow sphere — always rendered at a fixed world position for bloom testing.
+        constexpr glm::vec3 glowSpherePos{0.0f, 80.0f, 300.0f};
+        if (glowSphereModelIdx_ >= 0) {
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowSphereModelIdx_,
+                .worldTransform = glm::translate(glm::mat4(1.0f), glowSpherePos),
+            });
+        }
+
+        // Movable glow sphere — follows the player's view direction.
+        const glm::vec3 movableSpherePos = cachedEye_ + cachedCamFwd_ * sphereFollowDist_;
+        if (movableSphereEnabled_ && movableSphereModelIdx_ >= 0) {
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = movableSphereModelIdx_,
+                .worldTransform = glm::translate(glm::mat4(1.0f), movableSpherePos),
+            });
+        }
+
+        // Glow beam cylinder — follows player position and view direction.
+        // Offsets are (forward, up, right) relative to camera.
+        const glm::vec3 camRight = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+        const glm::vec3 camUp = glm::normalize(glm::cross(camRight, cachedCamFwd_));
+        const glm::vec3 beamWorldStart =
+            cachedEye_ + cachedCamFwd_ * beamStartOff_.x + camUp * beamStartOff_.y + camRight * beamStartOff_.z;
+        const glm::vec3 beamWorldEnd =
+            cachedEye_ + cachedCamFwd_ * beamEndOff_.x + camUp * beamEndOff_.y + camRight * beamEndOff_.z;
+
+        if (beamEnabled_ && glowCylinderModelIdx_ >= 0) {
+            // Update visual emissive color to match the color picker (HDR scaled).
+            const float emScale = 10.0f;
+            renderer.setModelEmissive(glowCylinderModelIdx_, glm::vec4(beamColor_ * emScale, 0.0f));
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowCylinderModelIdx_,
+                .worldTransform = cylinderTransform(beamWorldStart, beamWorldEnd, beamRadius_),
+            });
+        }
+
+        // Weapon beam visuals — driven by BeamState synced from server registry.
+        // Local player: client-side predicted raycast for zero-lag response.
+        // Remote players: use the server-computed positions from BeamState.
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+            if (!beam.active || glowCylinderModelIdx_ < 0)
+                return;
+
+            glm::vec3 beamOrigin = beam.origin;
+            glm::vec3 beamEnd = beam.hitPoint;
+
+            if (registry.all_of<LocalPlayer>(e)) {
+                // Client-side prediction: raycast with this frame's camera
+                // direction so the beam tracks the crosshair with zero latency.
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
+                const glm::vec3 up = glm::normalize(glm::cross(rgt, fwd));
+
+                // Muzzle position from viewmodel offset.
+                beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
+
+                // Predicted endpoint: raycast from eye along current view.
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+            }
+
+            // Green Zarya-style tint, HDR-scaled for bloom.
+            renderer.setModelEmissive(glowCylinderModelIdx_, glm::vec4(glm::vec3(0.3f, 1.0f, 0.2f) * 10.0f, 0.0f));
+
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowCylinderModelIdx_,
+                .worldTransform = cylinderTransform(beamOrigin, beamEnd, 2.0f),
+            });
+        });
+
         renderer.setEntityRenderList(std::move(entityCmds));
+
+        // Build dynamic point lights list.
+        std::vector<PointLight> dynLights;
+
+        // Static glow sphere point light.
+        dynLights.push_back(PointLight{
+            .position = glowSpherePos,
+            .color = glm::vec3(1.0f, 0.6f, 0.2f),
+            .intensity = 5.0f,
+            .range = 500.0f,
+        });
+
+        // Flashlight — point light near the camera.
+        if (flashlightEnabled_) {
+            dynLights.push_back(PointLight{
+                .position = cachedEye_ + cachedCamFwd_ * flashlightOffset_,
+                .color = glm::vec3(1.0f, 0.95f, 0.9f),
+                .intensity = flashlightIntensity_,
+                .range = flashlightRange_,
+            });
+        }
+
+        // Movable glow sphere point light.
+        if (movableSphereEnabled_) {
+            dynLights.push_back(PointLight{
+                .position = movableSpherePos,
+                .color = glm::vec3(0.4f, 0.7f, 1.0f),
+                .intensity = sphereIntensity_,
+                .range = sphereRange_,
+            });
+        }
+
+        // Beam point lights — evenly distributed along the beam length.
+        if (beamEnabled_) {
+            const glm::vec3 beamDelta = beamWorldEnd - beamWorldStart;
+            const float beamLen = glm::length(beamDelta);
+            const int numBeamLights = (beamLightSpacing_ > 1.0f && beamLen > 0.1f)
+                                          ? std::max(2, static_cast<int>(beamLen / beamLightSpacing_) + 1)
+                                          : 2;
+            const glm::vec3 beamLightColor = beamColor_ * 1.5f;
+            for (int i = 0; i < numBeamLights; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numBeamLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = beamWorldStart + beamDelta * t,
+                    .color = beamLightColor,
+                    .intensity = beamLightIntensity_,
+                    .range = beamLightRange_,
+                });
+            }
+        }
+
+        // Weapon beam point lights — from BeamState, evenly distributed.
+        // Local player uses predicted positions (same as the visual beam above).
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+            if (!beam.active)
+                return;
+
+            glm::vec3 lightStart = beam.origin;
+            glm::vec3 lightEnd = beam.hitPoint;
+
+            if (registry.all_of<LocalPlayer>(e)) {
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                lightStart = renderEye;
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+            }
+
+            const glm::vec3 delta = lightEnd - lightStart;
+            const float len = glm::length(delta);
+            if (len < 1.0f)
+                return;
+            const int numLights = std::max(2, static_cast<int>(len / 80.0f) + 1);
+            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f};
+            for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = lightStart + delta * t,
+                    .color = lightColor,
+                    .intensity = 3.0f,
+                    .range = 200.0f,
+                });
+            }
+        });
+
+        renderer.setPointLights(std::move(dynLights));
     }
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
+        const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
+                                 : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
                                  : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
                                                                          : ws.primary;
         currentEquippedType_ = gun.type;
@@ -1070,7 +1400,107 @@ SDL_AppResult Game::iterate()
                     statsFPS1pLow,
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
-    debugUI.buildScoreboardUI(registry, currentMatchPhase, countdownTimer);
+
+    // Scoreboard — shown while Tab is held.
+    if (ImGui::IsKeyDown(ImGuiKey_Tab)) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+
+        constexpr ImGuiWindowFlags k_scoreFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
+                                                  ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+        ImGui::SetNextWindowPos(ImVec2(static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f),
+                                ImGuiCond_Always,
+                                ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowBgAlpha(0.80f);
+
+        if (ImGui::Begin("##scoreboard", nullptr, k_scoreFlags)) {
+            // Phase banner
+            const char* phaseStr = "Warmup";
+            switch (currentMatchPhase) {
+            case MatchPhase::COUNTDOWN:
+                phaseStr = "Starting...";
+                break;
+            case MatchPhase::IN_PROGRESS:
+                phaseStr = "In Progress";
+                break;
+            case MatchPhase::FINISHED:
+                phaseStr = "Game Over";
+                break;
+            default:
+                break;
+            }
+
+            const float centerX = ImGui::GetContentRegionAvail().x;
+            const ImVec2 phaseTextSize = ImGui::CalcTextSize(phaseStr);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - phaseTextSize.x) * 0.5f);
+            ImGui::TextUnformatted(phaseStr);
+            if (currentMatchPhase == MatchPhase::COUNTDOWN || currentMatchPhase == MatchPhase::FINISHED) {
+                char timerBuf[16];
+                std::snprintf(timerBuf, sizeof(timerBuf), "%.1fs", static_cast<double>(countdownTimer));
+                const ImVec2 timerSize = ImGui::CalcTextSize(timerBuf);
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - timerSize.x) * 0.5f);
+                ImGui::TextUnformatted(timerBuf);
+            }
+            ImGui::Separator();
+
+            // Find local player to highlight.
+            entt::entity localPlayer = entt::null;
+            registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayer = e; });
+
+            constexpr ImGuiTableFlags k_tableFlags =
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit;
+            if (ImGui::BeginTable("##scores", 5, k_tableFlags)) {
+                ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthFixed, 160.0f);
+                ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+                ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+                ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, 55.0f);
+                ImGui::TableSetupColumn("Won", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+                ImGui::TableHeadersRow();
+
+                int row = 0;
+                registry.view<PlayerMatchStats>().each([&](entt::entity e, const PlayerMatchStats& stats) {
+                    const bool isLocal = (e == localPlayer);
+                    const int clientId = registry.all_of<ClientId>(e) ? registry.get<ClientId>(e).value : (row + 1);
+
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    if (isLocal) {
+                        char localLabel[40];
+                        std::snprintf(localLabel, sizeof(localLabel), "> You (Player #%d)", clientId);
+                        ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "%s", localLabel);
+                    } else {
+                        ImGui::Text("Player #%d", clientId);
+                    }
+
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%d", stats.kills);
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%d", stats.deaths);
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("%d", stats.score);
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::Text("%s", stats.hasWon ? "Yes" : "-");
+
+                    ++row;
+                });
+                if (row == 0)
+                    ImGui::TextDisabled("No players");
+
+                ImGui::EndTable();
+            }
+        }
+        ImGui::End();
+    }
+
+    // Process ammo refill request — pulse refillAmmo on InputSnapshot for
+    // exactly one frame so the server handles it once then stops.
+    {
+        const bool wantRefill = debugUI.pendingAmmoRefill_;
+        debugUI.pendingAmmoRefill_ = false;
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
+    }
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 #ifdef USE_HYBRID_RENDERER
@@ -1163,6 +1593,148 @@ SDL_AppResult Game::iterate()
             dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
     }
 
+    // Kill feed — tick timers and drop expired entries.
+    for (auto& e : killFeed)
+        e.displayTimer -= frameTime;
+    std::erase_if(killFeed, [](const KillFeedEvent& e) { return e.displayTimer <= 0.0f; });
+
+    // Kill feed overlay — top-right corner, always visible.
+    if (!killFeed.empty()) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        static constexpr float k_entryH = 22.0f;
+        static constexpr float k_padX = 12.0f;
+        static constexpr float k_marginRight = 10.0f;
+        static constexpr float k_marginTop = 10.0f;
+        static constexpr float k_fadeTime = 1.0f;
+
+        ClientId localClientId{-1};
+        registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        ImFont* font = ImGui::GetFont();
+        const float fontSize = ImGui::GetFontSize();
+
+        for (size_t i = 0; i < killFeed.size(); ++i) {
+            const auto& evt = killFeed[i];
+            const float alpha = std::min(evt.displayTimer / k_fadeTime, 1.0f);
+
+            const bool killerIsLocal = (localClientId.value != -1 && evt.killerId == localClientId);
+            const bool victimIsLocal = (localClientId.value != -1 && evt.victimId == localClientId);
+
+            char buf[64];
+            const char* killerName = killerIsLocal ? "You" : nullptr;
+            const char* victimName = victimIsLocal ? "You" : nullptr;
+            char killerBuf[16], victimBuf[16];
+            if (!killerName) {
+                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", evt.killerId.value);
+                killerName = killerBuf;
+            }
+            if (!victimName) {
+                std::snprintf(victimBuf, sizeof(victimBuf), "Player #%d", evt.victimId.value);
+                victimName = victimBuf;
+            }
+            std::snprintf(buf, sizeof(buf), "%s killed %s", killerName, victimName);
+
+            const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, buf);
+            const float boxW = textSize.x + k_padX * 2.0f;
+            const float boxH = k_entryH;
+            const float x = static_cast<float>(winW) - boxW - k_marginRight;
+            const float y = k_marginTop + static_cast<float>(i) * (boxH + 2.0f);
+
+            ImVec4 bgColor = {0.0f, 0.0f, 0.0f, 0.55f * alpha};
+            if (killerIsLocal)
+                bgColor = {0.1f, 0.35f, 0.05f, 0.75f * alpha}; // green tint — you got the kill
+            else if (victimIsLocal)
+                bgColor = {0.4f, 0.05f, 0.05f, 0.75f * alpha}; // red tint — you died
+
+            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(bgColor);
+            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 3.0f);
+            dl->AddText(font, fontSize, ImVec2(x + k_padX, y + (boxH - fontSize) * 0.5f), fg, buf);
+        }
+    }
+
+    // Death HUD — bottom bar shown while local player is dead.
+    {
+        entt::entity localPlayer = entt::null;
+        registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayer = e; });
+
+        if (localPlayer != entt::null && registry.all_of<DeathInfo, RespawnTimer>(localPlayer)) {
+            const auto& deathInfo = registry.get<DeathInfo>(localPlayer);
+            const auto& respawnTimer = registry.get<RespawnTimer>(localPlayer);
+
+            ClientId localClientId{-1};
+            registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+            char killerBuf[32];
+            const char* killerName;
+            if (localClientId.value != -1 && deathInfo.killerId == localClientId)
+                killerName = "yourself";
+            else {
+                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", deathInfo.killerId.value);
+                killerName = killerBuf;
+            }
+
+            char line1[64], line2[64];
+            std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
+            std::snprintf(line2,
+                          sizeof(line2),
+                          "Their HP: %.0f  Armor: %.0f  |  Respawning in %.0fs",
+                          static_cast<double>(deathInfo.killerHealth.health),
+                          static_cast<double>(deathInfo.killerHealth.armor),
+                          std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
+
+            int winW = 0, winH = 0;
+            SDL_GetWindowSizeInPixels(window, &winW, &winH);
+
+            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            ImFont* font = ImGui::GetFont();
+            const float fs = ImGui::GetFontSize();
+
+            static constexpr float k_padX = 12.0f;
+            static constexpr float k_padY = 8.0f;
+            static constexpr float k_marginB = 16.0f;
+            static constexpr float k_lineGap = 4.0f;
+
+            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
+            const float boxW = static_cast<float>(winW) * 0.4f;
+            const float x = (static_cast<float>(winW) - boxW) * 0.5f;
+            const float y = static_cast<float>(winH) - boxH - k_marginB;
+
+            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
+            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
+
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
+        }
+    }
+
+    // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.
+    if (hitmarkerTimer_ > 0.0f) {
+        hitmarkerTimer_ -= frameTime;
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        const float cx = static_cast<float>(winW) * 0.5f;
+        const float cy = static_cast<float>(winH) * 0.5f;
+
+        const float alpha = std::min(hitmarkerTimer_ / 0.15f, 1.0f); // fade out last 150ms
+        const float hmSize = 8.0f;
+        const float hmGap = 4.0f;
+        const float hmThick = 2.5f;
+        const ImU32 hmCol = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+        // Four diagonal lines forming an X, offset from center by hmGap
+        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy - hmGap - hmSize), ImVec2(cx - hmGap, cy - hmGap), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx + hmGap, cy - hmGap), ImVec2(cx + hmGap + hmSize, cy - hmGap - hmSize), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy + hmGap + hmSize), ImVec2(cx - hmGap, cy + hmGap), hmCol, hmThick);
+        dl->AddLine(ImVec2(cx + hmGap, cy + hmGap), ImVec2(cx + hmGap + hmSize, cy + hmGap + hmSize), hmCol, hmThick);
+    }
+
     // Third-person weapon tweaker — per-weapon tuning for remote player weapons.
     if (showTPWeaponUI_) {
         if (ImGui::Begin("3P Weapon Tweaker", &showTPWeaponUI_)) {
@@ -1199,6 +1771,43 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(tp.yawOffset),
                         static_cast<double>(tp.pitchOffset),
                         static_cast<double>(tp.rollOffset));
+            }
+        }
+        ImGui::End();
+    }
+
+    // Dynamic Lighting debug panel.
+    if (showDynLightUI_) {
+        ImGui::SetNextWindowPos({10.f, 400.f}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({280.f, 320.f}, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Dynamic Lighting", &showDynLightUI_)) {
+            ImGui::SeparatorText("Flashlight");
+            ImGui::Checkbox("Enable Flashlight", &flashlightEnabled_);
+            if (flashlightEnabled_) {
+                ImGui::DragFloat("FL Intensity", &flashlightIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("FL Range", &flashlightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+                ImGui::DragFloat("FL Offset", &flashlightOffset_, 1.0f, 0.0f, 100.0f, "%.0f");
+            }
+
+            ImGui::SeparatorText("Movable Glow Sphere");
+            ImGui::Checkbox("Enable Sphere", &movableSphereEnabled_);
+            if (movableSphereEnabled_) {
+                ImGui::DragFloat("Follow Dist", &sphereFollowDist_, 5.0f, 30.0f, 500.0f, "%.0f");
+                ImGui::DragFloat("Sph Intensity", &sphereIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("Sph Range", &sphereRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+            }
+
+            ImGui::SeparatorText("Bloom Beam");
+            ImGui::Checkbox("Enable Beam", &beamEnabled_);
+            if (beamEnabled_) {
+                ImGui::Text("Offsets: (fwd, up, right) from eye");
+                ImGui::DragFloat3("Start Off", &beamStartOff_.x, 1.0f, -500.0f, 500.0f, "%.0f");
+                ImGui::DragFloat3("End Off", &beamEndOff_.x, 1.0f, -500.0f, 500.0f, "%.0f");
+                ImGui::DragFloat("Radius", &beamRadius_, 0.5f, 0.5f, 50.0f, "%.1f");
+                ImGui::ColorEdit3("Beam Color", &beamColor_.x);
+                ImGui::DragFloat("Beam Intensity", &beamLightIntensity_, 0.1f, 0.1f, 30.0f, "%.1f");
+                ImGui::DragFloat("Beam Lt Range", &beamLightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
+                ImGui::DragFloat("Light Spacing", &beamLightSpacing_, 5.0f, 10.0f, 200.0f, "%.0f");
             }
         }
         ImGui::End();
@@ -1242,6 +1851,7 @@ void Game::quit()
 {
     if (recorder.isRecording())
         recorder.stopRecording();
+    sfxSystem.quit();
     particleSystem.quit();
     renderer.quit();
     debugUI.shutdown();
@@ -1263,7 +1873,7 @@ void Game::refreshRemotePlayerRenderables()
     // crouching changes the half-height — no manual offset update needed.
     registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
                                                                                    const Position&,
-                                                                                   const PlayerState&,
+                                                                                   const PlayerState& state,
                                                                                    const InputSnapshot& input,
                                                                                    const CollisionShape& shape) {
         if (registry.all_of<LocalPlayer>(e))
@@ -1286,8 +1896,22 @@ void Game::refreshRemotePlayerRenderables()
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
         rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        rend.visible = true;
+        rend.visible = !state.IsDead;
     });
+}
+
+void Game::refreshRemoteProjectileRenderables()
+{
+    registry.view<Position, Projectile, Velocity, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& shape) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            rend.modelIndex = 1;
+
+            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+            rend.scale = glm::vec3(10);
+            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+            rend.visible = true;
+        });
 }
 
 void Game::attachAnimatedCharacter(entt::entity e)

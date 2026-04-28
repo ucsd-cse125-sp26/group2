@@ -24,8 +24,11 @@ SDL_GPUColorTargetBlendState ParticleRenderer::additiveBlend()
     b.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
     b.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     b.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    // Preserve destination alpha — the HDR target's alpha channel carries the
+    // weapon viewmodel mask (0 = weapon, 1 = scene).  Particles must never
+    // overwrite it, or post-FX (SSAO, bloom) get incorrectly skipped.
+    b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     b.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
     return b;
 }
@@ -37,8 +40,9 @@ SDL_GPUColorTargetBlendState ParticleRenderer::premulAlphaBlend()
     b.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     b.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     b.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // Preserve destination alpha (weapon mask).
+    b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     b.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
     return b;
 }
@@ -50,8 +54,9 @@ SDL_GPUColorTargetBlendState ParticleRenderer::alphaBlend()
     b.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
     b.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     b.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // Preserve destination alpha (weapon mask).
+    b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     b.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
     return b;
 }

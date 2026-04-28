@@ -85,6 +85,23 @@ public:
     /// @brief Set the list of entity render commands for this frame.
     void setEntityRenderList(std::vector<EntityRenderCmd> cmds) override { entityRenderCmds = std::move(cmds); }
 
+    /// @brief Set dynamic point lights for this frame.
+    ///
+    /// Up to 6 point lights are supported (the UBO has 8 slots; 2 are reserved
+    /// for the directional sun + fill).  Excess lights are silently dropped.
+    void setPointLights(std::vector<PointLight> lights) override { pointLights = std::move(lights); }
+
+    /// @brief Update the emissive factor on every mesh of a loaded model.
+    ///
+    /// Takes effect on the next drawFrame — the material UBO is pushed from CPU
+    /// each frame, so no GPU re-upload is needed.
+    void setModelEmissive(int modelIndex, glm::vec4 emissiveFactor) override
+    {
+        if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < models.size())
+            for (auto& m : models[static_cast<size_t>(modelIndex)].meshes)
+                m.material.emissiveFactor = emissiveFactor;
+    }
+
     /// @brief Set the first-person weapon viewmodel for this frame.
     void setWeaponViewmodel(const WeaponViewmodel& vm) override { weaponVM = vm; }
 
@@ -210,6 +227,7 @@ private:
 
     // Entity rendering
     std::vector<EntityRenderCmd> entityRenderCmds; ///< Per-frame list from Game.
+    std::vector<PointLight> pointLights;           ///< Per-frame dynamic point lights from Game.
     WeaponViewmodel weaponVM;                      ///< First-person weapon, rendered after depth clear.
 
     // Deferred vertex re-uploads (skinned animation)
@@ -300,7 +318,7 @@ public:
     /// over-glossy / pseudo-metallic look dielectric surfaces get from
     /// real-world HDR environment maps.
     float iblSpecularIntensity = 0.5f;
-    float bloomStr = 0.04f;   ///< Bloom compositing strength.
+    float bloomStr = 0.3f;    ///< Bloom compositing strength.
     float ssaoStr = 0.8f;     ///< SSAO compositing strength.
     float ssaoRadius = 0.8f;  ///< GTAO world-space radius.
     float ssaoFalloff = 2.0f; ///< GTAO distance falloff exponent.

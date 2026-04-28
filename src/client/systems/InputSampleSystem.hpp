@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ecs/components/Controllable.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -35,7 +36,7 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity)
     float mdy = 0.0f;
     SDL_GetRelativeMouseState(&mdx, &mdy);
 
-    registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
+    registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         // Negate: SDL mdx is positive when moving right, but positive yaw
         // rotates toward +X which maps to screen-left via glm::lookAt's
         // cross(forward, up) convention.  Negating gives the standard
@@ -61,7 +62,7 @@ inline void runMovementKeys(Registry& registry)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
 
-    registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
+    registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.forward = kKeys[SDL_SCANCODE_W];
         snap.back = kKeys[SDL_SCANCODE_S];
         snap.left = kKeys[SDL_SCANCODE_A];
@@ -85,12 +86,13 @@ inline void runWeaponKeys(Registry& registry)
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
 
-    registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
+    registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting =
             (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
         snap.switchToTertiary = kKeys[SDL_SCANCODE_3];
+        snap.switchToQuaternary = kKeys[SDL_SCANCODE_4];
         snap.reload = kKeys[SDL_SCANCODE_R];
     });
 }

@@ -15,6 +15,8 @@
 #include "network/MatchStatus.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
+#include "sfx/SfxSystem.hpp"
+#include "systems/KillFeedEvent.hpp"
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
 #else
@@ -49,6 +51,7 @@ public:
     /// @brief Shut down all subsystems in reverse-init order.
     void quit();
     void refreshRemotePlayerRenderables();
+    void refreshRemoteProjectileRenderables();
 
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
@@ -67,6 +70,7 @@ private:
     Registry registry;             ///< The shared ECS registry.
     Client client;                 ///< UDP network client.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;           ///< Client-side sound effects system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
     Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
@@ -80,7 +84,7 @@ private:
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
                                            ///  vs every iterate() call (false).
-    bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false).
+    bool limitFPSToMonitor = true;         ///< VSync on (true) / off (false).
 
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
@@ -99,20 +103,49 @@ private:
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
     // Model indices for entity rendering (loaded at init).
-    int wraithModelIdx = -1;                             ///< Wraith player model index.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1};       ///< Per WeaponType, loaded at init.
+    int wraithModelIdx = -1;                       ///< Wraith player model index.
+    int glowSphereModelIdx_ = -1;                  ///< Glow sphere for bloom testing (static).
+    int movableSphereModelIdx_ = -1;               ///< Glow sphere that follows the player.
+    int weaponModelIndices_[4] = {-1, -1, -1, -1}; ///< Per WeaponType, loaded at init.
+
+    // Dynamic lighting test controls (ImGui-tunable)
+    bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
+    bool flashlightEnabled_ = false;                     ///< Point light at camera position.
+    float flashlightIntensity_ = 8.0f;                   ///< Flashlight brightness.
+    float flashlightRange_ = 800.0f;                     ///< Flashlight attenuation range.
+    float flashlightOffset_ = 30.0f;                     ///< Forward offset from eye.
+    bool movableSphereEnabled_ = false;                  ///< Glow sphere following the player.
+    float sphereFollowDist_ = 150.0f;                    ///< Distance ahead of player.
+    float sphereIntensity_ = 5.0f;                       ///< Point light intensity of movable sphere.
+    float sphereRange_ = 500.0f;                         ///< Point light range of movable sphere.
+    int glowCylinderModelIdx_ = -1;                      ///< Glow cylinder (beam) model index.
+    bool beamEnabled_ = false;                           ///< Show the bloom beam.
+    glm::vec3 beamStartOff_{30.0f, -5.0f, 10.0f};        ///< Beam start offset (fwd, up, right) from eye.
+    glm::vec3 beamEndOff_{200.0f, -5.0f, 10.0f};         ///< Beam end offset (fwd, up, right) from eye.
+    float beamRadius_ = 3.0f;                            ///< Beam cylinder radius.
+    glm::vec3 beamColor_{0.6f, 0.1f, 1.0f};              ///< Beam emissive colour (purple).
+    float beamLightIntensity_ = 4.0f;                    ///< Point light intensity per sample.
+    float beamLightRange_ = 300.0f;                      ///< Point light range per sample.
+    float beamLightSpacing_ = 60.0f;                     ///< Distance between point lights along beam.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
 
+    // Sound state tracking
+    bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
+    bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
+
+    // Hitmarker
+    float hitmarkerTimer_ = 0.0f; ///< Remaining display time (fades out over this).
+
     // Viewmodel tuning (live-adjustable via ImGui)
-    float vmScale = 0.03f;       ///< Weapon model scale (model is in mm).
-    float vmForward = 21.0f;     ///< Forward offset from eye (Quake units).
-    float vmRight = 5.5f;        ///< Right offset from eye.
-    float vmDown = 22.5f;        ///< Downward offset from eye.
-    float vmYawOffset = 58.0f;   ///< Extra yaw (degrees) applied to the model before camera orient.
-    float vmPitchOffset = 12.0f; ///< Extra pitch (degrees).
-    float vmRollOffset = 2.0f;   ///< Extra roll (degrees).
-    bool showViewmodelUI = true; ///< Show the Viewmodel Tweaker window.
+    float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).
+    float vmForward = 21.0f;      ///< Forward offset from eye (Quake units).
+    float vmRight = 5.5f;         ///< Right offset from eye.
+    float vmDown = 22.5f;         ///< Downward offset from eye.
+    float vmYawOffset = 58.0f;    ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 12.0f;  ///< Extra pitch (degrees).
+    float vmRollOffset = 2.0f;    ///< Extra roll (degrees).
+    bool showViewmodelUI = false; ///< Show the Viewmodel Tweaker window.
 
     // Weapon sway state (CoD-style barrel lead)
     float prevSwayYaw_ = 0.0f;
@@ -149,7 +182,7 @@ private:
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
     int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
-    bool showTPWeaponUI_ = true;                ///< Show the 3P Weapon Tweaker window.
+    bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
@@ -192,4 +225,7 @@ private:
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::WARMUP; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
+
+    // Kill Feed State
+    std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
 };

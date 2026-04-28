@@ -92,11 +92,6 @@ public:
     void buildNetworkUI(const NetworkStats& stats);
     void buildWeaponUI(const Registry& registry);
 
-    /// @brief Build the persistent scoreboard HUD showing all players' kills, deaths, and score.
-    /// @param phase          Current match phase received from the server.
-    /// @param countdownTimer Seconds remaining; displayed only during COUNTDOWN and FINISHED phases.
-    void buildScoreboardUI(const Registry& registry, MatchPhase phase, float countdownTimer);
-
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
@@ -113,14 +108,15 @@ public:
     ///                        consistent across all debug windows.
     void toggleAllPanels(std::initializer_list<bool*> externalPanels = {});
 
+    bool pendingAmmoRefill_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
+
 private:
     /// Per-window visibility toggles — persistent across frames.
-    bool showInspector = true;        ///< Show the main ECS Inspector window.
-    bool showRenderToggles = true;    ///< Show the Render Toggles window.
-    bool showLightingControls = true; ///< Show the Lighting Controls window.
-    bool showSkybox = true;           ///< Show the Skybox window.
-    bool showNetworkStats = true;     ///< Show the Network Stats window.
-    bool showScoreboard_ = true;      ///< Show the scoreboard HUD window.
+    bool showInspector = false;        ///< Show the main ECS Inspector window.
+    bool showRenderToggles = false;    ///< Show the Render Toggles window.
+    bool showLightingControls = false; ///< Show the Lighting Controls window.
+    bool showSkybox = false;           ///< Show the Skybox window.
+    bool showNetworkStats = false;     ///< Show the Network Stats window.
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.
@@ -130,8 +126,8 @@ private:
     bool showPlayerState = true;    ///< Show PlayerState flags row.
     bool showInputSnapshot = true;  ///< Show InputSnapshot key-state row.
     bool showViewAngles = true;     ///< Show yaw/pitch/roll in degrees (easier to read than radians).
-    bool showMovementChart = true;  ///< Show the 2-D overhead movement chart window.
-    bool showBhopAnalyzer = true;   ///< Show the bhop analyzer (player-relative + gain/sync).
+    bool showMovementChart = false; ///< Show the 2-D overhead movement chart window.
+    bool showBhopAnalyzer = false;  ///< Show the bhop analyzer (player-relative + gain/sync).
 
     /// @brief Draw the body of the ECS Inspector window (everything after `ImGui::Begin`).
     ///
@@ -177,5 +173,5 @@ private:
 
     // Particle UI state
     float particleSpawnDist_ = 200.f; ///< Units ahead of camera to spawn effects.
-    bool showParticleWindow_ = true;
+    bool showParticleWindow_ = false;
 };

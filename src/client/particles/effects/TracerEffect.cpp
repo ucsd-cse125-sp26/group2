@@ -41,10 +41,10 @@ void TracerEffect::spawnFree(glm::vec3 tip, glm::vec3 tail, float lifetime)
 
     slot->tip = tip;
     slot->tail = tail;
-    slot->radius = 5.0f;
+    slot->radius = 8.0f;
     slot->brightness = 1.f;
-    slot->coreColor = {1.f, 0.95f, 0.7f, 1.f};
-    slot->edgeColor = {1.f, 0.55f, 0.10f, 0.3f};
+    slot->coreColor = {1.f, 0.7f, 0.25f, 1.f};
+    slot->edgeColor = {1.f, 0.45f, 0.05f, 0.4f};
     slot->lifetime = lifetime; // < 9990 -> picked up by the decay loop
 }
 
