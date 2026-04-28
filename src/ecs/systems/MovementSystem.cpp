@@ -663,16 +663,20 @@ void exitWallrun(PlayerState& state, float posY)
 }
 
 /// @brief Process wallrunning movement, exit conditions, and camera tilt.
-/// @param vel    Velocity (modified in place).
-/// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-/// @param walls  Wall detection result from this tick.
-/// @param posY   Current vertical position of the entity.
-/// @param dt     Fixed physics delta time in seconds.
-void handleWallRunning(glm::vec3& vel,
+/// @param pos          Entity position (modified for curved-surface correction).
+/// @param vel          Velocity (modified in place).
+/// @param state        Player state (modified in place).
+/// @param input        Current input snapshot.
+/// @param walls        Wall detection result from this tick.
+/// @param halfExtents  Player AABB half-extents (for standoff distance).
+/// @param posY         Current vertical position of the entity.
+/// @param dt           Fixed physics delta time in seconds.
+void handleWallRunning(glm::vec3& pos,
+                       glm::vec3& vel,
                        PlayerState& state,
                        const InputSnapshot& input,
                        const physics::WallDetectionResult& walls,
+                       const glm::vec3& halfExtents,
                        float posY,
                        float dt)
 {
@@ -712,12 +716,44 @@ void handleWallRunning(glm::vec3& vel,
     else
         state.wallNormal = walls.leftNormal;
 
+    // --- Curved surface: constrained motion ---
+    // On a flat wall, tangential velocity is parallel to the surface.
+    // On a curved surface (cylinder), the tangent rotates, so velocity must
+    // be re-projected onto the new tangent plane each tick.  Without this,
+    // the player flies off tangentially — the push force (300 u/s²) can't
+    // overcome the centripetal acceleration needed (v²/r ≈ 2000+ u/s²).
+
+    // 1. Preserve speed, re-project velocity onto the new wall tangent plane.
+    //    This is the key step — it rotates the velocity to follow curvature.
+    {
+        const float k_normalVel = glm::dot(vel, state.wallNormal);
+        // Remove the outward component (only if pointing away from wall).
+        // Keep inward component so the push force can press the player in.
+        if (k_normalVel > 0.0f)
+            vel -= state.wallNormal * k_normalVel;
+    }
+
+    // 2. Position correction: if the wall contact point is known, nudge the
+    //    player toward the wall to maintain consistent standoff distance.
+    {
+        const glm::vec3 wallPt = (state.wallRunSide == WallSide::Right) ? walls.rightPoint : walls.leftPoint;
+        // Vector from wall contact point to player center, along wall normal.
+        const float k_currentDist = glm::dot(pos - wallPt, state.wallNormal);
+        // Desired standoff: just outside the collision shape.
+        const float k_desiredDist = std::max(halfExtents.x, halfExtents.z) + 1.0f;
+        const float k_drift = k_currentDist - k_desiredDist;
+        // If drifting outward, pull back. Lerp to avoid jitter.
+        if (k_drift > 0.5f) {
+            const float k_correction = std::min(k_drift * 10.0f * dt, k_drift);
+            pos -= state.wallNormal * k_correction;
+        }
+    }
+
     // --- Compute wall-tangent acceleration direction ---
-    // Instead of using wishDir projected onto the wall (which makes strafing
-    // into the wall go backward), accelerate along the current horizontal
-    // velocity direction projected onto the wall plane.  As long as wishDir
-    // points into the wall, the player maintains speed — this makes the
-    // controls feel much more intuitive on curved surfaces.
+    // Accelerate along the current velocity direction projected onto the wall
+    // plane.  This makes the controls intuitive: as long as wishDir has a
+    // component into the wall, the player is accelerated forward regardless
+    // of strafe keys.
     const glm::vec3 k_hv = horizVel(vel);
     const float k_hvLen = glm::length(k_hv);
 
@@ -729,9 +765,8 @@ void handleWallRunning(glm::vec3& vel,
         if (k_projLen > 0.001f)
             wallFwd /= k_projLen;
         else
-            wallFwd = state.wallForward; // fallback to stored
+            wallFwd = state.wallForward;
     } else {
-        // Not moving — keep previous direction
         wallFwd = state.wallForward;
     }
 
@@ -1205,7 +1240,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             }
 
             case MoveMode::WallRunning:
-                handleWallRunning(vel.value, state, input, walls, pos.value.y, dt);
+                handleWallRunning(pos.value, vel.value, state, input, walls, shape.halfExtents, pos.value.y, dt);
                 break;
 
             case MoveMode::Climbing:
