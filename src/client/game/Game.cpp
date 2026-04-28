@@ -9,6 +9,8 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Controllable.hpp"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -16,6 +18,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/components/WeaponConfig.hpp"
@@ -164,10 +167,26 @@ bool Game::init()
             SDL_Log("[client] glow cylinder uploaded (model index %d)", glowCylinderModelIdx_);
     }
 
+    // Remove Controllable when the local player dies (RespawnTimer added),
+    // restore it when they respawn (RespawnTimer removed).
+    registry.on_construct<RespawnTimer>().connect<[](entt::registry& reg, entt::entity e) {
+        if (reg.all_of<LocalPlayer>(e))
+            reg.remove<Controllable>(e);
+    }>();
+    registry.on_destroy<RespawnTimer>().connect<[](entt::registry& reg, entt::entity e) {
+        if (reg.all_of<LocalPlayer>(e))
+            reg.emplace_or_replace<Controllable>(e);
+    }>();
+
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
         registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        // Only add Controllable if the player is not already dead (edge case:
+        // joining while mid-death on a long-running server).
+        if (!registry.all_of<RespawnTimer>(local))
+            registry.emplace<Controllable>(local);
 
         // Animator runs for local too — future gun-IK / hands-on-weapon work
         // needs an up-to-date upper-body pose even when the body is invisible.
@@ -656,7 +675,8 @@ SDL_AppResult Game::iterate()
         }
 
         if (!client.poll(registry)) {
-            return SDL_APP_FAILURE;
+            // TODO: Update so reset to menu or some other non-crash state
+            return SDL_APP_SUCCESS;
         }
 
         refreshRemotePlayerRenderables();
@@ -1636,6 +1656,63 @@ SDL_AppResult Game::iterate()
         }
     }
 
+    // Death HUD — bottom bar shown while local player is dead.
+    {
+        entt::entity localPlayer = entt::null;
+        registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayer = e; });
+
+        if (localPlayer != entt::null && registry.all_of<DeathInfo, RespawnTimer>(localPlayer)) {
+            const auto& deathInfo = registry.get<DeathInfo>(localPlayer);
+            const auto& respawnTimer = registry.get<RespawnTimer>(localPlayer);
+
+            ClientId localClientId{-1};
+            registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+            char killerBuf[32];
+            const char* killerName;
+            if (localClientId.value != -1 && deathInfo.killerId == localClientId)
+                killerName = "yourself";
+            else {
+                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", deathInfo.killerId.value);
+                killerName = killerBuf;
+            }
+
+            char line1[64], line2[64];
+            std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
+            std::snprintf(line2,
+                          sizeof(line2),
+                          "Their HP: %.0f  Armor: %.0f  |  Respawning in %.0fs",
+                          static_cast<double>(deathInfo.killerHealth.health),
+                          static_cast<double>(deathInfo.killerHealth.armor),
+                          std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
+
+            int winW = 0, winH = 0;
+            SDL_GetWindowSizeInPixels(window, &winW, &winH);
+
+            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            ImFont* font = ImGui::GetFont();
+            const float fs = ImGui::GetFontSize();
+
+            static constexpr float k_padX = 12.0f;
+            static constexpr float k_padY = 8.0f;
+            static constexpr float k_marginB = 16.0f;
+            static constexpr float k_lineGap = 4.0f;
+
+            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
+            const float boxW = static_cast<float>(winW) * 0.4f;
+            const float x = (static_cast<float>(winW) - boxW) * 0.5f;
+            const float y = static_cast<float>(winH) - boxH - k_marginB;
+
+            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
+            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
+
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
+        }
+    }
+
     // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.
     if (hitmarkerTimer_ > 0.0f) {
         hitmarkerTimer_ -= frameTime;
@@ -1796,7 +1873,7 @@ void Game::refreshRemotePlayerRenderables()
     // crouching changes the half-height — no manual offset update needed.
     registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
                                                                                    const Position&,
-                                                                                   const PlayerState&,
+                                                                                   const PlayerState& state,
                                                                                    const InputSnapshot& input,
                                                                                    const CollisionShape& shape) {
         if (registry.all_of<LocalPlayer>(e))
@@ -1819,7 +1896,7 @@ void Game::refreshRemotePlayerRenderables()
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
         rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        rend.visible = true;
+        rend.visible = !state.IsDead;
     });
 }
 

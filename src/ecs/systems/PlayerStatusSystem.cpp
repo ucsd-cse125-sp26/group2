@@ -4,12 +4,15 @@
 #include "PlayerStatusSystem.hpp"
 
 #include "SDL3/SDL_log.h"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Renderable.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
@@ -49,6 +52,9 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
     const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
 
+    registry.erase<RespawnTimer>(player);
+    registry.erase<DeathInfo>(player);
+    registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = true; });
     registry.emplace_or_replace<InputSnapshot>(player);
     registry.emplace_or_replace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace_or_replace<Velocity>(player);
@@ -97,28 +103,40 @@ inline void handleDeath(entt::entity& player,
     if (playerHealth.health <= 0) {
         // Update death
         registry.get_or_emplace<PlayerState>(player).IsDead = true;
+        registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = false; });
+        registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 5.0f});
         registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
 
         // Award killer
-        registry.patch<PlayerMatchStats>(killer, [&](PlayerMatchStats& stats) { stats.kills++; });
+        registry.get_or_emplace<PlayerMatchStats>(killer).kills++;
 
-        // Place kill event for network baroadcast
+        // Get killer info
+        ClientId killerId = registry.get<ClientId>(killer);
+        Health killerHealth = registry.get<Health>(killer);
+
+        // Death info handling
         NetKillEvent event{
-            .killerId = registry.get<ClientId>(killer),
+            .killerId = killerId,
             .victimId = registry.get<ClientId>(player),
-            .killerHealth = registry.get<Health>(killer),
+            .killerHealth = killerHealth,
         };
-
         killEvents.push_back(event);
 
-        // Respawn
-        handleRespawn(player, registry);
+        registry.emplace_or_replace<DeathInfo>(player,
+                                               DeathInfo{
+                                                   .killerId = killerId,
+                                                   .killerHealth = killerHealth,
+                                               });
     }
 }
 
 void applyDamage(
     float damage, entt::entity player, entt::entity& killer, Registry& registry, std::vector<NetKillEvent>& killEvents)
 {
+    // If player is dead, ignore damage
+    if (registry.all_of<RespawnTimer>(player))
+        return;
+
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 
     // Reset heal cooldown on every damage tick
@@ -153,8 +171,16 @@ inline void handleHealing(Health& playerHealth, float dt)
 void runPlayerStatus(Registry& registry, float dt)
 {
     registry.view<Player>().each([&registry, dt](entt::entity e) {
-        Health& playerHealth = registry.get_or_emplace<Health>(e);
-        handleHealing(playerHealth, dt);
+        if (registry.all_of<RespawnTimer>(e)) {
+            auto& respawnTimer = registry.get<RespawnTimer>(e);
+            respawnTimer.timeRemaining -= dt;
+            if (respawnTimer.timeRemaining <= 0) {
+                handleRespawn(e, registry);
+            }
+        } else {
+            Health& playerHealth = registry.get_or_emplace<Health>(e);
+            handleHealing(playerHealth, dt);
+        }
     });
 }
 } // namespace systems
