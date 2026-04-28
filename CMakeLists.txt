@@ -610,6 +610,7 @@ add_executable(group2
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
+        src/client/systems/KillFeedEvent.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -843,6 +844,7 @@ add_executable(client
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
         src/network/MatchStatus.hpp
+        src/client/systems/KillFeedEvent.hpp
 )
 
 target_include_directories(client PRIVATE

@@ -252,6 +252,16 @@ bool Game::init()
         countdownTimer = packet.countdownTimer;
     });
 
+    client.onKillEvent([this](const NetKillEvent& evt) {
+        killFeed.insert(killFeed.begin(),
+                        KillFeedEvent{
+                            evt.killerId,
+                            evt.victimId,
+                        });
+
+        // TODO: Specific handling for local player deaths (display enemy health)
+    });
+
     // Initialize runtime 3P weapon params from defaults
     for (int i = 0; i < 4; ++i)
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
@@ -1468,6 +1478,46 @@ SDL_AppResult Game::iterate()
         // Optional center dot
         if (crosshairDot_)
             dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
+    }
+
+    // Kill feed — tick timers and drop expired entries.
+    for (auto& e : killFeed)
+        e.displayTimer -= frameTime;
+    std::erase_if(killFeed, [](const KillFeedEvent& e) { return e.displayTimer <= 0.0f; });
+
+    // Kill feed overlay — top-right corner, always visible.
+    if (!killFeed.empty()) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        static constexpr float k_entryH = 22.0f;
+        static constexpr float k_padX = 12.0f;
+        static constexpr float k_marginRight = 10.0f;
+        static constexpr float k_marginTop = 10.0f;
+        static constexpr float k_fadeTime = 1.0f;
+
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        ImFont* font = ImGui::GetFont();
+        const float fontSize = ImGui::GetFontSize();
+
+        for (size_t i = 0; i < killFeed.size(); ++i) {
+            const auto& evt = killFeed[i];
+            const float alpha = std::min(evt.displayTimer / k_fadeTime, 1.0f);
+
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Player %d killed Player %d", evt.killerId.value, evt.victimId.value);
+
+            const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, buf);
+            const float boxW = textSize.x + k_padX * 2.0f;
+            const float boxH = k_entryH;
+            const float x = static_cast<float>(winW) - boxW - k_marginRight;
+            const float y = k_marginTop + static_cast<float>(i) * (boxH + 2.0f);
+
+            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.55f * alpha));
+            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 3.0f);
+            dl->AddText(font, fontSize, ImVec2(x + k_padX, y + (boxH - fontSize) * 0.5f), fg, buf);
+        }
     }
 
     // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.
