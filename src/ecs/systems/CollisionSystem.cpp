@@ -210,24 +210,25 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
 
 /// @brief Push the entity out of a triangle mesh it currently overlaps.
 ///
-/// Uses a weighted-average push direction across all overlapping triangles to
-/// avoid jitter at triangle boundaries.  On a flat surface (all normals agree)
-/// this produces the same result as single-triangle depenetration.  On curved
-/// surfaces or triangle junctions, the averaged direction is smooth and stable.
+/// Instead of depenetrating against individual triangles (which jitters at
+/// edges where adjacent normals fight), this uses the BVH leaf AABBs as
+/// proxy collision volumes.  Each leaf AABB is a tight box around 1-4
+/// triangles.  AABB depenetration has stable, consistent face normals —
+/// the same algorithm that works perfectly for WorldAABB.
+///
+/// The swept collision still uses precise per-triangle tests, so sliding and
+/// surface normals are accurate.  This depenetration is only a safety net.
 static void
 depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
 {
     // Quick reject: AABB overlap with mesh bounds.
-    const glm::vec3 entMin = pos - halfExtents;
-    const glm::vec3 entMax = pos + halfExtents;
-    if (entMax.x < mesh.boundsMin.x || entMin.x > mesh.boundsMax.x || entMax.y < mesh.boundsMin.y ||
-        entMin.y > mesh.boundsMax.y || entMax.z < mesh.boundsMin.z || entMin.z > mesh.boundsMax.z)
+    if (pos.x + halfExtents.x < mesh.boundsMin.x || pos.x - halfExtents.x > mesh.boundsMax.x ||
+        pos.y + halfExtents.y < mesh.boundsMin.y || pos.y - halfExtents.y > mesh.boundsMax.y ||
+        pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
         return;
 
-    // BVH traversal: accumulate weighted push from ALL overlapping triangles.
-    glm::vec3 pushAccum{0.0f};
-    float maxOverlap = 0.0f;
-
+    // BVH traversal: find leaf nodes whose AABBs overlap the entity and
+    // depenetrate against each leaf AABB using the standard box push-out.
     int stack[64];
     int stackPtr = 0;
     stack[0] = 0;
@@ -236,55 +237,23 @@ depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents,
         const int nodeIdx = stack[stackPtr--];
         const auto& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
-        // Static AABB overlap: expand node bounds by halfExtents.
+        // Expand node bounds by entity halfExtents (Minkowski sum).
         const glm::vec3 expMin = node.boundsMin - halfExtents;
         const glm::vec3 expMax = node.boundsMax + halfExtents;
+
+        // Not overlapping this node?
         if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
             pos.z > expMax.z)
             continue;
 
         if (node.count > 0) {
-            // Leaf — test individual triangles.
-            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
-                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
-                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
-                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
-                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
-
-                glm::vec3 triN = glm::cross(v1 - v0, v2 - v0);
-                const float len = glm::length(triN);
-                if (len < 1e-8f)
-                    continue;
-                triN /= len;
-
-                // Ensure normal faces toward pos.
-                if (glm::dot(triN, pos - v0) < 0.0f)
-                    triN = -triN;
-
-                const float r = std::abs(triN.x) * halfExtents.x + std::abs(triN.y) * halfExtents.y +
-                                std::abs(triN.z) * halfExtents.z;
-                const float dist = glm::dot(triN, pos) - glm::dot(triN, v0);
-
-                if (dist < r) {
-                    const float overlap = r - dist;
-                    // Weight by overlap depth: deeper penetrations contribute more.
-                    pushAccum += triN * overlap;
-                    maxOverlap = std::max(maxOverlap, overlap);
-                }
-            }
+            // Leaf node — depenetrate against its AABB (same logic as depenetrateBox).
+            const physics::WorldAABB leafBox{node.boundsMin, node.boundsMax};
+            depenetrateBox(pos, vel, halfExtents, leafBox);
         } else {
             stack[++stackPtr] = node.leftFirst;
             stack[++stackPtr] = node.leftFirst + 1;
         }
-    }
-
-    const float pushLen = glm::length(pushAccum);
-    if (pushLen > 1e-6f) {
-        const glm::vec3 pushDir = pushAccum / pushLen;
-        pos += pushDir * (maxOverlap + k_pushback);
-        const float k_into = glm::dot(vel, pushDir);
-        if (k_into < 0.0f)
-            vel -= pushDir * k_into;
     }
 }
 
@@ -310,10 +279,8 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
     for (const physics::WorldSphere& sph : world.spheres)
         depenetrateSphere(pos, vel, halfExtents, sph);
 
-    // Triangle meshes: no depenetration. The swept collision prevents entry;
-    // depenetrating against individual triangles is unstable at edges/corners
-    // and causes jitter. This matches Source/Quake which only depenetrate
-    // against simple convex primitives.
+    for (const physics::WorldTriMesh& tm : world.triMeshes)
+        depenetrateTriMesh(pos, vel, halfExtents, tm);
 }
 
 /// @brief Attempt to step over a low obstacle when a wall is hit.
