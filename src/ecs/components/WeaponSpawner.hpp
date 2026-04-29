@@ -10,4 +10,3 @@ struct WeaponSpawner
     float spawnCooldown = 0;
     bool hasWeapon = false;
 };
-
