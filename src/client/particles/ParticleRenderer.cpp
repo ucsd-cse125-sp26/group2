@@ -74,7 +74,9 @@ SDL_GPUGraphicsPipeline* ParticleRenderer::makeStoragePipeline(const char* vertN
                                                                SDL_GPUPrimitiveType prim)
 {
     const char* base = SDL_GetBasePath();
-    const char* ext = (shaderFmt_ == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    const char* ext = (shaderFmt_ == SDL_GPU_SHADERFORMAT_MSL)    ? ".msl"
+                      : (shaderFmt_ == SDL_GPU_SHADERFORMAT_DXIL) ? ".dxil"
+                                                                  : ".spv";
     char vp[512], fp[512];
     SDL_snprintf(vp, sizeof(vp), "%sshaders/%s%s", base ? base : "", vertName, ext);
     SDL_snprintf(fp, sizeof(fp), "%sshaders/%s%s", base ? base : "", fragName, ext);
@@ -131,7 +133,9 @@ SDL_GPUGraphicsPipeline* ParticleRenderer::makeVertexPipeline(const char* vertNa
                                                               SDL_GPUPrimitiveType prim)
 {
     const char* base = SDL_GetBasePath();
-    const char* ext = (shaderFmt_ == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    const char* ext = (shaderFmt_ == SDL_GPU_SHADERFORMAT_MSL)    ? ".msl"
+                      : (shaderFmt_ == SDL_GPU_SHADERFORMAT_DXIL) ? ".dxil"
+                                                                  : ".spv";
     char vp[512], fp[512];
     SDL_snprintf(vp, sizeof(vp), "%sshaders/%s%s", base ? base : "", vertName, ext);
     SDL_snprintf(fp, sizeof(fp), "%sshaders/%s%s", base ? base : "", fragName, ext);
