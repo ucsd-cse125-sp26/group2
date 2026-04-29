@@ -382,7 +382,9 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
             uniquePlanes.push_back({faceN, dist});
     }
 
-    if (uniquePlanes.empty() || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
+    // A closed convex volume needs at least 4 planes (tetrahedron).
+    // Fewer planes produce infinite half-spaces that break collision.
+    if (static_cast<int>(uniquePlanes.size()) < 4 || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
         return false;
 
     // Build the brush.
@@ -422,6 +424,20 @@ void buildTriMeshFromAiMesh(const aiMesh* mesh, const glm::mat4& world, float sc
 // Per-mesh collision extraction with auto-detection
 // ---------------------------------------------------------------------------
 
+/// @brief Check if a node name belongs to Blender default scene objects that
+///        should never generate collision (armatures, cameras, lights, mannequins).
+bool shouldSkipNode(const char* nodeName)
+{
+    const std::string name(nodeName);
+    // Blender's default mannequin meshes.
+    if (containsCI(name, "Beta_"))
+        return true;
+    // Blender default objects that sometimes leak into exports.
+    if (containsCI(name, "Armature") || containsCI(name, "Camera") || containsCI(name, "Light"))
+        return true;
+    return false;
+}
+
 /// @brief Determine the best collision primitive for a mesh and add it to `out`.
 void extractMeshCollision(const aiMesh* mesh,
                           const glm::mat4& world,
@@ -432,6 +448,12 @@ void extractMeshCollision(const aiMesh* mesh,
 {
     if (!mesh->HasPositions() || mesh->mNumVertices == 0)
         return;
+
+    // Skip known non-geometry objects (Blender mannequin, armatures, etc.)
+    if (forceType.empty() && shouldSkipNode(nodeName)) {
+        SDL_Log("MapLoader: skipping non-geometry node '%s'", nodeName);
+        return;
+    }
 
     const std::vector<glm::vec3> verts = getWorldVertices(mesh, world, scale);
     if (verts.empty())
