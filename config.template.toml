@@ -16,4 +16,4 @@ port = 9999
 #   "direct3d12"  — Windows: Direct3D 12 (default on Windows)
 #   "vulkan"      — Vulkan (default on Linux; available on Windows as fallback)
 #   "metal"       — macOS: Metal (default on macOS)
-backend = "direct3d12"
+backend = "auto"
