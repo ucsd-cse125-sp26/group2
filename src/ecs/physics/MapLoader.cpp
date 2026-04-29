@@ -6,6 +6,8 @@
 
 #include "MapLoader.hpp"
 
+#include "TriMeshCollision.hpp"
+
 #include <SDL3/SDL_log.h>
 
 #ifdef __GNUC__
@@ -26,6 +28,7 @@
 #include <cctype>
 #include <cmath>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <string>
 #include <vector>
@@ -379,7 +382,9 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
             uniquePlanes.push_back({faceN, dist});
     }
 
-    if (uniquePlanes.empty() || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
+    // A closed convex volume needs at least 4 planes (tetrahedron).
+    // Fewer planes produce infinite half-spaces that break collision.
+    if (static_cast<int>(uniquePlanes.size()) < 4 || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
         return false;
 
     // Build the brush.
@@ -393,8 +398,45 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
 }
 
 // ---------------------------------------------------------------------------
+// Triangle mesh construction
+// ---------------------------------------------------------------------------
+
+/// @brief Build a WorldTriMesh from an Assimp mesh.
+void buildTriMeshFromAiMesh(const aiMesh* mesh, const glm::mat4& world, float scale, WorldTriMesh& out)
+{
+    out.vertices.reserve(mesh->mNumVertices);
+    for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
+        const glm::vec4 local(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
+        out.vertices.push_back(glm::vec3(world * local) * scale);
+    }
+    for (unsigned int fi = 0; fi < mesh->mNumFaces; ++fi) {
+        const aiFace& face = mesh->mFaces[fi];
+        if (face.mNumIndices != 3)
+            continue;
+        out.indices.push_back(face.mIndices[0]);
+        out.indices.push_back(face.mIndices[1]);
+        out.indices.push_back(face.mIndices[2]);
+    }
+    computeAABB(out.vertices, out.boundsMin, out.boundsMax);
+}
+
+// ---------------------------------------------------------------------------
 // Per-mesh collision extraction with auto-detection
 // ---------------------------------------------------------------------------
+
+/// @brief Check if a node name belongs to Blender default scene objects that
+///        should never generate collision (armatures, cameras, lights, mannequins).
+bool shouldSkipNode(const char* nodeName)
+{
+    const std::string name(nodeName);
+    // Blender's default mannequin meshes.
+    if (containsCI(name, "Beta_"))
+        return true;
+    // Blender default objects that sometimes leak into exports.
+    if (containsCI(name, "Armature") || containsCI(name, "Camera") || containsCI(name, "Light"))
+        return true;
+    return false;
+}
 
 /// @brief Determine the best collision primitive for a mesh and add it to `out`.
 void extractMeshCollision(const aiMesh* mesh,
@@ -406,6 +448,12 @@ void extractMeshCollision(const aiMesh* mesh,
 {
     if (!mesh->HasPositions() || mesh->mNumVertices == 0)
         return;
+
+    // Skip known non-geometry objects (Blender mannequin, armatures, etc.)
+    if (forceType.empty() && shouldSkipNode(nodeName)) {
+        SDL_Log("MapLoader: skipping non-geometry node '%s'", nodeName);
+        return;
+    }
 
     const std::vector<glm::vec3> verts = getWorldVertices(mesh, world, scale);
     if (verts.empty())
@@ -484,6 +532,17 @@ void extractMeshCollision(const aiMesh* mesh,
         }
         return;
     }
+    if (forceType == "meshes") {
+        WorldTriMesh tm;
+        buildTriMeshFromAiMesh(mesh, world, scale, tm);
+        buildTriMeshBVH(tm);
+        SDL_Log("MapLoader: TriMesh (forced) %zu tris, %zu BVH nodes '%s'",
+                tm.indices.size() / 3,
+                tm.bvhNodes.size(),
+                nodeName);
+        out.triMeshes.push_back(std::move(tm));
+        return;
+    }
 
     // --- Auto-detection ---
     // Order: AABB → cylinder → sphere → brush → fallback.
@@ -551,7 +610,22 @@ void extractMeshCollision(const aiMesh* mesh,
         }
     }
 
-    // 5. Fallback: AABB
+    // 5. TriMesh (for complex geometry that doesn't fit simpler primitives)
+    if (mesh->mNumFaces >= 2) {
+        WorldTriMesh tm;
+        buildTriMeshFromAiMesh(mesh, world, scale, tm);
+        if (tm.indices.size() >= 3) {
+            buildTriMeshBVH(tm);
+            SDL_Log("MapLoader: TriMesh (auto) %zu tris, %zu BVH nodes '%s'",
+                    tm.indices.size() / 3,
+                    tm.bvhNodes.size(),
+                    nodeName);
+            out.triMeshes.push_back(std::move(tm));
+            return;
+        }
+    }
+
+    // 6. Final fallback: AABB (degenerate mesh)
     {
         glm::vec3 bmin, bmax;
         computeAABB(verts, bmin, bmax);
@@ -620,6 +694,7 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     out.brushes.clear();
     out.cylinders.clear();
     out.spheres.clear();
+    out.triMeshes.clear();
 
     extractCollision(scene->mRootNode, scene, opts.collisionCollection, opts.allMeshesAreCollision, opts.scale, out);
 
@@ -642,13 +717,84 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
         SDL_Log("MapLoader: added floor plane at y=%.1f", static_cast<double>(lowestY));
     }
 
-    SDL_Log("MapLoader: loaded '%s' — %zu plane(s), %zu box(es), %zu brush(es), %zu cylinder(s), %zu sphere(s)",
+    SDL_Log("MapLoader: loaded '%s' — %zu plane(s), %zu box(es), %zu brush(es), %zu cylinder(s), %zu sphere(s), %zu "
+            "trimesh(es)",
             path.c_str(),
             out.planes.size(),
             out.boxes.size(),
             out.brushes.size(),
             out.cylinders.size(),
-            out.spheres.size());
+            out.spheres.size(),
+            out.triMeshes.size());
+
+    return true;
+}
+
+bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3 position, float scale)
+{
+    Assimp::Importer importer;
+
+    const auto flags =
+        static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_GenSmoothNormals);
+
+    const aiScene* scene = importer.ReadFile(path, flags);
+
+    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
+        SDL_Log("MapLoader: failed to load prop '%s': %s", path.c_str(), importer.GetErrorString());
+        return false;
+    }
+
+    // Build the prop transform: translate to world position, then uniform scale.
+    const glm::mat4 propTransform = glm::scale(glm::translate(glm::mat4(1.0f), position), glm::vec3(scale));
+
+    // Walk the scene graph — treat all meshes as collision (like prototype mode),
+    // but bake the prop's world position into the transform.
+    const auto prevBoxes = out.boxes.size();
+    const auto prevCyls = out.cylinders.size();
+    const auto prevSpheres = out.spheres.size();
+    const auto prevBrushes = out.brushes.size();
+    const auto prevTri = out.triMeshes.size();
+
+    // We can't use extractCollision directly because it computes the transform
+    // from the node hierarchy.  Instead, use a simple recursive walk that
+    // multiplies our prop transform with each node's accumulated transform.
+    struct Walker
+    {
+        static void
+        walk(const aiNode* node, const aiScene* scene, const glm::mat4& parentTransform, MapCollisionData& out)
+        {
+            const glm::mat4 world = parentTransform * aiToGlm(node->mTransformation);
+
+            for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
+                const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
+                // Scale = 1.0 because the scale is already baked into the transform.
+                extractMeshCollision(mesh, world, 1.0f, "", node->mName.C_Str(), out);
+            }
+
+            for (unsigned int c = 0; c < node->mNumChildren; ++c)
+                walk(node->mChildren[c], scene, world, out);
+        }
+    };
+
+    Walker::walk(scene->mRootNode, scene, propTransform, out);
+
+    const auto newBoxes = out.boxes.size() - prevBoxes;
+    const auto newCyls = out.cylinders.size() - prevCyls;
+    const auto newSpheres = out.spheres.size() - prevSpheres;
+    const auto newBrushes = out.brushes.size() - prevBrushes;
+    const auto newTri = out.triMeshes.size() - prevTri;
+
+    SDL_Log("MapLoader: prop '%s' at (%.0f,%.0f,%.0f) scale=%.1f — +%zu box, +%zu cyl, +%zu sph, +%zu brush, +%zu tri",
+            path.c_str(),
+            static_cast<double>(position.x),
+            static_cast<double>(position.y),
+            static_cast<double>(position.z),
+            static_cast<double>(scale),
+            newBoxes,
+            newCyls,
+            newSpheres,
+            newBrushes,
+            newTri);
 
     return true;
 }
