@@ -566,6 +566,8 @@ add_executable(group2
         src/ecs/physics/SweptCollision.cpp
         src/ecs/physics/MapLoader.hpp
         src/ecs/physics/MapLoader.cpp
+        src/ecs/physics/TriMeshCollision.hpp
+        src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -610,6 +612,9 @@ add_executable(group2
         src/ecs/systems/ExplosionSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
+        src/ecs/components/Hitbox.hpp
+        src/ecs/systems/HitboxSystem.hpp
+        src/ecs/systems/HitboxSystem.cpp
         src/ecs/components/Player.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
@@ -819,6 +824,8 @@ add_executable(client
         src/ecs/physics/SweptCollision.cpp
         src/ecs/physics/MapLoader.hpp
         src/ecs/physics/MapLoader.cpp
+        src/ecs/physics/TriMeshCollision.hpp
+        src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -858,6 +865,9 @@ add_executable(client
         src/ecs/systems/ExplosionSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
+        src/ecs/components/Hitbox.hpp
+        src/ecs/systems/HitboxSystem.hpp
+        src/ecs/systems/HitboxSystem.cpp
         src/ecs/components/Player.hpp
         src/network/MatchStatus.hpp
         src/client/systems/KillFeedEvent.hpp
@@ -982,6 +992,8 @@ add_executable(server
         src/ecs/physics/SweptCollision.cpp
         src/ecs/physics/MapLoader.hpp
         src/ecs/physics/MapLoader.cpp
+        src/ecs/physics/TriMeshCollision.hpp
+        src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -1027,13 +1039,29 @@ add_executable(server
         src/ecs/components/WeaponSpawner.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/components/Hitbox.hpp
+        src/ecs/systems/HitboxSystem.hpp
+        src/ecs/systems/HitboxSystem.cpp
+        src/client/animation/CharacterRig.hpp
+        src/client/animation/CharacterRig.cpp
+        src/client/animation/CharacterAnimator.hpp
+        src/client/animation/CharacterAnimator.cpp
+        src/client/animation/AnimationLibrary.hpp
+        src/client/animation/AnimationLibrary.cpp
+        src/client/animation/FbxImportUtils.hpp
+        src/client/animation/FbxImportUtils.cpp
+        src/client/animation/SkinningBackend.hpp
+        src/client/animation/SkinningBackend.cpp
+        src/client/renderer/ModelLoader.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
 # src/server/ — for server-local headers (game/ServerGame.hpp, network/Server.hpp, etc.)
+# src/client/ — needed for shared animation headers (CharacterRig, AnimationLibrary, etc.)
 target_include_directories(server PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
 )
 
 # ---- Server link libraries ----
@@ -1044,6 +1072,9 @@ target_link_libraries(server PRIVATE
     glm::glm
     assimp
     tomlplusplus::tomlplusplus
+    ozz_animation_offline
+    ozz_animation
+    ozz_base
 )
 
 # ---- Server precompiled header ----
@@ -1083,6 +1114,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/maps")
                 "${CMAKE_CURRENT_SOURCE_DIR}/assets/maps"
                 "$<TARGET_FILE_DIR:server>/assets/maps"
         COMMENT "Copying map assets to server binary directory"
+        VERBATIM
+    )
+endif()
+
+# Copy animation assets next to the server binary for server-side hitbox animation.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
+    add_custom_command(TARGET server POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets/animations"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations"
+                "$<TARGET_FILE_DIR:server>/assets/animations"
+        COMMENT "Copying animation assets to server binary directory"
         VERBATIM
     )
 endif()

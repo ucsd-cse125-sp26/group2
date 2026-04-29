@@ -3,11 +3,13 @@
 
 #pragma once
 
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchStatus.hpp"
 
 #include <SDL3/SDL.h>
 
+#include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <initializer_list>
 
@@ -91,6 +93,25 @@ public:
     /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
     void buildNetworkUI(const NetworkStats& stats);
     void buildWeaponUI(const Registry& registry);
+
+    /// @brief Draw the Hitbox Debug window and (optionally) capsule wireframe overlay.
+    ///
+    /// The window is always rendered when `showHitboxWindow` is true.  The 3-D
+    /// capsule overlay is drawn only when the "Draw Hitboxes" checkbox inside
+    /// the window is checked.
+    ///
+    /// @param registry     ECS registry (reads HitboxInstance, Position, Player).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildHitboxUI(const Registry& registry,
+                       HitboxRig& hitboxRig,
+                       const glm::mat4& viewProj,
+                       float screenWidth,
+                       float screenHeight);
+
+    bool showHitboxWindow = false;  ///< Show the Hitbox Debug ImGui window.
+    bool drawHitboxOverlay = false; ///< Draw 3-D capsule wireframes (independent of window visibility).
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
