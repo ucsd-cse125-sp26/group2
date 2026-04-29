@@ -108,7 +108,9 @@ inline void handleDeath(entt::entity& player,
         registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
 
         // Award killer
-        registry.get_or_emplace<PlayerMatchStats>(killer).kills++;
+        if (killer != player) {
+            registry.get_or_emplace<PlayerMatchStats>(killer).kills++;
+        }
 
         // Get killer info
         ClientId killerId = registry.get<ClientId>(killer);
