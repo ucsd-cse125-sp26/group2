@@ -7,6 +7,7 @@
 #pragma once
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Player.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/physics/SweptCollision.hpp"
@@ -135,8 +136,8 @@ raycastPlayers(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::
     HitscanHit bestHit;
     bestHit.distance = maxDistance;
 
-    registry.view<Position, CollisionShape>().each(
-        [&](entt::entity entity, const Position& pos, const CollisionShape& shape) {
+    registry.view<Position, Player, CollisionShape>().each(
+        [&](const entt::entity entity, const Position& pos, const CollisionShape& shape) {
             if (entity == shooter) {
                 return;
             }

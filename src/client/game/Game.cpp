@@ -22,6 +22,7 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
@@ -681,6 +682,7 @@ SDL_AppResult Game::iterate()
 
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
+        refreshRemoteRespawnRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -1909,6 +1911,37 @@ void Game::refreshRemoteProjectileRenderables()
 
             // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
             rend.scale = glm::vec3(10);
+            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+            rend.visible = true;
+        });
+}
+
+void Game::refreshRemoteRespawnRenderables()
+{
+    registry.view<Position, WeaponSpawner, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const WeaponSpawner& spawner, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            rend.modelIndex = 1;
+
+            switch (spawner.type) {
+            case WeaponType::Rifle:
+                rend.modelIndex = 6;
+                break;
+            case WeaponType::RailGun:
+                rend.modelIndex = 7;
+                break;
+            case WeaponType::Rocket:
+                rend.modelIndex = 8;
+                break;
+            case WeaponType::EnergyGun:
+                rend.modelIndex = 9;
+                break;
+            default:
+                rend.modelIndex = 1;
+            }
+
+            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+            rend.scale = glm::vec3(1);
             // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
             rend.visible = true;
         });

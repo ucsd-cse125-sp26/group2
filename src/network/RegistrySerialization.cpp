@@ -12,6 +12,7 @@
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "entt/entity/fwd.hpp"
 #include "network/RegistryArchive.hpp"
@@ -50,7 +51,8 @@ using Synced = std::tuple<entt::entity,
                           BeamState,
                           ClientId,
                           DeathInfo,
-                          RespawnTimer>;
+                          RespawnTimer,
+                          WeaponSpawner>;
 
 std::vector<uint8_t> serialize(const entt::registry& registry)
 {

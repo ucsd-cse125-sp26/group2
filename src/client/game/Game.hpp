@@ -52,6 +52,7 @@ public:
     void quit();
     void refreshRemotePlayerRenderables();
     void refreshRemoteProjectileRenderables();
+    void refreshRemoteRespawnRenderables();
 
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.

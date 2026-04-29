@@ -14,6 +14,7 @@
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
@@ -45,6 +46,12 @@ void ServerGame::run()
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_tickDuration = k_perfFreq / static_cast<Uint64>(tickRateHz);
     Uint64 nextTick = SDL_GetPerformanceCounter();
+
+    //temp weapon spawner
+    const entt::entity spawner = registry.create();
+    registry.emplace<WeaponSpawner>(spawner, WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
+    registry.emplace<Position>(spawner, glm::vec3{12.0f, 1.0f, 12.0f});
+    registry.emplace<CollisionShape>(spawner);
 
     while (running) {
         server.poll();

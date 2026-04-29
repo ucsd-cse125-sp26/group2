@@ -613,6 +613,7 @@ add_executable(group2
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
+        src/ecs/components/WeaponSpawner.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -857,6 +858,7 @@ add_executable(client
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
+        src/ecs/components/WeaponSpawner.hpp
 )
 
 target_include_directories(client PRIVATE
@@ -1013,6 +1015,7 @@ add_executable(server
         src/network/NetKillEvent.hpp
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
+        src/ecs/components/WeaponSpawner.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
