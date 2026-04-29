@@ -153,7 +153,9 @@ SDL_GPUShader* Renderer::loadShaderFromFile(const char* name,
                                             Uint32 storageTextureCount)
 {
     const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)    ? ".msl"
+                              : (shaderFormat == SDL_GPU_SHADERFORMAT_DXIL) ? ".dxil"
+                                                                            : ".spv";
 
     char path[512];
     SDL_snprintf(path, sizeof(path), "%sshaders/%s%s", k_base ? k_base : "", name, k_ext);
@@ -198,7 +200,9 @@ SDL_GPUComputePipeline* Renderer::createComputePipeline(const char* shaderName,
                                                         Uint32 threadCountZ)
 {
     const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)    ? ".msl"
+                              : (shaderFormat == SDL_GPU_SHADERFORMAT_DXIL) ? ".dxil"
+                                                                            : ".spv";
 
     char path[512];
     SDL_snprintf(path, sizeof(path), "%sshaders/%s%s", k_base ? k_base : "", shaderName, k_ext);
@@ -314,7 +318,7 @@ bool Renderer::initPBRPipeline()
 
         // Reload shaders for the second pipeline (SDL requires separate shader objects).
         SDL_GPUShader* vertT = loadShaderFromFile("pbr.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-        SDL_GPUShader* fragT = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2);
+        SDL_GPUShader* fragT = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 8, 3);
 
         SDL_GPUGraphicsPipelineCreateInfo pciT = pci; // copy from opaque
         pciT.vertex_shader = vertT;
@@ -1516,6 +1520,9 @@ bool Renderer::init(SDL_Window* win)
 #ifdef HAVE_MSL_SHADERS
                                                     | SDL_GPU_SHADERFORMAT_MSL
 #endif
+#ifdef HAVE_DXIL_SHADERS
+                                                    | SDL_GPU_SHADERFORMAT_DXIL
+#endif
         ;
 
     device = SDL_CreateGPUDevice(k_wantedFormats, /*debug_mode=*/true, nullptr);
@@ -1531,16 +1538,20 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // Detect shader format and cache swapchain format.
-    // Prefer MSL on the Metal backend: our spirv-cross pipeline produces MSL
-    // with correct resource bindings for SDL3 GPU's slot model.  SDL3's
-    // built-in SPIR-V translation (shadercross) may also work, but using our
-    // pre-compiled MSL avoids a runtime dependency on shadercross and gives us
-    // explicit control over Metal argument indices.
+    // Pick the shader format that matches the selected GPU backend.  Each SDL
+    // GPU backend reports exactly one supported format here:
+    //   Direct3D 12 → DXIL, Metal → MSL, Vulkan → SPIR-V.
+    // The CMake build emits whichever blobs are needed for this platform; the
+    // matching `HAVE_*_SHADERS` define gates each branch.
     const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
     shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
+#ifdef HAVE_DXIL_SHADERS
+    if (k_available & SDL_GPU_SHADERFORMAT_DXIL)
+        shaderFormat = SDL_GPU_SHADERFORMAT_DXIL;
+    else
+#endif
 #ifdef HAVE_MSL_SHADERS
-    if (k_available & SDL_GPU_SHADERFORMAT_MSL)
+        if (k_available & SDL_GPU_SHADERFORMAT_MSL)
         shaderFormat = SDL_GPU_SHADERFORMAT_MSL;
     else
 #endif
@@ -1551,7 +1562,8 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
     SDL_Log("Renderer: selected shader format = %s",
-            (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)     ? "MSL"
+            (shaderFormat == SDL_GPU_SHADERFORMAT_DXIL)    ? "DXIL"
+            : (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)   ? "MSL"
             : (shaderFormat == SDL_GPU_SHADERFORMAT_SPIRV) ? "SPIR-V"
                                                            : "unknown");
 

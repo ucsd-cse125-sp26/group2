@@ -34,6 +34,7 @@
 #include "particles/ParticleEvents.hpp"
 #include "renderer/GlowCylinder.hpp"
 #include "renderer/GlowSphere.hpp"
+#include "renderer/GraphicsConfig.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
 
@@ -73,6 +74,14 @@ bool Game::init()
         const char* base = SDL_GetBasePath();
         std::string cfgPath = std::string(base ? base : "") + "config.toml";
         netCfg = loadNetworkConfig(cfgPath.c_str());
+
+        // Apply graphics backend selection BEFORE SDL_CreateGPUDevice runs in
+        // Renderer::init.  SDL_GPU honours SDL_HINT_GPU_DRIVER at device
+        // creation; if the requested driver is unavailable SDL falls back to
+        // another supported one automatically.
+        const GraphicsConfig gfxCfg = loadGraphicsConfig(cfgPath.c_str());
+        if (const char* driver = gpuBackendHintString(gfxCfg.backend))
+            SDL_SetHint(SDL_HINT_GPU_DRIVER, driver);
     }
 
     window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE);
