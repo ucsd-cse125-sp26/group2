@@ -3,6 +3,8 @@
 
 #include "SweptCollision.hpp"
 
+#include "TriMeshCollision.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>
@@ -376,6 +378,12 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
             best = k_hr;
     }
 
+    for (const WorldTriMesh& tm : world.triMeshes) {
+        const HitResult k_hr = sweepAABBvsTriMesh(halfExtents, start, end, tm);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
     return best;
 }
 
@@ -599,6 +607,18 @@ SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const W
         best.t = t;
         best.normal = n;
         best.point = hp - n * radius;
+    }
+
+    // Test against triangle meshes (conservative: treat sphere as AABB)
+    for (const WorldTriMesh& tm : world.triMeshes) {
+        const glm::vec3 sphereHalf{radius, radius, radius};
+        const HitResult hr = sweepAABBvsTriMesh(sphereHalf, start, end, tm);
+        if (hr.hit && hr.tFirst < best.t) {
+            best.hit = true;
+            best.t = hr.tFirst;
+            best.normal = hr.normal;
+            best.point = start + k_delta * hr.tFirst - hr.normal * radius;
+        }
     }
 
     return best;

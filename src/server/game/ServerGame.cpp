@@ -50,7 +50,6 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         opts.addFloorPlane = false;        // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
-            physics::setActiveWorld(mapCollision_.geometry());
             SDL_Log("[server] map collision loaded: %zu planes, %zu boxes, %zu brushes",
                     mapCollision_.planes.size(),
                     mapCollision_.boxes.size(),
@@ -58,6 +57,17 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         } else {
             SDL_Log("[server] WARNING: map collision load failed — falling back to testWorld()");
         }
+
+        // Load prop collision — must match client for prediction parity.
+        const std::string assetsDir = std::string(base ? base : "") + "assets/";
+        physics::loadPropCollision(
+            assetsDir + "free_1975_porsche_911_930_turbo.glb", mapCollision_, glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f);
+        physics::loadPropCollision(
+            assetsDir + "metallic_pallet_factory_store.glb", mapCollision_, glm::vec3(0.0f, 0.0f, 600.0f), 0.25f);
+        physics::loadPropCollision(assetsDir + "bottle_a.glb", mapCollision_, glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+
+        // Set active world with map + all props.
+        physics::setActiveWorld(mapCollision_.geometry());
     }
 
     if (!server.init(addr, port))
