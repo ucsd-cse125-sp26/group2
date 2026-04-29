@@ -22,12 +22,12 @@ const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::str
 bool AssetLoader::loadModelsList()
 {
     const ModelIdInt id = 0;
-    //std::string modelFileName = "assualtRifleJ.obj";
+    // std::string modelFileName = "assualtRifleJ.obj";
     std::string modelFileName = "test_scene.obj";
     const std::vector<std::string> texFileNames;
 
     std::cout << "loading model" << std::endl;
-    bool res = loadModel(id, modelFileName,texFileNames,true);
+    bool res = loadModel(id, modelFileName, texFileNames, true);
     std::cout << "loaded model" << std::endl;
     if (!res) {
         std::cout << "MODEL NOT FOUND!!" << std::endl;
@@ -83,20 +83,20 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     assert(k_flatten == true);
     Assimp::Importer importer;
     std::string debugPrefix = "Static Model Loading: ";
-    std::string assetIdNameSpace = modelFileName +  "::";
+    std::string assetIdNameSpace = modelFileName + "::";
 
-    //std::cout << " Asset::Model &newModel = Asset::models_[id]; " << std::endl;
+    // std::cout << " Asset::Model &newModel = Asset::models_[id]; " << std::endl;
     Asset::Model& newModel = Asset::models_[id];
 
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
-    //std::cout << "loadAsset" << std::endl;
+    // std::cout << "loadAsset" << std::endl;
     const aiScene* asimpSceneStructurePtr = loadAsset(importer, modelFileName);
 
     if (asimpSceneStructurePtr == nullptr) {
         std::cout << debugPrefix << "scene is null" << std::endl;
         return false;
     }
-    //std::cout << "loadedAsset" << std::endl;
+    // std::cout << "loadedAsset" << std::endl;
 
     if (asimpSceneStructurePtr->mNumMeshes == 0 || asimpSceneStructurePtr->mMeshes == nullptr) {
         std::cout << debugPrefix << "model not found" << std::endl;
@@ -104,9 +104,9 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     }
 
     if (k_flatten) {
-        asimpSceneStructurePtr = importer.ApplyPostProcessing(aiProcess_PreTransformVertices);/// FLATTEN AISCENE
+        asimpSceneStructurePtr = importer.ApplyPostProcessing(aiProcess_PreTransformVertices); /// FLATTEN AISCENE
     }
-    const aiScene &sceneAi = *asimpSceneStructurePtr;
+    const aiScene& sceneAi = *asimpSceneStructurePtr;
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     newModel.modelElements_.reserve(sceneAi.mNumMeshes);
 
@@ -115,25 +115,24 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     std::stack<const aiNode*> sceneAiDFSStack;
     sceneAiDFSStack.push(sceneAi.mRootNode); // Note: if clang gives an error under push, that is a clang bug
 
-    std::stack< glm::mat4> sceneAiTransformStack;
-    sceneAiTransformStack.push(glmFromAiTransform(sceneAi.mRootNode->mTransformation)); // Note: if clang gives an error under push, that is a clang bug ^
+    std::stack<glm::mat4> sceneAiTransformStack;
+    sceneAiTransformStack.push(glmFromAiTransform(
+        sceneAi.mRootNode->mTransformation)); // Note: if clang gives an error under push, that is a clang bug ^
 
     while (!sceneAiDFSStack.empty()) {
-        const aiNode *currentNodePtr = sceneAiDFSStack.top();
-        const aiNode &currentNode = *currentNodePtr;
+        const aiNode* currentNodePtr = sceneAiDFSStack.top();
+        const aiNode& currentNode = *currentNodePtr;
         sceneAiDFSStack.pop();
-    std::cout << "Node: " << currentNode.mName.C_Str()
-              << " | Meshes: " << currentNode.mNumMeshes
-              << " | Children: " << currentNode.mNumChildren << std::endl;
+        std::cout << "Node: " << currentNode.mName.C_Str() << " | Meshes: " << currentNode.mNumMeshes
+                  << " | Children: " << currentNode.mNumChildren << std::endl;
 
-        pushAiNodeMeshesToModelElements(assetIdNameSpace,currentNode,sceneAi,id);
+        pushAiNodeMeshesToModelElements(assetIdNameSpace, currentNode, sceneAi, id);
 
         for (int i = 0; i < currentNode.mNumChildren; i++) {
             sceneAiDFSStack.push(currentNode.mChildren[i]);
         }
     }
     std::cout << "modelElements_ count: " << Asset::models_[id].modelElements_.size() << std::endl;
-
 
     // pushAiNodeMeshesToModelElements(assetIdNameSpace,rootNodeAi,sceneAi,id);
     // for (int i = 0; i < rootNodeAi.mNumChildren; i++) {
@@ -149,51 +148,54 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     return true;
 }
 
-void AssetLoader::pushAiNodeMeshesToModelElements(const std::string &meshNameSpace,const aiNode &nodeAi,const aiScene &sceneAi,const ModelIdInt k_modelId)
+void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpace,
+                                                  const aiNode& nodeAi,
+                                                  const aiScene& sceneAi,
+                                                  const ModelIdInt k_modelId)
 {
-        std::string debugPrefix = "pushAiNodeMeshes: ";
-        Asset::Model &newModel = Asset::models_[k_modelId];
+    std::string debugPrefix = "pushAiNodeMeshes: ";
+    Asset::Model& newModel = Asset::models_[k_modelId];
 
-        const aiString nodeAiName = nodeAi.mName;
-        const std::string nodeNameStr(nodeAiName.C_Str());
+    const aiString nodeAiName = nodeAi.mName;
+    const std::string nodeNameStr(nodeAiName.C_Str());
 
-        for (int j = 0; j < nodeAi.mNumMeshes ; j++) {
-            uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
-            if (mesh_j_IdAi < 0 || mesh_j_IdAi >= sceneAi.mNumMeshes) {
-                std::cout << debugPrefix << "given aiNode is not in aiScene!!!:" << std::endl;
-                std::cout << "\tmesh: " << mesh_j_IdAi << " is not in aiScene's mesh array" << std::endl;
-            }
+    for (int j = 0; j < nodeAi.mNumMeshes; j++) {
+        uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
+        if (mesh_j_IdAi < 0 || mesh_j_IdAi >= sceneAi.mNumMeshes) {
+            std::cout << debugPrefix << "given aiNode is not in aiScene!!!:" << std::endl;
+            std::cout << "\tmesh: " << mesh_j_IdAi << " is not in aiScene's mesh array" << std::endl;
         }
+    }
 
-        for (int j = 0; j < nodeAi.mNumMeshes ; j++) {
-            Asset::ModelElement me_j;
-            uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
+    for (int j = 0; j < nodeAi.mNumMeshes; j++) {
+        Asset::ModelElement me_j;
+        uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
 
-            const aiMesh &mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
+        const aiMesh& mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
 
-            std::string meshName = meshNameSpace + nodeNameStr + std::to_string(mesh_j_IdAi);
-            MeshIdInt meshNameId = Asset::getMeshIdFromString(meshName);
-            std::cout << "meshName: " << meshName << " | meshNameId: " << meshNameId << std::endl;
+        std::string meshName = meshNameSpace + nodeNameStr + std::to_string(mesh_j_IdAi);
+        MeshIdInt meshNameId = Asset::getMeshIdFromString(meshName);
+        std::cout << "meshName: " << meshName << " | meshNameId: " << meshNameId << std::endl;
 
-            std::cout << debugPrefix << "loadMesh: j:" << j << std::endl;
-            bool loadREsult = loadMesh(meshNameId,mesh_j_Ai);
-            std::cout << "loadREsult: " << loadREsult <<  std::endl;
+        std::cout << debugPrefix << "loadMesh: j:" << j << std::endl;
+        bool loadREsult = loadMesh(meshNameId, mesh_j_Ai);
+        std::cout << "loadREsult: " << loadREsult << std::endl;
 
-            me_j.meshId_ = meshNameId;
-            me_j.modelElementTransform_ = glmFromAiTransform(nodeAi.mTransformation);
+        me_j.meshId_ = meshNameId;
+        me_j.modelElementTransform_ = glmFromAiTransform(nodeAi.mTransformation);
 
-            newModel.modelElements_.push_back(me_j);
-        }
-
+        newModel.modelElements_.push_back(me_j);
+    }
 }
 
-glm::mat4 AssetLoader::glmFromAiTransform(const aiMatrix4x4& transformAi) {
+glm::mat4 AssetLoader::glmFromAiTransform(const aiMatrix4x4& transformAi)
+{
     glm::mat4 retTransform;
 
-    retTransform[0] = glm::vec4(transformAi.a1,transformAi.a3,transformAi.a3,transformAi.a4);
-    retTransform[1] = glm::vec4(transformAi.b1,transformAi.b3,transformAi.b3,transformAi.b4);
-    retTransform[2] = glm::vec4(transformAi.c1,transformAi.c3,transformAi.c3,transformAi.c4);
-    retTransform[3] = glm::vec4(transformAi.d1,transformAi.d3,transformAi.d3,transformAi.d4);
+    retTransform[0] = glm::vec4(transformAi.a1, transformAi.a3, transformAi.a3, transformAi.a4);
+    retTransform[1] = glm::vec4(transformAi.b1, transformAi.b3, transformAi.b3, transformAi.b4);
+    retTransform[2] = glm::vec4(transformAi.c1, transformAi.c3, transformAi.c3, transformAi.c4);
+    retTransform[3] = glm::vec4(transformAi.d1, transformAi.d3, transformAi.d3, transformAi.d4);
 
     return retTransform;
 }
