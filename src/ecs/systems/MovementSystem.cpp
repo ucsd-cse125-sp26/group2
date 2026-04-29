@@ -8,6 +8,7 @@
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/Movement.hpp"
@@ -1148,9 +1149,9 @@ void applySpeedCap(glm::vec3& vel, const PlayerState& state)
 void runMovement(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
     // Entities WITH InputSnapshot — full player movement
-    registry.view<Position, Velocity, PlayerState, CollisionShape, InputSnapshot>().each(
-        [dt,
-         &world](Position& pos, Velocity& vel, PlayerState& state, CollisionShape& shape, const InputSnapshot& input) {
+    registry.view<Position, Velocity, PlayerState, CollisionShape, InputSnapshot>(entt::exclude<RespawnTimer>)
+        .each([dt, &world](
+                  Position& pos, Velocity& vel, PlayerState& state, CollisionShape& shape, const InputSnapshot& input) {
             // 0. Tick timers
             tickTimers(state, dt);
 
