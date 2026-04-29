@@ -29,7 +29,15 @@ bool NewRenderer::init(SDL_Window* window)
     ownsDevice_ = true;
     ownsWindowClaim_ = true;
 
-    device_ = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, false, nullptr);
+    constexpr SDL_GPUShaderFormat k_wantedFormats = SDL_GPU_SHADERFORMAT_SPIRV
+#ifdef HAVE_MSL_SHADERS
+                                                    | SDL_GPU_SHADERFORMAT_MSL
+#endif
+#ifdef HAVE_DXIL_SHADERS
+                                                    | SDL_GPU_SHADERFORMAT_DXIL
+#endif
+        ;
+    device_ = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
     if (!device_) {
         SDL_Log("NewRenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
@@ -133,7 +141,6 @@ bool NewRenderer::loadSceneAssets()
             uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
             uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
         }
-
     }
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);

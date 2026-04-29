@@ -11,6 +11,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -27,11 +28,13 @@
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/HitboxSystem.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "renderer/GlowCylinder.hpp"
 #include "renderer/GlowSphere.hpp"
+#include "renderer/GraphicsConfig.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
 
@@ -71,6 +74,14 @@ bool Game::init()
         const char* base = SDL_GetBasePath();
         std::string cfgPath = std::string(base ? base : "") + "config.toml";
         netCfg = loadNetworkConfig(cfgPath.c_str());
+
+        // Apply graphics backend selection BEFORE SDL_CreateGPUDevice runs in
+        // Renderer::init.  SDL_GPU honours SDL_HINT_GPU_DRIVER at device
+        // creation; if the requested driver is unavailable SDL falls back to
+        // another supported one automatically.
+        const GraphicsConfig gfxCfg = loadGraphicsConfig(cfgPath.c_str());
+        if (const char* driver = gpuBackendHintString(gfxCfg.backend))
+            SDL_SetHint(SDL_HINT_GPU_DRIVER, driver);
     }
 
     window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE);
@@ -139,7 +150,6 @@ bool Game::init()
         opts.addFloorPlane = false;        // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
-            physics::setActiveWorld(mapCollision_.geometry());
             SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes",
                     mapCollision_.planes.size(),
                     mapCollision_.boxes.size(),
@@ -149,59 +159,100 @@ bool Game::init()
         }
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
-        mapModelIdx_ = renderer.loadSceneModel("maps/map1.glb", glm::vec3(0.0f), k_metersToInches);
-        if (mapModelIdx_ >= 0) {
-            renderer.setModelScenePass(mapModelIdx_, true);
-            SDL_Log("[client] map visual loaded (model index %d)", mapModelIdx_);
+        const int mapId = assets_.add("map1", "maps/map1.glb", AssetRole::Map);
+        const int mapModelIdx = renderer.loadSceneModel("maps/map1.glb", glm::vec3(0.0f), k_metersToInches);
+        assets_.setModelIndex(mapId, mapModelIdx);
+        if (mapModelIdx >= 0) {
+            renderer.setModelScenePass(mapModelIdx, true);
+            SDL_Log("[client] map visual loaded (model index %d)", mapModelIdx);
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
         }
     }
 
-    // Load models for entity rendering
-    wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
-    if (wraithModelIdx < 0)
-        SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
+    // ── Load props (render + collision) ───────────────────────────────────
+    // These are standalone GLB models placed at fixed world positions.
+    // Both visual and collision are loaded so players/projectiles interact.
+    {
+        const char* base = SDL_GetBasePath();
+        const std::string basePath = base ? base : "";
+
+        // Helper: load a prop with render + collision in one call.
+        auto loadProp = [&](const char* name, const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
+            const int id = assets_.add(name, filename, AssetRole::Prop);
+            const int modelIdx = renderer.loadSceneModel(filename, pos, scale, flipUVs);
+            assets_.setModelIndex(id, modelIdx);
+            if (modelIdx >= 0) {
+                renderer.setModelScenePass(modelIdx, true);
+            }
+
+            // Load collision at the same position/scale.
+            const std::string fullPath = basePath + "assets/" + filename;
+            if (physics::loadPropCollision(fullPath, mapCollision_, pos, scale)) {
+                assets_.setHasCollision(id);
+            }
+        };
+
+        loadProp("porsche", "free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
+        loadProp("pallet", "metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
+        loadProp("bottle", "bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+
+        // Update the active world with the new collision data (map + all props).
+        physics::setActiveWorld(mapCollision_.geometry());
+    }
+
+    // ── Load entity models (render only, drawn via EntityRenderCmd) ──────
+    {
+        const int id = assets_.add("wraith", "Apex_Legend_Wraith.glb", AssetRole::Entity);
+        wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+        assets_.setModelIndex(id, wraithModelIdx);
+        if (wraithModelIdx < 0)
+            SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
+    }
 
     // Load all weapon models (per WeaponType)
-    for (int i = 0; i < 4; ++i) {
-        const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
-        if (info.filename) {
-            weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
-            if (weaponModelIndices_[i] < 0)
-                SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+    {
+        static const char* k_weaponNames[] = {"weapon_rifle", "weapon_rocket", "weapon_railgun", "weapon_energy"};
+        for (int i = 0; i < 4; ++i) {
+            const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
+            if (info.filename) {
+                const int id = assets_.add(k_weaponNames[i], info.filename, AssetRole::Entity);
+                weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
+                assets_.setModelIndex(id, weaponModelIndices_[i]);
+                if (weaponModelIndices_[i] < 0)
+                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+            }
         }
     }
 
-    // Glow sphere — procedural emissive sphere for bloom / dynamic lighting test.
+    // ── Procedural effects ──────────────────────────────────────────────
     {
         LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
+        const int id = assets_.add("glow_sphere", "", AssetRole::Effect);
         glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
-        if (glowSphereModelIdx_ < 0)
-            SDL_Log("[client] WARNING: glow sphere failed to upload");
-        else
-            SDL_Log("[client] glow sphere uploaded (model index %d)", glowSphereModelIdx_);
+        assets_.setModelIndex(id, glowSphereModelIdx_);
     }
-
-    // Movable glow sphere — smaller sphere that follows the player for dynamic lighting tests.
     {
         LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
+        const int id = assets_.add("glow_sphere_movable", "", AssetRole::Effect);
         movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
-        if (movableSphereModelIdx_ < 0)
-            SDL_Log("[client] WARNING: movable glow sphere failed to upload");
-        else
-            SDL_Log("[client] movable glow sphere uploaded (model index %d)", movableSphereModelIdx_);
+        assets_.setModelIndex(id, movableSphereModelIdx_);
     }
-
-    // Glow cylinder (beam) — unit cylinder, oriented at runtime via transform.
     {
         LoadedModel cylModel = createGlowCylinder(24, 1, glm::vec3(8.0f, 2.0f, 10.0f));
+        const int id = assets_.add("glow_cylinder", "", AssetRole::Effect);
         glowCylinderModelIdx_ = renderer.uploadSceneModel(cylModel);
-        if (glowCylinderModelIdx_ < 0)
-            SDL_Log("[client] WARNING: glow cylinder failed to upload");
-        else
-            SDL_Log("[client] glow cylinder uploaded (model index %d)", glowCylinderModelIdx_);
+        assets_.setModelIndex(id, glowCylinderModelIdx_);
     }
+
+    // Log the full asset registry.
+    SDL_Log("[client] Asset registry: %d entries", assets_.count());
+    for (const auto& e : assets_.entries())
+        SDL_Log("[client]   '%s' → model %d (role=%d, collision=%s)",
+                e.name.c_str(),
+                e.modelIndex,
+                static_cast<int>(e.role),
+                e.hasCollision ? "yes" : "no");
 
     // Remove Controllable when the local player dies (RespawnTimer added),
     // restore it when they respawn (RespawnTimer removed).
@@ -243,6 +294,7 @@ bool Game::init()
             if (sfxSystem.isInitialized())
                 sfxSystem.play(SfxId::FleshHit);
             hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
+            hitmarkerIsHeadshot_ = (evt.headshot != 0);
         }
 
         // Skip own effects that were already spawned locally for instant feedback.
@@ -389,6 +441,17 @@ bool Game::init()
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
             }
+        }
+
+        // Build and resolve hitbox definitions (client-side, for debug visualization).
+        clientHitboxRig_ = HitboxRig::buildMixamoDefault();
+        clientHitboxRig_.resolveIndices(charRig_.jointMap());
+        {
+            int resolved = 0;
+            for (const auto& def : clientHitboxRig_.definitions)
+                if (def.boneIndex >= 0)
+                    ++resolved;
+            SDL_Log("[client] hitbox rig: %zu definitions, %d resolved", clientHitboxRig_.definitions.size(), resolved);
         }
     }
 
@@ -867,6 +930,56 @@ SDL_AppResult Game::iterate()
         if (!isBeamNow && wasBeamActive_)
             sfxSystem.stop(SfxId::EnergyBeamLoop);
         wasBeamActive_ = isBeamNow;
+
+        // Beam hitmarker: client-side raycast against player hitboxes while firing.
+        // Note: Player component is not synced to clients, so we raycast against
+        // HitboxInstance directly (skipping the local player entity).
+        if (isBeamNow) {
+            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape>().each(
+                [&](entt::entity localE,
+                    const BeamState&,
+                    const InputSnapshot& inp,
+                    const Position& pos,
+                    const CollisionShape& shape) {
+                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float cp = std::cos(inp.pitch);
+                    const glm::vec3 dir{std::sin(inp.yaw) * cp, -std::sin(inp.pitch), std::cos(inp.yaw) * cp};
+
+                    physics::HitboxHit bestHit;
+                    bestHit.distance = 5000.0f;
+                    registry.view<Position, CollisionShape, HitboxInstance>().each([&](entt::entity target,
+                                                                                       const Position& tPos,
+                                                                                       const CollisionShape& tShape,
+                                                                                       const HitboxInstance& hb) {
+                        if (target == localE)
+                            return;
+                        const physics::WorldAABB bounds{tPos.value - tShape.halfExtents,
+                                                        tPos.value + tShape.halfExtents};
+                        float aabbDist = bestHit.distance;
+                        glm::vec3 aabbN{0.0f};
+                        if (!physics::raycastAABB(eye, dir, bounds, bestHit.distance, aabbDist, aabbN))
+                            return;
+                        for (const auto& cap : hb.capsules) {
+                            float dist = bestHit.distance;
+                            glm::vec3 n{0.0f};
+                            if (!physics::raycastCapsule(
+                                    eye, dir, cap.pointA, cap.pointB, cap.radius, bestHit.distance, dist, n))
+                                continue;
+                            bestHit.hit = true;
+                            bestHit.distance = dist;
+                            bestHit.point = eye + dir * dist;
+                            bestHit.normal = n;
+                            bestHit.region = cap.region;
+                            bestHit.entity = target;
+                        }
+                    });
+
+                    if (bestHit.hit) {
+                        hitmarkerTimer_ = 0.10f; // short pulse — refreshed every frame while hitting
+                        hitmarkerIsHeadshot_ = (bestHit.region == BodyRegion::Head);
+                    }
+                });
+        }
     }
 
     // Draw persistent HUD text each frame
@@ -946,9 +1059,12 @@ SDL_AppResult Game::iterate()
     // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
     // CPU-skins every rig mesh, and streams the resulting vertices into its
     // per-entity renderer model instance.
+    //
+    // Also populates the JointMatrices ECS component with model-space bone transforms
+    // for skeleton-driven hitbox capsule placement.
     {
         std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity,
+        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity e,
                                                                                           AnimatedCharacter& ac,
                                                                                           const Velocity& vel,
                                                                                           const PlayerState& ps,
@@ -967,6 +1083,10 @@ SDL_AppResult Game::iterate()
             ai.wallRunSide = static_cast<int>(ps.wallRunSide);
             ac.animator->update(ai, frameTime);
 
+            // Store model-space joint matrices for hitbox system.
+            auto& jm = registry.get_or_emplace<JointMatrices>(e);
+            jm.matrices = ac.animator->jointModelMatrices();
+
             ac.animator->computeSkinnedVertices(skinnedBuffer);
             for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
                 const auto& sv = skinnedBuffer[m];
@@ -974,6 +1094,10 @@ SDL_AppResult Game::iterate()
                     ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
             }
         });
+
+        // Update hitbox capsules from bone transforms (client-side for debug visualization).
+        if (charRig_.isLoaded())
+            systems::updateHitboxes(registry, clientHitboxRig_, kRigScale_, rigMeshMinY_);
     }
 
     // Build entity render list
@@ -1548,6 +1672,19 @@ SDL_AppResult Game::iterate()
     }
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
+
+    // Hitbox debug visualization — project capsules into screen space.
+    {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSize(window, &winW, &winH);
+        const float winWf = static_cast<float>(winW);
+        const float winHf = static_cast<float>(winH);
+        const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
+        const glm::mat4 hbProj =
+            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+        const glm::mat4 hbVP = hbProj * hbView;
+        debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
+    }
 #ifdef USE_HYBRID_RENDERER
     debugUI.buildRenderTogglesUI(renderer.legacy());
     debugUI.buildLightingUI(renderer.legacy());
@@ -1770,7 +1907,9 @@ SDL_AppResult Game::iterate()
         const float hmSize = 8.0f;
         const float hmGap = 4.0f;
         const float hmThick = 2.5f;
-        const ImU32 hmCol = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+        const ImU32 hmCol = hitmarkerIsHeadshot_
+                                ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 0.2f, 0.2f, alpha))  // red for headshots
+                                : ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)); // white default
         ImDrawList* dl = ImGui::GetForegroundDrawList();
 
         // Four diagonal lines forming an X, offset from center by hmGap
@@ -1969,24 +2108,32 @@ void Game::refreshRemoteRespawnRenderables()
             switch (spawner.type) {
             case WeaponType::Rifle:
                 rend.modelIndex = 6;
+                rend.scale = glm::vec3(0.025f);
                 break;
             case WeaponType::RailGun:
                 rend.modelIndex = 7;
+                rend.scale = glm::vec3(1.0f);
                 break;
             case WeaponType::Rocket:
                 rend.modelIndex = 8;
+                rend.scale = glm::vec3(0.025f);
                 break;
             case WeaponType::EnergyGun:
                 rend.modelIndex = 9;
+                rend.scale = glm::vec3(1.0f);
                 break;
             default:
                 rend.modelIndex = 1;
+                rend.scale = glm::vec3(1.0f);
             }
 
             // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            rend.scale = glm::vec3(1);
+            // rend.scale = glm::vec3(1);
             // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
             rend.visible = true;
+            // if (spawner.hasWeapon) {
+            //     rend.visible = true;
+            // }
         });
 }
 

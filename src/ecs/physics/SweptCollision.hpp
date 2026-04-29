@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <cstdint>
 #include <glm/vec3.hpp>
 #include <span>
+#include <vector>
 
 /// @brief Pure swept-collision math — no ECS types, no registry.
 ///
@@ -61,6 +63,30 @@ struct WorldSphere
     float radius;     ///< Radius.
 };
 
+/// @brief A single BVH node for spatial acceleration of triangle meshes.
+struct BVHNode
+{
+    glm::vec3 boundsMin; ///< AABB minimum corner.
+    glm::vec3 boundsMax; ///< AABB maximum corner.
+    int leftFirst;       ///< If leaf: index into triIndices[]. If interior: left child index.
+    int count;           ///< >0 → leaf with `count` triangles.  0 → interior node.
+};
+
+/// @brief A triangle mesh with BVH acceleration for collision queries.
+///
+/// Built once at load time via `buildTriMeshBVH()`.  The BVH is a flat array
+/// binary tree; leaves hold up to 4 triangles.  `triIndices` is a permutation
+/// array mapping BVH leaf ranges to triangle indices in `indices`.
+struct WorldTriMesh
+{
+    std::vector<glm::vec3> vertices;  ///< All vertex positions (world space, scaled).
+    std::vector<uint32_t> indices;    ///< Triangle indices (3 per triangle).
+    std::vector<BVHNode> bvhNodes;    ///< Flat BVH node array.
+    std::vector<uint32_t> triIndices; ///< Permutation: BVH leaf ranges → triangle indices.
+    glm::vec3 boundsMin{0.0f};        ///< Whole-mesh AABB min.
+    glm::vec3 boundsMax{0.0f};        ///< Whole-mesh AABB max.
+};
+
 /// @brief All world collision geometry for one tick.
 struct WorldGeometry
 {
@@ -69,6 +95,7 @@ struct WorldGeometry
     std::span<const WorldBrush> brushes;
     std::span<const WorldCylinder> cylinders;
     std::span<const WorldSphere> spheres;
+    std::span<const WorldTriMesh> triMeshes;
 };
 
 /// @brief Result of a swept AABB collision query.

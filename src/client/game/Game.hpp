@@ -9,6 +9,8 @@
 #include "animation/SkinningBackend.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
+#include "ecs/AssetRegistry.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -106,13 +108,16 @@ private:
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;
-    int mapModelIdx_ = -1; ///< Renderer model index for the map's visual mesh.
 
-    // Model indices for entity rendering (loaded at init).
-    int wraithModelIdx = -1;                       ///< Wraith player model index.
-    int glowSphereModelIdx_ = -1;                  ///< Glow sphere for bloom testing (static).
-    int movableSphereModelIdx_ = -1;               ///< Glow sphere that follows the player.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1}; ///< Per WeaponType, loaded at init.
+    // Central asset registry — maps human-readable names to renderer model indices.
+    AssetRegistry assets_;
+
+    // Legacy model index aliases (for code that still uses raw indices).
+    // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
+    int wraithModelIdx = -1;
+    int glowSphereModelIdx_ = -1;
+    int movableSphereModelIdx_ = -1;
+    int weaponModelIndices_[4] = {-1, -1, -1, -1};
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
@@ -141,7 +146,8 @@ private:
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
 
     // Hitmarker
-    float hitmarkerTimer_ = 0.0f; ///< Remaining display time (fades out over this).
+    float hitmarkerTimer_ = 0.0f;      ///< Remaining display time (fades out over this).
+    bool hitmarkerIsHeadshot_ = false; ///< True when the current hitmarker was a headshot.
 
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).
@@ -196,6 +202,7 @@ private:
     AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
     CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
+    HitboxRig clientHitboxRig_;         ///< Hitbox definitions for client-side debug visualization.
     float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (auto-calculated, tunable).
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).

@@ -12,6 +12,7 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
+#include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 
 #include <glm/geometric.hpp>
@@ -207,6 +208,55 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
         vel -= pushDir * k_into;
 }
 
+/// @brief Push the entity out of a triangle mesh it currently overlaps.
+///
+/// Instead of depenetrating against individual triangles (which jitters at
+/// edges where adjacent normals fight), this uses the BVH leaf AABBs as
+/// proxy collision volumes.  Each leaf AABB is a tight box around 1-4
+/// triangles.  AABB depenetration has stable, consistent face normals —
+/// the same algorithm that works perfectly for WorldAABB.
+///
+/// The swept collision still uses precise per-triangle tests, so sliding and
+/// surface normals are accurate.  This depenetration is only a safety net.
+static void
+depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
+{
+    // Quick reject: AABB overlap with mesh bounds.
+    if (pos.x + halfExtents.x < mesh.boundsMin.x || pos.x - halfExtents.x > mesh.boundsMax.x ||
+        pos.y + halfExtents.y < mesh.boundsMin.y || pos.y - halfExtents.y > mesh.boundsMax.y ||
+        pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
+        return;
+
+    // BVH traversal: find leaf nodes whose AABBs overlap the entity and
+    // depenetrate against each leaf AABB using the standard box push-out.
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const auto& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+        // Expand node bounds by entity halfExtents (Minkowski sum).
+        const glm::vec3 expMin = node.boundsMin - halfExtents;
+        const glm::vec3 expMax = node.boundsMax + halfExtents;
+
+        // Not overlapping this node?
+        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+            pos.z > expMax.z)
+            continue;
+
+        if (node.count > 0) {
+            // Leaf node — depenetrate against its AABB (same logic as depenetrateBox).
+            const physics::WorldAABB leafBox{node.boundsMin, node.boundsMax};
+            depenetrateBox(pos, vel, halfExtents, leafBox);
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
+}
+
 /// @brief Run all depenetration passes (planes, boxes, brushes, cylinders, spheres).
 /// @param pos          Entity position (modified in place).
 /// @param vel          Entity velocity (modified in place).
@@ -228,6 +278,9 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
 
     for (const physics::WorldSphere& sph : world.spheres)
         depenetrateSphere(pos, vel, halfExtents, sph);
+
+    for (const physics::WorldTriMesh& tm : world.triMeshes)
+        depenetrateTriMesh(pos, vel, halfExtents, tm);
 }
 
 /// @brief Attempt to step over a low obstacle when a wall is hit.

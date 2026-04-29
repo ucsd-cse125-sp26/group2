@@ -39,7 +39,7 @@ jobs:
 
           - name: Windows
             os: windows-latest
-            preset: debug-win
+            preset: debug
             cc: cl
             cxx: cl
 
@@ -65,7 +65,7 @@ jobs:
             ninja-build clang clang-format-18 clang-tidy \
             glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxss-dev libxkbcommon-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols \
             libpulse-dev libasound2-dev \
             libdbus-1-dev libudev-dev \
@@ -156,6 +156,9 @@ jobs:
   #  Release builds — optimised, no sanitizers                          #
   #  Runs on: push to main  →  updates "latest" pre-release             #
   #            tag v*.*.*   →  creates versioned release                #
+  #                                                                      #
+  #  Each platform produces ONE zip containing:                          #
+  #    client + server + shaders/ + config.toml + assets/                #
   # ------------------------------------------------------------------ #
   release-build:
     name: Release Build (${{ matrix.name }})
@@ -163,6 +166,8 @@ jobs:
     if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
+      # Google Drive file ID for the shared assets zip.
+      ASSETS_GDRIVE_ID: "1_Xafht6-R_E8-gVglYFDAHvjZA8msfE4"
     strategy:
       fail-fast: false
       matrix:
@@ -173,7 +178,7 @@ jobs:
             cc: clang
             cxx: clang++
             build_dir: build/release
-            client_bin: group2
+            client_bin: client
             server_bin: server
             archive_suffix: linux-x86_64
 
@@ -183,17 +188,17 @@ jobs:
             cc: clang
             cxx: clang++
             build_dir: build/release
-            client_bin: group2
+            client_bin: client
             server_bin: server
             archive_suffix: macos
 
           - name: Windows
             os: windows-latest
-            preset: release-win
+            preset: release
             cc: cl
             cxx: cl
-            build_dir: build/release-win
-            client_bin: group2.exe
+            build_dir: build/release
+            client_bin: client.exe
             server_bin: server.exe
             archive_suffix: windows-x86_64
 
@@ -218,7 +223,7 @@ jobs:
             ninja-build clang \
             glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxss-dev libxkbcommon-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols \
             libpulse-dev libasound2-dev \
             libdbus-1-dev libudev-dev \
@@ -244,6 +249,12 @@ jobs:
         with:
           vulkan_version: latest
           cache: true
+
+      # Ensure Python is available consistently across all runners (for gdown).
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       # sccache is incompatible with MSVC's PDB model (assimp sets /Zi + /Fd
       # which conflicts with sccache's output caching).  Linux/macOS only.
@@ -286,42 +297,53 @@ jobs:
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             ${{ matrix.extra_cmake || '' }}
 
+      # Only build the client and server targets (skip group2 / HybridRenderer).
       - name: Build
         shell: bash
-        run: cmake --build --preset ${{ matrix.preset }} --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --target client server --parallel
 
-      # Package client: binary + shaders/ + assets/ into a zip archive.
-      - name: Package client
+      # Download the shared assets zip from Google Drive using gdown.
+      - name: Download assets
         shell: bash
         run: |
-          STAGE="staging/group2-${{ matrix.archive_suffix }}"
+          pip install --quiet gdown
+          gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
+
+      # Bundle client + server + shaders + config + assets into a single zip.
+      - name: Package release
+        shell: bash
+        run: |
+          DIR="group2-${{ matrix.archive_suffix }}"
+          STAGE="staging/$DIR"
           mkdir -p "$STAGE"
+
+          # Executables
           cp "${{ matrix.build_dir }}/${{ matrix.client_bin }}" "$STAGE/"
+          cp "${{ matrix.build_dir }}/${{ matrix.server_bin }}" "$STAGE/"
+
+          # Config
+          cp "${{ matrix.build_dir }}/config.toml" "$STAGE/"
+
+          # Compiled SPIR-V shaders (legacy set used by the client target)
           cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
-          if [ -d "${{ matrix.build_dir }}/assets" ]; then
-            cp -r "${{ matrix.build_dir }}/assets" "$STAGE/"
-          fi
+
+          # Assets from Google Drive (cross-platform extraction via Python)
+          python3 -c "import zipfile; zipfile.ZipFile('assets.zip').extractall('$STAGE')"
+
+          # Create release zip.
+          # Linux/macOS have zip pre-installed; Windows has 7z instead.
           cd staging
-          zip -r "../group2-${{ matrix.archive_suffix }}.zip" "group2-${{ matrix.archive_suffix }}"
+          if command -v zip &>/dev/null; then
+            zip -r "../$DIR.zip" "$DIR"
+          else
+            7z a -tzip "../$DIR.zip" "$DIR"
+          fi
 
-      # Server is a standalone binary — no shaders or assets needed.
-      - name: Package server
-        shell: bash
-        run: |
-          cp "${{ matrix.build_dir }}/${{ matrix.server_bin }}" "server-${{ matrix.archive_suffix }}${{ runner.os == 'Windows' && '.exe' || '' }}"
-
-      - name: Upload client archive
+      - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
-          name: group2-${{ matrix.archive_suffix }}.zip
+          name: group2-${{ matrix.archive_suffix }}
           path: group2-${{ matrix.archive_suffix }}.zip
-          retention-days: 7
-
-      - name: Upload server binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-${{ matrix.archive_suffix }}
-          path: server-${{ matrix.archive_suffix }}${{ runner.os == 'Windows' && '.exe' || '' }}
           retention-days: 7
 
   # ------------------------------------------------------------------ #
@@ -385,7 +407,4 @@ jobs:
             $PRERELEASE_FLAG \
             group2-linux-x86_64.zip \
             group2-macos.zip \
-            group2-windows-x86_64.zip \
-            server-linux-x86_64 \
-            server-macos \
-            server-windows-x86_64.exe
+            group2-windows-x86_64.zip
