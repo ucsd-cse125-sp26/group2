@@ -400,8 +400,9 @@ endif()
 
 # SDL_shadercross builds a `shadercross` CLI target above (SDLSHADERCROSS_CLI=ON).
 # Use that target directly so the shader build stays in lockstep with the
-# vendored copy — no system install required.
-if(NOT TARGET shadercross)
+# vendored copy — no system install required.  Only required on platforms that
+# transpile SPIR-V → DXIL/MSL (Windows / macOS); Linux runs SPIR-V directly.
+if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE AND NOT TARGET shadercross)
     message(FATAL_ERROR
         "shadercross CLI target not found — SDL_shadercross FetchContent did "
         "not produce the expected target.")
