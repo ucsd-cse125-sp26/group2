@@ -21,6 +21,7 @@
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/ShotEvent.hpp"
 
@@ -73,9 +74,15 @@ void ServerGame::run()
 
     //temp weapon spawner
     const entt::entity spawner = registry.create();
-    registry.emplace<WeaponSpawner>(spawner, WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
-    registry.emplace<Position>(spawner, glm::vec3{12.0f, 1.0f, 12.0f});
+    registry.emplace<WeaponSpawner>(spawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(spawner, glm::vec3{12.0f, 15.0f, 12.0f});
     registry.emplace<CollisionShape>(spawner);
+
+    // temp rocket spawner
+     const entt::entity rocketSpawner = registry.create();
+     registry.emplace<WeaponSpawner>(rocketSpawner, WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
+     registry.emplace<Position>(rocketSpawner, glm::vec3{-200.0f, 15.0f, 12.0f});
+     registry.emplace<CollisionShape>(rocketSpawner);
 
     while (running) {
         server.poll();
@@ -156,6 +163,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     systems::runCollision(registry, dt, physics::activeWorld());
     systems::runExplosion(registry, particleEvents, pendingKillEvents);
     systems::runPlayerStatus(registry, dt);
+    systems::runWeaponSpawners(registry, dt);
 
     matchController.update(dt, registry, server);
 

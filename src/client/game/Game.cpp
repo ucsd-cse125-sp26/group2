@@ -1969,24 +1969,33 @@ void Game::refreshRemoteRespawnRenderables()
             switch (spawner.type) {
             case WeaponType::Rifle:
                 rend.modelIndex = 6;
+                rend.scale = glm::vec3(0.025f);
                 break;
             case WeaponType::RailGun:
                 rend.modelIndex = 7;
+                rend.scale = glm::vec3(1.0f);
                 break;
             case WeaponType::Rocket:
                 rend.modelIndex = 8;
+                rend.scale = glm::vec3(0.025f);
                 break;
             case WeaponType::EnergyGun:
                 rend.modelIndex = 9;
+                rend.scale = glm::vec3(1.0f);
                 break;
             default:
                 rend.modelIndex = 1;
+                rend.scale = glm::vec3(1.0f);
             }
 
             // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            rend.scale = glm::vec3(1);
+            // rend.scale = glm::vec3(1);
             // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
             rend.visible = true;
+            // if (spawner.hasWeapon) {
+            //     rend.visible = true;
+            // }
+
         });
 }
 
