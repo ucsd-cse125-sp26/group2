@@ -1128,6 +1128,8 @@ SDL_AppResult Game::iterate()
                                                                                        const CollisionShape&) {
             if (registry.all_of<LocalPlayer>(e))
                 return;
+            if (registry.all_of<RespawnTimer>(e))
+                return;
 
             const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
                                      : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
@@ -1349,7 +1351,8 @@ SDL_AppResult Game::iterate()
     // Build weapon viewmodel
     {
         WeaponViewmodel vm;
-        if (currentWeaponModelIdx >= 0) {
+        const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end()) {
             vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
 

@@ -7,6 +7,7 @@
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 
 #include <cmath>
 #include <glm/ext/matrix_transform.hpp>
@@ -17,7 +18,11 @@ namespace systems
 
 void updateHitboxes(Registry& registry, const HitboxRig& hitboxRig, float rigScale, float rigMeshMinY)
 {
-    auto view = registry.view<Position, JointMatrices>();
+    // Remove stale hitboxes from dead/respawning entities (handles client side where handleDeath doesn't run).
+    for (auto entity : registry.view<RespawnTimer>())
+        registry.remove<HitboxInstance>(entity);
+
+    auto view = registry.view<Position, JointMatrices>(entt::exclude<RespawnTimer>);
     view.each([&](entt::entity entity, const Position& pos, const JointMatrices& joints) {
         auto& instance = registry.get_or_emplace<HitboxInstance>(entity);
         instance.capsules.resize(hitboxRig.definitions.size());
