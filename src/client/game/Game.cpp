@@ -285,6 +285,7 @@ bool Game::init()
             if (sfxSystem.isInitialized())
                 sfxSystem.play(SfxId::FleshHit);
             hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
+            hitmarkerIsHeadshot_ = (evt.headshot != 0);
         }
 
         // Skip own effects that were already spawned locally for instant feedback.
@@ -1847,7 +1848,9 @@ SDL_AppResult Game::iterate()
         const float hmSize = 8.0f;
         const float hmGap = 4.0f;
         const float hmThick = 2.5f;
-        const ImU32 hmCol = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
+        const ImU32 hmCol = hitmarkerIsHeadshot_
+                                ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 0.2f, 0.2f, alpha))  // red for headshots
+                                : ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)); // white default
         ImDrawList* dl = ImGui::GetForegroundDrawList();
 
         // Four diagonal lines forming an X, offset from center by hmGap

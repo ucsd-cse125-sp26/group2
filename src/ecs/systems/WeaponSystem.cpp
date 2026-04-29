@@ -229,6 +229,7 @@ inline void handleFire(Registry& registry,
             impactEvt.effectType = ParticleEffectType::Impact;
             impactEvt.weaponType = gun.type;
             impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
+            impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);
@@ -300,6 +301,7 @@ inline void handleFire(Registry& registry,
             impactEvt.effectType = ParticleEffectType::Impact;
             impactEvt.weaponType = gun.type;
             impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
+            impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);
