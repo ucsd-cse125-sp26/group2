@@ -1301,62 +1301,76 @@ ImU32 regionColor(BodyRegion region)
 
 } // namespace
 
-void DebugUI::buildHitboxUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight)
+void DebugUI::buildHitboxUI(
+    const Registry& registry, HitboxRig& hitboxRig, const glm::mat4& viewProj, float screenWidth, float screenHeight)
 {
-    if (!showHitboxWindow)
-        return;
+    // ── ImGui window (only when showHitboxWindow is true) ──
+    if (showHitboxWindow) {
+        if (ImGui::Begin("Hitbox Debug", &showHitboxWindow)) {
+            ImGui::Checkbox("Draw Hitboxes", &drawHitboxOverlay);
+            ImGui::Separator();
 
-    if (ImGui::Begin("Hitbox Debug", &showHitboxWindow)) {
-        ImGui::Checkbox("Draw Hitboxes", &drawHitboxOverlay);
-        ImGui::Separator();
+            // Count entities with hitboxes.
+            int entityCount = 0;
+            int capsuleCount = 0;
+            registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
+                ++entityCount;
+                capsuleCount += static_cast<int>(hb.capsules.size());
+            });
+            ImGui::Text("Entities: %d  |  Capsules: %d", entityCount, capsuleCount);
+            ImGui::Separator();
 
-        // Count entities with hitboxes.
-        int entityCount = 0;
-        int capsuleCount = 0;
-        registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
-            ++entityCount;
-            capsuleCount += static_cast<int>(hb.capsules.size());
-        });
-        ImGui::Text("Entities: %d  |  Capsules: %d", entityCount, capsuleCount);
-        ImGui::Separator();
+            // ── Per-capsule editors ──
+            if (ImGui::TreeNode("Capsule Definitions")) {
+                for (size_t i = 0; i < hitboxRig.definitions.size(); ++i) {
+                    auto& def = hitboxRig.definitions[i];
+                    ImGui::PushID(static_cast<int>(i));
 
-        // Position & scale adjustment.
-        ImGui::SeparatorText("Hitbox Adjustments");
-        ImGui::DragFloat3("Position Offset", &hitboxPosOffset.x, 0.5f, -200.0f, 200.0f, "%.1f");
-        ImGui::DragFloat("Scale Multiplier", &hitboxScaleMul, 0.01f, 0.1f, 5.0f, "%.2f");
-        if (ImGui::Button("Reset Adjustments")) {
-            hitboxPosOffset = glm::vec3(0.0f);
-            hitboxScaleMul = 1.0f;
-        }
-        ImGui::Separator();
+                    const ImU32 col = regionColor(def.region);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col);
+                    const bool open =
+                        ImGui::TreeNode("##cap", "[%zu] %s (%s)", i, def.boneName.c_str(), bodyRegionName(def.region));
+                    ImGui::PopStyleColor();
 
-        // Damage profile display.
-        if (ImGui::TreeNode("Damage Multipliers")) {
-            const auto& profile = defaultDamageProfile();
-            for (size_t i = 0; i < static_cast<size_t>(BodyRegion::Count); ++i) {
-                const auto region = static_cast<BodyRegion>(i);
-                ImU32 col = regionColor(region);
-                ImGui::PushStyleColor(ImGuiCol_Text, col);
-                ImGui::Text("%-15s  %.2fx", bodyRegionName(region), static_cast<double>(profile.multipliers[i]));
-                ImGui::PopStyleColor();
+                    if (open) {
+                        ImGui::DragFloat3("Offset", &def.localOffset.x, 0.5f, -100.0f, 100.0f, "%.1f");
+                        ImGui::DragFloat("Radius", &def.radius, 0.1f, 0.5f, 30.0f, "%.1f");
+                        ImGui::DragFloat("Half Height", &def.halfHeight, 0.1f, 0.5f, 40.0f, "%.1f");
+                        ImGui::DragFloat3("Axis", &def.localAxis.x, 0.05f, -1.0f, 1.0f, "%.2f");
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
             }
-            ImGui::TreePop();
-        }
-    }
-    ImGui::End();
+            ImGui::Separator();
 
-    // Draw capsule wireframes on the foreground draw list (overlaid on the 3D scene).
+            // Damage profile display.
+            if (ImGui::TreeNode("Damage Multipliers")) {
+                const auto& profile = defaultDamageProfile();
+                for (size_t i = 0; i < static_cast<size_t>(BodyRegion::Count); ++i) {
+                    const auto region = static_cast<BodyRegion>(i);
+                    ImU32 col = regionColor(region);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col);
+                    ImGui::Text("%-15s  %.2fx", bodyRegionName(region), static_cast<double>(profile.multipliers[i]));
+                    ImGui::PopStyleColor();
+                }
+                ImGui::TreePop();
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Capsule wireframe overlay (independent of window visibility) ──
+    // This intentionally runs even when the window is hidden (F2 toggle)
+    // so you can play with a clean viewport while still seeing hitboxes.
     if (drawHitboxOverlay) {
         ImDrawList* dl = ImGui::GetForegroundDrawList();
-        const glm::vec3 posOff = hitboxPosOffset;
-        const float sMul = hitboxScaleMul;
         registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
             for (const auto& cap : hb.capsules) {
                 const ImU32 color = regionColor(cap.region);
-                const glm::vec3 adjA = cap.pointA + posOff;
-                const glm::vec3 adjB = cap.pointB + posOff;
-                const float adjR = cap.radius * sMul;
-                drawCapsuleWireframe(dl, adjA, adjB, adjR, viewProj, screenWidth, screenHeight, color);
+                drawCapsuleWireframe(
+                    dl, cap.pointA, cap.pointB, cap.radius, viewProj, screenWidth, screenHeight, color);
             }
         });
     }

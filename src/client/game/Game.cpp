@@ -1583,7 +1583,7 @@ SDL_AppResult Game::iterate()
         const glm::mat4 hbProj =
             glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
         const glm::mat4 hbVP = hbProj * hbView;
-        debugUI.buildHitboxUI(registry, hbVP, winWf, winHf);
+        debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
     }
 #ifdef USE_HYBRID_RENDERER
     debugUI.buildRenderTogglesUI(renderer.legacy());

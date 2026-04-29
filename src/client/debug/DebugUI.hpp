@@ -104,14 +104,14 @@ public:
     /// @param viewProj     Combined view-projection matrix for the current camera.
     /// @param screenWidth  Viewport width in pixels.
     /// @param screenHeight Viewport height in pixels.
-    void buildHitboxUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+    void buildHitboxUI(const Registry& registry,
+                       HitboxRig& hitboxRig,
+                       const glm::mat4& viewProj,
+                       float screenWidth,
+                       float screenHeight);
 
     bool showHitboxWindow = false; ///< Show the Hitbox Debug ImGui window.
-    bool drawHitboxOverlay = true; ///< Draw 3-D capsule wireframes (checkbox inside the window).
-
-    // Live-tunable hitbox adjustment (applied on top of rig defaults).
-    glm::vec3 hitboxPosOffset{0.0f}; ///< World-space offset added to all capsule positions.
-    float hitboxScaleMul = 1.0f;     ///< Multiplier on capsule radius + half-height.
+    bool drawHitboxOverlay = true; ///< Draw 3-D capsule wireframes (independent of window visibility).
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
@@ -138,7 +138,6 @@ private:
     bool showLightingControls = false; ///< Show the Lighting Controls window.
     bool showSkybox = false;           ///< Show the Skybox window.
     bool showNetworkStats = false;     ///< Show the Network Stats window.
-    // showHitboxes is public (declared above) to allow Game to pass it to toggleAllPanels.
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.

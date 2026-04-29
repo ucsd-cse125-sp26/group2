@@ -183,19 +183,25 @@ struct HitboxRig
         defs.reserve(12);
 
         // clang-format off
+        // NOTE: In Mixamo rigs imported via assimp/ozz the bone-local +Y axis
+        // points from child toward parent (i.e. "up" for legs, "inward" for arms).
+        // Therefore offsets that push the capsule ALONG the bone (toward the child
+        // joint) use negative Y.  The localAxis {0,-1,0} makes halfHeight extend
+        // in the -Y direction (along the bone) so the capsule covers from the bone
+        // origin toward the next joint.
         //                boneName                        region                       offset                  radius  halfH   axis
-        defs.push_back({"mixamorig:Head",          -1, BodyRegion::Head,          {0, 4, 0},             4.5f,  3.0f,  {0,1,0}});
-        defs.push_back({"mixamorig:Neck",          -1, BodyRegion::Neck,          {0, 0, 0},             3.0f,  2.0f,  {0,1,0}});
-        defs.push_back({"mixamorig:Spine2",        -1, BodyRegion::UpperTorso,    {0, 0, 0},             8.0f,  6.0f,  {0,1,0}});
-        defs.push_back({"mixamorig:Spine1",        -1, BodyRegion::LowerTorso,    {0, 0, 0},             7.5f,  5.0f,  {0,1,0}});
-        defs.push_back({"mixamorig:LeftArm",       -1, BodyRegion::LeftUpperArm,  {0,-10, 0},            3.5f,  10.0f, {0,1,0}});
-        defs.push_back({"mixamorig:LeftForeArm",   -1, BodyRegion::LeftLowerArm,  {0,-10, 0},            3.0f,  10.0f, {0,1,0}});
-        defs.push_back({"mixamorig:RightArm",      -1, BodyRegion::RightUpperArm, {0,-10, 0},            3.5f,  10.0f, {0,1,0}});
-        defs.push_back({"mixamorig:RightForeArm",  -1, BodyRegion::RightLowerArm, {0,-10, 0},            3.0f,  10.0f, {0,1,0}});
-        defs.push_back({"mixamorig:LeftUpLeg",     -1, BodyRegion::LeftUpperLeg,  {0,-18, 0},            4.5f,  16.0f, {0,1,0}});
-        defs.push_back({"mixamorig:LeftLeg",       -1, BodyRegion::LeftLowerLeg,  {0,-18, 0},            3.5f,  16.0f, {0,1,0}});
-        defs.push_back({"mixamorig:RightUpLeg",    -1, BodyRegion::RightUpperLeg, {0,-18, 0},            4.5f,  16.0f, {0,1,0}});
-        defs.push_back({"mixamorig:RightLeg",      -1, BodyRegion::RightLowerLeg, {0,-18, 0},            3.5f,  16.0f, {0,1,0}});
+        defs.push_back({"mixamorig:Head",          -1, BodyRegion::Head,          {0, -4, 0},            4.5f,  3.0f,  {0,-1,0}});
+        defs.push_back({"mixamorig:Neck",          -1, BodyRegion::Neck,          {0,  0, 0},            3.0f,  2.0f,  {0,-1,0}});
+        defs.push_back({"mixamorig:Spine2",        -1, BodyRegion::UpperTorso,    {0,  0, 0},            8.0f,  6.0f,  {0,-1,0}});
+        defs.push_back({"mixamorig:Spine1",        -1, BodyRegion::LowerTorso,    {0,  0, 0},            7.5f,  5.0f,  {0,-1,0}});
+        defs.push_back({"mixamorig:LeftArm",       -1, BodyRegion::LeftUpperArm,  {0, 10, 0},            3.5f,  10.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:LeftForeArm",   -1, BodyRegion::LeftLowerArm,  {0, 10, 0},            3.0f,  10.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightArm",      -1, BodyRegion::RightUpperArm, {0, 10, 0},            3.5f,  10.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightForeArm",  -1, BodyRegion::RightLowerArm, {0, 10, 0},            3.0f,  10.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:LeftUpLeg",     -1, BodyRegion::LeftUpperLeg,  {0, 18, 0},            4.5f,  16.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:LeftLeg",       -1, BodyRegion::LeftLowerLeg,  {0, 18, 0},            3.5f,  16.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightUpLeg",    -1, BodyRegion::RightUpperLeg, {0, 18, 0},            4.5f,  16.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightLeg",      -1, BodyRegion::RightLowerLeg, {0, 18, 0},            3.5f,  16.0f, {0,-1,0}});
         // clang-format on
 
         return rig;
