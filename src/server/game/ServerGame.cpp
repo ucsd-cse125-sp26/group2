@@ -91,15 +91,17 @@ void ServerGame::run()
 
     // temp weapon spawner
     const entt::entity spawner = registry.create();
-    registry.emplace<WeaponSpawner>(spawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<WeaponSpawner>(
+        spawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
     registry.emplace<Position>(spawner, glm::vec3{12.0f, 15.0f, 12.0f});
     registry.emplace<CollisionShape>(spawner);
 
     // temp rocket spawner
-     const entt::entity rocketSpawner = registry.create();
-     registry.emplace<WeaponSpawner>(rocketSpawner, WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
-     registry.emplace<Position>(rocketSpawner, glm::vec3{-200.0f, 15.0f, 12.0f});
-     registry.emplace<CollisionShape>(rocketSpawner);
+    const entt::entity rocketSpawner = registry.create();
+    registry.emplace<WeaponSpawner>(rocketSpawner,
+                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
+    registry.emplace<Position>(rocketSpawner, glm::vec3{-200.0f, 15.0f, 12.0f});
+    registry.emplace<CollisionShape>(rocketSpawner);
 
     while (running) {
         server.poll();

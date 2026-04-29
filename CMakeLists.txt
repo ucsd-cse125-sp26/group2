@@ -63,13 +63,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
 endif()
 
-# Split DWARF debug info on Linux — keeps .o files smaller and dramatically
-# speeds up linking for Debug builds.  Not supported by Apple Clang or MSVC.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
-   AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options($<$<CONFIG:Debug>:-gsplit-dwarf>)
-    message(STATUS "Debug builds will use -gsplit-dwarf")
-endif()
+# Note: -gsplit-dwarf was previously enabled here for Linux Debug builds, but
+# Clang refuses to mix split-dwarf with precompiled headers (the per-file
+# "_gsplit_dwarf_path" macro is baked into the PCH and then mismatches every
+# consuming TU).  Both SDL3 3.4.x and our own targets use PCH, so the flag is
+# off across the board.  PCH already provides the bulk of the rebuild-speed
+# win that split-dwarf was helping with.
 
 # ---- Dependencies ----
 
@@ -400,8 +399,9 @@ endif()
 
 # SDL_shadercross builds a `shadercross` CLI target above (SDLSHADERCROSS_CLI=ON).
 # Use that target directly so the shader build stays in lockstep with the
-# vendored copy — no system install required.
-if(NOT TARGET shadercross)
+# vendored copy — no system install required.  Only required on platforms that
+# transpile SPIR-V → DXIL/MSL (Windows / macOS); Linux runs SPIR-V directly.
+if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE AND NOT TARGET shadercross)
     message(FATAL_ERROR
         "shadercross CLI target not found — SDL_shadercross FetchContent did "
         "not produce the expected target.")

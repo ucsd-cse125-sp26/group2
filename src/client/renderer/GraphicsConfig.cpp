@@ -30,8 +30,10 @@ GpuBackend parseBackend(std::string_view s)
         return GpuBackend::Vulkan;
     if (s == "metal")
         return GpuBackend::Metal;
-    std::fprintf(stderr, "[config] Warning: unknown graphics.backend '%.*s' — using platform default.\n",
-                 static_cast<int>(s.size()), s.data());
+    std::fprintf(stderr,
+                 "[config] Warning: unknown graphics.backend '%.*s' — using platform default.\n",
+                 static_cast<int>(s.size()),
+                 s.data());
     return defaultBackend();
 }
 } // namespace
