@@ -921,6 +921,56 @@ SDL_AppResult Game::iterate()
         if (!isBeamNow && wasBeamActive_)
             sfxSystem.stop(SfxId::EnergyBeamLoop);
         wasBeamActive_ = isBeamNow;
+
+        // Beam hitmarker: client-side raycast against player hitboxes while firing.
+        // Note: Player component is not synced to clients, so we raycast against
+        // HitboxInstance directly (skipping the local player entity).
+        if (isBeamNow) {
+            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape>().each(
+                [&](entt::entity localE,
+                    const BeamState&,
+                    const InputSnapshot& inp,
+                    const Position& pos,
+                    const CollisionShape& shape) {
+                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float cp = std::cos(inp.pitch);
+                    const glm::vec3 dir{std::sin(inp.yaw) * cp, -std::sin(inp.pitch), std::cos(inp.yaw) * cp};
+
+                    physics::HitboxHit bestHit;
+                    bestHit.distance = 5000.0f;
+                    registry.view<Position, CollisionShape, HitboxInstance>().each([&](entt::entity target,
+                                                                                       const Position& tPos,
+                                                                                       const CollisionShape& tShape,
+                                                                                       const HitboxInstance& hb) {
+                        if (target == localE)
+                            return;
+                        const physics::WorldAABB bounds{tPos.value - tShape.halfExtents,
+                                                        tPos.value + tShape.halfExtents};
+                        float aabbDist = bestHit.distance;
+                        glm::vec3 aabbN{0.0f};
+                        if (!physics::raycastAABB(eye, dir, bounds, bestHit.distance, aabbDist, aabbN))
+                            return;
+                        for (const auto& cap : hb.capsules) {
+                            float dist = bestHit.distance;
+                            glm::vec3 n{0.0f};
+                            if (!physics::raycastCapsule(
+                                    eye, dir, cap.pointA, cap.pointB, cap.radius, bestHit.distance, dist, n))
+                                continue;
+                            bestHit.hit = true;
+                            bestHit.distance = dist;
+                            bestHit.point = eye + dir * dist;
+                            bestHit.normal = n;
+                            bestHit.region = cap.region;
+                            bestHit.entity = target;
+                        }
+                    });
+
+                    if (bestHit.hit) {
+                        hitmarkerTimer_ = 0.10f; // short pulse — refreshed every frame while hitting
+                        hitmarkerIsHeadshot_ = (bestHit.region == BodyRegion::Head);
+                    }
+                });
+        }
     }
 
     // Draw persistent HUD text each frame
