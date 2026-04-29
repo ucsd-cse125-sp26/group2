@@ -42,11 +42,15 @@ void updateHitboxes(Registry& registry, const HitboxRig& hitboxRig, float rigSca
         const float sinY = std::sin(yaw);
 
         // Compose manually for efficiency (single 4x4).
+        // Must match the renderer's transform: translate * mat4_cast(angleAxis(yaw, Y)) * scale.
+        // glm::angleAxis(yaw, Y) produces columns:
+        //   col0 = ( cos, 0, -sin)
+        //   col1 = (   0, 1,    0)
+        //   col2 = ( sin, 0,  cos)
         glm::mat4 worldTransform(1.0f);
-        // Scale columns
-        worldTransform[0] = glm::vec4(cosY * rigScale, 0.0f, sinY * rigScale, 0.0f);
+        worldTransform[0] = glm::vec4(cosY * rigScale, 0.0f, -sinY * rigScale, 0.0f);
         worldTransform[1] = glm::vec4(0.0f, rigScale, 0.0f, 0.0f);
-        worldTransform[2] = glm::vec4(-sinY * rigScale, 0.0f, cosY * rigScale, 0.0f);
+        worldTransform[2] = glm::vec4(sinY * rigScale, 0.0f, cosY * rigScale, 0.0f);
         worldTransform[3] = glm::vec4(pos.value.x, pos.value.y + verticalOffset, pos.value.z, 1.0f);
 
         for (size_t i = 0; i < hitboxRig.definitions.size(); ++i) {

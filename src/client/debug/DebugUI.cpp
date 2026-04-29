@@ -123,6 +123,7 @@ void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
         &showLightingControls,
         &showSkybox,
         &showNetworkStats,
+        &showHitboxWindow,
     };
 
     // If anything is currently visible (owned or external), hide everything;
@@ -1302,9 +1303,11 @@ ImU32 regionColor(BodyRegion region)
 
 void DebugUI::buildHitboxUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight)
 {
-    // Toggle window
-    if (ImGui::Begin("Hitbox Debug", &showHitboxes)) {
-        ImGui::Text("Skeleton-driven hitbox capsules");
+    if (!showHitboxWindow)
+        return;
+
+    if (ImGui::Begin("Hitbox Debug", &showHitboxWindow)) {
+        ImGui::Checkbox("Draw Hitboxes", &drawHitboxOverlay);
         ImGui::Separator();
 
         // Count entities with hitboxes.
@@ -1315,6 +1318,17 @@ void DebugUI::buildHitboxUI(const Registry& registry, const glm::mat4& viewProj,
             capsuleCount += static_cast<int>(hb.capsules.size());
         });
         ImGui::Text("Entities: %d  |  Capsules: %d", entityCount, capsuleCount);
+        ImGui::Separator();
+
+        // Position & scale adjustment.
+        ImGui::SeparatorText("Hitbox Adjustments");
+        ImGui::DragFloat3("Position Offset", &hitboxPosOffset.x, 0.5f, -200.0f, 200.0f, "%.1f");
+        ImGui::DragFloat("Scale Multiplier", &hitboxScaleMul, 0.01f, 0.1f, 5.0f, "%.2f");
+        if (ImGui::Button("Reset Adjustments")) {
+            hitboxPosOffset = glm::vec3(0.0f);
+            hitboxScaleMul = 1.0f;
+        }
+        ImGui::Separator();
 
         // Damage profile display.
         if (ImGui::TreeNode("Damage Multipliers")) {
@@ -1332,13 +1346,17 @@ void DebugUI::buildHitboxUI(const Registry& registry, const glm::mat4& viewProj,
     ImGui::End();
 
     // Draw capsule wireframes on the foreground draw list (overlaid on the 3D scene).
-    if (showHitboxes) {
+    if (drawHitboxOverlay) {
         ImDrawList* dl = ImGui::GetForegroundDrawList();
+        const glm::vec3 posOff = hitboxPosOffset;
+        const float sMul = hitboxScaleMul;
         registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
             for (const auto& cap : hb.capsules) {
                 const ImU32 color = regionColor(cap.region);
-                drawCapsuleWireframe(
-                    dl, cap.pointA, cap.pointB, cap.radius, viewProj, screenWidth, screenHeight, color);
+                const glm::vec3 adjA = cap.pointA + posOff;
+                const glm::vec3 adjB = cap.pointB + posOff;
+                const float adjR = cap.radius * sMul;
+                drawCapsuleWireframe(dl, adjA, adjB, adjR, viewProj, screenWidth, screenHeight, color);
             }
         });
     }

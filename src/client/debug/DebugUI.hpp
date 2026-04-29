@@ -94,10 +94,11 @@ public:
     void buildNetworkUI(const NetworkStats& stats);
     void buildWeaponUI(const Registry& registry);
 
-    /// @brief Draw hitbox capsule wireframes projected into screen space.
+    /// @brief Draw the Hitbox Debug window and (optionally) capsule wireframe overlay.
     ///
-    /// Uses the ImGui foreground draw list to overlay world-space capsules on
-    /// top of the rendered frame.  Toggled via `showHitboxes`.
+    /// The window is always rendered when `showHitboxWindow` is true.  The 3-D
+    /// capsule overlay is drawn only when the "Draw Hitboxes" checkbox inside
+    /// the window is checked.
     ///
     /// @param registry     ECS registry (reads HitboxInstance, Position, Player).
     /// @param viewProj     Combined view-projection matrix for the current camera.
@@ -105,7 +106,12 @@ public:
     /// @param screenHeight Viewport height in pixels.
     void buildHitboxUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
 
-    bool showHitboxes = false; ///< Show skeleton-driven hitbox capsule debug overlay.
+    bool showHitboxWindow = false; ///< Show the Hitbox Debug ImGui window.
+    bool drawHitboxOverlay = true; ///< Draw 3-D capsule wireframes (checkbox inside the window).
+
+    // Live-tunable hitbox adjustment (applied on top of rig defaults).
+    glm::vec3 hitboxPosOffset{0.0f}; ///< World-space offset added to all capsule positions.
+    float hitboxScaleMul = 1.0f;     ///< Multiplier on capsule radius + half-height.
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
