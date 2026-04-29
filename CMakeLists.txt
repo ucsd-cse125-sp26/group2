@@ -620,6 +620,8 @@ add_executable(group2
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/systems/WeaponSpawnerSystem.hpp
+        src/ecs/systems/WeaponSpawnerSystem.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -872,6 +874,8 @@ add_executable(client
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/systems/WeaponSpawnerSystem.hpp
+        src/ecs/systems/WeaponSpawnerSystem.cpp
 )
 
 target_include_directories(client PRIVATE
@@ -1033,6 +1037,8 @@ add_executable(server
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/systems/WeaponSpawnerSystem.hpp
+        src/ecs/systems/WeaponSpawnerSystem.cpp
         src/ecs/components/Hitbox.hpp
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
