@@ -3,7 +3,11 @@
 
 #pragma once
 
+#include "client/animation/AnimationLibrary.hpp"
+#include "client/animation/CharacterAnimator.hpp"
+#include "client/animation/CharacterRig.hpp"
 #include "ecs/components/ClientId.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
@@ -13,6 +17,7 @@
 #include <SDL3/SDL.h>
 
 #include <entt/entity/entity.hpp>
+#include <memory>
 #include <unordered_map>
 
 /// @brief Top-level server game loop.
@@ -53,6 +58,20 @@ private:
     /// @param clientId Network client identifier for the player.
     void deletePlayerEntity(ClientId clientId);
 
+    /// @brief Initialise the server-side animation subsystem (skeleton, clips, hitboxes).
+    /// Called once during init() after map loading.
+    void initAnimation();
+
+    /// @brief Create and store a server-side animator for the given player entity.
+    void attachServerAnimator(entt::entity player);
+
+    /// @brief Remove the server-side animator for the given entity.
+    void detachServerAnimator(entt::entity player);
+
+    /// @brief Update all server-side animators and recompute hitbox capsules.
+    /// Called once per tick before weapon/damage systems.
+    void updateAnimationAndHitboxes(float dt);
+
     physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
 
     Server server;                           ///< Owns the TCP socket and network I/O.
@@ -63,4 +82,16 @@ private:
     bool running = false;                        ///< Loop continues while true.
     int tickRateHz = 128;                        ///< Physics ticks per second.
     int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
+
+    // ── Server-side animation subsystem ──
+    CharacterRig serverRig_;             ///< Shared skeleton (loaded from same FBX as client).
+    AnimationLibrary serverAnimLibrary_; ///< Animation clips for server-side sampling.
+    HitboxRig hitboxRig_;                ///< Shared hitbox capsule definitions.
+    float rigScale_ = 1.0f;              ///< Rig model-space → game-unit scale factor.
+    float rigMeshMinY_ = 0.0f;           ///< Minimum Y of bind-pose mesh (for vertical offset).
+    bool animationLoaded_ = false;       ///< True if rig+clips loaded successfully.
+
+    /// Per-entity server animators (not ECS components to avoid pulling animation
+    /// headers into the component registry).
+    std::unordered_map<entt::entity, std::unique_ptr<CharacterAnimator>> serverAnimators_;
 };

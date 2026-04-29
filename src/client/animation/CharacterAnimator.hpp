@@ -96,6 +96,16 @@ public:
     /// @brief Number of joints in the underlying rig.
     [[nodiscard]] int numJoints() const noexcept;
 
+    /// @brief Model-space joint matrices with all procedural transforms applied
+    ///        (head pitch, wallrun mirror) but WITHOUT inverse-bind-matrix multiplication.
+    ///
+    /// These are the matrices needed for hitbox capsule placement — each matrix
+    /// transforms from bone-local space to the rig's model space.  Apply the
+    /// entity's world transform (position + yaw + scale) on top to get world space.
+    ///
+    /// Valid after a call to update().  Size = numJoints().
+    [[nodiscard]] const std::vector<glm::mat4>& jointModelMatrices() const noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

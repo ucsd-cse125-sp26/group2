@@ -11,6 +11,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -27,6 +28,7 @@
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/HitboxSystem.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -429,6 +431,17 @@ bool Game::init()
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
             }
+        }
+
+        // Build and resolve hitbox definitions (client-side, for debug visualization).
+        clientHitboxRig_ = HitboxRig::buildMixamoDefault();
+        clientHitboxRig_.resolveIndices(charRig_.jointMap());
+        {
+            int resolved = 0;
+            for (const auto& def : clientHitboxRig_.definitions)
+                if (def.boneIndex >= 0)
+                    ++resolved;
+            SDL_Log("[client] hitbox rig: %zu definitions, %d resolved", clientHitboxRig_.definitions.size(), resolved);
         }
     }
 
@@ -986,9 +999,12 @@ SDL_AppResult Game::iterate()
     // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
     // CPU-skins every rig mesh, and streams the resulting vertices into its
     // per-entity renderer model instance.
+    //
+    // Also populates the JointMatrices ECS component with model-space bone transforms
+    // for skeleton-driven hitbox capsule placement.
     {
         std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity,
+        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity e,
                                                                                           AnimatedCharacter& ac,
                                                                                           const Velocity& vel,
                                                                                           const PlayerState& ps,
@@ -1007,6 +1023,10 @@ SDL_AppResult Game::iterate()
             ai.wallRunSide = static_cast<int>(ps.wallRunSide);
             ac.animator->update(ai, frameTime);
 
+            // Store model-space joint matrices for hitbox system.
+            auto& jm = registry.get_or_emplace<JointMatrices>(e);
+            jm.matrices = ac.animator->jointModelMatrices();
+
             ac.animator->computeSkinnedVertices(skinnedBuffer);
             for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
                 const auto& sv = skinnedBuffer[m];
@@ -1014,6 +1034,10 @@ SDL_AppResult Game::iterate()
                     ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
             }
         });
+
+        // Update hitbox capsules from bone transforms (client-side for debug visualization).
+        if (charRig_.isLoaded())
+            systems::updateHitboxes(registry, clientHitboxRig_, kRigScale_, rigMeshMinY_);
     }
 
     // Build entity render list
@@ -1588,6 +1612,19 @@ SDL_AppResult Game::iterate()
     }
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
+
+    // Hitbox debug visualization — project capsules into screen space.
+    {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSize(window, &winW, &winH);
+        const float winWf = static_cast<float>(winW);
+        const float winHf = static_cast<float>(winH);
+        const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
+        const glm::mat4 hbProj =
+            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+        const glm::mat4 hbVP = hbProj * hbView;
+        debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
+    }
 #ifdef USE_HYBRID_RENDERER
     debugUI.buildRenderTogglesUI(renderer.legacy());
     debugUI.buildLightingUI(renderer.legacy());

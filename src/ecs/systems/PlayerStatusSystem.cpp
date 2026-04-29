@@ -6,6 +6,7 @@
 #include "SDL3/SDL_log.h"
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -98,7 +99,8 @@ inline void handleDeath(entt::entity& player,
                         Health& playerHealth,
                         entt::entity& killer,
                         Registry& registry,
-                        std::vector<NetKillEvent>& killEvents)
+                        std::vector<NetKillEvent>& killEvents,
+                        BodyRegion hitRegion)
 {
     if (playerHealth.health <= 0) {
         // Update death
@@ -119,6 +121,8 @@ inline void handleDeath(entt::entity& player,
             .killerId = killerId,
             .victimId = registry.get<ClientId>(player),
             .killerHealth = killerHealth,
+            .hitRegion = hitRegion,
+            .isHeadshot = (hitRegion == BodyRegion::Head),
         };
         killEvents.push_back(event);
 
@@ -130,8 +134,12 @@ inline void handleDeath(entt::entity& player,
     }
 }
 
-void applyDamage(
-    float damage, entt::entity player, entt::entity& killer, Registry& registry, std::vector<NetKillEvent>& killEvents)
+void applyDamage(float damage,
+                 entt::entity player,
+                 entt::entity& killer,
+                 Registry& registry,
+                 std::vector<NetKillEvent>& killEvents,
+                 BodyRegion hitRegion)
 {
     // If player is dead, ignore damage
     if (registry.all_of<RespawnTimer>(player))
@@ -149,7 +157,7 @@ void applyDamage(
         playerHealth.armor = 0;
         if (playerHealth.health - overflow <= 0) {
             playerHealth.health = 0;
-            handleDeath(player, playerHealth, killer, registry, killEvents);
+            handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion);
         } else {
             playerHealth.health -= overflow;
         }

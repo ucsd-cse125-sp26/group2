@@ -28,6 +28,8 @@
 #include <cfloat>
 #include <cmath>
 #include <filesystem>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
 #include <imgui.h>
@@ -121,6 +123,7 @@ void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
         &showLightingControls,
         &showSkybox,
         &showNetworkStats,
+        &showHitboxWindow,
     };
 
     // If anything is currently visible (owned or external), hide everything;
@@ -1185,6 +1188,192 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     }
 
     ImGui::End();
+}
+
+// =====================================================================
+// Hitbox capsule debug visualization
+// =====================================================================
+
+namespace
+{
+
+/// @brief Project a world-space point to screen-space using the view-projection matrix.
+/// Returns false if the point is behind the camera.
+bool worldToScreen(glm::vec3 world, const glm::mat4& vp, float w, float h, ImVec2& out)
+{
+    const glm::vec4 clip = vp * glm::vec4(world, 1.0f);
+    if (clip.w <= 0.0001f)
+        return false; // behind camera
+    const float invW = 1.0f / clip.w;
+    out.x = (0.5f + 0.5f * clip.x * invW) * w;
+    out.y = (0.5f - 0.5f * clip.y * invW) * h;
+    return true;
+}
+
+/// @brief Draw a screen-space line between two world points if both are visible.
+void drawWorldLine(ImDrawList* dl,
+                   glm::vec3 a,
+                   glm::vec3 b,
+                   const glm::mat4& vp,
+                   float sw,
+                   float sh,
+                   ImU32 color,
+                   float thickness = 1.0f)
+{
+    ImVec2 sa, sb;
+    if (worldToScreen(a, vp, sw, sh, sa) && worldToScreen(b, vp, sw, sh, sb))
+        dl->AddLine(sa, sb, color, thickness);
+}
+
+/// @brief Draw a capsule wireframe (two hemispheres connected by 4 lines).
+void drawCapsuleWireframe(
+    ImDrawList* dl, glm::vec3 pA, glm::vec3 pB, float radius, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    // Capsule axis
+    glm::vec3 axis = pB - pA;
+    const float axisLen = glm::length(axis);
+    if (axisLen < 0.001f) {
+        // Degenerate — draw a circle.
+        ImVec2 center;
+        if (!worldToScreen(pA, vp, sw, sh, center))
+            return;
+        dl->AddCircle(center, 5.0f, color, 12, 1.5f);
+        return;
+    }
+    axis /= axisLen;
+
+    // Build perpendicular vectors.
+    glm::vec3 up = (std::abs(axis.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+    glm::vec3 right = glm::normalize(glm::cross(axis, up));
+    up = glm::normalize(glm::cross(right, axis));
+
+    constexpr int segments = 12;
+    constexpr float pi2 = 6.2831853f;
+
+    // Draw rings at both endpoints.
+    for (int endIdx = 0; endIdx < 2; ++endIdx) {
+        const glm::vec3 center = (endIdx == 0) ? pA : pB;
+        glm::vec3 prev = center + right * radius;
+        for (int i = 1; i <= segments; ++i) {
+            const float angle = pi2 * static_cast<float>(i) / static_cast<float>(segments);
+            const glm::vec3 cur = center + (right * std::cos(angle) + up * std::sin(angle)) * radius;
+            drawWorldLine(dl, prev, cur, vp, sw, sh, color, 1.0f);
+            prev = cur;
+        }
+    }
+
+    // Four connecting lines along the capsule length.
+    for (int i = 0; i < 4; ++i) {
+        const float angle = pi2 * static_cast<float>(i) / 4.0f;
+        const glm::vec3 offset = (right * std::cos(angle) + up * std::sin(angle)) * radius;
+        drawWorldLine(dl, pA + offset, pB + offset, vp, sw, sh, color, 1.0f);
+    }
+}
+
+/// @brief Get a color for a body region (consistent per-region coloring).
+ImU32 regionColor(BodyRegion region)
+{
+    switch (region) {
+    case BodyRegion::Head:
+        return IM_COL32(255, 50, 50, 220);  // Red
+    case BodyRegion::Neck:
+        return IM_COL32(255, 150, 50, 220); // Orange
+    case BodyRegion::UpperTorso:
+        return IM_COL32(50, 255, 50, 220);  // Green
+    case BodyRegion::LowerTorso:
+        return IM_COL32(50, 200, 50, 220);  // Dark green
+    case BodyRegion::LeftUpperArm:
+    case BodyRegion::LeftLowerArm:
+        return IM_COL32(50, 150, 255, 220); // Blue
+    case BodyRegion::RightUpperArm:
+    case BodyRegion::RightLowerArm:
+        return IM_COL32(150, 50, 255, 220); // Purple
+    case BodyRegion::LeftUpperLeg:
+    case BodyRegion::LeftLowerLeg:
+        return IM_COL32(255, 255, 50, 220); // Yellow
+    case BodyRegion::RightUpperLeg:
+    case BodyRegion::RightLowerLeg:
+        return IM_COL32(255, 200, 50, 220); // Gold
+    default:
+        return IM_COL32(255, 255, 255, 180);
+    }
+}
+
+} // namespace
+
+void DebugUI::buildHitboxUI(
+    const Registry& registry, HitboxRig& hitboxRig, const glm::mat4& viewProj, float screenWidth, float screenHeight)
+{
+    // ── ImGui window (only when showHitboxWindow is true) ──
+    if (showHitboxWindow) {
+        if (ImGui::Begin("Hitbox Debug", &showHitboxWindow)) {
+            ImGui::Checkbox("Draw Hitboxes", &drawHitboxOverlay);
+            ImGui::Separator();
+
+            // Count entities with hitboxes.
+            int entityCount = 0;
+            int capsuleCount = 0;
+            registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
+                ++entityCount;
+                capsuleCount += static_cast<int>(hb.capsules.size());
+            });
+            ImGui::Text("Entities: %d  |  Capsules: %d", entityCount, capsuleCount);
+            ImGui::Separator();
+
+            // ── Per-capsule editors ──
+            if (ImGui::TreeNode("Capsule Definitions")) {
+                for (size_t i = 0; i < hitboxRig.definitions.size(); ++i) {
+                    auto& def = hitboxRig.definitions[i];
+                    ImGui::PushID(static_cast<int>(i));
+
+                    const ImU32 col = regionColor(def.region);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col);
+                    const bool open =
+                        ImGui::TreeNode("##cap", "[%zu] %s (%s)", i, def.boneName.c_str(), bodyRegionName(def.region));
+                    ImGui::PopStyleColor();
+
+                    if (open) {
+                        ImGui::DragFloat3("Offset", &def.localOffset.x, 0.5f, -100.0f, 100.0f, "%.1f");
+                        ImGui::DragFloat("Radius", &def.radius, 0.1f, 0.5f, 30.0f, "%.1f");
+                        ImGui::DragFloat("Half Height", &def.halfHeight, 0.1f, 0.5f, 40.0f, "%.1f");
+                        ImGui::DragFloat3("Axis", &def.localAxis.x, 0.05f, -1.0f, 1.0f, "%.2f");
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+            ImGui::Separator();
+
+            // Damage profile display.
+            if (ImGui::TreeNode("Damage Multipliers")) {
+                const auto& profile = defaultDamageProfile();
+                for (size_t i = 0; i < static_cast<size_t>(BodyRegion::Count); ++i) {
+                    const auto region = static_cast<BodyRegion>(i);
+                    ImU32 col = regionColor(region);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col);
+                    ImGui::Text("%-15s  %.2fx", bodyRegionName(region), static_cast<double>(profile.multipliers[i]));
+                    ImGui::PopStyleColor();
+                }
+                ImGui::TreePop();
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Capsule wireframe overlay (independent of window visibility) ──
+    // This intentionally runs even when the window is hidden (F2 toggle)
+    // so you can play with a clean viewport while still seeing hitboxes.
+    if (drawHitboxOverlay) {
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
+            for (const auto& cap : hb.capsules) {
+                const ImU32 color = regionColor(cap.region);
+                drawCapsuleWireframe(
+                    dl, cap.pointA, cap.pointB, cap.radius, viewProj, screenWidth, screenHeight, color);
+            }
+        });
+    }
 }
 
 void DebugUI::render()

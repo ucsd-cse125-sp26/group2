@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ecs/components/Health.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/NetKillEvent.hpp"
@@ -20,13 +21,18 @@ const float healingRate = 20.0f; // Healing amount per second.
 /// @param playerHealth entity's health component.
 void applyHeal(float amount, Health& playerHealth);
 
-/// @param damage  Damage amount being applied.
-/// @param player Player who took damage.
-/// @param killer player who delt the final blow.
-/// @param registry  The ECS registry.
-/// @param killEvents  Vector to store kill events.
-void applyDamage(
-    float damage, entt::entity player, entt::entity& killer, Registry& registry, std::vector<NetKillEvent>& killEvents);
+/// @param damage     Damage amount being applied.
+/// @param player     Player who took damage.
+/// @param killer     Player who dealt the final blow.
+/// @param registry   The ECS registry.
+/// @param killEvents Vector to store kill events.
+/// @param hitRegion  Body region that was hit (for kill feed / headshot tracking).
+void applyDamage(float damage,
+                 entt::entity player,
+                 entt::entity& killer,
+                 Registry& registry,
+                 std::vector<NetKillEvent>& killEvents,
+                 BodyRegion hitRegion = BodyRegion::UpperTorso);
 
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
