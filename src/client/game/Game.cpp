@@ -2134,7 +2134,6 @@ void Game::refreshRemoteRespawnRenderables()
             // if (spawner.hasWeapon) {
             //     rend.visible = true;
             // }
-
         });
 }
 

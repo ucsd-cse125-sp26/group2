@@ -39,7 +39,7 @@ jobs:
 
           - name: Windows
             os: windows-latest
-            preset: debug-win
+            preset: debug
             cc: cl
             cxx: cl
 
@@ -65,7 +65,7 @@ jobs:
             ninja-build clang clang-format-18 clang-tidy \
             glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxss-dev libxkbcommon-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols \
             libpulse-dev libasound2-dev \
             libdbus-1-dev libudev-dev \
@@ -189,10 +189,10 @@ jobs:
 
           - name: Windows
             os: windows-latest
-            preset: release-win
+            preset: release
             cc: cl
             cxx: cl
-            build_dir: build/release-win
+            build_dir: build/release
             client_bin: group2.exe
             server_bin: server.exe
             archive_suffix: windows-x86_64
@@ -218,7 +218,7 @@ jobs:
             ninja-build clang \
             glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxss-dev libxkbcommon-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols \
             libpulse-dev libasound2-dev \
             libdbus-1-dev libudev-dev \
