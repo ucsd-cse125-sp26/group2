@@ -9,8 +9,8 @@
 #include "animation/SkinningBackend.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
-#include "ecs/components/Hitbox.hpp"
 #include "ecs/AssetRegistry.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -146,7 +146,8 @@ private:
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
 
     // Hitmarker
-    float hitmarkerTimer_ = 0.0f; ///< Remaining display time (fades out over this).
+    float hitmarkerTimer_ = 0.0f;      ///< Remaining display time (fades out over this).
+    bool hitmarkerIsHeadshot_ = false; ///< True when the current hitmarker was a headshot.
 
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).

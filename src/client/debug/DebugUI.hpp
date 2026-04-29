@@ -110,8 +110,8 @@ public:
                        float screenWidth,
                        float screenHeight);
 
-    bool showHitboxWindow = false; ///< Show the Hitbox Debug ImGui window.
-    bool drawHitboxOverlay = true; ///< Draw 3-D capsule wireframes (independent of window visibility).
+    bool showHitboxWindow = false;  ///< Show the Hitbox Debug ImGui window.
+    bool drawHitboxOverlay = false; ///< Draw 3-D capsule wireframes (independent of window visibility).
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
