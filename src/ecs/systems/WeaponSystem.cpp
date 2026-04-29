@@ -7,6 +7,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -16,12 +17,16 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 
+#include <SDL3/SDL_log.h>
+
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>
 
+using physics::HitboxHit;
 using physics::HitscanHit;
 using physics::resolveHitscan;
+using physics::resolveHitscanHitbox;
 
 namespace systems
 {
@@ -151,11 +156,12 @@ inline void handleFire(Registry& registry,
         // Raycast to find beam endpoint.
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
-        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
-        // Apply DPS-based damage.
+        // Apply DPS-based damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.dps * dt, hit.entity, shooter, registry, killEvents);
+            const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+            applyDamage(config.dps * dt * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
         }
 
         // Update BeamState (synced to clients via registry snapshot).
@@ -194,11 +200,17 @@ inline void handleFire(Registry& registry,
 
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
-        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
-        // Charge damage — significantly higher than normal.
+        // Charge damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.chargeDamage, hit.entity, shooter, registry, killEvents);
+            const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+            applyDamage(config.chargeDamage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            if (hit.region == BodyRegion::Head) {
+                SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
+                        static_cast<int>(hit.entity),
+                        static_cast<double>(config.chargeDamage * multiplier));
+            }
         }
 
         // Emit particle events (beam + impact).
@@ -216,7 +228,7 @@ inline void handleFire(Registry& registry,
             impactEvt.source = shooter;
             impactEvt.effectType = ParticleEffectType::Impact;
             impactEvt.weaponType = gun.type;
-            impactEvt.surfaceType = hit.surface;
+            impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);
@@ -246,11 +258,21 @@ inline void handleFire(Registry& registry,
     const glm::vec3 muzzle = muzzleOrigin(eye, direction);
 
     if (config.hitscan) {
-        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
-        // Apply damage
+        // Apply damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.damage, hit.entity, shooter, registry, killEvents);
+            const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+            const float finalDamage = config.damage * multiplier;
+            applyDamage(finalDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            if (hit.region == BodyRegion::Head) {
+                SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
+                        static_cast<int>(shooter),
+                        static_cast<int>(hit.entity),
+                        static_cast<double>(finalDamage),
+                        static_cast<double>(config.damage),
+                        static_cast<double>(multiplier));
+            }
         }
 
         // Emit replicated particle events for client FX.
@@ -266,7 +288,6 @@ inline void handleFire(Registry& registry,
             } else {
                 tracerEvt.effectType = ParticleEffectType::BulletTracer;
                 tracerEvt.pos1 = muzzle;
-                // Compute direction from origin→hitPoint (convention-independent)
                 tracerEvt.pos2 = glm::normalize(hit.point - muzzle);
                 tracerEvt.param = hit.distance;
             }
@@ -278,7 +299,7 @@ inline void handleFire(Registry& registry,
             impactEvt.source = shooter;
             impactEvt.effectType = ParticleEffectType::Impact;
             impactEvt.weaponType = gun.type;
-            impactEvt.surfaceType = hit.surface;
+            impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);

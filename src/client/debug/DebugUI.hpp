@@ -3,11 +3,13 @@
 
 #pragma once
 
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchStatus.hpp"
 
 #include <SDL3/SDL.h>
 
+#include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <initializer_list>
 
@@ -92,6 +94,19 @@ public:
     void buildNetworkUI(const NetworkStats& stats);
     void buildWeaponUI(const Registry& registry);
 
+    /// @brief Draw hitbox capsule wireframes projected into screen space.
+    ///
+    /// Uses the ImGui foreground draw list to overlay world-space capsules on
+    /// top of the rendered frame.  Toggled via `showHitboxes`.
+    ///
+    /// @param registry     ECS registry (reads HitboxInstance, Position, Player).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildHitboxUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showHitboxes = false; ///< Show skeleton-driven hitbox capsule debug overlay.
+
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
@@ -117,6 +132,7 @@ private:
     bool showLightingControls = false; ///< Show the Lighting Controls window.
     bool showSkybox = false;           ///< Show the Skybox window.
     bool showNetworkStats = false;     ///< Show the Network Stats window.
+    // showHitboxes is public (declared above) to allow Game to pass it to toggleAllPanels.
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.

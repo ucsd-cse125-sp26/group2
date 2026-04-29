@@ -7,6 +7,7 @@
 #pragma once
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
@@ -315,6 +316,195 @@ inline HitscanHit resolveHitscan(Registry& registry, entt::entity shooter, glm::
 
     const HitscanHit playerHit = raycastPlayers(registry, shooter, origin, direction, bestHit.distance);
     if (playerHit.hit && (!bestHit.hit || playerHit.distance < bestHit.distance)) {
+        bestHit = playerHit;
+    }
+
+    if (!bestHit.hit) {
+        bestHit.distance = k_hitscanRange;
+        bestHit.point = origin + direction * k_hitscanRange;
+    }
+
+    return bestHit;
+}
+
+// ===========================================================================
+// Skeleton-driven hitbox raycast (capsule-based)
+// ===========================================================================
+
+/// @brief Result of a hitbox-aware hitscan raycast.
+struct HitboxHit
+{
+    bool hit{false};
+    float distance{k_hitscanRange};
+    glm::vec3 point{0.0f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    BodyRegion region{BodyRegion::UpperTorso};
+    entt::entity entity{entt::null};
+};
+
+/// @brief Ray vs capsule intersection.
+///
+/// A capsule is the Minkowski sum of the line segment AB and a sphere of
+/// radius @p r.  Decomposed into: (1) ray vs infinite cylinder along AB,
+/// clamped to the segment, then (2) ray vs hemisphere endcaps.
+///
+/// @return True if the ray hits the capsule within @p maxDist.
+inline bool raycastCapsule(glm::vec3 origin,
+                           glm::vec3 dir,
+                           glm::vec3 A,
+                           glm::vec3 B,
+                           float r,
+                           float maxDist,
+                           float& outDist,
+                           glm::vec3& outNormal)
+{
+    const glm::vec3 AB = B - A;
+    const float segLenSq = glm::dot(AB, AB);
+
+    // Degenerate capsule (zero-length segment) -> sphere test.
+    if (segLenSq < k_parallelEpsilon * k_parallelEpsilon) {
+        const WorldSphere sph{.center = A, .radius = r};
+        return raycastSphere(origin, dir, sph, maxDist, outDist, outNormal);
+    }
+
+    const float segLen = std::sqrt(segLenSq);
+    const glm::vec3 segDir = AB / segLen; // unit axis
+
+    // Project ray into cylinder-local coords where the cylinder axis is segDir.
+    // We test against the infinite cylinder first, then clamp.
+    const glm::vec3 oa = origin - A;
+
+    // Components perpendicular to cylinder axis:
+    //   d_perp = dir - (dir . segDir) * segDir
+    //   oa_perp = oa - (oa . segDir) * segDir
+    const float dirDotSeg = glm::dot(dir, segDir);
+    const float oaDotSeg = glm::dot(oa, segDir);
+
+    const glm::vec3 dPerp = dir - dirDotSeg * segDir;
+    const glm::vec3 oaPerp = oa - oaDotSeg * segDir;
+
+    const float a = glm::dot(dPerp, dPerp);
+    const float b = 2.0f * glm::dot(dPerp, oaPerp);
+    const float c = glm::dot(oaPerp, oaPerp) - r * r;
+
+    float bestT = maxDist + 1.0f;
+    glm::vec3 bestN{0.0f};
+
+    if (a > k_parallelEpsilon) {
+        const float disc = b * b - 4.0f * a * c;
+        if (disc >= 0.0f) {
+            const float sqrtDisc = std::sqrt(disc);
+            const float inv2a = 1.0f / (2.0f * a);
+
+            // Test both roots (entry and exit).
+            for (int side = 0; side < 2; ++side) {
+                const float t = (side == 0) ? (-b - sqrtDisc) * inv2a : (-b + sqrtDisc) * inv2a;
+                if (t < 0.0f || t > maxDist || t >= bestT)
+                    continue;
+
+                // Where along the segment axis is the hit?
+                const float h = oaDotSeg + t * dirDotSeg;
+                if (h >= 0.0f && h <= segLen) {
+                    // Hit the cylindrical shaft.
+                    bestT = t;
+                    const glm::vec3 hitPos = origin + dir * t;
+                    const glm::vec3 closest = A + segDir * h;
+                    bestN = glm::normalize(hitPos - closest);
+                }
+            }
+        }
+    }
+
+    // Hemisphere endcap tests (spheres at A and B).
+    auto testEndcap = [&](glm::vec3 center) {
+        float t = 0.0f;
+        glm::vec3 n{0.0f};
+        const WorldSphere sph{.center = center, .radius = r};
+        if (raycastSphere(origin, dir, sph, std::min(maxDist, bestT), t, n)) {
+            if (t < bestT) {
+                bestT = t;
+                bestN = n;
+            }
+        }
+    };
+    testEndcap(A);
+    testEndcap(B);
+
+    if (bestT > maxDist)
+        return false;
+
+    outDist = bestT;
+    outNormal = bestN;
+    return true;
+}
+
+/// @brief Raycast against all player hitbox capsules (skeleton-driven).
+///
+/// Uses a broad-phase AABB check (CollisionShape) before testing individual
+/// capsules, so only nearby players pay the narrow-phase cost.
+inline HitboxHit raycastPlayerHitboxes(
+    Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction, float maxDistance)
+{
+    HitboxHit bestHit;
+    bestHit.distance = maxDistance;
+
+    registry.view<Position, Player, CollisionShape, HitboxInstance>().each([&](const entt::entity entity,
+                                                                               const Position& pos,
+                                                                               const CollisionShape& shape,
+                                                                               const HitboxInstance& hitboxes) {
+        if (entity == shooter)
+            return;
+
+        // Broad-phase: AABB check (same as old raycastPlayers).
+        const WorldAABB bounds{
+            .min = pos.value - shape.halfExtents,
+            .max = pos.value + shape.halfExtents,
+        };
+        float aabbDist = bestHit.distance;
+        glm::vec3 aabbNormal{0.0f};
+        if (!raycastAABB(origin, direction, bounds, bestHit.distance, aabbDist, aabbNormal))
+            return;
+
+        // Narrow-phase: test each capsule.
+        for (const WorldCapsule& cap : hitboxes.capsules) {
+            float dist = bestHit.distance;
+            glm::vec3 normal{0.0f};
+            if (!raycastCapsule(origin, direction, cap.pointA, cap.pointB, cap.radius, bestHit.distance, dist, normal))
+                continue;
+
+            bestHit.hit = true;
+            bestHit.distance = dist;
+            bestHit.point = origin + direction * dist;
+            bestHit.normal = normal;
+            bestHit.region = cap.region;
+            bestHit.entity = entity;
+        }
+    });
+
+    return bestHit;
+}
+
+/// @brief Full hitscan with skeleton-driven hitboxes.
+///
+/// World geometry first, then player hitbox capsules (closest wins).
+/// Falls back to the old AABB path for players without HitboxInstance.
+inline HitboxHit resolveHitscanHitbox(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction)
+{
+    // World geometry pass (returns HitscanHit but we need HitboxHit).
+    const HitscanHit worldHit = raycastWorld(origin, direction, activeWorld());
+
+    HitboxHit bestHit;
+    if (worldHit.hit) {
+        bestHit.hit = true;
+        bestHit.distance = worldHit.distance;
+        bestHit.point = worldHit.point;
+        bestHit.normal = worldHit.normal;
+        // entity stays entt::null (world geometry)
+    }
+
+    // Player hitbox pass.
+    const HitboxHit playerHit = raycastPlayerHitboxes(registry, shooter, origin, direction, bestHit.distance);
+    if (playerHit.hit && playerHit.distance < bestHit.distance) {
         bestHit = playerHit;
     }
 
