@@ -103,6 +103,7 @@ inline void handleDeath(entt::entity& player,
     if (playerHealth.health <= 0) {
         // Update death
         registry.get_or_emplace<PlayerState>(player).IsDead = true;
+        registry.get_or_emplace<Velocity>(player) = Velocity{};
         registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = false; });
         registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 5.0f});
         registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
