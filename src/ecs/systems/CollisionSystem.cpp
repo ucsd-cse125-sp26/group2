@@ -12,6 +12,7 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
+#include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 
 #include <glm/geometric.hpp>
@@ -207,6 +208,82 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
         vel -= pushDir * k_into;
 }
 
+/// @brief Push the entity out of a triangle mesh it currently overlaps.
+static void
+depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
+{
+    // Quick reject: AABB overlap with mesh bounds.
+    const glm::vec3 entMin = pos - halfExtents;
+    const glm::vec3 entMax = pos + halfExtents;
+    if (entMax.x < mesh.boundsMin.x || entMin.x > mesh.boundsMax.x || entMax.y < mesh.boundsMin.y ||
+        entMin.y > mesh.boundsMax.y || entMax.z < mesh.boundsMin.z || entMin.z > mesh.boundsMax.z)
+        return;
+
+    // BVH traversal to find overlapping triangles.
+    float minOverlap = 1e30f;
+    glm::vec3 pushNormal{0.0f, 1.0f, 0.0f};
+    bool found = false;
+
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const auto& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+        // Static AABB overlap: expand node bounds by halfExtents.
+        const glm::vec3 expMin = node.boundsMin - halfExtents;
+        const glm::vec3 expMax = node.boundsMax + halfExtents;
+        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+            pos.z > expMax.z)
+            continue;
+
+        if (node.count > 0) {
+            // Leaf — test individual triangles.
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+
+                glm::vec3 triN = glm::cross(v1 - v0, v2 - v0);
+                const float len = glm::length(triN);
+                if (len < 1e-8f)
+                    continue;
+                triN /= len;
+
+                // Ensure normal faces toward pos.
+                if (glm::dot(triN, pos - v0) < 0.0f)
+                    triN = -triN;
+
+                const float r = std::abs(triN.x) * halfExtents.x + std::abs(triN.y) * halfExtents.y +
+                                std::abs(triN.z) * halfExtents.z;
+                const float dist = glm::dot(triN, pos) - glm::dot(triN, v0);
+
+                if (dist < r) {
+                    const float overlap = r - dist;
+                    if (overlap < minOverlap) {
+                        minOverlap = overlap;
+                        pushNormal = triN;
+                        found = true;
+                    }
+                }
+            }
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
+
+    if (found) {
+        pos += pushNormal * (minOverlap + k_pushback);
+        const float k_into = glm::dot(vel, pushNormal);
+        if (k_into < 0.0f)
+            vel -= pushNormal * k_into;
+    }
+}
+
 /// @brief Run all depenetration passes (planes, boxes, brushes, cylinders, spheres).
 /// @param pos          Entity position (modified in place).
 /// @param vel          Entity velocity (modified in place).
@@ -228,6 +305,9 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
 
     for (const physics::WorldSphere& sph : world.spheres)
         depenetrateSphere(pos, vel, halfExtents, sph);
+
+    for (const physics::WorldTriMesh& tm : world.triMeshes)
+        depenetrateTriMesh(pos, vel, halfExtents, tm);
 }
 
 /// @brief Attempt to step over a low obstacle when a wall is hit.

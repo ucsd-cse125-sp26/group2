@@ -43,6 +43,7 @@ struct MapCollisionData
     std::vector<WorldBrush> brushes;
     std::vector<WorldCylinder> cylinders;
     std::vector<WorldSphere> spheres;
+    std::vector<WorldTriMesh> triMeshes;
 
     /// @brief Return a non-owning `WorldGeometry` view into this data.
     ///
@@ -51,7 +52,12 @@ struct MapCollisionData
     /// no further push_backs occur).
     [[nodiscard]] WorldGeometry geometry() const
     {
-        return {.planes = planes, .boxes = boxes, .brushes = brushes, .cylinders = cylinders, .spheres = spheres};
+        return {.planes = planes,
+                .boxes = boxes,
+                .brushes = brushes,
+                .cylinders = cylinders,
+                .spheres = spheres,
+                .triMeshes = triMeshes};
     }
 };
 

@@ -6,6 +6,8 @@
 
 #include "MapLoader.hpp"
 
+#include "TriMeshCollision.hpp"
+
 #include <SDL3/SDL_log.h>
 
 #ifdef __GNUC__
@@ -393,6 +395,29 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
 }
 
 // ---------------------------------------------------------------------------
+// Triangle mesh construction
+// ---------------------------------------------------------------------------
+
+/// @brief Build a WorldTriMesh from an Assimp mesh.
+void buildTriMeshFromAiMesh(const aiMesh* mesh, const glm::mat4& world, float scale, WorldTriMesh& out)
+{
+    out.vertices.reserve(mesh->mNumVertices);
+    for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
+        const glm::vec4 local(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
+        out.vertices.push_back(glm::vec3(world * local) * scale);
+    }
+    for (unsigned int fi = 0; fi < mesh->mNumFaces; ++fi) {
+        const aiFace& face = mesh->mFaces[fi];
+        if (face.mNumIndices != 3)
+            continue;
+        out.indices.push_back(face.mIndices[0]);
+        out.indices.push_back(face.mIndices[1]);
+        out.indices.push_back(face.mIndices[2]);
+    }
+    computeAABB(out.vertices, out.boundsMin, out.boundsMax);
+}
+
+// ---------------------------------------------------------------------------
 // Per-mesh collision extraction with auto-detection
 // ---------------------------------------------------------------------------
 
@@ -484,6 +509,17 @@ void extractMeshCollision(const aiMesh* mesh,
         }
         return;
     }
+    if (forceType == "meshes") {
+        WorldTriMesh tm;
+        buildTriMeshFromAiMesh(mesh, world, scale, tm);
+        buildTriMeshBVH(tm);
+        SDL_Log("MapLoader: TriMesh (forced) %zu tris, %zu BVH nodes '%s'",
+                tm.indices.size() / 3,
+                tm.bvhNodes.size(),
+                nodeName);
+        out.triMeshes.push_back(std::move(tm));
+        return;
+    }
 
     // --- Auto-detection ---
     // Order: AABB → cylinder → sphere → brush → fallback.
@@ -551,7 +587,22 @@ void extractMeshCollision(const aiMesh* mesh,
         }
     }
 
-    // 5. Fallback: AABB
+    // 5. TriMesh (for complex geometry that doesn't fit simpler primitives)
+    if (mesh->mNumFaces >= 2) {
+        WorldTriMesh tm;
+        buildTriMeshFromAiMesh(mesh, world, scale, tm);
+        if (tm.indices.size() >= 3) {
+            buildTriMeshBVH(tm);
+            SDL_Log("MapLoader: TriMesh (auto) %zu tris, %zu BVH nodes '%s'",
+                    tm.indices.size() / 3,
+                    tm.bvhNodes.size(),
+                    nodeName);
+            out.triMeshes.push_back(std::move(tm));
+            return;
+        }
+    }
+
+    // 6. Final fallback: AABB (degenerate mesh)
     {
         glm::vec3 bmin, bmax;
         computeAABB(verts, bmin, bmax);
@@ -620,6 +671,7 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     out.brushes.clear();
     out.cylinders.clear();
     out.spheres.clear();
+    out.triMeshes.clear();
 
     extractCollision(scene->mRootNode, scene, opts.collisionCollection, opts.allMeshesAreCollision, opts.scale, out);
 
@@ -642,13 +694,15 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
         SDL_Log("MapLoader: added floor plane at y=%.1f", static_cast<double>(lowestY));
     }
 
-    SDL_Log("MapLoader: loaded '%s' — %zu plane(s), %zu box(es), %zu brush(es), %zu cylinder(s), %zu sphere(s)",
+    SDL_Log("MapLoader: loaded '%s' — %zu plane(s), %zu box(es), %zu brush(es), %zu cylinder(s), %zu sphere(s), %zu "
+            "trimesh(es)",
             path.c_str(),
             out.planes.size(),
             out.boxes.size(),
             out.brushes.size(),
             out.cylinders.size(),
-            out.spheres.size());
+            out.spheres.size(),
+            out.triMeshes.size());
 
     return true;
 }

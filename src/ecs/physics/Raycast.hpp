@@ -11,6 +11,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/physics/SweptCollision.hpp"
+#include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 
@@ -209,6 +210,88 @@ inline bool raycastSphere(glm::vec3 origin,
     return true;
 }
 
+/// @brief Raycast against a triangle mesh using BVH-accelerated Möller-Trumbore.
+inline bool raycastTriMesh(glm::vec3 origin,
+                           glm::vec3 direction,
+                           const WorldTriMesh& mesh,
+                           float maxDistance,
+                           float& outDistance,
+                           glm::vec3& outNormal)
+{
+    // Quick reject against mesh AABB.
+    float dummyDist = maxDistance;
+    glm::vec3 dummyN{0.0f};
+    const WorldAABB meshBounds{mesh.boundsMin, mesh.boundsMax};
+    if (!raycastAABB(origin, direction, meshBounds, maxDistance, dummyDist, dummyN))
+        return false;
+
+    bool anyHit = false;
+    float bestDist = maxDistance;
+    glm::vec3 bestNormal{0.0f};
+
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const auto& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+        // Test ray against node AABB.
+        const WorldAABB nodeBox{node.boundsMin, node.boundsMax};
+        float nodeDist = bestDist;
+        glm::vec3 nodeN{0.0f};
+        if (!raycastAABB(origin, direction, nodeBox, bestDist, nodeDist, nodeN))
+            continue;
+
+        if (node.count > 0) {
+            // Leaf — Möller-Trumbore per triangle.
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+
+                const glm::vec3 e1 = v1 - v0;
+                const glm::vec3 e2 = v2 - v0;
+                const glm::vec3 h = glm::cross(direction, e2);
+                const float a = glm::dot(e1, h);
+                if (std::abs(a) < 1e-8f)
+                    continue;
+
+                const float f = 1.0f / a;
+                const glm::vec3 s = origin - v0;
+                const float u = f * glm::dot(s, h);
+                if (u < 0.0f || u > 1.0f)
+                    continue;
+
+                const glm::vec3 q = glm::cross(s, e1);
+                const float v = f * glm::dot(direction, q);
+                if (v < 0.0f || u + v > 1.0f)
+                    continue;
+
+                const float t = f * glm::dot(e2, q);
+                if (t > 0.0f && t < bestDist) {
+                    bestDist = t;
+                    bestNormal = glm::normalize(glm::cross(e1, e2));
+                    if (glm::dot(bestNormal, direction) > 0.0f)
+                        bestNormal = -bestNormal;
+                    anyHit = true;
+                }
+            }
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
+
+    if (anyHit) {
+        outDistance = bestDist;
+        outNormal = bestNormal;
+    }
+    return anyHit;
+}
+
 /// @brief Raycast against all static world geometry (planes + boxes + cylinders + spheres).
 inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const WorldGeometry& world)
 {
@@ -262,6 +345,18 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
         float distance = bestHit.distance;
         glm::vec3 normal{0.0f};
         if (!raycastSphere(origin, direction, sph, bestHit.distance, distance, normal))
+            continue;
+        bestHit.hit = true;
+        bestHit.distance = distance;
+        bestHit.point = origin + direction * distance;
+        bestHit.normal = normal;
+        bestHit.surface = SurfaceType::Concrete;
+    }
+
+    for (const WorldTriMesh& tm : world.triMeshes) {
+        float distance = bestHit.distance;
+        glm::vec3 normal{0.0f};
+        if (!raycastTriMesh(origin, direction, tm, bestHit.distance, distance, normal))
             continue;
         bestHit.hit = true;
         bestHit.distance = distance;
