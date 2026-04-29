@@ -63,17 +63,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
 endif()
 
-# Split DWARF debug info on Linux — keeps .o files smaller and dramatically
-# speeds up linking for Debug builds.  Not supported by Apple Clang or MSVC.
-# Applied below (after FetchContent) only to our own targets, because Clang's
-# PCH support and -gsplit-dwarf don't mix: SDL3 3.4.x enables PCH and fails
-# with "_gsplit_dwarf_path differs between PCH and command line" if the flag
-# leaks into the dep build via directory-level add_compile_options.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
-   AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    set(GROUP2_GSPLIT_DWARF ON)
-    message(STATUS "Debug builds will use -gsplit-dwarf (local targets only)")
-endif()
+# Note: -gsplit-dwarf was previously enabled here for Linux Debug builds, but
+# Clang refuses to mix split-dwarf with precompiled headers (the per-file
+# "_gsplit_dwarf_path" macro is baked into the PCH and then mismatches every
+# consuming TU).  Both SDL3 3.4.x and our own targets use PCH, so the flag is
+# off across the board.  PCH already provides the bulk of the rebuild-speed
+# win that split-dwarf was helping with.
 
 # ---- Dependencies ----
 
@@ -544,14 +539,6 @@ endforeach()
 
 add_custom_target(shaders ALL DEPENDS ${SHADER_OUTPUTS})
 
-# Helper: apply -gsplit-dwarf (Linux Debug, Clang/GCC) to a local target only.
-# Skipped for FetchContent deps to avoid clashing with their PCH builds.
-function(group2_enable_split_dwarf TARGET_NAME)
-    if(GROUP2_GSPLIT_DWARF)
-        target_compile_options(${TARGET_NAME} PRIVATE $<$<CONFIG:Debug>:-gsplit-dwarf>)
-    endif()
-endfunction()
-
 # ===========================================================================
 # Client executable (group2)
 # ===========================================================================
@@ -781,7 +768,6 @@ target_link_libraries(group2 PRIVATE
     ozz_base
     tomlplusplus::tomlplusplus
 )
-group2_enable_split_dwarf(group2)
 
 # ---- Client precompiled header ----
 # Heavy headers used across most client sources — compiled once, reused everywhere.
@@ -1028,7 +1014,6 @@ target_link_libraries(client PRIVATE
     ozz_base
     tomlplusplus::tomlplusplus
 )
-group2_enable_split_dwarf(client)
 
 target_precompile_headers(client PRIVATE
     <string>
@@ -1167,7 +1152,6 @@ target_link_libraries(server PRIVATE
     ozz_animation
     ozz_base
 )
-group2_enable_split_dwarf(server)
 
 # ---- Server precompiled header ----
 target_precompile_headers(server PRIVATE
