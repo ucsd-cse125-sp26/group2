@@ -663,60 +663,120 @@ void exitWallrun(PlayerState& state, float posY)
 }
 
 /// @brief Process wallrunning movement, exit conditions, and camera tilt.
-/// @param vel    Velocity (modified in place).
-/// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-/// @param walls  Wall detection result from this tick.
-/// @param posY   Current vertical position of the entity.
-/// @param dt     Fixed physics delta time in seconds.
-void handleWallRunning(glm::vec3& vel,
+/// @param pos          Entity position (modified for curved-surface correction).
+/// @param vel          Velocity (modified in place).
+/// @param state        Player state (modified in place).
+/// @param input        Current input snapshot.
+/// @param walls        Wall detection result from this tick.
+/// @param halfExtents  Player AABB half-extents (for standoff distance).
+/// @param posY         Current vertical position of the entity.
+/// @param dt           Fixed physics delta time in seconds.
+void handleWallRunning(glm::vec3& pos,
+                       glm::vec3& vel,
                        PlayerState& state,
                        const InputSnapshot& input,
                        const physics::WallDetectionResult& walls,
+                       const glm::vec3& halfExtents,
                        float posY,
                        float dt)
 {
     state.wallRunTimer += dt;
     state.wallRunSpeedTimer += dt;
 
-    // Exit conditions
+    // Exit: max duration
     if (state.wallRunTimer >= tms::k_wallrunKickoffDuration) {
         exitWallrun(state, posY);
         return;
     }
 
+    // Exit: lost wall contact
     const bool k_stillOnWall = (state.wallRunSide == WallSide::Right && walls.wallRight) ||
                                (state.wallRunSide == WallSide::Left && walls.wallLeft);
-
-    // Maintenance: same directional-intent rule as entry. Release the "into
-    // the wall" input and the run ends. Uses the stored wallNormal so the
-    // check is valid even if detection stutters for a frame.
-    const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    const bool k_intentHeld = glm::dot(k_wishDir, -state.wallNormal) >= tms::k_wallrunIntentThreshold;
-
-    if (!k_stillOnWall || !k_intentHeld) {
+    if (!k_stillOnWall) {
         exitWallrun(state, posY);
         return;
     }
 
-    // Movement along wall
-    // Update wall normal from latest detection.
+    // Detach intent: the player can look up to 15° away from the wall plane
+    // before detaching.  This makes jump-off more intuitive — start turning
+    // away, then jump, and you still get the wall-jump boost.
+    const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+    const float k_wishLen = glm::length(k_wishDir);
+    if (k_wishLen > 0.001f) {
+        const float k_intentDot = glm::dot(k_wishDir / k_wishLen, -state.wallNormal);
+        if (k_intentDot < tms::k_wallrunDetachThreshold) {
+            exitWallrun(state, posY);
+            return;
+        }
+    }
+
+    // --- Update wall normal from latest detection (curved surface tracking) ---
     if (state.wallRunSide == WallSide::Right)
         state.wallNormal = walls.rightNormal;
     else
         state.wallNormal = walls.leftNormal;
 
-    // Recompute wall forward.
-    const glm::vec3 k_up{0, 1, 0};
-    glm::vec3 wallFwd = glm::cross(k_up, state.wallNormal);
-    if (state.wallRunSide == WallSide::Left)
-        wallFwd = -wallFwd;
+    // --- Curved surface: constrained motion ---
+    // On a flat wall, tangential velocity is parallel to the surface.
+    // On a curved surface (cylinder), the tangent rotates, so velocity must
+    // be re-projected onto the new tangent plane each tick.  Without this,
+    // the player flies off tangentially — the push force (300 u/s²) can't
+    // overcome the centripetal acceleration needed (v²/r ≈ 2000+ u/s²).
+
+    // 1. Preserve speed, re-project velocity onto the new wall tangent plane.
+    //    This is the key step — it rotates the velocity to follow curvature.
+    {
+        const float k_normalVel = glm::dot(vel, state.wallNormal);
+        // Remove the outward component (only if pointing away from wall).
+        // Keep inward component so the push force can press the player in.
+        if (k_normalVel > 0.0f)
+            vel -= state.wallNormal * k_normalVel;
+    }
+
+    // 2. Position correction: if the wall contact point is known, nudge the
+    //    player toward the wall to maintain consistent standoff distance.
+    {
+        const glm::vec3 wallPt = (state.wallRunSide == WallSide::Right) ? walls.rightPoint : walls.leftPoint;
+        // Vector from wall contact point to player center, along wall normal.
+        const float k_currentDist = glm::dot(pos - wallPt, state.wallNormal);
+        // Desired standoff: just outside the collision shape.
+        const float k_desiredDist = std::max(halfExtents.x, halfExtents.z) + 1.0f;
+        const float k_drift = k_currentDist - k_desiredDist;
+        // If drifting outward, pull back. Lerp to avoid jitter.
+        if (k_drift > 0.5f) {
+            const float k_correction = std::min(k_drift * 10.0f * dt, k_drift);
+            pos -= state.wallNormal * k_correction;
+        }
+    }
+
+    // --- Compute wall-tangent acceleration direction ---
+    // Accelerate along the current velocity direction projected onto the wall
+    // plane.  This makes the controls intuitive: as long as wishDir has a
+    // component into the wall, the player is accelerated forward regardless
+    // of strafe keys.
+    const glm::vec3 k_hv = horizVel(vel);
+    const float k_hvLen = glm::length(k_hv);
+
+    glm::vec3 wallFwd;
+    if (k_hvLen > 1.0f) {
+        // Project current velocity onto the wall plane (remove normal component).
+        wallFwd = k_hv - state.wallNormal * glm::dot(k_hv, state.wallNormal);
+        const float k_projLen = glm::length(wallFwd);
+        if (k_projLen > 0.001f)
+            wallFwd /= k_projLen;
+        else
+            wallFwd = state.wallForward;
+    } else {
+        wallFwd = state.wallForward;
+    }
+
+    // Ensure consistency with stored direction (don't flip 180°).
     if (glm::dot(state.wallForward, wallFwd) < 0.0f)
         wallFwd = -wallFwd;
     state.wallForward = wallFwd;
 
     // Accelerate along the wall.
-    const float k_currentFwdSpeed = glm::dot(horizVel(vel), state.wallForward);
+    const float k_currentFwdSpeed = glm::dot(k_hv, state.wallForward);
     if (k_currentFwdSpeed < tms::k_wallrunMaxSpeed) {
         const float k_addSpeed = std::min(tms::k_wallrunAccel * dt, tms::k_wallrunMaxSpeed - k_currentFwdSpeed);
         vel += state.wallForward * k_addSpeed;
@@ -1095,14 +1155,20 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             tickTimers(state, dt);
 
             // 1. Wall / climb / ledge detection
+            // Pass the previous wall normal so the detector can trace toward
+            // curved surfaces (cylinders, concave walls) whose normal rotates
+            // as the player moves along them.
             physics::WallDetectionResult walls{};
             if (!state.grounded || state.moveMode == MoveMode::WallRunning || state.moveMode == MoveMode::Climbing) {
+                const glm::vec3 prevNormal =
+                    (state.moveMode == MoveMode::WallRunning) ? state.wallNormal : glm::vec3(0.0f);
                 walls = physics::detectWalls(pos.value,
                                              input.yaw,
                                              shape.halfExtents,
                                              world,
                                              tms::k_wallrunCheckDist,
-                                             tms::k_wallrunSphereRadius);
+                                             tms::k_wallrunSphereRadius,
+                                             prevNormal);
             }
 
             // 2. Sprint update
@@ -1174,7 +1240,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             }
 
             case MoveMode::WallRunning:
-                handleWallRunning(vel.value, state, input, walls, pos.value.y, dt);
+                handleWallRunning(pos.value, vel.value, state, input, walls, shape.halfExtents, pos.value.y, dt);
                 break;
 
             case MoveMode::Climbing:

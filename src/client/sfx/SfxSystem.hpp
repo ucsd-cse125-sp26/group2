@@ -24,6 +24,12 @@
 /// Health/death/kill changes are detected by comparing previous-frame state in
 /// update(), because the server's handleDeath() immediately calls handleRespawn()
 /// in the same tick so IsDead never survives to a registry sync.
+///
+/// On macOS, the system opens a specific physical audio device rather than
+/// SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK to avoid a race condition in SDL3's
+/// CoreAudio backend that causes a SIGSEGV when the default output changes
+/// (e.g. plugging/unplugging headphones).  Device hot-swap is handled
+/// manually via SDL_EVENT_AUDIO_DEVICE_REMOVED / ADDED events.
 class SfxSystem
 {
 public:
@@ -38,6 +44,12 @@ public:
 
     /// @brief Destroy all active streams, close the audio device, quit audio subsystem.
     void quit();
+
+    /// @brief Forward SDL audio-device events so the system can handle hot-swap.
+    ///
+    /// Call this from Game::event() for SDL_EVENT_AUDIO_DEVICE_ADDED,
+    /// SDL_EVENT_AUDIO_DEVICE_REMOVED, and SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED.
+    void handleEvent(const SDL_Event& event);
 
     /// @brief Play a sound immediately.
     /// @param id    Which clip to play.
@@ -61,7 +73,8 @@ public:
     bool isInitialized() const { return device_ != 0; }
 
 private:
-    SDL_AudioDeviceID device_ = 0; ///< Opened playback device (0 = not initialised).
+    SDL_AudioDeviceID device_ = 0;           ///< Logical playback device (0 = not initialised).
+    SDL_AudioDeviceID physicalDeviceId_ = 0; ///< Physical device ID we opened (for event matching).
 
     std::array<SoundClip, static_cast<size_t>(SfxId::_Count)> clips_;
 
@@ -88,8 +101,11 @@ private:
     float prevArmor_ = 100.0f;
     int prevDeaths_ = 0;
     int prevKills_ = 0;
-    float healingSoundCooldown_ = 0.0f; ///< Throttle the looping heal tick sound.
-    bool stateInitialized_ = false;     ///< Skip sounds on the very first update().
+    float healingSoundCooldown_ = 0.0f;           ///< Throttle the looping heal tick sound.
+    bool stateInitialized_ = false;               ///< Skip sounds on the very first update().
+
+    bool pendingReopen_ = false;                  ///< Set by handleEvent(), processed at the start of update().
+    SDL_AudioDeviceID pendingReopenDeviceId_ = 0; ///< Which physical device to switch to (0 = first available).
 
     /// @brief Decode a single MP3 from assets/sounds/ and store it as clip[id].
     bool loadClip(SfxId id, const char* filename, SfxCategory cat, float gain, float cooldownSecs);
@@ -99,4 +115,26 @@ private:
 
     /// @brief master × category × clip × extraGain.
     float effectiveGain(SfxId id, float extraGain) const;
+
+    /// @brief Open a specific physical playback device (macOS) or the default (other platforms).
+    /// @return True on success.
+    bool openDevice();
+
+    /// @brief Tear down all active voices/streams, close the device, then reopen.
+    void reopenDevice();
+
+    /// @brief Push a tiny silent buffer to force AudioQueue buffer pre-allocation.
+    ///
+    /// Without this, the first real sound on macOS triggers lazy buffer allocation
+    /// inside CoreAudio's AudioQueue, causing an audible latency spike / glitch.
+    void warmUpDevice();
+
+    /// @brief Convert every loaded clip to the device's native audio format.
+    ///
+    /// Eliminates per-stream resampling and format conversion inside the audio
+    /// callback.  Without this, every active voice triggers real-time S16LE→F32
+    /// + 44.1→48 kHz resampling on each ~21 ms CoreAudio callback.  Under CPU
+    /// throttling (Low Power Mode) or with many concurrent voices (up to 32),
+    /// the callback can't finish in time → buffer underruns → pops / stutter.
+    void preconvertClips();
 };

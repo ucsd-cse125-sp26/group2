@@ -23,7 +23,6 @@ enum class AAMode : int
 struct RenderToggles
 {
     // Geometry passes
-    bool sceneGeometry = true;   ///< Hard-coded cube + floor.
     bool pbrModels = true;       ///< Assimp-loaded scene models (opaque + transparent).
     bool entityModels = true;    ///< ECS-driven entity models (Renderable component).
     bool weaponViewmodel = true; ///< First-person weapon.

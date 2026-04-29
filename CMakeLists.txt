@@ -331,7 +331,6 @@ set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
 set(SHADER_SOURCES
-    projective.vert normal.frag         # scene geometry (cube + floor)
     model.vert model.frag               # legacy model shaders (kept for reference)
     geometry.vert geometry.frag          # graphics team Lambertian shaders
     pbr.vert pbr.frag                   # PBR Cook-Torrance (Phase 1)
@@ -565,6 +564,8 @@ add_executable(group2
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/MapLoader.hpp
+        src/ecs/physics/MapLoader.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -814,6 +815,8 @@ add_executable(client
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/MapLoader.hpp
+        src/ecs/physics/MapLoader.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -973,6 +976,8 @@ add_executable(server
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/MapLoader.hpp
+        src/ecs/physics/MapLoader.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -1031,6 +1036,7 @@ target_link_libraries(server PRIVATE
     SDL3_net::SDL3_net
     EnTT::EnTT
     glm::glm
+    assimp
     tomlplusplus::tomlplusplus
 )
 
@@ -1062,6 +1068,18 @@ add_custom_command(
 )
 add_custom_target(copy_server_config DEPENDS "${CMAKE_BINARY_DIR}/config_server.stamp")
 add_dependencies(server copy_server_config)
+
+# Copy map assets next to the server binary so MapLoader can find them.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/maps")
+    add_custom_command(TARGET server POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets/maps"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/maps"
+                "$<TARGET_FILE_DIR:server>/assets/maps"
+        COMMENT "Copying map assets to server binary directory"
+        VERBATIM
+    )
+endif()
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

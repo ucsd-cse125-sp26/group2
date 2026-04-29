@@ -10,6 +10,7 @@
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
+#include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
@@ -102,6 +103,10 @@ private:
     glm::vec3 cachedEye_{0.f, 100.f, 0.f};
     glm::vec3 cachedCamFwd_{0.f, 0.f, 1.f};
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
+
+    // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
+    physics::MapCollisionData mapCollision_;
+    int mapModelIdx_ = -1; ///< Renderer model index for the map's visual mesh.
 
     // Model indices for entity rendering (loaded at init).
     int wraithModelIdx = -1;                       ///< Wraith player model index.

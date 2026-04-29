@@ -32,6 +32,30 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
     clientEntities.clear(); // For safety
     registry.clear();
 
+    // ── Load map collision ──────────────────────────────────────────────
+    // Scale: the map was authored in meters; the game uses Quake units (inches).
+    {
+        static constexpr float k_metersToInches = 39.3701f;
+
+        const char* base = SDL_GetBasePath();
+        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+
+        physics::MapLoadOptions opts;
+        opts.scale = k_metersToInches;
+        opts.allMeshesAreCollision = true; // Prototype map — every mesh is collision.
+        opts.addFloorPlane = false;        // Map geometry provides its own floor.
+
+        if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
+            physics::setActiveWorld(mapCollision_.geometry());
+            SDL_Log("[server] map collision loaded: %zu planes, %zu boxes, %zu brushes",
+                    mapCollision_.planes.size(),
+                    mapCollision_.boxes.size(),
+                    mapCollision_.brushes.size());
+        } else {
+            SDL_Log("[server] WARNING: map collision load failed — falling back to testWorld()");
+        }
+    }
+
     if (!server.init(addr, port))
         return false;
 
@@ -128,8 +152,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     std::vector<NetParticleEvent> particleEvents;
     systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
-    systems::runMovement(registry, dt, physics::testWorld());
-    systems::runCollision(registry, dt, physics::testWorld());
+    systems::runMovement(registry, dt, physics::activeWorld());
+    systems::runCollision(registry, dt, physics::activeWorld());
     systems::runExplosion(registry, particleEvents, pendingKillEvents);
     systems::runPlayerStatus(registry, dt);
 

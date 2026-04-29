@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ecs/components/ClientId.hpp"
+#include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/Server.hpp"
@@ -52,9 +53,11 @@ private:
     /// @param clientId Network client identifier for the player.
     void deletePlayerEntity(ClientId clientId);
 
-    Server server;                                             ///< Owns the TCP socket and network I/O.
-    Registry registry;                                         ///< ECS entity/component store.
-    MatchController matchController;                           ///< Manages match flow and state.
+    physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
+
+    Server server;                           ///< Owns the TCP socket and network I/O.
+    Registry registry;                       ///< ECS entity/component store.
+    MatchController matchController;         ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.
     bool running = false;                        ///< Loop continues while true.

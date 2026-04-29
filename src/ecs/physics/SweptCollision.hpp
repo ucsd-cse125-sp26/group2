@@ -43,12 +43,32 @@ struct WorldBrush
     int planeCount{0};
 };
 
+/// @brief A vertical (Y-axis) cylinder in world space.
+///
+/// Defined by a base centre point, radius, and height.  The cylinder extends
+/// from `base.y` to `base.y + height` along the Y axis.
+struct WorldCylinder
+{
+    glm::vec3 base; ///< Centre of the bottom cap.
+    float radius;   ///< Horizontal radius.
+    float height;   ///< Extent along +Y from base.
+};
+
+/// @brief A sphere in world space.
+struct WorldSphere
+{
+    glm::vec3 center; ///< Centre point.
+    float radius;     ///< Radius.
+};
+
 /// @brief All world collision geometry for one tick.
 struct WorldGeometry
 {
     std::span<const Plane> planes;
     std::span<const WorldAABB> boxes;
     std::span<const WorldBrush> brushes;
+    std::span<const WorldCylinder> cylinders;
+    std::span<const WorldSphere> spheres;
 };
 
 /// @brief Result of a swept AABB collision query.
@@ -85,6 +105,20 @@ HitResult sweepAABBvsBox(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, 
 /// Finds the time at which the AABB enters all half-spaces simultaneously.
 /// Entities starting inside the brush are skipped (depenetration handles that).
 HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldBrush& brush);
+
+/// @brief Sweep an AABB against a vertical cylinder.
+///
+/// Minkowski-expands the cylinder by the AABB half-extents: the radius grows
+/// by the XZ extent and the height caps grow by the Y extent.  The sweep then
+/// reduces to a 2D ray-vs-circle test (XZ) clamped by the expanded Y slab.
+HitResult sweepAABBvsCylinder(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldCylinder& cyl);
+
+/// @brief Sweep an AABB against a sphere.
+///
+/// Minkowski-expands the sphere radius by the AABB half-extents (approximation:
+/// uses the max half-extent component, making it slightly conservative at
+/// corners).  Then performs a ray-vs-sphere test on the swept centre.
+HitResult sweepAABBvsSphere(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldSphere& sph);
 
 /// @brief Sweep an AABB against all world geometry, returning the earliest hit.
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);

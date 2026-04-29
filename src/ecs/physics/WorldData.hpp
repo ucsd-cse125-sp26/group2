@@ -1,12 +1,13 @@
 /// @file WorldData.hpp
-/// @brief Shared test world geometry compiled identically on client and server.
+/// @brief Shared world geometry for collision / movement / raycast systems.
+///
+/// Provides three entry points:
+///   - `testWorld()`   — hardcoded physics playground for development.
+///   - `setActiveWorld()` / `activeWorld()` — runtime-switchable world geometry,
+///     used when loading map files via `MapLoader`.  Both client and server must
+///     call `setActiveWorld()` with identical data for prediction parity.
 
 #pragma once
-
-/// @brief Shared test world geometry — compiled identically on client and server.
-///
-/// Defines the physics playground: floor, boxes, ramps, walls, pole, walkway.
-/// Both client and server must use the same geometry for prediction parity.
 
 #include "SweptCollision.hpp"
 
@@ -16,6 +17,51 @@
 
 namespace physics
 {
+
+// ---------------------------------------------------------------------------
+// Active world (runtime-switchable)
+// ---------------------------------------------------------------------------
+
+namespace detail
+{
+
+/// @brief Shared singleton state for the runtime-switchable world.
+struct ActiveWorldState
+{
+    WorldGeometry geo{};
+    bool set = false;
+};
+
+/// @brief Access the shared active-world state (Meyer's singleton).
+inline ActiveWorldState& activeWorldState()
+{
+    static ActiveWorldState s;
+    return s;
+}
+
+} // namespace detail
+
+/// @brief Set the world geometry that `activeWorld()` returns.
+///
+/// The caller retains ownership of the memory behind the spans — the pointed-to
+/// data must outlive every call to `activeWorld()`.  Typically backed by a
+/// `MapCollisionData` whose vectors live for the duration of the game.
+///
+/// Both client and server must call this with identical data before the first
+/// physics tick to maintain prediction parity.
+inline void setActiveWorld(const WorldGeometry& geo)
+{
+    auto& s = detail::activeWorldState();
+    s.geo = geo;
+    s.set = true;
+}
+
+/// @brief Return the world geometry most recently set via `setActiveWorld()`,
+/// or fall back to `testWorld()` if none has been set.
+///
+/// This is the single entry point that all physics systems should use.
+inline const WorldGeometry& activeWorld();
+// Defined after testWorld() below, since it depends on it.
 
 // Helper factories
 
@@ -183,8 +229,20 @@ inline const WorldGeometry& testWorld()
         makeDiagonalWall({300.0f, 0.0f, 1900.0f}, 100.0f, 8.0f, 120.0f, glm::normalize(glm::vec3(1.0f, 0.0f, 1.0f))),
     }};
 
-    static const WorldGeometry k_geo{k_planes, k_boxes, k_brushes};
+    static const WorldGeometry k_geo{k_planes, k_boxes, k_brushes, {}, {}};
     return k_geo;
+}
+
+// ---------------------------------------------------------------------------
+// activeWorld() definition (depends on testWorld)
+// ---------------------------------------------------------------------------
+
+inline const WorldGeometry& activeWorld()
+{
+    const auto& s = detail::activeWorldState();
+    if (s.set)
+        return s.geo;
+    return testWorld();
 }
 
 } // namespace physics

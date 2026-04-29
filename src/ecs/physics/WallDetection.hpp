@@ -44,15 +44,24 @@ struct WallDetectionResult
 ///
 /// Also probes downward to measure ground distance (used for wallrun/climb min height).
 ///
-/// @param pos          Player AABB centre position.
-/// @param yaw          Player facing direction (radians).
-/// @param halfExtents  Player AABB half-extents (for offset calculations).
-/// @param world        World collision geometry.
-/// @param checkDist    How far sideways/forward to trace (u).
-/// @param sphereRadius Radius of the trace sphere (u).
-/// @return             Detection results for all directions.
-WallDetectionResult detectWalls(
-    glm::vec3 pos, float yaw, glm::vec3 halfExtents, const WorldGeometry& world, float checkDist, float sphereRadius);
+/// @param pos            Player AABB centre position.
+/// @param yaw            Player facing direction (radians).
+/// @param halfExtents    Player AABB half-extents (for offset calculations).
+/// @param world          World collision geometry.
+/// @param checkDist      How far sideways/forward to trace (u).
+/// @param sphereRadius   Radius of the trace sphere (u).
+/// @param prevWallNormal Previous tick's wall normal (zero if not wallrunning).
+///                       When non-zero, an additional trace is cast toward
+///                       `-prevWallNormal` to track curved surfaces (cylinders,
+///                       concave walls) whose normal rotates as the player moves.
+/// @return               Detection results for all directions.
+WallDetectionResult detectWalls(glm::vec3 pos,
+                                float yaw,
+                                glm::vec3 halfExtents,
+                                const WorldGeometry& world,
+                                float checkDist,
+                                float sphereRadius,
+                                glm::vec3 prevWallNormal = glm::vec3(0.0f));
 
 /// @brief Check if a surface normal represents a wall (not floor/ceiling).
 ///

@@ -76,5 +76,8 @@ public:
     virtual void setModelEmissive(int modelIndex, glm::vec4 emissiveFactor) = 0;
     virtual void setWeaponViewmodel(const WeaponViewmodel& vm) = 0;
     virtual void requestScreenshot(const std::string& path) = 0;
+    /// @brief Override whether a model is drawn during the scene pass (static world
+    /// geometry) or only via EntityRenderCmd (dynamic entities / weapons).
+    virtual void setModelScenePass(int modelIndex, bool drawInScene) = 0;
     [[nodiscard]] virtual int modelCount() const = 0;
 };

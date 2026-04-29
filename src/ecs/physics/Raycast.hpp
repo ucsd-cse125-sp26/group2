@@ -89,7 +89,127 @@ inline bool raycastAABB(glm::vec3 origin,
     return true;
 }
 
-/// @brief Raycast against all static world geometry (planes + boxes).
+/// @brief Ray vs vertical cylinder intersection.
+inline bool raycastCylinder(glm::vec3 origin,
+                            glm::vec3 direction,
+                            const WorldCylinder& cyl,
+                            float maxDistance,
+                            float& outDistance,
+                            glm::vec3& outNormal)
+{
+    // XZ circle test
+    const float ox = origin.x - cyl.base.x;
+    const float oz = origin.z - cyl.base.z;
+    const float dx = direction.x;
+    const float dz = direction.z;
+
+    const float a = dx * dx + dz * dz;
+    const float b = 2.0f * (ox * dx + oz * dz);
+    const float c = ox * ox + oz * oz - cyl.radius * cyl.radius;
+
+    float tSide = maxDistance + 1.0f;
+    glm::vec3 sideNormal{0.0f};
+
+    if (a > k_parallelEpsilon) {
+        const float disc = b * b - 4.0f * a * c;
+        if (disc >= 0.0f) {
+            const float t = (-b - std::sqrt(disc)) / (2.0f * a);
+            if (t >= 0.0f && t < maxDistance) {
+                // Check Y bounds at hit point
+                const float hitY = origin.y + direction.y * t;
+                if (hitY >= cyl.base.y && hitY <= cyl.base.y + cyl.height) {
+                    tSide = t;
+                    sideNormal = glm::vec3(
+                        origin.x + direction.x * t - cyl.base.x, 0.0f, origin.z + direction.z * t - cyl.base.z);
+                    const float len = glm::length(sideNormal);
+                    if (len > k_parallelEpsilon)
+                        sideNormal /= len;
+                    else
+                        sideNormal = glm::vec3(1.0f, 0.0f, 0.0f);
+                }
+            }
+        }
+    }
+
+    // Cap tests (two discs)
+    float tCap = maxDistance + 1.0f;
+    glm::vec3 capNormal{0.0f};
+
+    if (std::abs(direction.y) > k_parallelEpsilon) {
+        // Bottom cap
+        float t = (cyl.base.y - origin.y) / direction.y;
+        if (t >= 0.0f && t < maxDistance) {
+            float hx = origin.x + direction.x * t - cyl.base.x;
+            float hz = origin.z + direction.z * t - cyl.base.z;
+            if (hx * hx + hz * hz <= cyl.radius * cyl.radius && t < tCap) {
+                tCap = t;
+                capNormal = glm::vec3(0.0f, -1.0f, 0.0f);
+            }
+        }
+        // Top cap
+        t = (cyl.base.y + cyl.height - origin.y) / direction.y;
+        if (t >= 0.0f && t < maxDistance) {
+            float hx = origin.x + direction.x * t - cyl.base.x;
+            float hz = origin.z + direction.z * t - cyl.base.z;
+            if (hx * hx + hz * hz <= cyl.radius * cyl.radius && t < tCap) {
+                tCap = t;
+                capNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+            }
+        }
+    }
+
+    float best = maxDistance + 1.0f;
+    glm::vec3 bestN{0.0f};
+    if (tSide < best) {
+        best = tSide;
+        bestN = sideNormal;
+    }
+    if (tCap < best) {
+        best = tCap;
+        bestN = capNormal;
+    }
+
+    if (best > maxDistance)
+        return false;
+
+    outDistance = best;
+    outNormal = bestN;
+    return true;
+}
+
+/// @brief Ray vs sphere intersection.
+inline bool raycastSphere(glm::vec3 origin,
+                          glm::vec3 direction,
+                          const WorldSphere& sph,
+                          float maxDistance,
+                          float& outDistance,
+                          glm::vec3& outNormal)
+{
+    const glm::vec3 oc = origin - sph.center;
+    const float a = glm::dot(direction, direction);
+    if (a < k_parallelEpsilon)
+        return false;
+    const float b = 2.0f * glm::dot(oc, direction);
+    const float c = glm::dot(oc, oc) - sph.radius * sph.radius;
+
+    if (c <= 0.0f)
+        return false; // inside sphere
+
+    const float disc = b * b - 4.0f * a * c;
+    if (disc < 0.0f)
+        return false;
+
+    const float t = (-b - std::sqrt(disc)) / (2.0f * a);
+    if (t < 0.0f || t > maxDistance)
+        return false;
+
+    outDistance = t;
+    const glm::vec3 hitPos = origin + direction * t;
+    outNormal = glm::normalize(hitPos - sph.center);
+    return true;
+}
+
+/// @brief Raycast against all static world geometry (planes + boxes + cylinders + spheres).
 inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const WorldGeometry& world)
 {
     HitscanHit bestHit;
@@ -119,6 +239,30 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
             continue;
         }
 
+        bestHit.hit = true;
+        bestHit.distance = distance;
+        bestHit.point = origin + direction * distance;
+        bestHit.normal = normal;
+        bestHit.surface = SurfaceType::Concrete;
+    }
+
+    for (const WorldCylinder& cyl : world.cylinders) {
+        float distance = bestHit.distance;
+        glm::vec3 normal{0.0f};
+        if (!raycastCylinder(origin, direction, cyl, bestHit.distance, distance, normal))
+            continue;
+        bestHit.hit = true;
+        bestHit.distance = distance;
+        bestHit.point = origin + direction * distance;
+        bestHit.normal = normal;
+        bestHit.surface = SurfaceType::Concrete;
+    }
+
+    for (const WorldSphere& sph : world.spheres) {
+        float distance = bestHit.distance;
+        glm::vec3 normal{0.0f};
+        if (!raycastSphere(origin, direction, sph, bestHit.distance, distance, normal))
+            continue;
         bestHit.hit = true;
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
@@ -167,7 +311,7 @@ raycastPlayers(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::
 /// @brief Full hitscan resolution: world geometry first, then players (closest wins).
 inline HitscanHit resolveHitscan(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction)
 {
-    HitscanHit bestHit = raycastWorld(origin, direction, testWorld());
+    HitscanHit bestHit = raycastWorld(origin, direction, activeWorld());
 
     const HitscanHit playerHit = raycastPlayers(registry, shooter, origin, direction, bestHit.distance);
     if (playerHit.hit && (!bestHit.hit || playerHit.distance < bestHit.distance)) {
