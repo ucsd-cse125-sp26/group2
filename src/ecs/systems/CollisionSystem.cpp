@@ -209,6 +209,11 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
 }
 
 /// @brief Push the entity out of a triangle mesh it currently overlaps.
+///
+/// Uses a weighted-average push direction across all overlapping triangles to
+/// avoid jitter at triangle boundaries.  On a flat surface (all normals agree)
+/// this produces the same result as single-triangle depenetration.  On curved
+/// surfaces or triangle junctions, the averaged direction is smooth and stable.
 static void
 depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
 {
@@ -219,10 +224,9 @@ depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents,
         entMin.y > mesh.boundsMax.y || entMax.z < mesh.boundsMin.z || entMin.z > mesh.boundsMax.z)
         return;
 
-    // BVH traversal to find overlapping triangles.
-    float minOverlap = 1e30f;
-    glm::vec3 pushNormal{0.0f, 1.0f, 0.0f};
-    bool found = false;
+    // BVH traversal: accumulate weighted push from ALL overlapping triangles.
+    glm::vec3 pushAccum{0.0f};
+    float maxOverlap = 0.0f;
 
     int stack[64];
     int stackPtr = 0;
@@ -263,11 +267,9 @@ depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents,
 
                 if (dist < r) {
                     const float overlap = r - dist;
-                    if (overlap < minOverlap) {
-                        minOverlap = overlap;
-                        pushNormal = triN;
-                        found = true;
-                    }
+                    // Weight by overlap depth: deeper penetrations contribute more.
+                    pushAccum += triN * overlap;
+                    maxOverlap = std::max(maxOverlap, overlap);
                 }
             }
         } else {
@@ -276,11 +278,13 @@ depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents,
         }
     }
 
-    if (found) {
-        pos += pushNormal * (minOverlap + k_pushback);
-        const float k_into = glm::dot(vel, pushNormal);
+    const float pushLen = glm::length(pushAccum);
+    if (pushLen > 1e-6f) {
+        const glm::vec3 pushDir = pushAccum / pushLen;
+        pos += pushDir * (maxOverlap + k_pushback);
+        const float k_into = glm::dot(vel, pushDir);
         if (k_into < 0.0f)
-            vel -= pushNormal * k_into;
+            vel -= pushDir * k_into;
     }
 }
 
@@ -306,8 +310,10 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
     for (const physics::WorldSphere& sph : world.spheres)
         depenetrateSphere(pos, vel, halfExtents, sph);
 
-    for (const physics::WorldTriMesh& tm : world.triMeshes)
-        depenetrateTriMesh(pos, vel, halfExtents, tm);
+    // Triangle meshes: no depenetration. The swept collision prevents entry;
+    // depenetrating against individual triangles is unstable at edges/corners
+    // and causes jitter. This matches Source/Quake which only depenetrate
+    // against simple convex primitives.
 }
 
 /// @brief Attempt to step over a low obstacle when a wall is hit.
