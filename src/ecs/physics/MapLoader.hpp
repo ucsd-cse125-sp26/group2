@@ -108,4 +108,18 @@ struct MapLoadOptions
 /// @return True on success; false on any Assimp load error (logged via SDL_Log).
 bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapLoadOptions& opts = {});
 
+/// @brief Load collision for a standalone prop GLB and append to existing collision data.
+///
+/// Loads the GLB, applies the given transform (position + uniform scale), runs
+/// auto-detection on each mesh, and appends the resulting primitives to `out`.
+/// Call `setActiveWorld(out.geometry())` after all props are loaded to update
+/// the physics world.
+///
+/// @param path     Absolute path to the `.glb` file.
+/// @param out      Existing collision data to append to.
+/// @param position World-space position of the prop.
+/// @param scale    Uniform scale factor.
+/// @return True on success.
+bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3 position, float scale);
+
 } // namespace physics

@@ -1642,37 +1642,10 @@ bool Renderer::init(SDL_Window* win)
     nearestDepthSampler = SDL_CreateGPUSampler(device, &nearestInfo);
 
     // Load scene models
+    // Props and character models are loaded via Game::init() → AssetRegistry,
+    // which generates collision data alongside visual uploads.
+
     const char* const k_base = SDL_GetBasePath();
-
-    // Helper to load a model and place it in the scene.
-    // flipWinding=true for models exported with CW winding (DirectX/Unity/
-    // many Sketchfab downloads) that appear inside-out in our CCW pipeline.
-    auto loadAndPlace = [&](const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
-        char path[512];
-        SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
-
-        LoadedModel loaded;
-        if (!loadModel(path, loaded, flipUVs)) {
-            SDL_Log("Renderer: failed to load '%s'", filename);
-            return;
-        }
-
-        ModelInstance inst;
-        inst.transform = glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(scale));
-
-        if (!uploadModel(loaded, inst))
-            SDL_Log("Renderer: GPU upload failed for '%s'", filename);
-        else
-            models.push_back(std::move(inst));
-    };
-
-    loadAndPlace("Apex_Legend_Wraith.glb", glm::vec3(200.0f, 0.0f, 400.0f), 8.0f);
-    // flipUVs=true: Porsche GLB uses V=0 at bottom (Sketchfab/Blender export).
-    // Y offset +1.3 compensates for the model's wheels extending below its origin.
-    // Without this, the wheels clip through the floor and reflections appear detached.
-    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
-    loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
-    loadAndPlace("bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
 
     // Camera — overridden every frame by drawFrame().
     camera = Camera();

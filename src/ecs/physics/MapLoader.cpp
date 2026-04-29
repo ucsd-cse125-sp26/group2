@@ -28,6 +28,7 @@
 #include <cctype>
 #include <cmath>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <string>
 #include <vector>
@@ -703,6 +704,75 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
             out.cylinders.size(),
             out.spheres.size(),
             out.triMeshes.size());
+
+    return true;
+}
+
+bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3 position, float scale)
+{
+    Assimp::Importer importer;
+
+    const auto flags =
+        static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_GenSmoothNormals);
+
+    const aiScene* scene = importer.ReadFile(path, flags);
+
+    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
+        SDL_Log("MapLoader: failed to load prop '%s': %s", path.c_str(), importer.GetErrorString());
+        return false;
+    }
+
+    // Build the prop transform: translate to world position, then uniform scale.
+    const glm::mat4 propTransform = glm::scale(glm::translate(glm::mat4(1.0f), position), glm::vec3(scale));
+
+    // Walk the scene graph — treat all meshes as collision (like prototype mode),
+    // but bake the prop's world position into the transform.
+    const auto prevBoxes = out.boxes.size();
+    const auto prevCyls = out.cylinders.size();
+    const auto prevSpheres = out.spheres.size();
+    const auto prevBrushes = out.brushes.size();
+    const auto prevTri = out.triMeshes.size();
+
+    // We can't use extractCollision directly because it computes the transform
+    // from the node hierarchy.  Instead, use a simple recursive walk that
+    // multiplies our prop transform with each node's accumulated transform.
+    struct Walker
+    {
+        static void
+        walk(const aiNode* node, const aiScene* scene, const glm::mat4& parentTransform, MapCollisionData& out)
+        {
+            const glm::mat4 world = parentTransform * aiToGlm(node->mTransformation);
+
+            for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
+                const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
+                // Scale = 1.0 because the scale is already baked into the transform.
+                extractMeshCollision(mesh, world, 1.0f, "", node->mName.C_Str(), out);
+            }
+
+            for (unsigned int c = 0; c < node->mNumChildren; ++c)
+                walk(node->mChildren[c], scene, world, out);
+        }
+    };
+
+    Walker::walk(scene->mRootNode, scene, propTransform, out);
+
+    const auto newBoxes = out.boxes.size() - prevBoxes;
+    const auto newCyls = out.cylinders.size() - prevCyls;
+    const auto newSpheres = out.spheres.size() - prevSpheres;
+    const auto newBrushes = out.brushes.size() - prevBrushes;
+    const auto newTri = out.triMeshes.size() - prevTri;
+
+    SDL_Log("MapLoader: prop '%s' at (%.0f,%.0f,%.0f) scale=%.1f — +%zu box, +%zu cyl, +%zu sph, +%zu brush, +%zu tri",
+            path.c_str(),
+            static_cast<double>(position.x),
+            static_cast<double>(position.y),
+            static_cast<double>(position.z),
+            static_cast<double>(scale),
+            newBoxes,
+            newCyls,
+            newSpheres,
+            newBrushes,
+            newTri);
 
     return true;
 }
