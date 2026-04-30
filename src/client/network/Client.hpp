@@ -89,6 +89,22 @@ public:
     /// @brief Access current network statistics.
     const NetworkStats& getNetStats() const { return stats; }
 
+    /// @brief Render-time interpolation alpha based on snapshot timing.
+    ///
+    /// Phase 5a: with the snapshot rate decoupled from the physics tick rate
+    /// (Phase 4a default = 32 Hz vs 128 Hz physics), the renderer can no
+    /// longer use `accumulator / k_physicsDt` as the lerp alpha — that
+    /// span is ~7.8 ms while two consecutive snapshots are ~31 ms apart.
+    /// The result was the entity stepping in 7.8 ms bursts every 31 ms.
+    ///
+    /// This helper returns alpha as
+    ///   `(now - lastSnapshotApplyNs) / (lastSnapshotApplyNs - prevSnapshotApplyNs)`
+    /// clamped to [0, 1]. Self-correcting if the server changes its
+    /// snapshot rate; freezes at 1.0 (entity at "current" pos, no extrapolation)
+    /// when a snapshot is overdue. Returns 1.0 before two snapshots have
+    /// arrived (no interpolation reference yet).
+    [[nodiscard]] float getSnapshotAlpha() const;
+
     /// @brief Number of recent inputs included in each INPUT packet for redundancy.
     ///
     /// At 128 Hz client tick rate, 5 inputs covers ~40 ms of redundancy —
@@ -140,6 +156,16 @@ private:
     /// poll(registry) checks this and reports false to the game thread, so
     /// the existing "server died" disconnect path still works.
     std::atomic<bool> socketDead_{false};
+
+    // ── Phase 5a: snapshot-interval interpolation timing ──────────────────
+    //
+    // Updated whenever dispatchMessage applies an UPDATE_REGISTRY. The
+    // renderer reads getSnapshotAlpha() instead of the physics-tick alpha
+    // so motion stays smooth at the much-coarser snapshot rate. Both fields
+    // are 0 before any snapshot has been applied; getSnapshotAlpha returns
+    // 1.0 in that case so first frame draws the snapped position.
+    Uint64 lastSnapshotApplyNs_ = 0;
+    Uint64 prevSnapshotApplyNs_ = 0;
 
     /// @brief Network-thread main loop body.
     void networkLoop();

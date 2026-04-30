@@ -3,6 +3,8 @@
 
 #include "Client.hpp"
 
+#include "ecs/components/Position.hpp"
+#include "ecs/components/PreviousPosition.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
@@ -12,6 +14,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <algorithm>
 #include <cstring>
 
 bool Client::init(const char* addr, Uint16 port)
@@ -157,6 +160,31 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     return send(buf, totalLen);
 }
 
+float Client::getSnapshotAlpha() const
+{
+    // Phase 5a: render-time interpolation alpha based on snapshot timing.
+    // Returns 1.0 (snap-to-current, no interpolation reference) until two
+    // snapshots have arrived, since we need the prior snapshot to know
+    // when "the start of the current interval" was.
+    if (lastSnapshotApplyNs_ == 0 || prevSnapshotApplyNs_ == 0)
+        return 1.0f;
+
+    const Uint64 now = SDL_GetTicksNS();
+    const Uint64 elapsed = now - lastSnapshotApplyNs_;
+    const Uint64 interval = lastSnapshotApplyNs_ - prevSnapshotApplyNs_;
+
+    if (interval == 0)
+        return 1.0f;
+
+    // Clamp to [0, 1]: alpha goes 0 just after a snapshot, climbs toward 1
+    // as the next is overdue, freezes at 1 (== "snap to current pos") if
+    // the next snapshot is late. We never extrapolate past the latest
+    // snapshot — per the Phase-5 plan, freeze is less ugly than rubber-
+    // banding when packets are late.
+    const float a = static_cast<float>(elapsed) / static_cast<float>(interval);
+    return std::clamp(a, 0.0f, 1.0f);
+}
+
 void Client::networkLoop()
 {
     // ~1 kHz cycle, symmetric to Server::networkLoop. Each phase takes the
@@ -221,9 +249,34 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         break;
     }
     case PacketType::UPDATE_REGISTRY:
+        // Phase 5a: copy current Position into PreviousPosition BEFORE the
+        // continuous_loader rewrites Position from the snapshot. This gives
+        // the renderer a (prev, pos) pair that brackets the most-recent
+        // snapshot transition, lerped over the full ~31 ms snapshot
+        // interval (vs. the old per-physics-tick lerp which only spanned
+        // ~7.8 ms and produced visible step jitter at 32 Hz snapshot rate).
+        registry.view<Position, PreviousPosition>().each(
+            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
         if (!registryLoader)
             registryLoader.emplace(registry);
         registryLoader->apply(payload, payloadSize, localPlayerEntity);
+
+        // Newly-spawned entities (created by the snapshot apply above) have
+        // a default-constructed PreviousPosition (or none at all). Without
+        // this seed pass, the very first frame would lerp them from (0,0,0)
+        // to their actual spawn position — visible "fly in from origin".
+        // Setting prev = pos for any entity missing PreviousPosition pins
+        // them at the snapshot pos until the *next* snapshot creates a
+        // real motion delta.
+        registry.view<Position>(entt::exclude<PreviousPosition>).each([&registry](entt::entity e, const Position& pos) {
+            registry.emplace<PreviousPosition>(e, pos.value);
+        });
+
+        // Update snapshot timing for the renderer's interpolation alpha.
+        prevSnapshotApplyNs_ = lastSnapshotApplyNs_;
+        lastSnapshotApplyNs_ = SDL_GetTicksNS();
+
         stats.registryUpdateSize = payloadSize;
         ++registryUpdatesWindow;
 

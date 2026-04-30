@@ -286,7 +286,11 @@ bool Game::init()
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
-        registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+        // Phase 5a: PreviousPosition is now seeded by Client::dispatchMessage
+        // for ALL entities with Position on first snapshot, including the
+        // local player. Use emplace_or_replace here so this callback stays
+        // idempotent regardless of whether the seed pass got there first.
+        registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
 
         // Only add Controllable if the player is not already dead (edge case:
         // joining while mid-death on a long-running server).
@@ -861,15 +865,19 @@ SDL_AppResult Game::iterate()
 
         physicsRan = true;
 
-        // Interpolate position between last two server updates
+        // Phase 5a: PreviousPosition is now updated *only* when a snapshot
+        // arrives (in Client::dispatchMessage), not every physics tick. The
+        // renderer interpolates over the snapshot interval via
+        // client.getSnapshotAlpha() rather than the much-shorter physics
+        // tick. Without that change, at 32 Hz snapshots the renderer
+        // produced visible step jitter every ~31 ms.
+        //
+        // The local player has no client-side physics yet; that lands in
+        // Phase 5b (prediction). Until then, the local player feels the
+        // same ~31 ms display lag as remote players — but smoothly, not
+        // step-y.
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
-
-            // Snapshot position before each tick so the last tick's delta is
-            // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
-            registry.view<Position, PreviousPosition>().each(
-                [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
-
             ++tickCount;
             ++ticksThisFrame;
             ++statsPhysTicks;
@@ -896,8 +904,12 @@ SDL_AppResult Game::iterate()
     float targetRoll = 0.0f; // degrees, from PlayerVisState
 
     if (renderSeparateFromPhysics) {
-        // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
-        const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
+        // Phase 5a: interpolation alpha is now driven by snapshot timing,
+        // not by the physics-tick accumulator. See Client::getSnapshotAlpha
+        // for the formula. This is what makes 32 Hz snapshots look smooth
+        // — at 32 Hz a snapshot interval is ~31 ms, so the renderer paces
+        // the lerp over that span instead of the 7.8 ms physics tick.
+        const float alpha = client.getSnapshotAlpha();
 
         registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,
@@ -1195,6 +1207,11 @@ SDL_AppResult Game::iterate()
 
     // Build entity render list
     {
+        // Phase 5a: snapshot-rate alpha for remote-entity position lerp.
+        // Read once per frame; applied to every entity below that has a
+        // PreviousPosition (i.e. has received at least one snapshot).
+        const float snapshotAlpha = client.getSnapshotAlpha();
+
         std::vector<EntityRenderCmd> entityCmds;
         registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
             if (!rend.visible || rend.modelIndex < 0)
@@ -1206,7 +1223,18 @@ SDL_AppResult Game::iterate()
             if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
-            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
+            // Phase 5a: lerp from PreviousPosition (= last snapshot) to
+            // Position (= current snapshot) over the snapshot interval.
+            // Entities without PreviousPosition (e.g. just-spawned) fall
+            // back to the raw current position, but Client::dispatchMessage
+            // seeds PreviousPosition on first snapshot apply so this
+            // fallback should rarely fire in practice.
+            glm::vec3 renderPos = pos.value;
+            if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+            }
+
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + rend.translation);
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
