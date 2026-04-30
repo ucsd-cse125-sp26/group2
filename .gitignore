@@ -31,6 +31,11 @@ compile_commands.json
 *~
 .ai/
 
+# Compiled shaders
+*.spv
+*.dxil
+*.msl.metallib
+
 # Compiled objects & libraries
 *.o
 *.obj
@@ -55,6 +60,7 @@ compile_commands.json
 .remember/
 .claude/
 docs/superpowers/
+blender/
 
 # Git worktrees
 .worktrees/

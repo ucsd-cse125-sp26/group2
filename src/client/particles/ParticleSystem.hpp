@@ -127,6 +127,9 @@ public:
     [[nodiscard]] uint32_t decalCount() const { return decals_.count(); }
     [[nodiscard]] bool sdfReady() const { return sdf_.ready(); }
 
+    /// @brief Access the SDF atlas for shared use by the HUD system.
+    [[nodiscard]] const SdfAtlas& sdfAtlas() const { return sdf_.atlas(); }
+
 private:
     ParticleRenderer renderer_;
     TracerEffect tracers_;

@@ -11,16 +11,16 @@
 
 /// @brief Loads a TTF font, bakes an SDF glyph atlas, and uploads it to the GPU.
 ///
-/// Uses stb_truetype for glyph rasterization.  The SDF is computed on the CPU
-/// (brute-force nearest-edge scan, spread = 8 px) and packed into a 1024x1024
-/// R8_UNORM texture.
+/// Uses stb_truetype's analytic SDF generator (stbtt_GetCodepointSDF) to
+/// compute distance fields directly from font vector outlines, then packs
+/// them into a 1024x1024 R8_UNORM atlas texture.
 class SdfAtlas
 {
 public:
     static constexpr int k_atlasW = 1024;
     static constexpr int k_atlasH = 1024;
-    static constexpr int k_renderPx = 48; ///< Rasterisation size in pixels.
-    static constexpr int k_spread = 8;    ///< SDF spread in pixels.
+    static constexpr int k_renderPx = 72; ///< Rasterisation size in pixels.
+    static constexpr int k_spread = 12;   ///< SDF spread in pixels.
 
     /// @brief Load TTF from path, bake SDF, upload to GPU.
     /// @param dev GPU device to upload the atlas texture to.

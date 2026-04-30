@@ -11,6 +11,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -29,6 +30,7 @@
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "hud/debug/HudDebugPanel.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -132,6 +134,22 @@ bool Game::init()
         dispatcher.sink<WeaponFiredEvent>().connect<&SfxSystem::onWeaponFired>(sfxSystem);
         // ExplosionEvent: also play the explosion SFX alongside the particle effect.
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
+    }
+
+    // HUD system — needs device + shader format from renderer, SDF atlas from particles.
+    if (particleSystem.sdfReady()) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        if (!hud_.init(renderer.getDevice(),
+                       renderer.getShaderFormat(),
+                       particleSystem.sdfAtlas(),
+                       static_cast<uint32_t>(winW),
+                       static_cast<uint32_t>(winH)))
+        {
+            SDL_Log("Hud init failed (non-fatal — HUD disabled)");
+        } else {
+            renderer.setHudTexture(hud_.getOutputTexture());
+        }
     }
 
     // ── Load map ──────────────────────────────────────────────────────────
@@ -470,9 +488,18 @@ SDL_AppResult Game::event(SDL_Event* event)
     // Forward every event to ImGui first so it can capture keyboard/mouse
     // when the cursor is hovering over a window.
     debugUI.processEvent(event);
+    hud_.processEvent(event);
 
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
+
+    // Resize HUD offscreen target when the window pixel size changes.
+    if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+        const auto newW = static_cast<uint32_t>(event->window.data1);
+        const auto newH = static_cast<uint32_t>(event->window.data2);
+        hud_.resize(newW, newH);
+        renderer.setHudTexture(hud_.getOutputTexture());
+    }
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
@@ -500,7 +527,8 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_F2:
             // Animation Tester is owned by Game (animUI_), not DebugUI, so
             // pass its visibility flag in so F2 toggles every panel uniformly.
-            debugUI.toggleAllPanels({&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_});
+            debugUI.toggleAllPanels(
+                {&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_, &showHudDebug_});
             break;
 
         // Particle system test keys
@@ -1699,6 +1727,8 @@ SDL_AppResult Game::iterate()
     debugUI.buildSkyboxUI(renderer);
 #endif
 
+    HudDebugPanel::build(hud_, &showHudDebug_);
+
     // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
     if (showViewmodelUI) {
         if (ImGui::Begin("Viewmodel Tweaker", &showViewmodelUI)) {
@@ -1784,63 +1814,7 @@ SDL_AppResult Game::iterate()
         e.displayTimer -= frameTime;
     std::erase_if(killFeed, [](const KillFeedEvent& e) { return e.displayTimer <= 0.0f; });
 
-    // Kill feed overlay — top-right corner, always visible.
-    if (!killFeed.empty()) {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-        static constexpr float k_entryH = 22.0f;
-        static constexpr float k_padX = 12.0f;
-        static constexpr float k_marginRight = 10.0f;
-        static constexpr float k_marginTop = 10.0f;
-        static constexpr float k_fadeTime = 1.0f;
-
-        ClientId localClientId{-1};
-        registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
-
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-        ImFont* font = ImGui::GetFont();
-        const float fontSize = ImGui::GetFontSize();
-
-        for (size_t i = 0; i < killFeed.size(); ++i) {
-            const auto& evt = killFeed[i];
-            const float alpha = std::min(evt.displayTimer / k_fadeTime, 1.0f);
-
-            const bool killerIsLocal = (localClientId.value != -1 && evt.killerId == localClientId);
-            const bool victimIsLocal = (localClientId.value != -1 && evt.victimId == localClientId);
-
-            char buf[64];
-            const char* killerName = killerIsLocal ? "You" : nullptr;
-            const char* victimName = victimIsLocal ? "You" : nullptr;
-            char killerBuf[16], victimBuf[16];
-            if (!killerName) {
-                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", evt.killerId.value);
-                killerName = killerBuf;
-            }
-            if (!victimName) {
-                std::snprintf(victimBuf, sizeof(victimBuf), "Player #%d", evt.victimId.value);
-                victimName = victimBuf;
-            }
-            std::snprintf(buf, sizeof(buf), "%s killed %s", killerName, victimName);
-
-            const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, buf);
-            const float boxW = textSize.x + k_padX * 2.0f;
-            const float boxH = k_entryH;
-            const float x = static_cast<float>(winW) - boxW - k_marginRight;
-            const float y = k_marginTop + static_cast<float>(i) * (boxH + 2.0f);
-
-            ImVec4 bgColor = {0.0f, 0.0f, 0.0f, 0.55f * alpha};
-            if (killerIsLocal)
-                bgColor = {0.1f, 0.35f, 0.05f, 0.75f * alpha}; // green tint — you got the kill
-            else if (victimIsLocal)
-                bgColor = {0.4f, 0.05f, 0.05f, 0.75f * alpha}; // red tint — you died
-
-            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(bgColor);
-            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
-
-            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 3.0f);
-            dl->AddText(font, fontSize, ImVec2(x + k_padX, y + (boxH - fontSize) * 0.5f), fg, buf);
-        }
-    }
+    // Kill feed overlay — now handled by HUD KillFeed widget.
 
     // Death HUD — bottom bar shown while local player is dead.
     {
@@ -1899,29 +1873,10 @@ SDL_AppResult Game::iterate()
         }
     }
 
-    // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.
-    if (hitmarkerTimer_ > 0.0f) {
+    // Hitmarker — now handled by HUD HitMarkerWidget.
+    // Timer still ticks for HUD integration (hitmarkerTimer_ feeds HudGameState::hitConfirms).
+    if (hitmarkerTimer_ > 0.0f)
         hitmarkerTimer_ -= frameTime;
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-        const float cx = static_cast<float>(winW) * 0.5f;
-        const float cy = static_cast<float>(winH) * 0.5f;
-
-        const float alpha = std::min(hitmarkerTimer_ / 0.15f, 1.0f); // fade out last 150ms
-        const float hmSize = 8.0f;
-        const float hmGap = 4.0f;
-        const float hmThick = 2.5f;
-        const ImU32 hmCol = hitmarkerIsHeadshot_
-                                ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 0.2f, 0.2f, alpha))  // red for headshots
-                                : ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)); // white default
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-
-        // Four diagonal lines forming an X, offset from center by hmGap
-        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy - hmGap - hmSize), ImVec2(cx - hmGap, cy - hmGap), hmCol, hmThick);
-        dl->AddLine(ImVec2(cx + hmGap, cy - hmGap), ImVec2(cx + hmGap + hmSize, cy - hmGap - hmSize), hmCol, hmThick);
-        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy + hmGap + hmSize), ImVec2(cx - hmGap, cy + hmGap), hmCol, hmThick);
-        dl->AddLine(ImVec2(cx + hmGap, cy + hmGap), ImVec2(cx + hmGap + hmSize, cy + hmGap + hmSize), hmCol, hmThick);
-    }
 
     // Third-person weapon tweaker — per-weapon tuning for remote player weapons.
     if (showTPWeaponUI_) {
@@ -2001,6 +1956,144 @@ SDL_AppResult Game::iterate()
         ImGui::End();
     }
 
+    // Update and render HUD.
+    if (hud_.getOutputTexture()) {
+        HudGameState hudState{};
+
+        // ── Local player health, armor, alive ──
+        registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
+            hudState.health = static_cast<int>(hp.health);
+            hudState.maxHealth = 100;
+            hudState.armor = static_cast<int>(hp.armor);
+            hudState.maxArmor = 100;
+        });
+        registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& ps) { hudState.isAlive = !ps.IsDead; });
+
+        // ── Weapon / ammo ──
+        registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+            const GunInstance* gun = &ws.primary;
+            switch (ws.current) {
+            case WeaponSlot::SECONDARY:
+                gun = &ws.secondary;
+                break;
+            case WeaponSlot::TERTIARY:
+                gun = &ws.tertiary;
+                break;
+            case WeaponSlot::QUATERNARY:
+                gun = &ws.quaternary;
+                break;
+            default:
+                break;
+            }
+            hudState.ammoClip = gun->currentMagAmmo;
+            hudState.ammoReserve = gun->totalAmmo;
+            hudState.weaponId = static_cast<int>(gun->type);
+        });
+
+        // ── Round timer / buy phase ──
+        hudState.roundTimeRemaining = countdownTimer;
+        hudState.isBuyPhase = (currentMatchPhase == MatchPhase::WARMUP || currentMatchPhase == MatchPhase::COUNTDOWN);
+
+        // ── Kill feed: convert KillFeedEvent → HudKillFeedEntry ──
+        ClientId localClientId{-1};
+        registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+        thread_local std::vector<HudKillFeedEntry> hudKillEntries;
+        hudKillEntries.clear();
+        // Only pass each event once — sentToHud flag prevents duplicates.
+        for (auto& evt : killFeed) {
+            if (!evt.sentToHud) {
+                evt.sentToHud = true;
+                HudKillFeedEntry entry;
+                if (localClientId.value != -1 && evt.killerId == localClientId)
+                    entry.killerName = "You";
+                else {
+                    char buf[16];
+                    SDL_snprintf(buf, sizeof(buf), "Player #%d", evt.killerId.value);
+                    entry.killerName = buf;
+                }
+                if (localClientId.value != -1 && evt.victimId == localClientId)
+                    entry.victimName = "You";
+                else {
+                    char buf[16];
+                    SDL_snprintf(buf, sizeof(buf), "Player #%d", evt.victimId.value);
+                    entry.victimName = buf;
+                }
+                hudKillEntries.push_back(entry);
+            }
+        }
+        hudState.killFeedEvents = hudKillEntries;
+
+        // ── Hit confirms: feed from hitmarkerTimer_ (set by onParticleEvent) ──
+        thread_local std::vector<HudHitConfirm> hudHitConfirms;
+        hudHitConfirms.clear();
+        if (hitmarkerTimer_ > 0.2f) { // just triggered (timer starts at 0.25)
+            hudHitConfirms.push_back({hitmarkerIsHeadshot_, false});
+        }
+        hudState.hitConfirms = hudHitConfirms;
+
+        // ── Scoreboard: all players ──
+        thread_local std::vector<HudTeamMemberStatus> hudAllPlayers;
+        hudAllPlayers.clear();
+        registry.view<ClientId, Health, PlayerState>().each(
+            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerState& ps) {
+                HudTeamMemberStatus status;
+                if (localClientId.value != -1 && cid == localClientId)
+                    status.name = "You";
+                else {
+                    char buf[16];
+                    SDL_snprintf(buf, sizeof(buf), "Player #%d", cid.value);
+                    status.name = buf;
+                }
+                status.health = static_cast<int>(hp.health);
+                status.isAlive = !ps.IsDead;
+                if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
+                    status.kills = pms->kills;
+                    status.deaths = pms->deaths;
+                }
+                status.ping = static_cast<int>(client.getNetStats().rttMs);
+                hudAllPlayers.push_back(status);
+            });
+        // For now all players go into allies (no team system exists).
+        hudState.allies = hudAllPlayers;
+        hudState.allyScore = 0;
+        hudState.enemyScore = 0;
+
+        // ── Minimap: local player + all other player positions ──
+        registry.view<LocalPlayer, Position>().each([&](const Position& pos) {
+            hudState.localPlayerX = pos.value.x;
+            hudState.localPlayerZ = pos.value.z;
+        });
+
+        thread_local std::vector<HudMinimapDot> hudMinimapDots;
+        hudMinimapDots.clear();
+        registry.view<ClientId, Position, PlayerState>().each(
+            [&](const ClientId& cid, const Position& pos, const PlayerState& ps) {
+                if (ps.IsDead)
+                    return;
+                if (localClientId.value != -1 && cid == localClientId)
+                    return; // Skip local player (always drawn at center).
+                hudMinimapDots.push_back({pos.value.x, pos.value.z});
+            });
+        hudState.enemyDots = hudMinimapDots;
+
+        static int minimapLogTimer = 0;
+        if (++minimapLogTimer % 300 == 1) // Log every ~5 seconds at 60fps
+            SDL_Log("Minimap: localPos=(%.0f,%.0f) enemyDots=%zu",
+                    static_cast<double>(hudState.localPlayerX),
+                    static_cast<double>(hudState.localPlayerZ),
+                    hudMinimapDots.size());
+
+        // ── Screen dimensions ──
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        hudState.screenW = static_cast<float>(winW);
+        hudState.screenH = static_cast<float>(winH);
+
+        hud_.update(frameTime, hudState);
+        hud_.render();
+    }
+
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
@@ -2041,6 +2134,7 @@ void Game::quit()
         recorder.stopRecording();
     sfxSystem.quit();
     particleSystem.quit();
+    hud_.quit();
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();

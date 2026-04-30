@@ -485,6 +485,9 @@ set(SHADER_SOURCES
     hitscan_beam.vert hitscan_beam.frag
     decal.vert decal.frag
     sdf_text.vert sdf_text.frag
+    # HUD overlay
+    hud.vert hud.frag
+    hud_blit.frag
 )
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
@@ -619,6 +622,41 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    # HUD system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -882,6 +920,41 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    # HUD system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp

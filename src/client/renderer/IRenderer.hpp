@@ -45,6 +45,7 @@ enum class RendererFeature
     SetPointLights,
     RequestScreenshot,
     ModelCount,
+    SetHudTexture,
 };
 
 /// @brief Abstract renderer contract. Both the legacy and the new renderer
@@ -80,4 +81,7 @@ public:
     /// geometry) or only via EntityRenderCmd (dynamic entities / weapons).
     virtual void setModelScenePass(int modelIndex, bool drawInScene) = 0;
     [[nodiscard]] virtual int modelCount() const = 0;
+
+    /// @brief Set the HUD overlay texture to blit after tone mapping.
+    virtual void setHudTexture(SDL_GPUTexture* hudOutput) = 0;
 };

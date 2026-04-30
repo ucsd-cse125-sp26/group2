@@ -46,6 +46,8 @@ const char* featureName(RendererFeature f)
         return "RequestScreenshot";
     case RendererFeature::ModelCount:
         return "ModelCount";
+    case RendererFeature::SetHudTexture:
+        return "SetHudTexture";
     }
     return "Unknown";
 }
@@ -68,6 +70,7 @@ constexpr RendererFeature k_allFeatures[] = {
     RendererFeature::SetWeaponViewmodel,
     RendererFeature::RequestScreenshot,
     RendererFeature::ModelCount,
+    RendererFeature::SetHudTexture,
 };
 
 } // namespace
@@ -271,4 +274,12 @@ int HybridRenderer::modelCount() const
     if (next_.supports(RendererFeature::ModelCount))
         return next_.modelCount();
     return legacy_.modelCount();
+}
+
+void HybridRenderer::setHudTexture(SDL_GPUTexture* hudOutput)
+{
+    // Always route to both — whichever is doing drawFrame needs the texture.
+    legacy_.setHudTexture(hudOutput);
+    if (nextInitialised_)
+        next_.setHudTexture(hudOutput);
 }
