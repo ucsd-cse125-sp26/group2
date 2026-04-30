@@ -485,6 +485,8 @@ set(SHADER_SOURCES
     hitscan_beam.vert hitscan_beam.frag
     decal.vert decal.frag
     sdf_text.vert sdf_text.frag
+    # HUD overlay
+    hud.vert hud.frag
 )
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
