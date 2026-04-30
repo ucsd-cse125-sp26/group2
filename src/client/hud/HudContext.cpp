@@ -154,7 +154,7 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
 
     float cursorX = startX;
     for (const char* p = str; *p; ++p) {
-        const uint32_t cp = static_cast<uint32_t>(*p);
+        const uint32_t cp = static_cast<uint8_t>(*p);
         const GlyphInfo* gi = sdfAtlas_->glyph(cp);
         if (!gi)
             continue;
@@ -179,7 +179,7 @@ float HudContext::measureText(const char* str, float size) const
     const float scale = size / static_cast<float>(SdfAtlas::k_renderPx);
     float width = 0.f;
     for (const char* p = str; *p; ++p) {
-        const GlyphInfo* gi = sdfAtlas_->glyph(static_cast<uint32_t>(*p));
+        const GlyphInfo* gi = sdfAtlas_->glyph(static_cast<uint8_t>(*p));
         if (gi)
             width += gi->advance * scale;
     }

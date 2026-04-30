@@ -493,6 +493,14 @@ SDL_AppResult Game::event(SDL_Event* event)
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
 
+    // Resize HUD offscreen target when the window pixel size changes.
+    if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+        const auto newW = static_cast<uint32_t>(event->window.data1);
+        const auto newH = static_cast<uint32_t>(event->window.data2);
+        hud_.resize(newW, newH);
+        renderer.setHudTexture(hud_.getOutputTexture());
+    }
+
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
         case SDLK_MINUS:
