@@ -649,6 +649,12 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -939,6 +945,12 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp

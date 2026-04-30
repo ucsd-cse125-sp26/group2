@@ -5,12 +5,15 @@
 
 #include "particles/sdf/SdfAtlas.hpp"
 #include "widgets/AmmoCounter.hpp"
+#include "widgets/BuyMenu.hpp"
 #include "widgets/CrosshairWidget.hpp"
 #include "widgets/DamageIndicator.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
 #include "widgets/KillFeed.hpp"
+#include "widgets/Minimap.hpp"
 #include "widgets/RoundTimer.hpp"
+#include "widgets/Scoreboard.hpp"
 #include "widgets/TeamStatusBar.hpp"
 
 bool Hud::init(SDL_GPUDevice* device,
@@ -47,11 +50,25 @@ void Hud::resize(uint32_t newW, uint32_t newH)
 
 void Hud::processEvent(const SDL_Event* event)
 {
-    // Interactive widgets (buy menu, scoreboard) handle events here.
-    // Iterate in reverse so topmost widget gets first chance.
-    for (auto it = widgets_.rbegin(); it != widgets_.rend(); ++it) {
-        if ((*it)->visible) {
-            // Widgets that consume events will set a flag — for now, no-op.
+    if (event->type == SDL_EVENT_KEY_DOWN) {
+        if (event->key.key == SDLK_TAB) {
+            for (auto& w : widgets_) {
+                if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
+                    sb->setOpen(true);
+            }
+        }
+        if (event->key.key == SDLK_B) {
+            for (auto& w : widgets_) {
+                if (auto* bm = dynamic_cast<BuyMenu*>(w.get()))
+                    bm->toggle(true);
+            }
+        }
+    } else if (event->type == SDL_EVENT_KEY_UP) {
+        if (event->key.key == SDLK_TAB) {
+            for (auto& w : widgets_) {
+                if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
+                    sb->setOpen(false);
+            }
         }
     }
 }
@@ -149,4 +166,7 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<RoundTimer>());
     widgets_.push_back(std::make_unique<TeamStatusBar>());
+    widgets_.push_back(std::make_unique<Scoreboard>());
+    widgets_.push_back(std::make_unique<BuyMenu>());
+    widgets_.push_back(std::make_unique<Minimap>());
 }
