@@ -4,7 +4,6 @@
 #include "hud/HudContext.hpp"
 
 #include <algorithm>
-#include <cstdio>
 
 RoundTimer::RoundTimer()
 {

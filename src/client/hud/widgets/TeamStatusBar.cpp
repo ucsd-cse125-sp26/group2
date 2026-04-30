@@ -3,8 +3,6 @@
 
 #include "hud/HudContext.hpp"
 
-#include <cstdio>
-
 TeamStatusBar::TeamStatusBar()
 {
     anchor = HudAnchor::TopCenter;
