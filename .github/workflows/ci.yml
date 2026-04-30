@@ -118,12 +118,14 @@ jobs:
       # Cache the project build tree for incremental cmake reconfigure.
       # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja
       # tracks source deps, so stale objects are never used.
+      # ImageVersion (set by GHA runners) ensures PCH invalidation on
+      # runner-image updates that change system-header mtimes.
       - name: Cache build tree
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
         shell: bash
@@ -287,8 +289,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
         shell: bash
