@@ -641,6 +641,14 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -923,6 +931,14 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
