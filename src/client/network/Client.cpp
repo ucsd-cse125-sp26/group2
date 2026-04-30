@@ -306,23 +306,38 @@ void Client::networkLoop()
 
         // ── Phase 3d: UDP receive phase ─────────────────────────────────
         //
-        // Drain any pending UDP datagrams (currently just PONGs from the
-        // server). Park them in udpRecvQueue_ for the game thread's poll()
-        // to dispatch alongside TCP messages, so a single dispatchMessage
-        // handles both transports.
+        // Non-fragmented payloads (PONG, small snapshots) go straight
+        // into udpRecvQueue_ for the game thread to dispatch. Fragmented
+        // payloads (Phase 3d-4 large snapshots) are fed to the
+        // reassembler; only the *complete* assembled message lands in
+        // the queue.
         if (udpEndpoint_.isOpen()) {
             std::lock_guard<std::mutex> lock(stateMutex_);
             net::UdpReceivedMessage msg;
             int drained = 0;
-            constexpr int k_maxDatagramsPerCycle = 64;
+            constexpr int k_maxDatagramsPerCycle = 256;
             while (drained < k_maxDatagramsPerCycle && udpEndpoint_.tryReceive(msg)) {
                 ++drained;
-                // Only accept payloads addressed to our connectionId on
-                // the Unreliable channel for now (Stage 3d-3 only).
-                if (msg.header.channel == static_cast<uint8_t>(net::ChannelId::Unreliable) &&
-                    msg.header.connectionId == connectionId_ && !msg.payload.empty())
+                if (msg.header.channel != static_cast<uint8_t>(net::ChannelId::Unreliable) ||
+                    msg.header.connectionId != connectionId_ || msg.payload.empty())
                 {
+                    msg.from.release();
+                    continue;
+                }
+
+                const bool isFragment = (msg.header.flags & 0x01) != 0;
+                if (!isFragment) {
                     udpRecvQueue_.emplace_back(std::move(msg.payload));
+                } else {
+                    std::vector<uint8_t> assembled;
+                    const auto r = unreliableReassembler_.addFragment(
+                        msg.header, msg.payload.data(), static_cast<int>(msg.payload.size()), assembled);
+                    if (r == net::FragmentReassembler::Result::Complete) {
+                        udpRecvQueue_.emplace_back(std::move(assembled));
+                    }
+                    // InProgress / Stale / Malformed: nothing to do —
+                    // either we keep accumulating, or the fragment
+                    // gets silently dropped (drop-stale contract).
                 }
                 msg.from.release();
             }

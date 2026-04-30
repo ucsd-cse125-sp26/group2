@@ -720,6 +720,7 @@ add_executable(group2
         src/network/NetworkConfig.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
         src/network/transport/PacketHeader.hpp
         src/network/transport/UdpEndpoint.hpp
         src/network/transport/UdpEndpoint.cpp
@@ -1035,6 +1036,7 @@ add_executable(client
         src/network/NetworkConfig.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
         src/network/transport/PacketHeader.hpp
         src/network/transport/UdpEndpoint.hpp
         src/network/transport/UdpEndpoint.cpp
@@ -1214,6 +1216,7 @@ add_executable(server
         src/network/NetworkConfig.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
         src/network/transport/PacketHeader.hpp
         src/network/transport/UdpEndpoint.hpp
         src/network/transport/UdpEndpoint.cpp

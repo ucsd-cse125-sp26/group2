@@ -12,6 +12,7 @@
 #include "network/OutboundQueue.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "network/ShotEvent.hpp"
+#include "network/transport/FragmentReassembler.hpp"
 #include "network/transport/UdpEndpoint.hpp"
 
 #include <SDL3/SDL_stdinc.h>
@@ -221,6 +222,13 @@ private:
     /// same as a complete framed message off the TCP path so the same
     /// dispatchMessage() handles both.
     std::vector<std::vector<uint8_t>> udpRecvQueue_;
+
+    /// @brief Phase 3d-4: reassembly buffer for fragmented snapshot
+    /// datagrams on the Unreliable channel. Tracks one in-progress
+    /// reassembly per client (the most-recent sequence). Older
+    /// fragments dropped via the FragmentReassembler's drop-stale
+    /// rule.
+    net::FragmentReassembler unreliableReassembler_;
 
     /// @brief Network-thread main loop body.
     void networkLoop();

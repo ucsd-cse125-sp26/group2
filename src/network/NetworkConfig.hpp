@@ -57,6 +57,15 @@ struct TransportConfig
     /// (server→client) over UDP for accurate RTT measurement that
     /// can't be poisoned by snapshot-stream backlog.
     bool pingOverUdp = true;
+
+    /// @brief Stage 3d-4: route UPDATE_REGISTRY snapshots over UDP
+    /// instead of TCP. The server fragments oversize snapshots into
+    /// MTU-safe datagrams; the client reassembles via
+    /// FragmentReassembler. Drop-stale: a single dropped fragment
+    /// loses the snapshot but the next one (~31 ms later at 32 Hz)
+    /// arrives independently. Off until 3d-4 is verified — defaulting
+    /// off lets the rollout be config-driven.
+    bool snapshotsOverUdp = true;
 };
 
 /// @brief Runtime network connection parameters.

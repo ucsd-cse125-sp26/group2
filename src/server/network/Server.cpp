@@ -492,15 +492,39 @@ bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 void Server::broadcastRegistry(const Registry& registry)
 {
     auto buf = registry_serialization::serialize(registry);
-
     buf.insert(buf.begin(), static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
 
-    // Replace-on-stale: a slow client only ever has one snapshot pending in
-    // its userspace queue — always the freshest. Without this, a 100-bot
-    // server can stack dozens of obsolete snapshots in a slow drainer's
-    // SDL3_net pending_output_buffer, all of which still have to be sent
-    // and decoded before catching up.
-    enqueueBroadcast(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY), buf.data(), static_cast<int>(buf.size()));
+    std::lock_guard<std::mutex> lock(stateMutex_);
+
+    // Phase 3d-4: when the snapshots-over-UDP toggle is on, fragment
+    // the snapshot and ship it via UDP to every client whose udpAddr
+    // we know (i.e. that has sent us at least one UDP packet — see
+    // handleUdpUnreliable's address caching). Clients we haven't
+    // heard from over UDP yet fall back to the TCP path; they catch
+    // up to UDP within ~one snapshot interval after their first
+    // INPUT/PING goes through.
+    const bool useUdp = transportConfig_.snapshotsOverUdp && udpEndpoint_.isOpen();
+
+    for (auto& [_, conn] : clients) {
+        const bool canUseUdp = useUdp && conn.udpAddr.addr != nullptr;
+        if (canUseUdp) {
+            net::PacketHeader hdr{};
+            hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+            hdr.connectionId = conn.connectionId;
+            hdr.sequence = conn.udpSnapshotSequence++;
+            hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
+            // sendFragmented handles both the single-datagram case
+            // (small registries, e.g. early in a match) and the multi-
+            // fragment case (~5 KB at 100 players → ~5 fragments). It
+            // sets flags.fragmented + fragmentInfo per fragment.
+            udpEndpoint_.sendFragmented(conn.udpAddr, hdr, buf.data(), static_cast<int>(buf.size()));
+        } else {
+            // TCP fallback path: the per-client OutboundQueue with
+            // replace-on-stale (Phase 3a) — same as before 3d-4.
+            conn.outbound.enqueue(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY),
+                                  frameMessage(buf.data(), static_cast<int>(buf.size())));
+        }
+    }
 }
 
 void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events)

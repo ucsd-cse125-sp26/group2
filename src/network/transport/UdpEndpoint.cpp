@@ -77,6 +77,48 @@ bool UdpEndpoint::send(const UdpEndpointAddr& dest, PacketHeader hdr, const void
     return NET_SendDatagram(socket_, dest.addr, dest.port, buf, static_cast<int>(sizeof(hdr)) + payloadLen);
 }
 
+bool UdpEndpoint::sendFragmented(const UdpEndpointAddr& dest, PacketHeader hdr, const void* data, int dataLen)
+{
+    if (!socket_ || dataLen < 0)
+        return false;
+
+    // Single-datagram fast path. No fragmentation overhead when the
+    // payload already fits.
+    if (dataLen <= k_maxPayloadBytes) {
+        hdr.flags = 0;
+        hdr.fragmentInfo = 0;
+        return send(dest, hdr, data, dataLen);
+    }
+
+    // Fragment count = ceil(dataLen / k_maxPayloadBytes). 256-fragment
+    // sanity cap matches what the wire format's 8-bit fragment-count
+    // field can encode; a snapshot that exceeds it indicates a bug
+    // upstream (something is generating > ~300 KB / tick of state).
+    const int fragCount = (dataLen + k_maxPayloadBytes - 1) / k_maxPayloadBytes;
+    if (fragCount > 256) {
+        SDL_Log("UdpEndpoint::sendFragmented: payload %d B needs %d fragments (>256 cap)", dataLen, fragCount);
+        return false;
+    }
+
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    for (int i = 0; i < fragCount; ++i) {
+        const int offset = i * k_maxPayloadBytes;
+        const int chunkLen = std::min(k_maxPayloadBytes, dataLen - offset);
+
+        PacketHeader fragHdr = hdr;
+        fragHdr.flags = 0x01; // bit 0 = fragmented
+        fragHdr.fragmentInfo = static_cast<uint16_t>((i << 8) | fragCount);
+
+        if (!send(dest, fragHdr, bytes + offset, chunkLen)) {
+            // Stop early on send failure. Caller will get a partial set
+            // on the wire; the receiver's FragmentReassembler will time
+            // it out. UDP is best-effort; this matches the spec.
+            return false;
+        }
+    }
+    return true;
+}
+
 bool UdpEndpoint::tryReceive(UdpReceivedMessage& out)
 {
     if (!socket_)

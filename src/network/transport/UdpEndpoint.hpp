@@ -100,6 +100,30 @@ public:
     /// @return False on socket error or oversize payload.
     bool send(const UdpEndpointAddr& dest, PacketHeader hdr, const void* payload, int payloadLen);
 
+    /// @brief Send a payload by splitting it into MTU-safe fragments.
+    ///
+    /// Stage 3d-4: snapshots at 100 players are ~5 KB, well over the
+    /// MTU-safe `k_maxPayloadBytes` (~1184 bytes per single datagram).
+    /// This helper splits @p data into ceil(len / k_maxPayloadBytes)
+    /// fragments. Each fragment carries the same `(channel, sequence)`
+    /// in its PacketHeader plus the bit-0-set `flags.fragmented`, with
+    /// `fragmentInfo` packing `(index << 8) | count`.
+    ///
+    /// The receiver pairs them by `(connectionId, sequence)` in a
+    /// FragmentReassembler. Drop-stale: a newer sequence supersedes any
+    /// in-progress reassembly. Single dropped fragment loses the whole
+    /// snapshot — fine because the next snapshot lands ~31 ms later.
+    ///
+    /// @param dest        Destination address.
+    /// @param hdr         Caller-supplied header. `flags` and
+    ///                    `fragmentInfo` are overwritten per-fragment.
+    /// @param data        Payload bytes (split internally).
+    /// @param dataLen     Total payload length.
+    /// @return False on socket error or if the payload would need more
+    ///         than 256 fragments (sanity cap; 256 × ~1.18 KB ≈ 302 KB
+    ///         logical-message ceiling, vastly more than we'll need).
+    bool sendFragmented(const UdpEndpointAddr& dest, PacketHeader hdr, const void* data, int dataLen);
+
     /// @brief Try to receive one datagram (non-blocking).
     /// @param out Filled in on success.
     /// @return True if a datagram was received and parsed; false if the

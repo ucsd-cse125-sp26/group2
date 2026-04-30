@@ -129,6 +129,12 @@ private:
         /// it's auto-assigned by their kernel). Server uses this to
         /// route UDP replies (PONG, future server→client UDP traffic).
         net::UdpEndpointAddr udpAddr;
+
+        /// @brief Phase 3d-4: per-client outgoing sequence for the
+        /// Unreliable channel's snapshot stream. Increments on every
+        /// snapshot the server sends to this client. Receiver uses it
+        /// to drop stale fragments when a newer set arrives.
+        uint16_t udpSnapshotSequence = 0;
     };
 
     /// @brief Dispatch a single decoded message from a client.
