@@ -925,12 +925,27 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
                 const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
-                // Raycast against full world geometry (floor + boxes + brushes).
+                // Raycast against world geometry AND player hitboxes so
+                // local-fire prediction gets the correct surface type and
+                // normal when shooting another player (Flesh + capsule normal).
+                entt::entity localEntity = entt::null;
+                registry.view<LocalPlayer>().each([&](entt::entity e) { localEntity = e; });
+
                 const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::activeWorld());
-                const float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
-                const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
-                const glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
-                const SurfaceType hitSurface = worldHit.surface;
+                float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
+                glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
+                glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
+                SurfaceType hitSurface = worldHit.surface;
+
+                // Check player hitbox capsules — take the closer hit.
+                const auto playerHit =
+                    physics::raycastPlayerHitboxes(registry, localEntity, cachedEye_, cachedCamFwd_, hitDist);
+                if (playerHit.hit && playerHit.distance < hitDist) {
+                    hitDist = playerHit.distance;
+                    hitPos = playerHit.point;
+                    hitNormal = playerHit.normal;
+                    hitSurface = SurfaceType::Flesh;
+                }
 
                 // Dispatch weapon-fired event for any listeners
                 WeaponFiredEvent wfe;

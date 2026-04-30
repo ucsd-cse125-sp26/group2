@@ -1,3 +1,6 @@
+/// @file Camera.cpp
+/// @brief Implementation of the first-person Camera class.
+
 #include "Camera.hpp"
 
 #include <cmath>

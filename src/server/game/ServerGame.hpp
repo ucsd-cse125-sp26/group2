@@ -34,7 +34,15 @@ public:
     /// @return True on success, false on network or initialisation failure.
     bool init(const char* addr, Uint16 port, int tickRateHz = 128);
 
-    /// @brief Block and run the game loop until shutdown() is called.
+    /// @brief Block on the game loop until shutdown() is called.
+    ///
+    /// Loop structure (each iteration = one tick at tickRateHz):
+    ///  1. `server.poll()` — accept new connections, read incoming packets,
+    ///     enqueue events (Connected / Disconnected / Input).
+    ///  2. `tick(dt, nextTick)` — process events and run all ECS systems.
+    ///  3. **Sleep** — hybrid sleep+spin-wait to maintain tick cadence.
+    ///
+    /// @see tick for the per-tick ECS system execution order.
     void run();
 
     /// @brief Signal the loop to stop and release all resources.
@@ -45,9 +53,34 @@ private:
     /// @param event The event to process.
     void eventHandler(Event event);
 
-    /// @brief Advance one physics tick.
+    /// @brief Advance one physics tick: drain events, run ECS systems, broadcast state.
+    ///
+    /// Execution order each tick:
+    ///  1. **Event drain** — dequeue Connected/Disconnected/Input events from the
+    ///     network server until the queue is empty or the tick deadline is exceeded.
+    ///  2. **Animation + hitboxes** — `updateAnimationAndHitboxes(dt)` samples
+    ///     skeleton poses and recomputes bone-capsule hitboxes for all players.
+    ///  3. **Weapon system** — `runWeapon()` processes fire inputs, performs
+    ///     hitscan raycasts against hitbox capsules, applies damage, generates
+    ///     particle/kill events.
+    ///  4. **Movement** — `runMovement()` applies acceleration, friction, gravity,
+    ///     and special movement modes (wallrun, slide, grapple).
+    ///  5. **Collision** — `runCollision()` performs swept-AABB resolution against
+    ///     the world geometry (planes, boxes, brushes).
+    ///  6. **Explosions** — `runExplosion()` processes pending projectile detonations
+    ///     with radius damage.
+    ///  7. **Player status** — `runPlayerStatus()` handles respawn timers, death
+    ///     state transitions, and health regeneration.
+    ///  8. **Weapon spawners** — `runWeaponSpawners()` ticks pickup cooldowns and
+    ///     spawns weapon entities.
+    ///  9. **Match controller** — `matchController.update()` manages match phase
+    ///     transitions (warmup → countdown → in-progress → finished).
+    /// 10. **Broadcast** — send updated registry snapshot, particle events, and
+    ///     kill events to all connected clients.
+    ///
     /// @param dt       Fixed delta time in seconds (1 / tickRateHz).
     /// @param nextTick Performance counter deadline for the current tick.
+    /// @see Game::iterate for the client-side frame loop.
     void tick(float dt, Uint64 nextTick);
 
     /// @brief Create a new player entity and map it to the given client ID.
