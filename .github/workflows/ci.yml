@@ -392,6 +392,8 @@ jobs:
 
       - name: Compute next semantic version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Find the latest version tag (supports both vX.Y.Z and X.Y.Z)
           LATEST_TAG=$(git tag -l --sort=-version:refname \
@@ -407,12 +409,24 @@ jobs:
             VERSION="${LATEST_TAG#v}"
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
-            # Scan commit messages since the last tag to determine bump type
-            COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || true)
+            # Collect commit subjects for bump analysis.
+            # Use --first-parent for clean main-branch view, and resolve
+            # PR merge commits to their actual PR title so that
+            # "feat:" / "fix:" in PR titles drive the version bump.
+            SUBJECTS=""
+            while IFS= read -r line || [[ -n "$line" ]]; do
+              if [[ "$line" =~ ^Merge\ pull\ request\ \#([0-9]+) ]]; then
+                PR_TITLE=$(gh pr view "${BASH_REMATCH[1]}" \
+                  --json title --jq .title 2>/dev/null || echo "")
+                [[ -n "$PR_TITLE" ]] && SUBJECTS="${SUBJECTS}${PR_TITLE}"$'\n'
+              else
+                SUBJECTS="${SUBJECTS}${line}"$'\n'
+              fi
+            done < <(git log "${LATEST_TAG}..HEAD" --first-parent --pretty=format:"%s")
 
-            if echo "$COMMITS" | grep -qiE 'BREAKING[- ]CHANGE|^[a-z]+(\(.+\))?!:'; then
+            if echo "$SUBJECTS" | grep -qiE 'BREAKING[- ]CHANGE|^[a-z]+(\(.+\))?!:'; then
               MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
-            elif echo "$COMMITS" | grep -qiE '^feat(\(.+\))?:'; then
+            elif echo "$SUBJECTS" | grep -qiE '^feat(\(.+\))?:'; then
               MINOR=$((MINOR + 1)); PATCH=0
             else
               PATCH=$((PATCH + 1))
@@ -424,19 +438,101 @@ jobs:
           echo "tag=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "### Computed version: ${NEXT}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Generate changelog
+        id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV_TAG:     ${{ steps.version.outputs.previous }}
+          RELEASE_TAG:  ${{ steps.version.outputs.tag }}
+        run: |
+          RANGE="${PREV_TAG:+${PREV_TAG}..HEAD}"
+          RANGE="${RANGE:-HEAD}"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
+
+          # ── Categorise commits (first-parent = clean main-branch view) ──
+          FEATS=""
+          FIXES=""
+          OTHER=""
+          # Format: subject<TAB>author name
+          while IFS=$'\t' read -r subject author || [[ -n "$subject" ]]; do
+            # Skip "Merge branch" noise (e.g. back-merges)
+            [[ "$subject" =~ ^Merge\ branch ]] && continue
+
+            # For PR merge commits, fetch the real PR title and author
+            if [[ "$subject" =~ ^Merge\ pull\ request\ \#([0-9]+) ]]; then
+              PR_NUM="${BASH_REMATCH[1]}"
+              PR_INFO=$(gh pr view "$PR_NUM" --json title,author \
+                --jq '"@\(.author.login): \(.title)"' 2>/dev/null || echo "")
+              if [[ -n "$PR_INFO" ]]; then
+                PR_AUTHOR="${PR_INFO%%:*}"
+                PR_TITLE="${PR_INFO#*: }"
+                subject="$PR_TITLE"
+                author="$PR_AUTHOR"
+                ENTRY="${subject} — ${author} (#${PR_NUM})"
+              else
+                continue  # can't resolve PR, skip
+              fi
+            else
+              ENTRY="${subject} — ${author}"
+            fi
+
+            if echo "$subject" | grep -qiE '^feat(\(.+\))?[!]?:'; then
+              FEATS="${FEATS}\n- ${ENTRY}"
+            elif echo "$subject" | grep -qiE '^fix(\(.+\))?[!]?:'; then
+              FIXES="${FIXES}\n- ${ENTRY}"
+            else
+              OTHER="${OTHER}\n- ${ENTRY}"
+            fi
+          done < <(git log "$RANGE" --first-parent --pretty=format:"%s%x09%an" --reverse)
+
+          # ── Build categorised section ──
+          BODY=""
+          if [[ -n "$FEATS" ]]; then
+            BODY="${BODY}## ✨ Features\n${FEATS}\n\n"
+          fi
+          if [[ -n "$FIXES" ]]; then
+            BODY="${BODY}## 🐛 Fixes\n${FIXES}\n\n"
+          fi
+          if [[ -n "$OTHER" ]]; then
+            BODY="${BODY}## 🔧 Other\n${OTHER}\n\n"
+          fi
+
+          # ── Append GitHub-generated PR details & contributors ──
+          # This adds "New Contributors" and linked PR references when
+          # changes came through pull requests.
+          GH_NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${RELEASE_TAG}" \
+            -f target_commitish="${GITHUB_SHA}" \
+            ${PREV_TAG:+-f previous_tag_name="${PREV_TAG}"} \
+            --jq '.body' 2>/dev/null || echo "")
+
+          # Extract only the "New Contributors" and "Full Changelog" sections
+          # (skip "What's Changed" — our categorised list replaces it)
+          if [[ -n "$GH_NOTES" ]]; then
+            CONTRIBUTORS=$(echo "$GH_NOTES" | sed -n '/^## New Contributors/,$p')
+            if [[ -n "$CONTRIBUTORS" ]]; then
+              BODY="${BODY}${CONTRIBUTORS}\n\n"
+            fi
+          fi
+
+          # Compare link
+          if [[ -n "$PREV_TAG" ]]; then
+            BODY="${BODY}**Full changelog**: ${REPO_URL}/compare/${PREV_TAG}...${RELEASE_TAG}"
+          fi
+
+          echo -e "$BODY" > release-notes.md
+
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG:  ${{ steps.version.outputs.tag }}
-          PREV_TAG:     ${{ steps.version.outputs.previous }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          # Build a release title with date for context
           DATE="$(date -u +%Y-%m-%d)"
           TITLE="${RELEASE_TAG} (${DATE})"
 
           gh release create "$RELEASE_TAG" \
             --title "$TITLE" \
-            --generate-notes \
+            --notes-file release-notes.md \
             --latest \
             group2-linux-x86_64.zip \
             group2-macos.zip \
