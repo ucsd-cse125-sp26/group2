@@ -11,6 +11,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -132,6 +133,22 @@ bool Game::init()
         dispatcher.sink<WeaponFiredEvent>().connect<&SfxSystem::onWeaponFired>(sfxSystem);
         // ExplosionEvent: also play the explosion SFX alongside the particle effect.
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
+    }
+
+    // HUD system — needs device + shader format from renderer, SDF atlas from particles.
+    if (particleSystem.sdfReady()) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        if (!hud_.init(renderer.getDevice(),
+                       renderer.getShaderFormat(),
+                       particleSystem.sdfAtlas(),
+                       static_cast<uint32_t>(winW),
+                       static_cast<uint32_t>(winH)))
+        {
+            SDL_Log("Hud init failed (non-fatal — HUD disabled)");
+        } else {
+            renderer.setHudTexture(hud_.getOutputTexture());
+        }
     }
 
     // ── Load map ──────────────────────────────────────────────────────────
@@ -470,6 +487,7 @@ SDL_AppResult Game::event(SDL_Event* event)
     // Forward every event to ImGui first so it can capture keyboard/mouse
     // when the cursor is hovering over a window.
     debugUI.processEvent(event);
+    hud_.processEvent(event);
 
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
@@ -2001,6 +2019,26 @@ SDL_AppResult Game::iterate()
         ImGui::End();
     }
 
+    // Update and render HUD.
+    if (hud_.getOutputTexture()) {
+        HudGameState hudState{};
+        // Populate from local player ECS data.
+        registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
+            hudState.health = static_cast<int>(hp.health);
+            hudState.maxHealth = 100;
+            hudState.armor = static_cast<int>(hp.armor);
+            hudState.maxArmor = 100;
+        });
+        hudState.isAlive = true; // TODO: derive from IsDead in PlayerState
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        hudState.screenW = static_cast<float>(winW);
+        hudState.screenH = static_cast<float>(winH);
+
+        hud_.update(frameTime, hudState);
+        hud_.render();
+    }
+
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
@@ -2041,6 +2079,7 @@ void Game::quit()
         recorder.stopRecording();
     sfxSystem.quit();
     particleSystem.quit();
+    hud_.quit();
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();

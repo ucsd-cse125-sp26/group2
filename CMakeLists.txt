@@ -622,6 +622,17 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    # HUD system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -885,6 +896,17 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    # HUD system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp

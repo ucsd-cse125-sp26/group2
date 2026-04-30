@@ -14,6 +14,7 @@
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "hud/Hud.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/NetworkConfig.hpp"
@@ -75,6 +76,7 @@ private:
     Client client;                 ///< UDP network client.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
     SfxSystem sfxSystem;           ///< Client-side sound effects system.
+    Hud hud_;                      ///< In-game HUD overlay system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
     Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
