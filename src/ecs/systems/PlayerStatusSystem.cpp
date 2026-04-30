@@ -204,17 +204,24 @@ inline void handleHealing(Health& playerHealth, float dt)
 
 void runPlayerStatus(Registry& registry, float dt)
 {
-    registry.view<Player>().each([&registry, dt](entt::entity e) {
-        if (registry.all_of<RespawnTimer>(e)) {
-            auto& respawnTimer = registry.get<RespawnTimer>(e);
-            respawnTimer.timeRemaining -= dt;
-            if (respawnTimer.timeRemaining <= 0) {
-                handleRespawn(e, registry);
+    registry.view<Player, InputSnapshot, Health>().each(
+        [&registry, dt](entt::entity e, InputSnapshot& snap, Health& health) {
+            if (registry.all_of<RespawnTimer>(e)) {
+                auto& respawnTimer = registry.get<RespawnTimer>(e);
+                respawnTimer.timeRemaining -= dt;
+                if (respawnTimer.timeRemaining <= 0) {
+                    handleRespawn(e, registry);
+                }
+            } else {
+                Health& playerHealth = registry.get_or_emplace<Health>(e);
+                handleHealing(playerHealth, dt);
             }
-        } else {
-            Health& playerHealth = registry.get_or_emplace<Health>(e);
-            handleHealing(playerHealth, dt);
-        }
-    });
+
+            if (snap.killSelf) {
+                health.health = 0;
+                std::vector<NetKillEvent> kills;
+                handleDeath(e, health, e, registry, kills, BodyRegion::Head);
+            }
+        });
 }
 } // namespace systems

@@ -34,6 +34,7 @@ struct InputSnapshot
     bool switchToTertiary{false};   ///< Switch to gun in tertiary slot.
     bool switchToQuaternary{false}; ///< Switch to gun in quaternary slot.
     bool refillAmmo{false};         ///< Debug: refill all weapons to full ammo.
+    bool killSelf{false};           ///< Debug: refill all weapons to full ammo.
 
     float yaw{0.0f};                ///< Horizontal look angle in radians (accumulated from mouse X deltas).
     float pitch{0.0f};              ///< Vertical look angle in radians, clamped to [-89°, +89°] by InputSampleSystem.
