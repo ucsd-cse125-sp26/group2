@@ -43,7 +43,8 @@ inline glm::vec3 viewForward(float yaw, float pitch)
 /// @param spawnerPos    Position of the spawner entity.
 /// @param spawnerShape  Collision shape of the spawner.
 /// @param spawner       Spawner component (weapon type, availability, cooldown).
-inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner& spawner)
+inline void
+checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner& spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState>();
     view.each([&](entt::entity player,
@@ -51,8 +52,8 @@ inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionSh
                   const CollisionShape& shape,
                   const InputSnapshot& input,
                   WeaponState& weapon) {
-        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) &&
-            spawner.hasWeapon) {
+        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasWeapon)
+        {
             const WeaponConfig config = getWeaponConfig(spawner.type);
             if (weapon.primary.type == spawner.type) {
                 weapon.primary.totalAmmo = config.defaultAmmoCapacity;
@@ -76,9 +77,8 @@ inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionSh
         const float distSq = glm::dot(toWeapon, toWeapon);
 
         const bool inRange = distSq <= k_pickupRange * k_pickupRange;
-        const bool lookingAtWeapon =
-            distSq > 0.0001f &&
-            glm::dot(viewForward(input.yaw, input.pitch), glm::normalize(toWeapon)) >= k_pickupMinDot;
+        const bool lookingAtWeapon = distSq > 0.0001f && glm::dot(viewForward(input.yaw, input.pitch),
+                                                                  glm::normalize(toWeapon)) >= k_pickupMinDot;
 
         if (spawner.hasWeapon && input.pickup && inRange && lookingAtWeapon) {
             // pickup

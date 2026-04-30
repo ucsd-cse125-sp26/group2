@@ -93,8 +93,8 @@ void ServerGame::run()
 
     // temp rocket spawner
     const entt::entity rocketSpawner = registry.create();
-    registry.emplace<WeaponSpawner>(rocketSpawner,
-                                    WeaponSpawner{.type = WeaponType::Rocket, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<WeaponSpawner>(
+        rocketSpawner, WeaponSpawner{.type = WeaponType::Rocket, .spawnCooldown = 0.0, .hasWeapon = false});
     registry.emplace<Position>(rocketSpawner, glm::vec3{-100.0f, 15.0f, 120.0f});
     registry.emplace<CollisionShape>(rocketSpawner);
 
@@ -107,8 +107,8 @@ void ServerGame::run()
 
     // temp rail gun spawner
     const entt::entity railSpawner = registry.create();
-    registry.emplace<WeaponSpawner>(railSpawner,
-                                    WeaponSpawner{.type = WeaponType::RailGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<WeaponSpawner>(
+        railSpawner, WeaponSpawner{.type = WeaponType::RailGun, .spawnCooldown = 0.0, .hasWeapon = false});
     registry.emplace<Position>(railSpawner, glm::vec3{-100.0f, 15.0f, -240.0f});
     registry.emplace<CollisionShape>(railSpawner);
 

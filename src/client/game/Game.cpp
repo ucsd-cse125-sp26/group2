@@ -45,8 +45,8 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -59,14 +59,14 @@ namespace
 {
 int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
-    return assets.add(def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
+    return assets.add(
+        def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
 }
 
 glm::quat assetRotation(const AssetEntry& asset)
 {
     const glm::vec3 r = glm::radians(asset.renderRotationDegrees);
-    return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) *
-           glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
+    return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
            glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
 }
 } // namespace
@@ -194,8 +194,8 @@ bool Game::init()
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
         const int mapId = addAssetDefinition(assets_, kMapAsset);
-        const int mapModelIdx =
-            renderer.loadSceneModel(kMapAsset.filename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs);
+        const int mapModelIdx = renderer.loadSceneModel(
+            kMapAsset.filename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
             renderer.setModelScenePass(mapModelIdx, true);
@@ -2186,7 +2186,8 @@ void Game::refreshRemoteRespawnRenderables()
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             const int weaponIndex = static_cast<int>(spawner.type);
             if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
-                weaponAssetIds_[weaponIndex] < 0) {
+                weaponAssetIds_[weaponIndex] < 0)
+            {
                 rend.modelIndex = -1;
                 rend.visible = false;
                 return;
@@ -2210,18 +2211,15 @@ void Game::refreshRemoteRespawnRenderables()
 
             if (spawner.hasWeapon) {
                 rend.orientation =
-                    glm::angleAxis(t * k_spawnerSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) *
-                    assetRotation(asset);
+                    glm::angleAxis(t * k_spawnerSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
 
-                rend.translation = asset.renderTranslation +
-                                   glm::vec3{0.0f,
-                                             std::sin(t * k_twoPi * k_spawnerBobHz) * k_spawnerBobAmplitude,
-                                             0.0f};
+                rend.translation =
+                    asset.renderTranslation +
+                    glm::vec3{0.0f, std::sin(t * k_twoPi * k_spawnerBobHz) * k_spawnerBobAmplitude, 0.0f};
             } else {
                 rend.orientation = assetRotation(asset);
                 rend.translation = asset.renderTranslation;
             }
-
         });
 }
 

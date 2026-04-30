@@ -12,10 +12,10 @@
 #pragma once
 
 #include <cstdint>
+#include <glm/vec3.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <glm/vec3.hpp>
 
 /// @brief Describes how a registered asset should be used.
 enum class AssetRole : uint8_t
@@ -29,8 +29,8 @@ enum class AssetRole : uint8_t
 /// @brief One entry in the asset registry.
 struct AssetEntry
 {
-    std::string name;     ///< Human-readable name (e.g. "porsche", "wraith", "map1").
-    std::string filename; ///< GLB filename relative to assets/ (empty for procedural).
+    std::string name;                      ///< Human-readable name (e.g. "porsche", "wraith", "map1").
+    std::string filename;                  ///< GLB filename relative to assets/ (empty for procedural).
     AssetRole role = AssetRole::Entity;
     glm::vec3 renderScale{1.0f};           ///< Default per-entity render scale for this asset.
     glm::vec3 renderTranslation{0.0f};     ///< Default per-entity local translation for this asset.
