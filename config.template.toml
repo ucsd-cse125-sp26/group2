@@ -9,6 +9,22 @@ port = 9999
 host = "127.0.0.1"
 port = 9999
 
+[server-replication]
+# How often the server emits a full registry snapshot to each client.
+# The simulation tick rate stays at 128 Hz regardless (deterministic
+# physics requires a fixed dt); only the wire-rate of state replication
+# is affected.
+#
+# Lower values cut bandwidth and per-tick serialization cost on the
+# server proportionally:
+#   * 128 — same rate as physics (legacy behaviour, smoothest visuals)
+#   * 64  — half traffic, very smooth
+#   * 32  — quarter traffic; visually step-y for remote players until
+#           Phase 5's RemoteHistory + clientRenderTick interpolation
+#           lands. Recommended for bot/load tests; gameplay tests
+#           should bump this to 64 or 128 until then.
+snapshot-hz = 32
+
 [graphics]
 # GPU backend selection.  Falls back to other available backends if the
 # requested one is unavailable on this machine.
