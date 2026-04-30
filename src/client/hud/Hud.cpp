@@ -76,10 +76,10 @@ void Hud::processEvent(const SDL_Event* event)
 void Hud::update(float dt, const HudGameState& state)
 {
     tweens_.update(dt);
-    for (auto& w : widgets_) {
-        if (w->visible)
-            w->update(dt, state, tweens_);
-    }
+    // Update ALL widgets (not just visible ones) so data stays fresh
+    // when toggled on (e.g. Scoreboard on TAB shows current frame data).
+    for (auto& w : widgets_)
+        w->update(dt, state, tweens_);
 }
 
 void Hud::render()
