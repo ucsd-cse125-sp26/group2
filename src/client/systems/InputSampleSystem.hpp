@@ -92,8 +92,6 @@ inline void runWeaponKeys(Registry& registry)
             (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
-        snap.switchToTertiary = kKeys[SDL_SCANCODE_3];
-        snap.switchToQuaternary = kKeys[SDL_SCANCODE_4];
         snap.reload = kKeys[SDL_SCANCODE_R];
         snap.pickup = kKeys[SDL_SCANCODE_F];
     });

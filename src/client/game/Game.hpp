@@ -242,8 +242,7 @@ private:
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
 
-    // Scroll-wheel weapon switching
-    int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = prev slot, consumed each frame.
+    int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.

@@ -643,12 +643,12 @@ SDL_AppResult Game::event(SDL_Event* event)
         sfxSystem.handleEvent(*event);
     }
 
-    // Scroll wheel cycles weapon slots
+    // Scroll wheel toggles between primary and secondary weapon slots.
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
         if (event->wheel.y > 0)
-            pendingScrollSwitch_ = -1; // scroll up → previous slot
+            pendingScrollSwitch_ = -1;
         else if (event->wheel.y < 0)
-            pendingScrollSwitch_ = 1;  // scroll down → next slot
+            pendingScrollSwitch_ = 1;
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
@@ -825,21 +825,16 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry);
         systems::runWeaponKeys(registry);
 
-        // Apply scroll-wheel weapon switch (overrides key-based switch for this frame)
+        // Apply scroll-wheel weapon switch, constrained to primary/secondary.
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
-                // Determine current slot from WeaponState
-                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2, QUATERNARY=3
+                int slotIdx = 0;
                 registry.view<LocalPlayer, WeaponState>().each(
                     [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
 
-                // Cycle: add direction, wrap around 4 slots
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 4) % 4;
-
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 2) % 2;
                 snap.switchToPrimary = (slotIdx == 0);
                 snap.switchToSecondary = (slotIdx == 1);
-                snap.switchToTertiary = (slotIdx == 2);
-                snap.switchToQuaternary = (slotIdx == 3);
             });
             pendingScrollSwitch_ = 0;
         }
@@ -951,9 +946,7 @@ SDL_AppResult Game::iterate()
             // Check ammo — don't spawn VFX if the magazine is empty.
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-                const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
-                                         : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                                 : ws.primary;
+                const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
                 hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
             });
 
@@ -1010,9 +1003,7 @@ SDL_AppResult Game::iterate()
         // Charge rifle: play load sound once when charging starts.
         bool isChargingNow = false;
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
-                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                             : ws.primary;
+            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
             if (getWeaponConfig(gun.type).isCharge && gun.chargeTime > 0.0f)
                 isChargingNow = true;
         });
@@ -1229,10 +1220,7 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<RespawnTimer>(e))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
-                                     : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
-                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                             : ws.primary;
+            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
                 return;
@@ -1424,10 +1412,7 @@ SDL_AppResult Game::iterate()
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
-                                 : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
-                                 : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                         : ws.primary;
+        const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
         currentEquippedType_ = gun.type;
     });
 
@@ -1928,18 +1913,8 @@ SDL_AppResult Game::iterate()
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
             const GunInstance* gun = &ws.primary;
-            switch (ws.current) {
-            case WeaponSlot::SECONDARY:
+            if (ws.current == WeaponSlot::SECONDARY) {
                 gun = &ws.secondary;
-                break;
-            case WeaponSlot::TERTIARY:
-                gun = &ws.tertiary;
-                break;
-            case WeaponSlot::QUATERNARY:
-                gun = &ws.quaternary;
-                break;
-            default:
-                break;
             }
             hudState.ammoClip = gun->currentMagAmmo;
             hudState.ammoReserve = gun->totalAmmo;

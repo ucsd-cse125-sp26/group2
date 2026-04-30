@@ -28,6 +28,16 @@ inline bool overlapsAABB(glm::vec3 aPos, glm::vec3 aHalf, glm::vec3 bPos, glm::v
            std::abs(aPos.z - bPos.z) <= (aHalf.z + bHalf.z);
 }
 
+inline glm::vec3 viewForward(float yaw, float pitch)
+{
+    const float cp = std::cos(pitch);
+    return glm::normalize(glm::vec3{
+        std::sin(yaw) * cp,
+        -std::sin(pitch),
+        std::cos(yaw) * cp,
+    });
+}
+
 /// @brief Check if any player overlaps the spawner and transfer the weapon on pickup.
 /// @param registry      The ECS registry.
 /// @param spawnerPos    Position of the spawner entity.
@@ -42,9 +52,36 @@ inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionSh
                   const InputSnapshot& input,
                   WeaponState& weapon) {
         if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) &&
-            spawner.hasWeapon && input.pickup)
-        {
-            // player is inside / overlapping the spawner
+            spawner.hasWeapon) {
+            const WeaponConfig config = getWeaponConfig(spawner.type);
+            if (weapon.primary.type == spawner.type) {
+                weapon.primary.totalAmmo = config.defaultAmmoCapacity;
+                weapon.primary.currentMagAmmo = config.magazineSize;
+                spawner.hasWeapon = false;
+                spawner.spawnCooldown = weaponCooldownTime;
+            } else if (weapon.secondary.type == spawner.type) {
+                weapon.secondary.totalAmmo = config.defaultAmmoCapacity;
+                weapon.secondary.currentMagAmmo = config.magazineSize;
+                spawner.hasWeapon = false;
+                spawner.spawnCooldown = weaponCooldownTime;
+            }
+        }
+
+        static constexpr float k_pickupRange = 140.0f;
+        static constexpr float k_pickupMaxAngleDeg = 12.0f;
+        static const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
+
+        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.77f, 0.0f};
+        const glm::vec3 toWeapon = spawnerPos.value - eye;
+        const float distSq = glm::dot(toWeapon, toWeapon);
+
+        const bool inRange = distSq <= k_pickupRange * k_pickupRange;
+        const bool lookingAtWeapon =
+            distSq > 0.0001f &&
+            glm::dot(viewForward(input.yaw, input.pitch), glm::normalize(toWeapon)) >= k_pickupMinDot;
+
+        if (spawner.hasWeapon && input.pickup && inRange && lookingAtWeapon) {
+            // pickup
             spawner.hasWeapon = false;
             spawner.spawnCooldown = weaponCooldownTime;
             const WeaponConfig& config = getWeaponConfig(spawner.type);

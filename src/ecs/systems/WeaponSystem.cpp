@@ -36,16 +36,10 @@ namespace systems
 /// @return Reference to the equipped gun.
 inline GunInstance& getEquippedGun(WeaponState& weapon)
 {
-    switch (weapon.current) {
-    case WeaponSlot::SECONDARY:
-        return weapon.secondary;
-    case WeaponSlot::TERTIARY:
-        return weapon.tertiary;
-    case WeaponSlot::QUATERNARY:
-        return weapon.quaternary;
-    default:
+    if (weapon.current == WeaponSlot::PRIMARY) {
         return weapon.primary;
     }
+    return weapon.secondary;
 }
 
 /// @brief Apply weapon slot switch from player input.
@@ -57,10 +51,6 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary) {
         weapon.current = WeaponSlot::SECONDARY;
-    } else if (input.switchToTertiary) {
-        weapon.current = WeaponSlot::TERTIARY;
-    } else if (input.switchToQuaternary) {
-        weapon.current = WeaponSlot::QUATERNARY;
     }
 }
 
@@ -73,8 +63,6 @@ inline void handleCooldown(WeaponState& weapon, float dt)
 
     reduce(weapon.primary);
     reduce(weapon.secondary);
-    reduce(weapon.tertiary);
-    reduce(weapon.quaternary);
 }
 
 /// @brief Reload the gun's magazine from reserve ammo.
@@ -439,7 +427,6 @@ void runWeapon(Registry& registry,
             };
             refill(weapon.primary);
             refill(weapon.secondary);
-            refill(weapon.tertiary);
             input.refillAmmo = false; // consume the flag
         }
     });

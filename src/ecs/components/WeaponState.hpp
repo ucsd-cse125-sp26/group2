@@ -18,8 +18,6 @@ enum class WeaponSlot : uint8_t
 {
     PRIMARY,
     SECONDARY,
-    TERTIARY,
-    QUATERNARY,
 };
 
 /// @brief Struct that defines this weapon's type, cooldown, and ammo.
@@ -37,7 +35,5 @@ struct WeaponState
 {
     GunInstance primary;
     GunInstance secondary;
-    GunInstance tertiary;
-    GunInstance quaternary;
     WeaponSlot current = WeaponSlot::PRIMARY; ///< Currently equipped weapon slot.
 };
