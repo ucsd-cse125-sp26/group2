@@ -25,7 +25,7 @@ void DamageIndicator::draw(HudContext& ctx, float cx, float cy)
 {
     for (const auto& a : arcs_) {
         const float alpha = std::clamp(a.timer / fadeTime, 0.f, 1.f);
-        const float rad = a.angleDeg * (3.14159265f / 180.f);
+        const float rad = glm::radians(a.angleDeg);
         // Direction toward damage source.
         const float dx = std::sin(rad);
         const float dy = -std::cos(rad);
