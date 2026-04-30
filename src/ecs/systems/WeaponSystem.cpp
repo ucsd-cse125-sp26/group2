@@ -210,13 +210,15 @@ inline void handleFire(Registry& registry,
         }
 
         // Charge damage with body-region multiplier.
+        float chargeDealtDamage = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            applyDamage(config.chargeDamage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            chargeDealtDamage = config.chargeDamage * multiplier;
+            applyDamage(chargeDealtDamage, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
-                        static_cast<double>(config.chargeDamage * multiplier));
+                        static_cast<double>(chargeDealtDamage));
             }
         }
 
@@ -244,6 +246,9 @@ inline void handleFire(Registry& registry,
             impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
             impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
             impactEvt.shieldBreak = chargeShieldBroke ? uint8_t{1} : uint8_t{0};
+            impactEvt.hadArmor = (chargeArmorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
+            impactEvt.damage = chargeDealtDamage;
+            impactEvt.target = hit.entity;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);
@@ -283,15 +288,16 @@ inline void handleFire(Registry& registry,
         }
 
         // Apply damage with body-region multiplier.
+        float dealtDamage = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            const float finalDamage = config.damage * multiplier;
-            applyDamage(finalDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            dealtDamage = config.damage * multiplier;
+            applyDamage(dealtDamage, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head) {
                 SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
                         static_cast<int>(shooter),
                         static_cast<int>(hit.entity),
-                        static_cast<double>(finalDamage),
+                        static_cast<double>(dealtDamage),
                         static_cast<double>(config.damage),
                         static_cast<double>(multiplier));
             }
@@ -331,6 +337,9 @@ inline void handleFire(Registry& registry,
             impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
             impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
             impactEvt.shieldBreak = shieldBroke ? uint8_t{1} : uint8_t{0};
+            impactEvt.hadArmor = (armorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
+            impactEvt.damage = dealtDamage;
+            impactEvt.target = hit.entity;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);

@@ -190,6 +190,21 @@ private:
     bool hitmarkerIsHeadshot_ = false;  ///< True when the current hitmarker was a headshot.
     bool hitmarkerShieldBreak_ = false; ///< True when the current hit depleted target armor.
 
+    // Floating damage numbers — queued from onParticleEvent, consumed by HUD each frame.
+    struct PendingDamageNumber
+    {
+        glm::vec3 pos;
+        float damage;
+        bool headshot;
+        bool shielded;
+    };
+    std::vector<PendingDamageNumber> pendingDamageNumbers_;
+
+    // Damage accumulator — tracks continuous damage to a single target.
+    entt::entity accumTarget_ = entt::null; ///< Current target being damaged.
+    int accumTotal_ = 0;                    ///< Running damage total.
+    float accumResetTimer_ = 0.f;           ///< Timer to reset accumulator after inactivity.
+
     // Vignette state: track previous frame health/armor for delta detection.
     float prevHealth_ = 100.f;
     float prevArmor_ = 100.f;

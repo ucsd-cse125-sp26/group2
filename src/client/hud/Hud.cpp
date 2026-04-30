@@ -7,7 +7,9 @@
 #include "widgets/AmmoCounter.hpp"
 #include "widgets/BuyMenu.hpp"
 #include "widgets/CrosshairWidget.hpp"
+#include "widgets/DamageAccumWidget.hpp"
 #include "widgets/DamageIndicator.hpp"
+#include "widgets/DamageNumberWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
 #include "widgets/KillFeed.hpp"
@@ -169,6 +171,8 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<HealthArmorBar>());
     widgets_.push_back(std::make_unique<AmmoCounter>());
     widgets_.push_back(std::make_unique<HitMarkerWidget>());
+    widgets_.push_back(std::make_unique<DamageNumberWidget>());
+    widgets_.push_back(std::make_unique<DamageAccumWidget>());
     widgets_.push_back(std::make_unique<KillFeed>());
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<RoundTimer>());

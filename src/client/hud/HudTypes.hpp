@@ -106,6 +106,23 @@ struct HudHitConfirm
     bool shieldBreak = false; ///< True when this shot depleted the target's armor.
 };
 
+/// @brief Floating damage number spawned at a world-space hit position.
+///
+/// Projected to screen space each frame by the damage number widget.
+struct HudDamageNumber
+{
+    float worldX = 0.f, worldY = 0.f, worldZ = 0.f; ///< World-space hit position.
+    int damage = 0;                                 ///< Damage dealt.
+    bool headshot = false;
+    bool shielded = false;                          ///< True if target had armor when hit.
+};
+
+/// @brief Current damage accumulator state for the local player.
+struct HudDamageAccum
+{
+    int total = 0; ///< Accumulated damage to current target.
+};
+
 /// @brief Per-teammate status (for scoreboard / team bar).
 struct HudTeamMemberStatus
 {
@@ -140,6 +157,11 @@ struct HudGameState
     std::span<const HudKillFeedEntry> killFeedEvents;
     std::span<const HudDamageEvent> damageEvents;
     std::span<const HudHitConfirm> hitConfirms;
+    std::span<const HudDamageNumber> damageNumbers; ///< Floating damage numbers to spawn this frame.
+    HudDamageAccum damageAccum;                     ///< Running damage total to current target.
+
+    // View/projection for world→screen projection (damage numbers).
+    glm::mat4 viewProj{1.f};
 
     // Team status.
     std::span<const HudTeamMemberStatus> allies;

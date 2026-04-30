@@ -28,10 +28,14 @@ struct NetParticleEvent
     ParticleEffectType effectType = ParticleEffectType::BulletTracer;
     WeaponType weaponType = WeaponType::Rifle;
     SurfaceType surfaceType = SurfaceType::Concrete;
-    uint8_t headshot = 0;    ///< 1 if the impact hit the head region (for client hitmarker colour).
-    uint8_t shieldBreak = 0; ///< 1 if this shot depleted the target's armor to zero.
-    glm::vec3 pos1{};        ///< Origin / position.
-    glm::vec3 pos2{};        ///< Direction / hitPos / normal.
-    float param = 0;         ///< Distance / radius.
+    uint8_t headshot = 0;             ///< 1 if the impact hit the head region (for client hitmarker colour).
+    uint8_t shieldBreak = 0;          ///< 1 if this shot depleted the target's armor to zero.
+    uint8_t hadArmor = 0;             ///< 1 if target had armor at the moment of impact.
+    uint8_t _pad = 0;                 ///< Padding for alignment.
+    glm::vec3 pos1{};                 ///< Origin / position.
+    glm::vec3 pos2{};                 ///< Direction / hitPos / normal.
+    float param = 0;                  ///< Distance / radius.
+    float damage = 0;                 ///< Damage dealt by this impact (for floating damage numbers).
+    entt::entity target = entt::null; ///< Entity that was hit (for damage accumulation).
 };
 static_assert(std::is_trivially_copyable_v<NetParticleEvent>);
