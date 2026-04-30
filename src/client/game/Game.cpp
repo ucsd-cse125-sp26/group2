@@ -16,6 +16,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
@@ -39,6 +40,8 @@
 #include "renderer/GraphicsConfig.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
+#include "systems/PredictionSystem.hpp"
+#include "systems/ReconciliationSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -291,6 +294,17 @@ bool Game::init()
         // local player. Use emplace_or_replace here so this callback stays
         // idempotent regardless of whether the seed pass got there first.
         registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        // Phase 5b: emplace PlayerSimState on the local player so runMovement
+        // (which iterates `<..., PlayerSimState, ...>`) will process it
+        // during client-side prediction. PlayerSimState is a server-only
+        // component — remote players don't have it on the client, so the
+        // view filter naturally narrows to just the local player.
+        // Server's snapshots don't replicate PlayerSimState so this stays
+        // entirely client-side; that means subtle timer fields can drift
+        // between client/server — fixed by Phase 4b's owner-only stream
+        // when it lands.
+        registry.emplace_or_replace<PlayerSimState>(local);
 
         // Only add Controllable if the player is not already dead (edge case:
         // joining while mid-death on a long-running server).
@@ -850,7 +864,7 @@ SDL_AppResult Game::iterate()
 
         // Stamp the current InputSnapshot with the next predict tick BEFORE
         // sending. The server uses this tick for dedup against
-        // lastAppliedInputTick, and Phase-5 prediction will key the input
+        // lastAppliedInputTick, and Phase-5b prediction keys the input
         // ring buffer by it. We bump once per tick *group* (not per inner
         // tick) — multiple physics ticks in one frame share the same input,
         // because we only sample input once per group.
@@ -858,26 +872,39 @@ SDL_AppResult Game::iterate()
         registry.view<InputSnapshot, LocalPlayer>().each(
             [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
 
-        // Send the redundant input batch (last k_inputRedundancy ticks). With
-        // TCP loss is a non-issue, but redundancy is still worth keeping for
-        // the Phase-3 UDP swap — same wire format works for both transports.
+        // Send the redundant input batch (last k_inputRedundancy ticks).
         systems::runInputSend(registry, client);
+
+        // Phase 5b: push the just-stamped input into the ring buffer so
+        // reconciliation can replay it after a snapshot arrives.
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
 
         physicsRan = true;
 
-        // Phase 5a: PreviousPosition is now updated *only* when a snapshot
-        // arrives (in Client::dispatchMessage), not every physics tick. The
-        // renderer interpolates over the snapshot interval via
-        // client.getSnapshotAlpha() rather than the much-shorter physics
-        // tick. Without that change, at 32 Hz snapshots the renderer
-        // produced visible step jitter every ~31 ms.
+        // Phase 5a: PreviousPosition is updated by Client::dispatchMessage
+        // when a snapshot arrives, not every physics tick. The renderer
+        // interpolates over the snapshot interval via
+        // client.getSnapshotAlpha() so motion stays smooth at the much-
+        // coarser snapshot rate (e.g. 32 Hz vs 128 Hz physics).
         //
-        // The local player has no client-side physics yet; that lands in
-        // Phase 5b (prediction). Until then, the local player feels the
-        // same ~31 ms display lag as remote players — but smoothly, not
-        // step-y.
+        // Phase 5b: per physics tick we ALSO snapshot the local player's
+        // pos→prev BEFORE running prediction so the renderer can show a
+        // tick-rate-smooth interpolation of the local player even when
+        // server snapshots arrive far less frequently. The local player
+        // uses physics-tick alpha (in render code below); remote players
+        // use the snapshot alpha.
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
+
+            // Phase 5b: capture local pos→prev for tick-rate interp,
+            // then run client-side prediction. PlayerSimState filter on
+            // runMovement narrows automatically to just the local player
+            // (remotes don't have PlayerSimState on the client).
+            registry.view<LocalPlayer, Position, PreviousPosition>().each(
+                [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+            systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
+
             ++tickCount;
             ++ticksThisFrame;
             ++statsPhysTicks;
@@ -886,6 +913,20 @@ SDL_AppResult Game::iterate()
         if (!client.poll(registry)) {
             // TODO: Update so reset to menu or some other non-crash state
             return SDL_APP_SUCCESS;
+        }
+
+        // Phase 5b: a snapshot just applied (overwriting the local
+        // player's Position with the server's authoritative value at the
+        // server-acked client tick). Replay the inputs we sent since
+        // then to restore the predicted state at the *current* predict
+        // tick — net effect is "server-side correction folded in,
+        // client-side immediate response preserved".
+        if (client.consumeSnapshotApplied()) {
+            const uint32_t ackedTick = client.getServerAckedClientTick();
+            if (ackedTick != 0 && clientPredictTick > ackedTick) {
+                systems::runReconciliation(
+                    registry, inputRing_, ackedTick, clientPredictTick, k_physicsDt, physics::activeWorld());
+            }
         }
 
         refreshRemotePlayerRenderables();
@@ -904,12 +945,12 @@ SDL_AppResult Game::iterate()
     float targetRoll = 0.0f; // degrees, from PlayerVisState
 
     if (renderSeparateFromPhysics) {
-        // Phase 5a: interpolation alpha is now driven by snapshot timing,
-        // not by the physics-tick accumulator. See Client::getSnapshotAlpha
-        // for the formula. This is what makes 32 Hz snapshots look smooth
-        // — at 32 Hz a snapshot interval is ~31 ms, so the renderer paces
-        // the lerp over that span instead of the 7.8 ms physics tick.
-        const float alpha = client.getSnapshotAlpha();
+        // Phase 5b: local player uses physics-tick alpha — its Position
+        // updates every 7.8 ms (128 Hz) via client-side prediction, so
+        // the lerp window matches that interval. Phase 5a's snapshot
+        // alpha is used for *remote* entities (in the render-list loop
+        // below) where Position only updates on snapshot arrival.
+        const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
         registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,

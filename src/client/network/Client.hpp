@@ -89,6 +89,28 @@ public:
     /// @brief Access current network statistics.
     const NetworkStats& getNetStats() const { return stats; }
 
+    /// @brief Latest server-acked client predict tick.
+    ///
+    /// Phase 5b: when the server applies an INPUT packet stamped with
+    /// client-tick T, then later sends a snapshot, the snapshot's local-
+    /// player position represents state-after-applying-input-T. The
+    /// client uses this value to know where to start replaying stored
+    /// inputs from for reconciliation. 0 if no snapshot has been applied
+    /// yet, or if the local player wasn't in the most recent snapshot.
+    [[nodiscard]] uint32_t getServerAckedClientTick() const noexcept { return serverAckedClientTick_; }
+
+    /// @brief Whether a snapshot was applied since the last call to consumeSnapshotApplied().
+    ///
+    /// Phase 5b: the game thread reads this each iterate() to know when
+    /// to trigger reconciliation. Self-resets so a single snapshot only
+    /// triggers a single reconciliation pass.
+    [[nodiscard]] bool consumeSnapshotApplied() noexcept
+    {
+        const bool was = snapshotAppliedFlag_;
+        snapshotAppliedFlag_ = false;
+        return was;
+    }
+
     /// @brief Render-time interpolation alpha based on snapshot timing.
     ///
     /// Phase 5a: with the snapshot rate decoupled from the physics tick rate
@@ -166,6 +188,14 @@ private:
     // 1.0 in that case so first frame draws the snapped position.
     Uint64 lastSnapshotApplyNs_ = 0;
     Uint64 prevSnapshotApplyNs_ = 0;
+
+    // ── Phase 5b: prediction reconciliation hand-off ──────────────────────
+    //
+    // Updated by dispatchMessage on every UPDATE_REGISTRY apply. The game
+    // thread reads getServerAckedClientTick() + consumeSnapshotApplied() to
+    // know when and from which tick to replay client-stored inputs.
+    uint32_t serverAckedClientTick_ = 0;
+    bool snapshotAppliedFlag_ = false;
 
     /// @brief Network-thread main loop body.
     void networkLoop();

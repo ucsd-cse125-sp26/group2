@@ -248,7 +248,7 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         localPlayerEntity = assignedEntity;
         break;
     }
-    case PacketType::UPDATE_REGISTRY:
+    case PacketType::UPDATE_REGISTRY: {
         // Phase 5a: copy current Position into PreviousPosition BEFORE the
         // continuous_loader rewrites Position from the snapshot. This gives
         // the renderer a (prev, pos) pair that brackets the most-recent
@@ -260,7 +260,17 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
 
         if (!registryLoader)
             registryLoader.emplace(registry);
-        registryLoader->apply(payload, payloadSize, localPlayerEntity);
+
+        // Phase 5b: pass an out-pointer so apply() reports the server's
+        // most-recently-applied client-tick (extracted from the local
+        // player's RemoteInputRecord). The game thread reads this via
+        // getServerAckedClientTick() to know where to start replaying
+        // stored inputs from for reconciliation.
+        uint32_t ackedTick = 0;
+        registryLoader->apply(payload, payloadSize, localPlayerEntity, &ackedTick);
+        if (ackedTick != 0)
+            serverAckedClientTick_ = ackedTick;
+        snapshotAppliedFlag_ = true;
 
         // Newly-spawned entities (created by the snapshot apply above) have
         // a default-constructed PreviousPosition (or none at all). Without
@@ -289,6 +299,7 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
             }
         }
         break;
+    }
     case PacketType::PARTICLE_SPAWN: {
         if (payloadSize < sizeof(uint32_t))
             break;
