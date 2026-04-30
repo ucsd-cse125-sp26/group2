@@ -39,8 +39,8 @@ jobs:
           - name: Windows
             os: windows-latest
             preset: debug
-            cc: cl
-            cxx: cl
+            cc: clang-cl
+            cxx: clang-cl
 
     steps:
       - uses: actions/checkout@v4
@@ -91,18 +91,19 @@ jobs:
           vulkan_version: latest
           cache: true
 
-      # sccache is incompatible with MSVC's PDB model (assimp sets /Zi + /Fd
-      # which conflicts with sccache's output caching).  Linux/macOS only.
+      # Pin to v0.14.0 — v0.15.0 has cache-write errors on GHA.
+      # Windows uses clang-cl (not MSVC cl) so sccache works on all platforms.
       - name: Setup sccache
-        if: runner.os != 'Windows'
         uses: mozilla/sccache-action@v0.0.9
+        with:
+          version: "v0.14.0"
 
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/${{ matrix.preset }}/_deps
-          key: deps-v2-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-v2-${{ runner.os }}-${{ matrix.preset }}-
+          path: .deps/${{ matrix.preset }}
+          key: deps-v3-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v3-${{ runner.os }}-${{ matrix.preset }}-
 
       # Remove stale *-build and *-subbuild dirs after cache restore.
       # Those dirs contain CMakeCache.txt files that record the generator
@@ -113,7 +114,7 @@ jobs:
       - name: Purge stale dep build dirs
         shell: bash
         run: |
-          find build/${{ matrix.preset }}/_deps -maxdepth 1 -type d \
+          find .deps/${{ matrix.preset }} -maxdepth 1 -type d \
             \( -name '*-build' -o -name '*-subbuild' \) \
             -exec rm -rf {} + 2>/dev/null || true
 
@@ -123,18 +124,15 @@ jobs:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
         run: |
-          SCCACHE_FLAGS=""
-          if [[ "$RUNNER_OS" != "Windows" ]]; then
-            SCCACHE_FLAGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
-          fi
           cmake --preset ${{ matrix.preset }} \
-            $SCCACHE_FLAGS \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             ${{ matrix.extra_cmake || '' }}
 
       - name: Build
         shell: bash
-        run: cmake --build --preset ${{ matrix.preset }} --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --target client server --parallel
 
   # ------------------------------------------------------------------ #
   #  Format check — pinned to clang-format-18 (ships on ubuntu-24.04)  #
@@ -193,8 +191,8 @@ jobs:
           - name: Windows
             os: windows-latest
             preset: release
-            cc: cl
-            cxx: cl
+            cc: clang-cl
+            cxx: clang-cl
             build_dir: build/release
             client_bin: client.exe
             server_bin: server.exe
@@ -254,18 +252,19 @@ jobs:
         with:
           python-version: '3.x'
 
-      # sccache is incompatible with MSVC's PDB model (assimp sets /Zi + /Fd
-      # which conflicts with sccache's output caching).  Linux/macOS only.
+      # Pin to v0.14.0 — v0.15.0 has cache-write errors on GHA.
+      # Windows uses clang-cl (not MSVC cl) so sccache works on all platforms.
       - name: Setup sccache
-        if: runner.os != 'Windows'
         uses: mozilla/sccache-action@v0.0.9
+        with:
+          version: "v0.14.0"
 
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/${{ matrix.preset }}/_deps
-          key: deps-v2-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-v2-${{ runner.os }}-${{ matrix.preset }}-
+          path: .deps/${{ matrix.preset }}
+          key: deps-v3-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v3-${{ runner.os }}-${{ matrix.preset }}-
 
       # Remove stale *-build and *-subbuild dirs after cache restore.
       # Those dirs contain CMakeCache.txt files that record the generator
@@ -276,7 +275,7 @@ jobs:
       - name: Purge stale dep build dirs
         shell: bash
         run: |
-          find build/${{ matrix.preset }}/_deps -maxdepth 1 -type d \
+          find .deps/${{ matrix.preset }} -maxdepth 1 -type d \
             \( -name '*-build' -o -name '*-subbuild' \) \
             -exec rm -rf {} + 2>/dev/null || true
 
@@ -286,22 +285,26 @@ jobs:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
         run: |
-          SCCACHE_FLAGS=""
-          if [[ "$RUNNER_OS" != "Windows" ]]; then
-            SCCACHE_FLAGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
-          fi
           cmake --preset ${{ matrix.preset }} \
-            $SCCACHE_FLAGS \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             ${{ matrix.extra_cmake || '' }}
 
-      # Only build the client and server targets (skip group2 / HybridRenderer).
       - name: Build
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --target client server --parallel
 
-      # Download the shared assets zip from Google Drive using gdown.
+      # Download the shared assets zip from Google Drive (cached across runs).
+      - name: Cache assets
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: assets.zip
+          key: assets-${{ env.ASSETS_GDRIVE_ID }}
+
       - name: Download assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           pip install --quiet gdown
