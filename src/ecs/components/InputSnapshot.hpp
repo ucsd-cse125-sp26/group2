@@ -28,6 +28,7 @@ struct InputSnapshot
     bool grapple{false};            ///< Middle mouse button / E key.
     bool shooting{false};           ///< Primary fire button.
     bool reload{false};             ///< Reload button.
+    bool pickup{false};             ///< Pick Up button (f).
     bool switchToPrimary{false};    ///< Switch to gun in primary slot.
     bool switchToSecondary{false};  ///< Switch to gun in secondary slot.
     bool switchToTertiary{false};   ///< Switch to gun in tertiary slot.

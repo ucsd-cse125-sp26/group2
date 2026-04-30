@@ -16,6 +16,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
@@ -28,6 +29,8 @@
 #include <cfloat>
 #include <cmath>
 #include <filesystem>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
 #include <imgui.h>
@@ -106,47 +109,58 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
-void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
+void DebugUI::toggleDebugMenu()
 {
-    // All window-visibility flags owned by DebugUI in one place — keep this
-    // list in sync with the private members in DebugUI.hpp when adding new
-    // top-level panels. Panels owned by other systems (e.g. Game's Animation
-    // Tester) are passed in via externalPanels.
-    bool* const ownedPanels[] = {
-        &showInspector,
-        &showMovementChart,
-        &showBhopAnalyzer,
-        &showParticleWindow_,
-        &showRenderToggles,
-        &showLightingControls,
-        &showSkybox,
-        &showNetworkStats,
-    };
+    showDebugMenu = !showDebugMenu;
+}
 
-    // If anything is currently visible (owned or external), hide everything;
-    // otherwise show everything.
-    bool anyVisible = false;
-    for (bool* p : ownedPanels) {
-        if (*p) {
-            anyVisible = true;
-            break;
+void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels)
+{
+    if (!showDebugMenu)
+        return;
+
+    ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({260.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags =
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::Begin("Debug Menu (F2)", &showDebugMenu, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextDisabled("F2: toggle this menu  |  F3: toggle cursor");
+    ImGui::Separator();
+
+    // DebugUI-owned panels
+    ImGui::SeparatorText("Inspector");
+    ImGui::Checkbox("ECS Inspector", &showInspector);
+    ImGui::Checkbox("Movement Chart", &showMovementChart);
+    ImGui::Checkbox("Bhop Analyzer", &showBhopAnalyzer);
+
+    ImGui::SeparatorText("Rendering");
+    ImGui::Checkbox("Render Toggles", &showRenderToggles);
+    ImGui::Checkbox("Lighting Controls", &showLightingControls);
+    ImGui::Checkbox("Skybox Selector", &showSkybox);
+
+    ImGui::SeparatorText("Gameplay");
+    ImGui::Checkbox("Network Stats", &showNetworkStats);
+    ImGui::Checkbox("Weapon HUD", &showWeaponHud);
+    ImGui::Checkbox("Particle System", &showParticleWindow_);
+
+    ImGui::SeparatorText("Physics");
+    ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
+    ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+
+    // External panels (owned by Game)
+    if (externalPanels.size() > 0) {
+        ImGui::SeparatorText("Game");
+        for (const auto& panel : externalPanels) {
+            if (panel.visible)
+                ImGui::Checkbox(panel.name, panel.visible);
         }
     }
-    if (!anyVisible) {
-        for (bool* p : externalPanels) {
-            if (p && *p) {
-                anyVisible = true;
-                break;
-            }
-        }
-    }
-    const bool newState = !anyVisible;
-    for (bool* p : ownedPanels)
-        *p = newState;
-    for (bool* p : externalPanels) {
-        if (p)
-            *p = newState;
-    }
+
+    ImGui::End();
 }
 
 void DebugUI::buildUI(const Registry& registry,
@@ -196,7 +210,8 @@ void DebugUI::buildUI(const Registry& registry,
     if (showBhopAnalyzer)
         buildBhopAnalyzer(registry);
 
-    buildWeaponUI(registry);
+    if (showWeaponHud)
+        buildWeaponUI(registry);
 }
 
 // Contents of the ECS Inspector window, factored out so the Begin/End wrapping
@@ -216,7 +231,7 @@ void DebugUI::buildInspectorContents(const Registry& registry,
                                      const float fps5pLow)
 {
     // Key bindings reminder
-    ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F2: toggle all panels");
+    ImGui::TextDisabled("F2: debug menu  |  F3: toggle cursor  |  ESC: toggle cursor");
     ImGui::Separator();
 
     // Settings
@@ -895,8 +910,7 @@ void DebugUI::buildRenderTogglesUI(Renderer& renderer)
     ImGui::Separator();
 
     // Count enabled systems for the "all on / all off" buttons.
-    bool* allFlags[] = {&t.sceneGeometry,
-                        &t.pbrModels,
+    bool* allFlags[] = {&t.pbrModels,
                         &t.entityModels,
                         &t.weaponViewmodel,
                         &t.skybox,
@@ -908,7 +922,7 @@ void DebugUI::buildRenderTogglesUI(Renderer& renderer)
                         &t.tonemap,
                         &t.particles,
                         &t.sdfText};
-    constexpr int k_flagCount = 13;
+    constexpr int k_flagCount = 12;
 
     if (ImGui::Button("All ON")) {
         for (int i = 0; i < k_flagCount; ++i)
@@ -933,8 +947,7 @@ void DebugUI::buildRenderTogglesUI(Renderer& renderer)
 
     // Geometry
     ImGui::SeparatorText("Geometry");
-    ImGui::Checkbox("Scene Geometry (cube+floor)", &t.sceneGeometry);
-    ImGui::Checkbox("PBR Models (Wraith, Porsche, etc.)", &t.pbrModels);
+    ImGui::Checkbox("PBR Models (map + scene models)", &t.pbrModels);
     ImGui::Checkbox("Entity Models (ECS Renderable)", &t.entityModels);
     ImGui::Checkbox("Weapon Viewmodel (R-301)", &t.weaponViewmodel);
     ImGui::Checkbox("Skybox", &t.skybox);
@@ -1187,6 +1200,570 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     }
 
     ImGui::End();
+}
+
+// Hitbox capsule debug visualization
+
+namespace
+{
+
+/// @brief Project a world-space point to screen-space using the view-projection matrix.
+/// Returns false if the point is behind the camera.
+bool worldToScreen(glm::vec3 world, const glm::mat4& vp, float w, float h, ImVec2& out)
+{
+    const glm::vec4 clip = vp * glm::vec4(world, 1.0f);
+    if (clip.w <= 0.0001f)
+        return false; // behind camera
+    const float invW = 1.0f / clip.w;
+    out.x = (0.5f + 0.5f * clip.x * invW) * w;
+    out.y = (0.5f - 0.5f * clip.y * invW) * h;
+    return true;
+}
+
+/// @brief Draw a screen-space line between two world points if both are visible.
+void drawWorldLine(ImDrawList* dl,
+                   glm::vec3 a,
+                   glm::vec3 b,
+                   const glm::mat4& vp,
+                   float sw,
+                   float sh,
+                   ImU32 color,
+                   float thickness = 1.0f)
+{
+    ImVec2 sa, sb;
+    if (worldToScreen(a, vp, sw, sh, sa) && worldToScreen(b, vp, sw, sh, sb))
+        dl->AddLine(sa, sb, color, thickness);
+}
+
+/// @brief Draw a capsule wireframe (two hemispheres connected by 4 lines).
+///
+/// Renders equator rings at pA and pB, four longitudinal struts, and
+/// hemisphere arcs on each end so the shape reads as a pill, not a cylinder.
+void drawCapsuleWireframe(
+    ImDrawList* dl, glm::vec3 pA, glm::vec3 pB, float radius, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    // Capsule axis
+    glm::vec3 axis = pB - pA;
+    const float axisLen = glm::length(axis);
+    if (axisLen < 0.001f) {
+        // Degenerate — draw a circle.
+        ImVec2 center;
+        if (!worldToScreen(pA, vp, sw, sh, center))
+            return;
+        dl->AddCircle(center, 5.0f, color, 12, 1.5f);
+        return;
+    }
+    axis /= axisLen;
+
+    // Build perpendicular vectors.
+    glm::vec3 up = (std::abs(axis.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+    glm::vec3 right = glm::normalize(glm::cross(axis, up));
+    up = glm::normalize(glm::cross(right, axis));
+
+    constexpr int ringSegments = 12;
+    constexpr int arcSegments = 8;
+    constexpr float pi2 = 6.2831853f;
+    constexpr float halfPi = 1.5707963f;
+
+    // Draw equator rings at both endpoints.
+    for (int endIdx = 0; endIdx < 2; ++endIdx) {
+        const glm::vec3 center = (endIdx == 0) ? pA : pB;
+        glm::vec3 prev = center + right * radius;
+        for (int i = 1; i <= ringSegments; ++i) {
+            const float angle = pi2 * static_cast<float>(i) / static_cast<float>(ringSegments);
+            const glm::vec3 cur = center + (right * std::cos(angle) + up * std::sin(angle)) * radius;
+            drawWorldLine(dl, prev, cur, vp, sw, sh, color, 1.0f);
+            prev = cur;
+        }
+    }
+
+    // Four connecting lines along the capsule body.
+    for (int i = 0; i < 4; ++i) {
+        const float angle = pi2 * static_cast<float>(i) / 4.0f;
+        const glm::vec3 offset = (right * std::cos(angle) + up * std::sin(angle)) * radius;
+        drawWorldLine(dl, pA + offset, pB + offset, vp, sw, sh, color, 1.0f);
+    }
+
+    // Hemisphere arcs on each end (4 meridian arcs per hemisphere).
+    // pA hemisphere bulges in -axis direction, pB in +axis direction.
+    for (int meridian = 0; meridian < 4; ++meridian) {
+        const float theta = pi2 * static_cast<float>(meridian) / 4.0f;
+        const glm::vec3 perpDir = right * std::cos(theta) + up * std::sin(theta);
+
+        // pA hemisphere (pole at pA - axis * radius).
+        {
+            glm::vec3 prev = pA + perpDir * radius; // equator point
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pA + perpDir * (radius * std::cos(phi)) - axis * (radius * std::sin(phi));
+                drawWorldLine(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
+
+        // pB hemisphere (pole at pB + axis * radius).
+        {
+            glm::vec3 prev = pB + perpDir * radius; // equator point
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pB + perpDir * (radius * std::cos(phi)) + axis * (radius * std::sin(phi));
+                drawWorldLine(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
+    }
+}
+
+/// @brief Get a color for a body region (consistent per-region coloring).
+ImU32 regionColor(BodyRegion region)
+{
+    switch (region) {
+    case BodyRegion::Head:
+        return IM_COL32(255, 50, 50, 220);  // Red
+    case BodyRegion::Neck:
+        return IM_COL32(255, 150, 50, 220); // Orange
+    case BodyRegion::UpperTorso:
+        return IM_COL32(50, 255, 50, 220);  // Green
+    case BodyRegion::LowerTorso:
+        return IM_COL32(50, 200, 50, 220);  // Dark green
+    case BodyRegion::LeftUpperArm:
+    case BodyRegion::LeftLowerArm:
+        return IM_COL32(50, 150, 255, 220); // Blue
+    case BodyRegion::RightUpperArm:
+    case BodyRegion::RightLowerArm:
+        return IM_COL32(150, 50, 255, 220); // Purple
+    case BodyRegion::LeftUpperLeg:
+    case BodyRegion::LeftLowerLeg:
+        return IM_COL32(255, 255, 50, 220); // Yellow
+    case BodyRegion::RightUpperLeg:
+    case BodyRegion::RightLowerLeg:
+        return IM_COL32(255, 200, 50, 220); // Gold
+    default:
+        return IM_COL32(255, 255, 255, 180);
+    }
+}
+
+} // namespace
+
+void DebugUI::buildHitboxUI(
+    const Registry& registry, HitboxRig& hitboxRig, const glm::mat4& viewProj, float screenWidth, float screenHeight)
+{
+    // ── ImGui window (only when showHitboxWindow is true) ──
+    if (showHitboxWindow) {
+        if (ImGui::Begin("Hitbox Debug", &showHitboxWindow)) {
+            ImGui::Checkbox("Draw Hitboxes", &drawHitboxOverlay);
+            ImGui::Separator();
+
+            // Count entities with hitboxes.
+            int entityCount = 0;
+            int capsuleCount = 0;
+            registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
+                ++entityCount;
+                capsuleCount += static_cast<int>(hb.capsules.size());
+            });
+            ImGui::Text("Entities: %d  |  Capsules: %d", entityCount, capsuleCount);
+            ImGui::Separator();
+
+            // ── Per-capsule editors ──
+            if (ImGui::TreeNode("Capsule Definitions")) {
+                for (size_t i = 0; i < hitboxRig.definitions.size(); ++i) {
+                    auto& def = hitboxRig.definitions[i];
+                    ImGui::PushID(static_cast<int>(i));
+
+                    const ImU32 col = regionColor(def.region);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col);
+                    const bool open =
+                        ImGui::TreeNode("##cap", "[%zu] %s (%s)", i, def.boneName.c_str(), bodyRegionName(def.region));
+                    ImGui::PopStyleColor();
+
+                    if (open) {
+                        ImGui::DragFloat3("Offset", &def.localOffset.x, 0.5f, -100.0f, 100.0f, "%.1f");
+                        ImGui::DragFloat("Radius", &def.radius, 0.1f, 0.5f, 30.0f, "%.1f");
+                        ImGui::DragFloat("Half Height", &def.halfHeight, 0.1f, 0.5f, 40.0f, "%.1f");
+                        ImGui::DragFloat3("Axis", &def.localAxis.x, 0.05f, -1.0f, 1.0f, "%.2f");
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+            ImGui::Separator();
+
+            // Damage profile display.
+            if (ImGui::TreeNode("Damage Multipliers")) {
+                const auto& profile = defaultDamageProfile();
+                for (size_t i = 0; i < static_cast<size_t>(BodyRegion::Count); ++i) {
+                    const auto region = static_cast<BodyRegion>(i);
+                    ImU32 col = regionColor(region);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col);
+                    ImGui::Text("%-15s  %.2fx", bodyRegionName(region), static_cast<double>(profile.multipliers[i]));
+                    ImGui::PopStyleColor();
+                }
+                ImGui::TreePop();
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Capsule wireframe overlay (independent of window visibility) ──
+    // This intentionally runs even when the window is hidden (F2 toggle)
+    // so you can play with a clean viewport while still seeing hitboxes.
+    if (drawHitboxOverlay) {
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        registry.view<HitboxInstance>().each([&](const HitboxInstance& hb) {
+            for (const auto& cap : hb.capsules) {
+                const ImU32 color = regionColor(cap.region);
+                drawCapsuleWireframe(
+                    dl, cap.pointA, cap.pointB, cap.radius, viewProj, screenWidth, screenHeight, color);
+            }
+        });
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collision wireframe helpers (anonymous namespace, same pattern as hitbox)
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+
+/// @brief Draw an AABB wireframe (12 edges).
+void drawAABBWireframe(
+    ImDrawList* dl, const physics::WorldAABB& box, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    const glm::vec3& mn = box.min;
+    const glm::vec3& mx = box.max;
+
+    // 8 corners.
+    const glm::vec3 c[8] = {
+        {mn.x, mn.y, mn.z},
+        {mx.x, mn.y, mn.z},
+        {mx.x, mn.y, mx.z},
+        {mn.x, mn.y, mx.z},
+        {mn.x, mx.y, mn.z},
+        {mx.x, mx.y, mn.z},
+        {mx.x, mx.y, mx.z},
+        {mn.x, mx.y, mx.z},
+    };
+
+    // Bottom face.
+    drawWorldLine(dl, c[0], c[1], vp, sw, sh, color);
+    drawWorldLine(dl, c[1], c[2], vp, sw, sh, color);
+    drawWorldLine(dl, c[2], c[3], vp, sw, sh, color);
+    drawWorldLine(dl, c[3], c[0], vp, sw, sh, color);
+    // Top face.
+    drawWorldLine(dl, c[4], c[5], vp, sw, sh, color);
+    drawWorldLine(dl, c[5], c[6], vp, sw, sh, color);
+    drawWorldLine(dl, c[6], c[7], vp, sw, sh, color);
+    drawWorldLine(dl, c[7], c[4], vp, sw, sh, color);
+    // Vertical edges.
+    drawWorldLine(dl, c[0], c[4], vp, sw, sh, color);
+    drawWorldLine(dl, c[1], c[5], vp, sw, sh, color);
+    drawWorldLine(dl, c[2], c[6], vp, sw, sh, color);
+    drawWorldLine(dl, c[3], c[7], vp, sw, sh, color);
+}
+
+/// @brief Draw a vertical cylinder wireframe (top ring, bottom ring, 4 struts).
+void drawCylinderWireframe(
+    ImDrawList* dl, const physics::WorldCylinder& cyl, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    constexpr int kSegments = 16;
+    constexpr float kPi2 = 6.2831853f;
+
+    const glm::vec3 botCenter = cyl.base;
+    const glm::vec3 topCenter = cyl.base + glm::vec3(0.0f, cyl.height, 0.0f);
+
+    // Draw top and bottom rings + 4 struts.
+    glm::vec3 prevBot = botCenter + glm::vec3(cyl.radius, 0.0f, 0.0f);
+    glm::vec3 prevTop = topCenter + glm::vec3(cyl.radius, 0.0f, 0.0f);
+
+    for (int i = 1; i <= kSegments; ++i) {
+        const float angle = kPi2 * static_cast<float>(i) / static_cast<float>(kSegments);
+        const float cs = std::cos(angle);
+        const float sn = std::sin(angle);
+        const glm::vec3 offset(cyl.radius * cs, 0.0f, cyl.radius * sn);
+
+        const glm::vec3 curBot = botCenter + offset;
+        const glm::vec3 curTop = topCenter + offset;
+
+        drawWorldLine(dl, prevBot, curBot, vp, sw, sh, color);
+        drawWorldLine(dl, prevTop, curTop, vp, sw, sh, color);
+
+        // 4 vertical struts at 0°, 90°, 180°, 270°.
+        if (i % (kSegments / 4) == 0)
+            drawWorldLine(dl, curBot, curTop, vp, sw, sh, color);
+
+        prevBot = curBot;
+        prevTop = curTop;
+    }
+}
+
+/// @brief Draw a sphere wireframe (3 orthogonal great circles).
+void drawSphereWireframe(
+    ImDrawList* dl, const physics::WorldSphere& sph, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    constexpr int kSegments = 16;
+    constexpr float kPi2 = 6.2831853f;
+
+    const glm::vec3& c = sph.center;
+    const float r = sph.radius;
+
+    // XY ring.
+    for (int i = 0; i < kSegments; ++i) {
+        const float a0 = kPi2 * static_cast<float>(i) / static_cast<float>(kSegments);
+        const float a1 = kPi2 * static_cast<float>(i + 1) / static_cast<float>(kSegments);
+        drawWorldLine(dl,
+                      c + glm::vec3(r * std::cos(a0), r * std::sin(a0), 0.0f),
+                      c + glm::vec3(r * std::cos(a1), r * std::sin(a1), 0.0f),
+                      vp,
+                      sw,
+                      sh,
+                      color);
+    }
+    // XZ ring.
+    for (int i = 0; i < kSegments; ++i) {
+        const float a0 = kPi2 * static_cast<float>(i) / static_cast<float>(kSegments);
+        const float a1 = kPi2 * static_cast<float>(i + 1) / static_cast<float>(kSegments);
+        drawWorldLine(dl,
+                      c + glm::vec3(r * std::cos(a0), 0.0f, r * std::sin(a0)),
+                      c + glm::vec3(r * std::cos(a1), 0.0f, r * std::sin(a1)),
+                      vp,
+                      sw,
+                      sh,
+                      color);
+    }
+    // YZ ring.
+    for (int i = 0; i < kSegments; ++i) {
+        const float a0 = kPi2 * static_cast<float>(i) / static_cast<float>(kSegments);
+        const float a1 = kPi2 * static_cast<float>(i + 1) / static_cast<float>(kSegments);
+        drawWorldLine(dl,
+                      c + glm::vec3(0.0f, r * std::cos(a0), r * std::sin(a0)),
+                      c + glm::vec3(0.0f, r * std::cos(a1), r * std::sin(a1)),
+                      vp,
+                      sw,
+                      sh,
+                      color);
+    }
+}
+
+/// @brief Draw a convex brush wireframe by intersecting plane triples to find vertices,
+/// then drawing edges between vertices that share two planes.
+void drawBrushWireframe(
+    ImDrawList* dl, const physics::WorldBrush& brush, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    const int n = brush.planeCount;
+    if (n < 3)
+        return;
+
+    // Find vertices: intersection of every triple of planes.
+    // A vertex is valid if it lies inside all other planes (dot(n,v) <= d + eps).
+    struct BrushVert
+    {
+        glm::vec3 pos;
+        int p0, p1, p2; // Plane indices that form this vertex.
+    };
+    std::vector<BrushVert> verts;
+
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            for (int k = j + 1; k < n; ++k) {
+                const auto& pi = brush.planes[i];
+                const auto& pj = brush.planes[j];
+                const auto& pk = brush.planes[k];
+
+                // Solve 3×3 system: dot(n_i, v) = d_i, etc.
+                const glm::vec3 cross_jk = glm::cross(pj.normal, pk.normal);
+                const float denom = glm::dot(pi.normal, cross_jk);
+                if (std::abs(denom) < 1e-6f)
+                    continue; // Parallel or degenerate.
+
+                const glm::vec3 v =
+                    (pi.distance * glm::cross(pj.normal, pk.normal) + pj.distance * glm::cross(pk.normal, pi.normal) +
+                     pk.distance * glm::cross(pi.normal, pj.normal)) /
+                    denom;
+
+                // Check if v is inside all planes (normals point outward, solid is dot < d).
+                bool inside = true;
+                for (int m = 0; m < n; ++m) {
+                    if (m == i || m == j || m == k)
+                        continue;
+                    if (glm::dot(brush.planes[m].normal, v) > brush.planes[m].distance + 0.1f) {
+                        inside = false;
+                        break;
+                    }
+                }
+                if (inside)
+                    verts.push_back({v, i, j, k});
+            }
+        }
+    }
+
+    // Draw edges: two vertices share an edge if they share exactly 2 plane indices.
+    for (size_t a = 0; a < verts.size(); ++a) {
+        for (size_t b = a + 1; b < verts.size(); ++b) {
+            int shared = 0;
+            const int planesA[3] = {verts[a].p0, verts[a].p1, verts[a].p2};
+            const int planesB[3] = {verts[b].p0, verts[b].p1, verts[b].p2};
+            for (int pa : planesA)
+                for (int pb : planesB)
+                    if (pa == pb)
+                        ++shared;
+            if (shared == 2)
+                drawWorldLine(dl, verts[a].pos, verts[b].pos, vp, sw, sh, color, 1.5f);
+        }
+    }
+}
+
+/// @brief Draw an infinite plane as a finite grid quad (±extent from origin along the plane).
+void drawPlaneGrid(ImDrawList* dl, const physics::Plane& plane, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    constexpr float kExtent = 2000.0f;
+    constexpr int kDivisions = 8;
+
+    // Build tangent frame on the plane.
+    glm::vec3 tangent = (std::abs(plane.normal.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+    tangent = glm::normalize(tangent - plane.normal * glm::dot(tangent, plane.normal));
+    const glm::vec3 bitangent = glm::cross(plane.normal, tangent);
+
+    // Plane origin: closest point to world origin.
+    const glm::vec3 origin = plane.normal * plane.distance;
+
+    // Draw grid lines.
+    const float step = 2.0f * kExtent / static_cast<float>(kDivisions);
+    for (int i = 0; i <= kDivisions; ++i) {
+        const float t = -kExtent + step * static_cast<float>(i);
+
+        // Lines along tangent direction.
+        const glm::vec3 a = origin + bitangent * t - tangent * kExtent;
+        const glm::vec3 b = origin + bitangent * t + tangent * kExtent;
+        drawWorldLine(dl, a, b, vp, sw, sh, color, (i == kDivisions / 2) ? 2.0f : 1.0f);
+
+        // Lines along bitangent direction.
+        const glm::vec3 c = origin + tangent * t - bitangent * kExtent;
+        const glm::vec3 d = origin + tangent * t + bitangent * kExtent;
+        drawWorldLine(dl, c, d, vp, sw, sh, color, (i == kDivisions / 2) ? 2.0f : 1.0f);
+    }
+}
+
+/// @brief Draw a triangle mesh wireframe — every triangle edge.
+void drawTriMeshWireframe(
+    ImDrawList* dl, const physics::WorldTriMesh& mesh, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    const size_t triCount = mesh.indices.size() / 3;
+    for (size_t i = 0; i < triCount; ++i) {
+        const glm::vec3& v0 = mesh.vertices[mesh.indices[i * 3 + 0]];
+        const glm::vec3& v1 = mesh.vertices[mesh.indices[i * 3 + 1]];
+        const glm::vec3& v2 = mesh.vertices[mesh.indices[i * 3 + 2]];
+        drawWorldLine(dl, v0, v1, vp, sw, sh, color);
+        drawWorldLine(dl, v1, v2, vp, sw, sh, color);
+        drawWorldLine(dl, v2, v0, vp, sw, sh, color);
+    }
+}
+
+} // namespace
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildCollisionUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildCollisionUI(const physics::WorldGeometry& world,
+                               const glm::mat4& viewProj,
+                               float screenWidth,
+                               float screenHeight)
+{
+    // ── ImGui window (only when showCollisionWindow is true) ──
+    if (showCollisionWindow) {
+        if (ImGui::Begin("Collision Debug", &showCollisionWindow)) {
+            ImGui::Checkbox("Draw Collisions", &drawCollisionOverlay);
+            ImGui::Separator();
+
+            // Summary counts.
+            ImGui::Text("Planes: %zu  |  Boxes: %zu  |  Brushes: %zu",
+                        world.planes.size(),
+                        world.boxes.size(),
+                        world.brushes.size());
+            ImGui::Text("Cylinders: %zu  |  Spheres: %zu  |  TriMeshes: %zu",
+                        world.cylinders.size(),
+                        world.spheres.size(),
+                        world.triMeshes.size());
+
+            // Total triangle count from all trimeshes.
+            size_t totalTris = 0;
+            for (const auto& tm : world.triMeshes)
+                totalTris += tm.indices.size() / 3;
+            if (totalTris > 0)
+                ImGui::Text("Total triangles: %zu", totalTris);
+
+            ImGui::Separator();
+            ImGui::Text("Per-type visibility:");
+
+            // Color-coded checkboxes matching the wireframe colors.
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 255, 255, 220));
+            ImGui::Checkbox("Planes", &drawCollisionPlanes);
+            ImGui::PopStyleColor();
+
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(50, 150, 255, 220));
+            ImGui::Checkbox("Boxes", &drawCollisionBoxes);
+            ImGui::PopStyleColor();
+
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(50, 255, 50, 220));
+            ImGui::Checkbox("Brushes", &drawCollisionBrushes);
+            ImGui::PopStyleColor();
+
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 200, 50, 220));
+            ImGui::Checkbox("Cylinders", &drawCollisionCylinders);
+            ImGui::PopStyleColor();
+
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 100, 200, 220));
+            ImGui::Checkbox("Spheres", &drawCollisionSpheres);
+            ImGui::PopStyleColor();
+
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(200, 50, 255, 220));
+            ImGui::Checkbox("TriMeshes", &drawCollisionTriMeshes);
+            ImGui::PopStyleColor();
+        }
+        ImGui::End();
+    }
+
+    // ── Wireframe overlay (independent of window visibility) ──
+    if (!drawCollisionOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    if (drawCollisionPlanes) {
+        const ImU32 planeColor = IM_COL32(0, 255, 255, 140);
+        for (const auto& p : world.planes)
+            drawPlaneGrid(dl, p, viewProj, screenWidth, screenHeight, planeColor);
+    }
+
+    if (drawCollisionBoxes) {
+        const ImU32 boxColor = IM_COL32(50, 150, 255, 220);
+        for (const auto& b : world.boxes)
+            drawAABBWireframe(dl, b, viewProj, screenWidth, screenHeight, boxColor);
+    }
+
+    if (drawCollisionBrushes) {
+        const ImU32 brushColor = IM_COL32(50, 255, 50, 220);
+        for (const auto& b : world.brushes)
+            drawBrushWireframe(dl, b, viewProj, screenWidth, screenHeight, brushColor);
+    }
+
+    if (drawCollisionCylinders) {
+        const ImU32 cylColor = IM_COL32(255, 200, 50, 220);
+        for (const auto& c : world.cylinders)
+            drawCylinderWireframe(dl, c, viewProj, screenWidth, screenHeight, cylColor);
+    }
+
+    if (drawCollisionSpheres) {
+        const ImU32 sphColor = IM_COL32(255, 100, 200, 220);
+        for (const auto& s : world.spheres)
+            drawSphereWireframe(dl, s, viewProj, screenWidth, screenHeight, sphColor);
+    }
+
+    if (drawCollisionTriMeshes) {
+        const ImU32 triColor = IM_COL32(200, 50, 255, 220);
+        for (const auto& tm : world.triMeshes)
+            drawTriMeshWireframe(dl, tm, viewProj, screenWidth, screenHeight, triColor);
+    }
 }
 
 void DebugUI::render()

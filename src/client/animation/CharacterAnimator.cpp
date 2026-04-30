@@ -103,6 +103,7 @@ struct CharacterAnimator::Impl
     std::vector<ozz::math::SoaTransform> blendedLocals;
     std::vector<ozz::math::Float4x4> models;
     std::vector<glm::mat4> skinMats;
+    std::vector<glm::mat4> jointModelMats; ///< Model-space matrices with procedural xforms, no IBM.
 
     // Public snapshot.
     std::array<ClipSampler, kNumSamplerSlots> samplers{};
@@ -150,6 +151,7 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
     impl_->blendedLocals.resize(static_cast<size_t>(numSoaJoints));
     impl_->models.resize(static_cast<size_t>(numJoints));
     impl_->skinMats.resize(static_cast<size_t>(numJoints), glm::mat4(1.0f));
+    impl_->jointModelMats.resize(static_cast<size_t>(numJoints), glm::mat4(1.0f));
 
     // Cache head joint index and build descendant mask for procedural head-look.
     if (rig.isLoaded() && rig.skeleton()) {
@@ -221,6 +223,11 @@ void CharacterAnimator::setDebugPlaybackSpeed(float mul) noexcept
 int CharacterAnimator::numJoints() const noexcept
 {
     return impl_->rig ? impl_->rig->numJoints() : 0;
+}
+
+const std::vector<glm::mat4>& CharacterAnimator::jointModelMatrices() const noexcept
+{
+    return impl_->jointModelMats;
 }
 
 namespace
@@ -649,6 +656,9 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         if (hasHeadPitch && uj < impl_->isHeadDescendant.size() && impl_->isHeadDescendant[uj])
             modelMat = headPitchTransform * modelMat;
 
+        // Store model-space matrix with procedural xforms (for hitbox capsule placement).
+        impl_->jointModelMats[uj] = mirrorMat * modelMat;
+        // Skin matrix additionally includes inverse bind matrix.
         impl_->skinMats[uj] = mirrorMat * modelMat * ibm[uj];
     }
 

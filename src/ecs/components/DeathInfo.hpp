@@ -6,8 +6,12 @@
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/Health.hpp"
 
+/// @brief ECS component: information about the entity that killed this player.
+///
+/// Attached on death, removed on respawn.  Used by the client to display
+/// the killer's health bar in the death screen.
 struct DeathInfo
 {
-    ClientId killerId;   // ClientId of the killer
-    Health killerHealth; // Health of the killer at the moment of the kill
+    ClientId killerId;   ///< Client ID of the killer.
+    Health killerHealth; ///< Killer's health snapshot at time of the kill.
 };

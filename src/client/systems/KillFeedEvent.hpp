@@ -9,4 +9,5 @@ struct KillFeedEvent
     ClientId killerId;         // ID of the player who made the kill
     ClientId victimId;         // ID of the player killed
     float displayTimer = 5.0f; // Timer for how long to display the kill feed entry
+    bool sentToHud = false;    // Set true after first HUD pass to prevent duplicates
 };

@@ -63,12 +63,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
 endif()
 
-# Split DWARF debug info on Linux — keeps .o files smaller and dramatically
-# speeds up linking for Debug builds.  Not supported by Apple Clang or MSVC.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
-   AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options($<$<CONFIG:Debug>:-gsplit-dwarf>)
-    message(STATUS "Debug builds will use -gsplit-dwarf")
+# Note: -gsplit-dwarf was previously enabled here for Linux Debug builds, but
+# Clang refuses to mix split-dwarf with precompiled headers (the per-file
+# "_gsplit_dwarf_path" macro is baked into the PCH and then mismatches every
+# consuming TU).  Both SDL3 3.4.x and our own targets use PCH, so the flag is
+# off across the board.  PCH already provides the bulk of the rebuild-speed
+# win that split-dwarf was helping with.
+
+# Clang validates PCH freshness by checking system header mtime.  Package
+# manager updates (apt upgrade, brew upgrade) bump mtimes without changing
+# content, causing spurious "precompiled header has been modified" errors.
+# -fno-pch-timestamp stops baking file timestamps into the PCH so mtime
+# changes alone never invalidate it.  Applied only to our own targets (not
+# FetchContent deps) via target_compile_options below — search for
+# "PCH_NO_TIMESTAMP_TARGETS".
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(PCH_NO_TIMESTAMP_FLAG "-Xclang;-fno-pch-timestamp" CACHE INTERNAL "")
 endif()
 
 # ---- Dependencies ----
@@ -77,13 +87,13 @@ endif()
 FetchContent_Declare(
     SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG        release-3.2.0
+    GIT_TAG        release-3.4.4
     GIT_SHALLOW    TRUE
 )
 # Build SDL3 as a static library so no DLL shipping is needed at runtime.
 set(SDL_SHARED   OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC   ON  CACHE BOOL "" FORCE)
-# SDL3 3.2.0 has a type mismatch vs newer PipeWire headers; disable it —
+# SDL3 has a type mismatch vs newer PipeWire headers; disable it —
 # PulseAudio / ALSA remain available on Linux.
 set(SDL_PIPEWIRE OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL3)
@@ -99,6 +109,120 @@ block()
     )
     FetchContent_MakeAvailable(SDL3_net)
 endblock()
+
+# SDL_shadercross — build-time shader transpiler.
+#   SPIR-V → DXIL (Windows / Direct3D 12)
+#   SPIR-V → MSL  (macOS  / Metal)
+# We only need the `shadercross` CLI executable; the runtime library is not used
+# (shaders are transpiled at build time and shipped as pre-compiled blobs).
+#
+# SDL_shadercross's "vendored" mode builds DXC's full LLVM/Clang stack from
+# source (~1700 compile units; also requires the ATL workload on MSVC).  We
+# avoid that by fetching DXC's official prebuilt binaries and SPIRV-Cross
+# sources separately, then telling SDL_shadercross to use them.
+if(WIN32)
+    set(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE ON)
+elseif(APPLE)
+    set(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE ON)
+else()
+    set(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE OFF)
+endif()
+
+if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE)
+    # SPIRV-Cross — ships SDL_shadercross's MSL + reflection backends.
+    block()
+        set(SPIRV_CROSS_CLI                 OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_TESTS        OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_SHARED              OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_STATIC              ON  CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_C_API        ON  CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_GLSL         ON  CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_HLSL         ON  CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_MSL          ON  CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_REFLECT      ON  CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_CPP          OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_UTIL         ON  CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_SKIP_INSTALL        ON  CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            SPIRV-Cross
+            GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
+            GIT_TAG        vulkan-sdk-1.4.309.0
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(SPIRV-Cross)
+    endblock()
+
+    # SPIRV-Cross creates targets with hyphens (spirv-cross-c) but
+    # SDL_shadercross looks for underscored names (spirv_cross_c) via
+    # find_package, gated on `if(NOT TARGET spirv_cross_c)`.  Add aliases so
+    # that gate sees the in-tree targets and skips find_package.
+    foreach(_v core glsl hlsl msl reflect util c)
+        if(TARGET spirv-cross-${_v} AND NOT TARGET spirv_cross_${_v})
+            add_library(spirv_cross_${_v} ALIAS spirv-cross-${_v})
+        endif()
+    endforeach()
+
+    # SDL_shadercross's CMakeLists unconditionally calls
+    #   export(TARGETS SDL3_shadercross-static ...)
+    # which walks transitive deps and fails if spirv-cross-c isn't part of any
+    # export set.  Put the SPIRV-Cross targets we use into a throwaway export
+    # so CMake's "in any export set" check passes.
+    set(_spvc_export_targets)
+    foreach(_t spirv-cross-c spirv-cross-core spirv-cross-glsl spirv-cross-hlsl
+                spirv-cross-msl spirv-cross-reflect spirv-cross-util)
+        if(TARGET ${_t})
+            list(APPEND _spvc_export_targets ${_t})
+        endif()
+    endforeach()
+    if(_spvc_export_targets)
+        export(TARGETS ${_spvc_export_targets}
+               FILE "${CMAKE_BINARY_DIR}/SPIRV-Cross-vendored-targets.cmake")
+    endif()
+
+    # On Windows, fetch Microsoft's prebuilt DXC release zip so SDL_shadercross
+    # can find dxcompiler.dll/.lib/dxcapi.h without building LLVM ourselves.
+    # On other platforms we disable DXC entirely (we only need MSL on macOS).
+    if(WIN32)
+        FetchContent_Declare(
+            dxc_binaries
+            URL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2024_07_31.zip
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+        FetchContent_MakeAvailable(dxc_binaries)
+        set(DirectXShaderCompiler_ROOT "${dxc_binaries_SOURCE_DIR}" CACHE PATH "" FORCE)
+
+        # Pre-set FindDirectXShaderCompiler.cmake results so find_library() never
+        # falls back to the Windows SDK's dxcompiler.lib (which is a stub that
+        # lacks the DxcCreateInstance export, causing LNK2019 on some machines).
+        set(DirectXShaderCompiler_INCLUDE_PATH  "${dxc_binaries_SOURCE_DIR}/inc"                  CACHE PATH     "" FORCE)
+        set(DirectXShaderCompiler_dxcompiler_LIBRARY "${dxc_binaries_SOURCE_DIR}/lib/x64/dxcompiler.lib" CACHE FILEPATH "" FORCE)
+        set(DirectXShaderCompiler_dxcompiler_BINARY  "${dxc_binaries_SOURCE_DIR}/bin/x64/dxcompiler.dll" CACHE FILEPATH "" FORCE)
+        set(DirectXShaderCompiler_dxil_BINARY        "${dxc_binaries_SOURCE_DIR}/bin/x64/dxil.dll"       CACHE FILEPATH "" FORCE)
+        set(SHADERCROSS_DXC_ENABLED ON)
+    else()
+        set(SHADERCROSS_DXC_ENABLED OFF)
+    endif()
+
+    block()
+        set(SDLSHADERCROSS_VENDORED         OFF CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_DXC              ${SHADERCROSS_DXC_ENABLED} CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_CLI              ON  CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_SHARED           OFF CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_STATIC           ON  CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_CLI_STATIC       ON  CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_SPIRVCROSS_SHARED OFF CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_INSTALL          OFF CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_TESTS            OFF CACHE BOOL "" FORCE)
+        set(SDLSHADERCROSS_WERROR           OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            SDL_shadercross
+            GIT_REPOSITORY https://github.com/libsdl-org/SDL_shadercross.git
+            GIT_TAG        main
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(SDL_shadercross)
+    endblock()
+endif()
 
 # GLM — header-only math library (vectors, matrices, quaternions)
 FetchContent_Declare(
@@ -258,25 +382,20 @@ target_compile_options(imgui_lib PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W0>
 )
 
-# ---- Shaders: GLSL → SPIR-V (→ MSL on macOS) ----
+# ---- Shaders: GLSL → SPIR-V (→ DXIL on Windows / MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
 #   Prefers glslc (shaderc); falls back to glslangValidator.
 #   Linux:   sudo apt-get install glslang-tools
 #   macOS:   brew install glslang
 #   Windows: install Vulkan SDK (https://vulkan.lunarg.com/)
-# Step 2: SPIR-V → MSL (macOS Metal backend only)
-#   macOS:   brew install spirv-cross
-#   Linux:   sudo apt-get install spirv-cross  (only needed for cross-builds targeting macOS)
-#   Windows: bundled with the Vulkan SDK
+# Step 2: SPIR-V → DXIL / MSL via SDL_shadercross (the `shadercross` CLI built
+#   from the FetchContent block above).  Replaces the legacy spirv-cross +
+#   spv_to_msl path.
 find_program(GLSLC glslc
     HINTS ENV VULKAN_SDK
     PATHS /opt/homebrew/bin /usr/local/bin
     PATH_SUFFIXES bin)
 find_program(GLSLANG_VALIDATOR glslangValidator
-    HINTS ENV VULKAN_SDK
-    PATHS /opt/homebrew/bin /usr/local/bin
-    PATH_SUFFIXES bin)
-find_program(SPIRV_CROSS spirv-cross
     HINTS ENV VULKAN_SDK
     PATHS /opt/homebrew/bin /usr/local/bin
     PATH_SUFFIXES bin)
@@ -297,41 +416,57 @@ else()
         "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
 endif()
 
-if(APPLE)
-    if(SPIRV_CROSS)
-        message(STATUS "MSL transpiler:  spirv-cross (${SPIRV_CROSS})")
-
-        # spv_to_msl: pre-built CLI tool that converts SPIR-V → MSL with explicit
-        # resource bindings matching SDL3 GPU's Metal backend slot model.
-        # Source in cmake/spv_to_msl.cpp; rebuild with:
-        #   c++ -std=c++17 -O2 -I$(brew --prefix spirv-cross)/include \
-        #       cmake/spv_to_msl.cpp \
-        #       -L$(brew --prefix spirv-cross)/lib \
-        #       -lspirv-cross-msl -lspirv-cross-glsl -lspirv-cross-core \
-        #       -o cmake/spv_to_msl
-        find_program(SPV_TO_MSL spv_to_msl
-            HINTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
-                  "${CMAKE_CURRENT_SOURCE_DIR}/tools")
-        if(SPV_TO_MSL)
-            message(STATUS "spv_to_msl:      ${SPV_TO_MSL}")
-        else()
-            message(WARNING "spv_to_msl not found — falling back to spirv-cross --msl (bindings may be wrong)")
-        endif()
-    else()
-        message(FATAL_ERROR
-            "spirv-cross not found — required on macOS for the SDL3 GPU Metal backend.\n"
-            "  brew install spirv-cross")
-    endif()
-else()
-    message(STATUS "Non-Apple build — MSL shader transpilation skipped")
+# SDL_shadercross builds a `shadercross` CLI target above (SDLSHADERCROSS_CLI=ON).
+# Use that target directly so the shader build stays in lockstep with the
+# vendored copy — no system install required.  Only required on platforms that
+# transpile SPIR-V → DXIL/MSL (Windows / macOS); Linux runs SPIR-V directly.
+if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE AND NOT TARGET shadercross)
+    message(FATAL_ERROR
+        "shadercross CLI target not found — SDL_shadercross FetchContent did "
+        "not produce the expected target.")
 endif()
+
+# Auto-pick transpile targets per platform:
+#   Windows → DXIL (primary, Direct3D 12); SPIR-V kept as Vulkan fallback.
+#   macOS   → MSL  (Metal); SPIR-V not used at runtime.
+#   Linux   → SPIR-V only (Vulkan).
+if(WIN32)
+    set(SHADER_BUILD_DXIL ON)
+    set(SHADER_BUILD_MSL  OFF)
+elseif(APPLE)
+    set(SHADER_BUILD_DXIL OFF)
+    set(SHADER_BUILD_MSL  ON)
+else()
+    set(SHADER_BUILD_DXIL OFF)
+    set(SHADER_BUILD_MSL  OFF)
+endif()
+set(_shader_targets "SPIR-V")
+if(SHADER_BUILD_DXIL)
+    string(APPEND _shader_targets ", DXIL")
+endif()
+if(SHADER_BUILD_MSL)
+    string(APPEND _shader_targets ", MSL")
+endif()
+message(STATUS "Shader targets: ${_shader_targets}")
+
+# Helper: emit a SPIR-V → <target> transpile rule via the shadercross CLI.
+# `shadercross` infers the output format from the file extension (.dxil/.msl).
+function(_add_transpile_rule SPV_OUT OUT_FILE OUT_LIST_VAR)
+    add_custom_command(
+        OUTPUT  "${OUT_FILE}"
+        COMMAND $<TARGET_FILE:shadercross> "${SPV_OUT}" -o "${OUT_FILE}"
+        DEPENDS "${SPV_OUT}" shadercross
+        COMMENT "Transpiling ${SPV_OUT} → ${OUT_FILE}"
+        VERBATIM
+    )
+    set(${OUT_LIST_VAR} "${${OUT_LIST_VAR}};${OUT_FILE}" PARENT_SCOPE)
+endfunction()
 
 set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
 set(SHADER_SOURCES
-    projective.vert normal.frag         # scene geometry (cube + floor)
     model.vert model.frag               # legacy model shaders (kept for reference)
     geometry.vert geometry.frag          # graphics team Lambertian shaders
     pbr.vert pbr.frag                   # PBR Cook-Torrance (Phase 1)
@@ -361,6 +496,9 @@ set(SHADER_SOURCES
     hitscan_beam.vert hitscan_beam.frag
     decal.vert decal.frag
     sdf_text.vert sdf_text.frag
+    # HUD overlay
+    hud.vert hud.frag
+    hud_blit.frag
 )
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})
@@ -376,43 +514,14 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     )
     list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
 
+    # SPIR-V → DXIL (Direct3D 12 backend on Windows)
+    if(SHADER_BUILD_DXIL)
+        _add_transpile_rule("${SPV_OUT}" "${SHADER_OUT_DIR}/${SHADER_SRC}.dxil" SHADER_OUTPUTS)
+    endif()
+
     # SPIR-V → MSL (Metal backend on macOS)
-    #
-    # spirv-cross --msl reorders resource bindings arbitrarily, which breaks
-    # SDL3 GPU's Metal backend.  We use a small build tool (spv_to_msl) that
-    # calls the spirv-cross C++ API with explicit MSLResourceBinding entries
-    # to assign Metal indices matching SDL3's slot model:
-    #
-    #   Textures: samplers(0..)  → RO-storage  → RW-storage
-    #   Buffers:  UBOs(0..)      → RO-storage  → RW-storage
-    #   Samplers: 0..N-1
-    #
-    if(APPLE)
-        if(SPV_TO_MSL)
-            set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
-            add_custom_command(
-                OUTPUT  "${MSL_OUT}"
-                COMMAND "${SPV_TO_MSL}" "${SPV_OUT}" "${MSL_OUT}"
-                DEPENDS "${SPV_OUT}"
-                COMMENT "Transpiling shader ${SHADER_SRC} → MSL"
-                VERBATIM
-            )
-            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
-        elseif(SPIRV_CROSS)
-            set(MSL_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.msl")
-            add_custom_command(
-                OUTPUT  "${MSL_OUT}"
-                COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
-                COMMAND python3
-                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
-                        "${SPIRV_CROSS}" "${SPV_OUT}" "${MSL_OUT}"
-                DEPENDS "${SPV_OUT}"
-                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
-                COMMENT "Transpiling shader ${SHADER_SRC} → MSL (fallback)"
-                VERBATIM
-            )
-            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
-        endif()
+    if(SHADER_BUILD_MSL)
+        _add_transpile_rule("${SPV_OUT}" "${SHADER_OUT_DIR}/${SHADER_SRC}.msl" SHADER_OUTPUTS)
     endif()
 endforeach()
 
@@ -442,33 +551,11 @@ foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
     )
     list(APPEND SHADER_OUTPUTS "${SPV_OUT}")
 
-    # SPIR-V → MSL (Metal backend on macOS)
-    if(APPLE)
-        if(SPV_TO_MSL)
-            set(MSL_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.msl")
-            add_custom_command(
-                OUTPUT  "${MSL_OUT}"
-                COMMAND "${SPV_TO_MSL}" "${SPV_OUT}" "${MSL_OUT}"
-                DEPENDS "${SPV_OUT}"
-                COMMENT "Transpiling new-renderer shader ${SHADER_SRC} → MSL"
-                VERBATIM
-            )
-            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
-        elseif(SPIRV_CROSS)
-            set(MSL_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.msl")
-            add_custom_command(
-                OUTPUT  "${MSL_OUT}"
-                COMMAND "${SPIRV_CROSS}" --msl "${SPV_OUT}" --output "${MSL_OUT}"
-                COMMAND python3
-                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
-                        "${SPIRV_CROSS}" "${SPV_OUT}" "${MSL_OUT}"
-                DEPENDS "${SPV_OUT}"
-                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_msl_compute_bindings.py"
-                COMMENT "Transpiling new-renderer shader ${SHADER_SRC} → MSL (fallback)"
-                VERBATIM
-            )
-            list(APPEND SHADER_OUTPUTS "${MSL_OUT}")
-        endif()
+    if(SHADER_BUILD_DXIL)
+        _add_transpile_rule("${SPV_OUT}" "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.dxil" SHADER_OUTPUTS)
+    endif()
+    if(SHADER_BUILD_MSL)
+        _add_transpile_rule("${SPV_OUT}" "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.msl" SHADER_OUTPUTS)
     endif()
 endforeach()
 
@@ -489,6 +576,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.cpp"
@@ -544,6 +633,47 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    # HUD system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -565,6 +695,10 @@ add_executable(group2
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/MapLoader.hpp
+        src/ecs/physics/MapLoader.cpp
+        src/ecs/physics/TriMeshCollision.hpp
+        src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -609,10 +743,16 @@ add_executable(group2
         src/ecs/systems/ExplosionSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
+        src/ecs/components/Hitbox.hpp
+        src/ecs/systems/HitboxSystem.hpp
+        src/ecs/systems/HitboxSystem.cpp
         src/ecs/components/Player.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
+        src/ecs/components/WeaponSpawner.hpp
+        src/ecs/systems/WeaponSpawnerSystem.hpp
+        src/ecs/systems/WeaponSpawnerSystem.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -661,8 +801,11 @@ add_custom_command(TARGET group2 POST_BUILD
 )
 
 # Tell the renderer which shader formats were compiled.
-if(SPIRV_CROSS)
+if(SHADER_BUILD_MSL)
     target_compile_definitions(group2 PRIVATE HAVE_MSL_SHADERS)
+endif()
+if(SHADER_BUILD_DXIL)
+    target_compile_definitions(group2 PRIVATE HAVE_DXIL_SHADERS)
 endif()
 
 # SDL3 GPU uses [0, 1] depth range on all backends (Vulkan + Metal).
@@ -707,6 +850,10 @@ target_precompile_headers(group2 PRIVATE
     <entt/entt.hpp>
     <SDL3/SDL.h>
 )
+# PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(group2 PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
 # find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).
@@ -737,6 +884,8 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.cpp"
@@ -792,6 +941,47 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    # HUD system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -813,6 +1003,10 @@ add_executable(client
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/MapLoader.hpp
+        src/ecs/physics/MapLoader.cpp
+        src/ecs/physics/TriMeshCollision.hpp
+        src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -852,11 +1046,17 @@ add_executable(client
         src/ecs/systems/ExplosionSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
+        src/ecs/components/Hitbox.hpp
+        src/ecs/systems/HitboxSystem.hpp
+        src/ecs/systems/HitboxSystem.cpp
         src/ecs/components/Player.hpp
         src/network/MatchStatus.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
+        src/ecs/components/WeaponSpawner.hpp
+        src/ecs/systems/WeaponSpawnerSystem.hpp
+        src/ecs/systems/WeaponSpawnerSystem.cpp
 )
 
 target_include_directories(client PRIVATE
@@ -900,8 +1100,11 @@ add_custom_target(copy_client_config DEPENDS "${CMAKE_BINARY_DIR}/config_client.
 add_dependencies(group2 copy_client_config)
 
 # No USE_HYBRID_RENDERER — Game.cpp / Game.hpp use the legacy Renderer directly.
-if(SPIRV_CROSS)
+if(SHADER_BUILD_MSL)
     target_compile_definitions(client PRIVATE HAVE_MSL_SHADERS)
+endif()
+if(SHADER_BUILD_DXIL)
+    target_compile_definitions(client PRIVATE HAVE_DXIL_SHADERS)
 endif()
 target_compile_definitions(client PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
@@ -936,6 +1139,10 @@ target_precompile_headers(client PRIVATE
     <entt/entt.hpp>
     <SDL3/SDL.h>
 )
+# PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(client PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
 
 # Copy assets next to the binary (same as group2).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
@@ -971,6 +1178,10 @@ add_executable(server
         src/ecs/physics/Movement.cpp
         src/ecs/physics/SweptCollision.hpp
         src/ecs/physics/SweptCollision.cpp
+        src/ecs/physics/MapLoader.hpp
+        src/ecs/physics/MapLoader.cpp
+        src/ecs/physics/TriMeshCollision.hpp
+        src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -1013,13 +1224,32 @@ add_executable(server
         src/network/NetKillEvent.hpp
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
+        src/ecs/components/WeaponSpawner.hpp
+        src/ecs/systems/WeaponSpawnerSystem.hpp
+        src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/components/Hitbox.hpp
+        src/ecs/systems/HitboxSystem.hpp
+        src/ecs/systems/HitboxSystem.cpp
+        src/client/animation/CharacterRig.hpp
+        src/client/animation/CharacterRig.cpp
+        src/client/animation/CharacterAnimator.hpp
+        src/client/animation/CharacterAnimator.cpp
+        src/client/animation/AnimationLibrary.hpp
+        src/client/animation/AnimationLibrary.cpp
+        src/client/animation/FbxImportUtils.hpp
+        src/client/animation/FbxImportUtils.cpp
+        src/client/animation/SkinningBackend.hpp
+        src/client/animation/SkinningBackend.cpp
+        src/client/renderer/ModelLoader.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
 # src/server/ — for server-local headers (game/ServerGame.hpp, network/Server.hpp, etc.)
+# src/client/ — needed for shared animation headers (CharacterRig, AnimationLibrary, etc.)
 target_include_directories(server PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
 )
 
 # ---- Server link libraries ----
@@ -1028,7 +1258,11 @@ target_link_libraries(server PRIVATE
     SDL3_net::SDL3_net
     EnTT::EnTT
     glm::glm
+    assimp
     tomlplusplus::tomlplusplus
+    ozz_animation_offline
+    ozz_animation
+    ozz_base
 )
 
 # ---- Server precompiled header ----
@@ -1045,6 +1279,10 @@ target_precompile_headers(server PRIVATE
     <entt/entt.hpp>
     <SDL3/SDL.h>
 )
+# PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(server PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
 
 # Copy config.toml next to the server binary when it changes.
 add_custom_command(
@@ -1059,6 +1297,30 @@ add_custom_command(
 )
 add_custom_target(copy_server_config DEPENDS "${CMAKE_BINARY_DIR}/config_server.stamp")
 add_dependencies(server copy_server_config)
+
+# Copy map assets next to the server binary so MapLoader can find them.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/maps")
+    add_custom_command(TARGET server POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets/maps"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/maps"
+                "$<TARGET_FILE_DIR:server>/assets/maps"
+        COMMENT "Copying map assets to server binary directory"
+        VERBATIM
+    )
+endif()
+
+# Copy animation assets next to the server binary for server-side hitbox animation.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
+    add_custom_command(TARGET server POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets/animations"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations"
+                "$<TARGET_FILE_DIR:server>/assets/animations"
+        COMMENT "Copying animation assets to server binary directory"
+        VERBATIM
+    )
+endif()
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

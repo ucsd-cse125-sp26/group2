@@ -1,3 +1,6 @@
+/// @file Camera.cpp
+/// @brief Implementation of the new renderer Camera class.
+
 #include "Camera.hpp"
 
 #include <cmath>

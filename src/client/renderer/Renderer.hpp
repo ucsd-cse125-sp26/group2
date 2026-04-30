@@ -75,6 +75,8 @@ public:
     /// @brief Shader format selected during init() (SPIR-V or MSL).
     [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const override { return shaderFormat; }
 
+    void setHudTexture(SDL_GPUTexture* hudOutput) override { hudTexture_ = hudOutput; }
+
     /// @brief HDR render target format (RGBA16F). Particle pipelines must match this.
     [[nodiscard]] static constexpr SDL_GPUTextureFormat getHdrFormat()
     {
@@ -104,6 +106,12 @@ public:
 
     /// @brief Set the first-person weapon viewmodel for this frame.
     void setWeaponViewmodel(const WeaponViewmodel& vm) override { weaponVM = vm; }
+
+    void setModelScenePass(int modelIndex, bool drawInScene) override
+    {
+        if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < models.size())
+            models[static_cast<size_t>(modelIndex)].drawInScenePass = drawInScene;
+    }
 
     /// @brief Load a model and return its index in the models[] vector, or -1 on failure.
     int loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) override;
@@ -147,13 +155,11 @@ private:
     Camera camera;
 
     // Pipelines
-    SDL_GPUGraphicsPipeline* scenePipeline = nullptr;          ///< Hard-coded cube + floor (PBR lit).
     SDL_GPUGraphicsPipeline* pbrPipeline = nullptr;            ///< Assimp model — opaque meshes.
     SDL_GPUGraphicsPipeline* pbrTransparentPipeline = nullptr; ///< Same PBR — alpha-blended meshes.
     SDL_GPUGraphicsPipeline* skyboxPipeline = nullptr;         ///< Procedural/cubemap skybox.
     SDL_GPUGraphicsPipeline* tonemapPipeline = nullptr;        ///< Fullscreen HDR → LDR.
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;         ///< Depth-only shadow map.
-    SDL_GPUGraphicsPipeline* sceneShadowPipeline = nullptr;    ///< Scene geometry into shadow map.
 
     // Render targets
     SDL_GPUTexture* depthTexture = nullptr;       ///< Scene depth, D32_FLOAT.
@@ -251,6 +257,12 @@ private:
     SDL_GPUTextureFormat captureRTFmt = SDL_GPU_TEXTUREFORMAT_INVALID;
     std::string pendingCapPath;
 
+    // HUD overlay
+    SDL_GPUTexture* hudTexture_ = nullptr;               ///< Non-owning: from Hud system.
+    SDL_GPUGraphicsPipeline* hudBlitPipeline_ = nullptr; ///< Fullscreen quad, alpha blend.
+    SDL_GPUSampler* hudSampler_ = nullptr;               ///< Nearest, clamp.
+    bool initHudBlit();
+
     // Post-processing (Phases 7-12)
     Uint32 postProcW = 0, postProcH = 0; ///< Screen dims used for post-processing texture allocation.
 
@@ -347,12 +359,10 @@ private:
     SDL_GPUGraphicsPipeline* oitResolvePipeline = nullptr;
 
     // Private helpers
-    bool initScenePipeline();
     bool initPBRPipeline();
     bool initSkyboxPipeline();
     bool initTonemapPipeline();
     bool initShadowPipeline();
-    bool initSceneShadowPipeline();
 
     bool initIBL();
 

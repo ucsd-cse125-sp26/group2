@@ -27,6 +27,6 @@ struct Projectile
     WeaponType type = WeaponType::Rifle; ///< Weapon that spawned this projectile.
     float damage = 0.0f;                 ///< Damage dealt on hit.
     entt::entity owner = entt::null;     ///< Entity that fired this projectile.
-    bool explosive = false;
-    float currentLifeTime = 0.0f;
+    bool explosive = false;              ///< True if the projectile detonates on impact.
+    float currentLifeTime = 0.0f;        ///< Seconds since spawn (destroyed when exceeding max).
 };

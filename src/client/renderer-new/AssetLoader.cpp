@@ -1,6 +1,5 @@
-//
-// Created by mysteriousjim on 4/16/2026.
-//
+/// @file AssetLoader.cpp
+/// @brief Implementation of AssetLoader — Assimp scene import and mesh extraction.
 
 #include "AssetLoader.hpp"
 
@@ -82,20 +81,20 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 {
     Assimp::Importer importer;
     std::string debugPrefix = "Static Model Loading: ";
-    std::string assetIdNameSpace = modelFileName +  "::";
+    std::string assetIdNameSpace = modelFileName + "::";
 
-    //std::cout << " Asset::Model &newModel = Asset::models_[id]; " << std::endl;
+    // std::cout << " Asset::Model &newModel = Asset::models_[id]; " << std::endl;
     Asset::Model& newModel = Asset::models_[id];
 
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
-    //std::cout << "loadAsset" << std::endl;
+    // std::cout << "loadAsset" << std::endl;
     const aiScene* asimpSceneStructurePtr = loadAsset(importer, modelFileName);
 
     if (asimpSceneStructurePtr == nullptr) {
         std::cout << debugPrefix << "scene is null" << std::endl;
         return false;
     }
-    //std::cout << "loadedAsset" << std::endl;
+    // std::cout << "loadedAsset" << std::endl;
 
     if (asimpSceneStructurePtr->mNumMeshes == 0 || asimpSceneStructurePtr->mMeshes == nullptr) {
         std::cout << debugPrefix << "model not found" << std::endl;
@@ -103,9 +102,9 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     }
 
     if (k_flatten) {
-        asimpSceneStructurePtr = importer.ApplyPostProcessing(aiProcess_PreTransformVertices);/// FLATTEN AISCENE
+        asimpSceneStructurePtr = importer.ApplyPostProcessing(aiProcess_PreTransformVertices); /// FLATTEN AISCENE
     }
-    const aiScene &sceneAi = *asimpSceneStructurePtr;
+    const aiScene& sceneAi = *asimpSceneStructurePtr;
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     newModel.modelElements_.reserve(sceneAi.mNumMeshes);
 
@@ -126,8 +125,8 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
     while (!sceneAiDFSStack.empty()) {
-        const aiNode *currentNodePtr = sceneAiDFSStack.top();
-        const aiNode &currentNode = *currentNodePtr;
+        const aiNode* currentNodePtr = sceneAiDFSStack.top();
+        const aiNode& currentNode = *currentNodePtr;
         sceneAiDFSStack.pop();
         std::cout << "Node: " << currentNode.mName.C_Str()
                   << " | Meshes: " << currentNode.mNumMeshes
@@ -184,19 +183,26 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string &meshNameSpa
             }
         }
 
-        for (int j = 0; j < nodeAi.mNumMeshes ; j++) {
-            Asset::ModelElement me_j;
-            uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
+    const aiString nodeAiName = nodeAi.mName;
+    const std::string nodeNameStr(nodeAiName.C_Str());
 
-            const aiMesh &mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
+    for (int j = 0; j < nodeAi.mNumMeshes; j++) {
+        uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
+        if (mesh_j_IdAi < 0 || mesh_j_IdAi >= sceneAi.mNumMeshes) {
+            std::cout << debugPrefix << "given aiNode is not in aiScene!!!:" << std::endl;
+            std::cout << "\tmesh: " << mesh_j_IdAi << " is not in aiScene's mesh array" << std::endl;
+        }
+    }
 
-            std::string meshName = meshNameSpace + nodeNameStr + std::to_string(mesh_j_IdAi);
-            MeshIdInt meshNameId = Asset::getMeshIdFromString(meshName);
-            std::cout << "meshName: " << meshName << " | meshNameId: " << meshNameId << std::endl;
+    for (int j = 0; j < nodeAi.mNumMeshes; j++) {
+        Asset::ModelElement me_j;
+        uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
 
-            std::cout << debugPrefix << "loadMesh: j:" << j << std::endl;
-            bool loadREsult = loadMesh(meshNameId,mesh_j_Ai);
-            std::cout << "loadREsult: " << loadREsult <<  std::endl;
+        const aiMesh& mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
+
+        std::string meshName = meshNameSpace + nodeNameStr + std::to_string(mesh_j_IdAi);
+        MeshIdInt meshNameId = Asset::getMeshIdFromString(meshName);
+        std::cout << "meshName: " << meshName << " | meshNameId: " << meshNameId << std::endl;
 
             me_j.meshId_ = meshNameId;
             me_j.cachedTransform_ = glm::mat4(1.0f);
@@ -206,6 +212,8 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string &meshNameSpa
             currentModelNode.modelElementsIndices_.push_back(childModelElementIndex);
         }
 
+        newModel.modelElements_.push_back(me_j);
+    }
 }
 void AssetLoader::updateModelTransformCache(const ModelIdInt id)
 {
@@ -247,7 +255,8 @@ void AssetLoader::updateModelTransformCache(const ModelIdInt id)
 
 };
 
-glm::mat4 AssetLoader::glmFromAiTransform(const aiMatrix4x4& transformAi) {
+glm::mat4 AssetLoader::glmFromAiTransform(const aiMatrix4x4& transformAi)
+{
     glm::mat4 retTransform;
 
     retTransform[0] = glm::vec4(transformAi.a1,transformAi.b1,transformAi.c1,transformAi.d1);

@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <cstdint>
 #include <glm/vec3.hpp>
 #include <span>
+#include <vector>
 
 /// @brief Pure swept-collision math — no ECS types, no registry.
 ///
@@ -43,12 +45,57 @@ struct WorldBrush
     int planeCount{0};
 };
 
+/// @brief A vertical (Y-axis) cylinder in world space.
+///
+/// Defined by a base centre point, radius, and height.  The cylinder extends
+/// from `base.y` to `base.y + height` along the Y axis.
+struct WorldCylinder
+{
+    glm::vec3 base; ///< Centre of the bottom cap.
+    float radius;   ///< Horizontal radius.
+    float height;   ///< Extent along +Y from base.
+};
+
+/// @brief A sphere in world space.
+struct WorldSphere
+{
+    glm::vec3 center; ///< Centre point.
+    float radius;     ///< Radius.
+};
+
+/// @brief A single BVH node for spatial acceleration of triangle meshes.
+struct BVHNode
+{
+    glm::vec3 boundsMin; ///< AABB minimum corner.
+    glm::vec3 boundsMax; ///< AABB maximum corner.
+    int leftFirst;       ///< If leaf: index into triIndices[]. If interior: left child index.
+    int count;           ///< >0 → leaf with `count` triangles.  0 → interior node.
+};
+
+/// @brief A triangle mesh with BVH acceleration for collision queries.
+///
+/// Built once at load time via `buildTriMeshBVH()`.  The BVH is a flat array
+/// binary tree; leaves hold up to 4 triangles.  `triIndices` is a permutation
+/// array mapping BVH leaf ranges to triangle indices in `indices`.
+struct WorldTriMesh
+{
+    std::vector<glm::vec3> vertices;  ///< All vertex positions (world space, scaled).
+    std::vector<uint32_t> indices;    ///< Triangle indices (3 per triangle).
+    std::vector<BVHNode> bvhNodes;    ///< Flat BVH node array.
+    std::vector<uint32_t> triIndices; ///< Permutation: BVH leaf ranges → triangle indices.
+    glm::vec3 boundsMin{0.0f};        ///< Whole-mesh AABB min.
+    glm::vec3 boundsMax{0.0f};        ///< Whole-mesh AABB max.
+};
+
 /// @brief All world collision geometry for one tick.
 struct WorldGeometry
 {
     std::span<const Plane> planes;
     std::span<const WorldAABB> boxes;
     std::span<const WorldBrush> brushes;
+    std::span<const WorldCylinder> cylinders;
+    std::span<const WorldSphere> spheres;
+    std::span<const WorldTriMesh> triMeshes;
 };
 
 /// @brief Result of a swept AABB collision query.
@@ -85,6 +132,20 @@ HitResult sweepAABBvsBox(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, 
 /// Finds the time at which the AABB enters all half-spaces simultaneously.
 /// Entities starting inside the brush are skipped (depenetration handles that).
 HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldBrush& brush);
+
+/// @brief Sweep an AABB against a vertical cylinder.
+///
+/// Minkowski-expands the cylinder by the AABB half-extents: the radius grows
+/// by the XZ extent and the height caps grow by the Y extent.  The sweep then
+/// reduces to a 2D ray-vs-circle test (XZ) clamped by the expanded Y slab.
+HitResult sweepAABBvsCylinder(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldCylinder& cyl);
+
+/// @brief Sweep an AABB against a sphere.
+///
+/// Minkowski-expands the sphere radius by the AABB half-extents (approximation:
+/// uses the max half-extent component, making it slightly conservative at
+/// corners).  Then performs a ray-vs-sphere test on the swept centre.
+HitResult sweepAABBvsSphere(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldSphere& sph);
 
 /// @brief Sweep an AABB against all world geometry, returning the earliest hit.
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);

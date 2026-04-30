@@ -5,8 +5,18 @@
 #   Linux   → clang / clang++ from PATH
 #   macOS   → /usr/bin/clang  (Apple Clang — avoids Homebrew LLVM in PATH)
 #   Windows → MSVC via cmake/toolchains/msvc.cmake
+#
+# When CC/CXX environment variables are set, they take precedence over the
+# auto-detected compiler (used by CI to select clang-cl on Windows).
 
 cmake_minimum_required(VERSION 3.25)
+
+# ── Respect explicit CC/CXX overrides (CI, advanced users) ─────────
+if(DEFINED ENV{CC} AND NOT "$ENV{CC}" STREQUAL "")
+    set(CMAKE_C_COMPILER   "$ENV{CC}"  CACHE FILEPATH "" FORCE)
+    set(CMAKE_CXX_COMPILER "$ENV{CXX}" CACHE FILEPATH "" FORCE)
+    return()
+endif()
 
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
     include("${CMAKE_CURRENT_LIST_DIR}/msvc.cmake")

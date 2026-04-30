@@ -6,6 +6,7 @@
 #include "SDL3/SDL_log.h"
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -23,6 +24,7 @@
 
 namespace systems
 {
+/// @copydoc applyHeal
 void applyHeal(float amount, Health& playerHealth)
 {
     if (amount < 0)
@@ -44,9 +46,16 @@ void applyHeal(float amount, Health& playerHealth)
     }
 }
 
+/// @brief Reset a dead player to a fresh spawn state.
+///
+/// Clears the respawn timer and death info, restores visibility, resets
+/// position/velocity/health/weapons to defaults, and places the player
+/// at the spawn point.
+///
+/// @param player    Entity to respawn (modified in place).
+/// @param registry  The ECS registry.
 inline void handleRespawn(entt::entity& player, Registry& registry)
 {
-    // Refresh player stats and position
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
     const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
@@ -94,21 +103,37 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
                                              });
 }
 
+/// @brief Transition a player to the dead state if health has reached zero.
+///
+/// Hides the player, removes hitboxes, starts a 5-second respawn timer,
+/// updates death/kill stats, and emits a NetKillEvent for the kill feed.
+///
+/// @param player       Entity that died.
+/// @param playerHealth Health component (already at or below zero).
+/// @param killer       Entity that dealt the killing blow.
+/// @param registry     The ECS registry.
+/// @param killEvents   Accumulates kill events for network broadcast.
+/// @param hitRegion    Body region of the killing blow.
 inline void handleDeath(entt::entity& player,
                         Health& playerHealth,
                         entt::entity& killer,
                         Registry& registry,
-                        std::vector<NetKillEvent>& killEvents)
+                        std::vector<NetKillEvent>& killEvents,
+                        BodyRegion hitRegion)
 {
     if (playerHealth.health <= 0) {
         // Update death
         registry.get_or_emplace<PlayerState>(player).IsDead = true;
+        registry.get_or_emplace<Velocity>(player) = Velocity{};
         registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = false; });
+        registry.remove<HitboxInstance>(player);
         registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 5.0f});
         registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
 
         // Award killer
-        registry.get_or_emplace<PlayerMatchStats>(killer).kills++;
+        if (killer != player) {
+            registry.get_or_emplace<PlayerMatchStats>(killer).kills++;
+        }
 
         // Get killer info
         ClientId killerId = registry.get<ClientId>(killer);
@@ -119,6 +144,8 @@ inline void handleDeath(entt::entity& player,
             .killerId = killerId,
             .victimId = registry.get<ClientId>(player),
             .killerHealth = killerHealth,
+            .hitRegion = hitRegion,
+            .isHeadshot = (hitRegion == BodyRegion::Head),
         };
         killEvents.push_back(event);
 
@@ -130,8 +157,12 @@ inline void handleDeath(entt::entity& player,
     }
 }
 
-void applyDamage(
-    float damage, entt::entity player, entt::entity& killer, Registry& registry, std::vector<NetKillEvent>& killEvents)
+void applyDamage(float damage,
+                 entt::entity player,
+                 entt::entity& killer,
+                 Registry& registry,
+                 std::vector<NetKillEvent>& killEvents,
+                 BodyRegion hitRegion)
 {
     // If player is dead, ignore damage
     if (registry.all_of<RespawnTimer>(player))
@@ -149,13 +180,16 @@ void applyDamage(
         playerHealth.armor = 0;
         if (playerHealth.health - overflow <= 0) {
             playerHealth.health = 0;
-            handleDeath(player, playerHealth, killer, registry, killEvents);
+            handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion);
         } else {
             playerHealth.health -= overflow;
         }
     }
 }
 
+/// @brief Tick passive health regeneration after the heal cooldown expires.
+/// @param playerHealth  Health component (modified in place).
+/// @param dt            Fixed physics delta time in seconds.
 inline void handleHealing(Health& playerHealth, float dt)
 {
     if (playerHealth.healTimer == 0) {

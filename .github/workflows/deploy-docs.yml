@@ -18,10 +18,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Doxygen and Graphviz
+      # apt ships Doxygen 1.9.8 which can't parse complex C++ (lambdas,
+      # ECS registry views, templates) well enough to generate call graphs
+      # for functions like Game::iterate().  Install 1.16.1 from GitHub.
+      - name: Install Doxygen 1.16.1 and Graphviz
+        env:
+          DOXYGEN_VERSION: "1.16.1"
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends doxygen graphviz
+          sudo apt-get install -y --no-install-recommends graphviz
+          curl -fsSL "https://github.com/doxygen/doxygen/releases/download/Release_${DOXYGEN_VERSION//./_}/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz" \
+            | sudo tar xzf - -C /usr/local --strip-components=1
+          doxygen --version
 
       - name: Generate Doxyfile from template
         run: |

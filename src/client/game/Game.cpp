@@ -11,6 +11,8 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/Health.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -22,15 +24,19 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/HitboxSystem.hpp"
+#include "hud/debug/HudDebugPanel.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "renderer/GlowCylinder.hpp"
 #include "renderer/GlowSphere.hpp"
+#include "renderer/GraphicsConfig.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
 
@@ -70,6 +76,14 @@ bool Game::init()
         const char* base = SDL_GetBasePath();
         std::string cfgPath = std::string(base ? base : "") + "config.toml";
         netCfg = loadNetworkConfig(cfgPath.c_str());
+
+        // Apply graphics backend selection BEFORE SDL_CreateGPUDevice runs in
+        // Renderer::init.  SDL_GPU honours SDL_HINT_GPU_DRIVER at device
+        // creation; if the requested driver is unavailable SDL falls back to
+        // another supported one automatically.
+        const GraphicsConfig gfxCfg = loadGraphicsConfig(cfgPath.c_str());
+        if (const char* driver = gpuBackendHintString(gfxCfg.backend))
+            SDL_SetHint(SDL_HINT_GPU_DRIVER, driver);
     }
 
     window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE);
@@ -122,50 +136,141 @@ bool Game::init()
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
     }
 
-    // Load models for entity rendering
-    wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
-    if (wraithModelIdx < 0)
-        SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
-
-    // Load all weapon models (per WeaponType)
-    for (int i = 0; i < 4; ++i) {
-        const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
-        if (info.filename) {
-            weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
-            if (weaponModelIndices_[i] < 0)
-                SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+    // HUD system — needs device + shader format from renderer, SDF atlas from particles.
+    if (particleSystem.sdfReady()) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        if (!hud_.init(renderer.getDevice(),
+                       renderer.getShaderFormat(),
+                       particleSystem.sdfAtlas(),
+                       static_cast<uint32_t>(winW),
+                       static_cast<uint32_t>(winH)))
+        {
+            SDL_Log("Hud init failed (non-fatal — HUD disabled)");
+        } else {
+            renderer.setHudTexture(hud_.getOutputTexture());
         }
     }
 
-    // Glow sphere — procedural emissive sphere for bloom / dynamic lighting test.
+    // ── Load map ──────────────────────────────────────────────────────────
+    // Scale: the map was authored in meters; the game uses Quake units (inches).
+    // 1 m = 39.3701 in.
+    {
+        static constexpr float k_metersToInches = 39.3701f;
+
+        const char* base = SDL_GetBasePath();
+        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+
+        // 1) Extract collision geometry (prototype mode: all meshes → collision).
+        physics::MapLoadOptions opts;
+        opts.scale = k_metersToInches;
+        opts.allMeshesAreCollision = true; // Prototype map — every mesh is both visual and collision.
+        opts.addFloorPlane = false;        // Map geometry provides its own floor.
+
+        if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
+            SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes",
+                    mapCollision_.planes.size(),
+                    mapCollision_.boxes.size(),
+                    mapCollision_.brushes.size());
+        } else {
+            SDL_Log("[client] WARNING: map collision load failed — falling back to testWorld()");
+        }
+
+        // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
+        const int mapId = assets_.add("map1", "maps/map1.glb", AssetRole::Map);
+        const int mapModelIdx = renderer.loadSceneModel("maps/map1.glb", glm::vec3(0.0f), k_metersToInches);
+        assets_.setModelIndex(mapId, mapModelIdx);
+        if (mapModelIdx >= 0) {
+            renderer.setModelScenePass(mapModelIdx, true);
+            SDL_Log("[client] map visual loaded (model index %d)", mapModelIdx);
+        } else {
+            SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
+        }
+    }
+
+    // ── Load props (render + collision) ───────────────────────────────────
+    // These are standalone GLB models placed at fixed world positions.
+    // Both visual and collision are loaded so players/projectiles interact.
+    {
+        const char* base = SDL_GetBasePath();
+        const std::string basePath = base ? base : "";
+
+        // Helper: load a prop with render + collision in one call.
+        auto loadProp = [&](const char* name, const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
+            const int id = assets_.add(name, filename, AssetRole::Prop);
+            const int modelIdx = renderer.loadSceneModel(filename, pos, scale, flipUVs);
+            assets_.setModelIndex(id, modelIdx);
+            if (modelIdx >= 0) {
+                renderer.setModelScenePass(modelIdx, true);
+            }
+
+            // Load collision at the same position/scale.
+            const std::string fullPath = basePath + "assets/" + filename;
+            if (physics::loadPropCollision(fullPath, mapCollision_, pos, scale)) {
+                assets_.setHasCollision(id);
+            }
+        };
+
+        loadProp("porsche", "free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
+        loadProp("pallet", "metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
+        loadProp("bottle", "bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+
+        // Update the active world with the new collision data (map + all props).
+        physics::setActiveWorld(mapCollision_.geometry());
+    }
+
+    // ── Load entity models (render only, drawn via EntityRenderCmd) ──────
+    {
+        const int id = assets_.add("wraith", "Apex_Legend_Wraith.glb", AssetRole::Entity);
+        wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+        assets_.setModelIndex(id, wraithModelIdx);
+        if (wraithModelIdx < 0)
+            SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
+    }
+
+    // Load all weapon models (per WeaponType)
+    {
+        static const char* k_weaponNames[] = {"weapon_rifle", "weapon_rocket", "weapon_railgun", "weapon_energy"};
+        for (int i = 0; i < 4; ++i) {
+            const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
+            if (info.filename) {
+                const int id = assets_.add(k_weaponNames[i], info.filename, AssetRole::Entity);
+                weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
+                assets_.setModelIndex(id, weaponModelIndices_[i]);
+                if (weaponModelIndices_[i] < 0)
+                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+            }
+        }
+    }
+
+    // ── Procedural effects ──────────────────────────────────────────────
     {
         LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
+        const int id = assets_.add("glow_sphere", "", AssetRole::Effect);
         glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
-        if (glowSphereModelIdx_ < 0)
-            SDL_Log("[client] WARNING: glow sphere failed to upload");
-        else
-            SDL_Log("[client] glow sphere uploaded (model index %d)", glowSphereModelIdx_);
+        assets_.setModelIndex(id, glowSphereModelIdx_);
     }
-
-    // Movable glow sphere — smaller sphere that follows the player for dynamic lighting tests.
     {
         LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
+        const int id = assets_.add("glow_sphere_movable", "", AssetRole::Effect);
         movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
-        if (movableSphereModelIdx_ < 0)
-            SDL_Log("[client] WARNING: movable glow sphere failed to upload");
-        else
-            SDL_Log("[client] movable glow sphere uploaded (model index %d)", movableSphereModelIdx_);
+        assets_.setModelIndex(id, movableSphereModelIdx_);
     }
-
-    // Glow cylinder (beam) — unit cylinder, oriented at runtime via transform.
     {
         LoadedModel cylModel = createGlowCylinder(24, 1, glm::vec3(8.0f, 2.0f, 10.0f));
+        const int id = assets_.add("glow_cylinder", "", AssetRole::Effect);
         glowCylinderModelIdx_ = renderer.uploadSceneModel(cylModel);
-        if (glowCylinderModelIdx_ < 0)
-            SDL_Log("[client] WARNING: glow cylinder failed to upload");
-        else
-            SDL_Log("[client] glow cylinder uploaded (model index %d)", glowCylinderModelIdx_);
+        assets_.setModelIndex(id, glowCylinderModelIdx_);
     }
+
+    // Log the full asset registry.
+    SDL_Log("[client] Asset registry: %d entries", assets_.count());
+    for (const auto& e : assets_.entries())
+        SDL_Log("[client]   '%s' → model %d (role=%d, collision=%s)",
+                e.name.c_str(),
+                e.modelIndex,
+                static_cast<int>(e.role),
+                e.hasCollision ? "yes" : "no");
 
     // Remove Controllable when the local player dies (RespawnTimer added),
     // restore it when they respawn (RespawnTimer removed).
@@ -207,18 +312,40 @@ bool Game::init()
             if (sfxSystem.isInitialized())
                 sfxSystem.play(SfxId::FleshHit);
             hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
+            hitmarkerIsHeadshot_ = (evt.headshot != 0);
+            hitmarkerShieldBreak_ = (evt.shieldBreak != 0);
+
+            // Queue floating damage number at hit position.
+            if (evt.damage > 0.f) {
+                const bool isHeadshot = (evt.headshot != 0);
+                const bool isShielded = (evt.hadArmor != 0);
+                pendingDamageNumbers_.push_back({evt.pos1, evt.damage, isHeadshot, isShielded});
+
+                // Damage accumulator: reset if target changed, accumulate otherwise.
+                if (evt.target != accumTarget_) {
+                    accumTarget_ = evt.target;
+                    accumTotal_ = 0;
+                }
+                accumTotal_ += static_cast<int>(evt.damage + 0.5f);
+                accumResetTimer_ = 2.0f; // reset after 2s of no hits
+                // Track latest hit type for accumulator color.
+                accumLastHitType_ = isHeadshot ? uint8_t{2} : (isShielded ? uint8_t{1} : uint8_t{0});
+            }
         }
 
         // Skip own effects that were already spawned locally for instant feedback.
         // Exceptions that must NOT be skipped:
         //   - Charge weapons: local VFX is skipped; we rely on server events.
-        //   - Explosions: server-authoritative (not locally predicted).
-        //   - Smoke: server-authoritative.
+        //   - Explosions / Smoke: server-authoritative (not locally predicted).
+        //   - Impacts: local prediction only spawns tracers; all impact VFX
+        //     (sparks, blood, bullet holes) come from server so player hits
+        //     always get the correct surface type and normal.
         if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
-            const bool isServerOnly =
-                evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke;
-            if (!isChargeWeapon && !isServerOnly)
+            const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
+                                               evt.effectType == ParticleEffectType::Smoke ||
+                                               evt.effectType == ParticleEffectType::Impact;
+            if (!isChargeWeapon && !isServerAuthoritative)
                 return;
 
             // For charge weapons from self: also dispatch the weapon-fired event
@@ -354,6 +481,17 @@ bool Game::init()
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
             }
         }
+
+        // Build and resolve hitbox definitions (client-side, for debug visualization).
+        clientHitboxRig_ = HitboxRig::buildMixamoDefault();
+        clientHitboxRig_.resolveIndices(charRig_.jointMap());
+        {
+            int resolved = 0;
+            for (const auto& def : clientHitboxRig_.definitions)
+                if (def.boneIndex >= 0)
+                    ++resolved;
+            SDL_Log("[client] hitbox rig: %zu definitions, %d resolved", clientHitboxRig_.definitions.size(), resolved);
+        }
     }
 
     prevTime = SDL_GetPerformanceCounter();
@@ -371,9 +509,18 @@ SDL_AppResult Game::event(SDL_Event* event)
     // Forward every event to ImGui first so it can capture keyboard/mouse
     // when the cursor is hovering over a window.
     debugUI.processEvent(event);
+    hud_.processEvent(event);
 
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
+
+    // Resize HUD offscreen target when the window pixel size changes.
+    if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+        const auto newW = static_cast<uint32_t>(event->window.data1);
+        const auto newH = static_cast<uint32_t>(event->window.data2);
+        hud_.resize(newW, newH);
+        renderer.setHudTexture(hud_.getOutputTexture());
+    }
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
@@ -394,14 +541,22 @@ SDL_AppResult Game::event(SDL_Event* event)
             //     break;
             // }
 
-        // F2 — toggle all ImGui debug panels at once. Hides them all if any
-        // are visible, shows them all if everything is hidden. Handy for clean
-        // gameplay / screenshots without losing the ability to bring the
-        // overlay back with a single press.
+        // F2 — toggle the unified debug menu. Individual panels are toggled
+        // from checkboxes inside the menu, not all-at-once.
         case SDLK_F2:
-            // Animation Tester is owned by Game (animUI_), not DebugUI, so
-            // pass its visibility flag in so F2 toggles every panel uniformly.
-            debugUI.toggleAllPanels({&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_});
+            debugUI.toggleDebugMenu();
+            // Auto-release cursor when opening the debug menu so the user can
+            // interact with ImGui widgets immediately.
+            if (debugUI.showDebugMenu && mouseCaptured) {
+                mouseCaptured = false;
+                SDL_SetWindowRelativeMouseMode(window, false);
+            }
+            break;
+
+        // F3 — toggle mouse capture on/off independently.
+        case SDLK_F3:
+            mouseCaptured = !mouseCaptured;
+            SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
             break;
 
         // Particle system test keys
@@ -462,6 +617,14 @@ SDL_AppResult Game::event(SDL_Event* event)
     // NOTE: Local weapon VFX (tracers, impact, recoil) are handled continuously
     // in iterate() so held fire (auto weapons) spawns effects every cooldown tick.
 
+    // Forward audio-device hot-swap events to the SFX system so it can
+    // gracefully reopen when headphones are plugged / unplugged.
+    if (event->type == SDL_EVENT_AUDIO_DEVICE_ADDED || event->type == SDL_EVENT_AUDIO_DEVICE_REMOVED ||
+        event->type == SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED)
+    {
+        sfxSystem.handleEvent(*event);
+    }
+
     // Scroll wheel cycles weapon slots
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
         if (event->wheel.y > 0)
@@ -471,9 +634,14 @@ SDL_AppResult Game::event(SDL_Event* event)
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
+    // Suppress recapture when ImGui wants the mouse (hovering over a debug
+    // window) or when the debug menu is open — let the user interact freely.
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouseCaptured) {
-        mouseCaptured = true;
-        SDL_SetWindowRelativeMouseMode(window, true);
+        const ImGuiIO& io = ImGui::GetIO();
+        if (!io.WantCaptureMouse && !debugUI.showDebugMenu) {
+            mouseCaptured = true;
+            SDL_SetWindowRelativeMouseMode(window, true);
+        }
     }
 
     return SDL_APP_CONTINUE;
@@ -561,9 +729,29 @@ SDL_AppResult Game::iterate()
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
-    frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
-    prevTime = k_now;
-    accumulator += frameTime;
+
+    // If the game was suspended (backgrounded / minimized), the raw delta can
+    // be enormous.  Rather than trying to catch up through potentially seconds
+    // of physics ticks (and replaying every buffered TCP message visually), we
+    // detect the gap and skip straight to the present.  The next client.poll()
+    // will still drain the TCP buffer so entity state snaps to current.
+    static constexpr float k_suspendThreshold = 0.5f; // half-second gap = clearly suspended
+    if (frameTime > k_suspendThreshold) {
+        SDL_Log("[client] detected suspend (gap %.2fs) — resetting accumulator", static_cast<double>(frameTime));
+        prevTime = k_now;
+        accumulator = k_physicsDt; // run exactly one tick to apply latest state
+        // Drain the network now so we snap to the current server state
+        // without fast-forwarding through every intermediate update.
+        client.poll(registry);
+        refreshRemotePlayerRenderables();
+        refreshRemoteProjectileRenderables();
+        refreshRemoteRespawnRenderables();
+        // Fall through to render the current frame normally.
+    } else {
+        frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
+        prevTime = k_now;
+        accumulator += frameTime;
+    }
 
     static int iterCount = 0;
     if (false && ++iterCount <= 3)
@@ -681,6 +869,7 @@ SDL_AppResult Game::iterate()
 
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
+        refreshRemoteRespawnRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -756,12 +945,12 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
                 const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
-                // Raycast against full world geometry (floor + boxes + brushes).
-                const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::testWorld());
-                const float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
+                // Raycast world geometry for tracer endpoint.  Impact effects
+                // (sparks / blood / bullet holes) are NOT spawned here — they
+                // come from the server's authoritative NetParticleEvent so that
+                // player hits get the correct surface type and normal.
+                const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::activeWorld());
                 const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
-                const glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
-                const SurfaceType hitSurface = worldHit.surface;
 
                 // Dispatch weapon-fired event for any listeners
                 WeaponFiredEvent wfe;
@@ -779,7 +968,6 @@ SDL_AppResult Game::iterate()
                 const float hipHitDist = glm::length(hipToHit);
                 const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
                 particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
-                particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only)
                 const RecoilParams& rp = getRecoilParams(currentEquippedType_);
@@ -822,6 +1010,56 @@ SDL_AppResult Game::iterate()
         if (!isBeamNow && wasBeamActive_)
             sfxSystem.stop(SfxId::EnergyBeamLoop);
         wasBeamActive_ = isBeamNow;
+
+        // Beam hitmarker: client-side raycast against player hitboxes while firing.
+        // Note: Player component is not synced to clients, so we raycast against
+        // HitboxInstance directly (skipping the local player entity).
+        if (isBeamNow) {
+            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape>().each(
+                [&](entt::entity localE,
+                    const BeamState&,
+                    const InputSnapshot& inp,
+                    const Position& pos,
+                    const CollisionShape& shape) {
+                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float cp = std::cos(inp.pitch);
+                    const glm::vec3 dir{std::sin(inp.yaw) * cp, -std::sin(inp.pitch), std::cos(inp.yaw) * cp};
+
+                    physics::HitboxHit bestHit;
+                    bestHit.distance = 5000.0f;
+                    registry.view<Position, CollisionShape, HitboxInstance>().each([&](entt::entity target,
+                                                                                       const Position& tPos,
+                                                                                       const CollisionShape& tShape,
+                                                                                       const HitboxInstance& hb) {
+                        if (target == localE)
+                            return;
+                        const physics::WorldAABB bounds{tPos.value - tShape.halfExtents,
+                                                        tPos.value + tShape.halfExtents};
+                        float aabbDist = bestHit.distance;
+                        glm::vec3 aabbN{0.0f};
+                        if (!physics::raycastAABB(eye, dir, bounds, bestHit.distance, aabbDist, aabbN))
+                            return;
+                        for (const auto& cap : hb.capsules) {
+                            float dist = bestHit.distance;
+                            glm::vec3 n{0.0f};
+                            if (!physics::raycastCapsule(
+                                    eye, dir, cap.pointA, cap.pointB, cap.radius, bestHit.distance, dist, n))
+                                continue;
+                            bestHit.hit = true;
+                            bestHit.distance = dist;
+                            bestHit.point = eye + dir * dist;
+                            bestHit.normal = n;
+                            bestHit.region = cap.region;
+                            bestHit.entity = target;
+                        }
+                    });
+
+                    if (bestHit.hit) {
+                        hitmarkerTimer_ = 0.10f; // short pulse — refreshed every frame while hitting
+                        hitmarkerIsHeadshot_ = (bestHit.region == BodyRegion::Head);
+                    }
+                });
+        }
     }
 
     // Draw persistent HUD text each frame
@@ -901,9 +1139,12 @@ SDL_AppResult Game::iterate()
     // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
     // CPU-skins every rig mesh, and streams the resulting vertices into its
     // per-entity renderer model instance.
+    //
+    // Also populates the JointMatrices ECS component with model-space bone transforms
+    // for skeleton-driven hitbox capsule placement.
     {
         std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity,
+        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity e,
                                                                                           AnimatedCharacter& ac,
                                                                                           const Velocity& vel,
                                                                                           const PlayerState& ps,
@@ -922,6 +1163,10 @@ SDL_AppResult Game::iterate()
             ai.wallRunSide = static_cast<int>(ps.wallRunSide);
             ac.animator->update(ai, frameTime);
 
+            // Store model-space joint matrices for hitbox system.
+            auto& jm = registry.get_or_emplace<JointMatrices>(e);
+            jm.matrices = ac.animator->jointModelMatrices();
+
             ac.animator->computeSkinnedVertices(skinnedBuffer);
             for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
                 const auto& sv = skinnedBuffer[m];
@@ -929,6 +1174,10 @@ SDL_AppResult Game::iterate()
                     ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
             }
         });
+
+        // Update hitbox capsules from bone transforms (client-side for debug visualization).
+        if (charRig_.isLoaded())
+            systems::updateHitboxes(registry, clientHitboxRig_, kRigScale_, rigMeshMinY_);
     }
 
     // Build entity render list
@@ -958,6 +1207,8 @@ SDL_AppResult Game::iterate()
                                                                                        const WeaponState& ws,
                                                                                        const CollisionShape&) {
             if (registry.all_of<LocalPlayer>(e))
+                return;
+            if (registry.all_of<RespawnTimer>(e))
                 return;
 
             const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
@@ -1050,7 +1301,7 @@ SDL_AppResult Game::iterate()
                 beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
 
                 // Predicted endpoint: raycast from eye along current view.
-                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
                 beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
             }
 
@@ -1129,7 +1380,7 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 fwd{
                     std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
                 lightStart = renderEye;
-                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::testWorld());
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
                 lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
             }
 
@@ -1180,7 +1431,8 @@ SDL_AppResult Game::iterate()
     // Build weapon viewmodel
     {
         WeaponViewmodel vm;
-        if (currentWeaponModelIdx >= 0) {
+        const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end()) {
             vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
 
@@ -1386,6 +1638,16 @@ SDL_AppResult Game::iterate()
 
     // 10. Render
     debugUI.newFrame();
+
+    // Unified debug menu — one window with toggles for every debug panel.
+    debugUI.buildDebugMenu({
+        {"HUD Tweaker", &showHudDebug_},
+        {"Viewmodel Tweaker", &showViewmodelUI},
+        {"3P Weapon Tweaker", &showTPWeaponUI_},
+        {"Dynamic Lighting", &showDynLightUI_},
+        {"Animation Tester", &animUI_.show},
+    });
+
     debugUI.buildUI(registry,
                     tickCount,
                     mouseSensitivity,
@@ -1401,97 +1663,7 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
 
-    // Scoreboard — shown while Tab is held.
-    if (ImGui::IsKeyDown(ImGuiKey_Tab)) {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-
-        constexpr ImGuiWindowFlags k_scoreFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                                                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
-                                                  ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-        ImGui::SetNextWindowPos(ImVec2(static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f),
-                                ImGuiCond_Always,
-                                ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowBgAlpha(0.80f);
-
-        if (ImGui::Begin("##scoreboard", nullptr, k_scoreFlags)) {
-            // Phase banner
-            const char* phaseStr = "Warmup";
-            switch (currentMatchPhase) {
-            case MatchPhase::COUNTDOWN:
-                phaseStr = "Starting...";
-                break;
-            case MatchPhase::IN_PROGRESS:
-                phaseStr = "In Progress";
-                break;
-            case MatchPhase::FINISHED:
-                phaseStr = "Game Over";
-                break;
-            default:
-                break;
-            }
-
-            const float centerX = ImGui::GetContentRegionAvail().x;
-            const ImVec2 phaseTextSize = ImGui::CalcTextSize(phaseStr);
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - phaseTextSize.x) * 0.5f);
-            ImGui::TextUnformatted(phaseStr);
-            if (currentMatchPhase == MatchPhase::COUNTDOWN || currentMatchPhase == MatchPhase::FINISHED) {
-                char timerBuf[16];
-                std::snprintf(timerBuf, sizeof(timerBuf), "%.1fs", static_cast<double>(countdownTimer));
-                const ImVec2 timerSize = ImGui::CalcTextSize(timerBuf);
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - timerSize.x) * 0.5f);
-                ImGui::TextUnformatted(timerBuf);
-            }
-            ImGui::Separator();
-
-            // Find local player to highlight.
-            entt::entity localPlayer = entt::null;
-            registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayer = e; });
-
-            constexpr ImGuiTableFlags k_tableFlags =
-                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit;
-            if (ImGui::BeginTable("##scores", 5, k_tableFlags)) {
-                ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthFixed, 160.0f);
-                ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-                ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-                ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, 55.0f);
-                ImGui::TableSetupColumn("Won", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-                ImGui::TableHeadersRow();
-
-                int row = 0;
-                registry.view<PlayerMatchStats>().each([&](entt::entity e, const PlayerMatchStats& stats) {
-                    const bool isLocal = (e == localPlayer);
-                    const int clientId = registry.all_of<ClientId>(e) ? registry.get<ClientId>(e).value : (row + 1);
-
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    if (isLocal) {
-                        char localLabel[40];
-                        std::snprintf(localLabel, sizeof(localLabel), "> You (Player #%d)", clientId);
-                        ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "%s", localLabel);
-                    } else {
-                        ImGui::Text("Player #%d", clientId);
-                    }
-
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::Text("%d", stats.kills);
-                    ImGui::TableSetColumnIndex(2);
-                    ImGui::Text("%d", stats.deaths);
-                    ImGui::TableSetColumnIndex(3);
-                    ImGui::Text("%d", stats.score);
-                    ImGui::TableSetColumnIndex(4);
-                    ImGui::Text("%s", stats.hasWon ? "Yes" : "-");
-
-                    ++row;
-                });
-                if (row == 0)
-                    ImGui::TextDisabled("No players");
-
-                ImGui::EndTable();
-            }
-        }
-        ImGui::End();
-    }
+    // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
 
     // Process ammo refill request — pulse refillAmmo on InputSnapshot for
     // exactly one frame so the server handles it once then stops.
@@ -1503,6 +1675,20 @@ SDL_AppResult Game::iterate()
     }
     debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
     buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
+
+    // Hitbox debug visualization — project capsules into screen space.
+    {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSize(window, &winW, &winH);
+        const float winWf = static_cast<float>(winW);
+        const float winHf = static_cast<float>(winH);
+        const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
+        const glm::mat4 hbProj =
+            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+        const glm::mat4 hbVP = hbProj * hbView;
+        debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
+        debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+    }
 #ifdef USE_HYBRID_RENDERER
     debugUI.buildRenderTogglesUI(renderer.legacy());
     debugUI.buildLightingUI(renderer.legacy());
@@ -1512,6 +1698,8 @@ SDL_AppResult Game::iterate()
     debugUI.buildLightingUI(renderer);
     debugUI.buildSkyboxUI(renderer);
 #endif
+
+    HudDebugPanel::build(hud_, &showHudDebug_);
 
     // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
     if (showViewmodelUI) {
@@ -1555,42 +1743,8 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(recoilPitch_),
                         static_cast<double>(recoilPushBack_),
                         static_cast<double>(recoilRoll_));
-
-            ImGui::SeparatorText("Crosshair");
-            ImGui::Checkbox("Show Crosshair", &showCrosshair_);
-            ImGui::DragFloat("CH Size", &crosshairSize_, 0.5f, 1.0f, 30.0f);
-            ImGui::DragFloat("CH Gap", &crosshairGap_, 0.5f, 0.0f, 20.0f);
-            ImGui::DragFloat("CH Thickness", &crosshairThickness_, 0.5f, 0.5f, 5.0f);
-            ImGui::ColorEdit4("CH Color", &crosshairColor_.x);
-            ImGui::Checkbox("CH Dot", &crosshairDot_);
         }
         ImGui::End();
-    }
-
-    // Draw screen crosshair via ImGui foreground draw list
-    if (showCrosshair_ && mouseCaptured) {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-        const float cx = static_cast<float>(winW) * 0.5f;
-        const float cy = static_cast<float>(winH) * 0.5f;
-
-        const ImU32 col = ImGui::ColorConvertFloat4ToU32(
-            ImVec4(crosshairColor_.r, crosshairColor_.g, crosshairColor_.b, crosshairColor_.a));
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-
-        const float g = crosshairGap_;
-        const float s = crosshairSize_;
-        const float t = crosshairThickness_;
-
-        // Four lines: top, bottom, left, right
-        dl->AddLine(ImVec2(cx, cy - g - s), ImVec2(cx, cy - g), col, t); // up
-        dl->AddLine(ImVec2(cx, cy + g), ImVec2(cx, cy + g + s), col, t); // down
-        dl->AddLine(ImVec2(cx - g - s, cy), ImVec2(cx - g, cy), col, t); // left
-        dl->AddLine(ImVec2(cx + g, cy), ImVec2(cx + g + s, cy), col, t); // right
-
-        // Optional center dot
-        if (crosshairDot_)
-            dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
     }
 
     // Kill feed — tick timers and drop expired entries.
@@ -1598,63 +1752,7 @@ SDL_AppResult Game::iterate()
         e.displayTimer -= frameTime;
     std::erase_if(killFeed, [](const KillFeedEvent& e) { return e.displayTimer <= 0.0f; });
 
-    // Kill feed overlay — top-right corner, always visible.
-    if (!killFeed.empty()) {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-        static constexpr float k_entryH = 22.0f;
-        static constexpr float k_padX = 12.0f;
-        static constexpr float k_marginRight = 10.0f;
-        static constexpr float k_marginTop = 10.0f;
-        static constexpr float k_fadeTime = 1.0f;
-
-        ClientId localClientId{-1};
-        registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
-
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-        ImFont* font = ImGui::GetFont();
-        const float fontSize = ImGui::GetFontSize();
-
-        for (size_t i = 0; i < killFeed.size(); ++i) {
-            const auto& evt = killFeed[i];
-            const float alpha = std::min(evt.displayTimer / k_fadeTime, 1.0f);
-
-            const bool killerIsLocal = (localClientId.value != -1 && evt.killerId == localClientId);
-            const bool victimIsLocal = (localClientId.value != -1 && evt.victimId == localClientId);
-
-            char buf[64];
-            const char* killerName = killerIsLocal ? "You" : nullptr;
-            const char* victimName = victimIsLocal ? "You" : nullptr;
-            char killerBuf[16], victimBuf[16];
-            if (!killerName) {
-                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", evt.killerId.value);
-                killerName = killerBuf;
-            }
-            if (!victimName) {
-                std::snprintf(victimBuf, sizeof(victimBuf), "Player #%d", evt.victimId.value);
-                victimName = victimBuf;
-            }
-            std::snprintf(buf, sizeof(buf), "%s killed %s", killerName, victimName);
-
-            const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, buf);
-            const float boxW = textSize.x + k_padX * 2.0f;
-            const float boxH = k_entryH;
-            const float x = static_cast<float>(winW) - boxW - k_marginRight;
-            const float y = k_marginTop + static_cast<float>(i) * (boxH + 2.0f);
-
-            ImVec4 bgColor = {0.0f, 0.0f, 0.0f, 0.55f * alpha};
-            if (killerIsLocal)
-                bgColor = {0.1f, 0.35f, 0.05f, 0.75f * alpha}; // green tint — you got the kill
-            else if (victimIsLocal)
-                bgColor = {0.4f, 0.05f, 0.05f, 0.75f * alpha}; // red tint — you died
-
-            const ImU32 bg = ImGui::ColorConvertFloat4ToU32(bgColor);
-            const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
-
-            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 3.0f);
-            dl->AddText(font, fontSize, ImVec2(x + k_padX, y + (boxH - fontSize) * 0.5f), fg, buf);
-        }
-    }
+    // Kill feed overlay — now handled by HUD KillFeed widget.
 
     // Death HUD — bottom bar shown while local player is dead.
     {
@@ -1713,27 +1811,10 @@ SDL_AppResult Game::iterate()
         }
     }
 
-    // Hitmarker — diagonal X that flashes on confirmed enemy hits, fades out.
-    if (hitmarkerTimer_ > 0.0f) {
+    // Hitmarker — now handled by HUD HitMarkerWidget.
+    // Timer still ticks for HUD integration (hitmarkerTimer_ feeds HudGameState::hitConfirms).
+    if (hitmarkerTimer_ > 0.0f)
         hitmarkerTimer_ -= frameTime;
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-        const float cx = static_cast<float>(winW) * 0.5f;
-        const float cy = static_cast<float>(winH) * 0.5f;
-
-        const float alpha = std::min(hitmarkerTimer_ / 0.15f, 1.0f); // fade out last 150ms
-        const float hmSize = 8.0f;
-        const float hmGap = 4.0f;
-        const float hmThick = 2.5f;
-        const ImU32 hmCol = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha));
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-
-        // Four diagonal lines forming an X, offset from center by hmGap
-        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy - hmGap - hmSize), ImVec2(cx - hmGap, cy - hmGap), hmCol, hmThick);
-        dl->AddLine(ImVec2(cx + hmGap, cy - hmGap), ImVec2(cx + hmGap + hmSize, cy - hmGap - hmSize), hmCol, hmThick);
-        dl->AddLine(ImVec2(cx - hmGap - hmSize, cy + hmGap + hmSize), ImVec2(cx - hmGap, cy + hmGap), hmCol, hmThick);
-        dl->AddLine(ImVec2(cx + hmGap, cy + hmGap), ImVec2(cx + hmGap + hmSize, cy + hmGap + hmSize), hmCol, hmThick);
-    }
 
     // Third-person weapon tweaker — per-weapon tuning for remote player weapons.
     if (showTPWeaponUI_) {
@@ -1813,6 +1894,198 @@ SDL_AppResult Game::iterate()
         ImGui::End();
     }
 
+    // Update and render HUD.
+    if (hud_.getOutputTexture()) {
+        HudGameState hudState{};
+
+        // ── Local player health, armor, alive ──
+        registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
+            hudState.health = static_cast<int>(hp.health);
+            hudState.maxHealth = 100;
+            hudState.armor = static_cast<int>(hp.armor);
+            hudState.maxArmor = 100;
+        });
+        registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& ps) { hudState.isAlive = !ps.IsDead; });
+
+        // ── Weapon / ammo ──
+        registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+            const GunInstance* gun = &ws.primary;
+            switch (ws.current) {
+            case WeaponSlot::SECONDARY:
+                gun = &ws.secondary;
+                break;
+            case WeaponSlot::TERTIARY:
+                gun = &ws.tertiary;
+                break;
+            case WeaponSlot::QUATERNARY:
+                gun = &ws.quaternary;
+                break;
+            default:
+                break;
+            }
+            hudState.ammoClip = gun->currentMagAmmo;
+            hudState.ammoReserve = gun->totalAmmo;
+            hudState.weaponId = static_cast<int>(gun->type);
+        });
+
+        // ── Round timer / buy phase ──
+        hudState.roundTimeRemaining = countdownTimer;
+        hudState.isBuyPhase = (currentMatchPhase == MatchPhase::WARMUP || currentMatchPhase == MatchPhase::COUNTDOWN);
+
+        // ── Kill feed: convert KillFeedEvent → HudKillFeedEntry ──
+        ClientId localClientId{-1};
+        registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+        thread_local std::vector<HudKillFeedEntry> hudKillEntries;
+        hudKillEntries.clear();
+        // Only pass each event once — sentToHud flag prevents duplicates.
+        for (auto& evt : killFeed) {
+            if (!evt.sentToHud) {
+                evt.sentToHud = true;
+                HudKillFeedEntry entry;
+                if (localClientId.value != -1 && evt.killerId == localClientId)
+                    entry.killerName = "You";
+                else {
+                    char buf[16];
+                    SDL_snprintf(buf, sizeof(buf), "Player #%d", evt.killerId.value);
+                    entry.killerName = buf;
+                }
+                if (localClientId.value != -1 && evt.victimId == localClientId)
+                    entry.victimName = "You";
+                else {
+                    char buf[16];
+                    SDL_snprintf(buf, sizeof(buf), "Player #%d", evt.victimId.value);
+                    entry.victimName = buf;
+                }
+                hudKillEntries.push_back(entry);
+            }
+        }
+        hudState.killFeedEvents = hudKillEntries;
+
+        // ── Hit confirms: feed from hitmarkerTimer_ (set by onParticleEvent) ──
+        thread_local std::vector<HudHitConfirm> hudHitConfirms;
+        hudHitConfirms.clear();
+        if (hitmarkerTimer_ > 0.2f) { // just triggered (timer starts at 0.25)
+            hudHitConfirms.push_back({hitmarkerIsHeadshot_, false, hitmarkerShieldBreak_});
+        }
+        hudState.hitConfirms = hudHitConfirms;
+
+        // ── Vignette: detect health/armor deltas for damage & shield break ──
+        {
+            float curHealth = 100.f, curArmor = 100.f;
+            registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
+                curHealth = hp.health;
+                curArmor = hp.armor;
+            });
+
+            const float healthLost = prevHealth_ - curHealth;
+            const float armorLost = prevArmor_ - curArmor;
+            const float totalLost = std::max(0.f, healthLost) + std::max(0.f, armorLost);
+
+            hudState.armorBroke = (prevArmor_ > 0.f && curArmor <= 0.f);
+
+            // Red vignette on damage — suppressed when the shield breaks so
+            // the blue shield-break vignette plays alone.
+            if (totalLost > 0.f && !hudState.armorBroke) {
+                hudState.tookDamage = true;
+                hudState.damageIntensity = std::clamp(totalLost / 100.f, 0.f, 1.f);
+            }
+
+            prevHealth_ = curHealth;
+            prevArmor_ = curArmor;
+        }
+
+        // ── Scoreboard: all players ──
+        thread_local std::vector<HudTeamMemberStatus> hudAllPlayers;
+        hudAllPlayers.clear();
+        registry.view<ClientId, Health, PlayerState>().each(
+            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerState& ps) {
+                HudTeamMemberStatus status;
+                if (localClientId.value != -1 && cid == localClientId)
+                    status.name = "You";
+                else {
+                    char buf[16];
+                    SDL_snprintf(buf, sizeof(buf), "Player #%d", cid.value);
+                    status.name = buf;
+                }
+                status.health = static_cast<int>(hp.health);
+                status.isAlive = !ps.IsDead;
+                if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
+                    status.kills = pms->kills;
+                    status.deaths = pms->deaths;
+                }
+                status.ping = static_cast<int>(client.getNetStats().rttMs);
+                hudAllPlayers.push_back(status);
+            });
+        // For now all players go into allies (no team system exists).
+        hudState.allies = hudAllPlayers;
+        hudState.allyScore = 0;
+        hudState.enemyScore = 0;
+
+        // ── Minimap: local player + all other player positions ──
+        registry.view<LocalPlayer, Position, InputSnapshot>().each(
+            [&](const Position& pos, const InputSnapshot& input) {
+                hudState.localPlayerX = pos.value.x;
+                hudState.localPlayerZ = pos.value.z;
+                hudState.localPlayerYaw = input.yaw;
+            });
+
+        thread_local std::vector<HudMinimapDot> hudMinimapDots;
+        hudMinimapDots.clear();
+        registry.view<ClientId, Position, PlayerState>().each(
+            [&](const ClientId& cid, const Position& pos, const PlayerState& ps) {
+                if (ps.IsDead)
+                    return;
+                if (localClientId.value != -1 && cid == localClientId)
+                    return; // Skip local player (always drawn at center).
+                hudMinimapDots.push_back({pos.value.x, pos.value.z});
+            });
+        hudState.enemyDots = hudMinimapDots;
+
+        static int minimapLogTimer = 0;
+        if (++minimapLogTimer % 300 == 1) // Log every ~5 seconds at 60fps
+            SDL_Log("Minimap: localPos=(%.0f,%.0f) enemyDots=%zu",
+                    static_cast<double>(hudState.localPlayerX),
+                    static_cast<double>(hudState.localPlayerZ),
+                    hudMinimapDots.size());
+
+        // ── Screen dimensions ──
+        int winW = 0, winH = 0;
+        SDL_GetWindowSizeInPixels(window, &winW, &winH);
+        hudState.screenW = static_cast<float>(winW);
+        hudState.screenH = static_cast<float>(winH);
+
+        // ── Floating damage numbers ──
+        thread_local std::vector<HudDamageNumber> hudDamageNumbers;
+        hudDamageNumbers.clear();
+        for (const auto& pdn : pendingDamageNumbers_) {
+            hudDamageNumbers.push_back(
+                {pdn.pos.x, pdn.pos.y, pdn.pos.z, static_cast<int>(pdn.damage + 0.5f), pdn.headshot, pdn.shielded});
+        }
+        pendingDamageNumbers_.clear();
+        hudState.damageNumbers = hudDamageNumbers;
+
+        // ── Damage accumulator ──
+        accumResetTimer_ -= frameTime;
+        if (accumResetTimer_ <= 0.f) {
+            accumTarget_ = entt::null;
+            accumTotal_ = 0;
+        }
+        hudState.damageAccum.total = accumTotal_;
+        if (accumLastHitType_ == 2)
+            hudState.damageAccum.color = HudColor(1.0f, 0.85f, 0.2f, 1.f); // gold (headshot)
+        else if (accumLastHitType_ == 1)
+            hudState.damageAccum.color = HudColor(0.3f, 0.6f, 1.0f, 1.f);  // blue (shield)
+        else
+            hudState.damageAccum.color = HudColor(1.f, 1.f, 1.f, 1.f);     // white (health)
+
+        // ── View-projection matrix for world→screen projection ──
+        hudState.viewProj = renderer.getCamera().getViewProjection();
+
+        hud_.update(frameTime, hudState);
+        hud_.render();
+    }
+
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
@@ -1853,6 +2126,7 @@ void Game::quit()
         recorder.stopRecording();
     sfxSystem.quit();
     particleSystem.quit();
+    hud_.quit();
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();
@@ -1911,6 +2185,45 @@ void Game::refreshRemoteProjectileRenderables()
             rend.scale = glm::vec3(10);
             // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
             rend.visible = true;
+        });
+}
+
+void Game::refreshRemoteRespawnRenderables()
+{
+    registry.view<Position, WeaponSpawner, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const WeaponSpawner& spawner, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            rend.modelIndex = 1;
+
+            switch (spawner.type) {
+            case WeaponType::Rifle:
+                rend.modelIndex = 6;
+                rend.scale = glm::vec3(0.025f);
+                break;
+            case WeaponType::RailGun:
+                rend.modelIndex = 7;
+                rend.scale = glm::vec3(1.0f);
+                break;
+            case WeaponType::Rocket:
+                rend.modelIndex = 8;
+                rend.scale = glm::vec3(0.025f);
+                break;
+            case WeaponType::EnergyGun:
+                rend.modelIndex = 9;
+                rend.scale = glm::vec3(1.0f);
+                break;
+            default:
+                rend.modelIndex = 1;
+                rend.scale = glm::vec3(1.0f);
+            }
+
+            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+            // rend.scale = glm::vec3(1);
+            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+            rend.visible = true;
+            // if (spawner.hasWeapon) {
+            //     rend.visible = true;
+            // }
         });
 }
 

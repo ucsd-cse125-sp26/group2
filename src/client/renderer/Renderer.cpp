@@ -46,14 +46,6 @@ struct Matrices
     glm::mat4 normalMatrix; ///< transpose(inverse(model)), padded to mat4 for std140.
 };
 
-/// @brief Vertex UBO for the old scene pipeline (no normalMatrix).
-struct SceneMatrices
-{
-    glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 projection;
-};
-
 /// @brief Fragment UBO slot 0 -- per-mesh PBR material.
 struct MaterialUBO
 {
@@ -161,7 +153,9 @@ SDL_GPUShader* Renderer::loadShaderFromFile(const char* name,
                                             Uint32 storageTextureCount)
 {
     const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)    ? ".msl"
+                              : (shaderFormat == SDL_GPU_SHADERFORMAT_DXIL) ? ".dxil"
+                                                                            : ".spv";
 
     char path[512];
     SDL_snprintf(path, sizeof(path), "%sshaders/%s%s", k_base ? k_base : "", name, k_ext);
@@ -206,7 +200,9 @@ SDL_GPUComputePipeline* Renderer::createComputePipeline(const char* shaderName,
                                                         Uint32 threadCountZ)
 {
     const char* const k_base = SDL_GetBasePath();
-    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL) ? ".msl" : ".spv";
+    const char* const k_ext = (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)    ? ".msl"
+                              : (shaderFormat == SDL_GPU_SHADERFORMAT_DXIL) ? ".dxil"
+                                                                            : ".spv";
 
     char path[512];
     SDL_snprintf(path, sizeof(path), "%sshaders/%s%s", k_base ? k_base : "", shaderName, k_ext);
@@ -242,47 +238,6 @@ SDL_GPUComputePipeline* Renderer::createComputePipeline(const char* shaderName,
 }
 
 // Pipeline creation
-
-bool Renderer::initScenePipeline()
-{
-    // Scene geometry: projective.vert (1 vert UBO) + normal.frag (1 frag sampler + 1 frag UBO).
-    SDL_GPUShader* vert = loadShaderFromFile("projective.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-    SDL_GPUShader* frag = loadShaderFromFile("normal.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
-    if (!vert || !frag) {
-        SDL_ReleaseGPUShader(device, vert);
-        SDL_ReleaseGPUShader(device, frag);
-        return false;
-    }
-
-    SDL_GPUColorTargetDescription ct{};
-    ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT; // render to HDR
-
-    SDL_GPUGraphicsPipelineCreateInfo pci{};
-    pci.vertex_shader = vert;
-    pci.fragment_shader = frag;
-    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pci.target_info.color_target_descriptions = &ct;
-    pci.target_info.num_color_targets = 1;
-    pci.target_info.has_depth_stencil_target = true;
-    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
-    pci.depth_stencil_state.enable_depth_test = true;
-    pci.depth_stencil_state.enable_depth_write = true;
-    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
-    // Y-flip in projection reverses screen-space winding; tell the GPU that CW = front.
-    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
-
-    scenePipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
-    SDL_ReleaseGPUShader(device, vert);
-    SDL_ReleaseGPUShader(device, frag);
-
-    if (!scenePipeline) {
-        SDL_Log("Renderer: scene pipeline creation failed: %s", SDL_GetError());
-        return false;
-    }
-    return true;
-}
 
 bool Renderer::initPBRPipeline()
 {
@@ -363,7 +318,7 @@ bool Renderer::initPBRPipeline()
 
         // Reload shaders for the second pipeline (SDL requires separate shader objects).
         SDL_GPUShader* vertT = loadShaderFromFile("pbr.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-        SDL_GPUShader* fragT = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2);
+        SDL_GPUShader* fragT = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 8, 3);
 
         SDL_GPUGraphicsPipelineCreateInfo pciT = pci; // copy from opaque
         pciT.vertex_shader = vertT;
@@ -510,46 +465,6 @@ bool Renderer::initShadowPipeline()
 
     if (!shadowPipeline) {
         SDL_Log("Renderer: shadow pipeline creation failed: %s", SDL_GetError());
-        return false;
-    }
-    return true;
-}
-
-bool Renderer::initSceneShadowPipeline()
-{
-    // Scene geometry into shadow map: projective.vert (procedural verts) + shadow.frag (no-op).
-    SDL_GPUShader* vert = loadShaderFromFile("projective.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-    SDL_GPUShader* frag = loadShaderFromFile("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
-    if (!vert || !frag) {
-        SDL_ReleaseGPUShader(device, vert);
-        SDL_ReleaseGPUShader(device, frag);
-        return false;
-    }
-
-    SDL_GPUGraphicsPipelineCreateInfo pci{};
-    pci.vertex_shader = vert;
-    pci.fragment_shader = frag;
-    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    // No vertex input — projective.vert generates all positions from gl_VertexIndex.
-    pci.target_info.num_color_targets = 0;
-    pci.target_info.has_depth_stencil_target = true;
-    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
-    pci.depth_stencil_state.enable_depth_test = true;
-    pci.depth_stencil_state.enable_depth_write = true;
-    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE; // No culling — same reason as shadowPipeline.
-    // Same depth bias as shadow pipeline.
-    pci.rasterizer_state.depth_bias_constant_factor = 0.75f;
-    pci.rasterizer_state.depth_bias_slope_factor = 1.0f;
-    pci.rasterizer_state.enable_depth_bias = true;
-
-    sceneShadowPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
-    SDL_ReleaseGPUShader(device, vert);
-    SDL_ReleaseGPUShader(device, frag);
-
-    if (!sceneShadowPipeline) {
-        SDL_Log("Renderer: scene shadow pipeline creation failed: %s", SDL_GetError());
         return false;
     }
     return true;
@@ -820,7 +735,7 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
 
 bool Renderer::initIBL()
 {
-    // ----- Texture resources -------------------------------------------------
+    // Texture resources
 
     // BRDF LUT (512x512 RG16F). Written by brdf_lut.comp, sampled in pbr.frag.
     {
@@ -947,7 +862,7 @@ bool Renderer::initIBL()
         }
     }
 
-    // ----- Compute pipelines -------------------------------------------------
+    // Compute pipelines
     //
     // brdf_lut.comp: 0 samplers, 1 RW storage texture, 0 UBOs.
     // irradiance.comp / prefilter.comp: 1 sampler (envCubemap), 1 RW storage
@@ -961,7 +876,7 @@ bool Renderer::initIBL()
         return false;
     }
 
-    // ----- Procedural sky upload to envCubemap -------------------------------
+    // Procedural sky upload to envCubemap
     //
     // Matches the analytic sky in skybox.frag so the IBL stays consistent with
     // what the user sees in the sky. Only runs once at startup; loadHDRSkybox()
@@ -1070,7 +985,7 @@ bool Renderer::initIBL()
         SDL_ReleaseGPUTransferBuffer(device, tb);
     }
 
-    // ----- BRDF LUT (one-time) -----------------------------------------------
+    // BRDF LUT (one-time)
     //
     // Self-contained -- no input cubemap needed. The split-sum BRDF integration
     // depends only on (NdotV, roughness).
@@ -1086,7 +1001,7 @@ bool Renderer::initIBL()
         SDL_WaitForGPUIdle(device);
     }
 
-    // ----- Irradiance + prefilter from procedural sky ------------------------
+    // Irradiance + prefilter from procedural sky
     if (!regenerateIBLFromCubemap(envCubemap)) {
         SDL_Log("IBL: regenerateIBLFromCubemap failed for procedural sky");
         return false;
@@ -1595,6 +1510,55 @@ bool Renderer::initCAS()
     return casPipeline != nullptr;
 }
 
+bool Renderer::initHudBlit()
+{
+    SDL_GPUShader* vert = loadShaderFromFile("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+    SDL_GPUShader* frag = loadShaderFromFile("hud_blit.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    SDL_GPUColorTargetDescription ct{};
+    ct.format = swapchainFormat;
+    ct.blend_state.enable_blend = true;
+    ct.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    ct.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    ct.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    ct.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    ct.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    ct.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.target_info.color_target_descriptions = &ct;
+    pci.target_info.num_color_targets = 1;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    hudBlitPipeline_ = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!hudBlitPipeline_) {
+        SDL_Log("Renderer: HUD blit pipeline failed: %s", SDL_GetError());
+        return false;
+    }
+
+    // Nearest-clamp sampler for pixel-perfect blit.
+    SDL_GPUSamplerCreateInfo sci{};
+    sci.min_filter = SDL_GPU_FILTER_NEAREST;
+    sci.mag_filter = SDL_GPU_FILTER_NEAREST;
+    sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    hudSampler_ = SDL_CreateGPUSampler(device, &sci);
+
+    return hudBlitPipeline_ && hudSampler_;
+}
+
 // init
 
 bool Renderer::init(SDL_Window* win)
@@ -1604,6 +1568,9 @@ bool Renderer::init(SDL_Window* win)
     constexpr SDL_GPUShaderFormat k_wantedFormats = SDL_GPU_SHADERFORMAT_SPIRV
 #ifdef HAVE_MSL_SHADERS
                                                     | SDL_GPU_SHADERFORMAT_MSL
+#endif
+#ifdef HAVE_DXIL_SHADERS
+                                                    | SDL_GPU_SHADERFORMAT_DXIL
 #endif
         ;
 
@@ -1620,16 +1587,20 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
 
-    // Detect shader format and cache swapchain format.
-    // Prefer MSL on the Metal backend: our spirv-cross pipeline produces MSL
-    // with correct resource bindings for SDL3 GPU's slot model.  SDL3's
-    // built-in SPIR-V translation (shadercross) may also work, but using our
-    // pre-compiled MSL avoids a runtime dependency on shadercross and gives us
-    // explicit control over Metal argument indices.
+    // Pick the shader format that matches the selected GPU backend.  Each SDL
+    // GPU backend reports exactly one supported format here:
+    //   Direct3D 12 → DXIL, Metal → MSL, Vulkan → SPIR-V.
+    // The CMake build emits whichever blobs are needed for this platform; the
+    // matching `HAVE_*_SHADERS` define gates each branch.
     const SDL_GPUShaderFormat k_available = SDL_GetGPUShaderFormats(device);
     shaderFormat = SDL_GPU_SHADERFORMAT_INVALID;
+#ifdef HAVE_DXIL_SHADERS
+    if (k_available & SDL_GPU_SHADERFORMAT_DXIL)
+        shaderFormat = SDL_GPU_SHADERFORMAT_DXIL;
+    else
+#endif
 #ifdef HAVE_MSL_SHADERS
-    if (k_available & SDL_GPU_SHADERFORMAT_MSL)
+        if (k_available & SDL_GPU_SHADERFORMAT_MSL)
         shaderFormat = SDL_GPU_SHADERFORMAT_MSL;
     else
 #endif
@@ -1640,7 +1611,8 @@ bool Renderer::init(SDL_Window* win)
         return false;
     }
     SDL_Log("Renderer: selected shader format = %s",
-            (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)     ? "MSL"
+            (shaderFormat == SDL_GPU_SHADERFORMAT_DXIL)    ? "DXIL"
+            : (shaderFormat == SDL_GPU_SHADERFORMAT_MSL)   ? "MSL"
             : (shaderFormat == SDL_GPU_SHADERFORMAT_SPIRV) ? "SPIR-V"
                                                            : "unknown");
 
@@ -1655,8 +1627,6 @@ bool Renderer::init(SDL_Window* win)
         return false;
 
     // Create all pipelines
-    if (!initScenePipeline())
-        return false;
     if (!initPBRPipeline())
         return false;
     if (!initSkyboxPipeline())
@@ -1665,7 +1635,6 @@ bool Renderer::init(SDL_Window* win)
         return false;
     // Shadow pipeline + shadow map texture + comparison sampler.
     initShadowPipeline();
-    initSceneShadowPipeline();
     {
         // Shadow atlas: D32_FLOAT, (2*k_shadowMapSize)² with 4 cascade viewports
         // in a 2×2 grid.  Each cascade occupies one quadrant at k_shadowMapSize².
@@ -1734,37 +1703,10 @@ bool Renderer::init(SDL_Window* win)
     nearestDepthSampler = SDL_CreateGPUSampler(device, &nearestInfo);
 
     // Load scene models
+    // Props and character models are loaded via Game::init() → AssetRegistry,
+    // which generates collision data alongside visual uploads.
+
     const char* const k_base = SDL_GetBasePath();
-
-    // Helper to load a model and place it in the scene.
-    // flipWinding=true for models exported with CW winding (DirectX/Unity/
-    // many Sketchfab downloads) that appear inside-out in our CCW pipeline.
-    auto loadAndPlace = [&](const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
-        char path[512];
-        SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
-
-        LoadedModel loaded;
-        if (!loadModel(path, loaded, flipUVs)) {
-            SDL_Log("Renderer: failed to load '%s'", filename);
-            return;
-        }
-
-        ModelInstance inst;
-        inst.transform = glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(scale));
-
-        if (!uploadModel(loaded, inst))
-            SDL_Log("Renderer: GPU upload failed for '%s'", filename);
-        else
-            models.push_back(std::move(inst));
-    };
-
-    loadAndPlace("Apex_Legend_Wraith.glb", glm::vec3(200.0f, 0.0f, 400.0f), 8.0f);
-    // flipUVs=true: Porsche GLB uses V=0 at bottom (Sketchfab/Blender export).
-    // Y offset +1.3 compensates for the model's wheels extending below its origin.
-    // Without this, the wheels clip through the floor and reflections appear detached.
-    loadAndPlace("free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
-    loadAndPlace("metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
-    loadAndPlace("bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
 
     // Camera — overridden every frame by drawFrame().
     camera = Camera();
@@ -1778,6 +1720,9 @@ bool Renderer::init(SDL_Window* win)
         if (!loadHDRSkybox(hdrPath))
             SDL_Log("Renderer: default HDR skybox not loaded — using procedural sky");
     }
+
+    if (!initHudBlit())
+        SDL_Log("Renderer: HUD blit init failed (non-fatal)");
 
     return true;
 }
@@ -2336,17 +2281,6 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                     SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
                 }
             }
-
-            // Scene geometry (procedural boxes + floor)
-            if (sceneShadowPipeline) {
-                SDL_BindGPUGraphicsPipeline(shadowPass, sceneShadowPipeline);
-                SceneMatrices sceneShadowMats{};
-                sceneShadowMats.model = glm::mat4(1.0f);
-                sceneShadowMats.view = cascade.lightView;
-                sceneShadowMats.projection = cascade.lightProj;
-                SDL_PushGPUVertexUniformData(cmd, 0, &sceneShadowMats, sizeof(sceneShadowMats));
-                SDL_DrawGPUPrimitives(shadowPass, 1182, 1, 0, 0);
-            }
         }
 
         SDL_EndGPURenderPass(shadowPass);
@@ -2369,57 +2303,6 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 
         SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
-
-        // Scene geometry (physics playground)
-        if (toggles.sceneGeometry && scenePipeline) {
-            SDL_BindGPUGraphicsPipeline(pass, scenePipeline);
-
-            SceneMatrices sceneMats{};
-            sceneMats.model = glm::mat4(1.0f);
-            sceneMats.view = camera.getViewMatrix();
-            sceneMats.projection = camera.getProjectionMatrix();
-            SDL_PushGPUVertexUniformData(cmd, 0, &sceneMats, sizeof(sceneMats));
-
-            // Push cascade shadow data for the scene fragment shader.
-            ShadowDataFragUBO sceneShadow{};
-            for (int ci = 0; ci < k_shadowCascades; ++ci)
-                sceneShadow.lightVP[ci] = cascades[static_cast<size_t>(ci)].lightVP;
-            sceneShadow.cascadeSplits = glm::vec4(cascades[0].splitDistance,
-                                                  cascades[1].splitDistance,
-                                                  cascades[2].splitDistance,
-                                                  cascades[3].splitDistance);
-            sceneShadow.cameraView = camera.getViewMatrix();
-            sceneShadow.shadowBias = shadowBiasVal;
-            sceneShadow.shadowNormalBias = shadowNormalBiasVal;
-            sceneShadow.lightDirWorld = glm::vec4(getSunDirection(), 0.0f);
-            sceneShadow.lightColor = glm::vec4(1.0f, 0.95f, 0.85f, sunIntensity);
-            sceneShadow.ambientColor = glm::vec4(ambientR, ambientG, ambientB, 1.0f);
-            sceneShadow.fillColor = glm::vec4(0.25f, 0.30f, 0.45f, fillIntensity);
-            sceneShadow.shadowMapSize =
-                (shadowMap && shadowPipeline && toggles.shadows) ? static_cast<float>(k_shadowMapSize) : 0.0f;
-
-            // Inject dynamic point lights into scene shadow UBO.
-            sceneShadow.numPointLights = 0;
-            for (size_t pi = 0; pi < pointLights.size() && sceneShadow.numPointLights < 14; ++pi) {
-                const auto& pl = pointLights[pi];
-                auto& slot = sceneShadow.scenePtLights[sceneShadow.numPointLights];
-                slot.position = glm::vec4(pl.position, 1.0f);
-                slot.color = glm::vec4(pl.color, pl.intensity);
-                slot.params = glm::vec4(pl.range, 0.0f, 0.0f, 0.0f);
-                ++sceneShadow.numPointLights;
-            }
-
-            SDL_PushGPUFragmentUniformData(cmd, 0, &sceneShadow, sizeof(sceneShadow));
-
-            // Bind the shadow map for scene geometry shadow receiving.
-            const SDL_GPUTextureSamplerBinding sceneShadowSamp = {
-                .texture = (shadowMap && toggles.shadows) ? shadowMap : fallbackWhite,
-                .sampler = shadowSampler ? shadowSampler : tonemapSampler,
-            };
-            SDL_BindGPUFragmentSamplers(pass, 0, &sceneShadowSamp, 1);
-
-            SDL_DrawGPUPrimitives(pass, 1182, 1, 0, 0);
-        }
 
         // PBR models (two-pass: opaques first, then transparents)
         if (pbrSampler && !models.empty()) {
@@ -3203,6 +3086,16 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         if (drawData)
             ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, pass);
 
+        // HUD overlay (in LDR, on top of everything)
+        if (hudTexture_ && hudBlitPipeline_) {
+            SDL_BindGPUGraphicsPipeline(pass, hudBlitPipeline_);
+            SDL_GPUTextureSamplerBinding hudBinding{};
+            hudBinding.texture = hudTexture_;
+            hudBinding.sampler = hudSampler_;
+            SDL_BindGPUFragmentSamplers(pass, 0, &hudBinding, 1);
+            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0); // fullscreen triangle
+        }
+
         SDL_EndGPURenderPass(pass);
 
         // Blit captureRT → swapchain if capturing.
@@ -3474,6 +3367,12 @@ void Renderer::quit()
     if (motionVectorTexture)
         SDL_ReleaseGPUTexture(device, motionVectorTexture);
 
+    // HUD blit
+    if (hudBlitPipeline_)
+        SDL_ReleaseGPUGraphicsPipeline(device, hudBlitPipeline_);
+    if (hudSampler_)
+        SDL_ReleaseGPUSampler(device, hudSampler_);
+
     // Release SMAA resources.
     if (smaaEdgeTex)
         SDL_ReleaseGPUTexture(device, smaaEdgeTex);
@@ -3561,10 +3460,6 @@ void Renderer::quit()
 
     // Release pipelines.
     ImGui_ImplSDLGPU3_Shutdown();
-    if (scenePipeline)
-        SDL_ReleaseGPUGraphicsPipeline(device, scenePipeline);
-    if (sceneShadowPipeline)
-        SDL_ReleaseGPUGraphicsPipeline(device, sceneShadowPipeline);
     if (pbrPipeline)
         SDL_ReleaseGPUGraphicsPipeline(device, pbrPipeline);
     if (pbrTransparentPipeline)

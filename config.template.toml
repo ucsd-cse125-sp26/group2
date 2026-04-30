@@ -8,3 +8,12 @@ port = 9999
 [server-network]
 host = "127.0.0.1"
 port = 9999
+
+[graphics]
+# GPU backend selection.  Falls back to other available backends if the
+# requested one is unavailable on this machine.
+#   "auto"        — let SDL pick the best backend for the platform
+#   "direct3d12"  — Windows: Direct3D 12 (default on Windows)
+#   "vulkan"      — Vulkan (default on Linux; available on Windows as fallback)
+#   "metal"       — macOS: Metal (default on macOS)
+backend = "auto"

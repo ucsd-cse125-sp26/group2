@@ -12,6 +12,7 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
+#include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 
 #include <glm/geometric.hpp>
@@ -130,7 +131,133 @@ depenetrateBrush(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, c
         vel -= plane.normal * k_into;
 }
 
-/// @brief Run all depenetration passes (planes, boxes, brushes).
+/// @brief Push the entity out of a vertical cylinder it currently overlaps.
+static void
+depenetrateCylinder(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldCylinder& cyl)
+{
+    // Minkowski expansion
+    const float k_effR = cyl.radius + std::max(halfExtents.x, halfExtents.z);
+    const float k_yMin = cyl.base.y - halfExtents.y;
+    const float k_yMax = cyl.base.y + cyl.height + halfExtents.y;
+
+    // Check Y overlap
+    if (pos.y < k_yMin || pos.y > k_yMax)
+        return;
+
+    // Check XZ overlap (circle test)
+    const float k_dx = pos.x - cyl.base.x;
+    const float k_dz = pos.z - cyl.base.z;
+    const float k_distXZ = std::sqrt(k_dx * k_dx + k_dz * k_dz);
+
+    if (k_distXZ >= k_effR)
+        return;
+
+    // Inside — find least-penetration axis
+    const float k_yPenBottom = pos.y - k_yMin;
+    const float k_yPenTop = k_yMax - pos.y;
+    const float k_xzPen = k_effR - k_distXZ;
+    const float k_yPen = std::min(k_yPenBottom, k_yPenTop);
+
+    glm::vec3 pushDir;
+    float pen;
+
+    if (k_yPen < k_xzPen) {
+        // Push out along Y (whichever cap is closer)
+        pushDir = (k_yPenBottom < k_yPenTop) ? glm::vec3(0.0f, -1.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+        pen = k_yPen;
+    } else {
+        // Push out radially in XZ
+        if (k_distXZ > 1e-6f)
+            pushDir = glm::vec3(k_dx / k_distXZ, 0.0f, k_dz / k_distXZ);
+        else
+            pushDir = glm::vec3(1.0f, 0.0f, 0.0f); // degenerate: on axis
+        pen = k_xzPen;
+    }
+
+    pos += pushDir * (pen + k_pushback);
+    const float k_into = glm::dot(vel, pushDir);
+    if (k_into < 0.0f)
+        vel -= pushDir * k_into;
+}
+
+/// @brief Push the entity out of a world sphere it currently overlaps.
+static void
+depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldSphere& sph)
+{
+    // Conservative Minkowski expansion
+    const float k_effR = sph.radius + std::max({halfExtents.x, halfExtents.y, halfExtents.z});
+
+    const glm::vec3 k_diff = pos - sph.center;
+    const float k_dist = glm::length(k_diff);
+
+    if (k_dist >= k_effR)
+        return;
+
+    // Inside — push outward from sphere centre
+    glm::vec3 pushDir;
+    if (k_dist > 1e-6f)
+        pushDir = k_diff / k_dist;
+    else
+        pushDir = glm::vec3(0.0f, 1.0f, 0.0f); // degenerate: at centre
+
+    const float k_pen = k_effR - k_dist;
+    pos += pushDir * (k_pen + k_pushback);
+
+    const float k_into = glm::dot(vel, pushDir);
+    if (k_into < 0.0f)
+        vel -= pushDir * k_into;
+}
+
+/// @brief Push the entity out of a triangle mesh it currently overlaps.
+///
+/// Instead of depenetrating against individual triangles (which jitters at
+/// edges where adjacent normals fight), this uses the BVH leaf AABBs as
+/// proxy collision volumes.  Each leaf AABB is a tight box around 1-4
+/// triangles.  AABB depenetration has stable, consistent face normals —
+/// the same algorithm that works perfectly for WorldAABB.
+///
+/// The swept collision still uses precise per-triangle tests, so sliding and
+/// surface normals are accurate.  This depenetration is only a safety net.
+static void
+depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
+{
+    // Quick reject: AABB overlap with mesh bounds.
+    if (pos.x + halfExtents.x < mesh.boundsMin.x || pos.x - halfExtents.x > mesh.boundsMax.x ||
+        pos.y + halfExtents.y < mesh.boundsMin.y || pos.y - halfExtents.y > mesh.boundsMax.y ||
+        pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
+        return;
+
+    // BVH traversal: find leaf nodes whose AABBs overlap the entity and
+    // depenetrate against each leaf AABB using the standard box push-out.
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const auto& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+        // Expand node bounds by entity halfExtents (Minkowski sum).
+        const glm::vec3 expMin = node.boundsMin - halfExtents;
+        const glm::vec3 expMax = node.boundsMax + halfExtents;
+
+        // Not overlapping this node?
+        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+            pos.z > expMax.z)
+            continue;
+
+        if (node.count > 0) {
+            // Leaf node — depenetrate against its AABB (same logic as depenetrateBox).
+            const physics::WorldAABB leafBox{node.boundsMin, node.boundsMax};
+            depenetrateBox(pos, vel, halfExtents, leafBox);
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
+}
+
+/// @brief Run all depenetration passes (planes, boxes, brushes, cylinders, spheres).
 /// @param pos          Entity position (modified in place).
 /// @param vel          Entity velocity (modified in place).
 /// @param halfExtents  AABB half-extents of the entity.
@@ -145,6 +272,15 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
 
     for (const physics::WorldBrush& brush : world.brushes)
         depenetrateBrush(pos, vel, halfExtents, brush);
+
+    for (const physics::WorldCylinder& cyl : world.cylinders)
+        depenetrateCylinder(pos, vel, halfExtents, cyl);
+
+    for (const physics::WorldSphere& sph : world.spheres)
+        depenetrateSphere(pos, vel, halfExtents, sph);
+
+    for (const physics::WorldTriMesh& tm : world.triMeshes)
+        depenetrateTriMesh(pos, vel, halfExtents, tm);
 }
 
 /// @brief Attempt to step over a low obstacle when a wall is hit.

@@ -9,8 +9,12 @@
 #include "animation/SkinningBackend.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
+#include "ecs/AssetRegistry.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
+#include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "hud/Hud.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/NetworkConfig.hpp"
@@ -45,13 +49,51 @@ public:
     SDL_AppResult event(SDL_Event* event);
 
     /// @brief Advance one frame: sample input, step physics, render.
+    ///
+    /// Execution flow each frame:
+    ///  1. **Time accumulation** — compute frame delta, detect suspend/background gaps,
+    ///     clamp to avoid spiral-of-death.
+    ///  2. **Performance stats** — refresh FPS percentiles and physics Hz every 0.5 s.
+    ///  3. **Input sampling** — mouse look runs every frame for smooth camera;
+    ///     movement keys run once per physics tick group when inputSyncedWithPhysics
+    ///     is true; weapon keys sampled every frame.
+    ///  4. **Network** — send input to server, send periodic pings, poll bandwidth.
+    ///  5. **Physics** — drain accumulator at 128 Hz (up to k_maxTicksPerFrame),
+    ///     snapshot PreviousPosition, poll network for state updates, refresh
+    ///     remote renderables.
+    ///  6. **Camera resolve** — interpolate local player position between ticks
+    ///     (or use post-tick position in sequential mode).
+    ///  7. **Local weapon VFX** — fire cooldown, spawn tracers/impacts,
+    ///     visual recoil kick (viewmodel-only, does not affect aim).
+    ///  8. **Subsystem updates** — flush dispatcher events, update particles,
+    ///     SFX, skeletal animation (CPU skinning + hitbox capsules).
+    ///  9. **Entity render list** — build world-space transforms for entities,
+    ///     third-person weapons, glow spheres, beam visuals, point lights.
+    /// 10. **Viewmodel** — weapon sway, bob, recoil decay, camera-space transform.
+    /// 11. **Frame recording** — if R-key recording is active, capture frame state.
+    /// 12. **FPS ring buffer** — record inter-render delta for stats.
+    /// 13. **Debug UI** — ImGui panels (debug menu, network, particles, hitbox,
+    ///     lighting, viewmodel tweaker, 3P weapon tweaker, scoreboard).
+    /// 14. **HUD** — gather game state, update and render the HUD overlay.
+    /// 15. **Render** — drawFrame with interpolated camera, apply VSync changes.
+    /// 16. **Software frame limiter** — sleep + spin-wait if targeting above
+    ///     monitor refresh rate.
+    ///
     /// @return SDL_APP_CONTINUE normally; SDL_APP_SUCCESS on quit request.
+    /// @see ServerGame::tick for the authoritative server-side equivalent.
     SDL_AppResult iterate();
 
     /// @brief Shut down all subsystems in reverse-init order.
     void quit();
+
+    /// @brief Update Renderable components for remote players (model, scale, orientation from animation rig).
     void refreshRemotePlayerRenderables();
+
+    /// @brief Assign Renderable components to newly spawned projectile entities.
     void refreshRemoteProjectileRenderables();
+
+    /// @brief Reset Renderable visibility for players transitioning through respawn.
+    void refreshRemoteRespawnRenderables();
 
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
@@ -71,6 +113,7 @@ private:
     Client client;                 ///< UDP network client.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
     SfxSystem sfxSystem;           ///< Client-side sound effects system.
+    Hud hud_;                      ///< In-game HUD overlay system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
     Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
@@ -102,14 +145,22 @@ private:
     glm::vec3 cachedCamFwd_{0.f, 0.f, 1.f};
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
-    // Model indices for entity rendering (loaded at init).
-    int wraithModelIdx = -1;                       ///< Wraith player model index.
-    int glowSphereModelIdx_ = -1;                  ///< Glow sphere for bloom testing (static).
-    int movableSphereModelIdx_ = -1;               ///< Glow sphere that follows the player.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1}; ///< Per WeaponType, loaded at init.
+    // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
+    physics::MapCollisionData mapCollision_;
+
+    // Central asset registry — maps human-readable names to renderer model indices.
+    AssetRegistry assets_;
+
+    // Legacy model index aliases (for code that still uses raw indices).
+    // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
+    int wraithModelIdx = -1;
+    int glowSphereModelIdx_ = -1;
+    int movableSphereModelIdx_ = -1;
+    int weaponModelIndices_[4] = {-1, -1, -1, -1};
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
+    bool showHudDebug_ = false;                          ///< Show the HUD Tweaker panel.
     bool flashlightEnabled_ = false;                     ///< Point light at camera position.
     float flashlightIntensity_ = 8.0f;                   ///< Flashlight brightness.
     float flashlightRange_ = 800.0f;                     ///< Flashlight attenuation range.
@@ -135,7 +186,29 @@ private:
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
 
     // Hitmarker
-    float hitmarkerTimer_ = 0.0f; ///< Remaining display time (fades out over this).
+    float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
+    bool hitmarkerIsHeadshot_ = false;  ///< True when the current hitmarker was a headshot.
+    bool hitmarkerShieldBreak_ = false; ///< True when the current hit depleted target armor.
+
+    // Floating damage numbers — queued from onParticleEvent, consumed by HUD each frame.
+    struct PendingDamageNumber
+    {
+        glm::vec3 pos;
+        float damage;
+        bool headshot;
+        bool shielded;
+    };
+    std::vector<PendingDamageNumber> pendingDamageNumbers_;
+
+    // Damage accumulator — tracks continuous damage to a single target.
+    entt::entity accumTarget_ = entt::null; ///< Current target being damaged.
+    int accumTotal_ = 0;                    ///< Running damage total.
+    float accumResetTimer_ = 0.f;           ///< Timer to reset accumulator after inactivity.
+    uint8_t accumLastHitType_ = 0;          ///< 0=health(white), 1=shield(blue), 2=headshot(gold).
+
+    // Vignette state: track previous frame health/armor for delta detection.
+    float prevHealth_ = 100.f;
+    float prevArmor_ = 100.f;
 
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).
@@ -168,14 +241,6 @@ private:
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
 
-    // Crosshair settings (ImGui-adjustable)
-    float crosshairSize_ = 6.0f;                           ///< Half-length of each crosshair line (pixels).
-    float crosshairThickness_ = 2.0f;                      ///< Line thickness (pixels).
-    float crosshairGap_ = 3.0f;                            ///< Gap from center to start of each line (pixels).
-    glm::vec4 crosshairColor_ = {0.0f, 1.0f, 0.0f, 0.85f}; ///< RGBA (default: green).
-    bool crosshairDot_ = true;                             ///< Draw center dot.
-    bool showCrosshair_ = true;                            ///< Master toggle.
-
     // Scroll-wheel weapon switching
     int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = prev slot, consumed each frame.
 
@@ -190,6 +255,7 @@ private:
     AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
     CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
+    HitboxRig clientHitboxRig_;         ///< Hitbox definitions for client-side debug visualization.
     float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (auto-calculated, tunable).
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).

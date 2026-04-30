@@ -7,6 +7,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -16,16 +17,23 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 
+#include <SDL3/SDL_log.h>
+
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>
 
+using physics::HitboxHit;
 using physics::HitscanHit;
 using physics::resolveHitscan;
+using physics::resolveHitscanHitbox;
 
 namespace systems
 {
 
+/// @brief Return the GunInstance for the currently selected weapon slot.
+/// @param weapon  Weapon state to query.
+/// @return Reference to the equipped gun.
 inline GunInstance& getEquippedGun(WeaponState& weapon)
 {
     switch (weapon.current) {
@@ -40,6 +48,9 @@ inline GunInstance& getEquippedGun(WeaponState& weapon)
     }
 }
 
+/// @brief Apply weapon slot switch from player input.
+/// @param input   Current input snapshot.
+/// @param weapon  Weapon state (modified in place).
 void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
 {
     if (input.switchToPrimary) {
@@ -53,6 +64,9 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
     }
 }
 
+/// @brief Tick fire cooldowns for all weapon slots.
+/// @param weapon  Weapon state (modified in place).
+/// @param dt      Fixed physics delta time in seconds.
 inline void handleCooldown(WeaponState& weapon, float dt)
 {
     auto reduce = [dt](GunInstance& gun) { gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt); };
@@ -63,6 +77,8 @@ inline void handleCooldown(WeaponState& weapon, float dt)
     reduce(weapon.quaternary);
 }
 
+/// @brief Reload the gun's magazine from reserve ammo.
+/// @param gun  Gun instance to reload (modified in place).
 inline void handleReload(GunInstance& gun)
 {
     const WeaponConfig& config = getWeaponConfig(gun.type);
@@ -78,6 +94,9 @@ inline void handleReload(GunInstance& gun)
     }
 }
 
+/// @brief Consume one round from the magazine; auto-reload if empty.
+/// @param gun  Gun instance to consume ammo from (modified in place).
+/// @return True if a round was consumed, false if the gun is empty.
 inline bool handleAmmo(GunInstance& gun)
 {
     if (gun.currentMagAmmo <= 0) {
@@ -90,6 +109,10 @@ inline bool handleAmmo(GunInstance& gun)
     return true;
 }
 
+/// @brief Compute the player's 3D view direction from yaw and pitch angles.
+/// @param yaw    Horizontal angle (radians).
+/// @param pitch  Vertical angle (radians, positive = down).
+/// @return Normalized forward direction vector.
 inline glm::vec3 viewForward(float yaw, float pitch)
 {
     // Must match client camera convention:
@@ -104,6 +127,13 @@ inline glm::vec3 viewForward(float yaw, float pitch)
     });
 }
 
+/// @brief Offset the muzzle origin from the eye position for tracer visuals.
+///
+/// Shifts the origin right and down from eye, slightly forward, so tracers
+/// don't originate from the center of the screen.
+/// @param eye        Eye position (camera origin).
+/// @param direction  Normalized view direction.
+/// @return Offset muzzle position in world space.
 inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
 {
     constexpr glm::vec3 k_worldUp{0.0f, 1.0f, 0.0f};
@@ -118,6 +148,25 @@ inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
     return eye + right * 15.0f - up * 8.0f + direction * 5.0f;
 }
 
+/// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
+///
+/// Handles three weapon archetypes:
+///  - **Beam** — continuous DPS drain while held, capsule raycast each tick.
+///  - **Charge** — accumulates chargeTime while held, fires on release.
+///  - **Discrete** — standard per-click hitscan or projectile spawn.
+///
+/// Emits NetParticleEvent entries for tracer/impact effects and applies damage
+/// through applyDamage() which may trigger kill events.
+///
+/// @param registry      The ECS registry.
+/// @param shooter       Entity that is firing.
+/// @param input         Current input snapshot.
+/// @param pos           Shooter position.
+/// @param shape         Shooter collision shape (for eye height).
+/// @param weapon        Shooter weapon state (modified in place).
+/// @param dt            Fixed physics delta time in seconds.
+/// @param outParticles  Accumulates particle events for network broadcast.
+/// @param killEvents    Accumulates kill events for network broadcast.
 inline void handleFire(Registry& registry,
                        entt::entity shooter,
                        const InputSnapshot& input,
@@ -151,11 +200,12 @@ inline void handleFire(Registry& registry,
         // Raycast to find beam endpoint.
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
-        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
-        // Apply DPS-based damage.
+        // Apply DPS-based damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.dps * dt, hit.entity, shooter, registry, killEvents);
+            const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+            applyDamage(config.dps * dt * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
         }
 
         // Update BeamState (synced to clients via registry snapshot).
@@ -194,11 +244,32 @@ inline void handleFire(Registry& registry,
 
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
-        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
-        // Charge damage — significantly higher than normal.
+        // Snapshot armor before damage for shield-break detection.
+        float chargeArmorBefore = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.chargeDamage, hit.entity, shooter, registry, killEvents);
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                chargeArmorBefore = hp->armor;
+        }
+
+        // Charge damage with body-region multiplier.
+        float chargeDealtDamage = 0.f;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+            chargeDealtDamage = config.chargeDamage * multiplier;
+            applyDamage(chargeDealtDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            if (hit.region == BodyRegion::Head) {
+                SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
+                        static_cast<int>(hit.entity),
+                        static_cast<double>(chargeDealtDamage));
+            }
+        }
+
+        bool chargeShieldBroke = false;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                chargeShieldBroke = (chargeArmorBefore > 0.f && hp->armor <= 0.f);
         }
 
         // Emit particle events (beam + impact).
@@ -216,7 +287,12 @@ inline void handleFire(Registry& registry,
             impactEvt.source = shooter;
             impactEvt.effectType = ParticleEffectType::Impact;
             impactEvt.weaponType = gun.type;
-            impactEvt.surfaceType = hit.surface;
+            impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
+            impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
+            impactEvt.shieldBreak = chargeShieldBroke ? uint8_t{1} : uint8_t{0};
+            impactEvt.hadArmor = (chargeArmorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
+            impactEvt.damage = chargeDealtDamage;
+            impactEvt.target = hit.entity;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);
@@ -246,11 +322,36 @@ inline void handleFire(Registry& registry,
     const glm::vec3 muzzle = muzzleOrigin(eye, direction);
 
     if (config.hitscan) {
-        const HitscanHit hit = resolveHitscan(registry, shooter, eye, direction);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
-        // Apply damage
+        // Snapshot armor before damage for shield-break detection.
+        float armorBefore = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            applyDamage(config.damage, hit.entity, shooter, registry, killEvents);
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                armorBefore = hp->armor;
+        }
+
+        // Apply damage with body-region multiplier.
+        float dealtDamage = 0.f;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+            dealtDamage = config.damage * multiplier;
+            applyDamage(dealtDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            if (hit.region == BodyRegion::Head) {
+                SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
+                        static_cast<int>(shooter),
+                        static_cast<int>(hit.entity),
+                        static_cast<double>(dealtDamage),
+                        static_cast<double>(config.damage),
+                        static_cast<double>(multiplier));
+            }
+        }
+
+        // Check if armor was just depleted to zero by this shot.
+        bool shieldBroke = false;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                shieldBroke = (armorBefore > 0.f && hp->armor <= 0.f);
         }
 
         // Emit replicated particle events for client FX.
@@ -266,7 +367,6 @@ inline void handleFire(Registry& registry,
             } else {
                 tracerEvt.effectType = ParticleEffectType::BulletTracer;
                 tracerEvt.pos1 = muzzle;
-                // Compute direction from origin→hitPoint (convention-independent)
                 tracerEvt.pos2 = glm::normalize(hit.point - muzzle);
                 tracerEvt.param = hit.distance;
             }
@@ -278,7 +378,12 @@ inline void handleFire(Registry& registry,
             impactEvt.source = shooter;
             impactEvt.effectType = ParticleEffectType::Impact;
             impactEvt.weaponType = gun.type;
-            impactEvt.surfaceType = hit.surface;
+            impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
+            impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
+            impactEvt.shieldBreak = shieldBroke ? uint8_t{1} : uint8_t{0};
+            impactEvt.hadArmor = (armorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
+            impactEvt.damage = dealtDamage;
+            impactEvt.target = hit.entity;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);

@@ -30,9 +30,7 @@ static constexpr int SMAA_SEARCHTEX_PITCH = SMAA_SEARCHTEX_WIDTH; // R8 = 1 byte
 static constexpr int SMAA_SEARCHTEX_PACKED_WIDTH = 64;
 static constexpr int SMAA_SEARCHTEX_PACKED_HEIGHT = 16;
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
 namespace smaa_search_detail
 {
 

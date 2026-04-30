@@ -1,3 +1,6 @@
+/// @file Boilerplate.cpp
+/// @brief Implementation of SDL3 GPU boilerplate helpers.
+
 #include "Boilerplate.hpp"
 
 #include <filesystem>
@@ -61,13 +64,18 @@ SDL_GPUShaderFormat selectShaderFormat(SDL_GPUDevice* device)
 {
     const SDL_GPUShaderFormat availableFormats = SDL_GetGPUShaderFormats(device);
 
-    if (availableFormats & SDL_GPU_SHADERFORMAT_SPIRV)
-        return SDL_GPU_SHADERFORMAT_SPIRV;
+#ifdef HAVE_DXIL_SHADERS
+    if (availableFormats & SDL_GPU_SHADERFORMAT_DXIL)
+        return SDL_GPU_SHADERFORMAT_DXIL;
+#endif
 
 #ifdef HAVE_MSL_SHADERS
     if (availableFormats & SDL_GPU_SHADERFORMAT_MSL)
         return SDL_GPU_SHADERFORMAT_MSL;
 #endif
+
+    if (availableFormats & SDL_GPU_SHADERFORMAT_SPIRV)
+        return SDL_GPU_SHADERFORMAT_SPIRV;
 
     return SDL_GPU_SHADERFORMAT_INVALID;
 }
@@ -82,11 +90,12 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device,
                           Uint32 storageTextureCount)
 {
     const bool isMsl = format == SDL_GPU_SHADERFORMAT_MSL;
+    const bool isDxil = format == SDL_GPU_SHADERFORMAT_DXIL;
     const char* const base = SDL_GetBasePath();
 
     std::filesystem::path fullPath = base ? base : "";
     fullPath /= path;
-    fullPath += isMsl ? ".msl" : ".spv";
+    fullPath += isMsl ? ".msl" : isDxil ? ".dxil" : ".spv";
 
     const std::string fullPathString = fullPath.string();
 

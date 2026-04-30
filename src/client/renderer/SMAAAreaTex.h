@@ -30,9 +30,7 @@ static constexpr int SMAA_AREATEX_SUBTEX_COUNT = 7;                             
 static constexpr int SMAA_AREATEX_ORTHO_PATTERNS = 16;                           // 0..15 (4-bit, crossing L/R or T/B)
 static constexpr int SMAA_AREATEX_SUBTEX_SIZE = (SMAA_AREATEX_MAX_DISTANCE + 1); // 17 pixels per axis per sub-texture
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
 namespace smaa_detail
 {
 

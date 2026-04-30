@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    tags:     ['v*.*.*']
   pull_request:
     branches: [main]
 
@@ -39,9 +38,9 @@ jobs:
 
           - name: Windows
             os: windows-latest
-            preset: debug-win
-            cc: cl
-            cxx: cl
+            preset: debug
+            cc: clang-cl
+            cxx: clang-cl
 
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +64,7 @@ jobs:
             ninja-build clang clang-format-18 clang-tidy \
             glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxss-dev libxkbcommon-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols \
             libpulse-dev libasound2-dev \
             libdbus-1-dev libudev-dev \
@@ -92,31 +91,41 @@ jobs:
           vulkan_version: latest
           cache: true
 
-      # sccache is incompatible with MSVC's PDB model (assimp sets /Zi + /Fd
-      # which conflicts with sccache's output caching).  Linux/macOS only.
-      - name: Setup sccache
-        if: runner.os != 'Windows'
-        uses: mozilla/sccache-action@v0.0.9
+      # Strawberry Perl ships a ccache.exe that hijacks compiler launcher
+      # invocations and breaks RC (resource compiler) dep tracking.
+      - name: Remove Strawberry ccache (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: rm -f /c/Strawberry/c/bin/ccache.exe
 
+      # Pin to v0.14.0 — v0.15.0 has cache-write errors on GHA.
+      # Windows uses clang-cl (not MSVC cl) so sccache works on all platforms.
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.9
+        with:
+          version: "v0.14.0"
+
+      # Cache dep sources AND their build dirs (CMakeCache.txt holds
+      # try_compile results, compiler probes, feature detection).
+      # Keeping build dirs lets cmake skip ~68 compile probes on re-runs.
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/${{ matrix.preset }}/_deps
-          key: deps-v2-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-v2-${{ runner.os }}-${{ matrix.preset }}-
+          path: .deps/${{ matrix.preset }}
+          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      # Remove stale *-build and *-subbuild dirs after cache restore.
-      # Those dirs contain CMakeCache.txt files that record the generator
-      # used in the run that created the cache — if it differs from the
-      # current run's generator, CMake fails with "generator does not match".
-      # Source dirs (*-src) are left intact so FetchContent doesn't re-download.
-      # sccache handles compilation caching, so re-building from source is fast.
-      - name: Purge stale dep build dirs
-        shell: bash
-        run: |
-          find build/${{ matrix.preset }}/_deps -maxdepth 1 -type d \
-            \( -name '*-build' -o -name '*-subbuild' \) \
-            -exec rm -rf {} + 2>/dev/null || true
+      # Cache the project build tree for incremental cmake reconfigure.
+      # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja
+      # tracks source deps, so stale objects are never used.
+      # ImageVersion (set by GHA runners) ensures PCH invalidation on
+      # runner-image updates that change system-header mtimes.
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build/${{ matrix.preset }}
+          key: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
         shell: bash
@@ -124,18 +133,15 @@ jobs:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
         run: |
-          SCCACHE_FLAGS=""
-          if [[ "$RUNNER_OS" != "Windows" ]]; then
-            SCCACHE_FLAGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
-          fi
           cmake --preset ${{ matrix.preset }} \
-            $SCCACHE_FLAGS \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             ${{ matrix.extra_cmake || '' }}
 
       - name: Build
         shell: bash
-        run: cmake --build --preset ${{ matrix.preset }} --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --target client server --parallel
 
   # ------------------------------------------------------------------ #
   #  Format check — pinned to clang-format-18 (ships on ubuntu-24.04)  #
@@ -154,8 +160,10 @@ jobs:
 
   # ------------------------------------------------------------------ #
   #  Release builds — optimised, no sanitizers                          #
-  #  Runs on: push to main  →  updates "latest" pre-release             #
-  #            tag v*.*.*   →  creates versioned release                #
+  #  Runs on: push to main  →  auto-versioned release (semver)         #
+  #                                                                      #
+  #  Each platform produces ONE zip containing:                          #
+  #    client + server + shaders/ + config.toml + assets/                #
   # ------------------------------------------------------------------ #
   release-build:
     name: Release Build (${{ matrix.name }})
@@ -163,6 +171,8 @@ jobs:
     if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
+      # Google Drive file ID for the shared assets zip.
+      ASSETS_GDRIVE_ID: "1_Xafht6-R_E8-gVglYFDAHvjZA8msfE4"
     strategy:
       fail-fast: false
       matrix:
@@ -173,7 +183,7 @@ jobs:
             cc: clang
             cxx: clang++
             build_dir: build/release
-            client_bin: group2
+            client_bin: client
             server_bin: server
             archive_suffix: linux-x86_64
 
@@ -183,17 +193,17 @@ jobs:
             cc: clang
             cxx: clang++
             build_dir: build/release
-            client_bin: group2
+            client_bin: client
             server_bin: server
             archive_suffix: macos
 
           - name: Windows
             os: windows-latest
-            preset: release-win
-            cc: cl
-            cxx: cl
-            build_dir: build/release-win
-            client_bin: group2.exe
+            preset: release
+            cc: clang-cl
+            cxx: clang-cl
+            build_dir: build/release
+            client_bin: client.exe
             server_bin: server.exe
             archive_suffix: windows-x86_64
 
@@ -218,7 +228,7 @@ jobs:
             ninja-build clang \
             glslang-tools spirv-cross \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxi-dev libxss-dev libxkbcommon-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols \
             libpulse-dev libasound2-dev \
             libdbus-1-dev libudev-dev \
@@ -245,31 +255,42 @@ jobs:
           vulkan_version: latest
           cache: true
 
-      # sccache is incompatible with MSVC's PDB model (assimp sets /Zi + /Fd
-      # which conflicts with sccache's output caching).  Linux/macOS only.
-      - name: Setup sccache
-        if: runner.os != 'Windows'
-        uses: mozilla/sccache-action@v0.0.9
+      # Ensure Python is available consistently across all runners (for gdown).
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
+      # Strawberry Perl ships a ccache.exe that hijacks compiler launcher
+      # invocations and breaks RC (resource compiler) dep tracking.
+      - name: Remove Strawberry ccache (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: rm -f /c/Strawberry/c/bin/ccache.exe
+
+      # Pin to v0.14.0 — v0.15.0 has cache-write errors on GHA.
+      # Windows uses clang-cl (not MSVC cl) so sccache works on all platforms.
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.9
+        with:
+          version: "v0.14.0"
+
+      # Cache dep sources AND their build dirs (CMakeCache.txt holds
+      # try_compile results, compiler probes, feature detection).
       - name: Cache FetchContent deps
         uses: actions/cache@v4
         with:
-          path: build/${{ matrix.preset }}/_deps
-          key: deps-v2-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-v2-${{ runner.os }}-${{ matrix.preset }}-
+          path: .deps/${{ matrix.preset }}
+          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      # Remove stale *-build and *-subbuild dirs after cache restore.
-      # Those dirs contain CMakeCache.txt files that record the generator
-      # used in the run that created the cache — if it differs from the
-      # current run's generator, CMake fails with "generator does not match".
-      # Source dirs (*-src) are left intact so FetchContent doesn't re-download.
-      # sccache handles compilation caching, so re-building from source is fast.
-      - name: Purge stale dep build dirs
-        shell: bash
-        run: |
-          find build/${{ matrix.preset }}/_deps -maxdepth 1 -type d \
-            \( -name '*-build' -o -name '*-subbuild' \) \
-            -exec rm -rf {} + 2>/dev/null || true
+      # Cache the project build tree for incremental cmake reconfigure.
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: build/${{ matrix.preset }}
+          key: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
         shell: bash
@@ -277,55 +298,76 @@ jobs:
           CC:  ${{ matrix.cc  || '' }}
           CXX: ${{ matrix.cxx || '' }}
         run: |
-          SCCACHE_FLAGS=""
-          if [[ "$RUNNER_OS" != "Windows" ]]; then
-            SCCACHE_FLAGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
-          fi
           cmake --preset ${{ matrix.preset }} \
-            $SCCACHE_FLAGS \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             ${{ matrix.extra_cmake || '' }}
 
       - name: Build
         shell: bash
-        run: cmake --build --preset ${{ matrix.preset }} --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --target client server --parallel
 
-      # Package client: binary + shaders/ + assets/ into a zip archive.
-      - name: Package client
+      # Download the shared assets zip from Google Drive (cached across runs).
+      - name: Cache assets
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: assets.zip
+          key: assets-${{ env.ASSETS_GDRIVE_ID }}
+
+      - name: Download assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          STAGE="staging/group2-${{ matrix.archive_suffix }}"
+          pip install --quiet gdown
+          gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
+
+      # Bundle client + server + shaders + config + assets into a single zip.
+      - name: Package release
+        shell: bash
+        run: |
+          DIR="group2-${{ matrix.archive_suffix }}"
+          STAGE="staging/$DIR"
           mkdir -p "$STAGE"
+
+          # Executables
           cp "${{ matrix.build_dir }}/${{ matrix.client_bin }}" "$STAGE/"
+          cp "${{ matrix.build_dir }}/${{ matrix.server_bin }}" "$STAGE/"
+
+          # Config
+          cp "${{ matrix.build_dir }}/config.toml" "$STAGE/"
+
+          # Compiled SPIR-V shaders (legacy set used by the client target)
           cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
-          if [ -d "${{ matrix.build_dir }}/assets" ]; then
-            cp -r "${{ matrix.build_dir }}/assets" "$STAGE/"
-          fi
+
+          # Assets from Google Drive (cross-platform extraction via Python)
+          python3 -c "import zipfile; zipfile.ZipFile('assets.zip').extractall('$STAGE')"
+
+          # Create release zip.
+          # Linux/macOS have zip pre-installed; Windows has 7z instead.
           cd staging
-          zip -r "../group2-${{ matrix.archive_suffix }}.zip" "group2-${{ matrix.archive_suffix }}"
+          if command -v zip &>/dev/null; then
+            zip -r "../$DIR.zip" "$DIR"
+          else
+            7z a -tzip "../$DIR.zip" "$DIR"
+          fi
 
-      # Server is a standalone binary — no shaders or assets needed.
-      - name: Package server
-        shell: bash
-        run: |
-          cp "${{ matrix.build_dir }}/${{ matrix.server_bin }}" "server-${{ matrix.archive_suffix }}${{ runner.os == 'Windows' && '.exe' || '' }}"
-
-      - name: Upload client archive
+      - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
-          name: group2-${{ matrix.archive_suffix }}.zip
+          name: group2-${{ matrix.archive_suffix }}
           path: group2-${{ matrix.archive_suffix }}.zip
-          retention-days: 7
-
-      - name: Upload server binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-${{ matrix.archive_suffix }}
-          path: server-${{ matrix.archive_suffix }}${{ runner.os == 'Windows' && '.exe' || '' }}
           retention-days: 7
 
   # ------------------------------------------------------------------ #
   #  Publish to GitHub Releases once all three platform builds succeed  #
+  #                                                                      #
+  #  Auto-semantic-versioning from commit messages:                      #
+  #    BREAKING CHANGE / feat!:  →  bump major                          #
+  #    feat:                     →  bump minor                          #
+  #    everything else           →  bump patch                          #
+  #  First release starts at v0.1.0.                                    #
   # ------------------------------------------------------------------ #
   publish:
     name: Publish Release
@@ -336,56 +378,266 @@ jobs:
       contents: write
 
     steps:
+      # Full history + tags needed to compute the next semantic version.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
 
-      - name: Determine release metadata
-        id: meta
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "tag=${GITHUB_REF_NAME}"                                  >> "$GITHUB_OUTPUT"
-            echo "title=${GITHUB_REF_NAME}"                                >> "$GITHUB_OUTPUT"
-            echo "prerelease=false"                                        >> "$GITHUB_OUTPUT"
-            echo "notes=Versioned release ${GITHUB_REF_NAME}."            >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=latest"                                              >> "$GITHUB_OUTPUT"
-            echo "title=Latest Build"                                      >> "$GITHUB_OUTPUT"
-            echo "prerelease=true"                                         >> "$GITHUB_OUTPUT"
-            echo "notes=Automated build from \`main\` — commit ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Delete existing 'latest' release (rolling update)
-        if: steps.meta.outputs.tag == 'latest'
+      - name: Compute next semantic version
+        id: version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest --yes 2>/dev/null || true
-          git push origin :refs/tags/latest 2>/dev/null || true
+          # Find the latest version tag (supports both vX.Y.Z and X.Y.Z)
+          LATEST_TAG=$(git tag -l --sort=-version:refname \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+
+          if [[ -z "$LATEST_TAG" ]]; then
+            # No version tags yet — start at v0.1.0
+            NEXT="v0.1.0"
+            echo "previous=" >> "$GITHUB_OUTPUT"
+          else
+            echo "previous=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+            VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+            # Use --no-merges to see every individual commit (including
+            # those inside PR merge commits) so feat:/fix: in any commit
+            # drives the version bump — not just the merge-commit subject.
+            SUBJECTS=$(git log "${LATEST_TAG}..HEAD" --no-merges --pretty=format:"%s")
+
+            if echo "$SUBJECTS" | grep -qiE 'BREAKING[- ]CHANGE|^[a-z]+(\(.+\))?!:'; then
+              MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+            elif echo "$SUBJECTS" | grep -qiE '^feat(\(.+\))?:'; then
+              MINOR=$((MINOR + 1)); PATCH=0
+            else
+              PATCH=$((PATCH + 1))
+            fi
+
+            NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          echo "tag=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "### Computed version: ${NEXT}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV_TAG:     ${{ steps.version.outputs.previous }}
+          RELEASE_TAG:  ${{ steps.version.outputs.tag }}
+        run: |
+          RANGE="${PREV_TAG:+${PREV_TAG}..HEAD}"
+          RANGE="${RANGE:-HEAD}"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
+          ROOT=$(git rev-list --max-parents=0 HEAD | head -1)
+          COMPARE_BASE="${PREV_TAG:-$ROOT}"
+
+          # ── Build SHA → @username map via GitHub compare API ──
+          # Single API call resolves git authors to GitHub logins.
+          gh api "repos/${GITHUB_REPOSITORY}/compare/${COMPARE_BASE}...${GITHUB_SHA}" \
+            --jq '.commits[] | "\(.sha[:7])\t@\(.author.login // .commit.author.name)"' \
+            > /tmp/author_map.tsv 2>/dev/null || true
+
+          # ── Categorise individual (non-merge) commits ──
+          FEATS=""
+          FIXES=""
+          OTHER=""
+          SEEN_AUTHORS=""
+
+          while IFS=$'\t' read -r sha subject author_name || [[ -n "$sha" ]]; do
+            # Resolve to GitHub @username; fall back to git author name
+            author=$(grep "^${sha}" /tmp/author_map.tsv 2>/dev/null | cut -f2 | head -1)
+            author="${author:-${author_name}}"
+
+            # Track unique contributors
+            if [[ -n "$author" ]] && ! echo "$SEEN_AUTHORS" | grep -qF "$author"; then
+              SEEN_AUTHORS="${SEEN_AUTHORS} ${author}"
+            fi
+
+            ENTRY="${subject} — ${author}"
+
+            if echo "$subject" | grep -qiE '^feat(\(.+\))?[!]?:'; then
+              FEATS="${FEATS}\n- ${ENTRY}"
+            elif echo "$subject" | grep -qiE '^fix(\(.+\))?[!]?:'; then
+              FIXES="${FIXES}\n- ${ENTRY}"
+            else
+              OTHER="${OTHER}\n- ${ENTRY}"
+            fi
+          done < <(git log "$RANGE" --no-merges --pretty=format:"%h%x09%s%x09%an" --reverse)
+
+          # ── Build categorised section ──
+          CHANGELOG=""
+          if [[ -n "$FEATS" ]]; then
+            CHANGELOG="${CHANGELOG}## Features\n${FEATS}\n\n"
+          fi
+          if [[ -n "$FIXES" ]]; then
+            CHANGELOG="${CHANGELOG}## Fixes\n${FIXES}\n\n"
+          fi
+          if [[ -n "$OTHER" ]]; then
+            CHANGELOG="${CHANGELOG}## Other\n${OTHER}\n\n"
+          fi
+
+          # ── Stats: this release ──
+          COMMIT_COUNT=$(git rev-list --count --no-merges "$RANGE" 2>/dev/null || echo "0")
+          DIFF_STATS=$(git diff --shortstat "${COMPARE_BASE}..HEAD" 2>/dev/null || echo "")
+          FILES_CHG=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "0")
+          INS=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+          DEL=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+          NET=$(( ${INS:-0} - ${DEL:-0} ))
+          [[ $NET -ge 0 ]] && NET_FMT="+${NET}" || NET_FMT="${NET}"
+
+          # ── Stats: repository totals ──
+          TOTAL_COMMITS=$(git rev-list --count HEAD)
+          TOTAL_FILES=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) 2>/dev/null | wc -l | tr -d ' ')
+          TOTAL_LOC=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) \
+            -exec cat {} + 2>/dev/null | wc -l | tr -d ' ')
+
+          CHANGELOG="${CHANGELOG}## Stats\n"
+          CHANGELOG="${CHANGELOG}**${COMMIT_COUNT}** commits  ·  "
+          CHANGELOG="${CHANGELOG}**${FILES_CHG}** files changed  ·  "
+          CHANGELOG="${CHANGELOG}**+${INS}** / **-${DEL}** lines (net ${NET_FMT})\n"
+          CHANGELOG="${CHANGELOG}Repository: **${TOTAL_LOC}** lines across **${TOTAL_FILES}** source files  ·  **${TOTAL_COMMITS}** total commits\n\n"
+
+          # ── Contributors ──
+          if [[ -n "${SEEN_AUTHORS// /}" ]]; then
+            CHANGELOG="${CHANGELOG}## Contributors\n"
+            for c in $SEEN_AUTHORS; do
+              CHANGELOG="${CHANGELOG}${c} "
+            done
+            CHANGELOG="${CHANGELOG}\n\n"
+          fi
+
+          # ── Append "New Contributors" from GitHub auto-generated notes ──
+          GH_NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${RELEASE_TAG}" \
+            -f target_commitish="${GITHUB_SHA}" \
+            ${PREV_TAG:+-f previous_tag_name="${PREV_TAG}"} \
+            --jq '.body' 2>/dev/null || echo "")
+
+          if [[ -n "$GH_NOTES" ]]; then
+            NEW_CONTRIB=$(echo "$GH_NOTES" | sed -n '/^## New Contributors/,/^## /{ /^## [^N]/d; p; }')
+            if [[ -n "$NEW_CONTRIB" ]]; then
+              CHANGELOG="${CHANGELOG}${NEW_CONTRIB}\n\n"
+            fi
+          fi
+
+          # Compare link
+          if [[ -n "$PREV_TAG" ]]; then
+            CHANGELOG="${CHANGELOG}**Full changelog**: ${REPO_URL}/compare/${PREV_TAG}...${RELEASE_TAG}"
+          fi
+
+          echo -e "$CHANGELOG" > changelog.md
+
+      # Ask Gemini to write a short human-readable summary of the changes.
+      # Sends the categorised changelog AND detailed per-commit stats
+      # (files changed, insertions, deletions, diffstat) so the summary
+      # is well-informed.  Falls back gracefully — if the API call fails
+      # the release still ships with just the categorised changelog.
+      - name: Generate AI summary
+        id: summary
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI }}
+          PREV_TAG: ${{ steps.version.outputs.previous }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          CHANGELOG=$(cat changelog.md)
+
+          RANGE="${PREV_TAG:+${PREV_TAG}..HEAD}"
+          RANGE="${RANGE:-HEAD}"
+
+          # Detailed per-commit info: hash, subject, author, date,
+          # plus --stat showing which files changed and how much.
+          COMMIT_DETAILS=$(git log "$RANGE" --first-parent \
+            --format="%n--- commit %h ---  %s  (%an, %ad)%n" --date=short \
+            --stat --stat-width=120 2>/dev/null || echo "")
+
+          # Overall diffstat summary (total files, insertions, deletions)
+          DIFF_SUMMARY=$(git diff --stat --stat-width=120 \
+            "${PREV_TAG:-$(git rev-list --max-parents=0 HEAD | head -1)}"..HEAD \
+            2>/dev/null | tail -1 || echo "")
+
+          # Build the JSON payload with jq to avoid injection from
+          # commit messages or file paths.
+          PAYLOAD=$(jq -n \
+            --arg changelog "$CHANGELOG" \
+            --arg commits "$COMMIT_DETAILS" \
+            --arg diffstat "$DIFF_SUMMARY" \
+            --arg version "$RELEASE_TAG" \
+            '{
+              "contents": [{
+                "parts": [{
+                  "text": ("You are writing a release summary for version " + $version + " of a multiplayer C++ FPS game engine.\n\nWrite a concise 2-4 sentence summary that describes what changed in this release. Focus on what matters to players and developers: new gameplay features, bug fixes, performance improvements, infrastructure changes. Be specific about what was added or fixed, referencing actual system names when relevant.\n\nDo not use emoji. Do not use markdown formatting. Just plain text sentences.\n\nCategorised changelog:\n" + $changelog + "\n\nDetailed commit info (commit hash, message, author, date, files changed):\n" + $commits + "\n\nOverall diff statistics:\n" + $diffstat)
+                }]
+              }],
+              "generationConfig": {
+                "maxOutputTokens": 300,
+                "temperature": 0.3
+              }
+            }')
+
+          # Try models in order: latest preview → stable fallback.
+          # Preview models can return 503/000 under load.
+          MODELS="gemini-3.1-flash-lite-preview gemini-2.5-flash-lite gemini-2.0-flash-lite"
+          SUMMARY=""
+
+          for MODEL in $MODELS; do
+            echo "Trying model: ${MODEL}"
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              --max-time 30) || true
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+
+            if [[ "$HTTP_CODE" == "200" ]]; then
+              SUMMARY=$(echo "$BODY" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null || echo "")
+              if [[ -n "$SUMMARY" ]]; then
+                echo "Success with ${MODEL}"
+                break
+              fi
+            fi
+            echo "${MODEL} returned HTTP ${HTTP_CODE} — trying next model."
+          done
+
+          if [[ -n "$SUMMARY" ]]; then
+            echo "$SUMMARY" > summary.txt
+            echo "has_summary=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "All models failed — skipping summary."
+            echo "has_summary=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assemble release notes
+        run: |
+          BODY=""
+          if [[ -f summary.txt ]]; then
+            SUMMARY=$(cat summary.txt)
+            BODY="## Summary\n${SUMMARY}\n\n"
+          fi
+          BODY="${BODY}$(cat changelog.md)"
+          echo -e "$BODY" > release-notes.md
 
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG:        ${{ steps.meta.outputs.tag }}
-          RELEASE_TITLE:      ${{ steps.meta.outputs.title }}
-          RELEASE_NOTES:      ${{ steps.meta.outputs.notes }}
-          RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          PRERELEASE_FLAG=""
-          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
-            PRERELEASE_FLAG="--prerelease"
-          fi
+          DATE="$(date -u +%Y-%m-%d)"
+          TITLE="${RELEASE_TAG} (${DATE})"
 
           gh release create "$RELEASE_TAG" \
-            --title "$RELEASE_TITLE" \
-            --notes "$RELEASE_NOTES" \
-            $PRERELEASE_FLAG \
+            --title "$TITLE" \
+            --notes-file release-notes.md \
+            --latest \
             group2-linux-x86_64.zip \
             group2-macos.zip \
-            group2-windows-x86_64.zip \
-            server-linux-x86_64 \
-            server-macos \
-            server-windows-x86_64.exe
+            group2-windows-x86_64.zip

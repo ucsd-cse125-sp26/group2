@@ -3,7 +3,12 @@
 
 #pragma once
 
+#include "client/animation/AnimationLibrary.hpp"
+#include "client/animation/CharacterAnimator.hpp"
+#include "client/animation/CharacterRig.hpp"
 #include "ecs/components/ClientId.hpp"
+#include "ecs/components/Hitbox.hpp"
+#include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/Server.hpp"
@@ -12,6 +17,7 @@
 #include <SDL3/SDL.h>
 
 #include <entt/entity/entity.hpp>
+#include <memory>
 #include <unordered_map>
 
 /// @brief Top-level server game loop.
@@ -28,7 +34,15 @@ public:
     /// @return True on success, false on network or initialisation failure.
     bool init(const char* addr, Uint16 port, int tickRateHz = 128);
 
-    /// @brief Block and run the game loop until shutdown() is called.
+    /// @brief Block on the game loop until shutdown() is called.
+    ///
+    /// Loop structure (each iteration = one tick at tickRateHz):
+    ///  1. `server.poll()` — accept new connections, read incoming packets,
+    ///     enqueue events (Connected / Disconnected / Input).
+    ///  2. `tick(dt, nextTick)` — process events and run all ECS systems.
+    ///  3. **Sleep** — hybrid sleep+spin-wait to maintain tick cadence.
+    ///
+    /// @see tick for the per-tick ECS system execution order.
     void run();
 
     /// @brief Signal the loop to stop and release all resources.
@@ -39,9 +53,34 @@ private:
     /// @param event The event to process.
     void eventHandler(Event event);
 
-    /// @brief Advance one physics tick.
+    /// @brief Advance one physics tick: drain events, run ECS systems, broadcast state.
+    ///
+    /// Execution order each tick:
+    ///  1. **Event drain** — dequeue Connected/Disconnected/Input events from the
+    ///     network server until the queue is empty or the tick deadline is exceeded.
+    ///  2. **Animation + hitboxes** — `updateAnimationAndHitboxes(dt)` samples
+    ///     skeleton poses and recomputes bone-capsule hitboxes for all players.
+    ///  3. **Weapon system** — `runWeapon()` processes fire inputs, performs
+    ///     hitscan raycasts against hitbox capsules, applies damage, generates
+    ///     particle/kill events.
+    ///  4. **Movement** — `runMovement()` applies acceleration, friction, gravity,
+    ///     and special movement modes (wallrun, slide, grapple).
+    ///  5. **Collision** — `runCollision()` performs swept-AABB resolution against
+    ///     the world geometry (planes, boxes, brushes).
+    ///  6. **Explosions** — `runExplosion()` processes pending projectile detonations
+    ///     with radius damage.
+    ///  7. **Player status** — `runPlayerStatus()` handles respawn timers, death
+    ///     state transitions, and health regeneration.
+    ///  8. **Weapon spawners** — `runWeaponSpawners()` ticks pickup cooldowns and
+    ///     spawns weapon entities.
+    ///  9. **Match controller** — `matchController.update()` manages match phase
+    ///     transitions (warmup → countdown → in-progress → finished).
+    /// 10. **Broadcast** — send updated registry snapshot, particle events, and
+    ///     kill events to all connected clients.
+    ///
     /// @param dt       Fixed delta time in seconds (1 / tickRateHz).
     /// @param nextTick Performance counter deadline for the current tick.
+    /// @see Game::iterate for the client-side frame loop.
     void tick(float dt, Uint64 nextTick);
 
     /// @brief Create a new player entity and map it to the given client ID.
@@ -52,12 +91,40 @@ private:
     /// @param clientId Network client identifier for the player.
     void deletePlayerEntity(ClientId clientId);
 
-    Server server;                                             ///< Owns the TCP socket and network I/O.
-    Registry registry;                                         ///< ECS entity/component store.
-    MatchController matchController;                           ///< Manages match flow and state.
+    /// @brief Initialise the server-side animation subsystem (skeleton, clips, hitboxes).
+    /// Called once during init() after map loading.
+    void initAnimation();
+
+    /// @brief Create and store a server-side animator for the given player entity.
+    void attachServerAnimator(entt::entity player);
+
+    /// @brief Remove the server-side animator for the given entity.
+    void detachServerAnimator(entt::entity player);
+
+    /// @brief Update all server-side animators and recompute hitbox capsules.
+    /// Called once per tick before weapon/damage systems.
+    void updateAnimationAndHitboxes(float dt);
+
+    physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
+
+    Server server;                           ///< Owns the TCP socket and network I/O.
+    Registry registry;                       ///< ECS entity/component store.
+    MatchController matchController;         ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.
     bool running = false;                        ///< Loop continues while true.
     int tickRateHz = 128;                        ///< Physics ticks per second.
     int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
+
+    // ── Server-side animation subsystem ──
+    CharacterRig serverRig_;             ///< Shared skeleton (loaded from same FBX as client).
+    AnimationLibrary serverAnimLibrary_; ///< Animation clips for server-side sampling.
+    HitboxRig hitboxRig_;                ///< Shared hitbox capsule definitions.
+    float rigScale_ = 1.0f;              ///< Rig model-space → game-unit scale factor.
+    float rigMeshMinY_ = 0.0f;           ///< Minimum Y of bind-pose mesh (for vertical offset).
+    bool animationLoaded_ = false;       ///< True if rig+clips loaded successfully.
+
+    /// Per-entity server animators (not ECS components to avoid pulling animation
+    /// headers into the component registry).
+    std::unordered_map<entt::entity, std::unique_ptr<CharacterAnimator>> serverAnimators_;
 };
