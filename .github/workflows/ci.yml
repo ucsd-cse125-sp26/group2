@@ -582,25 +582,37 @@ jobs:
               }
             }')
 
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
-            --max-time 15) || true
+          # Try models in order: latest preview → stable fallback.
+          # Preview models can return 503/000 under load.
+          MODELS="gemini-3.1-flash-lite-preview gemini-2.5-flash-lite gemini-2.0-flash-lite"
+          SUMMARY=""
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
+          for MODEL in $MODELS; do
+            echo "Trying model: ${MODEL}"
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              --max-time 30) || true
 
-          if [[ "$HTTP_CODE" == "200" ]]; then
-            SUMMARY=$(echo "$BODY" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null || echo "")
-            if [[ -n "$SUMMARY" ]]; then
-              echo "$SUMMARY" > summary.txt
-              echo "has_summary=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "has_summary=false" >> "$GITHUB_OUTPUT"
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+
+            if [[ "$HTTP_CODE" == "200" ]]; then
+              SUMMARY=$(echo "$BODY" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null || echo "")
+              if [[ -n "$SUMMARY" ]]; then
+                echo "Success with ${MODEL}"
+                break
+              fi
             fi
+            echo "${MODEL} returned HTTP ${HTTP_CODE} — trying next model."
+          done
+
+          if [[ -n "$SUMMARY" ]]; then
+            echo "$SUMMARY" > summary.txt
+            echo "has_summary=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Gemini API returned HTTP $HTTP_CODE — skipping summary."
+            echo "All models failed — skipping summary."
             echo "has_summary=false" >> "$GITHUB_OUTPUT"
           fi
 
