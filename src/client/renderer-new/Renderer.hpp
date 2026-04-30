@@ -1,3 +1,6 @@
+/// @file Renderer.hpp
+/// @brief Work-in-progress SDL3 GPU renderer implementing the IRenderer interface.
+
 #pragma once
 
 #include "Asset.hpp"
@@ -90,11 +93,30 @@ private:
     NewCamera camera_;
     Camera legacyCameraStub_{};
 
+    /// @brief Shared initialisation called by both init() overloads.
+    /// @return True on success.
     bool initCommon();
+
+    /// @brief Build the geometry graphics pipeline from vertex/fragment shaders.
+    /// @return True on success.
     bool createGeometryPipeline();
+
+    /// @brief Load models via AssetLoader and upload their mesh buffers to the GPU.
+    /// @return True on success.
     bool loadSceneAssets();
+
+    /// @brief (Re-)create the depth texture if the viewport size changed.
+    /// @param width  New viewport width in pixels.
+    /// @param height New viewport height in pixels.
+    /// @return True on success.
     bool ensureDepthTexture(Uint32 width, Uint32 height);
 
+    /// @brief Allocate GPU vertex and index buffers for the given mesh.
+    /// @param meshId Key into Asset::meshes_.
     void createMeshBuffers(MeshIdInt meshId);
+
+    /// @brief Bind a mesh's buffers and issue an indexed draw call.
+    /// @param renderPass The active render pass.
+    /// @param mesh The mesh to draw.
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
 };

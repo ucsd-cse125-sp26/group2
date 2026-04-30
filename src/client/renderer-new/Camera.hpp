@@ -1,29 +1,52 @@
+/// @file Camera.hpp
+/// @brief Camera class for the new renderer with combined view-projection matrix.
+
 #pragma once
 
 #include <glm/glm.hpp>
 
+/// @brief Camera for the new renderer, combining view and projection into one matrix.
 class NewCamera
 {
 public:
+    /// @brief Construct a NewCamera with default perspective and position.
     NewCamera();
 
-    // Camera perspective properties (modifies projection matrix)
+    /// @brief Set the aspect ratio from pixel dimensions (modifies projection matrix).
+    /// @param width  Viewport width in pixels.
+    /// @param height Viewport height in pixels.
     void setAspect(float width, float height);
+
+    /// @brief Set the vertical field of view in degrees.
+    /// @param fovyDegrees Vertical FOV in degrees.
     void setFov(float fovyDegrees);
+
+    /// @brief Set the near clip plane distance.
+    /// @param zNear Near clip distance.
     void setZNear(float zNear);
+
+    /// @brief Set the far clip plane distance.
+    /// @param zFar Far clip distance.
     void setZFar(float zFar);
 
-    // Sets the position of the camera in the world (modifies view matrix)
+    /// @brief Set the camera eye position in world space (modifies view matrix).
+    /// @param eye World-space position.
     void setEye(glm::vec3 eye);
-    // Sets the view direction from the eye based on the pitch, yaw, and roll
-    // (all in radians). Roll rotates the up vector around the forward axis,
-    // used for camera tilt during wallruns.
+
+    /// @brief Set the view direction from pitch, yaw, and roll (all in radians).
+    ///
+    /// Roll rotates the up vector around the forward axis, used for camera
+    /// tilt during wallruns.
+    /// @param pitch Pitch angle in radians.
+    /// @param yaw   Yaw angle in radians.
+    /// @param roll  Roll angle in radians.
     void setTarget(float pitch, float yaw, float roll);
-    // Sets the up direction of the camera explicitly (overrides whatever
-    // setTarget produced). Useful if you ever need a non-gravity-aligned up.
+
+    /// @brief Explicitly set the camera up direction, overriding setTarget's up vector.
+    /// @param up The desired up direction.
     void setUp(glm::vec3 up);
 
-    // Matrix computation, always run after using any of the set methods above.
+    /// @brief Recompute the combined view-projection matrix from current parameters.
     void computeViewProjectionMatrix();
 
     /// @brief Return the combined view-projection matrix.

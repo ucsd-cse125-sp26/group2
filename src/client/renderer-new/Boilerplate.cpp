@@ -1,3 +1,6 @@
+/// @file Boilerplate.cpp
+/// @brief Implementation of SDL3 GPU boilerplate helpers.
+
 #include "Boilerplate.hpp"
 
 #include <filesystem>

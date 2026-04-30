@@ -1,3 +1,6 @@
+/// @file Renderer.cpp
+/// @brief Implementation of the work-in-progress NewRenderer.
+
 #include "Renderer.hpp"
 
 #include "Asset.hpp"

@@ -319,17 +319,16 @@ bool Game::init()
         // Skip own effects that were already spawned locally for instant feedback.
         // Exceptions that must NOT be skipped:
         //   - Charge weapons: local VFX is skipped; we rely on server events.
-        //   - Explosions: server-authoritative (not locally predicted).
-        //   - Smoke: server-authoritative.
-        //   - Flesh impacts: local prediction can't reliably detect player
-        //     hitboxes, so we always honour the server's authoritative hit.
+        //   - Explosions / Smoke: server-authoritative (not locally predicted).
+        //   - Impacts: local prediction only spawns tracers; all impact VFX
+        //     (sparks, blood, bullet holes) come from server so player hits
+        //     always get the correct surface type and normal.
         if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
-            const bool isServerOnly =
-                evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke;
-            const bool isFleshImpact =
-                evt.effectType == ParticleEffectType::Impact && evt.surfaceType == SurfaceType::Flesh;
-            if (!isChargeWeapon && !isServerOnly && !isFleshImpact)
+            const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
+                                               evt.effectType == ParticleEffectType::Smoke ||
+                                               evt.effectType == ParticleEffectType::Impact;
+            if (!isChargeWeapon && !isServerAuthoritative)
                 return;
 
             // For charge weapons from self: also dispatch the weapon-fired event
@@ -929,27 +928,12 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
                 const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
-                // Raycast against world geometry AND player hitboxes so
-                // local-fire prediction gets the correct surface type and
-                // normal when shooting another player (Flesh + capsule normal).
-                entt::entity localEntity = entt::null;
-                registry.view<LocalPlayer>().each([&](entt::entity e) { localEntity = e; });
-
+                // Raycast world geometry for tracer endpoint.  Impact effects
+                // (sparks / blood / bullet holes) are NOT spawned here — they
+                // come from the server's authoritative NetParticleEvent so that
+                // player hits get the correct surface type and normal.
                 const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::activeWorld());
-                float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
-                glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
-                glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
-                SurfaceType hitSurface = worldHit.surface;
-
-                // Check player hitbox capsules — take the closer hit.
-                const auto playerHit =
-                    physics::raycastPlayerHitboxes(registry, localEntity, cachedEye_, cachedCamFwd_, hitDist);
-                if (playerHit.hit && playerHit.distance < hitDist) {
-                    hitDist = playerHit.distance;
-                    hitPos = playerHit.point;
-                    hitNormal = playerHit.normal;
-                    hitSurface = SurfaceType::Flesh;
-                }
+                const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
 
                 // Dispatch weapon-fired event for any listeners
                 WeaponFiredEvent wfe;
@@ -967,7 +951,6 @@ SDL_AppResult Game::iterate()
                 const float hipHitDist = glm::length(hipToHit);
                 const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
                 particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
-                particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only)
                 const RecoilParams& rp = getRecoilParams(currentEquippedType_);
@@ -2072,12 +2055,14 @@ SDL_AppResult Game::iterate()
             const float armorLost = prevArmor_ - curArmor;
             const float totalLost = std::max(0.f, healthLost) + std::max(0.f, armorLost);
 
-            if (totalLost > 0.f) {
+            hudState.armorBroke = (prevArmor_ > 0.f && curArmor <= 0.f);
+
+            // Red vignette on damage — suppressed when the shield breaks so
+            // the blue shield-break vignette plays alone.
+            if (totalLost > 0.f && !hudState.armorBroke) {
                 hudState.tookDamage = true;
                 hudState.damageIntensity = std::clamp(totalLost / 100.f, 0.f, 1.f);
             }
-
-            hudState.armorBroke = (prevArmor_ > 0.f && curArmor <= 0.f);
 
             prevHealth_ = curHealth;
             prevArmor_ = curArmor;
