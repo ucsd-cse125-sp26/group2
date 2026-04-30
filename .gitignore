@@ -55,6 +55,7 @@ compile_commands.json
 .remember/
 .claude/
 docs/superpowers/
+blender/
 
 # Git worktrees
 .worktrees/

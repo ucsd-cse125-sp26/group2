@@ -19,10 +19,10 @@ layout(location = 3) out vec3  vShapeData;
 
 void main()
 {
-    // Pixel coords → NDC.  Y is flipped so (0,0) = top-left.
+    // Pixel coords → NDC.  Vulkan Y already points down, so no flip needed.
     vec2 ndc;
-    ndc.x =  (inPosition.x / screenSize.x) * 2.0 - 1.0;
-    ndc.y = -((inPosition.y / screenSize.y) * 2.0 - 1.0);
+    ndc.x = (inPosition.x / screenSize.x) * 2.0 - 1.0;
+    ndc.y = (inPosition.y / screenSize.y) * 2.0 - 1.0;
     gl_Position = vec4(ndc, 0.0, 1.0);
 
     vUV        = inUV;
