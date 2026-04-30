@@ -54,7 +54,7 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         // Should collision meshes be auto-fit to primitive shapes, or kept
         // as raw triMeshes (the exact artist-authored Blender geometry)?
         // Must match the client value in Game.cpp for prediction parity.
-        static constexpr bool k_guessShapesProcessed = false;
+        static constexpr bool k_guessShapesProcessed = true;
 
         const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
 

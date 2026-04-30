@@ -176,11 +176,12 @@ bool Game::init()
         // In separated mode, should the loader auto-fit each collision mesh
         // to a primitive (AABB / cylinder / sphere / brush) — or load the raw
         // Blender geometry as-is (triangle mesh)?
-        //   false (default) → trust the artist: every collision mesh becomes a
+        //   true  (default) → auto-detect: convex shapes become cheap primitives
+        //                     or brushes; only truly non-convex meshes fall
+        //                     back to triMesh.  Smoother collision overall.
+        //   false           → trust the artist: every collision mesh stays a
         //                     triMesh, vertex-for-vertex, exactly as authored.
-        //   true            → run the auto-detection pipeline (cheaper at
-        //                     runtime, but the loader picks the primitive).
-        static constexpr bool k_guessShapesProcessed = false;
+        static constexpr bool k_guessShapesProcessed = true;
 
         const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
 

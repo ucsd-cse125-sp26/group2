@@ -87,7 +87,14 @@ struct MapLoadOptions
     /// auto-detect/guess each collision mesh's best-fitting primitive
     /// (AABB / cylinder / sphere / convex brush), or load it raw?
     ///
-    ///   false (default) — preserve exactly what Blender's collision section
+    ///   true (default)  — run the auto-detection pipeline
+    ///                     (AABB → cylinder → sphere → convex brush → triMesh)
+    ///                     plus sub-collection / name forcing.  Convex shapes
+    ///                     end up as cheap primitives or brushes; only truly
+    ///                     non-convex meshes fall back to triMesh.  Convex
+    ///                     primitives are dramatically cheaper at runtime and
+    ///                     don't suffer triMesh edge-jitter on contact.
+    ///   false           — preserve exactly what Blender's collision section
     ///                     contains: every collision mesh becomes a triangle
     ///                     mesh, vertex-for-vertex.  Sub-collection name
     ///                     overrides ("Boxes/", "Cylinders/", …) and Blender
@@ -95,16 +102,33 @@ struct MapLoadOptions
     ///                     Use this when the artist has authored exact
     ///                     collision hulls and the loader must not second-
     ///                     guess them.
-    ///   true            — run the existing auto-detection pipeline
-    ///                     (AABB → cylinder → sphere → brush → triMesh) plus
-    ///                     sub-collection / name forcing.  Cheaper at runtime
-    ///                     for simple shapes, but the loader picks the
-    ///                     primitive — not the artist.
     ///
     /// Has no effect in prototype mode (`allMeshesAreCollision = true`):
     /// every mesh is collision there, and forcing all of them to triMesh
     /// would be prohibitively expensive.
-    bool guessShapesProcessed = false;
+    bool guessShapesProcessed = true;
+
+    /// In separated mode with shape-guessing on, when a collision mesh is
+    /// non-convex (so it can't be a single `WorldBrush`), should the loader
+    /// run V-HACD convex decomposition to split it into multiple brushes?
+    ///
+    ///   true  (default) — non-convex meshes go through V-HACD; the resulting
+    ///                     hulls are appended as `WorldBrush`es.  Smoother
+    ///                     collision than triMesh (no per-triangle MTV
+    ///                     jitter) and cheaper at runtime.  Costs a few
+    ///                     hundred milliseconds to a few seconds at *load*
+    ///                     time per non-convex mesh, depending on size.
+    ///   false           — skip decomposition; non-convex meshes fall through
+    ///                     to `WorldTriMesh`.
+    ///
+    /// V-HACD tries `FLOOD_FILL` first (closed solid meshes), falling back
+    /// to `RAYCAST_FILL` and finally `SURFACE_ONLY` (hollow shells like a
+    /// tube without thickness) — so it works for both solid non-convex
+    /// objects and walkable hollow shells.
+    ///
+    /// Has no effect when `guessShapesProcessed = false` or when
+    /// `allMeshesAreCollision = true`.
+    bool decomposeNonConvex = true;
 };
 
 /// API

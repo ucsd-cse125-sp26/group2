@@ -10,6 +10,20 @@
 
 #include <SDL3/SDL_log.h>
 
+// V-HACD (header-only).  Implementation is compiled in VHACDImpl.cpp via
+// `#define ENABLE_VHACD_IMPLEMENTATION` — this site only needs the API.
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wpedantic"
+#pragma GCC diagnostic ignored "-Wdouble-promotion"
+#endif
+#include <VHACD.h>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -350,14 +364,48 @@ struct FacePlane
     float distance;
 };
 
-/// @brief Extract unique face planes from mesh triangles and build a WorldBrush.
-/// Returns true if the mesh is convex and fits within WorldBrush::k_maxPlanes.
+/// @brief Try to fit a convex hull (`WorldBrush`) to the mesh.
+///
+/// Returns true if **and only if** the mesh is genuinely convex *and* its
+/// unique face planes fit within `WorldBrush::k_maxPlanes`.
+///
+/// "Genuinely convex" means: for every triangle face, all of the mesh's other
+/// vertices lie on or behind that face's plane (using the outward-facing
+/// normal).  An L-shape, U-shape, hollow tube, or anything with a concave
+/// region will fail this test even if its unique-plane count happens to fit
+/// in `k_maxPlanes` — those meshes are silently mis-represented if you build
+/// a brush from them, because the brush is the *convex hull* of the planes,
+/// not the actual concave shape.
+///
+/// Outward orientation is auto-detected from the mesh centroid: whichever side
+/// of each face the centroid is on is treated as the interior.  This means
+/// inverted-winding meshes are handled correctly without a manual flip.
 bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale, WorldBrush& outBrush)
 {
-    if (!mesh->HasPositions() || !mesh->HasNormals() || mesh->mNumFaces == 0)
+    if (!mesh->HasPositions() || mesh->mNumFaces == 0)
         return false;
 
-    // Collect unique face planes (by normal direction).
+    // World-space vertex cache — we'll project every vertex against every
+    // face plane below, so do the transform once.
+    const std::vector<glm::vec3> verts = getWorldVertices(mesh, world, scale);
+    if (verts.size() < 4)
+        return false; // a closed convex volume needs at least a tetrahedron
+
+    // Mesh extent — used to scale a relative tolerance for "on the plane".
+    glm::vec3 bmin, bmax;
+    computeAABB(verts, bmin, bmax);
+    const glm::vec3 centroid = (bmin + bmax) * 0.5f;
+    const glm::vec3 ext = bmax - bmin;
+    const float meshDiag = glm::length(ext);
+    if (meshDiag < 1e-6f)
+        return false; // degenerate (zero-extent mesh)
+
+    // 0.1% of the mesh diagonal — generous enough to absorb numerical noise
+    // and Blender's typical export precision, tight enough to flag real
+    // concavities.  For a 200-unit cube that's 0.2 units, well below any
+    // "real" feature size.
+    const float tolerance = meshDiag * 0.001f;
+
     std::vector<FacePlane> uniquePlanes;
 
     for (unsigned int fi = 0; fi < mesh->mNumFaces; ++fi) {
@@ -365,33 +413,40 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
         if (face.mNumIndices < 3)
             continue;
 
-        // Compute face normal from the first triangle of this face.
-        const glm::vec4 lp0(mesh->mVertices[face.mIndices[0]].x,
-                            mesh->mVertices[face.mIndices[0]].y,
-                            mesh->mVertices[face.mIndices[0]].z,
-                            1.0f);
-        const glm::vec4 lp1(mesh->mVertices[face.mIndices[1]].x,
-                            mesh->mVertices[face.mIndices[1]].y,
-                            mesh->mVertices[face.mIndices[1]].z,
-                            1.0f);
-        const glm::vec4 lp2(mesh->mVertices[face.mIndices[2]].x,
-                            mesh->mVertices[face.mIndices[2]].y,
-                            mesh->mVertices[face.mIndices[2]].z,
-                            1.0f);
-
-        const glm::vec3 wp0 = glm::vec3(world * lp0) * scale;
-        const glm::vec3 wp1 = glm::vec3(world * lp1) * scale;
-        const glm::vec3 wp2 = glm::vec3(world * lp2) * scale;
+        const glm::vec3& wp0 = verts[face.mIndices[0]];
+        const glm::vec3& wp1 = verts[face.mIndices[1]];
+        const glm::vec3& wp2 = verts[face.mIndices[2]];
 
         glm::vec3 faceN = glm::cross(wp1 - wp0, wp2 - wp0);
         const float len = glm::length(faceN);
         if (len < 1e-8f)
-            continue;
+            continue; // sliver / degenerate triangle — skip
         faceN /= len;
+        float dist = glm::dot(faceN, wp0);
 
-        const float dist = glm::dot(faceN, wp0);
+        // Pick the outward orientation: the centroid should be on the *inside*
+        // (negative side) of each face plane for a convex closed mesh.  If the
+        // raw cross-product points the wrong way (inward winding), flip both
+        // normal and distance so the plane is consistently outward.
+        const float centroidSide = glm::dot(faceN, centroid) - dist;
+        if (centroidSide > tolerance) {
+            faceN = -faceN;
+            dist = -dist;
+        }
 
-        // Check if this normal direction already exists (within angular tolerance).
+        // Convexity verification: every vertex in the mesh must be on or
+        // behind this plane.  A single vertex on the *outside* (positive side
+        // beyond tolerance) means the mesh has a concavity here — treating it
+        // as a brush would silently give the player the wrong collision (the
+        // player would collide with the convex hull instead of the real
+        // surface).  Bail out so the caller falls through to triMesh.
+        for (const auto& v : verts) {
+            const float d = glm::dot(faceN, v) - dist;
+            if (d > tolerance)
+                return false;
+        }
+
+        // Deduplicate by normal direction (parallel coplanar tris share a plane).
         bool duplicate = false;
         for (const auto& existing : uniquePlanes) {
             if (glm::dot(faceN, existing.normal) > 0.999f) {
@@ -399,13 +454,12 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
                 break;
             }
         }
-
         if (!duplicate)
             uniquePlanes.push_back({faceN, dist});
     }
 
-    // A closed convex volume needs at least 4 planes (tetrahedron).
-    // Fewer planes produce infinite half-spaces that break collision.
+    // A closed convex volume needs at least 4 planes (tetrahedron); fewer means
+    // an unbounded half-space.  And it must fit within the brush's plane budget.
     if (static_cast<int>(uniquePlanes.size()) < 4 || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
         return false;
 
@@ -417,6 +471,212 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
     }
 
     return true;
+}
+
+// Convex decomposition (V-HACD)
+
+/// @brief Convert one V-HACD output hull to a `WorldBrush`.
+///
+/// V-HACD hands us each hull as a triangle mesh (vertices + indices in double
+/// precision).  We extract its unique face planes (deduplicating coplanar
+/// triangles), auto-detect the outward orientation from the centroid, and
+/// pack them into a brush.  Returns false if the hull is degenerate or its
+/// plane count exceeds the brush budget.
+bool buildBrushFromHull(const VHACD::IVHACD::ConvexHull& hull, WorldBrush& outBrush)
+{
+    if (hull.m_points.empty() || hull.m_triangles.empty())
+        return false;
+
+    // Convert hull vertices from V-HACD's double-precision to glm::vec3.
+    std::vector<glm::vec3> verts;
+    verts.reserve(hull.m_points.size());
+    for (const auto& p : hull.m_points)
+        verts.emplace_back(static_cast<float>(p.mX), static_cast<float>(p.mY), static_cast<float>(p.mZ));
+
+    // Centroid + tolerance for outward-orientation detection (mirrors the
+    // logic in extractConvexBrush so we keep behaviour consistent).
+    glm::vec3 bmin(1e30f), bmax(-1e30f);
+    for (const auto& v : verts) {
+        bmin = glm::min(bmin, v);
+        bmax = glm::max(bmax, v);
+    }
+    const glm::vec3 centroid = (bmin + bmax) * 0.5f;
+    const float meshDiag = glm::length(bmax - bmin);
+    if (meshDiag < 1e-6f)
+        return false;
+    const float tolerance = meshDiag * 0.001f;
+
+    std::vector<FacePlane> uniquePlanes;
+    uniquePlanes.reserve(hull.m_triangles.size());
+
+    for (const auto& tri : hull.m_triangles) {
+        if (tri.mI0 >= verts.size() || tri.mI1 >= verts.size() || tri.mI2 >= verts.size())
+            continue;
+
+        const glm::vec3& v0 = verts[tri.mI0];
+        const glm::vec3& v1 = verts[tri.mI1];
+        const glm::vec3& v2 = verts[tri.mI2];
+
+        glm::vec3 n = glm::cross(v1 - v0, v2 - v0);
+        const float len = glm::length(n);
+        if (len < 1e-8f)
+            continue; // sliver
+        n /= len;
+        float dist = glm::dot(n, v0);
+
+        // Outward orientation: centroid should be on the inside (negative side).
+        if (glm::dot(n, centroid) - dist > tolerance) {
+            n = -n;
+            dist = -dist;
+        }
+
+        // Deduplicate by normal direction (coplanar tris share a plane).
+        bool dup = false;
+        for (const auto& existing : uniquePlanes) {
+            if (glm::dot(n, existing.normal) > 0.999f) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup)
+            uniquePlanes.push_back({n, dist});
+    }
+
+    if (static_cast<int>(uniquePlanes.size()) < 4 || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
+        return false;
+
+    outBrush.planeCount = static_cast<int>(uniquePlanes.size());
+    for (int i = 0; i < outBrush.planeCount; ++i) {
+        outBrush.planes[i].normal = uniquePlanes[static_cast<size_t>(i)].normal;
+        outBrush.planes[i].distance = uniquePlanes[static_cast<size_t>(i)].distance;
+    }
+    return true;
+}
+
+/// @brief Run V-HACD convex decomposition on a non-convex mesh and append the
+///        resulting hulls to `out.brushes`.
+///
+/// Tries V-HACD's three fill modes in order:
+///   1. `FLOOD_FILL`     — closed solid meshes (default).  Voxelises the
+///                         interior via flood-fill from outside.  Best
+///                         quality for watertight solids.
+///   2. `RAYCAST_FILL`   — meshes with small holes.  Determines inside vs
+///                         outside by raycasting around each voxel.  More
+///                         robust than flood-fill against leaks.
+///   3. `SURFACE_ONLY`   — hollow shells (e.g. a tube wall, a curved
+///                         walkable corridor).  Treats the mesh as a thin
+///                         skin and produces hulls along the surface only,
+///                         so the cavity stays empty and walkable.
+///
+/// We accept the *first* mode that produces ≥1 successfully-converted hull —
+/// the modes are ordered "most likely correct for solid meshes" first so
+/// that solid non-convex shapes (chairs, L-blocks) don't accidentally get
+/// the surface-only treatment.
+///
+/// @return Number of brushes appended to `out.brushes`. Zero on failure
+/// (caller should fall through to triMesh).
+size_t decomposeIntoBrushes(
+    const aiMesh* mesh, const glm::mat4& world, float scale, const char* nodeName, MapCollisionData& out)
+{
+    if (!mesh->HasPositions() || mesh->mNumFaces == 0)
+        return 0;
+
+    // Build float vertex array (world-space) and uint32 index array.
+    const std::vector<glm::vec3> wverts = getWorldVertices(mesh, world, scale);
+    if (wverts.size() < 4)
+        return 0;
+
+    std::vector<float> points;
+    points.reserve(wverts.size() * 3);
+    for (const auto& v : wverts) {
+        points.push_back(v.x);
+        points.push_back(v.y);
+        points.push_back(v.z);
+    }
+
+    std::vector<uint32_t> indices;
+    indices.reserve(mesh->mNumFaces * 3);
+    for (unsigned int fi = 0; fi < mesh->mNumFaces; ++fi) {
+        const aiFace& face = mesh->mFaces[fi];
+        if (face.mNumIndices != 3)
+            continue;
+        indices.push_back(face.mIndices[0]);
+        indices.push_back(face.mIndices[1]);
+        indices.push_back(face.mIndices[2]);
+    }
+    if (indices.size() < 9)
+        return 0;
+
+    // Try each fill mode until one yields hulls.
+    //
+    // FLOOD_FILL is tried first because it's the most efficient for the common
+    // case (closed solid mesh, e.g. a chair, an L-shaped block): it voxelises
+    // the volume, flood-fills "outside" from the bounds, and decomposes the
+    // remaining "inside" into a small number of compact hulls.
+    //
+    // RAYCAST_FILL is a fallback for meshes with small holes that defeat the
+    // flood-fill (it decides inside-vs-outside per voxel via raycasts).
+    //
+    // SURFACE_ONLY is the last resort for thin-shell meshes that have no
+    // enclosed volume (e.g. a single-layer bezier tube the artist intended to
+    // be walkable from inside).  It decomposes only the surface skin so the
+    // cavity stays empty.  If you have a hollow-walkable mesh that's getting
+    // its cavity filled by FLOOD_FILL, give the wall thickness in Blender
+    // (Solidify modifier) — or move SURFACE_ONLY to the front of this list.
+    static constexpr struct
+    {
+        VHACD::FillMode mode;
+        const char* name;
+    } k_fillModes[] = {
+        {VHACD::FillMode::FLOOD_FILL, "flood-fill"},
+        {VHACD::FillMode::RAYCAST_FILL, "raycast-fill"},
+        {VHACD::FillMode::SURFACE_ONLY, "surface-only"},
+    };
+
+    for (const auto& mode : k_fillModes) {
+        VHACD::IVHACD::Parameters params;
+        params.m_maxConvexHulls = 32;      // total hull budget per mesh
+        params.m_resolution = 100000;      // voxel grid (default 400000 is slower)
+        params.m_maxNumVerticesPerCH = 32; // bounds plane count per hull (after dedup)
+        params.m_asyncACD = false;         // synchronous: we're at load-time
+        params.m_fillMode = mode.mode;
+
+        VHACD::IVHACD* iface = VHACD::CreateVHACD();
+        const bool computed = iface->Compute(points.data(),
+                                             static_cast<uint32_t>(points.size() / 3),
+                                             indices.data(),
+                                             static_cast<uint32_t>(indices.size() / 3),
+                                             params);
+
+        const uint32_t hullCount = computed ? iface->GetNConvexHulls() : 0u;
+        if (hullCount == 0) {
+            iface->Release();
+            continue; // try next fill mode
+        }
+
+        size_t addedBrushes = 0;
+        for (uint32_t i = 0; i < hullCount; ++i) {
+            VHACD::IVHACD::ConvexHull hull;
+            if (!iface->GetConvexHull(i, hull))
+                continue;
+
+            WorldBrush brush{};
+            if (buildBrushFromHull(hull, brush)) {
+                out.brushes.push_back(brush);
+                ++addedBrushes;
+            }
+        }
+        iface->Release();
+
+        if (addedBrushes > 0) {
+            SDL_Log(
+                "MapLoader: V-HACD decomposed '%s' into %zu brush(es) [mode=%s]", nodeName, addedBrushes, mode.name);
+            return addedBrushes;
+        }
+    }
+
+    SDL_Log("MapLoader: V-HACD failed for '%s' (all fill modes produced 0 hulls); falling back to triMesh", nodeName);
+    return 0;
 }
 
 // Triangle mesh construction
@@ -457,11 +717,15 @@ bool shouldSkipNode(const char* nodeName)
 }
 
 /// @brief Determine the best collision primitive for a mesh and add it to `out`.
+/// @param decomposeNonConvex  If true and the mesh fails the single-hull
+///        convex-brush check, run V-HACD convex decomposition before falling
+///        back to triMesh.
 void extractMeshCollision(const aiMesh* mesh,
                           const glm::mat4& world,
                           float scale,
                           const std::string& forceType,
                           const char* nodeName,
+                          bool decomposeNonConvex,
                           MapCollisionData& out)
 {
     if (!mesh->HasPositions() || mesh->mNumVertices == 0)
@@ -618,7 +882,8 @@ void extractMeshCollision(const aiMesh* mesh,
         }
     }
 
-    // 4. Try convex brush
+    // 4. Try a single convex brush (for genuinely-convex meshes that fit in
+    //    one hull within k_maxPlanes — cheapest collision shape after AABB).
     {
         WorldBrush brush{};
         if (extractConvexBrush(mesh, world, scale, brush)) {
@@ -626,6 +891,14 @@ void extractMeshCollision(const aiMesh* mesh,
             SDL_Log("MapLoader: Brush (auto) %d planes '%s'", brush.planeCount, nodeName);
             return;
         }
+    }
+
+    // 4.5. Try V-HACD convex decomposition: split the non-convex mesh into a
+    //     handful of convex brushes.  Smoother runtime collision than triMesh
+    //     (no per-triangle MTV jitter on curved surfaces) and the cost is paid
+    //     only once at load time.
+    if (decomposeNonConvex && decomposeIntoBrushes(mesh, world, scale, nodeName, out) > 0) {
+        return;
     }
 
     // 5. TriMesh (for complex geometry that doesn't fit simpler primitives)
@@ -666,6 +939,7 @@ void extractCollision(const aiNode* node,
                       const std::string& collectionName,
                       bool allAreCollision,
                       bool guessShapesProcessed,
+                      bool decomposeNonConvex,
                       float scale,
                       MapCollisionData& out)
 {
@@ -689,14 +963,27 @@ void extractCollision(const aiNode* node,
             forceType = guessShapesProcessed ? getCollectionType(node) : std::string("meshes");
         }
 
+        // V-HACD only fires in separated + shape-guessing mode and only on
+        // meshes that fall through to auto-detection (no forced type).  In
+        // prototype mode every mesh is collision (often hundreds), and forced
+        // triMesh / brush requests should be honoured exactly.
+        const bool tryDecompose = decomposeNonConvex && !allAreCollision && guessShapesProcessed && forceType.empty();
+
         for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
             const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
-            extractMeshCollision(mesh, world, scale, forceType, node->mName.C_Str(), out);
+            extractMeshCollision(mesh, world, scale, forceType, node->mName.C_Str(), tryDecompose, out);
         }
     }
 
     for (unsigned int c = 0; c < node->mNumChildren; ++c)
-        extractCollision(node->mChildren[c], scene, collectionName, allAreCollision, guessShapesProcessed, scale, out);
+        extractCollision(node->mChildren[c],
+                         scene,
+                         collectionName,
+                         allAreCollision,
+                         guessShapesProcessed,
+                         decomposeNonConvex,
+                         scale,
+                         out);
 }
 
 } // namespace
@@ -729,6 +1016,7 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
                      opts.collisionCollection,
                      opts.allMeshesAreCollision,
                      opts.guessShapesProcessed,
+                     opts.decomposeNonConvex,
                      opts.scale,
                      out);
 
@@ -805,7 +1093,17 @@ bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3
             for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
                 const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
                 // Scale = 1.0 because the scale is already baked into the transform.
-                extractMeshCollision(mesh, world, 1.0f, "", node->mName.C_Str(), out);
+                // decomposeNonConvex = false: props are loaded one-shot per call
+                // and a typical prop GLB has many meshes, V-HACD on each at
+                // load time would slow startup unacceptably.  Props use the
+                // existing primitive auto-detection + triMesh fallback.
+                extractMeshCollision(mesh,
+                                     world,
+                                     1.0f,
+                                     "",
+                                     node->mName.C_Str(),
+                                     /*decomposeNonConvex=*/false,
+                                     out);
             }
 
             for (unsigned int c = 0; c < node->mNumChildren; ++c)

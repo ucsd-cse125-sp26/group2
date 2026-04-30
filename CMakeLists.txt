@@ -306,6 +306,21 @@ FetchContent_MakeAvailable(minimp3)
 add_library(minimp3 INTERFACE)
 target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
 
+# V-HACD — Volumetric Hierarchical Approximate Convex Decomposition.
+# Header-only library used by MapLoader to split non-convex collision meshes
+# into a small set of convex hulls (WorldBrushes), avoiding triMesh-edge
+# jitter on curved surfaces.  Implementation lives in
+# src/ecs/physics/VHACDImpl.cpp via the ENABLE_VHACD_IMPLEMENTATION define.
+FetchContent_Declare(
+    vhacd
+    GIT_REPOSITORY https://github.com/kmammou/v-hacd.git
+    GIT_TAG        v4.1.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(vhacd)
+add_library(vhacd INTERFACE)
+target_include_directories(vhacd SYSTEM INTERFACE ${vhacd_SOURCE_DIR}/include)
+
 # ozz-animation — runtime skeletal animation (CPU skinning, sampling, blending).
 # We only need the runtime + offline builders; disable all extras.
 set(ozz_build_tests     OFF CACHE BOOL "" FORCE)
@@ -701,6 +716,7 @@ add_executable(group2
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -824,6 +840,7 @@ target_link_libraries(group2 PRIVATE
     glm::glm
     SDL3_net::SDL3_net
     EnTT::EnTT
+    vhacd
     imgui_lib
     assimp
     stb_image
@@ -1011,6 +1028,7 @@ add_executable(client
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -1117,6 +1135,7 @@ target_link_libraries(client PRIVATE
     glm::glm
     SDL3_net::SDL3_net
     EnTT::EnTT
+    vhacd
     imgui_lib
     assimp
     stb_image
@@ -1188,6 +1207,7 @@ add_executable(server
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -1265,6 +1285,7 @@ target_link_libraries(server PRIVATE
     EnTT::EnTT
     glm::glm
     assimp
+    vhacd
     tomlplusplus::tomlplusplus
     ozz_animation_offline
     ozz_animation
