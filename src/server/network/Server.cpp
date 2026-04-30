@@ -8,6 +8,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/transport/PacketHeader.hpp"
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL.h>
@@ -15,8 +16,9 @@
 #include <SDL3_net/SDL_net.h>
 #include <cstring>
 #include <entt/entity/entity.hpp>
+#include <random>
 
-bool Server::init(const char* addr, Uint16 port)
+bool Server::init(const char* addr, Uint16 port, const TransportConfig& transport)
 {
     NET_Address* netAddr = NET_ResolveHostname(addr);
     if (NET_WaitUntilResolved(netAddr, -1) == NET_FAILURE) {
@@ -36,6 +38,22 @@ bool Server::init(const char* addr, Uint16 port)
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
 
     nextClientId.value = 0;
+    transportConfig_ = transport;
+
+    // ── Phase 3d-1: open UDP sidecar on the same port ────────────────────
+    //
+    // TCP and UDP are different protocols so they can share a port number
+    // without collision. The OS demuxes by IP-protocol field. If the UDP
+    // bind fails (rare — OS usually only fails this if the port is in use
+    // *as UDP* by another app), we log and continue with TCP-only; the
+    // 3d-2/3 features fall back transparently when the sidecar isn't open.
+    if (transportConfig_.enableUdpSidecar) {
+        if (udpEndpoint_.open(addr, port)) {
+            SDL_Log("Server: UDP sidecar bound to port %d", static_cast<int>(port));
+        } else {
+            SDL_Log("Server: UDP sidecar bind failed; falling back to TCP-only");
+        }
+    }
 
     // ── Stage 3b: spawn the dedicated network thread. ────────────────────
     //
@@ -65,8 +83,11 @@ void Server::shutdown()
         NET_DestroyServer(server);
         server = nullptr;
     }
+    udpEndpoint_.close();
+    connIdToClient_.clear();
     for (auto& [_, client] : clients) {
         NET_DestroyStreamSocket(client.msgStream.socket);
+        client.udpAddr.release();
     }
     clients.clear();
 }
@@ -133,6 +154,54 @@ void Server::flushAllOutbound()
     }
 }
 
+void Server::handleUdpInput(uint32_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len)
+{
+    // Caller (networkLoop's UDP phase) holds stateMutex_.
+    auto idIt = connIdToClient_.find(connId);
+    if (idIt == connIdToClient_.end())
+        return; // unknown connection ID — silently drop
+
+    auto connIt = clients.find(idIt->second);
+    if (connIt == clients.end())
+        return; // client gone (race with disconnect)
+    auto& conn = connIt->second;
+
+    // Cache the source address for future server→client UDP replies
+    // (e.g. PONG in Stage 3d-3). Only refresh if we don't already have
+    // it or if the source port changed (NAT rebind).
+    if (conn.udpAddr.addr == nullptr || conn.udpAddr.port != from.port) {
+        conn.udpAddr.release();
+        conn.udpAddr.addr = NET_RefAddress(from.addr);
+        conn.udpAddr.port = from.port;
+    }
+
+    // Reuse the exact INPUT-packet parsing from the TCP path. The wire
+    // format is identical — just the transport differs.
+    if (len < 1)
+        return;
+    const uint8_t count = payload[0];
+    constexpr uint8_t k_maxInputsPerPacket = 16;
+    if (count == 0 || count > k_maxInputsPerPacket)
+        return;
+    const uint32_t expectedSize = 1u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+    if (len != expectedSize)
+        return;
+
+    const uint8_t* base = payload + 1;
+    for (uint8_t i = 0; i < count; ++i) {
+        InputSnapshot snap{};
+        std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
+        if (snap.tick <= conn.lastAppliedInputTick)
+            continue;
+        Event event{};
+        event.movementIntent = snap;
+        event.type = EventType::Input;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        conn.lastAppliedInputTick = snap.tick;
+    }
+}
+
 void Server::networkLoop()
 {
     // The three I/O phases run separately so the lock can be released
@@ -147,6 +216,34 @@ void Server::networkLoop()
             std::lock_guard<std::mutex> lock(stateMutex_);
             readClients();
         }
+
+        // ── Phase 3d: UDP receive phase ──────────────────────────────
+        //
+        // Drain all available datagrams in one batch. Held under the
+        // state mutex so handleUdpInput's enqueue path is serialized
+        // with the game thread's dequeueEvent.
+        if (udpEndpoint_.isOpen()) {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            net::UdpReceivedMessage msg;
+            int drained = 0;
+            constexpr int k_maxDatagramsPerCycle = 512;
+            while (drained < k_maxDatagramsPerCycle && udpEndpoint_.tryReceive(msg)) {
+                ++drained;
+                // Stage 3d-2: only INPUT is currently routed through UDP.
+                // Channel + connectionId are validated; payload is the
+                // existing INPUT wire format.
+                if (msg.header.channel == static_cast<uint8_t>(net::ChannelId::Unreliable) &&
+                    msg.header.connectionId != 0)
+                {
+                    handleUdpInput(msg.header.connectionId,
+                                   msg.from,
+                                   msg.payload.data(),
+                                   static_cast<uint32_t>(msg.payload.size()));
+                }
+                msg.from.release();
+            }
+        }
+
         {
             std::lock_guard<std::mutex> lock(stateMutex_);
             flushAllOutbound();
@@ -172,9 +269,22 @@ void Server::acceptClients()
         SDL_Log("Server: accepted new client");
         NET_SetStreamSocketNoDelay(socket, true);
         ClientId clientId = getNextClientId();
-        clients.insert(
-            {clientId,
-             Connection{.msgStream = MessageStream(socket), .clientId = clientId, .pendingInitialization = true}});
+
+        // Phase 3d-1: mint a 32-bit random connection ID. Off-path
+        // attackers can't guess it (defends against UDP spoofing for the
+        // duration of this connection). The ID is shipped to the client
+        // in the ASSIGN_CLIENT_ID packet over TCP and stamped on every
+        // outbound UDP datagram from then on.
+        static thread_local std::mt19937 rng{std::random_device{}()};
+        std::uniform_int_distribution<uint32_t> dist{1, std::numeric_limits<uint32_t>::max()};
+        const uint32_t connId = dist(rng);
+
+        clients.insert({clientId,
+                        Connection{.msgStream = MessageStream(socket),
+                                   .clientId = clientId,
+                                   .pendingInitialization = true,
+                                   .connectionId = connId}});
+        connIdToClient_[connId] = clientId;
         eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected, .movementIntent = {}});
     }
 }
@@ -183,6 +293,9 @@ void Server::disconnectClient(Connection conn)
 {
     SDL_Log("Server: disconnecting client %d", conn.clientId.value);
     NET_DestroyStreamSocket(conn.msgStream.socket);
+    if (conn.connectionId != 0)
+        connIdToClient_.erase(conn.connectionId);
+    conn.udpAddr.release();
     eventQueue.enqueue(Event{.clientId = conn.clientId, .type = EventType::Disconnected});
 }
 
@@ -313,14 +426,19 @@ Event Server::dequeueEvent()
 // NOTE: playerEntity is the entity id of the player
 bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 {
-    uint8_t buf[1 + sizeof(entt::entity)];
-    buf[0] = static_cast<uint8_t>(PacketType::ASSIGN_CLIENT_ID);
-    std::memcpy(buf + 1, &playerEntity, sizeof(entt::entity));
-
     std::lock_guard<std::mutex> lock(stateMutex_);
     auto it = clients.find(clientId);
     if (it == clients.end())
         return false;
+
+    // Phase 3d-1: ASSIGN_CLIENT_ID payload now also carries the
+    // server-minted UDP connectionId so the client can stamp it on
+    // outbound UDP datagrams. Wire format:
+    //   [PacketType::ASSIGN_CLIENT_ID (1B)] [entt::entity] [uint32_t connectionId]
+    uint8_t buf[1 + sizeof(entt::entity) + sizeof(uint32_t)];
+    buf[0] = static_cast<uint8_t>(PacketType::ASSIGN_CLIENT_ID);
+    std::memcpy(buf + 1, &playerEntity, sizeof(entt::entity));
+    std::memcpy(buf + 1 + sizeof(entt::entity), &it->second.connectionId, sizeof(uint32_t));
 
     // Inlined enqueue under the lock we already hold (calling enqueueTo
     // would re-lock and deadlock on a non-recursive mutex). ASSIGN_CLIENT_ID

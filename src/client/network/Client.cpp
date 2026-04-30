@@ -9,6 +9,7 @@
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/transport/PacketHeader.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_timer.h>
@@ -17,7 +18,7 @@
 #include <algorithm>
 #include <cstring>
 
-bool Client::init(const char* addr, Uint16 port)
+bool Client::init(const char* addr, Uint16 port, const TransportConfig& transport)
 {
     serverAddr = NET_ResolveHostname(addr);
     if (NET_WaitUntilResolved(serverAddr, -1) == NET_FAILURE) {
@@ -40,8 +41,26 @@ bool Client::init(const char* addr, Uint16 port)
     }
 
     msgStream.socket = sock;
+    transportConfig_ = transport;
 
     SDL_Log("Client created, server address is %s", NET_GetAddressString(serverAddr));
+
+    // ── Phase 3d-1: open UDP sidecar ─────────────────────────────────────
+    //
+    // Bind to any free local port (kernel picks). Server's address is
+    // the same one we resolved above; we hold a refcounted copy in
+    // serverUdpAddr_ for use in NET_SendDatagram. UDP traffic only
+    // starts after the server gives us a connectionId via the
+    // ASSIGN_CLIENT_ID TCP packet (see dispatchMessage).
+    if (transportConfig_.enableUdpSidecar) {
+        if (udpEndpoint_.open(/*bindAddr*/ nullptr, /*port*/ 0)) {
+            serverUdpAddr_.addr = NET_RefAddress(serverAddr);
+            serverUdpAddr_.port = port;
+            SDL_Log("Client: UDP sidecar opened, server %s:%u", NET_GetAddressString(serverAddr), port);
+        } else {
+            SDL_Log("Client: UDP sidecar open failed; falling back to TCP-only");
+        }
+    }
 
     // Stage 3c: spawn the network thread once everything's ready. It owns
     // kernel I/O for this connection from here onward; the game thread
@@ -67,6 +86,9 @@ void Client::shutdown()
         NET_DestroyStreamSocket(msgStream.socket);
         msgStream.socket = nullptr;
     }
+
+    udpEndpoint_.close();
+    serverUdpAddr_.release();
 
     if (serverAddr) {
         NET_UnrefAddress(serverAddr);
@@ -157,6 +179,46 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     }
 
     const uint32_t totalLen = 2 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
+
+    // ── Phase 3d-2: prefer UDP for INPUT once handshake completes ────────
+    //
+    // INPUT is naturally loss-tolerant (5-tick redundancy means a single
+    // dropped datagram is recovered from the next packet's history).
+    // Routing it over UDP gets it off the snapshot stream entirely —
+    // no head-of-line blocking against the much larger registry packet.
+    //
+    // Fall back to TCP when:
+    //   (a) UDP sidecar isn't enabled in config, or
+    //   (b) Server hasn't given us a connectionId yet (pre-handshake).
+    // The TCP path is functionally identical (Phase 3a/b queue + drain).
+    if (transportConfig_.inputsOverUdp && udpEndpoint_.isOpen() && connectionId_ != 0 && serverUdpAddr_.addr) {
+        // Build the packet header for UDP. The payload is the same
+        // [type][count][inputs...] bytes the TCP path would carry —
+        // server's handleUdpInput skips PacketType::INPUT (==0) parsing
+        // and goes straight to the count+inputs. Wait, that's not right.
+        // Actually handleUdpInput expects payload starting at the count
+        // byte (after PacketType). Let's strip the type byte for UDP
+        // since the channel ID + connectionId together identify it.
+        net::PacketHeader hdr{};
+        hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+        hdr.connectionId = connectionId_;
+        hdr.sequence = udpInputSequence_++;
+        hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
+        // Strip the leading PacketType::INPUT byte — for UDP the channel
+        // implies the type. handleUdpInput reads from `count` directly.
+        const uint8_t* udpPayload = buf + 1;
+        const int udpPayloadLen = static_cast<int>(totalLen) - 1;
+
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (udpEndpoint_.send(serverUdpAddr_, hdr, udpPayload, udpPayloadLen)) {
+            // Stats: count the bytes for outbound bandwidth tracking.
+            stats.bytesSentTotal += sizeof(net::PacketHeader) + udpPayloadLen;
+            bytesSentWindow += sizeof(net::PacketHeader) + udpPayloadLen;
+            return true;
+        }
+        // Fall through to TCP if UDP send failed (rare).
+    }
+
     return send(buf, totalLen);
 }
 
@@ -237,15 +299,28 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
 
     switch (type) {
     case PacketType::ASSIGN_CLIENT_ID: {
-        if (payloadSize != sizeof(entt::entity)) {
-            SDL_Log("Client: received ASSIGN_CLIENT_ID packet of invalid size %u (expected %zu)",
+        // Phase 3d-1: ASSIGN_CLIENT_ID payload is now
+        //   [entt::entity (4B)] [uint32_t connectionId (4B)]
+        // Older 4-byte form (entity only) is still recognised so older
+        // server builds keep working during the rollout.
+        constexpr uint32_t k_oldSize = sizeof(entt::entity);
+        constexpr uint32_t k_newSize = sizeof(entt::entity) + sizeof(uint32_t);
+        if (payloadSize != k_oldSize && payloadSize != k_newSize) {
+            SDL_Log("Client: received ASSIGN_CLIENT_ID packet of invalid size %u (expected %u or %u)",
                     payloadSize,
-                    sizeof(entt::entity));
+                    k_oldSize,
+                    k_newSize);
             return;
         }
         entt::entity assignedEntity;
         std::memcpy(&assignedEntity, payload, sizeof(entt::entity));
         localPlayerEntity = assignedEntity;
+        if (payloadSize == k_newSize) {
+            uint32_t connId = 0;
+            std::memcpy(&connId, payload + sizeof(entt::entity), sizeof(uint32_t));
+            connectionId_ = connId;
+            SDL_Log("Client: assigned UDP connection id 0x%08x", connId);
+        }
         break;
     }
     case PacketType::UPDATE_REGISTRY: {

@@ -33,7 +33,7 @@
 
 #include <algorithm>
 
-bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz)
+bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, const TransportConfig& transport)
 {
     tickRateHz = hz;
 
@@ -84,7 +84,7 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz)
         physics::setActiveWorld(mapCollision_.geometry());
     }
 
-    if (!server.init(addr, port))
+    if (!server.init(addr, port, transport))
         return false;
 
     // ── Load animation subsystem for hitbox detection ──

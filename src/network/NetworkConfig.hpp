@@ -34,6 +34,31 @@ struct ServerReplicationConfig
     int snapshotHz = 32;
 };
 
+/// @brief Phase 3d: per-feature toggles for the UDP transport rollout.
+///
+/// The transport overhaul is staged across multiple sub-phases (3d-1
+/// through 3d-5), each gated by one of these flags. Defaults are
+/// conservative — features turn on only after they've been verified
+/// stable for at least one release.
+struct TransportConfig
+{
+    /// @brief Stage 3d-1: bind a UDP datagram socket alongside the TCP
+    /// socket. Currently no traffic flows through it; later stages move
+    /// individual packet types over. Cheap to enable (one socket bind);
+    /// off by default until 3d-2 actually uses it.
+    bool enableUdpSidecar = true;
+
+    /// @brief Stage 3d-2: send INPUT packets over UDP instead of TCP.
+    /// Inputs already carry 5-tick redundancy so single-packet loss is
+    /// tolerated by design.
+    bool inputsOverUdp = true;
+
+    /// @brief Stage 3d-3: send PING (client→server) and PONG
+    /// (server→client) over UDP for accurate RTT measurement that
+    /// can't be poisoned by snapshot-stream backlog.
+    bool pingOverUdp = true;
+};
+
 /// @brief Runtime network connection parameters.
 ///
 /// Populated by loadNetworkConfig(). If the config file is absent or a key
@@ -43,6 +68,7 @@ struct NetworkConfig
     NetworkAddress clientNetwork;      ///< Client network config (host and port).
     NetworkAddress serverNetwork;      ///< Server network config (host and port).
     ServerReplicationConfig serverRep; ///< Server-side replication tuning.
+    TransportConfig transport;         ///< Phase 3d: UDP transport sub-feature toggles.
 };
 
 /// @brief Load network config from a TOML file.

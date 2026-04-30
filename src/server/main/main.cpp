@@ -20,10 +20,10 @@ int main()
     const NetworkAddress& serverNet = cfg.serverNetwork;
 
     ServerGame game;
-    // Phase 4a: pass the configured snapshot rate from config.toml
-    // ([server-replication].snapshot-hz). Default 32 Hz; falls back to
-    // compile-time default if missing.
-    if (!game.init(serverNet.host.c_str(), serverNet.port, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz)) {
+    // Phase 4a: snapshot rate from [server-replication].snapshot-hz.
+    // Phase 3d: TransportConfig for UDP sidecar feature toggles.
+    if (!game.init(serverNet.host.c_str(), serverNet.port, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, cfg.transport))
+    {
         NET_Quit();
         SDL_Quit();
         return 1;

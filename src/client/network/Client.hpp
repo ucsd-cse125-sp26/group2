@@ -8,9 +8,11 @@
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetKillEvent.hpp"
+#include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "network/ShotEvent.hpp"
+#include "network/transport/UdpEndpoint.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
@@ -45,10 +47,12 @@ public:
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
 
     /// @brief Create the TCP socket and connect to the server.
-    /// @param addr  Hostname or IP address of the server.
-    /// @param port  TCP port the server is listening on.
+    /// @param addr      Hostname or IP address of the server.
+    /// @param port      TCP port the server is listening on. The UDP
+    ///                  sidecar (Phase 3d) connects to the same port.
+    /// @param transport Phase 3d: which UDP features to enable.
     /// @return False on socket creation or DNS failure.
-    bool init(const char* addr, Uint16 port);
+    bool init(const char* addr, Uint16 port, const TransportConfig& transport = {});
 
     /// @brief Close the socket and release the resolved address.
     void shutdown();
@@ -196,6 +200,20 @@ private:
     // know when and from which tick to replay client-stored inputs.
     uint32_t serverAckedClientTick_ = 0;
     bool snapshotAppliedFlag_ = false;
+
+    // ── Phase 3d: UDP sidecar ─────────────────────────────────────────────
+    //
+    // Bound during init() to any free local port. Server's address is
+    // resolved from the same hostname/port we connected over TCP. We
+    // stamp every outbound UDP datagram with the connectionId the
+    // server gave us in the ASSIGN_CLIENT_ID packet so it can match
+    // datagrams to our TCP-established Connection. Until that arrives
+    // we fall back to TCP for everything (connectionId == 0).
+    TransportConfig transportConfig_;
+    net::UdpEndpoint udpEndpoint_;
+    net::UdpEndpointAddr serverUdpAddr_;
+    uint32_t connectionId_ = 0;
+    uint16_t udpInputSequence_ = 0; ///< Per-channel sequence for INPUT datagrams.
 
     /// @brief Network-thread main loop body.
     void networkLoop();

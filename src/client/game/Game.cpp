@@ -433,7 +433,7 @@ bool Game::init()
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
 
     const NetworkAddress clientNet = netCfg.clientNetwork;
-    if (!client.init(clientNet.host.c_str(), clientNet.port)) {
+    if (!client.init(clientNet.host.c_str(), clientNet.port, netCfg.transport)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
         renderer.quit();

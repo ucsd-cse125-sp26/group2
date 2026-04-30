@@ -8,8 +8,10 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
+#include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/ShotEvent.hpp"
+#include "network/transport/UdpEndpoint.hpp"
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL_stdinc.h>
@@ -29,10 +31,13 @@ class Server
 {
 public:
     /// @brief Bind a TCP socket to the given address and port.
-    /// @param addr  Hostname or IP to bind to (e.g. "127.0.0.1").
-    /// @param port  TCP port to listen on.
+    /// @param addr      Hostname or IP to bind to (e.g. "127.0.0.1").
+    /// @param port      TCP port to listen on. The UDP sidecar binds to
+    ///                  the same port (different protocol = different
+    ///                  socket; OS handles the demux).
+    /// @param transport Phase 3d: which UDP features to enable.
     /// @return False on DNS or socket creation failure.
-    bool init(const char* addr, Uint16 port);
+    bool init(const char* addr, Uint16 port, const TransportConfig& transport = {});
 
     /// @brief Close the socket and release resources.
     void shutdown();
@@ -108,6 +113,22 @@ private:
         /// of accumulating dozens of obsolete snapshots in SDL3_net's
         /// internal pending_output_buffer.
         OutboundQueue outbound;
+
+        /// @brief Phase 3d: server-assigned UDP connection ID.
+        ///
+        /// Generated when the TCP connection is accepted and shipped to
+        /// the client in the ASSIGN_CLIENT_ID packet. Clients stamp every
+        /// outbound UDP datagram with this; the server demuxes incoming
+        /// UDP via `connIdToClient_` to find which TCP-established client
+        /// the datagram is from. 0 = not yet assigned.
+        uint32_t connectionId = 0;
+
+        /// @brief Phase 3d: source address of the most-recent UDP packet
+        /// from this client. Filled in lazily on first UDP receive (the
+        /// client's actual UDP source port isn't known until then —
+        /// it's auto-assigned by their kernel). Server uses this to
+        /// route UDP replies (PONG, future server→client UDP traffic).
+        net::UdpEndpointAddr udpAddr;
     };
 
     /// @brief Dispatch a single decoded message from a client.
@@ -149,12 +170,31 @@ private:
     /// to burn a full core.
     void networkLoop();
 
+    /// @brief Handle an INPUT-packet payload received over UDP.
+    ///
+    /// Reuses the same dedup + event-enqueue path as the TCP INPUT
+    /// handler, just identifies the connection by `connId` instead of
+    /// the TCP `Connection` reference. Payload format is identical.
+    void handleUdpInput(uint32_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len);
+
     NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 
     std::unordered_map<ClientId, Connection> clients; ///< Currently connected clients.
     EventQueue eventQueue;                            ///< Incoming events awaiting processing.
 
     ClientId nextClientId;                            ///< Counter for assigning client IDs.
+
+    // ── Phase 3d: UDP sidecar ─────────────────────────────────────────────
+    //
+    // Bound during init() to the same port as the TCP listener (different
+    // protocol = different socket; OS demuxes). The network thread polls
+    // both. Server-assigned 32-bit connection IDs let us match an
+    // incoming UDP datagram to a TCP-established Connection — the IDs
+    // are minted on TCP accept and shipped to the client in the
+    // ASSIGN_CLIENT_ID packet so it can stamp them on outbound UDP.
+    net::UdpEndpoint udpEndpoint_;
+    TransportConfig transportConfig_;
+    std::unordered_map<uint32_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.
 
     // ── Stage 3b: dedicated network thread ────────────────────────────────
     //

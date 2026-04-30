@@ -44,5 +44,14 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.serverRep.snapshotHz = std::max(1, std::min(*v, 256));
     }
 
+    // [transport] section — Phase 3d UDP rollout toggles.
+    auto transport = tbl["transport"];
+    if (auto v = transport["enable-udp-sidecar"].value<bool>())
+        cfg.transport.enableUdpSidecar = *v;
+    if (auto v = transport["inputs-over-udp"].value<bool>())
+        cfg.transport.inputsOverUdp = *v;
+    if (auto v = transport["ping-over-udp"].value<bool>())
+        cfg.transport.pingOverUdp = *v;
+
     return cfg;
 }

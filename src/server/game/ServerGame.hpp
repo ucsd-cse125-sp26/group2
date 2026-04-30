@@ -11,6 +11,7 @@
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
 #include "systems/MatchController.hpp"
 
@@ -37,8 +38,13 @@ public:
     ///                    server can keep deterministic 128 Hz physics
     ///                    while only paying the serialization+broadcast
     ///                    cost a fraction as often.
+    /// @param transport   Phase 3d: UDP sidecar feature toggles.
     /// @return True on success, false on network or initialisation failure.
-    bool init(const char* addr, Uint16 port, int tickRateHz = 128, int snapshotHz = 32);
+    bool init(const char* addr,
+              Uint16 port,
+              int tickRateHz = 128,
+              int snapshotHz = 32,
+              const TransportConfig& transport = {});
 
     /// @brief Block on the game loop until shutdown() is called.
     ///

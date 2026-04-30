@@ -720,6 +720,9 @@ add_executable(group2
         src/network/NetworkConfig.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1032,6 +1035,9 @@ add_executable(client
         src/network/NetworkConfig.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1208,6 +1214,9 @@ add_executable(server
         src/network/NetworkConfig.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1355,6 +1364,9 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistryArchive.hpp"
