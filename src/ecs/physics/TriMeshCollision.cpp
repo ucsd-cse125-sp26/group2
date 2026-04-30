@@ -190,6 +190,98 @@ bool staticAABBvsTriSAT(glm::vec3 center, glm::vec3 he, glm::vec3 v0, glm::vec3 
     return true; // no separating axis found — overlapping
 }
 
+/// @brief Compute the minimum-translation-vector (MTV) that separates a static
+///        AABB from a single triangle, using the same 13 SAT axes as
+///        `staticAABBvsTriSAT`.  Returns true if they overlap; on overlap,
+///        `outMtv` is the smallest vector that — when added to the AABB centre
+///        — makes the shapes disjoint.
+///
+/// All cross-product axes are normalised before measuring overlap, so the
+/// returned depth is in world units across every axis (the boolean SAT test
+/// in `staticAABBvsTriSAT` skips this normalisation because it only needs to
+/// compare signs).
+bool aabbVsTriMTV(glm::vec3 center, glm::vec3 he, glm::vec3 v0, glm::vec3 v1, glm::vec3 v2, glm::vec3& outMtv)
+{
+    // Translate triangle so AABB centre is at origin (mirrors staticAABBvsTriSAT).
+    const glm::vec3 a = v0 - center;
+    const glm::vec3 b = v1 - center;
+    const glm::vec3 c = v2 - center;
+
+    const glm::vec3 edges[3] = {b - a, c - b, a - c};
+
+    glm::vec3 bestAxis(0.0f);
+    float bestDepth = 1e30f;
+
+    // For one SAT axis: project AABB ([-r, r] in axis-local coords) and triangle
+    // ([triMin, triMax]) and update the best-MTV running tally.  Returns false
+    // if the axis is a separating axis (no overlap → no need to test others).
+    auto considerAxis = [&](const glm::vec3& axis, float triMin, float triMax, float r) -> bool {
+        if (triMax < -r || triMin > r)
+            return false; // separating axis — shapes are disjoint
+
+        // Two ways to push the AABB out of the overlap on this axis:
+        //   push +axis by (triMax + r): AABB.min ends up at triMax (touching from -side)
+        //   push -axis by (r - triMin): AABB.max ends up at triMin (touching from +side)
+        // Pick whichever is smaller; that's the axis-local MTV contribution.
+        const float pushPlus = triMax + r;
+        const float pushMinus = r - triMin;
+
+        const float depth = std::min(pushPlus, pushMinus);
+        const glm::vec3 dir = (pushPlus < pushMinus) ? axis : -axis;
+
+        if (depth < bestDepth) {
+            bestDepth = depth;
+            bestAxis = dir;
+        }
+        return true;
+    };
+
+    // 1. AABB face normals — already unit length.
+    for (int axIdx = 0; axIdx < 3; ++axIdx) {
+        glm::vec3 ax(0.0f);
+        ax[axIdx] = 1.0f;
+        const float triMin = std::min({a[axIdx], b[axIdx], c[axIdx]});
+        const float triMax = std::max({a[axIdx], b[axIdx], c[axIdx]});
+        if (!considerAxis(ax, triMin, triMax, he[axIdx]))
+            return false;
+    }
+
+    // 2. Triangle face normal — normalise so depth is in world units.
+    glm::vec3 triN = glm::cross(edges[0], edges[1]);
+    const float triNLen = glm::length(triN);
+    if (triNLen > 1e-8f) {
+        triN /= triNLen;
+        const float r = he.x * std::abs(triN.x) + he.y * std::abs(triN.y) + he.z * std::abs(triN.z);
+        const float s = glm::dot(triN, a); // all 3 vertices are coplanar → single value
+        if (!considerAxis(triN, s, s, r))
+            return false;
+    }
+
+    // 3. Cross-product axes (3 AABB edges × 3 triangle edges = 9 axes).
+    const glm::vec3 aabbAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            glm::vec3 ax = glm::cross(aabbAxes[i], edges[j]);
+            const float axLen = glm::length(ax);
+            if (axLen < 1e-5f)
+                continue; // edges parallel — degenerate axis, skip
+            ax /= axLen;
+
+            const float r = he.x * std::abs(ax.x) + he.y * std::abs(ax.y) + he.z * std::abs(ax.z);
+            const float p0 = glm::dot(ax, a);
+            const float p1 = glm::dot(ax, b);
+            const float p2 = glm::dot(ax, c);
+            const float triMin = std::min({p0, p1, p2});
+            const float triMax = std::max({p0, p1, p2});
+            if (!considerAxis(ax, triMin, triMax, r))
+                return false;
+        }
+    }
+
+    outMtv = bestAxis * bestDepth;
+    return true;
+}
+
 /// @brief Swept AABB vs a single triangle.
 HitResult
 sweepAABBvsTriangle(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, glm::vec3 v0, glm::vec3 v1, glm::vec3 v2)
@@ -321,6 +413,73 @@ HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 e
     }
 
     return best;
+}
+
+void depenetrateAABBvsTriMesh(
+    glm::vec3& pos, glm::vec3& vel, glm::vec3 halfExtents, const WorldTriMesh& mesh, float pushback)
+{
+    if (mesh.bvhNodes.empty())
+        return;
+
+    // Quick reject: AABB must overlap the whole-mesh bounds (Minkowski-expanded).
+    if (pos.x + halfExtents.x < mesh.boundsMin.x || pos.x - halfExtents.x > mesh.boundsMax.x ||
+        pos.y + halfExtents.y < mesh.boundsMin.y || pos.y - halfExtents.y > mesh.boundsMax.y ||
+        pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
+        return;
+
+    // BVH traversal: for each leaf whose AABB overlaps the entity, run per-
+    // triangle SAT MTV.  pos and vel are mutated in-place — subsequent triangle
+    // tests see the already-pushed position so the entity converges out of the
+    // mesh in one pass for typical (curved-but-not-self-intersecting) shapes.
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+        // Cull this node by Minkowski-expanded AABB overlap test.
+        const glm::vec3 expMin = node.boundsMin - halfExtents;
+        const glm::vec3 expMax = node.boundsMax + halfExtents;
+        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+            pos.z > expMax.z)
+            continue;
+
+        if (node.count > 0) {
+            // Leaf — depenetrate against each triangle individually.
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+
+                glm::vec3 mtv;
+                if (!aabbVsTriMTV(pos, halfExtents, v0, v1, v2, mtv))
+                    continue;
+
+                const float depth = glm::length(mtv);
+                if (depth < 1e-6f)
+                    continue; // numerical floor — already touching
+
+                const glm::vec3 pushDir = mtv / depth;
+
+                // Push out by (depth + pushback) so we sit just off the surface.
+                pos += pushDir * (depth + pushback);
+
+                // Cancel velocity component flowing INTO the surface (vel · pushDir < 0
+                // means motion was opposite to the push, i.e. into the triangle).  This
+                // lets the entity slide along the contact instead of re-penetrating
+                // next frame.
+                const float into = glm::dot(vel, pushDir);
+                if (into < 0.0f)
+                    vel -= pushDir * into;
+            }
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
 }
 
 } // namespace physics
