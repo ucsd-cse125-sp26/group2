@@ -520,15 +520,22 @@ SDL_AppResult Game::event(SDL_Event* event)
             //     break;
             // }
 
-        // F2 — toggle all ImGui debug panels at once. Hides them all if any
-        // are visible, shows them all if everything is hidden. Handy for clean
-        // gameplay / screenshots without losing the ability to bring the
-        // overlay back with a single press.
+        // F2 — toggle the unified debug menu. Individual panels are toggled
+        // from checkboxes inside the menu, not all-at-once.
         case SDLK_F2:
-            // Animation Tester is owned by Game (animUI_), not DebugUI, so
-            // pass its visibility flag in so F2 toggles every panel uniformly.
-            debugUI.toggleAllPanels(
-                {&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_, &showHudDebug_});
+            debugUI.toggleDebugMenu();
+            // Auto-release cursor when opening the debug menu so the user can
+            // interact with ImGui widgets immediately.
+            if (debugUI.showDebugMenu && mouseCaptured) {
+                mouseCaptured = false;
+                SDL_SetWindowRelativeMouseMode(window, false);
+            }
+            break;
+
+        // F3 — toggle mouse capture on/off independently.
+        case SDLK_F3:
+            mouseCaptured = !mouseCaptured;
+            SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
             break;
 
         // Particle system test keys
@@ -606,9 +613,14 @@ SDL_AppResult Game::event(SDL_Event* event)
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
+    // Suppress recapture when ImGui wants the mouse (hovering over a debug
+    // window) or when the debug menu is open — let the user interact freely.
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouseCaptured) {
-        mouseCaptured = true;
-        SDL_SetWindowRelativeMouseMode(window, true);
+        const ImGuiIO& io = ImGui::GetIO();
+        if (!io.WantCaptureMouse && !debugUI.showDebugMenu) {
+            mouseCaptured = true;
+            SDL_SetWindowRelativeMouseMode(window, true);
+        }
     }
 
     return SDL_APP_CONTINUE;
@@ -696,9 +708,29 @@ SDL_AppResult Game::iterate()
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
-    frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
-    prevTime = k_now;
-    accumulator += frameTime;
+
+    // If the game was suspended (backgrounded / minimized), the raw delta can
+    // be enormous.  Rather than trying to catch up through potentially seconds
+    // of physics ticks (and replaying every buffered TCP message visually), we
+    // detect the gap and skip straight to the present.  The next client.poll()
+    // will still drain the TCP buffer so entity state snaps to current.
+    static constexpr float k_suspendThreshold = 0.5f; // half-second gap = clearly suspended
+    if (frameTime > k_suspendThreshold) {
+        SDL_Log("[client] detected suspend (gap %.2fs) — resetting accumulator", static_cast<double>(frameTime));
+        prevTime = k_now;
+        accumulator = k_physicsDt; // run exactly one tick to apply latest state
+        // Drain the network now so we snap to the current server state
+        // without fast-forwarding through every intermediate update.
+        client.poll(registry);
+        refreshRemotePlayerRenderables();
+        refreshRemoteProjectileRenderables();
+        refreshRemoteRespawnRenderables();
+        // Fall through to render the current frame normally.
+    } else {
+        frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
+        prevTime = k_now;
+        accumulator += frameTime;
+    }
 
     static int iterCount = 0;
     if (false && ++iterCount <= 3)
@@ -1586,6 +1618,16 @@ SDL_AppResult Game::iterate()
 
     // 10. Render
     debugUI.newFrame();
+
+    // Unified debug menu — one window with toggles for every debug panel.
+    debugUI.buildDebugMenu({
+        {"HUD Tweaker", &showHudDebug_},
+        {"Viewmodel Tweaker", &showViewmodelUI},
+        {"3P Weapon Tweaker", &showTPWeaponUI_},
+        {"Dynamic Lighting", &showDynLightUI_},
+        {"Animation Tester", &animUI_.show},
+    });
+
     debugUI.buildUI(registry,
                     tickCount,
                     mouseSensitivity,
@@ -1771,42 +1813,8 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(recoilPitch_),
                         static_cast<double>(recoilPushBack_),
                         static_cast<double>(recoilRoll_));
-
-            ImGui::SeparatorText("Crosshair");
-            ImGui::Checkbox("Show Crosshair", &showCrosshair_);
-            ImGui::DragFloat("CH Size", &crosshairSize_, 0.5f, 1.0f, 30.0f);
-            ImGui::DragFloat("CH Gap", &crosshairGap_, 0.5f, 0.0f, 20.0f);
-            ImGui::DragFloat("CH Thickness", &crosshairThickness_, 0.5f, 0.5f, 5.0f);
-            ImGui::ColorEdit4("CH Color", &crosshairColor_.x);
-            ImGui::Checkbox("CH Dot", &crosshairDot_);
         }
         ImGui::End();
-    }
-
-    // Draw screen crosshair via ImGui foreground draw list
-    if (showCrosshair_ && mouseCaptured) {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-        const float cx = static_cast<float>(winW) * 0.5f;
-        const float cy = static_cast<float>(winH) * 0.5f;
-
-        const ImU32 col = ImGui::ColorConvertFloat4ToU32(
-            ImVec4(crosshairColor_.r, crosshairColor_.g, crosshairColor_.b, crosshairColor_.a));
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-
-        const float g = crosshairGap_;
-        const float s = crosshairSize_;
-        const float t = crosshairThickness_;
-
-        // Four lines: top, bottom, left, right
-        dl->AddLine(ImVec2(cx, cy - g - s), ImVec2(cx, cy - g), col, t); // up
-        dl->AddLine(ImVec2(cx, cy + g), ImVec2(cx, cy + g + s), col, t); // down
-        dl->AddLine(ImVec2(cx - g - s, cy), ImVec2(cx - g, cy), col, t); // left
-        dl->AddLine(ImVec2(cx + g, cy), ImVec2(cx + g + s, cy), col, t); // right
-
-        // Optional center dot
-        if (crosshairDot_)
-            dl->AddCircleFilled(ImVec2(cx, cy), t * 0.6f, col);
     }
 
     // Kill feed — tick timers and drop expired entries.
