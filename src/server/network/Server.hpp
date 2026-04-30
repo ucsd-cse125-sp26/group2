@@ -15,7 +15,10 @@
 #include <SDL3/SDL_stdinc.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <atomic>
 #include <entt/entity/entity.hpp>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 /// @brief TCP stream socket — receives client packets and echoes them back.
@@ -34,8 +37,13 @@ public:
     /// @brief Close the socket and release resources.
     void shutdown();
 
-    /// @brief Drain all pending messages for this tick.
-    void poll();
+    /// @brief No-op since stage 3b moved I/O onto a dedicated network thread.
+    ///
+    /// Kept as a public function so existing ServerGame code keeps compiling;
+    /// the network thread (started by `init` and stopped by `shutdown`) does
+    /// the real work continuously in the background. Safe to call from the
+    /// game thread; just doesn't do anything.
+    void poll() {}
 
     /// @brief Check whether the event queue is empty.
     /// @return True if no events are pending.
@@ -131,10 +139,32 @@ private:
     /// @param replaceKey See `enqueueTo`.
     void enqueueBroadcast(uint8_t replaceKey, const void* data, int len);
 
+    /// @brief Network-thread main loop body.
+    ///
+    /// Runs continuously between `init` and `shutdown`, taking the mutex
+    /// briefly for each I/O phase so the game thread isn't starved while
+    /// (e.g.) draining 100 client outbound queues. Uses `SDL_Delay(1)`
+    /// between cycles for a ~1 kHz tick — fast enough that game-thread
+    /// enqueues turn into wire bytes within a millisecond, slow enough not
+    /// to burn a full core.
+    void networkLoop();
+
     NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 
     std::unordered_map<ClientId, Connection> clients; ///< Currently connected clients.
     EventQueue eventQueue;                            ///< Incoming events awaiting processing.
 
     ClientId nextClientId;                            ///< Counter for assigning client IDs.
+
+    // ── Stage 3b: dedicated network thread ────────────────────────────────
+    //
+    // The mutex protects every member above (clients map, eventQueue,
+    // nextClientId, NET_Server*) — both the game thread (enqueueTo /
+    // enqueueBroadcast / dequeueEvent / notifyPlayerClientId) and the
+    // network thread (acceptClients / readClients / flushAllOutbound) hold
+    // it during state mutation. Lock holds are kept short (one phase at a
+    // time) so the game thread isn't starved.
+    std::mutex stateMutex_;
+    std::thread networkThread_;
+    std::atomic<bool> shouldStop_{false};
 };

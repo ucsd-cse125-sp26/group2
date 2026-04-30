@@ -36,11 +36,30 @@ bool Server::init(const char* addr, Uint16 port)
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
 
     nextClientId.value = 0;
+
+    // ── Stage 3b: spawn the dedicated network thread. ────────────────────
+    //
+    // Game thread continues to call broadcast helpers and dequeueEvent;
+    // those are now guarded by stateMutex_ and the network thread does the
+    // actual TCP I/O in the background. Order matters: spawn last so all
+    // server state (especially the NET_Server*) is fully initialised
+    // before the thread starts touching it.
+    shouldStop_.store(false, std::memory_order_relaxed);
+    networkThread_ = std::thread(&Server::networkLoop, this);
+
     return true;
 }
 
 void Server::shutdown()
 {
+    // Tell the network thread to stop and join before tearing down state —
+    // otherwise it might be mid-poll on a socket we're about to destroy.
+    shouldStop_.store(true, std::memory_order_relaxed);
+    if (networkThread_.joinable()) {
+        networkThread_.join();
+    }
+
+    std::lock_guard<std::mutex> lock(stateMutex_);
     if (server) {
         SDL_Log("Server: shutting down");
         NET_DestroyServer(server);
@@ -73,6 +92,7 @@ std::vector<uint8_t> frameMessage(const void* data, int len)
 
 bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void* data, int len)
 {
+    std::lock_guard<std::mutex> lock(stateMutex_);
     auto it = clients.find(clientId);
     if (it == clients.end())
         return false;
@@ -83,11 +103,12 @@ bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void*
 
 void Server::enqueueBroadcast(uint8_t replaceKey, const void* data, int len)
 {
-    // Frame once, copy bytes per client. The frame itself is a small
-    // (~70 KB at 100 players) blob and the per-client copy lives in the
-    // queue entry until the network drain ships it; we accept that
-    // allocation overhead in exchange for not re-framing per client.
+    // Frame the message once outside the lock — the framing copy doesn't
+    // touch any shared state — then lock briefly only to push per-client
+    // copies into each queue.
     auto framed = frameMessage(data, len);
+
+    std::lock_guard<std::mutex> lock(stateMutex_);
     for (auto& [_, conn] : clients) {
         conn.outbound.enqueue(replaceKey, std::vector<uint8_t>(framed));
     }
@@ -99,6 +120,7 @@ void Server::flushAllOutbound()
     // dropped before going on the wire — see OutboundQueue::flushTo.
     constexpr Uint32 k_maxAgeMs = 300;
 
+    // Caller (networkLoop or shutdown path) holds stateMutex_.
     for (auto it = clients.begin(); it != clients.end();) {
         auto& conn = it->second;
         if (!conn.outbound.flushTo(conn.msgStream.socket, k_maxAgeMs)) {
@@ -111,10 +133,31 @@ void Server::flushAllOutbound()
     }
 }
 
-void Server::poll()
+void Server::networkLoop()
 {
-    acceptClients();
-    readClients();
+    // The three I/O phases run separately so the lock can be released
+    // between them — letting the game thread enqueue / dequeue without
+    // having to wait for an entire I/O cycle to finish.
+    while (!shouldStop_.load(std::memory_order_relaxed)) {
+        {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            acceptClients();
+        }
+        {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            readClients();
+        }
+        {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            flushAllOutbound();
+        }
+
+        // 1 ms cycle: bytes from a game-thread enqueue land on the wire
+        // within ~1 ms worst case, but the thread doesn't burn a core
+        // hot-spinning. SDL_Delay's resolution is ms; this is a coarse
+        // upper bound on outbound latency.
+        SDL_Delay(1);
+    }
 }
 
 void Server::acceptClients()
@@ -228,15 +271,16 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     case PacketType::PING: {
         // Echo the payload back as a PONG so the client can measure RTT.
-        // Routed through the per-client outbound queue so the PONG can't
-        // get stuck behind a flood of snapshots in the SDL3_net internal
-        // queue — the original "ping decay on join" symptom.
+        // We're called from readClients() which already holds stateMutex_,
+        // so push directly to conn.outbound rather than calling enqueueTo
+        // (which would re-acquire the same non-recursive mutex and
+        // deadlock).  PONG is tiny and one-per-second; replaceKey=0 means
+        // "always send, never drop on age".
         uint8_t buf[1 + sizeof(Uint64)];
         buf[0] = static_cast<uint8_t>(PacketType::PONG);
         if (payloadLen == sizeof(Uint64)) {
             std::memcpy(buf + 1, payload, sizeof(Uint64));
-            // PONG is tiny and one-per-second; replaceKey=0 (always send).
-            enqueueTo(conn.clientId, 0, buf, static_cast<int>(sizeof(buf)));
+            conn.outbound.enqueue(0, frameMessage(buf, static_cast<int>(sizeof(buf))));
         }
         break;
     }
@@ -256,28 +300,32 @@ ClientId Server::getNextClientId()
 
 bool Server::isEmpty()
 {
+    std::lock_guard<std::mutex> lock(stateMutex_);
     return eventQueue.isEmpty();
 }
 
 Event Server::dequeueEvent()
 {
+    std::lock_guard<std::mutex> lock(stateMutex_);
     return eventQueue.dequeue();
 }
 
 // NOTE: playerEntity is the entity id of the player
 bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 {
+    uint8_t buf[1 + sizeof(entt::entity)];
+    buf[0] = static_cast<uint8_t>(PacketType::ASSIGN_CLIENT_ID);
+    std::memcpy(buf + 1, &playerEntity, sizeof(entt::entity));
+
+    std::lock_guard<std::mutex> lock(stateMutex_);
     auto it = clients.find(clientId);
     if (it == clients.end())
         return false;
 
-    uint8_t buf[1 + sizeof(entt::entity)];
-    buf[0] = static_cast<uint8_t>(PacketType::ASSIGN_CLIENT_ID);
-    std::memcpy(buf + 1, &playerEntity, sizeof(entt::entity));
-    // ASSIGN_CLIENT_ID must be delivered (replaceKey=0 → never dropped on
-    // age). It only fires once per connection so queue depth stays trivial.
-    enqueueTo(clientId, 0, buf, sizeof(buf));
-
+    // Inlined enqueue under the lock we already hold (calling enqueueTo
+    // would re-lock and deadlock on a non-recursive mutex). ASSIGN_CLIENT_ID
+    // must be delivered (replaceKey=0 → never dropped on age).
+    it->second.outbound.enqueue(0, frameMessage(buf, sizeof(buf)));
     it->second.pendingInitialization = false;
     return true;
 }
@@ -319,6 +367,7 @@ void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events
 
 int Server::getClientCount()
 {
+    std::lock_guard<std::mutex> lock(stateMutex_);
     return static_cast<int>(clients.size());
 }
 
