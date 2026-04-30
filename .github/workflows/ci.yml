@@ -154,8 +154,8 @@ jobs:
 
   # ------------------------------------------------------------------ #
   #  Release builds — optimised, no sanitizers                          #
-  #  Runs on: push to main  →  updates "latest" pre-release             #
-  #            tag v*.*.*   →  creates versioned release                #
+  #  Runs on: push to main  →  creates build-YYYYMMDD-SHA prerelease   #
+  #            tag v*.*.*   →  creates versioned release (latest)      #
   #                                                                      #
   #  Each platform produces ONE zip containing:                          #
   #    client + server + shaders/ + config.toml + assets/                #
@@ -372,21 +372,17 @@ jobs:
             echo "tag=${GITHUB_REF_NAME}"                                  >> "$GITHUB_OUTPUT"
             echo "title=${GITHUB_REF_NAME}"                                >> "$GITHUB_OUTPUT"
             echo "prerelease=false"                                        >> "$GITHUB_OUTPUT"
+            echo "latest=true"                                             >> "$GITHUB_OUTPUT"
             echo "notes=Versioned release ${GITHUB_REF_NAME}."            >> "$GITHUB_OUTPUT"
           else
-            echo "tag=latest"                                              >> "$GITHUB_OUTPUT"
-            echo "title=Latest Build"                                      >> "$GITHUB_OUTPUT"
+            SHORT_SHA="${GITHUB_SHA::7}"
+            DATE="$(date -u +%Y%m%d)"
+            echo "tag=build-${DATE}-${SHORT_SHA}"                          >> "$GITHUB_OUTPUT"
+            echo "title=Latest Build (${DATE} · ${SHORT_SHA})"            >> "$GITHUB_OUTPUT"
             echo "prerelease=true"                                         >> "$GITHUB_OUTPUT"
+            echo "latest=false"                                            >> "$GITHUB_OUTPUT"
             echo "notes=Automated build from \`main\` — commit ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Delete existing 'latest' release (rolling update)
-        if: steps.meta.outputs.tag == 'latest'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete latest --yes 2>/dev/null || true
-          git push origin :refs/tags/latest 2>/dev/null || true
 
       - name: Create release and upload assets
         env:
@@ -395,16 +391,20 @@ jobs:
           RELEASE_TITLE:      ${{ steps.meta.outputs.title }}
           RELEASE_NOTES:      ${{ steps.meta.outputs.notes }}
           RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          RELEASE_LATEST:     ${{ steps.meta.outputs.latest }}
         run: |
-          PRERELEASE_FLAG=""
+          FLAGS=""
           if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
-            PRERELEASE_FLAG="--prerelease"
+            FLAGS="$FLAGS --prerelease"
+          fi
+          if [[ "$RELEASE_LATEST" == "true" ]]; then
+            FLAGS="$FLAGS --latest"
           fi
 
           gh release create "$RELEASE_TAG" \
             --title "$RELEASE_TITLE" \
             --notes "$RELEASE_NOTES" \
-            $PRERELEASE_FLAG \
+            $FLAGS \
             group2-linux-x86_64.zip \
             group2-macos.zip \
             group2-windows-x86_64.zip
