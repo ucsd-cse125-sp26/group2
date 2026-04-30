@@ -4,7 +4,7 @@
 #include "ecs/systems/CollisionSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -344,8 +344,12 @@ snapToGround(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const
 
 void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
-    registry.view<Position, Velocity, CollisionShape, PlayerState>().each(
-        [dt, &world](Position& pos, Velocity& vel, const CollisionShape& shape, PlayerState& state) {
+    // CollisionSystem only reads/writes the replicated half (grounded /
+    // groundNormal / grappleActive), so it takes PlayerVisState directly.
+    // The simulation-only timer fields live in PlayerSimState and aren't
+    // touched here.
+    registry.view<Position, Velocity, CollisionShape, PlayerVisState>().each(
+        [dt, &world](Position& pos, Velocity& vel, const CollisionShape& shape, PlayerVisState& state) {
             const bool k_wasGrounded = state.grounded;
             state.grounded = false;
 

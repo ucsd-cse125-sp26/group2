@@ -16,7 +16,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -893,18 +893,18 @@ SDL_AppResult Game::iterate()
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
-    float targetRoll = 0.0f; // degrees, from PlayerState
+    float targetRoll = 0.0f; // degrees, from PlayerVisState
 
     if (renderSeparateFromPhysics) {
         // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
         const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
-        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerState>().each(
+        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,
                 const PreviousPosition& prev,
                 const InputSnapshot& input,
                 const CollisionShape& shape,
-                const PlayerState& pstate) {
+                const PlayerVisState& pstate) {
                 const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
@@ -914,11 +914,11 @@ SDL_AppResult Game::iterate()
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
-        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerState>().each(
+        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,
                 const InputSnapshot& input,
                 const CollisionShape& shape,
-                const PlayerState& pstate) {
+                const PlayerVisState& pstate) {
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
                 renderYaw = input.yaw;
@@ -1128,7 +1128,7 @@ SDL_AppResult Game::iterate()
     }
 
     // Grapple cable visual
-    registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& pstate) {
+    registry.view<LocalPlayer, PlayerVisState>().each([&](const PlayerVisState& pstate) {
         if (pstate.grappleActive) {
             // Draw cable from player hand to hook point every frame.
             const float cosPi = std::cos(renderPitch);
@@ -1157,11 +1157,11 @@ SDL_AppResult Game::iterate()
     // for skeleton-driven hitbox capsule placement.
     {
         std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity e,
-                                                                                          AnimatedCharacter& ac,
-                                                                                          const Velocity& vel,
-                                                                                          const PlayerState& ps,
-                                                                                          const InputSnapshot& inp) {
+        registry.view<AnimatedCharacter, Velocity, PlayerVisState, InputSnapshot>().each([&](entt::entity e,
+                                                                                             AnimatedCharacter& ac,
+                                                                                             const Velocity& vel,
+                                                                                             const PlayerVisState& ps,
+                                                                                             const InputSnapshot& inp) {
             if (!ac.animator || ac.modelIndex < 0)
                 return;
 
@@ -1918,7 +1918,8 @@ SDL_AppResult Game::iterate()
             hudState.armor = static_cast<int>(hp.armor);
             hudState.maxArmor = 100;
         });
-        registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& ps) { hudState.isAlive = !ps.IsDead; });
+        registry.view<LocalPlayer, PlayerVisState>().each(
+            [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });
 
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
@@ -2011,8 +2012,8 @@ SDL_AppResult Game::iterate()
         // ── Scoreboard: all players ──
         thread_local std::vector<HudTeamMemberStatus> hudAllPlayers;
         hudAllPlayers.clear();
-        registry.view<ClientId, Health, PlayerState>().each(
-            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerState& ps) {
+        registry.view<ClientId, Health, PlayerVisState>().each(
+            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerVisState& ps) {
                 HudTeamMemberStatus status;
                 if (localClientId.value != -1 && cid == localClientId)
                     status.name = "You";
@@ -2022,7 +2023,7 @@ SDL_AppResult Game::iterate()
                     status.name = buf;
                 }
                 status.health = static_cast<int>(hp.health);
-                status.isAlive = !ps.IsDead;
+                status.isAlive = !ps.isDead;
                 if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
                     status.kills = pms->kills;
                     status.deaths = pms->deaths;
@@ -2045,9 +2046,9 @@ SDL_AppResult Game::iterate()
 
         thread_local std::vector<HudMinimapDot> hudMinimapDots;
         hudMinimapDots.clear();
-        registry.view<ClientId, Position, PlayerState>().each(
-            [&](const ClientId& cid, const Position& pos, const PlayerState& ps) {
-                if (ps.IsDead)
+        registry.view<ClientId, Position, PlayerVisState>().each(
+            [&](const ClientId& cid, const Position& pos, const PlayerVisState& ps) {
+                if (ps.isDead)
                     return;
                 if (localClientId.value != -1 && cid == localClientId)
                     return; // Skip local player (always drawn at center).
@@ -2158,11 +2159,11 @@ void Game::refreshRemotePlayerRenderables()
     // collision AABB: translation.y = -halfExtents.y - meshMinY * scale.
     // This ensures the model tracks the AABB bottom automatically when
     // crouching changes the half-height — no manual offset update needed.
-    registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
-                                                                                   const Position&,
-                                                                                   const PlayerState& state,
-                                                                                   const InputSnapshot& input,
-                                                                                   const CollisionShape& shape) {
+    registry.view<Position, PlayerVisState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
+                                                                                      const Position&,
+                                                                                      const PlayerVisState& state,
+                                                                                      const InputSnapshot& input,
+                                                                                      const CollisionShape& shape) {
         if (registry.all_of<LocalPlayer>(e))
             return;
 
@@ -2183,7 +2184,7 @@ void Game::refreshRemotePlayerRenderables()
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
         rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        rend.visible = !state.IsDead;
+        rend.visible = !state.isDead;
     });
 }
 

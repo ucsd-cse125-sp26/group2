@@ -8,7 +8,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -371,8 +371,8 @@ void DebugUI::buildInspectorContents(const Registry& registry,
             }
 
             // PlayerState
-            if (showPlayerState && registry.all_of<PlayerState>(entity)) {
-                const auto& c = registry.get<PlayerState>(entity);
+            if (showPlayerState && registry.all_of<PlayerVisState>(entity)) {
+                const auto& c = registry.get<PlayerVisState>(entity);
                 static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun", "Climbing", "LedgeGrab"};
                 const int k_modeIdx = static_cast<int>(c.moveMode);
                 ImGui::Text("PlayerState   mode:%s  grounded:%-3s  crouching:%-3s  sprint:%-3s",
@@ -474,13 +474,13 @@ void DebugUI::buildMovementChart(const Registry& registry)
 
     // Player
     const bool k_hasPlayer =
-        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerVisState>(localPlayer);
 
     if (k_hasPlayer) {
         const auto& pos = registry.get<Position>(localPlayer).value;
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const auto& playerState = registry.get<PlayerVisState>(localPlayer);
         const bool grounded = playerState.grounded;
 
         const ImVec2 k_pScreen = worldToScreen(pos.x, pos.z);
@@ -542,7 +542,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     if (k_hasPlayer) {
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const auto& playerState = registry.get<PlayerVisState>(localPlayer);
         const bool grounded = playerState.grounded;
         const float hSpeed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
         const glm::vec3 wishDir =
@@ -604,7 +604,7 @@ void DebugUI::buildBhopAnalyzer(const Registry& registry)
     }
 
     const bool k_hasPlayer =
-        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerVisState>(localPlayer);
 
     if (!k_hasPlayer) {
         ImGui::TextDisabled("No local player.");
@@ -614,7 +614,7 @@ void DebugUI::buildBhopAnalyzer(const Registry& registry)
 
     const auto& vel = registry.get<Velocity>(localPlayer).value;
     const auto& input = registry.get<InputSnapshot>(localPlayer);
-    const auto& playerState = registry.get<PlayerState>(localPlayer);
+    const auto& playerState = registry.get<PlayerVisState>(localPlayer);
     const bool grounded = playerState.grounded;
     const float yaw = input.yaw;
 

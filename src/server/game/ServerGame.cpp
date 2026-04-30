@@ -11,7 +11,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -221,7 +221,8 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);
     registry.emplace<CollisionShape>(player);
-    registry.emplace<PlayerState>(player);
+    registry.emplace<PlayerVisState>(player);
+    registry.emplace<PlayerSimState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
@@ -374,7 +375,7 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
             ai.yawRad = inp->yaw;
             ai.pitchRad = inp->pitch;
         }
-        if (const auto* ps = registry.try_get<PlayerState>(entity)) {
+        if (const auto* ps = registry.try_get<PlayerVisState>(entity)) {
             ai.grounded = ps->grounded;
             ai.sprinting = ps->sprinting;
             ai.crouching = ps->crouching;

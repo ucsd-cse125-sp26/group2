@@ -10,7 +10,7 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -42,10 +42,17 @@ namespace registry_serialization
 
 // NOTE: this is where any component that should be sent to clients must be listed.
 // The order of components in this tuple is the order they will be serialized in.
+//
+// PHASE 2: PlayerState was split into PlayerVisState (replicated, ~64 B) and
+// PlayerSimState (server-only, ~150 B). Only PlayerVisState appears here —
+// PlayerSimState stays on the server. This is the headline bandwidth win
+// of Phase 2: the per-player on-the-wire share of the registry payload
+// drops from ~280 B to ~64 B (≈4× reduction) before any other deltas /
+// quantization land in Phase 4.
 using Synced = std::tuple<entt::entity,
                           Position,
                           Velocity,
-                          PlayerState,
+                          PlayerVisState,
                           CollisionShape,
                           WeaponState,
                           Health,

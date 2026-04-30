@@ -679,7 +679,9 @@ add_executable(group2
         src/ecs/components/Position.hpp
         src/ecs/components/Velocity.hpp
         src/ecs/components/CollisionShape.hpp
-        src/ecs/components/PlayerState.hpp
+        src/ecs/components/PlayerStateEnums.hpp
+        src/ecs/components/PlayerVisState.hpp
+        src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
         src/ecs/components/LocalPlayer.hpp
@@ -987,7 +989,9 @@ add_executable(client
         src/ecs/components/Position.hpp
         src/ecs/components/Velocity.hpp
         src/ecs/components/CollisionShape.hpp
-        src/ecs/components/PlayerState.hpp
+        src/ecs/components/PlayerStateEnums.hpp
+        src/ecs/components/PlayerVisState.hpp
+        src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
         src/ecs/components/LocalPlayer.hpp
@@ -1169,7 +1173,9 @@ add_executable(server
         src/ecs/components/Position.hpp
         src/ecs/components/Velocity.hpp
         src/ecs/components/CollisionShape.hpp
-        src/ecs/components/PlayerState.hpp
+        src/ecs/components/PlayerStateEnums.hpp
+        src/ecs/components/PlayerVisState.hpp
+        src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
         src/ecs/components/LocalPlayer.hpp
