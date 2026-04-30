@@ -154,7 +154,10 @@ void Server::flushAllOutbound()
     }
 }
 
-void Server::handleUdpInput(uint32_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len)
+void Server::handleUdpUnreliable(uint32_t connId,
+                                 const net::UdpEndpointAddr& from,
+                                 const uint8_t* payload,
+                                 uint32_t len)
 {
     // Caller (networkLoop's UDP phase) holds stateMutex_.
     auto idIt = connIdToClient_.find(connId);
@@ -166,39 +169,76 @@ void Server::handleUdpInput(uint32_t connId, const net::UdpEndpointAddr& from, c
         return; // client gone (race with disconnect)
     auto& conn = connIt->second;
 
-    // Cache the source address for future server→client UDP replies
-    // (e.g. PONG in Stage 3d-3). Only refresh if we don't already have
-    // it or if the source port changed (NAT rebind).
+    // Cache the source address for server→client UDP replies (PONG, etc).
+    // Refresh if we don't already have it or if the source port changed
+    // (NAT rebind, client reconnect with new local port, etc.).
     if (conn.udpAddr.addr == nullptr || conn.udpAddr.port != from.port) {
         conn.udpAddr.release();
         conn.udpAddr.addr = NET_RefAddress(from.addr);
         conn.udpAddr.port = from.port;
     }
 
-    // Reuse the exact INPUT-packet parsing from the TCP path. The wire
-    // format is identical — just the transport differs.
+    // Wire format mirrors TCP: `[PacketType (1B)][rest]`. Channel ID
+    // selects reliability semantics; first byte still discriminates the
+    // application-layer packet type.
     if (len < 1)
         return;
-    const uint8_t count = payload[0];
-    constexpr uint8_t k_maxInputsPerPacket = 16;
-    if (count == 0 || count > k_maxInputsPerPacket)
-        return;
-    const uint32_t expectedSize = 1u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
-    if (len != expectedSize)
-        return;
+    const auto type = static_cast<PacketType>(payload[0]);
+    const uint8_t* sub = payload + 1;
+    const uint32_t subLen = len - 1;
 
-    const uint8_t* base = payload + 1;
-    for (uint8_t i = 0; i < count; ++i) {
-        InputSnapshot snap{};
-        std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
-        if (snap.tick <= conn.lastAppliedInputTick)
-            continue;
-        Event event{};
-        event.movementIntent = snap;
-        event.type = EventType::Input;
-        event.clientId = conn.clientId;
-        eventQueue.enqueue(event);
-        conn.lastAppliedInputTick = snap.tick;
+    switch (type) {
+    case PacketType::INPUT: {
+        // Same parser as the TCP INPUT case.
+        if (subLen < 1)
+            return;
+        const uint8_t count = sub[0];
+        constexpr uint8_t k_maxInputsPerPacket = 16;
+        if (count == 0 || count > k_maxInputsPerPacket)
+            return;
+        const uint32_t expectedSize = 1u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        if (subLen != expectedSize)
+            return;
+
+        const uint8_t* base = sub + 1;
+        for (uint8_t i = 0; i < count; ++i) {
+            InputSnapshot snap{};
+            std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
+            if (snap.tick <= conn.lastAppliedInputTick)
+                continue;
+            Event event{};
+            event.movementIntent = snap;
+            event.type = EventType::Input;
+            event.clientId = conn.clientId;
+            eventQueue.enqueue(event);
+            conn.lastAppliedInputTick = snap.tick;
+        }
+        break;
+    }
+    case PacketType::PING: {
+        // Phase 3d-3: PING/PONG over UDP. Echo the timestamp payload
+        // back; the client's RTT measurement now isn't poisoned by
+        // any TCP-stream backlog. Reply via UDP straight back to the
+        // source we just learned.
+        if (subLen != sizeof(Uint64))
+            return;
+        uint8_t reply[1 + sizeof(Uint64)];
+        reply[0] = static_cast<uint8_t>(PacketType::PONG);
+        std::memcpy(reply + 1, sub, sizeof(Uint64));
+
+        net::PacketHeader hdr{};
+        hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+        hdr.connectionId = conn.connectionId;
+        hdr.sequence = 0;
+        hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
+        udpEndpoint_.send(conn.udpAddr, hdr, reply, static_cast<int>(sizeof(reply)));
+        break;
+    }
+    default:
+        // Other types still ride TCP. Silently drop unknown UDP types
+        // — could be stale packets from a previous session, or a
+        // client speaking a future protocol version.
+        break;
     }
 }
 
@@ -229,16 +269,17 @@ void Server::networkLoop()
             constexpr int k_maxDatagramsPerCycle = 512;
             while (drained < k_maxDatagramsPerCycle && udpEndpoint_.tryReceive(msg)) {
                 ++drained;
-                // Stage 3d-2: only INPUT is currently routed through UDP.
+                // Stage 3d-2/3: INPUT and PING/PONG ride this channel.
                 // Channel + connectionId are validated; payload is the
-                // existing INPUT wire format.
+                // standard `[PacketType][rest]` wire format mirrored
+                // from TCP.
                 if (msg.header.channel == static_cast<uint8_t>(net::ChannelId::Unreliable) &&
                     msg.header.connectionId != 0)
                 {
-                    handleUdpInput(msg.header.connectionId,
-                                   msg.from,
-                                   msg.payload.data(),
-                                   static_cast<uint32_t>(msg.payload.size()));
+                    handleUdpUnreliable(msg.header.connectionId,
+                                        msg.from,
+                                        msg.payload.data(),
+                                        static_cast<uint32_t>(msg.payload.size()));
                 }
                 msg.from.release();
             }

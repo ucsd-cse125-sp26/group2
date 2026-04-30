@@ -215,6 +215,13 @@ private:
     uint32_t connectionId_ = 0;
     uint16_t udpInputSequence_ = 0; ///< Per-channel sequence for INPUT datagrams.
 
+    /// @brief UDP-received payloads waiting for the game thread to
+    /// dispatch. Filled by the network thread under stateMutex_; drained
+    /// by Client::poll. Format of each entry is `[PacketType][rest]` —
+    /// same as a complete framed message off the TCP path so the same
+    /// dispatchMessage() handles both.
+    std::vector<std::vector<uint8_t>> udpRecvQueue_;
+
     /// @brief Network-thread main loop body.
     void networkLoop();
 

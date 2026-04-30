@@ -137,6 +137,31 @@ void Client::sendPing()
     uint8_t buf[1 + sizeof(Uint64)];
     buf[0] = static_cast<uint8_t>(PacketType::PING);
     std::memcpy(buf + 1, &now, sizeof(Uint64));
+
+    // ── Phase 3d-3: prefer UDP for PING ─────────────────────────────────
+    //
+    // PING/PONG over UDP gives much truer RTT readings: the PONG byte
+    // can't get queued behind a snapshot in a TCP stream (the original
+    // "ping decay on join" symptom from before Phase 1). On UDP each
+    // datagram lands independently, so PONG always reflects the real
+    // network round-trip time. Loss is fine — PINGs go out once a
+    // second; missing one just delays the next sample.
+    if (transportConfig_.pingOverUdp && udpEndpoint_.isOpen() && connectionId_ != 0 && serverUdpAddr_.addr) {
+        net::PacketHeader hdr{};
+        hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+        hdr.connectionId = connectionId_;
+        hdr.sequence = 0; // PING sequence not used yet — server just echoes payload
+        hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
+        // Payload is the raw [PacketType::PING][timestamp] bytes — server
+        // demuxes on channel + first payload byte.
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (udpEndpoint_.send(serverUdpAddr_, hdr, buf, static_cast<int>(sizeof(buf)))) {
+            stats.bytesSentTotal += sizeof(net::PacketHeader) + sizeof(buf);
+            bytesSentWindow += sizeof(net::PacketHeader) + sizeof(buf);
+            return;
+        }
+        // Fall through to TCP if UDP send failed.
+    }
     send(buf, sizeof(buf));
 }
 
@@ -192,28 +217,22 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     //   (b) Server hasn't given us a connectionId yet (pre-handshake).
     // The TCP path is functionally identical (Phase 3a/b queue + drain).
     if (transportConfig_.inputsOverUdp && udpEndpoint_.isOpen() && connectionId_ != 0 && serverUdpAddr_.addr) {
-        // Build the packet header for UDP. The payload is the same
-        // [type][count][inputs...] bytes the TCP path would carry —
-        // server's handleUdpInput skips PacketType::INPUT (==0) parsing
-        // and goes straight to the count+inputs. Wait, that's not right.
-        // Actually handleUdpInput expects payload starting at the count
-        // byte (after PacketType). Let's strip the type byte for UDP
-        // since the channel ID + connectionId together identify it.
+        // UDP wire format mirrors TCP: `[PacketType][rest of payload]`.
+        // The PacketHeader's `channel` field selects reliability
+        // semantics (Unreliable here for INPUT — drop-stale, no
+        // retransmit), but the type byte stays for protocol uniformity
+        // with the TCP path. Server's handleUdpUnreliable dispatches
+        // on the type byte just like TCP's handleMessage does.
         net::PacketHeader hdr{};
         hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
         hdr.connectionId = connectionId_;
         hdr.sequence = udpInputSequence_++;
         hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
-        // Strip the leading PacketType::INPUT byte — for UDP the channel
-        // implies the type. handleUdpInput reads from `count` directly.
-        const uint8_t* udpPayload = buf + 1;
-        const int udpPayloadLen = static_cast<int>(totalLen) - 1;
 
         std::lock_guard<std::mutex> lock(stateMutex_);
-        if (udpEndpoint_.send(serverUdpAddr_, hdr, udpPayload, udpPayloadLen)) {
-            // Stats: count the bytes for outbound bandwidth tracking.
-            stats.bytesSentTotal += sizeof(net::PacketHeader) + udpPayloadLen;
-            bytesSentWindow += sizeof(net::PacketHeader) + udpPayloadLen;
+        if (udpEndpoint_.send(serverUdpAddr_, hdr, buf, static_cast<int>(totalLen))) {
+            stats.bytesSentTotal += sizeof(net::PacketHeader) + totalLen;
+            bytesSentWindow += sizeof(net::PacketHeader) + totalLen;
             return true;
         }
         // Fall through to TCP if UDP send failed (rare).
@@ -282,6 +301,30 @@ void Client::networkLoop()
                 if (!outbound_.flushTo(msgStream.socket, 0)) {
                     socketDead_.store(true, std::memory_order_relaxed);
                 }
+            }
+        }
+
+        // ── Phase 3d: UDP receive phase ─────────────────────────────────
+        //
+        // Drain any pending UDP datagrams (currently just PONGs from the
+        // server). Park them in udpRecvQueue_ for the game thread's poll()
+        // to dispatch alongside TCP messages, so a single dispatchMessage
+        // handles both transports.
+        if (udpEndpoint_.isOpen()) {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            net::UdpReceivedMessage msg;
+            int drained = 0;
+            constexpr int k_maxDatagramsPerCycle = 64;
+            while (drained < k_maxDatagramsPerCycle && udpEndpoint_.tryReceive(msg)) {
+                ++drained;
+                // Only accept payloads addressed to our connectionId on
+                // the Unreliable channel for now (Stage 3d-3 only).
+                if (msg.header.channel == static_cast<uint8_t>(net::ChannelId::Unreliable) &&
+                    msg.header.connectionId == connectionId_ && !msg.payload.empty())
+                {
+                    udpRecvQueue_.emplace_back(std::move(msg.payload));
+                }
+                msg.from.release();
             }
         }
 
@@ -465,12 +508,24 @@ bool Client::poll(Registry& registry)
     // We hold the lock only for the byte copy; dispatch happens after the
     // unlock so registry.apply / entt::continuous_loader can take their
     // time without blocking the network thread's read pump.
+    //
+    // Phase 3d: also drain UDP-received payloads queued by the network
+    // thread. UDP messages already arrive as discrete payloads (one per
+    // datagram) so they go straight in alongside the TCP-drained frames.
+    // Both transports use the same `[PacketType][rest]` payload format,
+    // so dispatchMessage handles them identically.
     std::vector<std::vector<uint8_t>> ready;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
         msgStream.drainComplete([&](const void* data, Uint32 size) {
             ready.emplace_back(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
         });
+        if (!udpRecvQueue_.empty()) {
+            for (auto& msg : udpRecvQueue_) {
+                ready.emplace_back(std::move(msg));
+            }
+            udpRecvQueue_.clear();
+        }
     }
 
     // Dispatch (lock-free).  Stats are touched here only — they're not

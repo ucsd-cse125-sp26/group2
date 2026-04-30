@@ -170,12 +170,14 @@ private:
     /// to burn a full core.
     void networkLoop();
 
-    /// @brief Handle an INPUT-packet payload received over UDP.
+    /// @brief Dispatch a UDP datagram received with channel == Unreliable.
     ///
-    /// Reuses the same dedup + event-enqueue path as the TCP INPUT
-    /// handler, just identifies the connection by `connId` instead of
-    /// the TCP `Connection` reference. Payload format is identical.
-    void handleUdpInput(uint32_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len);
+    /// Reads the first byte of @p payload as a PacketType discriminator
+    /// (mirrors the TCP wire format) and routes to the appropriate
+    /// handler. Currently handles INPUT (Phase 3d-2) and PING (3d-3).
+    /// All others are dropped silently — they're either meant for TCP
+    /// or not yet ported to UDP.
+    void handleUdpUnreliable(uint32_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len);
 
     NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 
