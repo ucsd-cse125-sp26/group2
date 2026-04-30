@@ -173,6 +173,15 @@ bool Game::init()
         // collision-only and stripped from the visual mesh list.
         static constexpr const char* k_collisionPattern = "COL_";
 
+        // In separated mode, should the loader auto-fit each collision mesh
+        // to a primitive (AABB / cylinder / sphere / brush) — or load the raw
+        // Blender geometry as-is (triangle mesh)?
+        //   false (default) → trust the artist: every collision mesh becomes a
+        //                     triMesh, vertex-for-vertex, exactly as authored.
+        //   true            → run the auto-detection pipeline (cheaper at
+        //                     runtime, but the loader picks the primitive).
+        static constexpr bool k_guessShapesProcessed = false;
+
         const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
 
         const char* base = SDL_GetBasePath();
@@ -186,6 +195,7 @@ bool Game::init()
         // mode, the field is unused (every mesh is collision by definition).
         if (k_separatedCollisionMap)
             opts.collisionCollection = k_collisionPattern;
+        opts.guessShapesProcessed = k_guessShapesProcessed;
         opts.addFloorPlane = false; // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {

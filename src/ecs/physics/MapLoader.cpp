@@ -665,6 +665,7 @@ void extractCollision(const aiNode* node,
                       const aiScene* scene,
                       const std::string& collectionName,
                       bool allAreCollision,
+                      bool guessShapesProcessed,
                       float scale,
                       MapCollisionData& out)
 {
@@ -673,7 +674,20 @@ void extractCollision(const aiNode* node,
 
     if (isCollision) {
         const glm::mat4 world = accumulatedTransform(node);
-        const std::string forceType = allAreCollision ? "" : getCollectionType(node);
+
+        // Pick the shape strategy:
+        //   - Prototype mode (allAreCollision): no forcing — let auto-detection
+        //     pick the best primitive for every mesh.
+        //   - Separated mode WITHOUT shape-guessing (default): force every
+        //     collision mesh to a raw triangle mesh, preserving the exact
+        //     geometry the artist authored in Blender.
+        //   - Separated mode WITH shape-guessing: respect sub-collection
+        //     naming ("Boxes/", "Cylinders/") and Blender primitive names,
+        //     falling back to auto-detection.
+        std::string forceType;
+        if (!allAreCollision) {
+            forceType = guessShapesProcessed ? getCollectionType(node) : std::string("meshes");
+        }
 
         for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
             const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
@@ -682,7 +696,7 @@ void extractCollision(const aiNode* node,
     }
 
     for (unsigned int c = 0; c < node->mNumChildren; ++c)
-        extractCollision(node->mChildren[c], scene, collectionName, allAreCollision, scale, out);
+        extractCollision(node->mChildren[c], scene, collectionName, allAreCollision, guessShapesProcessed, scale, out);
 }
 
 } // namespace
@@ -710,9 +724,16 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     out.spheres.clear();
     out.triMeshes.clear();
 
-    extractCollision(scene->mRootNode, scene, opts.collisionCollection, opts.allMeshesAreCollision, opts.scale, out);
+    extractCollision(scene->mRootNode,
+                     scene,
+                     opts.collisionCollection,
+                     opts.allMeshesAreCollision,
+                     opts.guessShapesProcessed,
+                     opts.scale,
+                     out);
 
-    const size_t total = out.boxes.size() + out.brushes.size() + out.cylinders.size() + out.spheres.size();
+    const size_t total =
+        out.boxes.size() + out.brushes.size() + out.cylinders.size() + out.spheres.size() + out.triMeshes.size();
     if (total == 0) {
         SDL_Log("MapLoader: WARNING — no collision geometry extracted from '%s'", path.c_str());
     }
@@ -726,6 +747,8 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
             lowestY = std::min(lowestY, c.base.y);
         for (const auto& s : out.spheres)
             lowestY = std::min(lowestY, s.center.y - s.radius);
+        for (const auto& tm : out.triMeshes)
+            lowestY = std::min(lowestY, tm.boundsMin.y);
 
         out.planes.push_back(Plane{.normal = {0.0f, 1.0f, 0.0f}, .distance = lowestY});
         SDL_Log("MapLoader: added floor plane at y=%.1f", static_cast<double>(lowestY));

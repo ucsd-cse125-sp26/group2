@@ -51,6 +51,11 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         static constexpr bool k_separatedCollisionMap = true;
         static constexpr const char* k_collisionPattern = "COL_";
 
+        // Should collision meshes be auto-fit to primitive shapes, or kept
+        // as raw triMeshes (the exact artist-authored Blender geometry)?
+        // Must match the client value in Game.cpp for prediction parity.
+        static constexpr bool k_guessShapesProcessed = false;
+
         const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
 
         const char* base = SDL_GetBasePath();
@@ -61,6 +66,7 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         opts.allMeshesAreCollision = !k_separatedCollisionMap;
         if (k_separatedCollisionMap)
             opts.collisionCollection = k_collisionPattern;
+        opts.guessShapesProcessed = k_guessShapesProcessed;
         opts.addFloorPlane = false; // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {

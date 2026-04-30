@@ -82,6 +82,29 @@ struct MapLoadOptions
     /// found across all collision geometry.  Prevents players from falling
     /// through the world even if the map mesh has tiny cracks.
     bool addFloorPlane = false;
+
+    /// In separated mode (`allMeshesAreCollision = false`), should the loader
+    /// auto-detect/guess each collision mesh's best-fitting primitive
+    /// (AABB / cylinder / sphere / convex brush), or load it raw?
+    ///
+    ///   false (default) — preserve exactly what Blender's collision section
+    ///                     contains: every collision mesh becomes a triangle
+    ///                     mesh, vertex-for-vertex.  Sub-collection name
+    ///                     overrides ("Boxes/", "Cylinders/", …) and Blender
+    ///                     primitive-name hints ("Cylinder") are ignored.
+    ///                     Use this when the artist has authored exact
+    ///                     collision hulls and the loader must not second-
+    ///                     guess them.
+    ///   true            — run the existing auto-detection pipeline
+    ///                     (AABB → cylinder → sphere → brush → triMesh) plus
+    ///                     sub-collection / name forcing.  Cheaper at runtime
+    ///                     for simple shapes, but the loader picks the
+    ///                     primitive — not the artist.
+    ///
+    /// Has no effect in prototype mode (`allMeshesAreCollision = true`):
+    /// every mesh is collision there, and forcing all of them to triMesh
+    /// would be prohibitively expensive.
+    bool guessShapesProcessed = false;
 };
 
 /// API
