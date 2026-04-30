@@ -15,9 +15,7 @@ namespace
 
 constexpr int k_maxLeafTris = 4; ///< Max triangles per BVH leaf.
 
-// ---------------------------------------------------------------------------
 // BVH helpers
-// ---------------------------------------------------------------------------
 
 /// @brief Compute the AABB of a set of triangles referenced by triIndices[from..from+count).
 void computeNodeBounds(const WorldTriMesh& mesh, int from, int count, glm::vec3& outMin, glm::vec3& outMax)
@@ -106,9 +104,7 @@ void subdivide(WorldTriMesh& mesh, int nodeIdx)
     subdivide(mesh, leftIdx + 1);
 }
 
-// ---------------------------------------------------------------------------
 // Swept-AABB vs BVH node AABB (quick overlap test)
-// ---------------------------------------------------------------------------
 
 /// @brief Test if a swept AABB overlaps a static AABB, considering only hits
 ///        closer than `tMax`.  Used for BVH node culling.
@@ -140,9 +136,7 @@ bool sweptAABBOverlapsAABB(
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // Swept-AABB vs single triangle (plane test + SAT confirmation)
-// ---------------------------------------------------------------------------
 
 /// @brief Test if a static AABB (centered at `center`, half-extents `he`)
 ///        overlaps triangle (v0, v1, v2) using the separating axis theorem.
@@ -248,9 +242,7 @@ sweepAABBvsTriangle(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, glm::
 
 } // namespace
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 void buildTriMeshBVH(WorldTriMesh& mesh)
 {

@@ -1,3 +1,6 @@
+/// @file RegistrySerialization.cpp
+/// @brief Implementation of ECS registry serialization for network transport.
+
 #include "RegistrySerialization.hpp"
 
 #include "ecs/components/BeamState.hpp"

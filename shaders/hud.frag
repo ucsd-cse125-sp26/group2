@@ -62,6 +62,17 @@ void main()
         float alpha = 1.0 - smoothstep(-fw, fw, dist);
         outColor = vec4(vColor.rgb, vColor.a * alpha);
 
+    } else if (mode == 4) {
+        // Vignette: radial edge gradient.
+        // UV covers full screen [0,1]².  Color is the vignette tint; alpha
+        // controls overall intensity.  The effect fades from fully transparent
+        // at the center to full color at the edges/corners.
+        vec2 uv = vUV * 2.0 - 1.0;            // remap to [-1,1]
+        float dist = length(uv);               // 0 at center, ~1.4 at corners
+        float vig = smoothstep(0.35, 1.4, dist); // transparent center, opaque edges
+        vig = vig * vig;                        // sharpen the falloff
+        outColor = vec4(vColor.rgb, vColor.a * vig);
+
     } else {
         // Mode 0: solid color
         outColor = vColor;

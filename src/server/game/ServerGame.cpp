@@ -282,9 +282,7 @@ void ServerGame::deletePlayerEntity(ClientId clientId)
     }
 }
 
-// ===========================================================================
 // Server-side animation subsystem
-// ===========================================================================
 
 void ServerGame::initAnimation()
 {

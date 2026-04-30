@@ -49,13 +49,50 @@ public:
     SDL_AppResult event(SDL_Event* event);
 
     /// @brief Advance one frame: sample input, step physics, render.
+    ///
+    /// Execution flow each frame:
+    ///  1. **Time accumulation** — compute frame delta, detect suspend/background gaps,
+    ///     clamp to avoid spiral-of-death.
+    ///  2. **Performance stats** — refresh FPS percentiles and physics Hz every 0.5 s.
+    ///  3. **Input sampling** — mouse look runs every frame for smooth camera;
+    ///     movement keys run once per physics tick group when inputSyncedWithPhysics
+    ///     is true; weapon keys sampled every frame.
+    ///  4. **Network** — send input to server, send periodic pings, poll bandwidth.
+    ///  5. **Physics** — drain accumulator at 128 Hz (up to k_maxTicksPerFrame),
+    ///     snapshot PreviousPosition, poll network for state updates, refresh
+    ///     remote renderables.
+    ///  6. **Camera resolve** — interpolate local player position between ticks
+    ///     (or use post-tick position in sequential mode).
+    ///  7. **Local weapon VFX** — fire cooldown, spawn tracers/impacts,
+    ///     visual recoil kick (viewmodel-only, does not affect aim).
+    ///  8. **Subsystem updates** — flush dispatcher events, update particles,
+    ///     SFX, skeletal animation (CPU skinning + hitbox capsules).
+    ///  9. **Entity render list** — build world-space transforms for entities,
+    ///     third-person weapons, glow spheres, beam visuals, point lights.
+    /// 10. **Viewmodel** — weapon sway, bob, recoil decay, camera-space transform.
+    /// 11. **Frame recording** — if R-key recording is active, capture frame state.
+    /// 12. **FPS ring buffer** — record inter-render delta for stats.
+    /// 13. **Debug UI** — ImGui panels (debug menu, network, particles, hitbox,
+    ///     lighting, viewmodel tweaker, 3P weapon tweaker, scoreboard).
+    /// 14. **HUD** — gather game state, update and render the HUD overlay.
+    /// 15. **Render** — drawFrame with interpolated camera, apply VSync changes.
+    /// 16. **Software frame limiter** — sleep + spin-wait if targeting above
+    ///     monitor refresh rate.
+    ///
     /// @return SDL_APP_CONTINUE normally; SDL_APP_SUCCESS on quit request.
+    /// @see ServerGame::tick for the authoritative server-side equivalent.
     SDL_AppResult iterate();
 
     /// @brief Shut down all subsystems in reverse-init order.
     void quit();
+
+    /// @brief Update Renderable components for remote players (model, scale, orientation from animation rig).
     void refreshRemotePlayerRenderables();
+
+    /// @brief Assign Renderable components to newly spawned projectile entities.
     void refreshRemoteProjectileRenderables();
+
+    /// @brief Reset Renderable visibility for players transitioning through respawn.
     void refreshRemoteRespawnRenderables();
 
 private:
@@ -149,8 +186,29 @@ private:
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
 
     // Hitmarker
-    float hitmarkerTimer_ = 0.0f;      ///< Remaining display time (fades out over this).
-    bool hitmarkerIsHeadshot_ = false; ///< True when the current hitmarker was a headshot.
+    float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
+    bool hitmarkerIsHeadshot_ = false;  ///< True when the current hitmarker was a headshot.
+    bool hitmarkerShieldBreak_ = false; ///< True when the current hit depleted target armor.
+
+    // Floating damage numbers — queued from onParticleEvent, consumed by HUD each frame.
+    struct PendingDamageNumber
+    {
+        glm::vec3 pos;
+        float damage;
+        bool headshot;
+        bool shielded;
+    };
+    std::vector<PendingDamageNumber> pendingDamageNumbers_;
+
+    // Damage accumulator — tracks continuous damage to a single target.
+    entt::entity accumTarget_ = entt::null; ///< Current target being damaged.
+    int accumTotal_ = 0;                    ///< Running damage total.
+    float accumResetTimer_ = 0.f;           ///< Timer to reset accumulator after inactivity.
+    uint8_t accumLastHitType_ = 0;          ///< 0=health(white), 1=shield(blue), 2=headshot(gold).
+
+    // Vignette state: track previous frame health/armor for delta detection.
+    float prevHealth_ = 100.f;
+    float prevArmor_ = 100.f;
 
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).

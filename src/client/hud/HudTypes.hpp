@@ -103,6 +103,25 @@ struct HudHitConfirm
 {
     bool isHeadshot = false;
     bool isKill = false;
+    bool shieldBreak = false; ///< True when this shot depleted the target's armor.
+};
+
+/// @brief Floating damage number spawned at a world-space hit position.
+///
+/// Projected to screen space each frame by the damage number widget.
+struct HudDamageNumber
+{
+    float worldX = 0.f, worldY = 0.f, worldZ = 0.f; ///< World-space hit position.
+    int damage = 0;                                 ///< Damage dealt.
+    bool headshot = false;
+    bool shielded = false;                          ///< True if target had armor when hit.
+};
+
+/// @brief Current damage accumulator state for the local player.
+struct HudDamageAccum
+{
+    int total = 0;                      ///< Accumulated damage to current target.
+    HudColor color{1.f, 1.f, 1.f, 1.f}; ///< Color matching the latest hit type.
 };
 
 /// @brief Per-teammate status (for scoreboard / team bar).
@@ -139,6 +158,11 @@ struct HudGameState
     std::span<const HudKillFeedEntry> killFeedEvents;
     std::span<const HudDamageEvent> damageEvents;
     std::span<const HudHitConfirm> hitConfirms;
+    std::span<const HudDamageNumber> damageNumbers; ///< Floating damage numbers to spawn this frame.
+    HudDamageAccum damageAccum;                     ///< Running damage total to current target.
+
+    // View/projection for world→screen projection (damage numbers).
+    glm::mat4 viewProj{1.f};
 
     // Team status.
     std::span<const HudTeamMemberStatus> allies;
@@ -149,6 +173,12 @@ struct HudGameState
     float localPlayerX = 0.f, localPlayerZ = 0.f;
     std::span<const HudMinimapDot> enemyDots;
     float minimapWorldRange = 1000.f; ///< World units visible in each direction from center.
+
+    // Vignette events (set by Game each frame based on health/armor deltas).
+    bool tookDamage = false;     ///< True the frame health or armor decreased.
+    float damageIntensity = 0.f; ///< 0..1 fraction of max-health lost this frame.
+    bool armorBroke = false;     ///< True the frame armor dropped to zero.
+    // isAlive already covers death vignette.
 
     // Screen dimensions (set by Game each frame).
     float screenW = 1280.f, screenH = 720.f;

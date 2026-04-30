@@ -16,6 +16,7 @@ void HitMarkerWidget::update(float /*dt*/, const HudGameState& state, HudTweenPo
         alpha_ = 1.f;
         scale_ = 1.3f;
         isHeadshot_ = hc.isHeadshot;
+        shieldBreak_ = hc.shieldBreak;
         tweens.tween(&alpha_, 0.f, fadeDuration, easeOutQuad);
         tweens.tween(&scale_, 1.f, 0.15f, easeOutBack);
     }
@@ -26,7 +27,14 @@ void HitMarkerWidget::draw(HudContext& ctx, float cx, float cy)
     if (alpha_ < 0.01f)
         return;
 
-    const HudColor color = isHeadshot_ ? HudColor(1.f, 0.3f, 0.3f, alpha_) : HudColor(1.f, 1.f, 1.f, alpha_);
+    // Color priority: headshot (red) > shield break (blue) > normal (white).
+    HudColor color;
+    if (isHeadshot_)
+        color = HudColor(1.f, 0.3f, 0.3f, alpha_); // red
+    else if (shieldBreak_)
+        color = HudColor(0.3f, 0.6f, 1.f, alpha_); // blue
+    else
+        color = HudColor(1.f, 1.f, 1.f, alpha_);   // white
     const float s = uiScale_;
     const float gap = armGap * scale_ * s;
     const float len = armLength * scale_ * s;

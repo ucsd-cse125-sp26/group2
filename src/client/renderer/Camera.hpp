@@ -1,35 +1,57 @@
+/// @file Camera.hpp
+/// @brief First-person camera with perspective projection and Vulkan-convention matrices.
+
 #pragma once
 
 #include <glm/glm.hpp>
 
+/// @brief First-person camera managing view and projection matrices.
 class Camera
 {
 public:
+    /// @brief Construct with default eye position, 60 degree FOV, and Quake-unit near/far.
     Camera();
 
-    // Camera perspective properties
+    /// @brief Update aspect ratio from viewport dimensions and recompute projection.
+    /// @param width  Viewport width in pixels.
+    /// @param height Viewport height in pixels.
     void setAspect(float width, float height);
+    /// @brief Set vertical field of view in degrees and recompute projection.
+    /// @param fovyDegrees Vertical FOV in degrees.
     void setFov(float fovyDegrees);
+    /// @brief Set the near clip plane distance (Quake units) and recompute projection.
+    /// @param zNear Near clip plane distance.
     void setZNear(float zNear);
+    /// @brief Set the far clip plane distance (Quake units) and recompute projection.
+    /// @param zFar Far clip plane distance.
     void setZFar(float zFar);
 
-    // Sets the position of the camera in the world
+    /// @brief Set camera world-space position and recompute view matrix.
+    /// @param eye New camera position in world space.
     void setEye(glm::vec3 eye);
-    // Sets the view direction from the eye based on the pitch, yaw, and roll
-    // (all in radians). Roll rotates the up vector around the forward axis,
-    // used for camera tilt during wallruns.
+    /// @brief Set view direction from pitch, yaw, and roll (all radians).
+    /// Roll rotates the up vector around the forward axis (wallrun tilt).
+    /// @param pitch Vertical angle in radians (positive looks down).
+    /// @param yaw   Horizontal angle in radians (0 faces +Z).
+    /// @param roll  Roll angle in radians for camera tilt.
     void setTarget(float pitch, float yaw, float roll);
-    // Sets the up direction of the camera explicitly (overrides whatever
-    // setTarget produced). Useful if you ever need a non-gravity-aligned up.
+    /// @brief Override the up direction explicitly.
+    /// Useful for non-gravity-aligned orientations.
+    /// @param up New up direction vector.
     void setUp(glm::vec3 up);
 
+    /// @brief Recompute the view matrix from current eye, target, and up.
     void computeViewMatrix();
+    /// @brief Recompute the projection matrix from current FOV, aspect, near, far.
+    /// @note Flips Y for Vulkan NDC convention.
     void computeProjectionMatrix();
 
     [[nodiscard]] const glm::mat4& getViewMatrix() const { return view_; }
     [[nodiscard]] const glm::mat4& getProjectionMatrix() const { return projection_; }
     [[nodiscard]] const glm::vec3& getEye() const { return eye_; }
+    /// @brief Return the camera right vector (normalized cross of forward and up).
     [[nodiscard]] const glm::vec3 getRight() const;
+    /// @brief Return the camera forward vector (normalized target - eye).
     [[nodiscard]] const glm::vec3 getForward() const;
     [[nodiscard]] const glm::vec3& getUp() const { return up_; }
     /// @brief Return the combined view-projection matrix.

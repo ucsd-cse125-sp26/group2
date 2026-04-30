@@ -7,7 +7,9 @@
 #include "widgets/AmmoCounter.hpp"
 #include "widgets/BuyMenu.hpp"
 #include "widgets/CrosshairWidget.hpp"
+#include "widgets/DamageAccumWidget.hpp"
 #include "widgets/DamageIndicator.hpp"
+#include "widgets/DamageNumberWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
 #include "widgets/KillFeed.hpp"
@@ -15,6 +17,7 @@
 #include "widgets/RoundTimer.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/TeamStatusBar.hpp"
+#include "widgets/VignetteWidget.hpp"
 
 bool Hud::init(SDL_GPUDevice* device,
                SDL_GPUShaderFormat shaderFormat,
@@ -162,10 +165,14 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
 void Hud::createWidgets()
 {
     // Widgets added in draw order (back to front).
+    // Vignette goes first (behind everything) since it's a full-screen overlay.
+    widgets_.push_back(std::make_unique<VignetteWidget>());
     widgets_.push_back(std::make_unique<CrosshairWidget>());
     widgets_.push_back(std::make_unique<HealthArmorBar>());
     widgets_.push_back(std::make_unique<AmmoCounter>());
     widgets_.push_back(std::make_unique<HitMarkerWidget>());
+    widgets_.push_back(std::make_unique<DamageNumberWidget>());
+    widgets_.push_back(std::make_unique<DamageAccumWidget>());
     widgets_.push_back(std::make_unique<KillFeed>());
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<RoundTimer>());

@@ -1,6 +1,5 @@
-//
-// Created by mysteriousjim on 4/16/2026.
-//
+/// @file AssetLoader.cpp
+/// @brief Implementation of AssetLoader — Assimp scene import and mesh extraction.
 
 #include "AssetLoader.hpp"
 

@@ -149,8 +149,10 @@ bool Client::poll(Registry& registry)
                 for (uint32_t i = 0; i < count; ++i) {
                     NetParticleEvent evt;
                     std::memcpy(&evt, eventData + i * sizeof(NetParticleEvent), sizeof(NetParticleEvent));
-                    // Map server entity to client entity
+                    // Map server entities to client entities
                     evt.source = registryLoader->map(evt.source);
+                    if (evt.target != entt::null)
+                        evt.target = registryLoader->map(evt.target);
                     particleEventFn_(evt, localE);
                 }
             }

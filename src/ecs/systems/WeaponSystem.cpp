@@ -202,15 +202,30 @@ inline void handleFire(Registry& registry,
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
+        // Snapshot armor before damage for shield-break detection.
+        float chargeArmorBefore = 0.f;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                chargeArmorBefore = hp->armor;
+        }
+
         // Charge damage with body-region multiplier.
+        float chargeDealtDamage = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            applyDamage(config.chargeDamage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            chargeDealtDamage = config.chargeDamage * multiplier;
+            applyDamage(chargeDealtDamage, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
-                        static_cast<double>(config.chargeDamage * multiplier));
+                        static_cast<double>(chargeDealtDamage));
             }
+        }
+
+        bool chargeShieldBroke = false;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                chargeShieldBroke = (chargeArmorBefore > 0.f && hp->armor <= 0.f);
         }
 
         // Emit particle events (beam + impact).
@@ -230,6 +245,10 @@ inline void handleFire(Registry& registry,
             impactEvt.weaponType = gun.type;
             impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
             impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
+            impactEvt.shieldBreak = chargeShieldBroke ? uint8_t{1} : uint8_t{0};
+            impactEvt.hadArmor = (chargeArmorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
+            impactEvt.damage = chargeDealtDamage;
+            impactEvt.target = hit.entity;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);
@@ -261,19 +280,34 @@ inline void handleFire(Registry& registry,
     if (config.hitscan) {
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
+        // Snapshot armor before damage for shield-break detection.
+        float armorBefore = 0.f;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                armorBefore = hp->armor;
+        }
+
         // Apply damage with body-region multiplier.
+        float dealtDamage = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            const float finalDamage = config.damage * multiplier;
-            applyDamage(finalDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            dealtDamage = config.damage * multiplier;
+            applyDamage(dealtDamage, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head) {
                 SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
                         static_cast<int>(shooter),
                         static_cast<int>(hit.entity),
-                        static_cast<double>(finalDamage),
+                        static_cast<double>(dealtDamage),
                         static_cast<double>(config.damage),
                         static_cast<double>(multiplier));
             }
+        }
+
+        // Check if armor was just depleted to zero by this shot.
+        bool shieldBroke = false;
+        if (hit.entity != entt::null && registry.valid(hit.entity)) {
+            if (const auto* hp = registry.try_get<Health>(hit.entity))
+                shieldBroke = (armorBefore > 0.f && hp->armor <= 0.f);
         }
 
         // Emit replicated particle events for client FX.
@@ -302,6 +336,10 @@ inline void handleFire(Registry& registry,
             impactEvt.weaponType = gun.type;
             impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
             impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
+            impactEvt.shieldBreak = shieldBroke ? uint8_t{1} : uint8_t{0};
+            impactEvt.hadArmor = (armorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
+            impactEvt.damage = dealtDamage;
+            impactEvt.target = hit.entity;
             impactEvt.pos1 = hit.point;
             impactEvt.pos2 = hit.normal;
             outParticles.push_back(impactEvt);

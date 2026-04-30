@@ -1,24 +1,19 @@
+/// @file PacketType.hpp
+/// @brief Network packet type identifiers for client-server communication.
+
 #pragma once
 
 #include <cstdint>
 
+/// @brief Identifies the type of a network packet.
 enum class PacketType : uint8_t
 {
-    // Client -> Server
-    INPUT,
-
-    // Server -> Client
-    ASSIGN_CLIENT_ID,
-    UPDATE_REGISTRY,
-
-    // Server -> All clients (particle effect replication)
-    PARTICLE_SPAWN,
-
-    // Bidirectional (latency measurement)
-    PING, // Client -> Server (carries uint64_t timestamp)
-    PONG, // Server -> Client (echoes timestamp back)
-
-    // Server -> All clients (match updates)
-    MATCH_STATE,
-    KILL_EVENT,
+    INPUT,            ///< Client -> Server: player input snapshot.
+    ASSIGN_CLIENT_ID, ///< Server -> Client: assign the connecting client its entity ID.
+    UPDATE_REGISTRY,  ///< Server -> Client: full ECS registry state snapshot.
+    PARTICLE_SPAWN,   ///< Server -> All clients: replicated particle/VFX event.
+    PING,             ///< Client -> Server: latency measurement (carries uint64_t timestamp).
+    PONG,             ///< Server -> Client: latency measurement reply (echoes timestamp).
+    MATCH_STATE,      ///< Server -> All clients: match phase transition update.
+    KILL_EVENT,       ///< Server -> All clients: player kill notification.
 };

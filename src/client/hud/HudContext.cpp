@@ -263,6 +263,14 @@ void HudContext::crosshair(const CrosshairStyle& style, float screenW, float scr
         rect(cx - ht, cy - ht, t, t, style.color);
 }
 
+// ── Vignette ────────────────────────────────────────────────────────
+
+void HudContext::vignette(float screenW, float screenH, HudColor color)
+{
+    // Full-screen quad with texMode=4 (radial edge gradient in fragment shader).
+    emitQuad(0.f, 0.f, screenW, screenH, 0.f, 0.f, 1.f, 1.f, color, 4.f);
+}
+
 // ── Clipping ────────────────────────────────────────────────────────────────
 
 void HudContext::pushClipRect(float x, float y, float w, float h)

@@ -53,7 +53,7 @@ void buildAnimationTesterUI(AnimationTesterState& state,
         return;
     }
 
-    // ---- Target entity combo ----
+    // Target entity combo
     ImGui::SeparatorText("Target");
 
     struct TargetEntry
@@ -109,7 +109,7 @@ void buildAnimationTesterUI(AnimationTesterState& state,
         return;
     }
 
-    // ---- Clip dropdown + Play/Stop ----
+    // Clip dropdown + Play/Stop
     ImGui::SeparatorText("Debug Override");
 
     state.selectedClip = std::clamp(state.selectedClip, 0, k_clipCount - 1);
@@ -136,7 +136,7 @@ void buildAnimationTesterUI(AnimationTesterState& state,
     if (ImGui::SliderFloat("Playback ×", &state.playbackSpeedMul, 0.0f, 4.0f, "%.2f"))
         ac.animator->setDebugPlaybackSpeed(state.playbackSpeedMul);
 
-    // ---- Sampler read-back ----
+    // Sampler read-back
     ImGui::SeparatorText("Sampler Slots");
 
     const auto& samplers = ac.animator->samplers();
@@ -166,7 +166,7 @@ void buildAnimationTesterUI(AnimationTesterState& state,
         ImGui::EndTable();
     }
 
-    // ---- Rendering tunables ----
+    // Rendering tunables
     ImGui::SeparatorText("Rendering");
 
     ImGui::Checkbox("Show local body (third-person debug)", &state.showLocalBody);

@@ -1,3 +1,11 @@
+/// @file RegistryArchive.hpp
+/// @brief Lightweight binary serialization archives for ECS component snapshots.
+///
+/// OutputArchive writes trivially-copyable components into a byte buffer.
+/// InputArchive reads them back, advancing an internal offset.  Used by
+/// RegistrySerialization to snapshot and restore the entt registry over
+/// the network.
+
 #pragma once
 
 #include <cstdint>
@@ -6,11 +14,15 @@
 #include <type_traits>
 #include <vector>
 
+/// @brief Archive that serializes trivially-copyable values into a byte buffer.
 class OutputArchive
 {
 public:
     std::vector<uint8_t> buffer;
 
+    /// @brief Append @p value to the internal buffer as raw bytes.
+    /// @tparam T A trivially-copyable type.
+    /// @param value The value to serialize.
     template <typename T>
     void operator()(const T& value)
     {
@@ -21,11 +33,18 @@ public:
     }
 };
 
+/// @brief Archive that deserializes trivially-copyable values from a byte buffer.
 class InputArchive
 {
 public:
+    /// @brief Construct an InputArchive over an existing data buffer.
+    /// @param d Pointer to the beginning of the buffer.
+    /// @param s Size of the buffer in bytes.
     InputArchive(const uint8_t* d, size_t s) : data(d), size(s) {}
 
+    /// @brief Read the next value from the buffer and advance the offset.
+    /// @tparam T A trivially-copyable type.
+    /// @param value Output parameter populated with the deserialized value.
     template <typename T>
     void operator()(T& value)
     {

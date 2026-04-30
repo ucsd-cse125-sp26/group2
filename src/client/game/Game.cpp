@@ -313,18 +313,39 @@ bool Game::init()
                 sfxSystem.play(SfxId::FleshHit);
             hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
             hitmarkerIsHeadshot_ = (evt.headshot != 0);
+            hitmarkerShieldBreak_ = (evt.shieldBreak != 0);
+
+            // Queue floating damage number at hit position.
+            if (evt.damage > 0.f) {
+                const bool isHeadshot = (evt.headshot != 0);
+                const bool isShielded = (evt.hadArmor != 0);
+                pendingDamageNumbers_.push_back({evt.pos1, evt.damage, isHeadshot, isShielded});
+
+                // Damage accumulator: reset if target changed, accumulate otherwise.
+                if (evt.target != accumTarget_) {
+                    accumTarget_ = evt.target;
+                    accumTotal_ = 0;
+                }
+                accumTotal_ += static_cast<int>(evt.damage + 0.5f);
+                accumResetTimer_ = 2.0f; // reset after 2s of no hits
+                // Track latest hit type for accumulator color.
+                accumLastHitType_ = isHeadshot ? uint8_t{2} : (isShielded ? uint8_t{1} : uint8_t{0});
+            }
         }
 
         // Skip own effects that were already spawned locally for instant feedback.
         // Exceptions that must NOT be skipped:
         //   - Charge weapons: local VFX is skipped; we rely on server events.
-        //   - Explosions: server-authoritative (not locally predicted).
-        //   - Smoke: server-authoritative.
+        //   - Explosions / Smoke: server-authoritative (not locally predicted).
+        //   - Impacts: local prediction only spawns tracers; all impact VFX
+        //     (sparks, blood, bullet holes) come from server so player hits
+        //     always get the correct surface type and normal.
         if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
-            const bool isServerOnly =
-                evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke;
-            if (!isChargeWeapon && !isServerOnly)
+            const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
+                                               evt.effectType == ParticleEffectType::Smoke ||
+                                               evt.effectType == ParticleEffectType::Impact;
+            if (!isChargeWeapon && !isServerAuthoritative)
                 return;
 
             // For charge weapons from self: also dispatch the weapon-fired event
@@ -924,12 +945,12 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
                 const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
 
-                // Raycast against full world geometry (floor + boxes + brushes).
+                // Raycast world geometry for tracer endpoint.  Impact effects
+                // (sparks / blood / bullet holes) are NOT spawned here — they
+                // come from the server's authoritative NetParticleEvent so that
+                // player hits get the correct surface type and normal.
                 const auto worldHit = physics::raycastWorld(cachedEye_, cachedCamFwd_, physics::activeWorld());
-                const float hitDist = worldHit.hit ? worldHit.distance : 5000.f;
                 const glm::vec3 hitPos = worldHit.hit ? worldHit.point : (cachedEye_ + cachedCamFwd_ * 5000.f);
-                const glm::vec3 hitNormal = worldHit.hit ? worldHit.normal : -cachedCamFwd_;
-                const SurfaceType hitSurface = worldHit.surface;
 
                 // Dispatch weapon-fired event for any listeners
                 WeaponFiredEvent wfe;
@@ -947,7 +968,6 @@ SDL_AppResult Game::iterate()
                 const float hipHitDist = glm::length(hipToHit);
                 const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
                 particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
-                particleSystem.spawnImpactEffect(hitPos, hitNormal, hitSurface, currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only)
                 const RecoilParams& rp = getRecoilParams(currentEquippedType_);
@@ -1643,97 +1663,7 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
 
-    // Scoreboard — shown while Tab is held.
-    if (ImGui::IsKeyDown(ImGuiKey_Tab)) {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSizeInPixels(window, &winW, &winH);
-
-        constexpr ImGuiWindowFlags k_scoreFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                                                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
-                                                  ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-        ImGui::SetNextWindowPos(ImVec2(static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f),
-                                ImGuiCond_Always,
-                                ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowBgAlpha(0.80f);
-
-        if (ImGui::Begin("##scoreboard", nullptr, k_scoreFlags)) {
-            // Phase banner
-            const char* phaseStr = "Warmup";
-            switch (currentMatchPhase) {
-            case MatchPhase::COUNTDOWN:
-                phaseStr = "Starting...";
-                break;
-            case MatchPhase::IN_PROGRESS:
-                phaseStr = "In Progress";
-                break;
-            case MatchPhase::FINISHED:
-                phaseStr = "Game Over";
-                break;
-            default:
-                break;
-            }
-
-            const float centerX = ImGui::GetContentRegionAvail().x;
-            const ImVec2 phaseTextSize = ImGui::CalcTextSize(phaseStr);
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - phaseTextSize.x) * 0.5f);
-            ImGui::TextUnformatted(phaseStr);
-            if (currentMatchPhase == MatchPhase::COUNTDOWN || currentMatchPhase == MatchPhase::FINISHED) {
-                char timerBuf[16];
-                std::snprintf(timerBuf, sizeof(timerBuf), "%.1fs", static_cast<double>(countdownTimer));
-                const ImVec2 timerSize = ImGui::CalcTextSize(timerBuf);
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (centerX - timerSize.x) * 0.5f);
-                ImGui::TextUnformatted(timerBuf);
-            }
-            ImGui::Separator();
-
-            // Find local player to highlight.
-            entt::entity localPlayer = entt::null;
-            registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayer = e; });
-
-            constexpr ImGuiTableFlags k_tableFlags =
-                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit;
-            if (ImGui::BeginTable("##scores", 5, k_tableFlags)) {
-                ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthFixed, 160.0f);
-                ImGui::TableSetupColumn("K", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-                ImGui::TableSetupColumn("D", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-                ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, 55.0f);
-                ImGui::TableSetupColumn("Won", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-                ImGui::TableHeadersRow();
-
-                int row = 0;
-                registry.view<PlayerMatchStats>().each([&](entt::entity e, const PlayerMatchStats& stats) {
-                    const bool isLocal = (e == localPlayer);
-                    const int clientId = registry.all_of<ClientId>(e) ? registry.get<ClientId>(e).value : (row + 1);
-
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    if (isLocal) {
-                        char localLabel[40];
-                        std::snprintf(localLabel, sizeof(localLabel), "> You (Player #%d)", clientId);
-                        ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "%s", localLabel);
-                    } else {
-                        ImGui::Text("Player #%d", clientId);
-                    }
-
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::Text("%d", stats.kills);
-                    ImGui::TableSetColumnIndex(2);
-                    ImGui::Text("%d", stats.deaths);
-                    ImGui::TableSetColumnIndex(3);
-                    ImGui::Text("%d", stats.score);
-                    ImGui::TableSetColumnIndex(4);
-                    ImGui::Text("%s", stats.hasWon ? "Yes" : "-");
-
-                    ++row;
-                });
-                if (row == 0)
-                    ImGui::TextDisabled("No players");
-
-                ImGui::EndTable();
-            }
-        }
-        ImGui::End();
-    }
+    // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
 
     // Process ammo refill request — pulse refillAmmo on InputSnapshot for
     // exactly one frame so the server handles it once then stops.
@@ -2036,9 +1966,34 @@ SDL_AppResult Game::iterate()
         thread_local std::vector<HudHitConfirm> hudHitConfirms;
         hudHitConfirms.clear();
         if (hitmarkerTimer_ > 0.2f) { // just triggered (timer starts at 0.25)
-            hudHitConfirms.push_back({hitmarkerIsHeadshot_, false});
+            hudHitConfirms.push_back({hitmarkerIsHeadshot_, false, hitmarkerShieldBreak_});
         }
         hudState.hitConfirms = hudHitConfirms;
+
+        // ── Vignette: detect health/armor deltas for damage & shield break ──
+        {
+            float curHealth = 100.f, curArmor = 100.f;
+            registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
+                curHealth = hp.health;
+                curArmor = hp.armor;
+            });
+
+            const float healthLost = prevHealth_ - curHealth;
+            const float armorLost = prevArmor_ - curArmor;
+            const float totalLost = std::max(0.f, healthLost) + std::max(0.f, armorLost);
+
+            hudState.armorBroke = (prevArmor_ > 0.f && curArmor <= 0.f);
+
+            // Red vignette on damage — suppressed when the shield breaks so
+            // the blue shield-break vignette plays alone.
+            if (totalLost > 0.f && !hudState.armorBroke) {
+                hudState.tookDamage = true;
+                hudState.damageIntensity = std::clamp(totalLost / 100.f, 0.f, 1.f);
+            }
+
+            prevHealth_ = curHealth;
+            prevArmor_ = curArmor;
+        }
 
         // ── Scoreboard: all players ──
         thread_local std::vector<HudTeamMemberStatus> hudAllPlayers;
@@ -2097,6 +2052,33 @@ SDL_AppResult Game::iterate()
         SDL_GetWindowSizeInPixels(window, &winW, &winH);
         hudState.screenW = static_cast<float>(winW);
         hudState.screenH = static_cast<float>(winH);
+
+        // ── Floating damage numbers ──
+        thread_local std::vector<HudDamageNumber> hudDamageNumbers;
+        hudDamageNumbers.clear();
+        for (const auto& pdn : pendingDamageNumbers_) {
+            hudDamageNumbers.push_back(
+                {pdn.pos.x, pdn.pos.y, pdn.pos.z, static_cast<int>(pdn.damage + 0.5f), pdn.headshot, pdn.shielded});
+        }
+        pendingDamageNumbers_.clear();
+        hudState.damageNumbers = hudDamageNumbers;
+
+        // ── Damage accumulator ──
+        accumResetTimer_ -= frameTime;
+        if (accumResetTimer_ <= 0.f) {
+            accumTarget_ = entt::null;
+            accumTotal_ = 0;
+        }
+        hudState.damageAccum.total = accumTotal_;
+        if (accumLastHitType_ == 2)
+            hudState.damageAccum.color = HudColor(1.0f, 0.85f, 0.2f, 1.f); // gold (headshot)
+        else if (accumLastHitType_ == 1)
+            hudState.damageAccum.color = HudColor(0.3f, 0.6f, 1.0f, 1.f);  // blue (shield)
+        else
+            hudState.damageAccum.color = HudColor(1.f, 1.f, 1.f, 1.f);     // white (health)
+
+        // ── View-projection matrix for world→screen projection ──
+        hudState.viewProj = renderer.getCamera().getViewProjection();
 
         hud_.update(frameTime, hudState);
         hud_.render();
