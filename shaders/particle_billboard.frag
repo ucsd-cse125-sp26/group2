@@ -11,6 +11,12 @@ void main()
 {
     float alpha;
 
+    // Hot core tinted toward the particle's own color.  For white-ish sparks
+    // (metal, concrete) the +0.3 bias gives the original (1.3,1.2,0.9) values;
+    // for colored particles (blood=red, energy=cyan) the core matches the tint
+    // instead of washing out to white under additive blending.
+    vec3 hotColor = vColor.rgb + vec3(0.3);
+
     if (vSpeedNorm > 0.05) {
         // Streak spark: sharp bright core fading to nothing at the tail end
         // vUV.x: -1 = back of streak (tail), +1 = front (tip)
@@ -22,8 +28,7 @@ void main()
 
         alpha = crossFade * tailFade;
 
-        // White-hot core of the streak
-        vec3 hotCore     = vec3(1.3, 1.2, 0.9) * coreLine * tailFade;
+        vec3 hotCore     = hotColor * coreLine * tailFade;
         outColor         = vec4(vColor.rgb * alpha + hotCore, alpha);
     } else {
         // Circle spark / impact flash: soft disc with bright centre
@@ -32,6 +37,6 @@ void main()
         float hotspot    = 1.0 - smoothstep(0.0, 0.15, dist);
 
         alpha = disc * vColor.a;
-        outColor = vec4(vColor.rgb * disc + vec3(1.2, 1.1, 0.9) * hotspot, alpha);
+        outColor = vec4(vColor.rgb * disc + hotColor * hotspot, alpha);
     }
 }

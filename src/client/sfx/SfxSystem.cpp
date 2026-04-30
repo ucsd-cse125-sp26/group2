@@ -12,11 +12,9 @@
 #include <cstdlib>
 #include <string>
 
-// ---------------------------------------------------------------------------
-// minimp3 — header-only MP3 decoder (implementation defined exactly once here)
+// minimp3 — header-only MP3 decoder (implementation defined exactly once here).
 // Diagnostic suppression keeps compiler warnings from minimp3's C code out of
 // our build output.
-// ---------------------------------------------------------------------------
 #ifdef _MSC_VER
 #pragma warning(push, 0)
 #elif defined(__clang__)
@@ -43,9 +41,7 @@
 #pragma GCC diagnostic pop
 #endif
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 namespace
 {
@@ -89,9 +85,7 @@ const char* sfxIdName(SfxId id)
 
 } // namespace
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 bool SfxSystem::init()
 {
@@ -115,12 +109,10 @@ bool SfxSystem::init()
     // All per-sound cooldowns start at 0 (ready to play immediately).
     cooldowns_.fill(0.0f);
 
-    // ------------------------------------------------------------------
     // Load sound clips.
     // File names must match exactly what's in assets/sounds/.
     // loadClip() is non-fatal: if a file is missing, that slot stays empty
     // and play() silently skips it.
-    // ------------------------------------------------------------------
 
     // Weapons — fire sounds
     loadClip(SfxId::RifleFire, "pubg-ak.wav", SfxCategory::Weapons, 0.8f, 0.10f);
@@ -262,9 +254,7 @@ float SfxSystem::categoryVolume(SfxCategory cat) const
     return categoryVolumes_[static_cast<size_t>(cat)];
 }
 
-// ---------------------------------------------------------------------------
 // entt::dispatcher event handlers
-// ---------------------------------------------------------------------------
 
 void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
 {
@@ -290,9 +280,7 @@ void SfxSystem::onExplosion(const ExplosionEvent& /*e*/)
     play(SfxId::Explosion);
 }
 
-// ---------------------------------------------------------------------------
 // Per-frame update
-// ---------------------------------------------------------------------------
 
 void SfxSystem::handleEvent(const SDL_Event& event)
 {
@@ -419,9 +407,7 @@ void SfxSystem::update(float dt, const Registry& registry)
     }
 }
 
-// ---------------------------------------------------------------------------
 // Private helpers
-// ---------------------------------------------------------------------------
 
 bool SfxSystem::loadClip(SfxId id, const char* filename, SfxCategory cat, float gain, float cooldownSecs)
 {
@@ -553,9 +539,7 @@ float SfxSystem::effectiveGain(SfxId id, float extraGain) const
     return masterVolume_ * categoryVolumes_[static_cast<size_t>(clip.category)] * clip.defaultGain * extraGain;
 }
 
-// ---------------------------------------------------------------------------
 // Device management — open / reopen / warm-up
-// ---------------------------------------------------------------------------
 
 bool SfxSystem::openDevice()
 {

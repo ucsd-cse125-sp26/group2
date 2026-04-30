@@ -103,6 +103,7 @@ struct HudHitConfirm
 {
     bool isHeadshot = false;
     bool isKill = false;
+    bool shieldBreak = false; ///< True when this shot depleted the target's armor.
 };
 
 /// @brief Per-teammate status (for scoreboard / team bar).
@@ -149,6 +150,12 @@ struct HudGameState
     float localPlayerX = 0.f, localPlayerZ = 0.f;
     std::span<const HudMinimapDot> enemyDots;
     float minimapWorldRange = 1000.f; ///< World units visible in each direction from center.
+
+    // Vignette events (set by Game each frame based on health/armor deltas).
+    bool tookDamage = false;     ///< True the frame health or armor decreased.
+    float damageIntensity = 0.f; ///< 0..1 fraction of max-health lost this frame.
+    bool armorBroke = false;     ///< True the frame armor dropped to zero.
+    // isAlive already covers death vignette.
 
     // Screen dimensions (set by Game each frame).
     float screenW = 1280.f, screenH = 720.f;

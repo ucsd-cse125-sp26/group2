@@ -735,7 +735,7 @@ bool Renderer::uploadModel(const LoadedModel& model, ModelInstance& outInstance)
 
 bool Renderer::initIBL()
 {
-    // ----- Texture resources -------------------------------------------------
+    // Texture resources
 
     // BRDF LUT (512x512 RG16F). Written by brdf_lut.comp, sampled in pbr.frag.
     {
@@ -862,7 +862,7 @@ bool Renderer::initIBL()
         }
     }
 
-    // ----- Compute pipelines -------------------------------------------------
+    // Compute pipelines
     //
     // brdf_lut.comp: 0 samplers, 1 RW storage texture, 0 UBOs.
     // irradiance.comp / prefilter.comp: 1 sampler (envCubemap), 1 RW storage
@@ -876,7 +876,7 @@ bool Renderer::initIBL()
         return false;
     }
 
-    // ----- Procedural sky upload to envCubemap -------------------------------
+    // Procedural sky upload to envCubemap
     //
     // Matches the analytic sky in skybox.frag so the IBL stays consistent with
     // what the user sees in the sky. Only runs once at startup; loadHDRSkybox()
@@ -985,7 +985,7 @@ bool Renderer::initIBL()
         SDL_ReleaseGPUTransferBuffer(device, tb);
     }
 
-    // ----- BRDF LUT (one-time) -----------------------------------------------
+    // BRDF LUT (one-time)
     //
     // Self-contained -- no input cubemap needed. The split-sum BRDF integration
     // depends only on (NdotV, roughness).
@@ -1001,7 +1001,7 @@ bool Renderer::initIBL()
         SDL_WaitForGPUIdle(device);
     }
 
-    // ----- Irradiance + prefilter from procedural sky ------------------------
+    // Irradiance + prefilter from procedural sky
     if (!regenerateIBLFromCubemap(envCubemap)) {
         SDL_Log("IBL: regenerateIBLFromCubemap failed for procedural sky");
         return false;

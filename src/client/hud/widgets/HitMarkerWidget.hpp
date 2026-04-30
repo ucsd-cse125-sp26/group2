@@ -20,4 +20,5 @@ private:
     float alpha_ = 0.f;
     float scale_ = 1.f;
     bool isHeadshot_ = false;
+    bool shieldBreak_ = false;
 };

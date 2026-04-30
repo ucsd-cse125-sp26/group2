@@ -47,6 +47,14 @@ public:
 
     void crosshair(const CrosshairStyle& style, float screenW, float screenH);
 
+    // ── Vignette ────────────────────────────────────────────────────────
+
+    /// @brief Draw a full-screen radial vignette overlay.
+    /// @param screenW  Viewport width in pixels.
+    /// @param screenH  Viewport height in pixels.
+    /// @param color    Tint color with alpha controlling intensity.
+    void vignette(float screenW, float screenH, HudColor color);
+
     // ── Clipping ────────────────────────────────────────────────────────
 
     void pushClipRect(float x, float y, float w, float h);

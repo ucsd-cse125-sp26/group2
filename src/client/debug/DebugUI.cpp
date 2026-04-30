@@ -1202,9 +1202,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     ImGui::End();
 }
 
-// =====================================================================
 // Hitbox capsule debug visualization
-// =====================================================================
 
 namespace
 {

@@ -15,6 +15,7 @@
 #include "widgets/RoundTimer.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/TeamStatusBar.hpp"
+#include "widgets/VignetteWidget.hpp"
 
 bool Hud::init(SDL_GPUDevice* device,
                SDL_GPUShaderFormat shaderFormat,
@@ -162,6 +163,8 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
 void Hud::createWidgets()
 {
     // Widgets added in draw order (back to front).
+    // Vignette goes first (behind everything) since it's a full-screen overlay.
+    widgets_.push_back(std::make_unique<VignetteWidget>());
     widgets_.push_back(std::make_unique<CrosshairWidget>());
     widgets_.push_back(std::make_unique<HealthArmorBar>());
     widgets_.push_back(std::make_unique<AmmoCounter>());

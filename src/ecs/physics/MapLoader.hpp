@@ -27,9 +27,7 @@ struct LoadedModel; // Forward-declared; defined in client/renderer/ModelLoader.
 namespace physics
 {
 
-// ---------------------------------------------------------------------------
-// Collision data
-// ---------------------------------------------------------------------------
+/// Collision data
 
 /// @brief Owns the collision primitives extracted from a map file.
 ///
@@ -61,9 +59,7 @@ struct MapCollisionData
     }
 };
 
-// ---------------------------------------------------------------------------
-// Load options
-// ---------------------------------------------------------------------------
+/// Load options
 
 /// @brief Configuration for map loading.
 struct MapLoadOptions
@@ -88,9 +84,7 @@ struct MapLoadOptions
     bool addFloorPlane = false;
 };
 
-// ---------------------------------------------------------------------------
-// API
-// ---------------------------------------------------------------------------
+/// API
 
 /// @brief Extract collision geometry from a map `.glb` file.
 ///

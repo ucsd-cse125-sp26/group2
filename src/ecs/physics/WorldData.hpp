@@ -18,9 +18,7 @@
 namespace physics
 {
 
-// ---------------------------------------------------------------------------
-// Active world (runtime-switchable)
-// ---------------------------------------------------------------------------
+/// Active world (runtime-switchable)
 
 namespace detail
 {
@@ -233,9 +231,7 @@ inline const WorldGeometry& testWorld()
     return k_geo;
 }
 
-// ---------------------------------------------------------------------------
 // activeWorld() definition (depends on testWorld)
-// ---------------------------------------------------------------------------
 
 inline const WorldGeometry& activeWorld()
 {

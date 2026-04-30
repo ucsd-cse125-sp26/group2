@@ -422,9 +422,7 @@ inline HitscanHit resolveHitscan(Registry& registry, entt::entity shooter, glm::
     return bestHit;
 }
 
-// ===========================================================================
-// Skeleton-driven hitbox raycast (capsule-based)
-// ===========================================================================
+/// Skeleton-driven hitbox raycast (capsule-based)
 
 /// @brief Result of a hitbox-aware hitscan raycast.
 struct HitboxHit

@@ -313,6 +313,7 @@ bool Game::init()
                 sfxSystem.play(SfxId::FleshHit);
             hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
             hitmarkerIsHeadshot_ = (evt.headshot != 0);
+            hitmarkerShieldBreak_ = (evt.shieldBreak != 0);
         }
 
         // Skip own effects that were already spawned locally for instant feedback.
@@ -2036,9 +2037,32 @@ SDL_AppResult Game::iterate()
         thread_local std::vector<HudHitConfirm> hudHitConfirms;
         hudHitConfirms.clear();
         if (hitmarkerTimer_ > 0.2f) { // just triggered (timer starts at 0.25)
-            hudHitConfirms.push_back({hitmarkerIsHeadshot_, false});
+            hudHitConfirms.push_back({hitmarkerIsHeadshot_, false, hitmarkerShieldBreak_});
         }
         hudState.hitConfirms = hudHitConfirms;
+
+        // ── Vignette: detect health/armor deltas for damage & shield break ──
+        {
+            float curHealth = 100.f, curArmor = 100.f;
+            registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
+                curHealth = hp.health;
+                curArmor = hp.armor;
+            });
+
+            const float healthLost = prevHealth_ - curHealth;
+            const float armorLost = prevArmor_ - curArmor;
+            const float totalLost = std::max(0.f, healthLost) + std::max(0.f, armorLost);
+
+            if (totalLost > 0.f) {
+                hudState.tookDamage = true;
+                hudState.damageIntensity = std::clamp(totalLost / 100.f, 0.f, 1.f);
+            }
+
+            hudState.armorBroke = (prevArmor_ > 0.f && curArmor <= 0.f);
+
+            prevHealth_ = curHealth;
+            prevArmor_ = curArmor;
+        }
 
         // ── Scoreboard: all players ──
         thread_local std::vector<HudTeamMemberStatus> hudAllPlayers;

@@ -16,9 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Body regions
-// ---------------------------------------------------------------------------
+/// Body regions
 
 /// @brief Body region identifiers for damage multiplier lookup.
 enum class BodyRegion : uint8_t
@@ -72,9 +70,7 @@ inline const char* bodyRegionName(BodyRegion region)
     return "(unknown)";
 }
 
-// ---------------------------------------------------------------------------
-// Hitbox definition (static, per-rig)
-// ---------------------------------------------------------------------------
+/// Hitbox definition (static, per-rig)
 
 /// @brief One bone-attached collision capsule in the rig's bone-local space.
 ///
@@ -92,9 +88,7 @@ struct HitboxDef
     glm::vec3 localAxis{0.0f, 1.0f, 0.0f};      ///< Capsule axis direction in bone-local space.
 };
 
-// ---------------------------------------------------------------------------
-// Runtime capsule (world-space, per-entity, per-frame)
-// ---------------------------------------------------------------------------
+/// Runtime capsule (world-space, per-entity, per-frame)
 
 /// @brief World-space capsule, recomputed each tick from animation pose + entity transform.
 struct WorldCapsule
@@ -105,9 +99,7 @@ struct WorldCapsule
     BodyRegion region = BodyRegion::UpperTorso; ///< For damage multiplier lookup.
 };
 
-// ---------------------------------------------------------------------------
-// ECS components
-// ---------------------------------------------------------------------------
+/// ECS components
 
 /// @brief ECS component: resolved hitbox capsules for one entity this frame.
 ///
@@ -126,9 +118,7 @@ struct JointMatrices
     std::vector<glm::mat4> matrices; ///< Model-space joint transforms, one per skeleton joint.
 };
 
-// ---------------------------------------------------------------------------
-// Damage profile
-// ---------------------------------------------------------------------------
+/// Damage profile
 
 /// @brief Damage multiplier table, indexed by BodyRegion.
 struct DamageProfile
@@ -158,9 +148,7 @@ inline const DamageProfile& defaultDamageProfile()
     return profile;
 }
 
-// ---------------------------------------------------------------------------
-// Hitbox rig (shared per character archetype)
-// ---------------------------------------------------------------------------
+/// Hitbox rig (shared per character archetype)
 
 /// @brief Collection of hitbox definitions for a character rig.
 ///
@@ -222,9 +210,7 @@ struct HitboxRig
     }
 };
 
-// ---------------------------------------------------------------------------
-// Debug: hit detection snapshot (for client-server mismatch debugging)
-// ---------------------------------------------------------------------------
+/// Debug: hit detection snapshot (for client-server mismatch debugging)
 
 /// @brief Snapshot captured on the client when a local hitscan detects a hit.
 ///

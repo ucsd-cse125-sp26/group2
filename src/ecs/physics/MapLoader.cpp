@@ -39,9 +39,7 @@ namespace physics
 namespace
 {
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 glm::mat4 aiToGlm(const aiMatrix4x4& m)
 {
@@ -121,9 +119,7 @@ std::vector<glm::vec3> getWorldVertices(const aiMesh* mesh, const glm::mat4& wor
     return verts;
 }
 
-// ---------------------------------------------------------------------------
 // Shape fitting
-// ---------------------------------------------------------------------------
 
 /// @brief Compute AABB from vertices.
 void computeAABB(const std::vector<glm::vec3>& verts, glm::vec3& outMin, glm::vec3& outMax)
@@ -317,9 +313,7 @@ bool isAxisAlignedBox(const aiMesh* mesh, const glm::mat4& world)
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // Convex hull → WorldBrush
-// ---------------------------------------------------------------------------
 
 /// @brief A face plane with a hash for deduplication.
 struct FacePlane
@@ -397,9 +391,7 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // Triangle mesh construction
-// ---------------------------------------------------------------------------
 
 /// @brief Build a WorldTriMesh from an Assimp mesh.
 void buildTriMeshFromAiMesh(const aiMesh* mesh, const glm::mat4& world, float scale, WorldTriMesh& out)
@@ -420,9 +412,7 @@ void buildTriMeshFromAiMesh(const aiMesh* mesh, const glm::mat4& world, float sc
     computeAABB(out.vertices, out.boundsMin, out.boundsMax);
 }
 
-// ---------------------------------------------------------------------------
 // Per-mesh collision extraction with auto-detection
-// ---------------------------------------------------------------------------
 
 /// @brief Check if a node name belongs to Blender default scene objects that
 ///        should never generate collision (armatures, cameras, lights, mannequins).
@@ -641,9 +631,7 @@ void extractMeshCollision(const aiMesh* mesh,
     }
 }
 
-// ---------------------------------------------------------------------------
 // Scene graph traversal
-// ---------------------------------------------------------------------------
 
 void extractCollision(const aiNode* node,
                       const aiScene* scene,
@@ -671,9 +659,7 @@ void extractCollision(const aiNode* node,
 
 } // namespace
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapLoadOptions& opts)
 {

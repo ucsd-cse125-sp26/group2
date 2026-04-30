@@ -149,8 +149,13 @@ private:
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
 
     // Hitmarker
-    float hitmarkerTimer_ = 0.0f;      ///< Remaining display time (fades out over this).
-    bool hitmarkerIsHeadshot_ = false; ///< True when the current hitmarker was a headshot.
+    float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
+    bool hitmarkerIsHeadshot_ = false;  ///< True when the current hitmarker was a headshot.
+    bool hitmarkerShieldBreak_ = false; ///< True when the current hit depleted target armor.
+
+    // Vignette state: track previous frame health/armor for delta detection.
+    float prevHealth_ = 100.f;
+    float prevArmor_ = 100.f;
 
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).

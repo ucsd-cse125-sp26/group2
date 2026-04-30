@@ -41,7 +41,7 @@ public:
     void drawFrame(glm::vec3 eye, float yaw, float pitch, float roll) override;
     void quit() override;
 
-    // ---- Unimplemented IRenderer methods ----
+    // Unimplemented IRenderer methods
     // Marked as "not supported" via `supports()`. HybridRenderer never calls
     // these, but they must exist for the class to be concrete.
     [[nodiscard]] SDL_GPUDevice* getDevice() const override { return device_; }
