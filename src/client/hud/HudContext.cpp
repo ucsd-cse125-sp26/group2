@@ -7,6 +7,7 @@
 #include "particles/sdf/SdfFont.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 void HudContext::init(const SdfAtlas* atlas)
@@ -152,7 +153,13 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
     else if (align == HudAlign::Right)
         startX = x - totalWidth;
 
-    float cursorX = startX;
+    // Snap the starting cursor to whole pixels so every glyph in the string
+    // lands on the same subpixel grid.  Without this, identical characters
+    // (e.g. the two zeros in "100") get different bilinear sampling patterns
+    // and appear to have different widths.
+    float cursorX = std::round(startX);
+    const float baselineY = std::round(y + size); // baseline, pixel-snapped
+
     for (const char* p = str; *p; ++p) {
         const uint32_t cp = static_cast<uint8_t>(*p);
         const GlyphInfo* gi = sdfAtlas_->glyph(cp);
@@ -161,8 +168,8 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
 
         const float gw = gi->width * scale;
         const float gh = gi->height * scale;
-        const float gx = cursorX + gi->bearing.x * scale;
-        const float gy = y - gi->bearing.y * scale + size; // baseline offset
+        const float gx = std::round(cursorX + gi->bearing.x * scale);
+        const float gy = std::round(baselineY - gi->bearing.y * scale);
 
         emitQuad(
             gx, gy, gw, gh, gi->uvMin.x, gi->uvMin.y, gi->uvMax.x, gi->uvMax.y, color, 1.f); // texMode = 1 (SDF text)

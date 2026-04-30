@@ -20,13 +20,18 @@ void main()
     if (mode == 1) {
         // SDF text with dark outline for readability.
         float sdf = texture(sdfAtlas, vUV).r;
-        float fw  = fwidth(sdf);
+
+        // Compute a stable AA width from screen-space UV derivatives.
+        // This avoids fwidth(sdf) which is noisy and too wide for small text.
+        float uvDeriv = length(vec2(dFdx(vUV.x), dFdy(vUV.y)));
+        float fw = uvDeriv * 8.0;  // scale by atlas texels per SDF unit
+        fw = clamp(fw, 0.01, 0.15);
 
         // Fill (glyph interior).
         float fillAlpha = smoothstep(0.5 - fw, 0.5 + fw, sdf);
 
         // Outline band just outside the glyph edge.
-        const float kOutlineWidth = 0.06;  // in SDF units (~1.5px at native)
+        const float kOutlineWidth = 0.08;
         float outlineEdge  = 0.5 - kOutlineWidth;
         float outlineAlpha = smoothstep(outlineEdge - fw, outlineEdge + fw, sdf);
 
