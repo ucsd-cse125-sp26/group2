@@ -16,6 +16,7 @@
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "ecs/systems/LagCompensation.hpp"
 
 #include <SDL3/SDL_log.h>
 
@@ -200,6 +201,13 @@ inline void handleFire(Registry& registry,
         // Raycast to find beam endpoint.
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
+        // Phase 6: rewindHitboxes is a no-op stub today. The call-site
+        // wiring lands now so a future PR enabling actual lag compensation
+        // is a one-line change inside rewindHitboxes(), not a hunt for
+        // every hitscan in the codebase. `input.tick` is the attacker's
+        // client predict tick at fire time — the future implementation
+        // will translate to a server tick and look up HitboxHistory.
+        const auto rewindGuard = systems::rewindHitboxes(registry, input.tick);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Apply DPS-based damage with body-region multiplier.
@@ -244,6 +252,9 @@ inline void handleFire(Registry& registry,
 
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
+        // Phase 6 lag-compensation hook (no-op stub today; see top-of-file
+        // include and the beam path comment).
+        const auto rewindGuard = systems::rewindHitboxes(registry, input.tick);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Snapshot armor before damage for shield-break detection.
@@ -322,6 +333,9 @@ inline void handleFire(Registry& registry,
     const glm::vec3 muzzle = muzzleOrigin(eye, direction);
 
     if (config.hitscan) {
+        // Phase 6 lag-compensation hook (no-op stub today; see top-of-file
+        // include and the beam path comment).
+        const auto rewindGuard = systems::rewindHitboxes(registry, input.tick);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Snapshot armor before damage for shield-break detection.

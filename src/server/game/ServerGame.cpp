@@ -28,6 +28,7 @@
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/ShotEvent.hpp"
+#include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -191,6 +192,14 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     // Update server-side animation and hitbox capsules before weapon raycasts.
     updateAnimationAndHitboxes(dt);
+
+    // Phase 6: capture this tick's capsules into each entity's HitboxHistory
+    // ring. Has to run *after* updateHitboxes (so the capsules reflect this
+    // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
+    // consistent history snapshot, even though Phase 6's rewindHitboxes is
+    // still a no-op). Pushing here means a future "flip" — actually doing
+    // the rewind — needs no further system-ordering changes.
+    systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
 
     std::vector<NetParticleEvent> particleEvents;
     systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
