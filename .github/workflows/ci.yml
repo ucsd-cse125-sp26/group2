@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    tags:     ['v*.*.*']
   pull_request:
     branches: [main]
 
@@ -154,8 +153,7 @@ jobs:
 
   # ------------------------------------------------------------------ #
   #  Release builds — optimised, no sanitizers                          #
-  #  Runs on: push to main  →  creates build-YYYYMMDD-SHA prerelease   #
-  #            tag v*.*.*   →  creates versioned release (latest)      #
+  #  Runs on: push to main  →  auto-versioned release (semver)         #
   #                                                                      #
   #  Each platform produces ONE zip containing:                          #
   #    client + server + shaders/ + config.toml + assets/                #
@@ -348,6 +346,12 @@ jobs:
 
   # ------------------------------------------------------------------ #
   #  Publish to GitHub Releases once all three platform builds succeed  #
+  #                                                                      #
+  #  Auto-semantic-versioning from commit messages:                      #
+  #    BREAKING CHANGE / feat!:  →  bump major                          #
+  #    feat:                     →  bump minor                          #
+  #    everything else           →  bump patch                          #
+  #  First release starts at v0.1.0.                                    #
   # ------------------------------------------------------------------ #
   publish:
     name: Publish Release
@@ -358,53 +362,65 @@ jobs:
       contents: write
 
     steps:
+      # Full history + tags needed to compute the next semantic version.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
 
-      - name: Determine release metadata
-        id: meta
+      - name: Compute next semantic version
+        id: version
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "tag=${GITHUB_REF_NAME}"                                  >> "$GITHUB_OUTPUT"
-            echo "title=${GITHUB_REF_NAME}"                                >> "$GITHUB_OUTPUT"
-            echo "prerelease=false"                                        >> "$GITHUB_OUTPUT"
-            echo "latest=true"                                             >> "$GITHUB_OUTPUT"
-            echo "notes=Versioned release ${GITHUB_REF_NAME}."            >> "$GITHUB_OUTPUT"
+          # Find the latest version tag (supports both vX.Y.Z and X.Y.Z)
+          LATEST_TAG=$(git tag -l --sort=-version:refname \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+
+          if [[ -z "$LATEST_TAG" ]]; then
+            # No version tags yet — start at v0.1.0
+            NEXT="v0.1.0"
+            echo "previous=" >> "$GITHUB_OUTPUT"
           else
-            SHORT_SHA="${GITHUB_SHA::7}"
-            DATE="$(date -u +%Y%m%d)"
-            echo "tag=build-${DATE}-${SHORT_SHA}"                          >> "$GITHUB_OUTPUT"
-            echo "title=Latest Build (${DATE} · ${SHORT_SHA})"            >> "$GITHUB_OUTPUT"
-            echo "prerelease=true"                                         >> "$GITHUB_OUTPUT"
-            echo "latest=false"                                            >> "$GITHUB_OUTPUT"
-            echo "notes=Automated build from \`main\` — commit ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
+            echo "previous=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+            # Strip optional 'v' prefix for parsing
+            VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+            # Scan commit messages since the last tag to determine bump type
+            COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || true)
+
+            if echo "$COMMITS" | grep -qiE 'BREAKING[- ]CHANGE|^[a-z]+(\(.+\))?!:'; then
+              MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+            elif echo "$COMMITS" | grep -qiE '^feat(\(.+\))?:'; then
+              MINOR=$((MINOR + 1)); PATCH=0
+            else
+              PATCH=$((PATCH + 1))
+            fi
+
+            NEXT="v${MAJOR}.${MINOR}.${PATCH}"
           fi
+
+          echo "tag=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "### Computed version: ${NEXT}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG:        ${{ steps.meta.outputs.tag }}
-          RELEASE_TITLE:      ${{ steps.meta.outputs.title }}
-          RELEASE_NOTES:      ${{ steps.meta.outputs.notes }}
-          RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
-          RELEASE_LATEST:     ${{ steps.meta.outputs.latest }}
+          RELEASE_TAG:  ${{ steps.version.outputs.tag }}
+          PREV_TAG:     ${{ steps.version.outputs.previous }}
         run: |
-          FLAGS=""
-          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
-            FLAGS="$FLAGS --prerelease"
-          fi
-          if [[ "$RELEASE_LATEST" == "true" ]]; then
-            FLAGS="$FLAGS --latest"
-          fi
+          # Build a release title with date for context
+          DATE="$(date -u +%Y-%m-%d)"
+          TITLE="${RELEASE_TAG} (${DATE})"
 
           gh release create "$RELEASE_TAG" \
-            --title "$RELEASE_TITLE" \
-            --notes "$RELEASE_NOTES" \
-            $FLAGS \
+            --title "$TITLE" \
+            --generate-notes \
+            --latest \
             group2-linux-x86_64.zip \
             group2-macos.zip \
             group2-windows-x86_64.zip
