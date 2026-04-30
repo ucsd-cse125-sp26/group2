@@ -21,11 +21,9 @@ void main()
         // SDF text with dark outline for readability.
         float sdf = texture(sdfAtlas, vUV).r;
 
-        // Compute a stable AA width from screen-space UV derivatives.
-        // This avoids fwidth(sdf) which is noisy and too wide for small text.
-        float uvDeriv = length(vec2(dFdx(vUV.x), dFdy(vUV.y)));
-        float fw = uvDeriv * 8.0;  // scale by atlas texels per SDF unit
-        fw = clamp(fw, 0.01, 0.15);
+        // fwidth(sdf) gives the correct isotropic AA width for SDF edges.
+        // Clamp to prevent too-thin text at small sizes or too-soft at large.
+        float fw = clamp(fwidth(sdf), 0.01, 0.12);
 
         // Fill (glyph interior).
         float fillAlpha = smoothstep(0.5 - fw, 0.5 + fw, sdf);
