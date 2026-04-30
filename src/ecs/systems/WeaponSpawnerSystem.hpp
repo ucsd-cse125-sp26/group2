@@ -16,6 +16,7 @@ namespace systems
 
 constexpr float weaponCooldownTime = 10.0f;
 
+/// @brief Tick weapon spawners: check player overlap for pickup, manage cooldowns.
 /// @param registry    The ECS registry.
 /// @param dt          Fixed physics delta time in seconds.
 void runWeaponSpawners(Registry& registry, float dt);

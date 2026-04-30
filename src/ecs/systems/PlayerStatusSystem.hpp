@@ -12,20 +12,26 @@
 /// @brief Player status update system.
 namespace systems
 {
-const float armorMax = 100.0f;
-const float healthMax = 100.0f;
-const float healCooldown = 5.0f; // In seconds.
-const float healingRate = 20.0f; // Healing amount per second.
+const float armorMax = 100.0f;   ///< Maximum armor value.
+const float healthMax = 100.0f;  ///< Maximum health value.
+const float healCooldown = 5.0f; ///< Seconds after last damage before passive healing starts.
+const float healingRate = 20.0f; ///< Passive healing amount per second.
 
-/// @param amount Healing amount being applied
-/// @param playerHealth entity's health component.
+/// @brief Apply a healing amount, filling health first then armor.
+/// @param amount       Healing amount being applied.
+/// @param playerHealth Entity's health component (modified in place).
 void applyHeal(float amount, Health& playerHealth);
 
+/// @brief Apply damage to a player, splitting across armor then health.
+///
+/// Resets the heal cooldown timer.  If health reaches zero, triggers death
+/// handling (respawn timer, kill event, stats update).
+///
 /// @param damage     Damage amount being applied.
-/// @param player     Player who took damage.
-/// @param killer     Player who dealt the final blow.
+/// @param player     Player entity who took damage.
+/// @param killer     Entity who dealt the final blow.
 /// @param registry   The ECS registry.
-/// @param killEvents Vector to store kill events.
+/// @param killEvents Accumulates kill events for network broadcast.
 /// @param hitRegion  Body region that was hit (for kill feed / headshot tracking).
 void applyDamage(float damage,
                  entt::entity player,
@@ -34,6 +40,7 @@ void applyDamage(float damage,
                  std::vector<NetKillEvent>& killEvents,
                  BodyRegion hitRegion = BodyRegion::UpperTorso);
 
+/// @brief Run one tick of player status: respawn timers and passive healing.
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
 void runPlayerStatus(Registry& registry, float dt);

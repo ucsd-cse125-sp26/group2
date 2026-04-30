@@ -3,7 +3,10 @@
 
 #pragma once
 
+/// @brief ECS component: countdown until a dead player respawns.
+///
+/// Attached on death, removed by handleRespawn() when the timer expires.
 struct RespawnTimer
 {
-    float timeRemaining; // Time remaining until player respawns.
+    float timeRemaining; ///< Seconds remaining until respawn.
 };

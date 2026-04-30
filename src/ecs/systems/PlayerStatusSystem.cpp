@@ -24,6 +24,7 @@
 
 namespace systems
 {
+/// @copydoc applyHeal
 void applyHeal(float amount, Health& playerHealth)
 {
     if (amount < 0)
@@ -45,9 +46,16 @@ void applyHeal(float amount, Health& playerHealth)
     }
 }
 
+/// @brief Reset a dead player to a fresh spawn state.
+///
+/// Clears the respawn timer and death info, restores visibility, resets
+/// position/velocity/health/weapons to defaults, and places the player
+/// at the spawn point.
+///
+/// @param player    Entity to respawn (modified in place).
+/// @param registry  The ECS registry.
 inline void handleRespawn(entt::entity& player, Registry& registry)
 {
-    // Refresh player stats and position
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
     const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
@@ -95,6 +103,17 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
                                              });
 }
 
+/// @brief Transition a player to the dead state if health has reached zero.
+///
+/// Hides the player, removes hitboxes, starts a 5-second respawn timer,
+/// updates death/kill stats, and emits a NetKillEvent for the kill feed.
+///
+/// @param player       Entity that died.
+/// @param playerHealth Health component (already at or below zero).
+/// @param killer       Entity that dealt the killing blow.
+/// @param registry     The ECS registry.
+/// @param killEvents   Accumulates kill events for network broadcast.
+/// @param hitRegion    Body region of the killing blow.
 inline void handleDeath(entt::entity& player,
                         Health& playerHealth,
                         entt::entity& killer,
@@ -168,6 +187,9 @@ void applyDamage(float damage,
     }
 }
 
+/// @brief Tick passive health regeneration after the heal cooldown expires.
+/// @param playerHealth  Health component (modified in place).
+/// @param dt            Fixed physics delta time in seconds.
 inline void handleHealing(Health& playerHealth, float dt)
 {
     if (playerHealth.healTimer == 0) {

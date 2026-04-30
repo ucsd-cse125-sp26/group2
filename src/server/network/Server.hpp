@@ -92,6 +92,11 @@ private:
     /// @brief Generate next unique client ID
     ClientId getNextClientId();
 
+    /// @brief Send raw data to a specific client.
+    /// @param clientId  Target client.
+    /// @param data      Pointer to the data payload.
+    /// @param len       Payload length in bytes.
+    /// @return True on success, false if the client is not connected.
     bool send(const ClientId& clientId, const void* data, int len);
 
     /// @brief Broadcast raw data to all clients.

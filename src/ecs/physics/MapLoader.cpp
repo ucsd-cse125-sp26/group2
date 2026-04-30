@@ -39,13 +39,13 @@ namespace physics
 namespace
 {
 
-// Helpers
-
+/// @brief Convert an Assimp 4×4 matrix to a glm column-major matrix.
 glm::mat4 aiToGlm(const aiMatrix4x4& m)
 {
     return glm::transpose(glm::make_mat4(&m.a1));
 }
 
+/// @brief Case-insensitive substring search.
 bool containsCI(const std::string& haystack, const std::string& needle)
 {
     if (needle.empty())
@@ -58,6 +58,7 @@ bool containsCI(const std::string& haystack, const std::string& needle)
     return toLower(haystack).find(toLower(needle)) != std::string::npos;
 }
 
+/// @brief Check whether any ancestor node name contains the given collection name.
 bool isUnderCollectionNode(const aiNode* node, const std::string& collectionName)
 {
     const aiNode* cur = node->mParent;
@@ -91,6 +92,7 @@ std::string getCollectionType(const aiNode* node)
     return ""; // auto-detect
 }
 
+/// @brief Walk the scene-graph ancestry and accumulate the world transform.
 glm::mat4 accumulatedTransform(const aiNode* node)
 {
     glm::mat4 t(1.0f);

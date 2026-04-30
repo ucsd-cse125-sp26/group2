@@ -16,12 +16,23 @@
 namespace systems
 {
 
+/// @brief Test whether two axis-aligned bounding boxes overlap.
+/// @param aPos   Center of box A.
+/// @param aHalf  Half-extents of box A.
+/// @param bPos   Center of box B.
+/// @param bHalf  Half-extents of box B.
+/// @return True if the boxes overlap on all three axes.
 inline bool overlapsAABB(glm::vec3 aPos, glm::vec3 aHalf, glm::vec3 bPos, glm::vec3 bHalf)
 {
     return std::abs(aPos.x - bPos.x) <= (aHalf.x + bHalf.x) && std::abs(aPos.y - bPos.y) <= (aHalf.y + bHalf.y) &&
            std::abs(aPos.z - bPos.z) <= (aHalf.z + bHalf.z);
 }
 
+/// @brief Check if any player overlaps the spawner and transfer the weapon on pickup.
+/// @param registry      The ECS registry.
+/// @param spawnerPos    Position of the spawner entity.
+/// @param spawnerShape  Collision shape of the spawner.
+/// @param spawner       Spawner component (weapon type, availability, cooldown).
 inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState>();

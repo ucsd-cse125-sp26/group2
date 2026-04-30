@@ -31,6 +31,9 @@ using physics::resolveHitscanHitbox;
 namespace systems
 {
 
+/// @brief Return the GunInstance for the currently selected weapon slot.
+/// @param weapon  Weapon state to query.
+/// @return Reference to the equipped gun.
 inline GunInstance& getEquippedGun(WeaponState& weapon)
 {
     switch (weapon.current) {
@@ -45,6 +48,9 @@ inline GunInstance& getEquippedGun(WeaponState& weapon)
     }
 }
 
+/// @brief Apply weapon slot switch from player input.
+/// @param input   Current input snapshot.
+/// @param weapon  Weapon state (modified in place).
 void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
 {
     if (input.switchToPrimary) {
@@ -58,6 +64,9 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
     }
 }
 
+/// @brief Tick fire cooldowns for all weapon slots.
+/// @param weapon  Weapon state (modified in place).
+/// @param dt      Fixed physics delta time in seconds.
 inline void handleCooldown(WeaponState& weapon, float dt)
 {
     auto reduce = [dt](GunInstance& gun) { gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt); };
@@ -68,6 +77,8 @@ inline void handleCooldown(WeaponState& weapon, float dt)
     reduce(weapon.quaternary);
 }
 
+/// @brief Reload the gun's magazine from reserve ammo.
+/// @param gun  Gun instance to reload (modified in place).
 inline void handleReload(GunInstance& gun)
 {
     const WeaponConfig& config = getWeaponConfig(gun.type);
@@ -83,6 +94,9 @@ inline void handleReload(GunInstance& gun)
     }
 }
 
+/// @brief Consume one round from the magazine; auto-reload if empty.
+/// @param gun  Gun instance to consume ammo from (modified in place).
+/// @return True if a round was consumed, false if the gun is empty.
 inline bool handleAmmo(GunInstance& gun)
 {
     if (gun.currentMagAmmo <= 0) {
@@ -95,6 +109,10 @@ inline bool handleAmmo(GunInstance& gun)
     return true;
 }
 
+/// @brief Compute the player's 3D view direction from yaw and pitch angles.
+/// @param yaw    Horizontal angle (radians).
+/// @param pitch  Vertical angle (radians, positive = down).
+/// @return Normalized forward direction vector.
 inline glm::vec3 viewForward(float yaw, float pitch)
 {
     // Must match client camera convention:
@@ -109,6 +127,13 @@ inline glm::vec3 viewForward(float yaw, float pitch)
     });
 }
 
+/// @brief Offset the muzzle origin from the eye position for tracer visuals.
+///
+/// Shifts the origin right and down from eye, slightly forward, so tracers
+/// don't originate from the center of the screen.
+/// @param eye        Eye position (camera origin).
+/// @param direction  Normalized view direction.
+/// @return Offset muzzle position in world space.
 inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
 {
     constexpr glm::vec3 k_worldUp{0.0f, 1.0f, 0.0f};
@@ -123,6 +148,25 @@ inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
     return eye + right * 15.0f - up * 8.0f + direction * 5.0f;
 }
 
+/// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
+///
+/// Handles three weapon archetypes:
+///  - **Beam** — continuous DPS drain while held, capsule raycast each tick.
+///  - **Charge** — accumulates chargeTime while held, fires on release.
+///  - **Discrete** — standard per-click hitscan or projectile spawn.
+///
+/// Emits NetParticleEvent entries for tracer/impact effects and applies damage
+/// through applyDamage() which may trigger kill events.
+///
+/// @param registry      The ECS registry.
+/// @param shooter       Entity that is firing.
+/// @param input         Current input snapshot.
+/// @param pos           Shooter position.
+/// @param shape         Shooter collision shape (for eye height).
+/// @param weapon        Shooter weapon state (modified in place).
+/// @param dt            Fixed physics delta time in seconds.
+/// @param outParticles  Accumulates particle events for network broadcast.
+/// @param killEvents    Accumulates kill events for network broadcast.
 inline void handleFire(Registry& registry,
                        entt::entity shooter,
                        const InputSnapshot& input,
