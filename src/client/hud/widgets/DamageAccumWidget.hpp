@@ -18,4 +18,5 @@ struct DamageAccumWidget : HudWidget
 private:
     int displayTotal_ = 0;
     float alpha_ = 0.f;
+    HudColor color_{1.f, 1.f, 1.f, 1.f}; ///< Matches latest hit type.
 };

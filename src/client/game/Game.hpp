@@ -204,6 +204,7 @@ private:
     entt::entity accumTarget_ = entt::null; ///< Current target being damaged.
     int accumTotal_ = 0;                    ///< Running damage total.
     float accumResetTimer_ = 0.f;           ///< Timer to reset accumulator after inactivity.
+    uint8_t accumLastHitType_ = 0;          ///< 0=health(white), 1=shield(blue), 2=headshot(gold).
 
     // Vignette state: track previous frame health/armor for delta detection.
     float prevHealth_ = 100.f;

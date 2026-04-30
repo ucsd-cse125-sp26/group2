@@ -317,7 +317,9 @@ bool Game::init()
 
             // Queue floating damage number at hit position.
             if (evt.damage > 0.f) {
-                pendingDamageNumbers_.push_back({evt.pos1, evt.damage, evt.headshot != 0, evt.hadArmor != 0});
+                const bool isHeadshot = (evt.headshot != 0);
+                const bool isShielded = (evt.hadArmor != 0);
+                pendingDamageNumbers_.push_back({evt.pos1, evt.damage, isHeadshot, isShielded});
 
                 // Damage accumulator: reset if target changed, accumulate otherwise.
                 if (evt.target != accumTarget_) {
@@ -326,6 +328,8 @@ bool Game::init()
                 }
                 accumTotal_ += static_cast<int>(evt.damage + 0.5f);
                 accumResetTimer_ = 2.0f; // reset after 2s of no hits
+                // Track latest hit type for accumulator color.
+                accumLastHitType_ = isHeadshot ? uint8_t{2} : (isShielded ? uint8_t{1} : uint8_t{0});
             }
         }
 
@@ -2066,6 +2070,12 @@ SDL_AppResult Game::iterate()
             accumTotal_ = 0;
         }
         hudState.damageAccum.total = accumTotal_;
+        if (accumLastHitType_ == 2)
+            hudState.damageAccum.color = HudColor(1.0f, 0.85f, 0.2f, 1.f); // gold (headshot)
+        else if (accumLastHitType_ == 1)
+            hudState.damageAccum.color = HudColor(0.3f, 0.6f, 1.0f, 1.f);  // blue (shield)
+        else
+            hudState.damageAccum.color = HudColor(1.f, 1.f, 1.f, 1.f);     // white (health)
 
         // ── View-projection matrix for world→screen projection ──
         hudState.viewProj = renderer.getCamera().getViewProjection();

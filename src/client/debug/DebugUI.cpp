@@ -1236,6 +1236,9 @@ void drawWorldLine(ImDrawList* dl,
 }
 
 /// @brief Draw a capsule wireframe (two hemispheres connected by 4 lines).
+///
+/// Renders equator rings at pA and pB, four longitudinal struts, and
+/// hemisphere arcs on each end so the shape reads as a pill, not a cylinder.
 void drawCapsuleWireframe(
     ImDrawList* dl, glm::vec3 pA, glm::vec3 pB, float radius, const glm::mat4& vp, float sw, float sh, ImU32 color)
 {
@@ -1257,26 +1260,58 @@ void drawCapsuleWireframe(
     glm::vec3 right = glm::normalize(glm::cross(axis, up));
     up = glm::normalize(glm::cross(right, axis));
 
-    constexpr int segments = 12;
+    constexpr int ringSegments = 12;
+    constexpr int arcSegments = 8;
+    constexpr float pi = 3.1415926f;
     constexpr float pi2 = 6.2831853f;
+    constexpr float halfPi = 1.5707963f;
 
-    // Draw rings at both endpoints.
+    // Draw equator rings at both endpoints.
     for (int endIdx = 0; endIdx < 2; ++endIdx) {
         const glm::vec3 center = (endIdx == 0) ? pA : pB;
         glm::vec3 prev = center + right * radius;
-        for (int i = 1; i <= segments; ++i) {
-            const float angle = pi2 * static_cast<float>(i) / static_cast<float>(segments);
+        for (int i = 1; i <= ringSegments; ++i) {
+            const float angle = pi2 * static_cast<float>(i) / static_cast<float>(ringSegments);
             const glm::vec3 cur = center + (right * std::cos(angle) + up * std::sin(angle)) * radius;
             drawWorldLine(dl, prev, cur, vp, sw, sh, color, 1.0f);
             prev = cur;
         }
     }
 
-    // Four connecting lines along the capsule length.
+    // Four connecting lines along the capsule body.
     for (int i = 0; i < 4; ++i) {
         const float angle = pi2 * static_cast<float>(i) / 4.0f;
         const glm::vec3 offset = (right * std::cos(angle) + up * std::sin(angle)) * radius;
         drawWorldLine(dl, pA + offset, pB + offset, vp, sw, sh, color, 1.0f);
+    }
+
+    // Hemisphere arcs on each end (4 meridian arcs per hemisphere).
+    // pA hemisphere bulges in -axis direction, pB in +axis direction.
+    for (int meridian = 0; meridian < 4; ++meridian) {
+        const float theta = pi2 * static_cast<float>(meridian) / 4.0f;
+        const glm::vec3 perpDir = right * std::cos(theta) + up * std::sin(theta);
+
+        // pA hemisphere (pole at pA - axis * radius).
+        {
+            glm::vec3 prev = pA + perpDir * radius; // equator point
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pA + perpDir * (radius * std::cos(phi)) - axis * (radius * std::sin(phi));
+                drawWorldLine(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
+
+        // pB hemisphere (pole at pB + axis * radius).
+        {
+            glm::vec3 prev = pB + perpDir * radius; // equator point
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pB + perpDir * (radius * std::cos(phi)) + axis * (radius * std::sin(phi));
+                drawWorldLine(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
     }
 }
 

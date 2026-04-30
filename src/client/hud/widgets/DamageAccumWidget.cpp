@@ -22,11 +22,15 @@ void DamageAccumWidget::update(float /*dt*/, const HudGameState& state, HudTween
         if (newTotal > 0) {
             alpha_ = 1.f;
             tweens.cancel(&alpha_);
+            color_ = state.damageAccum.color;
         } else {
             // Target switched or timed out — fade out.
             tweens.tween(&alpha_, 0.f, 0.3f, easeOutQuad);
         }
     }
+    // Update color even when total stays the same (e.g. armor → health mid-burst).
+    if (newTotal > 0)
+        color_ = state.damageAccum.color;
 }
 
 void DamageAccumWidget::draw(HudContext& ctx, float cx, float cy)
@@ -40,11 +44,16 @@ void DamageAccumWidget::draw(HudContext& ctx, float cx, float cy)
     const float fontSize = 24.f * uiScale_;
     const float outOff = 1.5f * uiScale_;
 
-    // Shadow for readability.
-    HudColor shadow(0.f, 0.f, 0.f, 0.7f * alpha_);
+    // Outline: darkened version of the color, black for white.
+    const bool isWhite = (color_.r > 0.9f && color_.g > 0.9f && color_.b > 0.9f);
+    HudColor shadow;
+    if (isWhite)
+        shadow = HudColor(0.f, 0.f, 0.f, 0.7f * alpha_);
+    else
+        shadow = HudColor(color_.r * 0.3f, color_.g * 0.3f, color_.b * 0.3f, 0.8f * alpha_);
     ctx.text(buf, cx + outOff, cy + outOff, fontSize, shadow, HudAlign::Center);
 
-    // White text.
-    HudColor color(1.f, 1.f, 1.f, alpha_);
+    HudColor color = color_;
+    color.a *= alpha_;
     ctx.text(buf, cx, cy, fontSize, color, HudAlign::Center);
 }

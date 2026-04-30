@@ -65,9 +65,13 @@ void DamageNumberWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
         // NDC → screen.
         const float ndcX = clip.x / clip.w;
         const float ndcY = clip.y / clip.w;
-        // Vulkan NDC: Y points down (0 top, 1 bottom after viewport).
-        const float sx = (ndcX * 0.5f + 0.5f) * screenW_;
-        const float sy = (1.f - (ndcY * 0.5f + 0.5f)) * screenH_;
+        // Projection already flips Y for Vulkan, so NDC maps directly:
+        // ndcY -1 = top, +1 = bottom → screen Y = (ndcY*0.5+0.5) * screenH.
+        float sx = (ndcX * 0.5f + 0.5f) * screenW_;
+        float sy = (ndcY * 0.5f + 0.5f) * screenH_;
+
+        // Offset to the right of the hit point so numbers don't obscure the target.
+        sx += 40.f * uiScale_;
 
         // Alpha fade based on remaining life.
         const float t = e.life / e.maxLife;
@@ -76,13 +80,18 @@ void DamageNumberWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
         HudColor color = e.color;
         color.a *= alpha;
 
-        const float fontSize = 18.f * uiScale_;
+        const float fontSize = 20.f * uiScale_;
         std::snprintf(buf, sizeof(buf), "%d", e.damage);
 
-        // Dark outline for readability.
+        // Colored outline matching the number (darkened), black for white numbers.
         const float outOff = 1.5f * uiScale_;
-        HudColor shadow(0.f, 0.f, 0.f, 0.6f * alpha);
-        ctx.text(buf, sx + outOff, sy + outOff, fontSize, shadow, HudAlign::Center);
-        ctx.text(buf, sx, sy, fontSize, color, HudAlign::Center);
+        const bool isWhite = (e.color.r > 0.9f && e.color.g > 0.9f && e.color.b > 0.9f);
+        HudColor shadow;
+        if (isWhite)
+            shadow = HudColor(0.f, 0.f, 0.f, 0.7f * alpha);
+        else
+            shadow = HudColor(e.color.r * 0.3f, e.color.g * 0.3f, e.color.b * 0.3f, 0.8f * alpha);
+        ctx.text(buf, sx + outOff, sy + outOff, fontSize, shadow, HudAlign::Left);
+        ctx.text(buf, sx, sy, fontSize, color, HudAlign::Left);
     }
 }

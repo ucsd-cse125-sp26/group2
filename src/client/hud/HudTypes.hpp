@@ -120,7 +120,8 @@ struct HudDamageNumber
 /// @brief Current damage accumulator state for the local player.
 struct HudDamageAccum
 {
-    int total = 0; ///< Accumulated damage to current target.
+    int total = 0;                      ///< Accumulated damage to current target.
+    HudColor color{1.f, 1.f, 1.f, 1.f}; ///< Color matching the latest hit type.
 };
 
 /// @brief Per-teammate status (for scoreboard / team bar).
