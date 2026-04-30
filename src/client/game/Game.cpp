@@ -158,31 +158,59 @@ bool Game::init()
     {
         static constexpr float k_metersToInches = 39.3701f;
 
-        const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+        // Toggle: does this map use SEPARATED collision and visual meshes?
+        //   false → "prototype mode": every mesh in the GLB is both visual *and*
+        //           collision (used for blockout maps like map1.glb).
+        //   true  → "separated mode": collision-only meshes are tagged in Blender
+        //           (e.g. "COL_*" prefix) and excluded from the visual model.
+        //           Used for production maps where collision is hand-authored
+        //           independently from rendering geometry.
+        static constexpr bool k_separatedCollisionMap = true;
 
-        // 1) Extract collision geometry (prototype mode: all meshes → collision).
+        // Pattern that identifies collision-only nodes when in separated mode.
+        // The Blender export convention here is a "COL_" prefix; nodes whose
+        // names contain this substring (case-insensitive) are treated as
+        // collision-only and stripped from the visual mesh list.
+        static constexpr const char* k_collisionPattern = "COL_";
+
+        const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
+
+        const char* base = SDL_GetBasePath();
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + mapFilename;
+
+        // 1) Extract collision geometry.
         physics::MapLoadOptions opts;
         opts.scale = k_metersToInches;
-        opts.allMeshesAreCollision = true; // Prototype map — every mesh is both visual and collision.
-        opts.addFloorPlane = false;        // Map geometry provides its own floor.
+        opts.allMeshesAreCollision = !k_separatedCollisionMap;
+        // In separated mode, recognise collision-prefixed nodes; in prototype
+        // mode, the field is unused (every mesh is collision by definition).
+        if (k_separatedCollisionMap)
+            opts.collisionCollection = k_collisionPattern;
+        opts.addFloorPlane = false; // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
-            SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes",
+            SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes, %zu cylinders, %zu spheres, "
+                    "%zu trimeshes",
                     mapCollision_.planes.size(),
                     mapCollision_.boxes.size(),
-                    mapCollision_.brushes.size());
+                    mapCollision_.brushes.size(),
+                    mapCollision_.cylinders.size(),
+                    mapCollision_.spheres.size(),
+                    mapCollision_.triMeshes.size());
         } else {
             SDL_Log("[client] WARNING: map collision load failed — falling back to testWorld()");
         }
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
-        const int mapId = assets_.add("map1", "maps/map1.glb", AssetRole::Map);
-        const int mapModelIdx = renderer.loadSceneModel("maps/map1.glb", glm::vec3(0.0f), k_metersToInches);
+        // In separated mode, exclude collision-only nodes so they aren't rendered.
+        const std::string visualExclude = k_separatedCollisionMap ? std::string(k_collisionPattern) : std::string();
+        const int mapId = assets_.add("map1", mapFilename, AssetRole::Map);
+        const int mapModelIdx =
+            renderer.loadSceneModel(mapFilename, glm::vec3(0.0f), k_metersToInches, false, visualExclude);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
             renderer.setModelScenePass(mapModelIdx, true);
-            SDL_Log("[client] map visual loaded (model index %d)", mapModelIdx);
+            SDL_Log("[client] map visual loaded (model index %d, exclude='%s')", mapModelIdx, visualExclude.c_str());
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
         }

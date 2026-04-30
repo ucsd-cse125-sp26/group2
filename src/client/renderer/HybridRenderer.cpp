@@ -193,11 +193,12 @@ void HybridRenderer::setParticleSystem(ParticleSystem* ps)
         legacy_.setParticleSystem(ps);
 }
 
-int HybridRenderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs)
+int HybridRenderer::loadSceneModel(
+    const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining)
 {
     if (next_.supports(RendererFeature::LoadSceneModel))
-        return next_.loadSceneModel(filename, pos, scale, flipUVs);
-    return legacy_.loadSceneModel(filename, pos, scale, flipUVs);
+        return next_.loadSceneModel(filename, pos, scale, flipUVs, excludeNodesContaining);
+    return legacy_.loadSceneModel(filename, pos, scale, flipUVs, excludeNodesContaining);
 }
 
 int HybridRenderer::uploadSceneModel(const LoadedModel& model)

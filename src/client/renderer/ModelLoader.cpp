@@ -5,6 +5,9 @@
 
 #include <SDL3/SDL_log.h>
 
+#include <algorithm>
+#include <cctype>
+
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -234,6 +237,20 @@ glm::mat4 aiToGlm(const aiMatrix4x4& m)
     return glm::transpose(glm::make_mat4(&m.a1));
 }
 
+/// @brief Case-insensitive substring search.  Returns false when needle is empty
+///        (the "no-filter" convention used by the exclude-pattern API).
+bool nodeNameContainsCI(const std::string& haystack, const std::string& needle)
+{
+    if (needle.empty())
+        return false;
+    auto toLower = [](std::string s) {
+        std::transform(
+            s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return s;
+    };
+    return toLower(haystack).find(toLower(needle)) != std::string::npos;
+}
+
 // Recursive scene-graph traversal
 //
 // Key rules:
@@ -252,12 +269,23 @@ glm::mat4 aiToGlm(const aiMatrix4x4& m)
 /// @param parentTransform Accumulated parent world transform.
 /// @param outModel Output model receiving meshes and textures.
 /// @param embTexToDataIdx Mapping from Assimp texture index to textures[] index.
+/// @param excludePattern Skip the entire subtree whenever this node's name
+///        contains `excludePattern` (case-insensitive).  Empty disables filtering.
 void processNode(const aiNode* node,
                  const aiScene* scene,
                  const glm::mat4& parentTransform,
                  LoadedModel& outModel,
-                 std::vector<int>& embTexToDataIdx)
+                 std::vector<int>& embTexToDataIdx,
+                 const std::string& excludePattern)
 {
+    // Drop collision-only nodes (and their entire subtrees) from the visual model.
+    // For maps with separated collision/visual meshes (e.g. "COL_*" prefixed nodes
+    // from Blender), this prevents the collision geometry from being rendered.
+    if (nodeNameContainsCI(std::string(node->mName.C_Str()), excludePattern)) {
+        SDL_Log("ModelLoader: skipping excluded node '%s' (matches '%s')", node->mName.C_Str(), excludePattern.c_str());
+        return;
+    }
+
     const glm::mat4 worldTransform = parentTransform * aiToGlm(node->mTransformation);
 
     // Normal matrix: inverse-transpose of the upper-left 3×3.
@@ -363,12 +391,12 @@ void processNode(const aiNode* node,
 
     // Recurse into children.
     for (unsigned int c = 0; c < node->mNumChildren; ++c)
-        processNode(node->mChildren[c], scene, worldTransform, outModel, embTexToDataIdx);
+        processNode(node->mChildren[c], scene, worldTransform, outModel, embTexToDataIdx, excludePattern);
 }
 
 } // namespace
 
-bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs)
+bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs, const std::string& excludeNodesContaining)
 {
     Assimp::Importer importer;
 
@@ -398,7 +426,7 @@ bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs)
 
     std::vector<int> embTexToDataIdx(scene->mNumTextures, -1);
 
-    processNode(scene->mRootNode, scene, glm::mat4(1.0f), outModel, embTexToDataIdx);
+    processNode(scene->mRootNode, scene, glm::mat4(1.0f), outModel, embTexToDataIdx, excludeNodesContaining);
 
     // Log material summary for all meshes (debugging aid).
     for (size_t m = 0; m < outModel.meshes.size(); ++m) {

@@ -42,19 +42,36 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
     {
         static constexpr float k_metersToInches = 39.3701f;
 
+        // Toggle: does this map use SEPARATED collision and visual meshes?
+        // Must match the client (Game.cpp) for prediction parity — both sides
+        // need to extract the exact same collision primitives from the GLB.
+        //   false → "prototype mode": every mesh in the GLB is collision.
+        //   true  → "separated mode": only nodes whose name contains the
+        //           collision pattern (e.g. "COL_") are extracted as collision.
+        static constexpr bool k_separatedCollisionMap = true;
+        static constexpr const char* k_collisionPattern = "COL_";
+
+        const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
+
         const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + mapFilename;
 
         physics::MapLoadOptions opts;
         opts.scale = k_metersToInches;
-        opts.allMeshesAreCollision = true; // Prototype map — every mesh is collision.
-        opts.addFloorPlane = false;        // Map geometry provides its own floor.
+        opts.allMeshesAreCollision = !k_separatedCollisionMap;
+        if (k_separatedCollisionMap)
+            opts.collisionCollection = k_collisionPattern;
+        opts.addFloorPlane = false; // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
-            SDL_Log("[server] map collision loaded: %zu planes, %zu boxes, %zu brushes",
+            SDL_Log("[server] map collision loaded: %zu planes, %zu boxes, %zu brushes, %zu cylinders, %zu spheres, "
+                    "%zu trimeshes",
                     mapCollision_.planes.size(),
                     mapCollision_.boxes.size(),
-                    mapCollision_.brushes.size());
+                    mapCollision_.brushes.size(),
+                    mapCollision_.cylinders.size(),
+                    mapCollision_.spheres.size(),
+                    mapCollision_.triMeshes.size());
         } else {
             SDL_Log("[server] WARNING: map collision load failed — falling back to testWorld()");
         }

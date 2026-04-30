@@ -72,8 +72,34 @@ bool isUnderCollectionNode(const aiNode* node, const std::string& collectionName
 
 /// @brief Determine the collision sub-collection type from ancestor node names.
 /// Returns: "boxes", "brushes", "cylinders", "spheres", "meshes", or "" (auto).
+///
+/// Two Blender authoring conventions are supported:
+///   1. **Sub-collection (plural):** wrap collision objects in a child collection
+///      named "Boxes", "Cylinders", "Spheres", "Brushes", or "Meshes".  The
+///      collection becomes a parent node in the GLB; we walk ancestors here.
+///   2. **Object name (singular):** name the collision object after its shape
+///      (the Blender default for primitive adds — "Cylinder", "Sphere", etc.).
+///      Useful when collision is tagged by name prefix (e.g. "COL_Cylinder")
+///      instead of nested sub-collections.
+///
+/// The node's own name is checked first because it is the more specific signal:
+/// users who deliberately group meshes under a sub-collection are typically
+/// fine with auto-detection for the individual meshes, but a mesh actually
+/// named "Cylinder" almost always *is* the Blender cylinder primitive (which
+/// auto-detection mis-fits as a sphere when the cylinder is rotated off-Y).
 std::string getCollectionType(const aiNode* node)
 {
+    // 1) Check the node's own name for Blender-style shape keywords.  Only
+    //    "cylinder" needs help today: the auto AABB / fitSphere paths already
+    //    handle "Cube"/"Plane"/"Sphere"/"Icosphere" correctly, but a rotated
+    //    cylinder has equidistant rim vertices and slips into fitSphere.
+    {
+        const std::string ownName(node->mName.C_Str());
+        if (containsCI(ownName, "cylinder"))
+            return "cylinders";
+    }
+
+    // 2) Walk ancestors looking for sub-collection names (plural).
     const aiNode* cur = node->mParent;
     while (cur != nullptr) {
         std::string name(cur->mName.C_Str());

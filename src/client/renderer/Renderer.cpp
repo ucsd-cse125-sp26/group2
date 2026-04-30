@@ -3182,14 +3182,15 @@ void Renderer::downloadAndSaveCapture(const Uint32 w, const Uint32 h)
 
 // Misc
 
-int Renderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs)
+int Renderer::loadSceneModel(
+    const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining)
 {
     const char* const k_base = SDL_GetBasePath();
     char path[512];
     SDL_snprintf(path, sizeof(path), "%sassets/%s", k_base ? k_base : "", filename);
 
     LoadedModel loaded;
-    if (!loadModel(path, loaded, flipUVs)) {
+    if (!loadModel(path, loaded, flipUVs, excludeNodesContaining)) {
         SDL_Log("Renderer::loadSceneModel: failed to load '%s'", filename);
         return -1;
     }
