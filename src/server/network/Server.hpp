@@ -153,6 +153,18 @@ private:
             std::vector<uint8_t> framed; ///< `[PacketType][rest]` payload bytes.
         };
         std::deque<PendingReliableEvent> reliableQueue;
+
+        /// @brief Phase 6: client's most-recent self-reported smoothed
+        /// RTT in milliseconds. Updated on every INPUT packet (the
+        /// 2-byte `rttMs` prefix in the wire format). Read by the
+        /// lag-compensation scheduler each server tick to size this
+        /// client's hitscan rewind window — `targetServerTick =
+        /// currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
+        /// Stays at 0 until the first INPUT packet arrives, which
+        /// means brand-new connections start with no rewind (correct:
+        /// their PING/PONG hasn't completed yet so any rewind would
+        /// be guesswork).
+        uint16_t lastReportedRttMs = 0;
     };
 
     /// @brief Dispatch a single decoded message from a client.

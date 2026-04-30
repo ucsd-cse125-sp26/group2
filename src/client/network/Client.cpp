@@ -16,6 +16,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 bool Client::init(const char* addr, Uint16 port, const TransportConfig& transport)
@@ -187,23 +188,37 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     if (inputRingCount_ < k_inputRedundancy)
         ++inputRingCount_;
 
-    // Pack [PacketType::INPUT (1B)] [count (1B)] [InputSnapshot * count].
+    // Pack [PacketType::INPUT (1B)] [count (1B)] [rttMs (2B)] [InputSnapshot * count].
+    //
     // Inputs are written oldest-first so the server can apply them in
     // tick order with a simple `tick > lastAppliedInputTick` check.
+    //
+    // Phase 6: the `rttMs` header carries the client's smoothed RTT
+    // estimate (avgRttMs from the PING/PONG flow). The server uses
+    // RTT/2 as the rewind target for lag-compensated hitscan. It's
+    // sent on every input packet — at 128 Hz this overpays in bytes
+    // slightly (2 B × 128 Hz = 256 B/s), but it means the server's
+    // rewind window adapts to ping changes within ~one tick instead
+    // of waiting for a separate "ping update" packet to arrive on
+    // its own channel. Rounded to the nearest ms; clamped to uint16
+    // (0–65 s, far beyond the 200 ms cap the server applies).
     const auto count = static_cast<uint8_t>(inputRingCount_);
-    uint8_t buf[2 + k_inputRedundancy * sizeof(InputSnapshot)];
+    const float rttClamped = std::clamp(stats.avgRttMs, 0.0f, 65535.0f);
+    const auto rttMs = static_cast<uint16_t>(std::lround(rttClamped));
+    uint8_t buf[4 + k_inputRedundancy * sizeof(InputSnapshot)];
     buf[0] = static_cast<uint8_t>(PacketType::INPUT);
     buf[1] = count;
+    std::memcpy(buf + 2, &rttMs, sizeof(uint16_t));
 
     // Oldest-first iteration: when ring is full, oldest is at head; otherwise
     // entries [0, count) are already in order.
     const size_t firstIdx = (inputRingCount_ == k_inputRedundancy) ? inputRingHead_ : 0;
     for (size_t i = 0; i < inputRingCount_; ++i) {
         const size_t srcIdx = (firstIdx + i) % k_inputRedundancy;
-        std::memcpy(buf + 2 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
+        std::memcpy(buf + 4 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
     }
 
-    const uint32_t totalLen = 2 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
+    const uint32_t totalLen = 4 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
 
     // ── Phase 3d-2: prefer UDP for INPUT once handshake completes ────────
     //

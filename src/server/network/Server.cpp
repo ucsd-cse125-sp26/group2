@@ -219,18 +219,25 @@ void Server::handleUdpUnreliable(uint32_t connId,
 
     switch (type) {
     case PacketType::INPUT: {
-        // Same parser as the TCP INPUT case.
-        if (subLen < 1)
+        // Same parser as the TCP INPUT case. Wire format:
+        //   [count u8] [rttMs u16] [InputSnapshot * count]
+        if (subLen < 3)
             return;
         const uint8_t count = sub[0];
         constexpr uint8_t k_maxInputsPerPacket = 16;
         if (count == 0 || count > k_maxInputsPerPacket)
             return;
-        const uint32_t expectedSize = 1u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 3u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (subLen != expectedSize)
             return;
 
-        const uint8_t* base = sub + 1;
+        // Phase 6: client's smoothed RTT estimate, used to size the
+        // lag-compensation rewind window for this client's hitscans.
+        uint16_t rttMs = 0;
+        std::memcpy(&rttMs, sub + 1, sizeof(uint16_t));
+        conn.lastReportedRttMs = rttMs;
+
+        const uint8_t* base = sub + 3;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
@@ -428,13 +435,17 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     switch (type) {
     case PacketType::INPUT: {
-        // New multi-input wire format: [count u8] [InputSnapshot * count],
+        // Multi-input wire format:
+        //   [count u8] [rttMs u16] [InputSnapshot * count],
         // oldest-first. Each client packet carries the last
         // Client::k_inputRedundancy inputs. We dedup against
         // conn.lastAppliedInputTick — most entries in any given packet are
         // duplicates of already-applied snapshots and get skipped cheaply.
-        if (payloadLen < 1) {
-            SDL_Log("Server: received empty INPUT packet from client %d", conn.clientId.value);
+        // The rttMs prefix is the client's smoothed RTT estimate; the
+        // server uses RTT/2 as the rewind window for lag-compensated
+        // hitscan (Phase 6).
+        if (payloadLen < 3) {
+            SDL_Log("Server: received undersized INPUT packet from client %d", conn.clientId.value);
             return;
         }
 
@@ -450,7 +461,7 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
             return;
         }
 
-        const uint32_t expectedSize = 1u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 3u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (payloadLen != expectedSize) {
             SDL_Log("Server: received INPUT packet of invalid size %u (expected %u for count %u)",
                     payloadLen,
@@ -459,7 +470,14 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
             return;
         }
 
-        const uint8_t* base = payload + 1;
+        // Phase 6: client's smoothed RTT, persisted on the connection
+        // so the lag-comp scheduler can read it each tick when it sets
+        // the per-shooter rewind target.
+        uint16_t rttMs = 0;
+        std::memcpy(&rttMs, payload + 1, sizeof(uint16_t));
+        conn.lastReportedRttMs = rttMs;
+
+        const uint8_t* base = payload + 3;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
