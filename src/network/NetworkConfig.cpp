@@ -3,6 +3,7 @@
 
 #include "NetworkConfig.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <toml++/toml.hpp>
 
@@ -33,6 +34,15 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.serverNetwork.host = *v;
     if (auto v = serverNet["port"].value<uint16_t>())
         cfg.serverNetwork.port = *v;
+
+    // [server-replication] section — Phase 4 snapshot rate.
+    auto serverRep = tbl["server-replication"];
+    if (auto v = serverRep["snapshot-hz"].value<int>()) {
+        // Clamp to a sane range. Above tick-rate makes no sense; below 1 Hz
+        // breaks gameplay. Bot-stress tests on loopback typically run at 32;
+        // playable settings probably want 32-64 once Phase 5 lands.
+        cfg.serverRep.snapshotHz = std::max(1, std::min(*v, 256));
+    }
 
     return cfg;
 }

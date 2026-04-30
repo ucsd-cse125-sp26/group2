@@ -28,11 +28,17 @@ class ServerGame
 {
 public:
     /// @brief Bind to the given address and port, spawn test entities.
-    /// @param addr       Hostname or IP to bind to (e.g. "127.0.0.1").
-    /// @param port       TCP port to listen on.
-    /// @param tickRateHz Physics tick rate in Hz (default 128).
+    /// @param addr        Hostname or IP to bind to (e.g. "127.0.0.1").
+    /// @param port        TCP port to listen on.
+    /// @param tickRateHz  Physics tick rate in Hz (default 128).
+    /// @param snapshotHz  Registry snapshot send rate in Hz (default 32).
+    ///                    Must be ≤ tickRateHz; clamped if not. Phase 4
+    ///                    decouples snapshot rate from tick rate so the
+    ///                    server can keep deterministic 128 Hz physics
+    ///                    while only paying the serialization+broadcast
+    ///                    cost a fraction as often.
     /// @return True on success, false on network or initialisation failure.
-    bool init(const char* addr, Uint16 port, int tickRateHz = 128);
+    bool init(const char* addr, Uint16 port, int tickRateHz = 128, int snapshotHz = 32);
 
     /// @brief Block on the game loop until shutdown() is called.
     ///
@@ -115,6 +121,13 @@ private:
     bool running = false;                        ///< Loop continues while true.
     int tickRateHz = 128;                        ///< Physics ticks per second.
     int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
+
+    /// @brief Send a registry snapshot every Nth tick. Computed in init() as
+    /// `max(1, tickRateHz / snapshotHz)` so the snapshot rate is roughly
+    /// `tickRateHz / snapshotEveryNTicks` Hz. With the default 128 / 32 = 4
+    /// the server snapshots every 4th tick — 4× less serialization +
+    /// broadcast work than pre-Phase-4.
+    int snapshotEveryNTicks = 4;
 
     // ── Server-side animation subsystem ──
     CharacterRig serverRig_;             ///< Shared skeleton (loaded from same FBX as client).

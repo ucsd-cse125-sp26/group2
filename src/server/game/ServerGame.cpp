@@ -31,9 +31,22 @@
 
 #include <SDL3/SDL.h>
 
-bool ServerGame::init(const char* addr, Uint16 port, int hz)
+#include <algorithm>
+
+bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz)
 {
     tickRateHz = hz;
+
+    // Phase 4a: snapshot rate ≤ tick rate. Both should be positive ints; we
+    // re-clamp here in case the caller didn't (NetworkConfig already
+    // clamps the loaded value to [1, 256]).
+    const int clampedSnapshotHz = std::max(1, std::min(snapshotHz, hz));
+    snapshotEveryNTicks = std::max(1, hz / clampedSnapshotHz);
+    SDL_Log("[server] tickRate=%d Hz, snapshotRate≈%d Hz (every %d ticks)",
+            hz,
+            hz / snapshotEveryNTicks,
+            snapshotEveryNTicks);
+
     clientEntities.clear(); // For safety
     registry.clear();
 
@@ -189,13 +202,21 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     matchController.update(dt, registry, server);
 
-    // Update Client by sending the registry. Each broadcast pushes into
-    // every client's per-client OutboundQueue with replace-on-stale
-    // semantics for snapshot-style messages. Stage 3b: the dedicated
-    // network thread (started by Server::init) drains the queues to their
-    // sockets continuously at ~1 kHz, so no explicit flush is needed here
-    // and the game-tick budget no longer pays for the I/O syscalls.
-    server.broadcastRegistry(registry);
+    // Phase 4a: snapshot rate decoupled from tick rate. The registry
+    // snapshot is the by far biggest piece of per-tick wire traffic, and
+    // remote clients can still smoothly interpolate position over the
+    // snapshot interval (Phase 5's RemoteHistory + clientRenderTick will
+    // formalise this; today's PreviousPosition lerp covers the simpler
+    // case). Events (particles, kills) stay tick-accurate — they're
+    // discrete moments and ~1-tick latency materially affects gameplay
+    // feel (kill feed lag, missing tracers).
+    //
+    // Stage 3b's dedicated network thread continuously drains the per-
+    // client OutboundQueue to sockets at ~1 kHz, so the game-tick budget
+    // no longer pays for the I/O syscalls.
+    if ((tickCount % snapshotEveryNTicks) == 0) {
+        server.broadcastRegistry(registry);
+    }
     server.broadcastParticleEvents(particleEvents);
     server.broadcastKillEvents(pendingKillEvents);
     pendingKillEvents.clear();

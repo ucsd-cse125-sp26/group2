@@ -20,8 +20,10 @@ int main()
     const NetworkAddress& serverNet = cfg.serverNetwork;
 
     ServerGame game;
-    if (!game.init(serverNet.host.c_str(), serverNet.port)) // default 128 Hz
-    {
+    // Phase 4a: pass the configured snapshot rate from config.toml
+    // ([server-replication].snapshot-hz). Default 32 Hz; falls back to
+    // compile-time default if missing.
+    if (!game.init(serverNet.host.c_str(), serverNet.port, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz)) {
         NET_Quit();
         SDL_Quit();
         return 1;
