@@ -404,24 +404,13 @@ jobs:
             echo "previous=" >> "$GITHUB_OUTPUT"
           else
             echo "previous=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
-            # Strip optional 'v' prefix for parsing
             VERSION="${LATEST_TAG#v}"
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
-            # Collect commit subjects for bump analysis.
-            # Use --first-parent for clean main-branch view, and resolve
-            # PR merge commits to their actual PR title so that
-            # "feat:" / "fix:" in PR titles drive the version bump.
-            SUBJECTS=""
-            while IFS= read -r line || [[ -n "$line" ]]; do
-              if [[ "$line" =~ ^Merge\ pull\ request\ \#([0-9]+) ]]; then
-                PR_TITLE=$(gh pr view "${BASH_REMATCH[1]}" \
-                  --json title --jq .title 2>/dev/null || echo "")
-                [[ -n "$PR_TITLE" ]] && SUBJECTS="${SUBJECTS}${PR_TITLE}"$'\n'
-              else
-                SUBJECTS="${SUBJECTS}${line}"$'\n'
-              fi
-            done < <(git log "${LATEST_TAG}..HEAD" --first-parent --pretty=format:"%s")
+            # Use --no-merges to see every individual commit (including
+            # those inside PR merge commits) so feat:/fix: in any commit
+            # drives the version bump — not just the merge-commit subject.
+            SUBJECTS=$(git log "${LATEST_TAG}..HEAD" --no-merges --pretty=format:"%s")
 
             if echo "$SUBJECTS" | grep -qiE 'BREAKING[- ]CHANGE|^[a-z]+(\(.+\))?!:'; then
               MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
@@ -447,33 +436,32 @@ jobs:
           RANGE="${PREV_TAG:+${PREV_TAG}..HEAD}"
           RANGE="${RANGE:-HEAD}"
           REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
+          ROOT=$(git rev-list --max-parents=0 HEAD | head -1)
+          COMPARE_BASE="${PREV_TAG:-$ROOT}"
 
-          # ── Categorise commits (first-parent = clean main-branch view) ──
+          # ── Build SHA → @username map via GitHub compare API ──
+          # Single API call resolves git authors to GitHub logins.
+          gh api "repos/${GITHUB_REPOSITORY}/compare/${COMPARE_BASE}...${GITHUB_SHA}" \
+            --jq '.commits[] | "\(.sha[:7])\t@\(.author.login // .commit.author.name)"' \
+            > /tmp/author_map.tsv 2>/dev/null || true
+
+          # ── Categorise individual (non-merge) commits ──
           FEATS=""
           FIXES=""
           OTHER=""
-          # Format: subject<TAB>author name
-          while IFS=$'\t' read -r subject author || [[ -n "$subject" ]]; do
-            # Skip "Merge branch" noise (e.g. back-merges)
-            [[ "$subject" =~ ^Merge\ branch ]] && continue
+          SEEN_AUTHORS=""
 
-            # For PR merge commits, fetch the real PR title and author
-            if [[ "$subject" =~ ^Merge\ pull\ request\ \#([0-9]+) ]]; then
-              PR_NUM="${BASH_REMATCH[1]}"
-              PR_INFO=$(gh pr view "$PR_NUM" --json title,author \
-                --jq '"@\(.author.login): \(.title)"' 2>/dev/null || echo "")
-              if [[ -n "$PR_INFO" ]]; then
-                PR_AUTHOR="${PR_INFO%%:*}"
-                PR_TITLE="${PR_INFO#*: }"
-                subject="$PR_TITLE"
-                author="$PR_AUTHOR"
-                ENTRY="${subject} — ${author} (#${PR_NUM})"
-              else
-                continue  # can't resolve PR, skip
-              fi
-            else
-              ENTRY="${subject} — ${author}"
+          while IFS=$'\t' read -r sha subject author_name || [[ -n "$sha" ]]; do
+            # Resolve to GitHub @username; fall back to git author name
+            author=$(grep "^${sha}" /tmp/author_map.tsv 2>/dev/null | cut -f2 | head -1)
+            author="${author:-${author_name}}"
+
+            # Track unique contributors
+            if [[ -n "$author" ]] && ! echo "$SEEN_AUTHORS" | grep -qF "$author"; then
+              SEEN_AUTHORS="${SEEN_AUTHORS} ${author}"
             fi
+
+            ENTRY="${subject} — ${author}"
 
             if echo "$subject" | grep -qiE '^feat(\(.+\))?[!]?:'; then
               FEATS="${FEATS}\n- ${ENTRY}"
@@ -482,7 +470,7 @@ jobs:
             else
               OTHER="${OTHER}\n- ${ENTRY}"
             fi
-          done < <(git log "$RANGE" --first-parent --pretty=format:"%s%x09%an" --reverse)
+          done < <(git log "$RANGE" --no-merges --pretty=format:"%h%x09%s%x09%an" --reverse)
 
           # ── Build categorised section ──
           CHANGELOG=""
@@ -496,21 +484,47 @@ jobs:
             CHANGELOG="${CHANGELOG}## Other\n${OTHER}\n\n"
           fi
 
-          # ── Append GitHub-generated PR details & contributors ──
-          # This adds "New Contributors" and linked PR references when
-          # changes came through pull requests.
+          # ── Stats: this release ──
+          COMMIT_COUNT=$(git rev-list --count --no-merges "$RANGE" 2>/dev/null || echo "0")
+          DIFF_STATS=$(git diff --shortstat "${COMPARE_BASE}..HEAD" 2>/dev/null || echo "")
+          FILES_CHG=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "0")
+          INS=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+          DEL=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+          NET=$(( ${INS:-0} - ${DEL:-0} ))
+          [[ $NET -ge 0 ]] && NET_FMT="+${NET}" || NET_FMT="${NET}"
+
+          # ── Stats: repository totals ──
+          TOTAL_COMMITS=$(git rev-list --count HEAD)
+          TOTAL_FILES=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) 2>/dev/null | wc -l | tr -d ' ')
+          TOTAL_LOC=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) \
+            -exec cat {} + 2>/dev/null | wc -l | tr -d ' ')
+
+          CHANGELOG="${CHANGELOG}## Stats\n"
+          CHANGELOG="${CHANGELOG}**${COMMIT_COUNT}** commits  ·  "
+          CHANGELOG="${CHANGELOG}**${FILES_CHG}** files changed  ·  "
+          CHANGELOG="${CHANGELOG}**+${INS}** / **-${DEL}** lines (net ${NET_FMT})\n"
+          CHANGELOG="${CHANGELOG}Repository: **${TOTAL_LOC}** lines across **${TOTAL_FILES}** source files  ·  **${TOTAL_COMMITS}** total commits\n\n"
+
+          # ── Contributors ──
+          if [[ -n "${SEEN_AUTHORS// /}" ]]; then
+            CHANGELOG="${CHANGELOG}## Contributors\n"
+            for c in $SEEN_AUTHORS; do
+              CHANGELOG="${CHANGELOG}${c} "
+            done
+            CHANGELOG="${CHANGELOG}\n\n"
+          fi
+
+          # ── Append "New Contributors" from GitHub auto-generated notes ──
           GH_NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
             -f tag_name="${RELEASE_TAG}" \
             -f target_commitish="${GITHUB_SHA}" \
             ${PREV_TAG:+-f previous_tag_name="${PREV_TAG}"} \
             --jq '.body' 2>/dev/null || echo "")
 
-          # Extract only the "New Contributors" and "Full Changelog" sections
-          # (skip "What's Changed" — our categorised list replaces it)
           if [[ -n "$GH_NOTES" ]]; then
-            CONTRIBUTORS=$(echo "$GH_NOTES" | sed -n '/^## New Contributors/,$p')
-            if [[ -n "$CONTRIBUTORS" ]]; then
-              CHANGELOG="${CHANGELOG}${CONTRIBUTORS}\n\n"
+            NEW_CONTRIB=$(echo "$GH_NOTES" | sed -n '/^## New Contributors/,/^## /{ /^## [^N]/d; p; }')
+            if [[ -n "$NEW_CONTRIB" ]]; then
+              CHANGELOG="${CHANGELOG}${NEW_CONTRIB}\n\n"
             fi
           fi
 
@@ -569,7 +583,7 @@ jobs:
             }')
 
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD" \
             --max-time 15) || true
