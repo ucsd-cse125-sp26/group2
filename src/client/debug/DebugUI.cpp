@@ -1262,7 +1262,6 @@ void drawCapsuleWireframe(
 
     constexpr int ringSegments = 12;
     constexpr int arcSegments = 8;
-    constexpr float pi = 3.1415926f;
     constexpr float pi2 = 6.2831853f;
     constexpr float halfPi = 1.5707963f;
 
