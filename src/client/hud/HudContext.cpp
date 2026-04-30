@@ -24,6 +24,13 @@ void HudContext::beginFrame()
     spanDirty_ = false;
 }
 
+void HudContext::endFrame()
+{
+    // Flush any remaining vertices into a final clip span so nothing is lost.
+    if (spanDirty_)
+        flushClipSpan();
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 void HudContext::emitQuad(float x,

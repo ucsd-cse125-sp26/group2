@@ -2077,6 +2077,13 @@ SDL_AppResult Game::iterate()
             });
         hudState.enemyDots = hudMinimapDots;
 
+        static int minimapLogTimer = 0;
+        if (++minimapLogTimer % 300 == 1) // Log every ~5 seconds at 60fps
+            SDL_Log("Minimap: localPos=(%.0f,%.0f) enemyDots=%zu",
+                    static_cast<double>(hudState.localPlayerX),
+                    static_cast<double>(hudState.localPlayerZ),
+                    hudMinimapDots.size());
+
         // ── Screen dimensions ──
         int winW = 0, winH = 0;
         SDL_GetWindowSizeInPixels(window, &winW, &winH);

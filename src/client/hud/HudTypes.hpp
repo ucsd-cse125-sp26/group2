@@ -148,7 +148,7 @@ struct HudGameState
     // Minimap.
     float localPlayerX = 0.f, localPlayerZ = 0.f;
     std::span<const HudMinimapDot> enemyDots;
-    float minimapWorldRange = 100.f; ///< World units visible in each direction from center.
+    float minimapWorldRange = 500.f; ///< World units visible in each direction from center.
 
     // Screen dimensions (set by Game each frame).
     float screenW = 1280.f, screenH = 720.f;

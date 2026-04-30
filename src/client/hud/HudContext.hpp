@@ -52,6 +52,10 @@ public:
     void pushClipRect(float x, float y, float w, float h);
     void popClipRect();
 
+    /// @brief Flush any remaining unflushed vertices into a final clip span.
+    /// Must be called after all draw() calls, before accessing vertices/clipSpans.
+    void endFrame();
+
     // ── Access for HudRenderer ──────────────────────────────────────────
 
     [[nodiscard]] const std::vector<HudVertex>& vertices() const { return vertices_; }

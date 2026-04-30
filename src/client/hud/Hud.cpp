@@ -97,11 +97,12 @@ void Hud::render()
         w->draw(context_, drawX, drawY);
     }
 
-    // Flush any remaining clip span.
+    // Flush any remaining unflushed vertices (e.g. minimap drawn after last clip pop).
+    context_.endFrame();
+
     if (!context_.vertices().empty()) {
-        // If no clip spans were emitted (no pushClipRect calls),
-        // create a single full-viewport span.
         if (context_.clipSpans().empty()) {
+            // No clipping was used — create a single full-viewport span.
             std::vector<std::array<float, 6>> fullSpan = {
                 {0.f, static_cast<float>(context_.vertices().size()), 0.f, 0.f, -1.f, 0.f}};
             renderer_.render(context_.vertices(), fullSpan);
