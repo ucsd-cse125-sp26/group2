@@ -183,14 +183,6 @@ private:
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
 
-    // Crosshair settings (ImGui-adjustable)
-    float crosshairSize_ = 6.0f;                           ///< Half-length of each crosshair line (pixels).
-    float crosshairThickness_ = 2.0f;                      ///< Line thickness (pixels).
-    float crosshairGap_ = 3.0f;                            ///< Gap from center to start of each line (pixels).
-    glm::vec4 crosshairColor_ = {0.0f, 1.0f, 0.0f, 0.85f}; ///< RGBA (default: green).
-    bool crosshairDot_ = true;                             ///< Draw center dot.
-    bool showCrosshair_ = true;                            ///< Master toggle.
-
     // Scroll-wheel weapon switching
     int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = prev slot, consumed each frame.
 

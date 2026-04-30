@@ -70,6 +70,17 @@ endif()
 # off across the board.  PCH already provides the bulk of the rebuild-speed
 # win that split-dwarf was helping with.
 
+# Clang validates PCH freshness by checking system header mtime.  Package
+# manager updates (apt upgrade, brew upgrade) bump mtimes without changing
+# content, causing spurious "precompiled header has been modified" errors.
+# -fno-pch-timestamp stops baking file timestamps into the PCH so mtime
+# changes alone never invalidate it.  Applied only to our own targets (not
+# FetchContent deps) via target_compile_options below — search for
+# "PCH_NO_TIMESTAMP_TARGETS".
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(PCH_NO_TIMESTAMP_FLAG "-Xclang;-fno-pch-timestamp" CACHE INTERNAL "")
+endif()
+
 # ---- Dependencies ----
 
 # SDL3 — window, input, GPU pipeline (Vulkan/Metal/DX12) + OpenGL context
@@ -833,6 +844,10 @@ target_precompile_headers(group2 PRIVATE
     <entt/entt.hpp>
     <SDL3/SDL.h>
 )
+# PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(group2 PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
 # find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).
@@ -1112,6 +1127,10 @@ target_precompile_headers(client PRIVATE
     <entt/entt.hpp>
     <SDL3/SDL.h>
 )
+# PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(client PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
 
 # Copy assets next to the binary (same as group2).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
@@ -1248,6 +1267,10 @@ target_precompile_headers(server PRIVATE
     <entt/entt.hpp>
     <SDL3/SDL.h>
 )
+# PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(server PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
 
 # Copy config.toml next to the server binary when it changes.
 add_custom_command(

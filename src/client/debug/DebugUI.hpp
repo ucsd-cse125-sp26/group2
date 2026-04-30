@@ -140,18 +140,27 @@ public:
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 
-    /// @brief Toggle every debug panel on/off at once.
+    /// @brief Toggle the unified debug menu on/off.
     ///
-    /// If any panel is currently visible, all panels are hidden. If all panels are
-    /// hidden, all panels become visible. Intended to be bound to a hotkey so the
-    /// user can clear the overlay for clean gameplay/screenshots and bring it
-    /// back with the same press.
-    /// @param externalPanels  Visibility flags for panels owned outside DebugUI
-    ///                        (e.g. the Animation Tester lives on Game). They
-    ///                        participate in both the "any visible?" check and
-    ///                        the bulk show/hide so the hotkey behavior stays
-    ///                        consistent across all debug windows.
-    void toggleAllPanels(std::initializer_list<bool*> externalPanels = {});
+    /// When visible, the debug menu shows one checkbox per debug panel. Individual
+    /// panels are only drawn when their checkbox is checked.
+    void toggleDebugMenu();
+
+    /// @brief Build the unified debug menu window.
+    ///
+    /// Renders a single ImGui window with a checkbox per debug panel (both
+    /// DebugUI-owned and external panels passed by Game). Only call when
+    /// `showDebugMenu` is true.
+    ///
+    /// @param externalPanels  Named toggle pairs for panels owned outside DebugUI.
+    struct ExternalPanel
+    {
+        const char* name; ///< Display name shown as checkbox label.
+        bool* visible;    ///< Pointer to the visibility flag.
+    };
+    void buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels);
+
+    bool showDebugMenu = false;      ///< Master toggle for the unified debug menu window.
 
     bool pendingAmmoRefill_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
 
@@ -162,6 +171,7 @@ private:
     bool showLightingControls = false; ///< Show the Lighting Controls window.
     bool showSkybox = false;           ///< Show the Skybox window.
     bool showNetworkStats = false;     ///< Show the Network Stats window.
+    bool showWeaponHud = false;        ///< Show the Weapon HUD debug window (disabled by default).
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.

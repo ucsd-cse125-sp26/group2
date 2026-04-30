@@ -109,49 +109,58 @@ void DebugUI::newFrame()
     ImGui::NewFrame();
 }
 
-void DebugUI::toggleAllPanels(std::initializer_list<bool*> externalPanels)
+void DebugUI::toggleDebugMenu()
 {
-    // All window-visibility flags owned by DebugUI in one place — keep this
-    // list in sync with the private members in DebugUI.hpp when adding new
-    // top-level panels. Panels owned by other systems (e.g. Game's Animation
-    // Tester) are passed in via externalPanels.
-    bool* const ownedPanels[] = {
-        &showInspector,
-        &showMovementChart,
-        &showBhopAnalyzer,
-        &showParticleWindow_,
-        &showRenderToggles,
-        &showLightingControls,
-        &showSkybox,
-        &showNetworkStats,
-        &showHitboxWindow,
-        &showCollisionWindow,
-    };
+    showDebugMenu = !showDebugMenu;
+}
 
-    // If anything is currently visible (owned or external), hide everything;
-    // otherwise show everything.
-    bool anyVisible = false;
-    for (bool* p : ownedPanels) {
-        if (*p) {
-            anyVisible = true;
-            break;
+void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels)
+{
+    if (!showDebugMenu)
+        return;
+
+    ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({260.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags =
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::Begin("Debug Menu (F2)", &showDebugMenu, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextDisabled("F2: toggle this menu  |  F3: toggle cursor");
+    ImGui::Separator();
+
+    // DebugUI-owned panels
+    ImGui::SeparatorText("Inspector");
+    ImGui::Checkbox("ECS Inspector", &showInspector);
+    ImGui::Checkbox("Movement Chart", &showMovementChart);
+    ImGui::Checkbox("Bhop Analyzer", &showBhopAnalyzer);
+
+    ImGui::SeparatorText("Rendering");
+    ImGui::Checkbox("Render Toggles", &showRenderToggles);
+    ImGui::Checkbox("Lighting Controls", &showLightingControls);
+    ImGui::Checkbox("Skybox Selector", &showSkybox);
+
+    ImGui::SeparatorText("Gameplay");
+    ImGui::Checkbox("Network Stats", &showNetworkStats);
+    ImGui::Checkbox("Weapon HUD", &showWeaponHud);
+    ImGui::Checkbox("Particle System", &showParticleWindow_);
+
+    ImGui::SeparatorText("Physics");
+    ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
+    ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+
+    // External panels (owned by Game)
+    if (externalPanels.size() > 0) {
+        ImGui::SeparatorText("Game");
+        for (const auto& panel : externalPanels) {
+            if (panel.visible)
+                ImGui::Checkbox(panel.name, panel.visible);
         }
     }
-    if (!anyVisible) {
-        for (bool* p : externalPanels) {
-            if (p && *p) {
-                anyVisible = true;
-                break;
-            }
-        }
-    }
-    const bool newState = !anyVisible;
-    for (bool* p : ownedPanels)
-        *p = newState;
-    for (bool* p : externalPanels) {
-        if (p)
-            *p = newState;
-    }
+
+    ImGui::End();
 }
 
 void DebugUI::buildUI(const Registry& registry,
@@ -201,7 +210,8 @@ void DebugUI::buildUI(const Registry& registry,
     if (showBhopAnalyzer)
         buildBhopAnalyzer(registry);
 
-    buildWeaponUI(registry);
+    if (showWeaponHud)
+        buildWeaponUI(registry);
 }
 
 // Contents of the ECS Inspector window, factored out so the Begin/End wrapping
@@ -221,7 +231,7 @@ void DebugUI::buildInspectorContents(const Registry& registry,
                                      const float fps5pLow)
 {
     // Key bindings reminder
-    ImGui::TextDisabled("ESC: toggle mouse  |  Q: quit  |  F2: toggle all panels");
+    ImGui::TextDisabled("F2: debug menu  |  F3: toggle cursor  |  ESC: toggle cursor");
     ImGui::Separator();
 
     // Settings
