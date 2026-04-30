@@ -71,6 +71,14 @@ private:
         MessageStream msgStream;    ///< Framed message stream for this client.
         ClientId clientId;          ///< Unique identifier assigned on accept.
         bool pendingInitialization; ///< True if waiting for Game to initialize player entity.
+
+        /// @brief Highest InputSnapshot.tick this client has had applied to the
+        /// simulation. Used to dedup multi-input redundancy: each client sends
+        /// the last N inputs every tick, so most arrivals are duplicates of
+        /// already-applied data. We accept only inputs strictly newer than this
+        /// value and update it as we process. Resets to 0 on reconnect because
+        /// each Connection is constructed fresh.
+        uint32_t lastAppliedInputTick = 0;
     };
 
     /// @brief Dispatch a single decoded message from a client.

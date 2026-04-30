@@ -12,6 +12,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <cstring>
 
 bool Client::init(const char* addr, Uint16 port)
 {
@@ -86,10 +87,30 @@ void Client::updateStats(float dt)
 
 bool Client::sendInputSnapshot(const InputSnapshot& snap)
 {
-    uint8_t buf[1 + sizeof(InputSnapshot)];
+    // Push the new snapshot into the ring (chronological).
+    inputRing_[inputRingHead_] = snap;
+    inputRingHead_ = (inputRingHead_ + 1) % k_inputRedundancy;
+    if (inputRingCount_ < k_inputRedundancy)
+        ++inputRingCount_;
+
+    // Pack [PacketType::INPUT (1B)] [count (1B)] [InputSnapshot * count].
+    // Inputs are written oldest-first so the server can apply them in
+    // tick order with a simple `tick > lastAppliedInputTick` check.
+    const auto count = static_cast<uint8_t>(inputRingCount_);
+    uint8_t buf[2 + k_inputRedundancy * sizeof(InputSnapshot)];
     buf[0] = static_cast<uint8_t>(PacketType::INPUT);
-    std::memcpy(buf + 1, &snap, sizeof(InputSnapshot));
-    return send(buf, sizeof(buf));
+    buf[1] = count;
+
+    // Oldest-first iteration: when ring is full, oldest is at head; otherwise
+    // entries [0, count) are already in order.
+    const size_t firstIdx = (inputRingCount_ == k_inputRedundancy) ? inputRingHead_ : 0;
+    for (size_t i = 0; i < inputRingCount_; ++i) {
+        const size_t srcIdx = (firstIdx + i) % k_inputRedundancy;
+        std::memcpy(buf + 2 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
+    }
+
+    const uint32_t totalLen = 2 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
+    return send(buf, totalLen);
 }
 
 bool Client::poll(Registry& registry)

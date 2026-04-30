@@ -14,6 +14,7 @@
 #include <SDL3/SDL_stdinc.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <array>
 #include <entt/entt.hpp>
 #include <optional>
 
@@ -54,6 +55,16 @@ public:
     /// @return False if the send fails.
     bool send(const void* data, uint32_t size);
 
+    /// @brief Push the latest input into the redundant ring and send to the server.
+    ///
+    /// Each call appends @p snap to a small ring buffer (capacity
+    /// @ref k_inputRedundancy) and emits one INPUT packet containing the
+    /// last N stored snapshots in tick order, oldest-first. The server
+    /// dedups by `InputSnapshot.tick` against `lastAppliedInputTick`, so
+    /// resending the last few inputs costs ~5x bandwidth on this packet
+    /// type while making the input stream resilient to single-packet loss
+    /// or reorder. Caller is responsible for stamping `snap.tick` with the
+    /// current `clientPredictTick` before calling.
     bool sendInputSnapshot(const InputSnapshot& snap);
 
     /// @brief Send a PING packet to the server for RTT measurement.
@@ -74,6 +85,13 @@ public:
     /// @brief Access current network statistics.
     const NetworkStats& getNetStats() const { return stats; }
 
+    /// @brief Number of recent inputs included in each INPUT packet for redundancy.
+    ///
+    /// At 128 Hz client tick rate, 5 inputs covers ~40 ms of redundancy —
+    /// enough to recover from single-packet loss without retransmission, at
+    /// the cost of ~5x INPUT-packet payload (still tiny: ~200 bytes/packet).
+    static constexpr size_t k_inputRedundancy = 5;
+
 private:
     MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr;             ///< Resolved server address.
@@ -92,4 +110,11 @@ private:
     uint64_t bytesRecvWindow = 0;
     uint32_t registryUpdatesWindow = 0;
     float statsAccumulator = 0.0f;
+
+    // Redundant input ring — see k_inputRedundancy and sendInputSnapshot().
+    // Stores the last N stamped InputSnapshots in chronological order so each
+    // outbound INPUT packet can include them all (server dedups by tick).
+    std::array<InputSnapshot, k_inputRedundancy> inputRing_{};
+    size_t inputRingHead_ = 0;  ///< Next write index, wraps mod k_inputRedundancy.
+    size_t inputRingCount_ = 0; ///< Valid entries in ring; saturates at k_inputRedundancy.
 };

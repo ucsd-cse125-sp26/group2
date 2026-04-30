@@ -1322,15 +1322,71 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
     )
 endif()
 
+# ===========================================================================
+# Clientbot executable — headless network-only load-test bot.
+#
+# Spawns N TCP client connections in one process (one std::thread each),
+# sends idle InputSnapshots at the server tick rate, and drains incoming
+# server snapshots like a real client. No window, no GPU, no animation, no
+# physics — just network traffic. Used to load-test the server past the
+# ~5-client GPU-context limit on a single machine.
+# ===========================================================================
+add_executable(clientbot
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/Bot.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/Bot.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistryArchive.hpp"
+)
+
+# Headers under src/ are referenced via "network/...", "ecs/components/...".
+target_include_directories(clientbot PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+
+# Same library set as the server, minus assimp/ozz (no map/animation needed).
+target_link_libraries(clientbot PRIVATE
+    SDL3::SDL3-static
+    SDL3_net::SDL3_net
+    EnTT::EnTT
+    glm::glm
+    tomlplusplus::tomlplusplus
+)
+
+# Copy config.toml next to clientbot so it picks up the same server address
+# the real client uses by default.
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/config_clientbot.stamp"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CONFIG_TOML_SOURCE}"
+            "$<TARGET_FILE_DIR:clientbot>/config.toml"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_clientbot.stamp"
+    DEPENDS "${CONFIG_TOML_SOURCE}"
+    COMMENT "Copying config.toml to clientbot binary directory"
+    VERBATIM
+)
+add_custom_target(copy_clientbot_config DEPENDS "${CMAKE_BINARY_DIR}/config_clientbot.stamp")
+add_dependencies(clientbot copy_clientbot_config)
+
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
 set_compiler_warnings(client)
 set_compiler_warnings(server)
+set_compiler_warnings(clientbot)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
 enable_sanitizers(client)
 enable_sanitizers(server)
+enable_sanitizers(clientbot)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
 # without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on

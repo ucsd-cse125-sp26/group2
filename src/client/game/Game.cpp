@@ -827,8 +827,6 @@ SDL_AppResult Game::iterate()
         }
     }
 
-    systems::runInputSend(registry, client);
-
     // Network stats: send periodic pings and update bandwidth counters
     client.updateStats(frameTime);
     pingTimer += frameTime;
@@ -845,6 +843,21 @@ SDL_AppResult Game::iterate()
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured)
             systems::runMovementKeys(registry);
+
+        // Stamp the current InputSnapshot with the next predict tick BEFORE
+        // sending. The server uses this tick for dedup against
+        // lastAppliedInputTick, and Phase-5 prediction will key the input
+        // ring buffer by it. We bump once per tick *group* (not per inner
+        // tick) — multiple physics ticks in one frame share the same input,
+        // because we only sample input once per group.
+        ++clientPredictTick;
+        registry.view<InputSnapshot, LocalPlayer>().each(
+            [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+
+        // Send the redundant input batch (last k_inputRedundancy ticks). With
+        // TCP loss is a non-issue, but redundancy is still worth keeping for
+        // the Phase-3 UDP swap — same wire format works for both transports.
+        systems::runInputSend(registry, client);
 
         physicsRan = true;
 

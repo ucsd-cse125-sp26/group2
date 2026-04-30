@@ -9,11 +9,11 @@
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "systems/EventQueue.hpp"
-#include "systems/InputReceiveSystem.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <cstring>
 #include <entt/entity/entity.hpp>
 
 bool Server::init(const char* addr, Uint16 port)
@@ -123,14 +123,56 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     switch (type) {
     case PacketType::INPUT: {
-        if (payloadLen != sizeof(InputSnapshot)) {
-            SDL_Log(
-                "Server: received INPUT packet of invalid size %u (expected %zu)", payloadLen, sizeof(InputSnapshot));
+        // New multi-input wire format: [count u8] [InputSnapshot * count],
+        // oldest-first. Each client packet carries the last
+        // Client::k_inputRedundancy inputs. We dedup against
+        // conn.lastAppliedInputTick — most entries in any given packet are
+        // duplicates of already-applied snapshots and get skipped cheaply.
+        if (payloadLen < 1) {
+            SDL_Log("Server: received empty INPUT packet from client %d", conn.clientId.value);
             return;
         }
-        Event event = systems::runInputReceive(payload);
-        event.clientId = conn.clientId;
-        eventQueue.enqueue(event);
+
+        const uint8_t count = payload[0];
+        // Cap at a sane upper bound to defend against malformed/hostile
+        // packets. Keep the cap loose enough that a future bump in
+        // Client::k_inputRedundancy doesn't require a server change.
+        constexpr uint8_t k_maxInputsPerPacket = 16;
+        if (count == 0 || count > k_maxInputsPerPacket) {
+            SDL_Log("Server: received INPUT packet with bad count %u from client %d",
+                    static_cast<unsigned>(count),
+                    conn.clientId.value);
+            return;
+        }
+
+        const uint32_t expectedSize = 1u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        if (payloadLen != expectedSize) {
+            SDL_Log("Server: received INPUT packet of invalid size %u (expected %u for count %u)",
+                    payloadLen,
+                    expectedSize,
+                    static_cast<unsigned>(count));
+            return;
+        }
+
+        const uint8_t* base = payload + 1;
+        for (uint8_t i = 0; i < count; ++i) {
+            InputSnapshot snap{};
+            std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
+
+            // Dedup: skip already-applied or out-of-order-old. The client
+            // sends inputs oldest-first so we will normally walk a small
+            // run of duplicates and then a small run of fresh inputs.
+            if (snap.tick <= conn.lastAppliedInputTick)
+                continue;
+
+            Event event{};
+            event.movementIntent = snap;
+            event.type = EventType::Input;
+            event.clientId = conn.clientId;
+            eventQueue.enqueue(event);
+
+            conn.lastAppliedInputTick = snap.tick;
+        }
         break;
     }
 
