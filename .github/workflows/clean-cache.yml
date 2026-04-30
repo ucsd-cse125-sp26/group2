@@ -1,0 +1,64 @@
+name: Clean CI Caches
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Which caches to purge'
+        type: choice
+        options:
+          - all
+          - deps
+          - build
+          - sccache
+          - assets
+        default: all
+
+jobs:
+  clean:
+    name: Purge caches
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write   # needed by gh cache delete
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete matching caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          set -euo pipefail
+
+          # Build a grep pattern based on the chosen scope.
+          # SCOPE is a choice input — only the five predefined values are
+          # possible, so there is no injection risk.
+          case "$SCOPE" in
+            all)      PATTERN="." ;;
+            deps)     PATTERN="^deps-" ;;
+            build)    PATTERN="^build-" ;;
+            sccache)  PATTERN="^sccache-" ;;
+            assets)   PATTERN="^assets-" ;;
+          esac
+
+          echo "### Purging caches matching: $SCOPE" >> "$GITHUB_STEP_SUMMARY"
+
+          KEYS=$(gh cache list --json key --jq '.[].key' -L 100 \
+            | grep -E "$PATTERN" || true)
+
+          if [[ -z "$KEYS" ]]; then
+            echo "No caches matched **$SCOPE** — nothing to delete." >> "$GITHUB_STEP_SUMMARY"
+            echo "No matching caches found."
+            exit 0
+          fi
+
+          COUNT=0
+          while IFS= read -r key; do
+            echo "Deleting: $key"
+            gh cache delete "$key" || echo "  warning: failed to delete $key"
+            COUNT=$((COUNT + 1))
+          done <<< "$KEYS"
+
+          echo "Deleted **$COUNT** cache(s)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Done — deleted $COUNT cache(s)."

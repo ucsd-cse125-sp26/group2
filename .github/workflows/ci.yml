@@ -5,21 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      clean_build:
-        description: 'Force clean build (purge all caches)'
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-# When clean_build is true, append a unique suffix to all cache keys so
-# nothing hits.  The old caches expire naturally (7 days).
-env:
-  CACHE_BUST: ${{ inputs.clean_build == true && github.run_id || '' }}
 
 jobs:
   # ------------------------------------------------------------------ #
@@ -31,7 +20,6 @@ jobs:
     if: github.event_name == 'pull_request'
     env:
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_VERSION: ${{ env.CACHE_BUST }}
     strategy:
       fail-fast: false
       matrix:
@@ -124,7 +112,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps/${{ matrix.preset }}
-          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}${{ env.CACHE_BUST }}
+          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       # Cache the project build tree for incremental cmake reconfigure.
@@ -134,7 +122,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}${{ env.CACHE_BUST }}
+          key: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
           restore-keys: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
@@ -178,10 +166,9 @@ jobs:
   release-build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_VERSION: ${{ env.CACHE_BUST }}
       # Google Drive file ID for the shared assets zip.
       ASSETS_GDRIVE_ID: "1_Xafht6-R_E8-gVglYFDAHvjZA8msfE4"
     strategy:
@@ -292,7 +279,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps/${{ matrix.preset }}
-          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}${{ env.CACHE_BUST }}
+          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       # Cache the project build tree for incremental cmake reconfigure.
@@ -300,7 +287,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}${{ env.CACHE_BUST }}
+          key: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
           restore-keys: build-v1-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
@@ -325,7 +312,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: assets.zip
-          key: assets-${{ env.ASSETS_GDRIVE_ID }}${{ env.CACHE_BUST }}
+          key: assets-${{ env.ASSETS_GDRIVE_ID }}
 
       - name: Download assets
         if: steps.assets-cache.outputs.cache-hit != 'true'
@@ -384,7 +371,7 @@ jobs:
     name: Publish Release
     runs-on: ubuntu-latest
     needs: release-build
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push'
     permissions:
       contents: write
 
