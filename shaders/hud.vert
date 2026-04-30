@@ -8,7 +8,7 @@ layout(location = 2) in vec4  inColor;
 layout(location = 3) in float inTexMode;
 layout(location = 4) in vec3  inShapeData;  // mode 3: halfW, halfH, radius
 
-layout(set = 0, binding = 0) uniform HudUniforms {
+layout(set = 1, binding = 0) uniform HudUniforms {
     vec2 screenSize;    // viewport width, height in pixels
 };
 

@@ -123,6 +123,7 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
         return;
 
     const uint32_t vertexCount = static_cast<uint32_t>(vertices.size());
+
     if (!ensureVertexBuffer(vertexCount))
         return;
 
@@ -162,13 +163,13 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
     vbBinding.buffer = vertexBuffer_;
     SDL_BindGPUVertexBuffers(pass, 0, &vbBinding, 1);
 
-    // Push screen-size uniform (set 0, binding 0).
+    // Push screen-size uniform (vertex UBO slot 0).
     ScreenUniforms su{};
     su.screenW = static_cast<float>(width_);
     su.screenH = static_cast<float>(height_);
     SDL_PushGPUVertexUniformData(cmd, 0, &su, sizeof(su));
 
-    // Bind fragment samplers (set 1: sdfAtlas + iconAtlas).
+    // Bind fragment samplers (set 2: sdfAtlas + iconAtlas).
     SDL_GPUTextureSamplerBinding samplers[2] = {
         {.texture = sdfAtlasTex_, .sampler = sdfAtlasSamp_},
         {.texture = iconAtlasTex_, .sampler = iconAtlasSamp_},

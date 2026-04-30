@@ -8,8 +8,8 @@ layout(location = 1) in vec4  vColor;
 layout(location = 2) in float vTexMode;
 layout(location = 3) in vec3  vShapeData;
 
-layout(set = 1, binding = 0) uniform sampler2D sdfAtlas;
-layout(set = 1, binding = 1) uniform sampler2D iconAtlas;
+layout(set = 2, binding = 0) uniform sampler2D sdfAtlas;
+layout(set = 2, binding = 1) uniform sampler2D iconAtlas;
 
 layout(location = 0) out vec4 outColor;
 
