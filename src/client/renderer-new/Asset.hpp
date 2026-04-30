@@ -103,11 +103,17 @@ inline MeshIdInt getMeshIdFromString(const std::string& strId)
     return fnv1a32(strId);
 }
 
+/// @brief Convert a string identifier to a ModelIdInt hash.
+/// @param strId The string identifier for the model.
+/// @return The hashed model ID.
 inline ModelIdInt getModelIdFromString(const std::string& strId)
 {
     return fnv1a32(strId);
 }
 
+/// @brief Convert a string identifier to a TexIdInt hash.
+/// @param strId The string identifier for the texture.
+/// @return The hashed texture ID.
 inline TexIdInt getTexIdFromString(const std::string& strId)
 {
     return fnv1a32(strId);

@@ -1,3 +1,6 @@
+/// @file Boilerplate.hpp
+/// @brief SDL3 GPU helper utilities: shader loading, buffer/texture creation, pipeline setup.
+
 #pragma once
 
 #include <SDL3/SDL.h>
@@ -9,6 +12,7 @@
 
 namespace Boilerplate
 {
+/// @brief Descriptor for a single shader stage: file path, stage, and resource counts.
 struct ShaderInfo
 {
     const char* path = nullptr;
@@ -19,12 +23,14 @@ struct ShaderInfo
     Uint32 storageTextureCount = 0;
 };
 
+/// @brief Vertex buffer layout: stride (pitch) and per-attribute descriptions.
 struct VertexInputLayout
 {
     Uint32 vertexPitch = 0;
     std::vector<SDL_GPUVertexAttribute> attributes;
 };
 
+/// @brief Describes a pending CPU-to-GPU buffer upload: target buffer, source data, and byte size.
 struct BufferUpload
 {
     SDL_GPUBuffer* buffer = nullptr;

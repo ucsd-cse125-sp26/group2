@@ -321,11 +321,15 @@ bool Game::init()
         //   - Charge weapons: local VFX is skipped; we rely on server events.
         //   - Explosions: server-authoritative (not locally predicted).
         //   - Smoke: server-authoritative.
+        //   - Flesh impacts: local prediction can't reliably detect player
+        //     hitboxes, so we always honour the server's authoritative hit.
         if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
             const bool isServerOnly =
                 evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke;
-            if (!isChargeWeapon && !isServerOnly)
+            const bool isFleshImpact =
+                evt.effectType == ParticleEffectType::Impact && evt.surfaceType == SurfaceType::Flesh;
+            if (!isChargeWeapon && !isServerOnly && !isFleshImpact)
                 return;
 
             // For charge weapons from self: also dispatch the weapon-fired event
