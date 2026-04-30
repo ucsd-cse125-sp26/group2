@@ -718,6 +718,8 @@ add_executable(group2
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1028,6 +1030,8 @@ add_executable(client
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1202,6 +1206,8 @@ add_executable(server
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp

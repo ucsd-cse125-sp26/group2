@@ -8,6 +8,7 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
+#include "network/OutboundQueue.hpp"
 #include "network/ShotEvent.hpp"
 #include "systems/EventQueue.hpp"
 
@@ -64,6 +65,16 @@ public:
     /// @brief Broadcast kill events to clients for kill feed updates.
     void broadcastKillEvents(const std::vector<NetKillEvent>& events);
 
+    /// @brief Drain every connection's outbound queue to its socket.
+    ///
+    /// Call once per server tick, after all per-tick broadcasts. Disconnects
+    /// any client whose socket reports an error during drain.
+    ///
+    /// Stage 3a: runs on the game thread. Stage 3b moves the actual I/O to a
+    /// dedicated network thread; this method's behaviour from the gameplay
+    /// layer's perspective stays the same.
+    void flushAllOutbound();
+
 private:
     /// @brief Per-client connection state.
     struct Connection
@@ -79,6 +90,16 @@ private:
         /// value and update it as we process. Resets to 0 on reconnect because
         /// each Connection is constructed fresh.
         uint32_t lastAppliedInputTick = 0;
+
+        /// @brief Per-client userspace outbound queue (Phase 3a).
+        ///
+        /// All broadcast helpers push into this queue; the queue is then
+        /// flushed once at end-of-tick via `flushAllOutbound()`. The
+        /// replace-on-stale semantics mean a slow drainer only ever has one
+        /// pending UPDATE_REGISTRY in flight (always the freshest), instead
+        /// of accumulating dozens of obsolete snapshots in SDL3_net's
+        /// internal pending_output_buffer.
+        OutboundQueue outbound;
     };
 
     /// @brief Dispatch a single decoded message from a client.
@@ -100,15 +121,15 @@ private:
     /// @brief Generate next unique client ID
     ClientId getNextClientId();
 
-    /// @brief Send raw data to a specific client.
-    /// @param clientId  Target client.
-    /// @param data      Pointer to the data payload.
-    /// @param len       Payload length in bytes.
-    /// @return True on success, false if the client is not connected.
-    bool send(const ClientId& clientId, const void* data, int len);
+    /// @brief Enqueue raw data for one client.
+    /// @param replaceKey  See OutboundEntry::replaceKey (0 = always append,
+    ///                    non-zero = replace existing entry with same key).
+    /// @return False if the client is not connected.
+    bool enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void* data, int len);
 
-    /// @brief Broadcast raw data to all clients.
-    bool broadcast(const void* data, int len);
+    /// @brief Enqueue raw data for all currently-connected clients.
+    /// @param replaceKey See `enqueueTo`.
+    void enqueueBroadcast(uint8_t replaceKey, const void* data, int len);
 
     NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 

@@ -189,11 +189,19 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     matchController.update(dt, registry, server);
 
-    // Update Client by sending the registry
+    // Update Client by sending the registry. Each broadcast pushes into
+    // every client's per-client OutboundQueue with replace-on-stale
+    // semantics for snapshot-style messages — actual writes happen in
+    // flushAllOutbound() below.
     server.broadcastRegistry(registry);
     server.broadcastParticleEvents(particleEvents);
     server.broadcastKillEvents(pendingKillEvents);
     pendingKillEvents.clear();
+
+    // Drain the per-client outbound queues to their TCP sockets. Stage 3a
+    // does this on the game thread; stage 3b will move it to a dedicated
+    // network thread.
+    server.flushAllOutbound();
 
     ++tickCount;
 

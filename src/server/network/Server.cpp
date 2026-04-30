@@ -52,13 +52,63 @@ void Server::shutdown()
     clients.clear();
 }
 
-bool Server::send(const ClientId& clientId, const void* data, int len)
+// ── Phase 3a: framing helper ─────────────────────────────────────────────
+//
+// Build the on-the-wire byte sequence (4-byte length prefix + payload) for a
+// single message. Returned by-value so the caller can hand the std::vector
+// straight to OutboundQueue::enqueue without further allocation. Done once
+// per logical message and shared across every per-client enqueue in a
+// broadcast — saves N - 1 framing copies on a broadcast to N clients.
+namespace
 {
-    auto& msgStream = clients.at(clientId).msgStream;
+std::vector<uint8_t> frameMessage(const void* data, int len)
+{
+    std::vector<uint8_t> framed(sizeof(Uint32) + static_cast<size_t>(len));
+    const auto msgLen = static_cast<Uint32>(len);
+    std::memcpy(framed.data(), &msgLen, sizeof(msgLen));
+    std::memcpy(framed.data() + sizeof(msgLen), data, static_cast<size_t>(len));
+    return framed;
+}
+} // namespace
 
-    auto msgLen = static_cast<Uint32>(len);
-    NET_WriteToStreamSocket(msgStream.socket, &msgLen, sizeof(msgLen));
-    return NET_WriteToStreamSocket(msgStream.socket, data, len);
+bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void* data, int len)
+{
+    auto it = clients.find(clientId);
+    if (it == clients.end())
+        return false;
+
+    it->second.outbound.enqueue(replaceKey, frameMessage(data, len));
+    return true;
+}
+
+void Server::enqueueBroadcast(uint8_t replaceKey, const void* data, int len)
+{
+    // Frame once, copy bytes per client. The frame itself is a small
+    // (~70 KB at 100 players) blob and the per-client copy lives in the
+    // queue entry until the network drain ships it; we accept that
+    // allocation overhead in exchange for not re-framing per client.
+    auto framed = frameMessage(data, len);
+    for (auto& [_, conn] : clients) {
+        conn.outbound.enqueue(replaceKey, std::vector<uint8_t>(framed));
+    }
+}
+
+void Server::flushAllOutbound()
+{
+    // Per-tick max-age for unreliable entries. Anything older than this is
+    // dropped before going on the wire — see OutboundQueue::flushTo.
+    constexpr Uint32 k_maxAgeMs = 300;
+
+    for (auto it = clients.begin(); it != clients.end();) {
+        auto& conn = it->second;
+        if (!conn.outbound.flushTo(conn.msgStream.socket, k_maxAgeMs)) {
+            // Socket error during flush — disconnect this client.
+            disconnectClient(conn);
+            it = clients.erase(it);
+            continue;
+        }
+        ++it;
+    }
 }
 
 void Server::poll()
@@ -178,11 +228,15 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     case PacketType::PING: {
         // Echo the payload back as a PONG so the client can measure RTT.
+        // Routed through the per-client outbound queue so the PONG can't
+        // get stuck behind a flood of snapshots in the SDL3_net internal
+        // queue — the original "ping decay on join" symptom.
         uint8_t buf[1 + sizeof(Uint64)];
         buf[0] = static_cast<uint8_t>(PacketType::PONG);
         if (payloadLen == sizeof(Uint64)) {
             std::memcpy(buf + 1, payload, sizeof(Uint64));
-            conn.msgStream.send(buf, static_cast<Uint32>(sizeof(buf)));
+            // PONG is tiny and one-per-second; replaceKey=0 (always send).
+            enqueueTo(conn.clientId, 0, buf, static_cast<int>(sizeof(buf)));
         }
         break;
     }
@@ -213,16 +267,18 @@ Event Server::dequeueEvent()
 // NOTE: playerEntity is the entity id of the player
 bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 {
-    auto& conn = clients.at(clientId);
+    auto it = clients.find(clientId);
+    if (it == clients.end())
+        return false;
+
     uint8_t buf[1 + sizeof(entt::entity)];
     buf[0] = static_cast<uint8_t>(PacketType::ASSIGN_CLIENT_ID);
     std::memcpy(buf + 1, &playerEntity, sizeof(entt::entity));
-    if (!send(clientId, buf, sizeof(buf))) {
-        SDL_Log("Server: failed to send ASSIGN_CLIENT_ID packet to client %d", clientId.value);
-        return false;
-    }
+    // ASSIGN_CLIENT_ID must be delivered (replaceKey=0 → never dropped on
+    // age). It only fires once per connection so queue depth stays trivial.
+    enqueueTo(clientId, 0, buf, sizeof(buf));
 
-    conn.pendingInitialization = false;
+    it->second.pendingInitialization = false;
     return true;
 }
 
@@ -232,9 +288,12 @@ void Server::broadcastRegistry(const Registry& registry)
 
     buf.insert(buf.begin(), static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
 
-    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
-        SDL_Log("Server: failed to broadcast UPDATE_REGISTRY packet to clients");
-    }
+    // Replace-on-stale: a slow client only ever has one snapshot pending in
+    // its userspace queue — always the freshest. Without this, a 100-bot
+    // server can stack dozens of obsolete snapshots in a slow drainer's
+    // SDL3_net pending_output_buffer, all of which still have to be sent
+    // and decoded before catching up.
+    enqueueBroadcast(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY), buf.data(), static_cast<int>(buf.size()));
 }
 
 void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events)
@@ -251,9 +310,11 @@ void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events
     std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
     std::memcpy(buf.data() + 1 + sizeof(uint32_t), events.data(), count * sizeof(NetParticleEvent));
 
-    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
-        SDL_Log("Server: failed to broadcast PARTICLE_SPAWN packet to clients");
-    }
+    // Particle events are discrete moments — each one represents a specific
+    // VFX trigger. We don't replace; we append. (replaceKey = 0 → no
+    // replace, no age cull → must ship.) Phase 4 will move these to the
+    // proper UnreliableSequenced channel where drop-old is OK.
+    enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
 }
 
 int Server::getClientCount()
@@ -267,22 +328,9 @@ void Server::broadcastMatchStatus(MatchStatePacket packet)
     buf[0] = static_cast<uint8_t>(PacketType::MATCH_STATE);
     std::memcpy(buf.data() + 1, &packet, sizeof(MatchStatePacket));
 
-    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
-        SDL_Log("Server: failed to broadcast MATCH_STATE packet to clients");
-    }
-}
-
-bool Server::broadcast(const void* data, int len)
-{
-    bool success = true;
-    for (const auto& [clientId, conn] : clients) {
-        if (!send(clientId, data, len)) {
-            SDL_Log("Server: failed to send broadcast packet to client %d", clientId.value);
-            success = false;
-        }
-    }
-
-    return success;
+    // MATCH_STATE is small and rare, but a stale phase-transition message is
+    // worse than a fresh one — replace.
+    enqueueBroadcast(static_cast<uint8_t>(PacketType::MATCH_STATE), buf.data(), static_cast<int>(buf.size()));
 }
 
 void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
@@ -299,9 +347,8 @@ void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
     std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
     std::memcpy(buf.data() + 1 + sizeof(uint32_t), events.data(), count * sizeof(NetKillEvent));
 
-    if (!broadcast(buf.data(), static_cast<int>(buf.size()))) {
-        SDL_Log("Server: failed to broadcast KILL_EVENT packet to clients");
-    }
+    // Kill events must ship (kill-feed correctness). Append, never drop.
+    enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
 
     SDL_Log("Server: broadcasted %u kill events to clients", count);
 }
