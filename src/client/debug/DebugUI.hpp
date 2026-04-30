@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ecs/components/Hitbox.hpp"
+#include "ecs/physics/SweptCollision.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchStatus.hpp"
 
@@ -112,6 +113,29 @@ public:
 
     bool showHitboxWindow = false;  ///< Show the Hitbox Debug ImGui window.
     bool drawHitboxOverlay = false; ///< Draw 3-D capsule wireframes (independent of window visibility).
+
+    /// @brief Draw the Collision Debug window and (optionally) wireframe overlay
+    /// for all world collision primitives.
+    ///
+    /// @param world        The world geometry to visualise.
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildCollisionUI(const physics::WorldGeometry& world,
+                          const glm::mat4& viewProj,
+                          float screenWidth,
+                          float screenHeight);
+
+    bool showCollisionWindow = false;  ///< Show the Collision Debug ImGui window.
+    bool drawCollisionOverlay = false; ///< Draw world collision wireframes (independent of window visibility).
+
+    // Per-type visibility toggles (all default on when overlay is active).
+    bool drawCollisionPlanes = true;
+    bool drawCollisionBoxes = true;
+    bool drawCollisionBrushes = true;
+    bool drawCollisionCylinders = true;
+    bool drawCollisionSpheres = true;
+    bool drawCollisionTriMeshes = true;
 
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
