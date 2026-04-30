@@ -7,8 +7,6 @@
 
 #include <SDL3/SDL.h>
 
-#include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <glm/glm.hpp>
 #include <stb_truetype.h>
@@ -56,45 +54,6 @@ static bool packRect(std::vector<Shelf>& shelves, int atlasW, int atlasH, int w,
     return true;
 }
 
-// Brute-force SDF bake for one glyph bitmap
-
-/// @brief Compute a signed-distance field from a binary glyph bitmap.
-/// @param bmp Source bitmap (values > 127 are considered inside).
-/// @param bw Bitmap width in pixels.
-/// @param bh Bitmap height in pixels.
-/// @param out Output SDF buffer (same dimensions as bmp).
-/// @param spread Maximum search distance in pixels.
-static void bakeSdf(const uint8_t* bmp, int bw, int bh, uint8_t* out, int spread)
-{
-    for (int py = 0; py < bh; ++py) {
-        for (int px = 0; px < bw; ++px) {
-            const bool inside = bmp[py * bw + px] > 127;
-            float minDist = static_cast<float>(spread);
-
-            const int sx0 = std::max(0, px - spread);
-            const int sx1 = std::min(bw - 1, px + spread);
-            const int sy0 = std::max(0, py - spread);
-            const int sy1 = std::min(bh - 1, py + spread);
-
-            for (int sy = sy0; sy <= sy1; ++sy) {
-                for (int sx = sx0; sx <= sx1; ++sx) {
-                    const bool other = bmp[sy * bw + sx] > 127;
-                    if (other != inside) {
-                        const float dx = static_cast<float>(sx - px);
-                        const float dy = static_cast<float>(sy - py);
-                        const float d = std::sqrt(dx * dx + dy * dy);
-                        minDist = std::min(minDist, d);
-                    }
-                }
-            }
-
-            const float signedDist = inside ? minDist : -minDist;
-            const float norm = 0.5f + signedDist / (static_cast<float>(spread) * 2.f);
-            out[py * bw + px] = static_cast<uint8_t>(std::clamp(norm, 0.f, 1.f) * 255.f);
-        }
-    }
-}
-
 // init
 
 bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
@@ -120,53 +79,44 @@ bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
     std::vector<uint8_t> atlas(k_atlasW * k_atlasH, 0);
     std::vector<Shelf> shelves;
 
-    // Bake ASCII 32-126
+    // SDF encoding: on-edge = 128, scale = 128 byte-units per k_spread pixels.
+    // This maps to [0, 255] with 0.5 (≈128/255) at the glyph boundary,
+    // matching the shader threshold of 0.5.
+    const unsigned char onEdgeValue = 128;
+    const float pixelDistScale = 128.0f / static_cast<float>(k_spread);
+
+    // Bake ASCII 32-126 using stb_truetype's analytic SDF (vector-outline based).
     for (int cp = 32; cp <= 126; ++cp) {
-        int ix0, iy0, ix1, iy1;
-        stbtt_GetCodepointBitmapBox(&font, cp, scale_, scale_, &ix0, &iy0, &ix1, &iy1);
-        const int gw = ix1 - ix0;
-        const int gh = iy1 - iy0;
-        if (gw <= 0 || gh <= 0)
+        int pw, ph, xoff, yoff;
+        unsigned char* sdf =
+            stbtt_GetCodepointSDF(&font, scale_, cp, k_spread, onEdgeValue, pixelDistScale, &pw, &ph, &xoff, &yoff);
+        if (!sdf || pw <= 0 || ph <= 0) {
+            if (sdf)
+                stbtt_FreeSDF(sdf, nullptr);
             continue;
-
-        // Rasterise
-        const int padded = k_spread * 2;
-        const int pw = gw + padded;
-        const int ph = gh + padded;
-        std::vector<uint8_t> bmp(pw * ph, 0);
-        stbtt_MakeCodepointBitmapSubpixel(&font,
-                                          bmp.data() + k_spread * pw + k_spread, // offset into padded buffer
-                                          gw,
-                                          gh,
-                                          pw,
-                                          scale_,
-                                          scale_,
-                                          0.f,
-                                          0.f,
-                                          cp);
-
-        // SDF bake
-        std::vector<uint8_t> sdf(pw * ph);
-        bakeSdf(bmp.data(), pw, ph, sdf.data(), k_spread);
+        }
 
         // Pack into atlas
         int ax, ay;
         if (!packRect(shelves, k_atlasW, k_atlasH, pw, ph, ax, ay)) {
             SDL_Log("SdfAtlas: atlas full at codepoint %d", cp);
+            stbtt_FreeSDF(sdf, nullptr);
             break;
         }
 
         // Copy SDF into atlas
         for (int row = 0; row < ph; ++row)
             std::memcpy(&atlas[(ay + row) * k_atlasW + ax], &sdf[row * pw], pw);
+        stbtt_FreeSDF(sdf, nullptr);
 
-        // Glyph metrics
+        // Glyph metrics.  xoff/yoff from stbtt_GetCodepointSDF already include
+        // the spread padding, matching our previous bearing convention.
         int advW, lsb;
         stbtt_GetCodepointHMetrics(&font, cp, &advW, &lsb);
         GlyphInfo g{};
         g.uvMin = {static_cast<float>(ax) / k_atlasW, static_cast<float>(ay) / k_atlasH};
         g.uvMax = {static_cast<float>(ax + pw) / k_atlasW, static_cast<float>(ay + ph) / k_atlasH};
-        g.bearing = {static_cast<float>(ix0 - k_spread), static_cast<float>(-iy0 + k_spread)};
+        g.bearing = {static_cast<float>(xoff), static_cast<float>(-yoff)};
         g.advance = static_cast<float>(advW) * scale_;
         g.width = static_cast<float>(pw);
         g.height = static_cast<float>(ph);
@@ -200,7 +150,7 @@ bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
     SDL_UnmapGPUTransferBuffer(dev, tb);
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(dev);
-    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUCopyPass* cpass = SDL_BeginGPUCopyPass(cmd);
 
     SDL_GPUTextureTransferInfo src{};
     src.transfer_buffer = tb;
@@ -214,8 +164,8 @@ bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
     dst.h = k_atlasH;
     dst.d = 1;
 
-    SDL_UploadToGPUTexture(cp, &src, &dst, false);
-    SDL_EndGPUCopyPass(cp);
+    SDL_UploadToGPUTexture(cpass, &src, &dst, false);
+    SDL_EndGPUCopyPass(cpass);
     SDL_SubmitGPUCommandBuffer(cmd);
     SDL_ReleaseGPUTransferBuffer(dev, tb);
 
