@@ -4,6 +4,10 @@
 #include "Hud.hpp"
 
 #include "particles/sdf/SdfAtlas.hpp"
+#include "widgets/AmmoCounter.hpp"
+#include "widgets/CrosshairWidget.hpp"
+#include "widgets/HealthArmorBar.hpp"
+#include "widgets/HitMarkerWidget.hpp"
 
 bool Hud::init(SDL_GPUDevice* device,
                SDL_GPUShaderFormat shaderFormat,
@@ -133,5 +137,8 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
 void Hud::createWidgets()
 {
     // Widgets added in draw order (back to front).
-    // Populated by subsequent tasks as each widget is implemented.
+    widgets_.push_back(std::make_unique<CrosshairWidget>());
+    widgets_.push_back(std::make_unique<HealthArmorBar>());
+    widgets_.push_back(std::make_unique<AmmoCounter>());
+    widgets_.push_back(std::make_unique<HitMarkerWidget>());
 }
