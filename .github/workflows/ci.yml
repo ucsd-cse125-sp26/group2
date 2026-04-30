@@ -483,15 +483,15 @@ jobs:
           done < <(git log "$RANGE" --first-parent --pretty=format:"%s%x09%an" --reverse)
 
           # ── Build categorised section ──
-          BODY=""
+          CHANGELOG=""
           if [[ -n "$FEATS" ]]; then
-            BODY="${BODY}## ✨ Features\n${FEATS}\n\n"
+            CHANGELOG="${CHANGELOG}## Features\n${FEATS}\n\n"
           fi
           if [[ -n "$FIXES" ]]; then
-            BODY="${BODY}## 🐛 Fixes\n${FIXES}\n\n"
+            CHANGELOG="${CHANGELOG}## Fixes\n${FIXES}\n\n"
           fi
           if [[ -n "$OTHER" ]]; then
-            BODY="${BODY}## 🔧 Other\n${OTHER}\n\n"
+            CHANGELOG="${CHANGELOG}## Other\n${OTHER}\n\n"
           fi
 
           # ── Append GitHub-generated PR details & contributors ──
@@ -508,15 +508,94 @@ jobs:
           if [[ -n "$GH_NOTES" ]]; then
             CONTRIBUTORS=$(echo "$GH_NOTES" | sed -n '/^## New Contributors/,$p')
             if [[ -n "$CONTRIBUTORS" ]]; then
-              BODY="${BODY}${CONTRIBUTORS}\n\n"
+              CHANGELOG="${CHANGELOG}${CONTRIBUTORS}\n\n"
             fi
           fi
 
           # Compare link
           if [[ -n "$PREV_TAG" ]]; then
-            BODY="${BODY}**Full changelog**: ${REPO_URL}/compare/${PREV_TAG}...${RELEASE_TAG}"
+            CHANGELOG="${CHANGELOG}**Full changelog**: ${REPO_URL}/compare/${PREV_TAG}...${RELEASE_TAG}"
           fi
 
+          echo -e "$CHANGELOG" > changelog.md
+
+      # Ask Gemini to write a short human-readable summary of the changes.
+      # Sends the categorised changelog AND detailed per-commit stats
+      # (files changed, insertions, deletions, diffstat) so the summary
+      # is well-informed.  Falls back gracefully — if the API call fails
+      # the release still ships with just the categorised changelog.
+      - name: Generate AI summary
+        id: summary
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI }}
+          PREV_TAG: ${{ steps.version.outputs.previous }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          CHANGELOG=$(cat changelog.md)
+
+          RANGE="${PREV_TAG:+${PREV_TAG}..HEAD}"
+          RANGE="${RANGE:-HEAD}"
+
+          # Detailed per-commit info: hash, subject, author, date,
+          # plus --stat showing which files changed and how much.
+          COMMIT_DETAILS=$(git log "$RANGE" --first-parent \
+            --format="%n--- commit %h ---  %s  (%an, %ad)%n" --date=short \
+            --stat --stat-width=120 2>/dev/null || echo "")
+
+          # Overall diffstat summary (total files, insertions, deletions)
+          DIFF_SUMMARY=$(git diff --stat --stat-width=120 \
+            "${PREV_TAG:-$(git rev-list --max-parents=0 HEAD | head -1)}"..HEAD \
+            2>/dev/null | tail -1 || echo "")
+
+          # Build the JSON payload with jq to avoid injection from
+          # commit messages or file paths.
+          PAYLOAD=$(jq -n \
+            --arg changelog "$CHANGELOG" \
+            --arg commits "$COMMIT_DETAILS" \
+            --arg diffstat "$DIFF_SUMMARY" \
+            --arg version "$RELEASE_TAG" \
+            '{
+              "contents": [{
+                "parts": [{
+                  "text": ("You are writing a release summary for version " + $version + " of a multiplayer C++ FPS game engine.\n\nWrite a concise 2-4 sentence summary that describes what changed in this release. Focus on what matters to players and developers: new gameplay features, bug fixes, performance improvements, infrastructure changes. Be specific about what was added or fixed, referencing actual system names when relevant.\n\nDo not use emoji. Do not use markdown formatting. Just plain text sentences.\n\nCategorised changelog:\n" + $changelog + "\n\nDetailed commit info (commit hash, message, author, date, files changed):\n" + $commits + "\n\nOverall diff statistics:\n" + $diffstat)
+                }]
+              }],
+              "generationConfig": {
+                "maxOutputTokens": 300,
+                "temperature": 0.3
+              }
+            }')
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            --max-time 15) || true
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            SUMMARY=$(echo "$BODY" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null || echo "")
+            if [[ -n "$SUMMARY" ]]; then
+              echo "$SUMMARY" > summary.txt
+              echo "has_summary=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "has_summary=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "Gemini API returned HTTP $HTTP_CODE — skipping summary."
+            echo "has_summary=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assemble release notes
+        run: |
+          BODY=""
+          if [[ -f summary.txt ]]; then
+            SUMMARY=$(cat summary.txt)
+            BODY="## Summary\n${SUMMARY}\n\n"
+          fi
+          BODY="${BODY}$(cat changelog.md)"
           echo -e "$BODY" > release-notes.md
 
       - name: Create release and upload assets
