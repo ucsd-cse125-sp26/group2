@@ -75,6 +75,8 @@ public:
     /// @brief Shader format selected during init() (SPIR-V or MSL).
     [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const override { return shaderFormat; }
 
+    void setHudTexture(SDL_GPUTexture* hudOutput) override { hudTexture_ = hudOutput; }
+
     /// @brief HDR render target format (RGBA16F). Particle pipelines must match this.
     [[nodiscard]] static constexpr SDL_GPUTextureFormat getHdrFormat()
     {
@@ -254,6 +256,12 @@ private:
     Uint32 captureRTW = 0, captureRTH = 0;
     SDL_GPUTextureFormat captureRTFmt = SDL_GPU_TEXTUREFORMAT_INVALID;
     std::string pendingCapPath;
+
+    // HUD overlay
+    SDL_GPUTexture* hudTexture_ = nullptr;               ///< Non-owning: from Hud system.
+    SDL_GPUGraphicsPipeline* hudBlitPipeline_ = nullptr; ///< Fullscreen quad, alpha blend.
+    SDL_GPUSampler* hudSampler_ = nullptr;               ///< Nearest, clamp.
+    bool initHudBlit();
 
     // Post-processing (Phases 7-12)
     Uint32 postProcW = 0, postProcH = 0; ///< Screen dims used for post-processing texture allocation.

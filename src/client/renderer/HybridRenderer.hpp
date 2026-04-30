@@ -42,6 +42,7 @@ public:
     void setWeaponViewmodel(const WeaponViewmodel& vm) override;
     void requestScreenshot(const std::string& path) override;
     [[nodiscard]] int modelCount() const override;
+    void setHudTexture(SDL_GPUTexture* hudOutput) override;
 
     /// @brief HDR render target format (RGBA16F). Pass-through to the legacy
     /// renderer's static constant so existing call sites keep working.

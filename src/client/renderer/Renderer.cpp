@@ -1510,6 +1510,55 @@ bool Renderer::initCAS()
     return casPipeline != nullptr;
 }
 
+bool Renderer::initHudBlit()
+{
+    SDL_GPUShader* vert = loadShaderFromFile("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+    SDL_GPUShader* frag = loadShaderFromFile("hud_blit.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    SDL_GPUColorTargetDescription ct{};
+    ct.format = swapchainFormat;
+    ct.blend_state.enable_blend = true;
+    ct.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    ct.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    ct.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    ct.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    ct.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    ct.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.target_info.color_target_descriptions = &ct;
+    pci.target_info.num_color_targets = 1;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    hudBlitPipeline_ = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+
+    if (!hudBlitPipeline_) {
+        SDL_Log("Renderer: HUD blit pipeline failed: %s", SDL_GetError());
+        return false;
+    }
+
+    // Nearest-clamp sampler for pixel-perfect blit.
+    SDL_GPUSamplerCreateInfo sci{};
+    sci.min_filter = SDL_GPU_FILTER_NEAREST;
+    sci.mag_filter = SDL_GPU_FILTER_NEAREST;
+    sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    hudSampler_ = SDL_CreateGPUSampler(device, &sci);
+
+    return hudBlitPipeline_ && hudSampler_;
+}
+
 // init
 
 bool Renderer::init(SDL_Window* win)
@@ -1671,6 +1720,9 @@ bool Renderer::init(SDL_Window* win)
         if (!loadHDRSkybox(hdrPath))
             SDL_Log("Renderer: default HDR skybox not loaded — using procedural sky");
     }
+
+    if (!initHudBlit())
+        SDL_Log("Renderer: HUD blit init failed (non-fatal)");
 
     return true;
 }
@@ -3034,6 +3086,16 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         if (drawData)
             ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, pass);
 
+        // HUD overlay (in LDR, on top of everything)
+        if (hudTexture_ && hudBlitPipeline_) {
+            SDL_BindGPUGraphicsPipeline(pass, hudBlitPipeline_);
+            SDL_GPUTextureSamplerBinding hudBinding{};
+            hudBinding.texture = hudTexture_;
+            hudBinding.sampler = hudSampler_;
+            SDL_BindGPUFragmentSamplers(pass, 0, &hudBinding, 1);
+            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0); // fullscreen triangle
+        }
+
         SDL_EndGPURenderPass(pass);
 
         // Blit captureRT → swapchain if capturing.
@@ -3304,6 +3366,12 @@ void Renderer::quit()
         SDL_ReleaseGPUTexture(device, volumetricTexture);
     if (motionVectorTexture)
         SDL_ReleaseGPUTexture(device, motionVectorTexture);
+
+    // HUD blit
+    if (hudBlitPipeline_)
+        SDL_ReleaseGPUGraphicsPipeline(device, hudBlitPipeline_);
+    if (hudSampler_)
+        SDL_ReleaseGPUSampler(device, hudSampler_);
 
     // Release SMAA resources.
     if (smaaEdgeTex)

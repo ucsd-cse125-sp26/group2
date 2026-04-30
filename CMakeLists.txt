@@ -487,6 +487,7 @@ set(SHADER_SOURCES
     sdf_text.vert sdf_text.frag
     # HUD overlay
     hud.vert hud.frag
+    hud_blit.frag
 )
 set(SHADER_OUTPUTS "")
 foreach(SHADER_SRC ${SHADER_SOURCES})

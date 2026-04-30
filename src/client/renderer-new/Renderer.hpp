@@ -67,6 +67,7 @@ public:
     void setWeaponViewmodel(const WeaponViewmodel& /*vm*/) override {}
     void requestScreenshot(const std::string& /*path*/) override {}
     [[nodiscard]] int modelCount() const override { return 0; }
+    void setHudTexture(SDL_GPUTexture* /*hudOutput*/) override {}
 
 private:
     SDL_Window* window_ = nullptr;
