@@ -18,11 +18,22 @@ void main()
     int mode = int(vTexMode + 0.5);
 
     if (mode == 1) {
-        // SDF text
-        float sdf   = texture(sdfAtlas, vUV).r;
-        float w     = fwidth(sdf) * 0.7;
-        float alpha = smoothstep(0.5 - w, 0.5 + w, sdf);
-        outColor = vec4(vColor.rgb, vColor.a * alpha);
+        // SDF text with dark outline for readability.
+        float sdf = texture(sdfAtlas, vUV).r;
+        float fw  = fwidth(sdf);
+
+        // Fill (glyph interior).
+        float fillAlpha = smoothstep(0.5 - fw, 0.5 + fw, sdf);
+
+        // Outline band just outside the glyph edge.
+        const float kOutlineWidth = 0.06;  // in SDF units (~1.5px at native)
+        float outlineEdge  = 0.5 - kOutlineWidth;
+        float outlineAlpha = smoothstep(outlineEdge - fw, outlineEdge + fw, sdf);
+
+        // Composite: dark outline behind colored fill.
+        vec3  color = mix(vec3(0.0), vColor.rgb, fillAlpha);
+        float alpha = outlineAlpha * vColor.a;
+        outColor = vec4(color, alpha);
 
     } else if (mode == 2) {
         // Sprite / icon
