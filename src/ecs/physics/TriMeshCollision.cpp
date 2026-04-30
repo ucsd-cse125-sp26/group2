@@ -427,58 +427,97 @@ void depenetrateAABBvsTriMesh(
         pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
         return;
 
-    // BVH traversal: for each leaf whose AABB overlaps the entity, run per-
-    // triangle SAT MTV.  pos and vel are mutated in-place — subsequent triangle
-    // tests see the already-pushed position so the entity converges out of the
-    // mesh in one pass for typical (curved-but-not-self-intersecting) shapes.
-    int stack[64];
-    int stackPtr = 0;
-    stack[0] = 0;
+    // Iterative aggregated depenetration to reduce jitter on curved surfaces.
+    //
+    // The naïve approach — apply each overlapping triangle's MTV one at a time —
+    // jitters when the entity straddles many triangles at once on a curved
+    // surface (e.g. inside a tube): each push moves the entity into a slightly
+    // different overlap with the *next* triangle, so the net motion oscillates.
+    //
+    // Instead, in each pass we:
+    //   1. Find every overlapping triangle (BVH-walk) at the *same* position.
+    //   2. Sum their normalised MTV directions (a Quake-style "average normal"
+    //      across all simultaneous contacts).
+    //   3. Push once along that averaged direction by the deepest single MTV
+    //      magnitude (plus the pushback bias).
+    //
+    // For a curved mesh, the averaged direction points smoothly out of the
+    // surface (e.g. radially outward from a tube's axis) instead of fighting
+    // between adjacent triangle normals.  For a corner where two faces meet,
+    // it points roughly diagonally and a few iterations clear the residual
+    // overlap on each face.  k_maxPasses caps the work even for pathological
+    // self-intersecting meshes.
+    constexpr int k_maxPasses = 4;
 
-    while (stackPtr >= 0) {
-        const int nodeIdx = stack[stackPtr--];
-        const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+    for (int pass = 0; pass < k_maxPasses; ++pass) {
+        glm::vec3 sumDir(0.0f);
+        float maxDepth = 0.0f;
+        int overlapCount = 0;
 
-        // Cull this node by Minkowski-expanded AABB overlap test.
-        const glm::vec3 expMin = node.boundsMin - halfExtents;
-        const glm::vec3 expMax = node.boundsMax + halfExtents;
-        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
-            pos.z > expMax.z)
-            continue;
+        int stack[64];
+        int stackPtr = 0;
+        stack[0] = 0;
 
-        if (node.count > 0) {
-            // Leaf — depenetrate against each triangle individually.
-            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
-                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
-                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
-                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
-                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+        while (stackPtr >= 0) {
+            const int nodeIdx = stack[stackPtr--];
+            const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
-                glm::vec3 mtv;
-                if (!aabbVsTriMTV(pos, halfExtents, v0, v1, v2, mtv))
-                    continue;
+            // Cull this node by Minkowski-expanded AABB overlap test.
+            const glm::vec3 expMin = node.boundsMin - halfExtents;
+            const glm::vec3 expMax = node.boundsMax + halfExtents;
+            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+                pos.z > expMax.z)
+                continue;
 
-                const float depth = glm::length(mtv);
-                if (depth < 1e-6f)
-                    continue; // numerical floor — already touching
+            if (node.count > 0) {
+                // Leaf — accumulate MTV contributions from every overlapping triangle.
+                for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                    const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                    const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                    const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                    const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
 
-                const glm::vec3 pushDir = mtv / depth;
+                    glm::vec3 mtv;
+                    if (!aabbVsTriMTV(pos, halfExtents, v0, v1, v2, mtv))
+                        continue;
 
-                // Push out by (depth + pushback) so we sit just off the surface.
-                pos += pushDir * (depth + pushback);
+                    const float depth = glm::length(mtv);
+                    if (depth < 1e-6f)
+                        continue;          // numerical floor — already touching
 
-                // Cancel velocity component flowing INTO the surface (vel · pushDir < 0
-                // means motion was opposite to the push, i.e. into the triangle).  This
-                // lets the entity slide along the contact instead of re-penetrating
-                // next frame.
-                const float into = glm::dot(vel, pushDir);
-                if (into < 0.0f)
-                    vel -= pushDir * into;
+                    sumDir += mtv / depth; // unit direction; sum smooths across adjacent tris
+                    maxDepth = std::max(maxDepth, depth);
+                    ++overlapCount;
+                }
+            } else {
+                stack[++stackPtr] = node.leftFirst;
+                stack[++stackPtr] = node.leftFirst + 1;
             }
-        } else {
-            stack[++stackPtr] = node.leftFirst;
-            stack[++stackPtr] = node.leftFirst + 1;
         }
+
+        if (overlapCount == 0)
+            return; // fully separated — done
+
+        const float dirLen = glm::length(sumDir);
+        if (dirLen < 1e-6f)
+            return; // contributions cancel out (rare; happens only if entity is
+                    // perfectly centred inside a closed mesh and all radial pushes
+                    // cancel — no useful direction to push, give up gracefully)
+
+        const glm::vec3 dir = sumDir / dirLen;
+
+        // Push along the averaged direction by enough to clear the deepest single
+        // overlap (plus the pushback bias).  Other simultaneous overlaps may not
+        // be fully cleared if their MTV directions diverge significantly from the
+        // average — those get caught by the next pass.
+        pos += dir * (maxDepth + pushback);
+
+        // Cancel velocity component flowing INTO the contact.  Using the averaged
+        // direction means the entity slides along the *average* surface normal,
+        // which is the smoothest behaviour on curved meshes.
+        const float into = glm::dot(vel, dir);
+        if (into < 0.0f)
+            vel -= dir * into;
     }
 }
 

@@ -83,9 +83,8 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         }
 
         // Load prop collision — must match client for prediction parity.
+        // Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
-        physics::loadPropCollision(
-            assetsDir + "free_1975_porsche_911_930_turbo.glb", mapCollision_, glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f);
         physics::loadPropCollision(
             assetsDir + "metallic_pallet_factory_store.glb", mapCollision_, glm::vec3(0.0f, 0.0f, 600.0f), 0.25f);
         physics::loadPropCollision(assetsDir + "bottle_a.glb", mapCollision_, glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);

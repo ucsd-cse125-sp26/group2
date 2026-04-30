@@ -249,7 +249,7 @@ bool Game::init()
             }
         };
 
-        loadProp("porsche", "free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
+        // Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
         loadProp("pallet", "metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
         loadProp("bottle", "bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
 
