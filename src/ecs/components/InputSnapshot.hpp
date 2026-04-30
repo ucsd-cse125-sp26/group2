@@ -31,8 +31,6 @@ struct InputSnapshot
     bool pickup{false};             ///< Pick Up button (f).
     bool switchToPrimary{false};    ///< Switch to gun in primary slot.
     bool switchToSecondary{false};  ///< Switch to gun in secondary slot.
-    bool switchToTertiary{false};   ///< Switch to gun in tertiary slot.
-    bool switchToQuaternary{false}; ///< Switch to gun in quaternary slot.
     bool refillAmmo{false};         ///< Debug: refill all weapons to full ammo.
 
     float yaw{0.0f};                ///< Horizontal look angle in radians (accumulated from mouse X deltas).

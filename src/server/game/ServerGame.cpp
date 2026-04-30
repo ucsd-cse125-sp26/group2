@@ -238,8 +238,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
-    const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
     registry.emplace<WeaponState>(player,
                                   WeaponState{
                                       .primary =
@@ -254,20 +252,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                               .type = WeaponType::RailGun,
                                               .totalAmmo = railConfig.defaultAmmoCapacity,
                                               .currentMagAmmo = railConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .tertiary =
-                                          GunInstance{
-                                              .type = WeaponType::EnergyGun,
-                                              .totalAmmo = wingmanConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = wingmanConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .quaternary =
-                                          GunInstance{
-                                              .type = WeaponType::Rocket,
-                                              .totalAmmo = rocketConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = rocketConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .current = WeaponSlot::PRIMARY,
