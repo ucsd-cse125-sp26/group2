@@ -2082,14 +2082,6 @@ SDL_AppResult Game::iterate()
     }
     renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
 
-    {
-        static int _f = 0;
-        if (++_f == 10) {
-            renderer.requestScreenshot("/tmp/hud_verify.png");
-            SDL_Log("SCREENSHOT REQUESTED frame %d", _f);
-        }
-    }
-
     if (limitFPSToMonitor != prevLimitFPS)
         applyFrameRateLimit();
 
