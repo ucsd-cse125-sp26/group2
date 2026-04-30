@@ -179,6 +179,14 @@ if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE)
         )
         FetchContent_MakeAvailable(dxc_binaries)
         set(DirectXShaderCompiler_ROOT "${dxc_binaries_SOURCE_DIR}" CACHE PATH "" FORCE)
+
+        # Pre-set FindDirectXShaderCompiler.cmake results so find_library() never
+        # falls back to the Windows SDK's dxcompiler.lib (which is a stub that
+        # lacks the DxcCreateInstance export, causing LNK2019 on some machines).
+        set(DirectXShaderCompiler_INCLUDE_PATH  "${dxc_binaries_SOURCE_DIR}/inc"                  CACHE PATH     "" FORCE)
+        set(DirectXShaderCompiler_dxcompiler_LIBRARY "${dxc_binaries_SOURCE_DIR}/lib/x64/dxcompiler.lib" CACHE FILEPATH "" FORCE)
+        set(DirectXShaderCompiler_dxcompiler_BINARY  "${dxc_binaries_SOURCE_DIR}/bin/x64/dxcompiler.dll" CACHE FILEPATH "" FORCE)
+        set(DirectXShaderCompiler_dxil_BINARY        "${dxc_binaries_SOURCE_DIR}/bin/x64/dxil.dll"       CACHE FILEPATH "" FORCE)
         set(SHADERCROSS_DXC_ENABLED ON)
     else()
         set(SHADERCROSS_DXC_ENABLED OFF)
