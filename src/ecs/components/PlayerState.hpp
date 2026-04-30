@@ -1,28 +1,21 @@
 /// @file PlayerState.hpp
-/// @brief Player locomotion state component for movement systems.
+/// @brief [DEPRECATED, transitional] Original combined player locomotion state.
+///
+/// Phase 2 of the networking overhaul split this into:
+///   * @ref PlayerVisState — replicated to all relevant clients
+///   * @ref PlayerSimState — server-only / owner-mirror bookkeeping
+///
+/// This header now exists only as a temporary alias surface so include
+/// statements migrate gradually. New code must use the split components
+/// directly. This file (and the PlayerState struct itself) will be removed
+/// once every consumer is migrated.
 
 #pragma once
 
+#include "PlayerStateEnums.hpp"
+
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
-
-/// @brief Movement mode — mutually exclusive locomotion states.
-enum class MoveMode : uint8_t
-{
-    OnFoot,        ///< Normal ground/air movement (walk, sprint, crouch, airborne).
-    Sliding,       ///< Momentum slide on the ground.
-    WallRunning,   ///< Running along a wall surface.
-    Climbing,      ///< Climbing vertically up a wall.
-    LedgeGrabbing, ///< Holding onto a ledge at the top of a wall.
-};
-
-/// @brief Which side a wall is on relative to the player.
-enum class WallSide : uint8_t
-{
-    None,
-    Left,
-    Right,
-};
 
 /// @brief Locomotion state for a player entity.
 ///
