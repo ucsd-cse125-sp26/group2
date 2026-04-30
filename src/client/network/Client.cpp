@@ -241,6 +241,46 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     return send(buf, totalLen);
 }
 
+bool Client::acceptReliableSequence(uint16_t seq)
+{
+    // First sequence ever — accept and seed the window.
+    if (!reliableHasAny_) {
+        reliableHasAny_ = true;
+        reliableHighestSeen_ = seq;
+        reliableSeenBitmask_ = 1; // bit 0 = highest-seen marker
+        return true;
+    }
+
+    // Glenn-Fiedler distance with 16-bit wrap. Positive forward delta
+    // means `seq` is newer than highestSeen.
+    const uint16_t fwd = static_cast<uint16_t>(seq - reliableHighestSeen_);
+    if (fwd != 0 && fwd < 32768u) {
+        // Newer: shift the window forward by `fwd` bits, set bit 0
+        // (current = highest-seen), accept.
+        reliableSeenBitmask_ = (fwd >= 64) ? 0 : (reliableSeenBitmask_ << fwd);
+        reliableSeenBitmask_ |= 1ULL;
+        reliableHighestSeen_ = seq;
+        return true;
+    }
+    if (fwd == 0) {
+        // Same as highestSeen → duplicate.
+        return false;
+    }
+
+    // Older. distance = how many slots behind the highest.
+    const uint16_t back = static_cast<uint16_t>(reliableHighestSeen_ - seq);
+    if (back >= 64) {
+        // Too old for the window — assume duplicate / out-of-order
+        // beyond redundancy budget.
+        return false;
+    }
+    const uint64_t bit = 1ULL << back;
+    if (reliableSeenBitmask_ & bit)
+        return false; // already seen
+    reliableSeenBitmask_ |= bit;
+    return true;
+}
+
 float Client::getSnapshotAlpha() const
 {
     // Phase 5a: render-time interpolation alpha based on snapshot timing.
@@ -318,27 +358,37 @@ void Client::networkLoop()
             constexpr int k_maxDatagramsPerCycle = 256;
             while (drained < k_maxDatagramsPerCycle && udpEndpoint_.tryReceive(msg)) {
                 ++drained;
-                if (msg.header.channel != static_cast<uint8_t>(net::ChannelId::Unreliable) ||
-                    msg.header.connectionId != connectionId_ || msg.payload.empty())
-                {
+                if (msg.header.connectionId != connectionId_ || msg.payload.empty()) {
                     msg.from.release();
                     continue;
                 }
 
-                const bool isFragment = (msg.header.flags & 0x01) != 0;
-                if (!isFragment) {
-                    udpRecvQueue_.emplace_back(std::move(msg.payload));
-                } else {
-                    std::vector<uint8_t> assembled;
-                    const auto r = unreliableReassembler_.addFragment(
-                        msg.header, msg.payload.data(), static_cast<int>(msg.payload.size()), assembled);
-                    if (r == net::FragmentReassembler::Result::Complete) {
-                        udpRecvQueue_.emplace_back(std::move(assembled));
+                const auto channel = static_cast<net::ChannelId>(msg.header.channel);
+
+                if (channel == net::ChannelId::Unreliable) {
+                    // Snapshot stream + INPUT/PING. Fragmented if the
+                    // payload exceeded the MTU floor; reassemble.
+                    const bool isFragment = (msg.header.flags & 0x01) != 0;
+                    if (!isFragment) {
+                        udpRecvQueue_.emplace_back(std::move(msg.payload));
+                    } else {
+                        std::vector<uint8_t> assembled;
+                        const auto r = unreliableReassembler_.addFragment(
+                            msg.header, msg.payload.data(), static_cast<int>(msg.payload.size()), assembled);
+                        if (r == net::FragmentReassembler::Result::Complete) {
+                            udpRecvQueue_.emplace_back(std::move(assembled));
+                        }
                     }
-                    // InProgress / Stale / Malformed: nothing to do —
-                    // either we keep accumulating, or the fragment
-                    // gets silently dropped (drop-stale contract).
+                } else if (channel == net::ChannelId::ReliableOrdered) {
+                    // Phase 3d-5: dedup by sequence. The same event
+                    // arrives k_reliableRedundancy times; only the first
+                    // copy gets dispatched. Sliding-window bitmask
+                    // handles wrap and out-of-order without false
+                    // positives on the typical RTT × redundancy span.
+                    if (acceptReliableSequence(msg.header.sequence))
+                        udpRecvQueue_.emplace_back(std::move(msg.payload));
                 }
+                // Other channels: not yet defined; silently drop.
                 msg.from.release();
             }
         }

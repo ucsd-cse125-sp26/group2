@@ -66,6 +66,14 @@ struct TransportConfig
     /// arrives independently. Off until 3d-4 is verified — defaulting
     /// off lets the rollout be config-driven.
     bool snapshotsOverUdp = true;
+
+    /// @brief Stage 3d-5: route KILL_EVENT, PARTICLE_SPAWN, and
+    /// MATCH_STATE through a reliable-style UDP channel instead of
+    /// TCP. Each event is shipped multiple times across consecutive
+    /// network cycles for redundancy; client dedups by per-channel
+    /// sequence number using a 64-entry sliding-window bitset.
+    /// Drops disappear into the next redundant send.
+    bool eventsOverUdp = true;
 };
 
 /// @brief Runtime network connection parameters.

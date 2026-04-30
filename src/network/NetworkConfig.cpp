@@ -54,6 +54,8 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.transport.pingOverUdp = *v;
     if (auto v = transport["snapshots-over-udp"].value<bool>())
         cfg.transport.snapshotsOverUdp = *v;
+    if (auto v = transport["events-over-udp"].value<bool>())
+        cfg.transport.eventsOverUdp = *v;
 
     return cfg;
 }

@@ -230,6 +230,22 @@ private:
     /// rule.
     net::FragmentReassembler unreliableReassembler_;
 
+    /// @brief Phase 3d-5: sliding-window bitset for ReliableOrdered
+    /// channel dedup. Each event arrives k_reliableRedundancy times;
+    /// only the first occurrence triggers dispatch. The window is
+    /// 64 sequences wide, enough to cover RTT × redundancy at any
+    /// reasonable network speed. Sequences older than that get
+    /// dropped (very rare — would require 64 events to arrive
+    /// during one RTT).
+    uint16_t reliableHighestSeen_ = 0;
+    uint64_t reliableSeenBitmask_ = 0;
+    bool reliableHasAny_ = false; ///< False until the first reliable event arrives.
+
+    /// @brief Sliding-window dedup helper. Returns true if the
+    /// caller should dispatch this sequence (i.e. it's new); false
+    /// if it's a duplicate or too old to track.
+    bool acceptReliableSequence(uint16_t seq);
+
     /// @brief Network-thread main loop body.
     void networkLoop();
 

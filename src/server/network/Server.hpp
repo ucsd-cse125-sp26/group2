@@ -18,6 +18,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <atomic>
+#include <deque>
 #include <entt/entity/entity.hpp>
 #include <mutex>
 #include <thread>
@@ -135,6 +136,23 @@ private:
         /// snapshot the server sends to this client. Receiver uses it
         /// to drop stale fragments when a newer set arrives.
         uint16_t udpSnapshotSequence = 0;
+
+        /// @brief Phase 3d-5: per-client outgoing sequence for the
+        /// reliable event stream over UDP. Each pushed event gets
+        /// next-sequence; client dedups against a sliding-window
+        /// bitset of recently-seen sequences.
+        uint16_t reliableNextSequence = 0;
+
+        /// @brief Phase 3d-5: pending reliable events, each scheduled
+        /// for `remainingSends` more cycles. Server drains in network
+        /// loop; entries with `remainingSends == 0` are popped.
+        struct PendingReliableEvent
+        {
+            uint16_t sequence;           ///< Per-channel send sequence.
+            uint8_t remainingSends;      ///< Decremented each send; popped at 0.
+            std::vector<uint8_t> framed; ///< `[PacketType][rest]` payload bytes.
+        };
+        std::deque<PendingReliableEvent> reliableQueue;
     };
 
     /// @brief Dispatch a single decoded message from a client.
@@ -165,6 +183,17 @@ private:
     /// @brief Enqueue raw data for all currently-connected clients.
     /// @param replaceKey See `enqueueTo`.
     void enqueueBroadcast(uint8_t replaceKey, const void* data, int len);
+
+    /// @brief Phase 3d-5: enqueue a reliable event for all clients.
+    ///
+    /// The event is pushed to each client's `reliableQueue` with a
+    /// fresh per-client sequence and `k_reliableRedundancy` send
+    /// budget. Network loop ships entries via UDP each cycle and
+    /// decrements the budget; entries with budget==0 get popped.
+    /// Falls back to TCP `OutboundQueue` (with replaceKey=0) when
+    /// the events-over-udp toggle is off, so the same broadcast
+    /// helpers work in both modes.
+    void enqueueReliableEvent(const void* data, int len);
 
     /// @brief Network-thread main loop body.
     ///

@@ -154,6 +154,36 @@ void Server::flushAllOutbound()
     }
 }
 
+void Server::enqueueReliableEvent(const void* data, int len)
+{
+    // Phase 3d-5: build the framed payload once, then push it into
+    // every connected client's reliable queue with a fresh per-client
+    // sequence number. Each entry rides UDP `k_reliableRedundancy`
+    // times for resilience against UDP loss. If `eventsOverUdp` is
+    // off, fall back to the existing TCP path.
+    constexpr uint8_t k_reliableRedundancy = 3;
+    auto framed = std::vector<uint8_t>(static_cast<size_t>(len));
+    std::memcpy(framed.data(), data, static_cast<size_t>(len));
+
+    std::lock_guard<std::mutex> lock(stateMutex_);
+
+    if (!transportConfig_.eventsOverUdp || !udpEndpoint_.isOpen()) {
+        // TCP fallback. replaceKey = 0 → never drop on age, always ship.
+        for (auto& [_, conn] : clients) {
+            conn.outbound.enqueue(0, frameMessage(data, len));
+        }
+        return;
+    }
+
+    for (auto& [_, conn] : clients) {
+        conn.reliableQueue.push_back(Connection::PendingReliableEvent{
+            .sequence = conn.reliableNextSequence++,
+            .remainingSends = k_reliableRedundancy,
+            .framed = framed,
+        });
+    }
+}
+
 void Server::handleUdpUnreliable(uint32_t connId,
                                  const net::UdpEndpointAddr& from,
                                  const uint8_t* payload,
@@ -288,6 +318,34 @@ void Server::networkLoop()
         {
             std::lock_guard<std::mutex> lock(stateMutex_);
             flushAllOutbound();
+        }
+
+        // ── Phase 3d-5: drain reliable-event queues over UDP ────────
+        //
+        // For each client with a known UDP address, send every pending
+        // reliable event once this cycle and decrement its remaining-
+        // send budget. Pop entries whose budget hit zero. Each event
+        // gets shipped k_reliableRedundancy times across consecutive
+        // cycles so a single dropped datagram doesn't lose the event
+        // (and the client's sequence-based dedup catches the dups).
+        if (udpEndpoint_.isOpen()) {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            for (auto& [_, conn] : clients) {
+                if (conn.udpAddr.addr == nullptr || conn.reliableQueue.empty())
+                    continue;
+                for (auto& entry : conn.reliableQueue) {
+                    net::PacketHeader hdr{};
+                    hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+                    hdr.connectionId = conn.connectionId;
+                    hdr.sequence = entry.sequence;
+                    hdr.channel = static_cast<uint8_t>(net::ChannelId::ReliableOrdered);
+                    udpEndpoint_.send(conn.udpAddr, hdr, entry.framed.data(), static_cast<int>(entry.framed.size()));
+                    if (entry.remainingSends > 0)
+                        --entry.remainingSends;
+                }
+                while (!conn.reliableQueue.empty() && conn.reliableQueue.front().remainingSends == 0)
+                    conn.reliableQueue.pop_front();
+            }
         }
 
         // 1 ms cycle: bytes from a game-thread enqueue land on the wire
@@ -541,11 +599,7 @@ void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events
     std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
     std::memcpy(buf.data() + 1 + sizeof(uint32_t), events.data(), count * sizeof(NetParticleEvent));
 
-    // Particle events are discrete moments — each one represents a specific
-    // VFX trigger. We don't replace; we append. (replaceKey = 0 → no
-    // replace, no age cull → must ship.) Phase 4 will move these to the
-    // proper UnreliableSequenced channel where drop-old is OK.
-    enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
+    enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
 }
 
 int Server::getClientCount()
@@ -560,9 +614,7 @@ void Server::broadcastMatchStatus(MatchStatePacket packet)
     buf[0] = static_cast<uint8_t>(PacketType::MATCH_STATE);
     std::memcpy(buf.data() + 1, &packet, sizeof(MatchStatePacket));
 
-    // MATCH_STATE is small and rare, but a stale phase-transition message is
-    // worse than a fresh one — replace.
-    enqueueBroadcast(static_cast<uint8_t>(PacketType::MATCH_STATE), buf.data(), static_cast<int>(buf.size()));
+    enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
 }
 
 void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
@@ -579,8 +631,7 @@ void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
     std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
     std::memcpy(buf.data() + 1 + sizeof(uint32_t), events.data(), count * sizeof(NetKillEvent));
 
-    // Kill events must ship (kill-feed correctness). Append, never drop.
-    enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
+    enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
 
     SDL_Log("Server: broadcasted %u kill events to clients", count);
 }
