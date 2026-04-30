@@ -8,6 +8,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetKillEvent.hpp"
+#include "network/OutboundQueue.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "network/ShotEvent.hpp"
 
@@ -15,8 +16,11 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <array>
+#include <atomic>
 #include <entt/entt.hpp>
+#include <mutex>
 #include <optional>
+#include <thread>
 
 /// @brief Live network statistics updated each frame.
 struct NetworkStats
@@ -117,4 +121,30 @@ private:
     std::array<InputSnapshot, k_inputRedundancy> inputRing_{};
     size_t inputRingHead_ = 0;  ///< Next write index, wraps mod k_inputRedundancy.
     size_t inputRingCount_ = 0; ///< Valid entries in ring; saturates at k_inputRedundancy.
+
+    // ── Stage 3c: dedicated network thread ────────────────────────────────
+    //
+    // Symmetric to the server's stage 3b. The network thread continuously
+    // (a) pumps the kernel receive buffer into msgStream's recvBuf and
+    // (b) drains the outbound queue to the socket. The game thread keeps
+    // calling sendInputSnapshot / sendPing / poll(registry) — those now
+    // touch the queue + recvBuf under stateMutex_ rather than doing
+    // syscalls inline. The win is that a render-frame stutter on the game
+    // thread no longer causes the kernel buffer to back up.
+    OutboundQueue outbound_;
+    std::mutex stateMutex_;
+    std::thread networkThread_;
+    std::atomic<bool> shouldStop_{false};
+
+    /// @brief Latched-true once the network thread observes a socket error.
+    /// poll(registry) checks this and reports false to the game thread, so
+    /// the existing "server died" disconnect path still works.
+    std::atomic<bool> socketDead_{false};
+
+    /// @brief Network-thread main loop body.
+    void networkLoop();
+
+    /// @brief Decode and dispatch a single complete framed message.
+    /// Called by poll(registry) after pulling the bytes out of recvBuf.
+    void dispatchMessage(const uint8_t* data, Uint32 size, Registry& registry);
 };

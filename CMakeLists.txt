@@ -1353,6 +1353,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistryArchive.hpp"

@@ -45,6 +45,24 @@ public:
     /// @return False if the socket reports an error.
     bool poll(const std::function<void(const void* data, Uint32 size)>& callback);
 
+    /// @brief Read-only half of poll(): drain the kernel into recvBuf.
+    ///
+    /// Stage 3c uses this from a dedicated network thread that owns kernel
+    /// I/O. The corresponding `drainComplete` runs on the game thread to
+    /// dispatch fully-received messages — both halves take a mutex around
+    /// recvBuf so they don't race.
+    ///
+    /// @return False on socket error (caller should disconnect).
+    bool pumpReads();
+
+    /// @brief Decode-only half of poll(): invoke the callback for each
+    ///        complete message currently buffered.
+    ///
+    /// Stage 3c uses this from the game thread after `pumpReads` has run on
+    /// the network thread. Together with pumpReads it does what poll() does
+    /// in the single-threaded code path, just split across two threads.
+    void drainComplete(const std::function<void(const void* data, Uint32 size)>& callback);
+
 private:
     /// @brief Bytes available for parsing in recvBuf, starting at recvHead.
     [[nodiscard]] Uint32 recvAvailable() const noexcept { return static_cast<Uint32>(recvBuf.size()) - recvHead; }
