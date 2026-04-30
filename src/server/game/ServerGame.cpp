@@ -4,6 +4,7 @@
 #include "ServerGame.hpp"
 
 #include "client/animation/CharacterAnimator.hpp"
+#include "ecs/AssetCatalog.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
@@ -38,15 +39,12 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
     registry.clear();
 
     // ── Load map collision ──────────────────────────────────────────────
-    // Scale: the map was authored in meters; the game uses Quake units (inches).
     {
-        static constexpr float k_metersToInches = 39.3701f;
-
         const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + kMapAsset.filename;
 
         physics::MapLoadOptions opts;
-        opts.scale = k_metersToInches;
+        opts.scale = kMapAsset.loadScale;
         opts.allMeshesAreCollision = true; // Prototype map — every mesh is collision.
         opts.addFloorPlane = false;        // Map geometry provides its own floor.
 
@@ -61,11 +59,8 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
 
         // Load prop collision — must match client for prediction parity.
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
-        physics::loadPropCollision(
-            assetsDir + "free_1975_porsche_911_930_turbo.glb", mapCollision_, glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f);
-        physics::loadPropCollision(
-            assetsDir + "metallic_pallet_factory_store.glb", mapCollision_, glm::vec3(0.0f, 0.0f, 600.0f), 0.25f);
-        physics::loadPropCollision(assetsDir + "bottle_a.glb", mapCollision_, glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+        for (const AssetDefinition& def : kPropAssets)
+            physics::loadPropCollision(assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale);
 
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());
