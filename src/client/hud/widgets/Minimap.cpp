@@ -5,6 +5,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <cmath>
+
 Minimap::Minimap()
 {
     anchor = HudAnchor::TopLeft;
@@ -18,6 +20,7 @@ void Minimap::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tw
 {
     localX_ = state.localPlayerX;
     localZ_ = state.localPlayerZ;
+    localYaw_ = state.localPlayerYaw;
     worldRange_ = state.minimapWorldRange;
     enemies_.clear();
     for (const auto& d : state.enemyDots)
@@ -43,13 +46,19 @@ void Minimap::draw(HudContext& ctx, float x, float y)
     const float pd = ds;
     ctx.roundedRect(cx - pd * 0.5f, cy - pd * 0.5f, pd, pd, pd * 0.5f, HudColor(0.f, 1.f, 0.f, 1.f));
 
-    // Enemy dots (red circles) — world offset mapped to minimap pixels.
+    // Enemy dots (red circles) — world offset mapped to minimap pixels,
+    // rotated by player yaw so the player's forward is always "up" on the map.
     const float worldToPixel = ms / (worldRange_ * 2.f);
+    const float sinYaw = std::sin(localYaw_);
+    const float cosYaw = std::cos(localYaw_);
     for (const auto& e : enemies_) {
-        const float dx = (e.worldX - localX_) * worldToPixel;
-        const float dz = (e.worldZ - localZ_) * worldToPixel;
-        const float ex = cx + dx;
-        const float ey = cy + dz;
+        const float wdx = (e.worldX - localX_) * worldToPixel;
+        const float wdz = (e.worldZ - localZ_) * worldToPixel;
+        // Rotate offset around center by negative yaw.
+        const float dx = wdx * cosYaw - wdz * sinYaw;
+        const float dz = wdx * sinYaw + wdz * cosYaw;
+        const float ex = cx - dx;
+        const float ey = cy - dz;
         if (ex > x && ex < x + ms && ey > y && ey < y + ms) {
             ctx.roundedRect(ex - enemyDs * 0.5f,
                             ey - enemyDs * 0.5f,

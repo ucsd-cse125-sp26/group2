@@ -171,6 +171,7 @@ struct HudGameState
 
     // Minimap.
     float localPlayerX = 0.f, localPlayerZ = 0.f;
+    float localPlayerYaw = 0.f;       ///< Player facing direction (radians, 0 = +Z, CW).
     std::span<const HudMinimapDot> enemyDots;
     float minimapWorldRange = 1000.f; ///< World units visible in each direction from center.
 
