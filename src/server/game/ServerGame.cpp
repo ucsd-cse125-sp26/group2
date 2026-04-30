@@ -90,18 +90,32 @@ void ServerGame::run()
     Uint64 nextTick = SDL_GetPerformanceCounter();
 
     // temp weapon spawner
-    const entt::entity spawner = registry.create();
+    const entt::entity energySpawner = registry.create();
     registry.emplace<WeaponSpawner>(
-        spawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
-    registry.emplace<Position>(spawner, glm::vec3{12.0f, 15.0f, 12.0f});
-    registry.emplace<CollisionShape>(spawner);
+        energySpawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(energySpawner, glm::vec3{-100.0f, 15.0f, 0.0f});
+    registry.emplace<CollisionShape>(energySpawner);
 
     // temp rocket spawner
     const entt::entity rocketSpawner = registry.create();
     registry.emplace<WeaponSpawner>(rocketSpawner,
-                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
-    registry.emplace<Position>(rocketSpawner, glm::vec3{-200.0f, 15.0f, 12.0f});
+                                    WeaponSpawner{.type = WeaponType::Rocket, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(rocketSpawner, glm::vec3{-100.0f, 15.0f, 120.0f});
     registry.emplace<CollisionShape>(rocketSpawner);
+
+    // temp rocket spawner
+    const entt::entity rifleSpawner = registry.create();
+    registry.emplace<WeaponSpawner>(rifleSpawner,
+                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(rifleSpawner, glm::vec3{-100.0f, 15.0f, -120.0f});
+    registry.emplace<CollisionShape>(rifleSpawner);
+
+    // temp rail gun spawner
+    const entt::entity railSpawner = registry.create();
+    registry.emplace<WeaponSpawner>(railSpawner,
+                                    WeaponSpawner{.type = WeaponType::RailGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(railSpawner, glm::vec3{-100.0f, 15.0f, -240.0f});
+    registry.emplace<CollisionShape>(railSpawner);
 
     while (running) {
         server.poll();

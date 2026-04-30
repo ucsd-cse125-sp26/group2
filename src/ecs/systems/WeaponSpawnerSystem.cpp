@@ -33,7 +33,7 @@ inline bool overlapsAABB(glm::vec3 aPos, glm::vec3 aHalf, glm::vec3 bPos, glm::v
 /// @param spawnerPos    Position of the spawner entity.
 /// @param spawnerShape  Collision shape of the spawner.
 /// @param spawner       Spawner component (weapon type, availability, cooldown).
-inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner spawner)
+inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner& spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState>();
     view.each([&](entt::entity player,
@@ -74,7 +74,6 @@ void runWeaponSpawners(Registry& registry, float dt)
         checkForPlayers(registry, pos, shape, spawner);
         if ((spawner.spawnCooldown - dt) > 0.0f) {
             spawner.spawnCooldown -= dt;
-            SDL_Log("%f", spawner.spawnCooldown);
         } else {
             spawner.spawnCooldown = 0;
             spawner.hasWeapon = true;

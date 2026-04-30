@@ -157,6 +157,7 @@ private:
     int glowSphereModelIdx_ = -1;
     int movableSphereModelIdx_ = -1;
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
+    int weaponAssetIds_[4] = {-1, -1, -1, -1};
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.

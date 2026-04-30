@@ -5,6 +5,7 @@
 
 #include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
+#include "ecs/AssetCatalog.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
@@ -44,6 +45,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -52,6 +54,22 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
+
+namespace
+{
+int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
+{
+    return assets.add(def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
+}
+
+glm::quat assetRotation(const AssetEntry& asset)
+{
+    const glm::vec3 r = glm::radians(asset.renderRotationDegrees);
+    return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) *
+           glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
+           glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
+}
+} // namespace
 
 bool Game::init()
 {
@@ -156,14 +174,12 @@ bool Game::init()
     // Scale: the map was authored in meters; the game uses Quake units (inches).
     // 1 m = 39.3701 in.
     {
-        static constexpr float k_metersToInches = 39.3701f;
-
         const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + kMapAsset.filename;
 
         // 1) Extract collision geometry (prototype mode: all meshes → collision).
         physics::MapLoadOptions opts;
-        opts.scale = k_metersToInches;
+        opts.scale = kMapAsset.loadScale;
         opts.allMeshesAreCollision = true; // Prototype map — every mesh is both visual and collision.
         opts.addFloorPlane = false;        // Map geometry provides its own floor.
 
@@ -177,8 +193,9 @@ bool Game::init()
         }
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
-        const int mapId = assets_.add("map1", "maps/map1.glb", AssetRole::Map);
-        const int mapModelIdx = renderer.loadSceneModel("maps/map1.glb", glm::vec3(0.0f), k_metersToInches);
+        const int mapId = addAssetDefinition(assets_, kMapAsset);
+        const int mapModelIdx =
+            renderer.loadSceneModel(kMapAsset.filename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
             renderer.setModelScenePass(mapModelIdx, true);
@@ -196,24 +213,23 @@ bool Game::init()
         const std::string basePath = base ? base : "";
 
         // Helper: load a prop with render + collision in one call.
-        auto loadProp = [&](const char* name, const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
-            const int id = assets_.add(name, filename, AssetRole::Prop);
-            const int modelIdx = renderer.loadSceneModel(filename, pos, scale, flipUVs);
+        auto loadProp = [&](const AssetDefinition& def) {
+            const int id = addAssetDefinition(assets_, def);
+            const int modelIdx = renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
             assets_.setModelIndex(id, modelIdx);
             if (modelIdx >= 0) {
                 renderer.setModelScenePass(modelIdx, true);
             }
 
             // Load collision at the same position/scale.
-            const std::string fullPath = basePath + "assets/" + filename;
-            if (physics::loadPropCollision(fullPath, mapCollision_, pos, scale)) {
+            const std::string fullPath = basePath + "assets/" + def.filename;
+            if (physics::loadPropCollision(fullPath, mapCollision_, def.loadTranslation, def.loadScale)) {
                 assets_.setHasCollision(id);
             }
         };
 
-        loadProp("porsche", "free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
-        loadProp("pallet", "metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
-        loadProp("bottle", "bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+        for (const AssetDefinition& def : kPropAssets)
+            loadProp(def);
 
         // Update the active world with the new collision data (map + all props).
         physics::setActiveWorld(mapCollision_.geometry());
@@ -221,8 +237,9 @@ bool Game::init()
 
     // ── Load entity models (render only, drawn via EntityRenderCmd) ──────
     {
-        const int id = assets_.add("wraith", "Apex_Legend_Wraith.glb", AssetRole::Entity);
-        wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+        const int id = addAssetDefinition(assets_, kWraithAsset);
+        wraithModelIdx = renderer.loadSceneModel(
+            kWraithAsset.filename, kWraithAsset.loadTranslation, kWraithAsset.loadScale, kWraithAsset.flipUVs);
         assets_.setModelIndex(id, wraithModelIdx);
         if (wraithModelIdx < 0)
             SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
@@ -230,15 +247,16 @@ bool Game::init()
 
     // Load all weapon models (per WeaponType)
     {
-        static const char* k_weaponNames[] = {"weapon_rifle", "weapon_rocket", "weapon_railgun", "weapon_energy"};
-        for (int i = 0; i < 4; ++i) {
-            const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
-            if (info.filename) {
-                const int id = assets_.add(k_weaponNames[i], info.filename, AssetRole::Entity);
-                weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
+        for (std::size_t i = 0; i < kWeaponAssets.size(); ++i) {
+            const AssetDefinition& def = kWeaponAssets[i];
+            if (def.filename) {
+                const int id = addAssetDefinition(assets_, def);
+                weaponAssetIds_[i] = id;
+                weaponModelIndices_[i] =
+                    renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
                 assets_.setModelIndex(id, weaponModelIndices_[i]);
                 if (weaponModelIndices_[i] < 0)
-                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
             }
         }
     }
@@ -246,19 +264,19 @@ bool Game::init()
     // ── Procedural effects ──────────────────────────────────────────────
     {
         LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
-        const int id = assets_.add("glow_sphere", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[0]);
         glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
         assets_.setModelIndex(id, glowSphereModelIdx_);
     }
     {
         LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
-        const int id = assets_.add("glow_sphere_movable", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[1]);
         movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
         assets_.setModelIndex(id, movableSphereModelIdx_);
     }
     {
         LoadedModel cylModel = createGlowCylinder(24, 1, glm::vec3(8.0f, 2.0f, 10.0f));
-        const int id = assets_.add("glow_cylinder", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[2]);
         glowCylinderModelIdx_ = renderer.uploadSceneModel(cylModel);
         assets_.setModelIndex(id, glowCylinderModelIdx_);
     }
@@ -2191,37 +2209,44 @@ void Game::refreshRemoteRespawnRenderables()
     registry.view<Position, WeaponSpawner, CollisionShape>().each(
         [&](entt::entity e, const Position&, const WeaponSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            rend.modelIndex = 1;
-
-            switch (spawner.type) {
-            case WeaponType::Rifle:
-                rend.modelIndex = 6;
-                rend.scale = glm::vec3(0.025f);
-                break;
-            case WeaponType::RailGun:
-                rend.modelIndex = 7;
-                rend.scale = glm::vec3(1.0f);
-                break;
-            case WeaponType::Rocket:
-                rend.modelIndex = 8;
-                rend.scale = glm::vec3(0.025f);
-                break;
-            case WeaponType::EnergyGun:
-                rend.modelIndex = 9;
-                rend.scale = glm::vec3(1.0f);
-                break;
-            default:
-                rend.modelIndex = 1;
-                rend.scale = glm::vec3(1.0f);
+            const int weaponIndex = static_cast<int>(spawner.type);
+            if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
+                weaponAssetIds_[weaponIndex] < 0) {
+                rend.modelIndex = -1;
+                rend.visible = false;
+                return;
             }
 
-            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            // rend.scale = glm::vec3(1);
-            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-            rend.visible = true;
-            // if (spawner.hasWeapon) {
-            //     rend.visible = true;
-            // }
+            const int assetId = weaponAssetIds_[weaponIndex];
+            const AssetEntry& asset = assets_.entry(assetId);
+
+            rend.modelIndex = asset.modelIndex;
+            rend.scale = asset.renderScale;
+
+            // Weapon bob and rotate
+            static constexpr float k_spawnerSpinRadiansPerSec = glm::radians(45.0f);
+            static constexpr float k_spawnerBobAmplitude = 6.0f;
+            static constexpr float k_spawnerBobHz = 0.6f;
+            static constexpr float k_twoPi = 6.28318530718f;
+
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.visible = spawner.hasWeapon;
+
+            if (spawner.hasWeapon) {
+                rend.orientation =
+                    glm::angleAxis(t * k_spawnerSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) *
+                    assetRotation(asset);
+
+                rend.translation = asset.renderTranslation +
+                                   glm::vec3{0.0f,
+                                             std::sin(t * k_twoPi * k_spawnerBobHz) * k_spawnerBobAmplitude,
+                                             0.0f};
+            } else {
+                rend.orientation = assetRotation(asset);
+                rend.translation = asset.renderTranslation;
+            }
+
         });
 }
 
