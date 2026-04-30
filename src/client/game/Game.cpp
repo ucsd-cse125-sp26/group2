@@ -30,6 +30,7 @@
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "hud/debug/HudDebugPanel.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -518,7 +519,8 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_F2:
             // Animation Tester is owned by Game (animUI_), not DebugUI, so
             // pass its visibility flag in so F2 toggles every panel uniformly.
-            debugUI.toggleAllPanels({&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_});
+            debugUI.toggleAllPanels(
+                {&animUI_.show, &showViewmodelUI, &showTPWeaponUI_, &showDynLightUI_, &showHudDebug_});
             break;
 
         // Particle system test keys
@@ -1716,6 +1718,8 @@ SDL_AppResult Game::iterate()
     debugUI.buildLightingUI(renderer);
     debugUI.buildSkyboxUI(renderer);
 #endif
+
+    HudDebugPanel::build(hud_, &showHudDebug_);
 
     // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
     if (showViewmodelUI) {

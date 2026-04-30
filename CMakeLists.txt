@@ -655,6 +655,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -951,6 +953,8 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
