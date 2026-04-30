@@ -96,6 +96,38 @@ void HudContext::rect(float x, float y, float w, float h, HudColor color)
     emitQuad(x, y, w, h, 0, 0, 0, 0, color, 0.f);
 }
 
+void HudContext::rotatedRect(float cx, float cy, float w, float h, float angleDeg, HudColor color)
+{
+    const float rad = angleDeg * 3.14159265f / 180.f;
+    const float cosA = std::cos(rad);
+    const float sinA = std::sin(rad);
+    const float hw = w * 0.5f;
+    const float hh = h * 0.5f;
+
+    // Four corners relative to center, rotated.
+    auto rot = [&](float lx, float ly) -> std::pair<float, float> {
+        return {cx + lx * cosA - ly * sinA, cy + lx * sinA + ly * cosA};
+    };
+
+    auto [tlx, tly] = rot(-hw, -hh);
+    auto [trx, trY] = rot(hw, -hh);
+    auto [brx, brY] = rot(hw, hh);
+    auto [blx, blY] = rot(-hw, hh);
+
+    spanDirty_ = true;
+    auto v = [&](float px, float py) -> HudVertex {
+        return HudVertex{{px, py}, {0, 0}, {color.r, color.g, color.b, color.a}, 0.f, {0, 0, 0}};
+    };
+
+    // Two triangles: TL-TR-BL, TR-BR-BL.
+    vertices_.push_back(v(tlx, tly));
+    vertices_.push_back(v(trx, trY));
+    vertices_.push_back(v(blx, blY));
+    vertices_.push_back(v(trx, trY));
+    vertices_.push_back(v(brx, brY));
+    vertices_.push_back(v(blx, blY));
+}
+
 void HudContext::rectOutline(float x, float y, float w, float h, float thickness, HudColor color)
 {
     rect(x, y, w, thickness, color);                                             // top

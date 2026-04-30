@@ -76,10 +76,13 @@ void Hud::processEvent(const SDL_Event* event)
 void Hud::update(float dt, const HudGameState& state)
 {
     tweens_.update(dt);
+    const float scale = screenH_ / 1080.f;
     // Update ALL widgets (not just visible ones) so data stays fresh
     // when toggled on (e.g. Scoreboard on TAB shows current frame data).
-    for (auto& w : widgets_)
+    for (auto& w : widgets_) {
+        w->uiScale_ = scale;
         w->update(dt, state, tweens_);
+    }
 }
 
 void Hud::render()
@@ -151,8 +154,8 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
         break;
     }
 
-    outX = baseX + w.offsetX;
-    outY = baseY + w.offsetY;
+    outX = baseX + w.offsetX * w.uiScale_;
+    outY = baseY + w.offsetY * w.uiScale_;
 }
 
 void Hud::createWidgets()

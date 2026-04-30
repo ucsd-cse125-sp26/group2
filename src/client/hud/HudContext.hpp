@@ -28,6 +28,7 @@ public:
     void rect(float x, float y, float w, float h, HudColor color);
     void rectOutline(float x, float y, float w, float h, float thickness, HudColor color);
     void roundedRect(float x, float y, float w, float h, float radius, HudColor color);
+    void rotatedRect(float cx, float cy, float w, float h, float angleDeg, HudColor color);
 
     // ── Bars ────────────────────────────────────────────────────────────
 

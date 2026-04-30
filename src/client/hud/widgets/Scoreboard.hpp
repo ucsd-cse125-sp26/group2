@@ -7,11 +7,11 @@
 
 struct Scoreboard : HudWidget
 {
-    float panelWidth = 500.f;
-    float panelHeight = 400.f;
-    float headerFontSize = 18.f;
-    float rowFontSize = 14.f;
-    float rowHeight = 22.f;
+    float panelWidth = 600.f;
+    float panelHeight = 450.f;
+    float headerFontSize = 22.f;
+    float rowFontSize = 18.f;
+    float rowHeight = 26.f;
 
     Scoreboard();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

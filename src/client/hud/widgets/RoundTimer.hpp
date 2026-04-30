@@ -5,7 +5,7 @@
 
 struct RoundTimer : HudWidget
 {
-    float fontSize = 24.f;
+    float fontSize = 30.f;
     float lowTimeThreshold = 10.f; ///< Seconds — color shifts to red below this.
 
     RoundTimer();

@@ -7,9 +7,9 @@
 
 struct AmmoCounter : HudWidget
 {
-    float clipFontSize = 32.f;
-    float reserveFontSize = 18.f;
-    float dividerPadding = 4.f;
+    float clipFontSize = 42.f;
+    float reserveFontSize = 22.f;
+    float dividerPadding = 6.f;
 
     AmmoCounter();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

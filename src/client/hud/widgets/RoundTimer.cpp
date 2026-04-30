@@ -19,6 +19,7 @@ void RoundTimer::update(float /*dt*/, const HudGameState& state, HudTweenPool& /
 
 void RoundTimer::draw(HudContext& ctx, float x, float y)
 {
+    const float s = uiScale_;
     const int minutes = static_cast<int>(timeRemaining_) / 60;
     const int seconds = static_cast<int>(timeRemaining_) % 60;
 
@@ -27,5 +28,5 @@ void RoundTimer::draw(HudContext& ctx, float x, float y)
 
     const HudColor color = (timeRemaining_ <= lowTimeThreshold) ? HudColor(1.f, 0.2f, 0.2f, 1.f) : HudColor::white();
 
-    ctx.text(buf, x, y, fontSize, color, HudAlign::Center);
+    ctx.text(buf, x, y, fontSize * s, color, HudAlign::Center);
 }

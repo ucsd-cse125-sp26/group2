@@ -27,21 +27,22 @@ void HitMarkerWidget::draw(HudContext& ctx, float cx, float cy)
         return;
 
     const HudColor color = isHeadshot_ ? HudColor(1.f, 0.3f, 0.3f, alpha_) : HudColor(1.f, 1.f, 1.f, alpha_);
-    const float gap = armGap * scale_;
-    const float len = armLength * scale_;
-    const float t = armThickness;
+    const float s = uiScale_;
+    const float gap = armGap * scale_ * s;
+    const float len = armLength * scale_ * s;
+    const float t = armThickness * s;
 
-    // Four diagonal arms (45° rotated X pattern).
-    const float d = 0.707f; // cos(45°)
-    const float gd = gap * d;
-    const float ld = len * d;
+    // Four diagonal arms forming an X pattern.
+    // Each arm center is offset from screen center along the 45° diagonal.
+    const float d = 0.7071f; // cos(45°) = sin(45°)
+    const float armCenterDist = gap + len * 0.5f;
 
-    // Top-right arm
-    ctx.rect(cx + gd, cy - gd - ld, t, ld, color);
-    // Top-left arm
-    ctx.rect(cx - gd - t, cy - gd - ld, t, ld, color);
-    // Bottom-right arm
-    ctx.rect(cx + gd, cy + gd, t, ld, color);
-    // Bottom-left arm
-    ctx.rect(cx - gd - t, cy + gd, t, ld, color);
+    // Top-right arm (rotated 45°)
+    ctx.rotatedRect(cx + d * armCenterDist, cy - d * armCenterDist, t, len, 45.f, color);
+    // Top-left arm (rotated -45°)
+    ctx.rotatedRect(cx - d * armCenterDist, cy - d * armCenterDist, t, len, -45.f, color);
+    // Bottom-right arm (rotated -45°)
+    ctx.rotatedRect(cx + d * armCenterDist, cy + d * armCenterDist, t, len, -45.f, color);
+    // Bottom-left arm (rotated 45°)
+    ctx.rotatedRect(cx - d * armCenterDist, cy + d * armCenterDist, t, len, 45.f, color);
 }

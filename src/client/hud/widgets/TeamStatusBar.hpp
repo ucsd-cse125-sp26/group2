@@ -5,9 +5,9 @@
 
 struct TeamStatusBar : HudWidget
 {
-    float indicatorSize = 12.f;
-    float indicatorSpacing = 4.f;
-    float scoreFontSize = 20.f;
+    float indicatorSize = 14.f;
+    float indicatorSpacing = 5.f;
+    float scoreFontSize = 24.f;
 
     TeamStatusBar();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

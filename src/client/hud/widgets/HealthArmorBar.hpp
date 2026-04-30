@@ -8,11 +8,11 @@
 struct HealthArmorBar : HudWidget
 {
     // Layout constants (tweakable via ImGui debug panel).
-    float barWidth = 200.f;
-    float barHeight = 16.f;
-    float barSpacing = 4.f;
-    float fontSize = 18.f;
-    float textPadding = 6.f;
+    float barWidth = 260.f;
+    float barHeight = 20.f;
+    float barSpacing = 6.f;
+    float fontSize = 22.f;
+    float textPadding = 8.f;
 
     HealthArmorBar();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

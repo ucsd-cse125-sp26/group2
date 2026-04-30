@@ -10,10 +10,10 @@
 
 struct KillFeed : HudWidget
 {
-    float entryHeight = 22.f;
+    float entryHeight = 26.f;
     float entryPadding = 4.f;
     float entryLifetime = 5.f;
-    float fontSize = 14.f;
+    float fontSize = 18.f;
     float fadeOutDuration = 0.5f;
     int maxEntries = 6;
 

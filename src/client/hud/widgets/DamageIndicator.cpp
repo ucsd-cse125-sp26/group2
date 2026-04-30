@@ -23,6 +23,7 @@ void DamageIndicator::update(float dt, const HudGameState& state, HudTweenPool& 
 
 void DamageIndicator::draw(HudContext& ctx, float cx, float cy)
 {
+    const float s = uiScale_;
     for (const auto& a : arcs_) {
         const float alpha = std::clamp(a.timer / fadeTime, 0.f, 1.f);
         const float rad = glm::radians(a.angleDeg);
@@ -30,13 +31,12 @@ void DamageIndicator::draw(HudContext& ctx, float cx, float cy)
         const float dx = std::sin(rad);
         const float dy = -std::cos(rad);
         // Arc center position.
-        const float ax = cx + dx * arcDistance;
-        const float ay = cy + dy * arcDistance;
+        const float dist = arcDistance * s;
+        const float ax = cx + dx * dist;
+        const float ay = cy + dy * dist;
+        const float al = arcLength * s;
+        const float at = arcThickness * s;
         // Draw a small rect oriented toward the damage direction.
-        ctx.rect(ax - arcThickness * 0.5f,
-                 ay - arcLength * 0.5f,
-                 arcThickness,
-                 arcLength,
-                 HudColor(1.f, 0.1f, 0.1f, alpha * 0.7f));
+        ctx.rect(ax - at * 0.5f, ay - al * 0.5f, at, al, HudColor(1.f, 0.1f, 0.1f, alpha * 0.7f));
     }
 }

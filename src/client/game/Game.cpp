@@ -2000,10 +2000,10 @@ SDL_AppResult Game::iterate()
 
         thread_local std::vector<HudKillFeedEntry> hudKillEntries;
         hudKillEntries.clear();
-        // Only pass NEW events (first frame they appear, displayTimer == entryLifetime).
-        // The KillFeed widget manages its own timers internally.
-        for (const auto& evt : killFeed) {
-            if (evt.displayTimer >= 4.9f) { // ~5.0 means just-arrived this frame
+        // Only pass each event once — sentToHud flag prevents duplicates.
+        for (auto& evt : killFeed) {
+            if (!evt.sentToHud) {
+                evt.sentToHud = true;
                 HudKillFeedEntry entry;
                 if (localClientId.value != -1 && evt.killerId == localClientId)
                     entry.killerName = "You";
@@ -2058,6 +2058,24 @@ SDL_AppResult Game::iterate()
         hudState.allies = hudAllPlayers;
         hudState.allyScore = 0;
         hudState.enemyScore = 0;
+
+        // ── Minimap: local player + all other player positions ──
+        registry.view<LocalPlayer, Position>().each([&](const Position& pos) {
+            hudState.localPlayerX = pos.value.x;
+            hudState.localPlayerZ = pos.value.z;
+        });
+
+        thread_local std::vector<HudMinimapDot> hudMinimapDots;
+        hudMinimapDots.clear();
+        registry.view<ClientId, Position, PlayerState>().each(
+            [&](const ClientId& cid, const Position& pos, const PlayerState& ps) {
+                if (ps.IsDead)
+                    return;
+                if (localClientId.value != -1 && cid == localClientId)
+                    return; // Skip local player (always drawn at center).
+                hudMinimapDots.push_back({pos.value.x, pos.value.z});
+            });
+        hudState.enemyDots = hudMinimapDots;
 
         // ── Screen dimensions ──
         int winW = 0, winH = 0;

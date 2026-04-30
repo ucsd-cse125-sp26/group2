@@ -116,6 +116,12 @@ struct HudTeamMemberStatus
     int ping = 0;
 };
 
+/// @brief World-space position for minimap display.
+struct HudMinimapDot
+{
+    float worldX = 0.f, worldZ = 0.f;
+};
+
 /// @brief Snapshot of game state consumed by the HUD each frame.
 ///
 /// Filled by Game from ECS data. The HUD never imports ECS headers.
@@ -138,6 +144,11 @@ struct HudGameState
     std::span<const HudTeamMemberStatus> allies;
     std::span<const HudTeamMemberStatus> enemies;
     int allyScore = 0, enemyScore = 0;
+
+    // Minimap.
+    float localPlayerX = 0.f, localPlayerZ = 0.f;
+    std::span<const HudMinimapDot> enemyDots;
+    float minimapWorldRange = 100.f; ///< World units visible in each direction from center.
 
     // Screen dimensions (set by Game each frame).
     float screenW = 1280.f, screenH = 720.f;

@@ -36,27 +36,27 @@ void HealthArmorBar::update(float /*dt*/, const HudGameState& state, HudTweenPoo
 
 void HealthArmorBar::draw(HudContext& ctx, float x, float y)
 {
+    const float s = uiScale_;
+    const float bw = barWidth * s;
+    const float bh = barHeight * s;
+    const float bs = barSpacing * s;
+    const float fs = fontSize * s;
+    const float tp = textPadding * s;
+
     // Health bar.
-    ctx.bar(
-        x, y, barWidth, barHeight, healthFill_, HudColor(0.2f, 0.8f, 0.2f, 0.9f), HudColor(0.15f, 0.15f, 0.15f, 0.7f));
+    ctx.bar(x, y, bw, bh, healthFill_, HudColor(0.2f, 0.8f, 0.2f, 0.9f), HudColor(0.15f, 0.15f, 0.15f, 0.7f));
 
     // Health text.
     char hpText[16];
     SDL_snprintf(hpText, sizeof(hpText), "%d", displayHealth_);
-    ctx.text(hpText, x + barWidth + textPadding, y, fontSize, HudColor::white());
+    ctx.text(hpText, x + bw + tp, y, fs, HudColor::white());
 
     // Armor bar (below health).
-    const float armorY = y + barHeight + barSpacing;
-    ctx.bar(x,
-            armorY,
-            barWidth,
-            barHeight,
-            armorFill_,
-            HudColor(0.3f, 0.5f, 0.9f, 0.9f),
-            HudColor(0.15f, 0.15f, 0.15f, 0.7f));
+    const float armorY = y + bh + bs;
+    ctx.bar(x, armorY, bw, bh, armorFill_, HudColor(0.3f, 0.5f, 0.9f, 0.9f), HudColor(0.15f, 0.15f, 0.15f, 0.7f));
 
     // Armor text.
     char armorText[16];
     SDL_snprintf(armorText, sizeof(armorText), "%d", displayArmor_);
-    ctx.text(armorText, x + barWidth + textPadding, armorY, fontSize, HudColor::white());
+    ctx.text(armorText, x + bw + tp, armorY, fs, HudColor::white());
 }

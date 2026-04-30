@@ -7,9 +7,9 @@
 
 struct HitMarkerWidget : HudWidget
 {
-    float armLength = 8.f;
-    float armThickness = 2.f;
-    float armGap = 4.f;
+    float armLength = 12.f;
+    float armThickness = 2.5f;
+    float armGap = 5.f;
     float fadeDuration = 0.35f;
 
     HitMarkerWidget();

@@ -15,9 +15,10 @@ void CrosshairWidget::update(float /*dt*/, const HudGameState& state, HudTweenPo
 
 void CrosshairWidget::draw(HudContext& ctx, float cx, float cy)
 {
-    const float gap = style.gap;
-    const float len = style.length;
-    const float t = style.thickness;
+    const float s = uiScale_;
+    const float gap = style.gap * s;
+    const float len = style.length * s;
+    const float t = style.thickness * s;
     const float ht = t * 0.5f;
 
     // Four arms.

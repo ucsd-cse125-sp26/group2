@@ -5,10 +5,10 @@
 
 struct BuyMenu : HudWidget
 {
-    float panelWidth = 400.f;
-    float panelHeight = 350.f;
-    float fontSize = 16.f;
-    float itemHeight = 30.f;
+    float panelWidth = 450.f;
+    float panelHeight = 380.f;
+    float fontSize = 20.f;
+    float itemHeight = 34.f;
 
     BuyMenu();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

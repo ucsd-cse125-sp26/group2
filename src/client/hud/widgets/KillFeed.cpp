@@ -37,6 +37,11 @@ void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tween
 
 void KillFeed::draw(HudContext& ctx, float x, float y)
 {
+    const float s = uiScale_;
+    const float fs = fontSize * s;
+    const float eh = entryHeight * s;
+    const float ep = entryPadding * s;
+
     float curY = y;
     for (const auto& e : entries_) {
         // Fade out in the last fadeOutDuration seconds.
@@ -46,18 +51,18 @@ void KillFeed::draw(HudContext& ctx, float x, float y)
 
         // "Killer > Victim" (right-aligned from anchor).
         const char* arrow = " > ";
-        const float killerW = ctx.measureText(e.killerName.c_str(), fontSize);
-        const float arrowW = ctx.measureText(arrow, fontSize);
-        const float victimW = ctx.measureText(e.victimName.c_str(), fontSize);
+        const float killerW = ctx.measureText(e.killerName.c_str(), fs);
+        const float arrowW = ctx.measureText(arrow, fs);
+        const float victimW = ctx.measureText(e.victimName.c_str(), fs);
         const float totalW = killerW + arrowW + victimW;
 
         float curX = x - totalW;
-        ctx.text(e.killerName.c_str(), curX, curY, fontSize, killerColor);
+        ctx.text(e.killerName.c_str(), curX, curY, fs, killerColor);
         curX += killerW;
-        ctx.text(arrow, curX, curY, fontSize, HudColor(0.7f, 0.7f, 0.7f, alpha));
+        ctx.text(arrow, curX, curY, fs, HudColor(0.7f, 0.7f, 0.7f, alpha));
         curX += arrowW;
-        ctx.text(e.victimName.c_str(), curX, curY, fontSize, victimColor);
+        ctx.text(e.victimName.c_str(), curX, curY, fs, victimColor);
 
-        curY += entryHeight + entryPadding;
+        curY += eh + ep;
     }
 }
