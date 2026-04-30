@@ -37,6 +37,8 @@ bool AssetLoader::loadModelsList()
 
 bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
 {
+
+    std::cout << "loadMesh id:"<< id << std::endl;
     Asset::Mesh& mesh = Asset::meshes_[id];
 
     mesh.indexData_.reserve(asimpMeshResult.mNumFaces);
@@ -183,17 +185,6 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string &meshNameSpa
             }
         }
 
-    const aiString nodeAiName = nodeAi.mName;
-    const std::string nodeNameStr(nodeAiName.C_Str());
-
-    for (int j = 0; j < nodeAi.mNumMeshes; j++) {
-        uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
-        if (mesh_j_IdAi < 0 || mesh_j_IdAi >= sceneAi.mNumMeshes) {
-            std::cout << debugPrefix << "given aiNode is not in aiScene!!!:" << std::endl;
-            std::cout << "\tmesh: " << mesh_j_IdAi << " is not in aiScene's mesh array" << std::endl;
-        }
-    }
-
     for (int j = 0; j < nodeAi.mNumMeshes; j++) {
         Asset::ModelElement me_j;
         uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
@@ -207,12 +198,11 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string &meshNameSpa
             me_j.meshId_ = meshNameId;
             me_j.cachedTransform_ = glm::mat4(1.0f);
 
+            loadMesh(meshNameId, mesh_j_Ai);
             newModel.modelElements_.push_back(me_j);
             uint32_t childModelElementIndex =  newModel.modelElements_.size() - 1;
             currentModelNode.modelElementsIndices_.push_back(childModelElementIndex);
-        }
 
-        newModel.modelElements_.push_back(me_j);
     }
 }
 void AssetLoader::updateModelTransformCache(const ModelIdInt id)
@@ -220,7 +210,6 @@ void AssetLoader::updateModelTransformCache(const ModelIdInt id)
 
     uint32_t rootModelNodeIndex = 0;
     Asset::Model &newModel = Asset::models_[id];
-    Asset::ModelNode &rootModelNode = newModel.modelNodes_[rootModelNodeIndex];
 
     std::stack<glm::mat4> transformStack;
     std::stack<uint32_t> modelNodeIdStack;
@@ -241,8 +230,7 @@ void AssetLoader::updateModelTransformCache(const ModelIdInt id)
         glm::mat4 worldTransform = transform_i * currentModelNode.transform_;
 
         for (uint32_t childModelNodeIndex : currentModelNode.childIndices_) {
-            Asset::ModelNode &childModelNode = newModel.modelNodes_[childModelNodeIndex];
-            transformStack.push(worldTransform );
+            transformStack.push(worldTransform);
             modelNodeIdStack.push(childModelNodeIndex);
         };
 

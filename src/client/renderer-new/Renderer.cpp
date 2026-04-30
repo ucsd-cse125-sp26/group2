@@ -222,7 +222,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
 
     for (const auto& modelPair : Asset::models_) {
         glm::mat4 modelMatrix = glm::mat4(1.0f);
-        modelMatrix = glm::scale(modelMatrix, glm::vec3(100.0f));
+        modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
 
         for (auto& element : modelPair.second.modelElements_) {
             glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;

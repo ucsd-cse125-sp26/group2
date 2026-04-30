@@ -49,17 +49,11 @@ private:
     /// @param transformAi The Assimp transform matrix.
     /// @return The equivalent glm::mat4.
     static glm::mat4 glmFromAiTransform(const aiMatrix4x4& transformAi);
-    static void pushAiNodeMeshesToModelElements(const std::string &meshNameSpace,const aiNode &nodeAi,const aiScene &sceneAi,const ModelIdInt k_modelId,const uint32_t modelIndexNode);
-
-};
 
     /// @brief Recursively extract meshes from an Assimp node and add them as ModelElements.
     /// @param meshNameSpace Namespace prefix for generating unique mesh IDs.
     /// @param nodeAi The current Assimp scene node.
     /// @param sceneAi The full Assimp scene.
     /// @param k_modelId The model ID to attach extracted elements to.
-    static void pushAiNodeMeshesToModelElements(const std::string& meshNameSpace,
-                                                const aiNode& nodeAi,
-                                                const aiScene& sceneAi,
-                                                const ModelIdInt k_modelId);
+    static void pushAiNodeMeshesToModelElements(const std::string &meshNameSpace,const aiNode &nodeAi,const aiScene &sceneAi,const ModelIdInt k_modelId,const uint32_t modelIndexNode);
 };
