@@ -93,6 +93,15 @@ bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
         if (!sdf || pw <= 0 || ph <= 0) {
             if (sdf)
                 stbtt_FreeSDF(sdf, nullptr);
+            // Whitespace glyphs (e.g. space) have no pixels but still need
+            // an advance width so text layout inserts the correct gap.
+            int advW, lsb;
+            stbtt_GetCodepointHMetrics(&font, cp, &advW, &lsb);
+            if (advW > 0) {
+                GlyphInfo g{};
+                g.advance = static_cast<float>(advW) * scale_;
+                glyphs_[static_cast<uint32_t>(cp)] = g;
+            }
             continue;
         }
 

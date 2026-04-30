@@ -205,13 +205,14 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
         if (!gi)
             continue;
 
+        // Advance the cursor even for whitespace glyphs (which have width/height 0).
         const float gw = gi->width * scale;
         const float gh = gi->height * scale;
-        const float gx = std::round(cursorX + gi->bearing.x * scale);
-        const float gy = std::round(baselineY - gi->bearing.y * scale);
-
-        emitQuad(
-            gx, gy, gw, gh, gi->uvMin.x, gi->uvMin.y, gi->uvMax.x, gi->uvMax.y, color, 1.f); // texMode = 1 (SDF text)
+        if (gw > 0.f && gh > 0.f) {
+            const float gx = std::round(cursorX + gi->bearing.x * scale);
+            const float gy = std::round(baselineY - gi->bearing.y * scale);
+            emitQuad(gx, gy, gw, gh, gi->uvMin.x, gi->uvMin.y, gi->uvMax.x, gi->uvMax.y, color, 1.f);
+        }
 
         cursorX += gi->advance * scale;
     }
