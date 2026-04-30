@@ -51,6 +51,22 @@ inline void checkForPlayers(Registry& registry, Position spawnerPos, CollisionSh
                   const CollisionShape& shape,
                   const InputSnapshot& input,
                   WeaponState& weapon) {
+        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) &&
+            spawner.hasWeapon) {
+            const WeaponConfig config = getWeaponConfig(spawner.type);
+            if (weapon.primary.type == spawner.type) {
+                weapon.primary.totalAmmo = config.defaultAmmoCapacity;
+                weapon.primary.currentMagAmmo = config.magazineSize;
+                spawner.hasWeapon = false;
+                spawner.spawnCooldown = weaponCooldownTime;
+            } else if (weapon.secondary.type == spawner.type) {
+                weapon.secondary.totalAmmo = config.defaultAmmoCapacity;
+                weapon.secondary.currentMagAmmo = config.magazineSize;
+                spawner.hasWeapon = false;
+                spawner.spawnCooldown = weaponCooldownTime;
+            }
+        }
+
         static constexpr float k_pickupRange = 140.0f;
         static constexpr float k_pickupMaxAngleDeg = 12.0f;
         static const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
