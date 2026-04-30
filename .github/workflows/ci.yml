@@ -91,6 +91,13 @@ jobs:
           vulkan_version: latest
           cache: true
 
+      # Strawberry Perl ships a ccache.exe that hijacks compiler launcher
+      # invocations and breaks RC (resource compiler) dep tracking.
+      - name: Remove Strawberry ccache (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: rm -f /c/Strawberry/c/bin/ccache.exe
+
       # Pin to v0.14.0 — v0.15.0 has cache-write errors on GHA.
       # Windows uses clang-cl (not MSVC cl) so sccache works on all platforms.
       - name: Setup sccache
@@ -251,6 +258,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+
+      # Strawberry Perl ships a ccache.exe that hijacks compiler launcher
+      # invocations and breaks RC (resource compiler) dep tracking.
+      - name: Remove Strawberry ccache (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: rm -f /c/Strawberry/c/bin/ccache.exe
 
       # Pin to v0.14.0 — v0.15.0 has cache-write errors on GHA.
       # Windows uses clang-cl (not MSVC cl) so sccache works on all platforms.
