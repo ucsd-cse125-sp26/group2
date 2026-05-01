@@ -210,25 +210,42 @@ void Server::enqueueReliableEvent(const void* data, int len)
     // times for resilience against UDP loss. If `eventsOverUdp` is
     // off, fall back to the existing TCP path.
     constexpr uint8_t k_reliableRedundancy = 3;
-    auto framed = std::vector<uint8_t>(static_cast<size_t>(len));
-    std::memcpy(framed.data(), data, static_cast<size_t>(len));
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-5a (server-perf): build the bytes ONCE into a shared_ptr.
+    // Every per-client enqueue (UDP reliable queue OR TCP fallback)
+    // is a pointer copy, not a vector copy. Pre-PR-5a:
+    //   - UDP path: `framed = framed` copied a vector per client
+    //   - TCP path: `frameMessage(data, len)` allocated a fresh
+    //     framed vector per client AND OutboundQueue::enqueue copied
+    //     it again into the deque entry
+    // Both contributed to the `broadcastEvents` p99 = 25-50 ms spike
+    // at 300 bots during fire-burst ticks.
+    {
+        // Raw payload (no length prefix) for the UDP reliable path.
+        auto rawPayload = std::vector<uint8_t>(static_cast<size_t>(len));
+        std::memcpy(rawPayload.data(), data, static_cast<size_t>(len));
+        auto sharedRaw = std::make_shared<const std::vector<uint8_t>>(std::move(rawPayload));
 
-    if (!transportConfig_.eventsOverUdp || !udpEndpoint_.isOpen()) {
-        // TCP fallback. replaceKey = 0 → never drop on age, always ship.
-        for (auto& [_, conn] : clients) {
-            conn.outbound.enqueue(0, frameMessage(data, len));
+        // 4-byte length-prefixed framed payload for the TCP fallback.
+        auto sharedFramed = std::make_shared<const std::vector<uint8_t>>(frameMessage(data, len));
+
+        std::lock_guard<std::mutex> lock(stateMutex_);
+
+        if (!transportConfig_.eventsOverUdp || !udpEndpoint_.isOpen()) {
+            // TCP fallback. replaceKey = 0 → never drop on age, always ship.
+            for (auto& [_, conn] : clients) {
+                conn.outbound.enqueue(0, sharedFramed);
+            }
+            return;
         }
-        return;
-    }
 
-    for (auto& [_, conn] : clients) {
-        conn.reliableQueue.push_back(Connection::PendingReliableEvent{
-            .sequence = conn.reliableNextSequence++,
-            .remainingSends = k_reliableRedundancy,
-            .framed = framed,
-        });
+        for (auto& [_, conn] : clients) {
+            conn.reliableQueue.push_back(Connection::PendingReliableEvent{
+                .sequence = conn.reliableNextSequence++,
+                .remainingSends = k_reliableRedundancy,
+                .framed = sharedRaw,
+            });
+        }
     }
 }
 
@@ -488,7 +505,10 @@ void Server::networkLoop()
                     hdr.connectionId = conn.connectionId;
                     hdr.sequence = entry.sequence;
                     hdr.channel = static_cast<uint8_t>(net::ChannelId::ReliableOrdered);
-                    udpEndpoint_.send(conn.udpAddr, hdr, entry.framed.data(), static_cast<int>(entry.framed.size()));
+                    if (entry.framed) {
+                        udpEndpoint_.send(
+                            conn.udpAddr, hdr, entry.framed->data(), static_cast<int>(entry.framed->size()));
+                    }
                     if (entry.remainingSends > 0)
                         --entry.remainingSends;
                 }

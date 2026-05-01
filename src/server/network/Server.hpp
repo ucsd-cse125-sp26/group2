@@ -176,11 +176,18 @@ private:
         /// @brief Phase 3d-5: pending reliable events, each scheduled
         /// for `remainingSends` more cycles. Server drains in network
         /// loop; entries with `remainingSends == 0` are popped.
+        ///
+        /// PR-5a (server-perf): `framed` is now `shared_ptr<const ...>`
+        /// so a single broadcast (kill, particle, match-state) shares
+        /// one byte buffer across N clients. Pre-PR-5a each client got
+        /// a fresh `std::vector<uint8_t>` copy — at 300 clients × 12.5 %
+        /// fire-burst ticks that was the visible `broadcastEvents`
+        /// p99 spike at 25–50 ms.
         struct PendingReliableEvent
         {
-            uint16_t sequence;           ///< Per-channel send sequence.
-            uint8_t remainingSends;      ///< Decremented each send; popped at 0.
-            std::vector<uint8_t> framed; ///< `[PacketType][rest]` payload bytes.
+            uint16_t sequence;                                  ///< Per-channel send sequence.
+            uint8_t remainingSends;                             ///< Decremented each send; popped at 0.
+            std::shared_ptr<const std::vector<uint8_t>> framed; ///< `[PacketType][rest]` payload bytes (shared).
         };
         std::deque<PendingReliableEvent> reliableQueue;
 
