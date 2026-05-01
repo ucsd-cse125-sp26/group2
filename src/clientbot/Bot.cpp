@@ -67,8 +67,28 @@ float Bot::getCurrentRttMs() const
 
 void Bot::runLoop(const std::atomic<bool>& stopFlag)
 {
+    // PR-4 (server-perf): allow the bot's tick rate to be reduced for
+    // stress-test runs. Each bot is a thread that spin-waits the
+    // sub-millisecond fraction of its tick boundary; at 200+ bots on
+    // a 16-core host the spinning fleet alone exhausts the machine's
+    // CPU regardless of how cheap the server is. Lowering the bot
+    // tick rate from 128 Hz to e.g. 32 Hz cuts bot-side CPU ~4× —
+    // each bot still exercises the server's full input-redundancy +
+    // PING/PONG path, just with proportionally fewer
+    // `sendInputSnapshot` calls per second.
+    //
+    // Production gameplay should keep 128 Hz for fidelity; the env
+    // override is a stress-test tool. Default unchanged.
+    int tickHz = k_tickHz;
+    if (const char* p = std::getenv("GROUP2_BOT_TICK_HZ")) {
+        char* end = nullptr;
+        const long n = std::strtol(p, &end, 10);
+        if (*end == '\0' && n >= 8 && n <= 256)
+            tickHz = static_cast<int>(n);
+    }
+
     const Uint64 perfFreq = SDL_GetPerformanceFrequency();
-    const Uint64 tickDurationCounters = perfFreq / static_cast<Uint64>(k_tickHz);
+    const Uint64 tickDurationCounters = perfFreq / static_cast<Uint64>(tickHz);
     Uint64 nextTick = SDL_GetPerformanceCounter() + tickDurationCounters;
 
     while (!stopFlag.load(std::memory_order_relaxed)) {
@@ -124,17 +144,28 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
 
         // ── Pacing: hybrid sleep + spin to hit the next tick boundary. ──
         //
-        // Same approach as ServerGame::run — coarse SDL_Delay for the bulk,
-        // spin-wait the sub-millisecond remainder for steady cadence. With
-        // 100+ bots each spinning, this WILL contend; that's fine, the load
-        // test is supposed to stress the network thread, not CPU efficiency.
+        // PR-4 (server-perf): when `GROUP2_BOT_NO_SPIN=1` is set, drop
+        // the sub-millisecond spin and rely on `SDL_Delay` alone. With
+        // 200+ bots on a single host, the cumulative spinning was
+        // exhausting the host's CPU and producing artificially-high
+        // RTT measurements at the bot fleet (the bots simply weren't
+        // running often enough). The trade-off: ±1 ms tick-cadence
+        // jitter per bot, fine for load-test purposes, unsuitable for
+        // an actual gameplay client.
+        static const bool k_noSpin = []() {
+            const char* p = std::getenv("GROUP2_BOT_NO_SPIN");
+            return p != nullptr && p[0] != '\0' && p[0] != '0';
+        }();
+
         const Uint64 now = SDL_GetPerformanceCounter();
         if (now < nextTick) {
             const Sint64 sleepMs = static_cast<Sint64>((nextTick - now) * 1000 / perfFreq) - 1;
             if (sleepMs > 0)
                 SDL_Delay(static_cast<Uint32>(sleepMs));
-            while (SDL_GetPerformanceCounter() < nextTick && !stopFlag.load(std::memory_order_relaxed)) {
-                // spin
+            if (!k_noSpin) {
+                while (SDL_GetPerformanceCounter() < nextTick && !stopFlag.load(std::memory_order_relaxed)) {
+                    // spin
+                }
             }
         }
         nextTick += tickDurationCounters;
@@ -151,7 +182,7 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
         }
 
         // Refresh bandwidth EMA (the Client expects ~per-frame calls).
-        client_.updateStats(1.0f / static_cast<float>(k_tickHz));
+        client_.updateStats(1.0f / static_cast<float>(tickHz));
 
         // Send a PING every 128 ticks (~1 s @ 128 Hz). The Client decodes
         // PONG responses and updates avgRttMs in its NetworkStats, so the
