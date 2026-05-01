@@ -121,11 +121,16 @@ public:
 
 private:
     /// @brief Per-client connection state.
+    ///
+    /// PR-5b (server-perf): default-initialised for `try_emplace`
+    /// in `acceptClients`. Pre-PR-5b the struct was copy-constructed
+    /// from a designated-initialiser temporary, which would no
+    /// longer compile once `OutboundQueue` grew an internal mutex.
     struct Connection
     {
-        MessageStream msgStream;    ///< Framed message stream for this client.
-        ClientId clientId;          ///< Unique identifier assigned on accept.
-        bool pendingInitialization; ///< True if waiting for Game to initialize player entity.
+        MessageStream msgStream{};         ///< Framed message stream for this client.
+        ClientId clientId{};               ///< Unique identifier assigned on accept.
+        bool pendingInitialization = true; ///< True if waiting for Game to initialize player entity.
 
         /// @brief Highest InputSnapshot.tick this client has had applied to the
         /// simulation. Used to dedup multi-input redundancy: each client sends
@@ -214,8 +219,17 @@ private:
     void acceptClients();
 
     /// @brief Disconnect a client and clean up resources.
-    /// @param conn The client connection to disconnect.
-    void disconnectClient(Connection conn);
+    ///
+    /// PR-5b (server-perf): now takes a reference. Pre-PR-5b it
+    /// took `Connection` by value, which was a quiet per-disconnect
+    /// std::vector<...> + per-deque copy. Once Connection grew an
+    /// internal `std::mutex` (in OutboundQueue) it stopped being
+    /// copyable and the by-value form would no longer compile —
+    /// switching to a reference is both faster and required.
+    /// The function reads only fields it doesn't mutate beyond the
+    /// final socket-destroy + udpAddr release; the caller is
+    /// expected to erase the entry from `clients` after.
+    void disconnectClient(Connection& conn);
 
     /// @brief Read and process pending messages from all connected clients.
     void readClients();

@@ -29,6 +29,12 @@ class MessageStream
 {
 
 public:
+    /// @brief PR-5b: default-construct so server `Connection` (which
+    /// embeds a `MessageStream`) can be `try_emplace`'d into the
+    /// clients map. The actual socket is assigned right after via
+    /// the `MessageStream(NET_StreamSocket*)` form.
+    MessageStream() = default;
+
     MessageStream(NET_StreamSocket* sock) : socket(sock) {}
 
     NET_StreamSocket* socket = nullptr; ///< Underlying SDL_net stream socket.

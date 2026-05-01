@@ -154,52 +154,82 @@ void Server::flushAllOutbound()
     // dropped before going on the wire — see OutboundQueue::flushTo.
     constexpr Uint32 k_maxAgeMs = 300;
 
-    // Caller (networkLoop or shutdown path) holds stateMutex_.
+    // PR-5b (server-perf): three-phase lock-light flush.
     //
-    // PR-1: opportunistically sample the per-client outbound depth so the
-    // 1 Hz profiler line can show a backlog gauge ("are we keeping up
-    // with the broadcast rate?"). Single pass over `clients` is cheap.
-    auto& nc = ::group2::perf::net();
-    std::uint32_t maxDepth = 0;
+    //  Phase 1 (under stateMutex_, brief): snapshot per-client
+    //          (ClientId, OutboundQueue*, socket) into a flat list.
+    //          Pointer stability holds because the network thread is
+    //          the sole writer to `clients` and we're on it; no
+    //          concurrent insert/erase can happen between phase 1
+    //          and phase 3.
+    //  Phase 2 (lock-free): iterate the list, calling
+    //          OutboundQueue::flushTo per client. The queue is
+    //          self-locked (PR-5b) so per-client enqueues from the
+    //          game thread proceed in parallel. The slow part — the
+    //          NET_WriteToStreamSocket syscall — runs without
+    //          stateMutex_, so game-thread broadcasts don't wait.
+    //  Phase 3 (under stateMutex_, brief): apply any disconnects
+    //          phase 2 collected, then republish the atomic
+    //          getClientCount / snapshotClientRtts snapshots.
+    //
+    // Pre-PR-5b this whole loop ran under a single stateMutex_ hold;
+    // at 300 clients the syscall fan-out alone took 25-50 ms p99 on
+    // the loadtest harness, blocking every game-thread broadcast for
+    // that duration.
 
-    for (auto it = clients.begin(); it != clients.end();) {
-        auto& conn = it->second;
-        const auto depth = static_cast<std::uint32_t>(conn.outbound.depth());
+    struct Target
+    {
+        ClientId id;
+        OutboundQueue* queue;
+        NET_StreamSocket* socket;
+    };
+    static thread_local std::vector<Target> targets;
+    targets.clear();
+
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        targets.reserve(clients.size());
+        for (auto& [id, conn] : clients) {
+            targets.push_back(Target{id, &conn.outbound, conn.msgStream.socket});
+        }
+    }
+
+    std::vector<ClientId> failed;
+    std::uint32_t maxDepth = 0;
+    for (const Target& t : targets) {
+        const auto depth = static_cast<std::uint32_t>(t.queue->depth());
         if (depth > maxDepth)
             maxDepth = depth;
-        if (!conn.outbound.flushTo(conn.msgStream.socket, k_maxAgeMs)) {
-            // Socket error during flush — disconnect this client.
-            disconnectClient(conn);
-            it = clients.erase(it);
-            continue;
+        if (!t.queue->flushTo(t.socket, k_maxAgeMs)) {
+            failed.push_back(t.id);
         }
-        ++it;
     }
 
-    // `clientCount` is a gauge — store, don't add. `peakBacklog` is a
-    // per-window peak — bump only on rise, reset by aggregator.
-    nc.clientCount.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
-    std::uint32_t cur = nc.peakBacklog.load(std::memory_order_relaxed);
-    while (maxDepth > cur && !nc.peakBacklog.compare_exchange_weak(cur, maxDepth, std::memory_order_relaxed)) {
+    // Phase 3: apply failures + republish atomics. Take the lock once.
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        for (ClientId id : failed) {
+            if (auto it = clients.find(id); it != clients.end()) {
+                disconnectClient(it->second);
+                clients.erase(it);
+            }
+        }
+
+        auto& nc = ::group2::perf::net();
+        nc.clientCount.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+        std::uint32_t cur = nc.peakBacklog.load(std::memory_order_relaxed);
+        while (maxDepth > cur && !nc.peakBacklog.compare_exchange_weak(cur, maxDepth, std::memory_order_relaxed)) {
+        }
+
+        // PR-4: publish lock-free read snapshots.
+        clientCountAtomic_.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+        auto rttSnap = std::make_shared<ClientRttSnapshot>();
+        rttSnap->entries.reserve(clients.size());
+        for (const auto& [id, conn] : clients)
+            rttSnap->entries.emplace_back(id, conn.lastReportedRttMs);
+        rttSnapshotAtomic_.store(std::shared_ptr<const ClientRttSnapshot>(std::move(rttSnap)),
+                                 std::memory_order_release);
     }
-
-    // PR-4 (server-perf): publish the lock-free read snapshots that
-    // game-thread queries (`getClientCount`, `snapshotClientRtts`)
-    // consume without taking stateMutex_. We're already holding the
-    // mutex here (caller's responsibility) and iterating `clients`,
-    // so the cost is one extra pass + one shared_ptr allocation per
-    // network cycle — negligible vs. the lock-wait this saves on the
-    // game thread.
-    clientCountAtomic_.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
-
-    // Build the RTT snapshot. Reusing a thread_local scratch vector
-    // would help, but the snapshot is held by shared_ptr and shared
-    // with readers, so we have to allocate fresh.
-    auto rttSnap = std::make_shared<ClientRttSnapshot>();
-    rttSnap->entries.reserve(clients.size());
-    for (const auto& [id, conn] : clients)
-        rttSnap->entries.emplace_back(id, conn.lastReportedRttMs);
-    rttSnapshotAtomic_.store(std::shared_ptr<const ClientRttSnapshot>(std::move(rttSnap)), std::memory_order_release);
 }
 
 void Server::enqueueReliableEvent(const void* data, int len)
@@ -481,10 +511,11 @@ void Server::networkLoop()
             }
         }
 
-        {
-            std::lock_guard<std::mutex> lock(stateMutex_);
-            flushAllOutbound();
-        }
+        // PR-5b: flushAllOutbound now manages its own locking (brief
+        // snapshot + apply phases) so it can run the per-client
+        // syscall fan-out without `stateMutex_` held. The caller
+        // does NOT lock around it any more.
+        flushAllOutbound();
 
         // ── Phase 3d-5: drain reliable-event queues over UDP ────────
         //
@@ -547,17 +578,25 @@ void Server::acceptClients()
         std::uniform_int_distribution<uint32_t> dist{1, std::numeric_limits<uint32_t>::max()};
         const uint32_t connId = dist(rng);
 
-        clients.insert({clientId,
-                        Connection{.msgStream = MessageStream(socket),
-                                   .clientId = clientId,
-                                   .pendingInitialization = true,
-                                   .connectionId = connId}});
+        // PR-5b (server-perf): construct in place. `Connection` is no
+        // longer copyable (its `OutboundQueue` member now holds a
+        // `std::mutex`), so the previous `insert({key, Connection{...}})`
+        // form would synthesize a copy. `try_emplace` default-constructs
+        // the value and we fill in the fields after.
+        auto [it, inserted] = clients.try_emplace(clientId);
+        if (inserted) {
+            auto& conn = it->second;
+            conn.msgStream = MessageStream(socket);
+            conn.clientId = clientId;
+            conn.pendingInitialization = true;
+            conn.connectionId = connId;
+        }
         connIdToClient_[connId] = clientId;
         eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected, .movementIntent = {}});
     }
 }
 
-void Server::disconnectClient(Connection conn)
+void Server::disconnectClient(Connection& conn)
 {
     SDL_Log("Server: disconnecting client %d", conn.clientId.value);
     NET_DestroyStreamSocket(conn.msgStream.socket);

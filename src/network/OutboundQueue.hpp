@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 /// @brief Bytes already framed (4-byte length prefix + payload) ready for the wire.
@@ -67,9 +68,19 @@ struct OutboundEntry
 
 /// @brief Per-connection outbound message queue.
 ///
-/// Not thread-safe; each Connection owns one. The Server's broadcast
-/// helpers mutate it on the game thread; in stage 3b a dedicated network
-/// thread will drain it. For stage 3a everything runs on the game thread.
+/// PR-5b (server-perf): the queue is self-locked. Pre-PR-5b the
+/// caller (`Server::flushAllOutbound`, `Server::enqueueBroadcast`,
+/// etc.) had to hold the global `stateMutex_` for every operation,
+/// which meant the network thread's per-cycle flush serialized with
+/// every game-thread broadcast. With the internal mutex, the global
+/// lock can be released while the queue is doing its slow work
+/// (NET_WriteToStreamSocket syscalls inside flushTo) — multiple
+/// game-thread enqueues can land on different clients while the
+/// network thread is mid-flush of another client's queue.
+///
+/// The mutex is `mutable` so const observers (`depth`, `totalBytes`)
+/// can take it; in practice they're only called from telemetry paths
+/// where the brief lock is fine.
 class OutboundQueue
 {
 public:
@@ -103,14 +114,23 @@ public:
     bool flushTo(NET_StreamSocket* socket, Uint32 maxAgeMs);
 
     /// @brief Number of entries currently queued (for telemetry / tests).
-    [[nodiscard]] size_t depth() const noexcept { return entries_.size(); }
+    [[nodiscard]] size_t depth() const noexcept
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return entries_.size();
+    }
 
     /// @brief Total bytes across all queued entries (for telemetry).
     [[nodiscard]] size_t totalBytes() const noexcept;
 
     /// @brief Drop all queued entries (used on disconnect).
-    void clear() noexcept { entries_.clear(); }
+    void clear() noexcept
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        entries_.clear();
+    }
 
 private:
+    mutable std::mutex mutex_; ///< PR-5b: protects entries_ for cross-thread access.
     std::deque<OutboundEntry> entries_;
 };
