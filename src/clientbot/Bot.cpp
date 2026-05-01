@@ -5,6 +5,13 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdlib>
+#include <cstring>
+#if defined(__linux__) || defined(__APPLE__) || defined(__unix__)
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -51,6 +58,58 @@ void Bot::start(const std::atomic<bool>& stopFlag)
         return;
     }
     thread_ = std::thread([this, &stopFlag] { runLoop(stopFlag); });
+
+    // PR-9 (server-perf): optional CPU affinity pinning for bot
+    // threads. With 500 bot threads on a 16-core box and no
+    // affinity, the kernel migrates threads across cores
+    // constantly — each migration cold-pages caches and the server
+    // pays for the bot fleet's cache thrash.
+    //
+    // GROUP2_BOT_CPUS=lo[,hi]  pins every bot thread's affinity
+    // mask to cores [lo..hi] (inclusive). Common patterns:
+    //   GROUP2_BOT_CPUS=8,15    bots on cores 8-15, server free
+    //                            on cores 0-7 (16-core host)
+    //   GROUP2_BOT_CPUS=12,15   bots on the last 4 cores only
+    //                            (most aggressive — assumes server
+    //                            uses 0-11)
+    //
+    // Linux-only (pthread_setaffinity_np). On macOS / Windows the
+    // env var is silently ignored.
+#if defined(__linux__)
+    if (const char* cpus = std::getenv("GROUP2_BOT_CPUS")) {
+        int lo = -1;
+        int hi = -1;
+        const char* comma = std::strchr(cpus, ',');
+        char* end = nullptr;
+        const long parsedLo = std::strtol(cpus, &end, 10);
+        if (end != cpus) {
+            lo = static_cast<int>(parsedLo);
+            if (comma != nullptr) {
+                const long parsedHi = std::strtol(comma + 1, &end, 10);
+                if (end != comma + 1)
+                    hi = static_cast<int>(parsedHi);
+            } else {
+                hi = lo;
+            }
+        }
+        if (lo >= 0 && hi >= lo) {
+            cpu_set_t mask;
+            CPU_ZERO(&mask);
+            for (int c = lo; c <= hi; ++c) {
+                CPU_SET(c, &mask);
+            }
+            const int rc = pthread_setaffinity_np(thread_.native_handle(), sizeof(mask), &mask);
+            if (rc != 0 && botId_ == 0) {
+                // Log once (only on bot 0) so the user sees the
+                // problem if pinning fails. Subsequent bots are
+                // assumed to fail for the same reason.
+                SDL_Log("[clientbot] WARNING: pthread_setaffinity_np failed (rc=%d) for cores %d-%d", rc, lo, hi);
+            }
+        } else if (botId_ == 0) {
+            SDL_Log("[clientbot] WARNING: GROUP2_BOT_CPUS='%s' malformed (expected 'lo,hi' or 'lo')", cpus);
+        }
+    }
+#endif
 }
 
 void Bot::join()
