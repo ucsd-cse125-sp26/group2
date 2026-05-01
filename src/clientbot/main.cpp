@@ -46,7 +46,11 @@ extern "C" void onSignal(int /*sig*/)
 
 void installSignalHandlers()
 {
-    struct sigaction sa{};
+    // `= {}` value-initialises every field. Same effect as `sa{};` but
+    // formats identically under clang-format-18 and clang-format-22 —
+    // the v18 layout-disagreement with the brace-init-only form was the
+    // sole reason this file failed the PR CI's clang-format-18 gate.
+    struct sigaction sa = {};
     sa.sa_handler = onSignal;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0; // no SA_RESTART; let blocking calls return EINTR if any
