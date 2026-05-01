@@ -7,14 +7,17 @@
 
 #include <utility>
 
-void OutboundQueue::enqueue(uint8_t replaceKey, std::vector<uint8_t>&& framedBytes)
+void OutboundQueue::enqueue(uint8_t replaceKey, std::shared_ptr<const std::vector<uint8_t>> framedBytes)
 {
+    if (!framedBytes)
+        return;
+
     const Uint64 now = SDL_GetTicksNS();
 
     if (replaceKey != 0) {
-        // Replace any existing entry with the same key.  The queue is small
-        // (≤ a few entries per tick under steady state), so a linear scan is
-        // fine — the win is bounded memory under slow-client conditions.
+        // Replace any existing entry with the same key. PR-2: storing a
+        // shared_ptr means the replace path is now a pointer assignment
+        // instead of a vector move + heap free.
         for (auto& e : entries_) {
             if (e.replaceKey == replaceKey) {
                 e.framedBytes = std::move(framedBytes);
@@ -29,6 +32,18 @@ void OutboundQueue::enqueue(uint8_t replaceKey, std::vector<uint8_t>&& framedByt
         .enqueuedNs = now,
         .framedBytes = std::move(framedBytes),
     });
+}
+
+void OutboundQueue::enqueue(uint8_t replaceKey, std::vector<uint8_t>&& framedBytes)
+{
+    // Wrap the rvalue vector exactly once. The cost is one heap-alloc for
+    // the shared_ptr control block; the vector itself is moved into the
+    // shared owner in-place (no byte copy). Callers on broadcast paths
+    // (PR-2) construct the shared_ptr upstream so this overload is mostly
+    // for single-client paths (notifyPlayerClientId, ASSIGN_CLIENT_ID,
+    // PONG, etc.).
+    auto shared = std::make_shared<std::vector<uint8_t>>(std::move(framedBytes));
+    enqueue(replaceKey, std::shared_ptr<const std::vector<uint8_t>>{std::move(shared)});
 }
 
 bool OutboundQueue::flushTo(NET_StreamSocket* socket, Uint32 maxAgeMs)
@@ -54,8 +69,14 @@ bool OutboundQueue::flushTo(NET_StreamSocket* socket, Uint32 maxAgeMs)
         // an internal pending_output_buffer if the kernel can't take it now.
         // A `false` return is a real socket error (closed / EPIPE / etc.) —
         // bubble it so the caller can disconnect.
-        const auto* data = front.framedBytes.data();
-        const auto len = static_cast<int>(front.framedBytes.size());
+        if (!front.framedBytes) {
+            // Defensive: a null pointer slipped through. Pop and keep going
+            // rather than abort the flush.
+            entries_.pop_front();
+            continue;
+        }
+        const auto* data = front.framedBytes->data();
+        const auto len = static_cast<int>(front.framedBytes->size());
         if (!NET_WriteToStreamSocket(socket, data, len))
             return false;
 
@@ -69,6 +90,6 @@ size_t OutboundQueue::totalBytes() const noexcept
 {
     size_t sum = 0;
     for (const auto& e : entries_)
-        sum += e.framedBytes.size();
+        sum += e.framedBytes ? e.framedBytes->size() : 0;
     return sum;
 }

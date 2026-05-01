@@ -26,6 +26,10 @@ set -o pipefail
 NUM_BOTS="${1:-50}"
 DURATION_S="${2:-90}"
 PRESET="${3:-relwithdebinfo}"
+# PR-2 (server-perf): default to port 19999 so loadtest runs don't
+# collide with manually-started benchmark servers (the user's
+# build/release/server binds 9999). Override via SERVER_PORT.
+SERVER_PORT="${SERVER_PORT:-19999}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build/${PRESET}"
@@ -75,9 +79,29 @@ cleanup() {
     echo "[loadtest] cleanup (exit=${code})..."
     stopProcess "${BOTS_PID:-}"   bots
     stopProcess "${SERVER_PID:-}" server
+    # Belt-and-braces: if the PID-based stop missed anything (e.g. the
+    # script was killed mid-pipe and never observed BOTS_PID), reap by
+    # binary path. We only target the build-dir binaries, never the
+    # user's own ${BUILD_DIR%/}-different processes.
+    if [[ -n "${BUILD_DIR:-}" ]]; then
+        pkill -9 -f "^${BUILD_DIR}/server\$"   2>/dev/null || true
+        pkill -9 -f "^${BUILD_DIR}/clientbot " 2>/dev/null || true
+    fi
+    # Restore the original config.toml if we mutated it.
+    if [[ -n "${BUILD_DIR:-}" ]] && [[ -f "${BUILD_DIR}/config.toml.loadtest.bak" ]]; then
+        mv -f "${BUILD_DIR}/config.toml.loadtest.bak" "${BUILD_DIR}/config.toml"
+    fi
     return ${code}
 }
 trap cleanup EXIT INT TERM
+
+# ── config.toml: rewrite the port so the server binds SERVER_PORT.
+# Pre-existing config.toml is preserved by writing to a build-local copy
+# and pointing the server at it. We mutate the build-dir copy in place
+# (it's gitignored under build/), restoring on exit.
+ORIG_CONFIG_BACKUP="${BUILD_DIR}/config.toml.loadtest.bak"
+cp "${BUILD_DIR}/config.toml" "${ORIG_CONFIG_BACKUP}"
+sed -E "s/(^port = )[0-9]+/\1${SERVER_PORT}/" "${ORIG_CONFIG_BACKUP}" > "${BUILD_DIR}/config.toml"
 
 # ── Server ─────────────────────────────────────────────────────────────
 (
@@ -91,7 +115,6 @@ SERVER_PID=$!
 # Wait for the server to bind. The server loads + V-HACD-decomposes map
 # assets *before* binding the listen socket, which can take several
 # seconds on a fresh build dir. Poll the port instead of guessing.
-SERVER_PORT="${SERVER_PORT:-9999}"
 for attempt in $(seq 1 60); do
     # `bash` 4.0+ exposes /dev/tcp/host/port for a synchronous probe.
     # `(... 2>/dev/null) </dev/null` swallows the connection failure
@@ -112,7 +135,7 @@ done
     cd "${BUILD_DIR}" && \
     GROUP2_BOT_FLEET_RTT=1 \
     GROUP2_BOT_FLEET_RTT_CSV="${BOT_CSV}" \
-    ./clientbot "${NUM_BOTS}" > "${BOT_LOG}" 2>&1
+    ./clientbot "${NUM_BOTS}" "127.0.0.1:${SERVER_PORT}" > "${BOT_LOG}" 2>&1
 ) &
 BOTS_PID=$!
 

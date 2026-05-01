@@ -243,13 +243,20 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     {
         GROUP2_PROF_SCOPE("eventDrain");
-        while (!server.isEmpty()) {
-            const Event event = server.dequeueEvent();
+        // PR-2b: bulk-drain the event queue in a single mutex acquisition
+        // instead of locking once per event. With ~5-input redundancy
+        // dedup'd at the receive boundary, a 128 Hz × 500 bot fleet
+        // pushes ~12 k unique inputs/sec. Pre-PR-2b that was 24 k mutex
+        // operations/sec on stateMutex_, which contended hard with the
+        // network thread's 1 kHz I/O cycle. Now: one lock per tick.
+        static thread_local std::vector<Event> events;
+        server.drainEvents(events);
+        for (const Event& event : events) {
             eventHandler(event);
-
-            // Check tick time --> move to next if over
+            // Tick-time bail-out kept identical to pre-PR-2b: if event
+            // processing alone blows the tick budget we abort the rest
+            // of the events (lost — TODO upstream the drop reason).
             if (const Uint64 kNow = SDL_GetPerformanceCounter(); kNow >= nextTick) {
-                // TODO: Drop events in queue
                 SDL_Log("[server] Exceeded tick time for event handling.");
                 break;
             }
@@ -501,12 +508,29 @@ void ServerGame::updateLagCompTargets()
     // "I shot him around the corner" feel for the receiver.
     static constexpr uint32_t k_maxLagCompTicks = 25;
 
+    // PR-2b: snapshot every client's RTT in one mutex acquisition,
+    // then drive the loop off the local copy. Pre-PR-2b this called
+    // `server.getClientRttMs(id)` per client, which acquired
+    // stateMutex_ each time — at 100 bots × 128 Hz that was ~13 k
+    // mutex ops/sec on the server's hot lock. Now: one lock per tick.
+    static thread_local std::vector<std::pair<ClientId, uint16_t>> rttCache;
+    server.snapshotClientRtts(rttCache);
+
+    // Lookup map from cache for the inner loop. Reserve once, reuse
+    // the std::unordered_map across ticks — avoids per-tick alloc.
+    static thread_local std::unordered_map<ClientId, uint16_t> rttById;
+    rttById.clear();
+    rttById.reserve(rttCache.size());
+    for (const auto& [id, rtt] : rttCache)
+        rttById.emplace(id, rtt);
+
     const auto currentServerTick = static_cast<uint32_t>(tickCount);
     for (const auto& [clientId, entity] : clientEntities) {
         if (!registry.valid(entity))
             continue;
 
-        const uint16_t rttMs = server.getClientRttMs(clientId);
+        const auto rttIt = rttById.find(clientId);
+        const uint16_t rttMs = (rttIt != rttById.end()) ? rttIt->second : 0;
         // Half-RTT in ticks. Round-to-nearest by adding half a tick
         // before integer divide. (rttMs / 2 / 1000 * tickRateHz)
         // reordered to keep the integer-only arithmetic exact at the

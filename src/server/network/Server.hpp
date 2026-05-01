@@ -20,6 +20,7 @@
 #include <atomic>
 #include <deque>
 #include <entt/entity/entity.hpp>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -59,6 +60,14 @@ public:
     /// @return The front event.
     Event dequeueEvent();
 
+    /// @brief PR-2b (server-perf): drain every queued event in FIFO order
+    /// into @p out under a single mutex acquisition. Pre-PR-2b the game
+    /// thread's tick loop did `isEmpty()`+`dequeueEvent()` per event,
+    /// each acquiring the state mutex separately; at 100 bots × 128 Hz
+    /// that was the dominant tick scope (12 ms p99). This collapses
+    /// the per-event cost to a single lock + swap per tick.
+    void drainEvents(std::vector<Event>& out);
+
     /// @brief Update client with new entity id.
     /// @return true if sent, otherwise false.
     bool notifyPlayerClientId(ClientId clientId, entt::entity playerEntity);
@@ -80,6 +89,19 @@ public:
     ///         the RTT field — see the wire format note in
     ///         `Connection::lastReportedRttMs`).
     uint16_t getClientRttMs(ClientId clientId);
+
+    /// @brief PR-2b (server-perf): bulk-snapshot every connected client's
+    /// last-reported RTT in one mutex acquisition. The game thread's
+    /// `updateLagCompTargets` calls this once per tick instead of
+    /// `getClientRttMs(...)` per client. At 100 bots × 128 Hz, the
+    /// per-client form was ~13 k mutex ops/sec on stateMutex_,
+    /// contending hard with the network thread; bulk snapshot
+    /// collapses to 1 op/tick.
+    ///
+    /// @param out Cleared and filled with `(clientId, rttMs)` pairs in
+    ///            unspecified order. Caller is expected to reuse the
+    ///            same vector across ticks to avoid allocation churn.
+    void snapshotClientRtts(std::vector<std::pair<ClientId, uint16_t>>& out);
 
     /// @brief Broadcast match status updates to clients.
     void broadcastMatchStatus(MatchStatePacket packet);
@@ -264,4 +286,26 @@ private:
     std::mutex stateMutex_;
     std::thread networkThread_;
     std::atomic<bool> shouldStop_{false};
+
+    // ── PR-2 (server-perf): deferred snapshot fanout ──────────────────────
+    //
+    // `broadcastRegistry` no longer does the per-client send loop on the
+    // game thread. Instead it serializes the snapshot once, wraps the
+    // bytes in `shared_ptr<const ...>`, and stores both the unframed
+    // payload (for the UDP path's per-fragment send loop) and the
+    // length-prefixed framed bytes (for the TCP fallback's enqueue) in
+    // these slots. The network thread picks them up at the start of its
+    // next cycle and runs the fanout there.
+    //
+    // Why two buffers: the UDP path expects the raw payload (the
+    // PacketHeader is added per-fragment); the TCP path expects the
+    // 4-byte length prefix already prepended (it goes straight into
+    // OutboundQueue → NET_WriteToStreamSocket). Pre-PR-2 the framing was
+    // done per client; now it's once per snapshot and shared.
+    //
+    // Both pointers protected by stateMutex_; the network thread
+    // exchanges to nullptr atomically under the lock so a fresh snapshot
+    // arriving mid-cycle replaces the old one without races.
+    std::shared_ptr<const std::vector<uint8_t>> pendingSnapshotPayload_;
+    std::shared_ptr<const std::vector<uint8_t>> pendingSnapshotFramed_;
 };
