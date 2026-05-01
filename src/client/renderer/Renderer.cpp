@@ -2688,8 +2688,11 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         gtaoUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
         gtaoUBO.radius = ssaoRadius;
         gtaoUBO.falloffExp = ssaoFalloff;
-        gtaoUBO.numSlices = 3;
-        gtaoUBO.numSteps = 6;
+        // Phase 3: trimmed slice/step counts.  Quality difference is barely
+        // perceptible on character + scene geometry but the ALU work drops by
+        // ~55% (was 3*6=18, now 2*4=8 march steps per pixel).
+        gtaoUBO.numSlices = 2;
+        gtaoUBO.numSteps = 4;
 
         SDL_GPUStorageTextureReadWriteBinding aoWrite = {.texture = ssaoTexture, .mip_level = 0, .layer = 0};
         SDL_GPUComputePass* aoPass = SDL_BeginGPUComputePass(cmd, &aoWrite, 1, nullptr, 0);
