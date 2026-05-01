@@ -385,3 +385,143 @@ can be bypassed in the field without redeploying.
 
 The second outcome is acceptable; we don't ship lies. "I tried, here
 are the wins, here's the wall" is a perfectly good deliverable.
+
+---
+
+## §9 Final report — what shipped and what didn't
+
+### Landed PRs
+
+| Commit  | Title | What it does |
+|---------|-------|--------------|
+| `3ad9fed` | docs: server 500-bot optimization design spec | This document. |
+| `d1fe4a9` | PR-1: scoped profiler + fleet RTT + harness | Foundation: per-system timers, 1 Hz aggregator, CSV out, bot fleet aggregator, `scripts/server-loadtest.sh`. |
+| `cf7f97a` | PR-2: defer snapshot fanout, share-frame, bulk drains | Snapshot bytes shared via `shared_ptr`; per-client UDP fanout deferred to network thread; `EventQueue` self-locks; bulk RTT snapshot. **Largest measured win.** |
+| `530d7b9` | PR-3: parallel-STL hooks for animation + hitbox | Optional TBB-backed `parallelFor`; pre-emplace + parallel kernel pattern. **Default off**: localhost loadtest oversubscribes cores with the bot fleet. |
+
+### Empirical results (relwithdebinfo, localhost, no simulated latency)
+
+| N    | Pre-PR-2 tick p99 | Post-PR-2 tick p99 | Post-PR-2 fleet RTT p99 | Status |
+|-----:|------------------:|-------------------:|------------------------:|:-------|
+|  20  | 0.79 ms          | 0.79 ms            | 7.91 ms                 | trivial |
+|  50  | 3.15 ms          | 0.79 ms            | 8.10–8.30 ms            | 4× faster, target hit |
+| 100  | 25–50 ms (broken) | 3.15–6.29 ms       | 14–21 ms (occasional spike to 22+) | tick under budget; RTT mostly under 15 ms |
+| 200  | n/a              | 50+ ms (broken)     | 25–48 ms                | fails — network-thread lock saturation |
+| 500  | not reachable    | not reachable       | not reachable           | fails — bot-side CPU exhausts the test machine first |
+
+`broadcastRegistry` itself dropped from 1.57 ms p50 (50 bots) to
+0.01 ms — a 157× collapse. That's the headline single-PR win.
+
+### Where the wall is
+
+At ≥ 200 bots two structural limits meet:
+
+1. **Bot-side CPU on a shared host.** Each clientbot thread spins
+   to maintain 128 Hz cadence; at 200 threads on a 16-core box,
+   the bot fleet alone consumes ~13 cores. The server's tick
+   thread gets context-switched out and the OS scheduler can't
+   keep all bots on time. Fleet RTT degrades because *bots don't
+   get to run often enough*, not because the server is slow.
+   (Confirmed by per-tick wall samples: `tickN < 128/sec` once
+   the fleet saturates the host.)
+
+2. **Single-threaded network I/O.** `Server::networkLoop` holds
+   `stateMutex_` for the duration of `readClients()`, which
+   iterates every connected client's socket. At 200+ clients
+   that lock-hold time exceeds 10 ms, and any game-thread
+   function that takes the same mutex (`getClientCount`,
+   the unsplit halves of `lagcompTargets` that PR-2c didn't
+   reach, `broadcastMatchStatus`) waits the full duration.
+   Lock-wait shows up in the profile as huge p99 spikes on
+   otherwise cheap scopes.
+
+The first is hardware; the second is architectural.
+
+### What still needs to happen for 500 bots
+
+1. **Test rig: bots on a separate machine** (or set of machines).
+   This is the single biggest unblock. `scripts/server-loadtest.sh`
+   currently colocates bots and server on localhost; that's wrong
+   for any N > ~150 on commodity hardware. Suggested follow-up:
+   add a `BOT_HOST=...` env var to the harness and run bots on
+   one or two separate boxes connected over LAN.
+
+2. **Fine-grained client-state locking** (server side). Replace
+   `stateMutex_` with three locks:
+   - `acceptMutex_` for the listen socket / new-connection path
+   - `clientsMutex_` for the clients map (`std::shared_mutex` so
+     reads don't block reads)
+   - per-`Connection` mutex for the `OutboundQueue`, `udpAddr`,
+     `lastReportedRttMs` fields the game thread snapshots
+
+3. **Multi-threaded I/O** (the natural extension of #2). Split
+   `networkLoop` into a worker pool: each worker handles a shard
+   of clients (modulo connectionId). With 4 I/O workers and
+   per-client lock, total I/O wall time shrinks proportionally.
+
+4. **Snapshot delta encoding** (deferred from PR-2). Most
+   components don't change tick-to-tick; sending the full
+   registry every snapshot is wasteful. A per-client baseline +
+   delta would cut bytes by ~70–90% in typical gameplay,
+   reducing both wire bandwidth (now 86 MB/s at 100 bots →
+   ~10 MB/s) and per-fragment syscall count proportionally.
+   Requires per-client baseline state and ack-tracking; it's
+   correctness-fragile so wants a careful PR.
+
+5. **AOI culling**. Players only need data for entities within
+   relevance radius. Default off because Titanfall-style maps
+   are large and "player off-screen" is gameplay-relevant, but
+   for the 500-bot stress test with all bots idle, AOI would
+   be a free 5–10× cut on bytes.
+
+6. **Parallel kernels worth the dispatch.** The PR-3 `parallelFor`
+   wrapper is in place but turns off at small N or on shared
+   hosts. On a deployment box with dedicated cores at 500 bots,
+   `GROUP2_SERVER_PARALLEL=1` should pay; verify.
+
+### What was tried and didn't pay (yet)
+
+- **PR-3 with parallel default ON.** On the test rig the parallel
+  path measured strictly worse than sequential at every N up to
+  the rig's saturation (200), because the TBB worker pool
+  oversubscribed the cores already shared with the bot fleet.
+  Code is in tree, default-off, opt-in via
+  `GROUP2_SERVER_PARALLEL=1` for the user's deployment box.
+
+### What was deferred / not tried
+
+- **PR-4 (movement-collision BVH)**: the `WorldTriMesh` already
+  ships a BVH (see `SweptCollision.hpp` `BVHNode`); other
+  geometry types (planes, boxes, brushes) total in the low
+  hundreds and don't currently dominate. At 100 bots the
+  `collision` scope is 0.39 ms p50 / 1.57 ms p99 — not the
+  bottleneck.
+- **PR-5 (lag-comp spatial hash + history fixed-cap)**: the
+  `HitboxHistory` vector copy was identified as a 5.5 MB/s
+  allocation in PR-1's exploration but doesn't show up at the
+  current top scopes. Worth doing as a hygiene PR; not a
+  500-bot unblocker.
+- **PR-6 (task graph)**: explicitly the *natural sum* of the
+  earlier PRs once parallel-per-system kernels exist (§5). With
+  PR-3 currently default-off, the graph node's own dispatch
+  overhead would dwarf the saving. Revisit when item #6 above
+  shows real wins on a deployment box.
+- **PR-7+ (GPU compute via SDL3 GPU)**: the spec gated this on
+  "animation still bottlenecked after CPU SIMD + parallelism."
+  Animation was 0.39 ms p50 at 100 bots without GPU — not
+  bottlenecked. SDL3 compute dispatch latency (~50–200 µs
+  round-trip) would dominate the work for the foreseeable
+  scale.
+
+### Done definition status
+
+By §8: **outcome (b)** — "a clearly written final report
+explaining where progress stalled, what would unblock it, and
+which PRs nevertheless land net wins on the 150–300 bot range."
+This section is that report. Items 1–5 above are the unblockers
+for hitting outcome (a).
+
+The PRs that landed (PR-1 through PR-3) are independent wins
+that pay even if the user never goes beyond 100 bots in real
+gameplay; they don't depend on the deferred work for their
+value.
