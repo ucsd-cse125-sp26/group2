@@ -5,6 +5,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <cmath>
+#include <cstdint>
+#include <random>
+
 Bot::~Bot()
 {
     if (thread_.joinable())
@@ -87,6 +91,57 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
             tickHz = static_cast<int>(n);
     }
 
+    // GROUP2_BOT_AI=1 turns each bot into a tiny stochastic agent: it walks
+    // in random directions, jumps, sprints, rotates the look angle, and pulses
+    // shooting on top of the existing fire cadence.  Default OFF so existing
+    // network/server load tests still see the deterministic idle state.  When
+    // ON, the perf bench measures something much closer to real in-game FPS:
+    // the server is doing real movement physics + lag-compensated hits, and
+    // the real client renders chars that are actually animating + pose-changing
+    // every frame.
+    const bool aiEnabled = []() {
+        const char* p = std::getenv("GROUP2_BOT_AI");
+        return p != nullptr && p[0] != '\0' && p[0] != '0';
+    }();
+
+    // Per-bot RNG.  Seed mixes botId + a clock-derived 32-bit so two adjacent
+    // bots don't desynchronise lock-step and produce identical input streams.
+    std::mt19937 rng{static_cast<uint32_t>(botId_) ^ static_cast<uint32_t>(SDL_GetPerformanceCounter() & 0xFFFFFFFFu)};
+    std::uniform_real_distribution<float> uni01{0.0f, 1.0f};
+    // Per-bot orientation drift. yaw drifts through 2π over ~8s, pitch sweeps
+    // shallow up/down. Each bot picks an independent yaw rate and phase so the
+    // fleet doesn't all face the same way.
+    const float yawRate = 0.5f + uni01(rng) * 1.5f; // 0.5–2.0 rad/s
+    const float pitchRate = 0.3f + uni01(rng) * 0.8f;
+    const float yawPhase = uni01(rng) * 6.2832f;
+    const float pitchPhase = uni01(rng) * 6.2832f;
+    // Movement state machine: the bot picks a "direction key" combo and holds
+    // it for ~0.5–1.5s before re-rolling.  Mirrors how a human plays.
+    int moveCombo = 0; // bit 0=fwd, 1=back, 2=left, 3=right
+    int sprintTicksRemaining = 0;
+    int jumpCooldownTicks = 0;
+    int comboTicksRemaining = 0;
+    auto rerollCombo = [&]() {
+        // ~70% chance pure forward direction; 30% strafe or backpedal.
+        const float r = uni01(rng);
+        if (r < 0.55f)
+            moveCombo = 0b0001; // forward
+        else if (r < 0.75f)
+            moveCombo = 0b0101; // forward+left
+        else if (r < 0.90f)
+            moveCombo = 0b1001; // forward+right
+        else if (r < 0.95f)
+            moveCombo = 0b0010; // back
+        else
+            moveCombo = 0;      // stand still
+        comboTicksRemaining =
+            static_cast<int>(0.5f * static_cast<float>(tickHz) + uni01(rng) * 1.0f * static_cast<float>(tickHz));
+        if (uni01(rng) < 0.30f)
+            sprintTicksRemaining = static_cast<int>(0.4f * static_cast<float>(tickHz));
+    };
+    if (aiEnabled)
+        rerollCombo();
+
     const Uint64 perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 tickDurationCounters = perfFreq / static_cast<Uint64>(tickHz);
     Uint64 nextTick = SDL_GetPerformanceCounter() + tickDurationCounters;
@@ -119,6 +174,44 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
         ++predictTick_;
         input_.shooting = (predictTick_ % 256u) < 32u;
         input_.tick = predictTick_;
+
+        if (aiEnabled) {
+            // Continuous yaw/pitch sweeps: rotation rate is per-bot but the
+            // sweep is bounded so the bot doesn't spin uncontrollably.
+            const float t = static_cast<float>(predictTick_) / static_cast<float>(tickHz);
+            input_.yaw = yawPhase + t * yawRate;
+            input_.pitch = 0.2f * std::sin(pitchPhase + t * pitchRate); // shallow up/down
+
+            // Movement combo: re-roll every comboTicksRemaining ticks.
+            if (--comboTicksRemaining <= 0)
+                rerollCombo();
+            input_.forward = (moveCombo & 0b0001) != 0;
+            input_.back = (moveCombo & 0b0010) != 0;
+            input_.left = (moveCombo & 0b0100) != 0;
+            input_.right = (moveCombo & 0b1000) != 0;
+
+            // Sprint while the sprint timer is running.
+            input_.sprint = sprintTicksRemaining > 0;
+            if (sprintTicksRemaining > 0)
+                --sprintTicksRemaining;
+
+            // Jump occasionally — pulse for one tick, then rate-limit so the
+            // server's lag-comp + ground check both get exercised.
+            if (jumpCooldownTicks > 0) {
+                input_.jump = false;
+                --jumpCooldownTicks;
+            } else if (uni01(rng) < 0.01f) {    // ~1.3 jumps/sec at 128 Hz
+                input_.jump = true;
+                jumpCooldownTicks = tickHz / 2; // 0.5s lockout
+            } else {
+                input_.jump = false;
+            }
+
+            // Override the deterministic shooting cadence: pulse with a much
+            // higher duty cycle so the lag-comp + bullet-VFX path runs hot.
+            input_.shooting = uni01(rng) < 0.10f;
+        }
+
         if (!client_.sendInputSnapshot(input_)) {
             SDL_Log("[bot %d] sendInputSnapshot failed; bailing", botId_);
             break;
