@@ -711,12 +711,14 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
             serverAckedClientTick_ = ackedTick;
         snapshotAppliedFlag_ = true;
 
-        // PR-10: stash the raw serialized bytes as the baseline for the
-        // next DELTA packet. We copy here — the loader-apply path may
-        // have advanced its internal cursor but the source bytes are
-        // still ours.
-        lastSnapshotPayload_.assign(serBytes, serBytes + serSize);
-        lastSnapshotTick_ = snapshotTick;
+        // PR-10 + PR-14: stash the raw serialized bytes as the
+        // *keyframe* baseline.  Every DELTA in this keyframe window
+        // will reference these same bytes; we do NOT update
+        // `keyframePayload_` on DELTA arrival, so individual DELTA
+        // drops don't cascade into baseline mismatches for the rest
+        // of the window.  The next FULL replaces the keyframe.
+        keyframePayload_.assign(serBytes, serBytes + serSize);
+        keyframeTick_ = snapshotTick;
 
         // Newly-spawned entities (created by the snapshot apply above) have
         // a default-constructed PreviousPosition (or none at all). Without
@@ -780,11 +782,14 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         std::memcpy(&fromTick, payload + 1 * sizeof(std::uint32_t), sizeof(std::uint32_t));
         std::memcpy(&baselineSize, payload + 2 * sizeof(std::uint32_t), sizeof(std::uint32_t));
 
-        // Drop if we don't have the right baseline. The next FULL
-        // (every 16th snapshot ≈ 500 ms at 32 Hz) re-syncs us.
-        if (fromTick != lastSnapshotTick_ || lastSnapshotPayload_.empty() ||
-            lastSnapshotPayload_.size() != baselineSize)
-        {
+        // PR-14: every delta references the most recent KEYFRAME, not
+        // the immediately previous snapshot.  Drop if we haven't
+        // received the matching keyframe yet (e.g. it was lost on the
+        // wire or we just connected and haven't seen one).  The next
+        // periodic keyframe (every 8 snapshots ≈ 62 ms at 128 Hz)
+        // re-syncs us — much faster than the pre-PR-14 cascade where
+        // a single drop could blank out an entire keyframe window.
+        if (fromTick != keyframeTick_ || keyframePayload_.empty() || keyframePayload_.size() != baselineSize) {
             // Silent drop is fine — receiver is allowed to discard
             // packets it can't apply. SDL_Log here would spam at
             // delta cadence on packet loss.
@@ -793,8 +798,7 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
 
         const uint8_t* patchData = payload + k_headerSize;
         const Uint32 patchSize = payloadSize - k_headerSize;
-        auto reconstructed =
-            registry_serialization::applyDelta(lastSnapshotPayload_, patchData, patchSize, baselineSize);
+        auto reconstructed = registry_serialization::applyDelta(keyframePayload_, patchData, patchSize, baselineSize);
         if (reconstructed.empty())
             break; // malformed patch — drop, wait for next FULL.
 
@@ -830,9 +834,13 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
             snapshotIntervalEmaNs_ = (3 * snapshotIntervalEmaNs_ + interval) / 4;
         }
 
-        // The reconstructed bytes BECOME the new baseline.
-        lastSnapshotPayload_ = std::move(reconstructed);
-        lastSnapshotTick_ = snapshotTick;
+        // PR-14: do NOT replace the keyframe.  All deltas in this
+        // keyframe window reference the same baseline; if we copied
+        // the reconstructed bytes here we'd be back to pre-PR-14
+        // cascade-on-loss.  The reconstructed bytes were already fed
+        // into the Loader above; the keyframe stays at the FULL we
+        // last saw.
+        (void)reconstructed;                    // intentional: reconstructed buffer goes out of scope
 
         stats.registryUpdateSize = payloadSize; // wire size, not reconstructed size
         ++registryUpdatesWindow;

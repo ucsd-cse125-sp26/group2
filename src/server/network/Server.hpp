@@ -385,10 +385,20 @@ private:
     // delta size, so clients that fell behind one delta still resync
     // within ≤ 500 ms (at 32 Hz × 16 = 500 ms).
     //
+    // PR-14 (loss resilience): `keyframeRaw_` / `keyframeTick_` now
+    // hold the most recent FULL keyframe, NOT the immediately previous
+    // snapshot.  Every delta within a keyframe window is encoded
+    // against the same fixed baseline, so a single dropped delta no
+    // longer cascades — the next-arriving delta still decodes against
+    // the keyframe the client holds.  The keyframe is replaced only
+    // when a new FULL is sent (forced by `k_keyframeInterval` or
+    // size-change fallback).  `snapshotCounter_` tracks the absolute
+    // snapshot number for tick stamping and keyframe scheduling.
+    //
     // All three fields are touched only on the game thread inside
     // broadcastRegistry — no synchronisation needed.
-    std::vector<uint8_t> prevSnapshotRaw_;
-    std::uint32_t prevSnapshotTick_ = 0;
+    std::vector<uint8_t> keyframeRaw_;
+    std::uint32_t keyframeTick_ = 0;
     std::uint32_t snapshotCounter_ = 0;
 
     // ── PR-4 (server-perf): atomic-published read snapshots ───────────────

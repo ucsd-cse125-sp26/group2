@@ -239,21 +239,31 @@ private:
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     bool localPlayerReadyNotified = false;         ///< True if localPlayerReadyFn has been called.
 
-    // ── PR-10 (server-perf): snapshot delta encoding state ──────────────
+    // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //
-    // `lastSnapshotPayload_` holds the most-recent FULL snapshot's raw
-    // entt-serialized bytes (no PacketType prefix, no tick). When a
-    // DELTA packet arrives we apply its patch on top of these bytes
-    // to reconstruct the new full state, then feed *that* into the
-    // existing Loader. Both bytes and tick are then replaced so
-    // subsequent deltas have the right baseline.
+    // `keyframePayload_` holds the most-recent FULL snapshot's raw
+    // entt-serialized bytes (no PacketType prefix, no tick), and
+    // `keyframeTick_` is the tick that snapshot was sent at.
     //
-    // If `fromTick` on a DELTA doesn't match `lastSnapshotTick_` the
-    // packet is silently dropped (the missing piece) — the next
-    // periodic full keyframe (every 16 snapshots ≈ 500 ms at 32 Hz)
-    // will resync.
-    std::vector<uint8_t> lastSnapshotPayload_;
-    std::uint32_t lastSnapshotTick_ = 0;
+    // PR-14 (loss resilience): both fields update *only* on FULL
+    // arrival.  DELTA packets reconstruct the current frame's bytes
+    // by applying their patch on top of the keyframe and feed the
+    // reconstructed bytes into the Loader, but do NOT replace the
+    // saved keyframe.  Pre-PR-14, every DELTA replaced the saved
+    // baseline with the just-reconstructed bytes — which meant a
+    // single dropped DELTA cascaded into all subsequent DELTAs in the
+    // same keyframe window dropping silently (their `fromTick` no
+    // longer matched the client's stored `lastSnapshotTick_`).  Now
+    // every DELTA in a window is independently decodable against the
+    // shared keyframe, so individual packet drops only cost that one
+    // frame's state.
+    //
+    // If `fromTick` on a DELTA doesn't match `keyframeTick_` the
+    // packet is dropped — happens when a FULL keyframe was lost or
+    // hasn't arrived yet.  The next periodic full keyframe (every 8
+    // snapshots ≈ 62 ms at 128 Hz) re-syncs us.
+    std::vector<uint8_t> keyframePayload_;
+    std::uint32_t keyframeTick_ = 0;
 
     NetworkStats stats; ///< Live network metrics.
 

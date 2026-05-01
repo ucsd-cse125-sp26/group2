@@ -905,22 +905,41 @@ void Server::broadcastRegistry(const Registry& registry)
     //     [PacketType:u8] [tick:u32] [fromTick:u32]
     //     [baselineSize:u32] [rlePatch...]
     //
-    // We always serialize the full registry first, then decide which
-    // form to ship by patch size. Force a full keyframe every Nth
-    // snapshot so clients that lost a delta resync within ≤ 500 ms.
+    // PR-14 (loss resilience): `fromTick` references the LAST FULL
+    // KEYFRAME, not the immediately previous snapshot.  Every delta
+    // within a keyframe window encodes against the same fixed
+    // baseline.  This eliminates the cascade-on-loss bug — pre-PR-14,
+    // a single dropped delta caused all subsequent deltas in the
+    // window to drop because their fromTick referenced bytes the
+    // client no longer held.  Post-PR-14, every delta is
+    // independently decodable against the keyframe, so individual
+    // packet drops only cost that one frame's worth of state — the
+    // next delta picks up where the lost one would have.
+    //
+    // Cost trade-off: deltas grow as we move further from the
+    // keyframe (more bytes have changed since the reference).  At
+    // PR-13's 128 Hz rate with k_keyframeInterval = 8 (~62 ms), the
+    // last delta in a window is ~2× the size of the first — still
+    // dramatically smaller than a full snapshot, and the loss-
+    // resilience win swamps the modest size growth.
 
-    constexpr std::uint32_t k_keyframeInterval = 16;
+    // PR-14: 8 snapshots / keyframe at PR-13's 128 Hz = ~62 ms recovery
+    // window.  Pre-PR-14 was 16 snapshots (~125 ms at 128 Hz, ~500 ms
+    // at the legacy 32 Hz).  Tighter at 128 Hz because each keyframe
+    // is now full size; the wire-size extra is amortised across many
+    // smaller-than-pre-PR-14 deltas (which now grow with distance
+    // from keyframe but still beat full in most ticks).
+    constexpr std::uint32_t k_keyframeInterval = 8;
 
     auto raw = registry_serialization::serialize(registry);
     const std::uint32_t thisTick = ++snapshotCounter_;
-    const bool forceFull =
-        prevSnapshotRaw_.empty() || prevSnapshotTick_ == 0 || (snapshotCounter_ % k_keyframeInterval) == 0;
+    const bool forceFull = keyframeRaw_.empty() || keyframeTick_ == 0 || (snapshotCounter_ % k_keyframeInterval) == 0;
 
     std::vector<uint8_t> wirePayload; // [PacketType][...] — UDP raw form
     bool sentDelta = false;
 
-    if (!forceFull && raw.size() == prevSnapshotRaw_.size()) {
-        auto patch = registry_serialization::encodeDelta(prevSnapshotRaw_, raw);
+    if (!forceFull && raw.size() == keyframeRaw_.size()) {
+        auto patch = registry_serialization::encodeDelta(keyframeRaw_, raw);
         // Only ship a delta if the patch beats the full by >25 %.
         // Otherwise the per-client wire saving doesn't justify the
         // extra encode/decode CPU. Threshold is pragmatic; revisit
@@ -934,7 +953,7 @@ void Server::broadcastRegistry(const Registry& registry)
             wirePayload.reserve(deltaWireSize);
             wirePayload.push_back(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY_DELTA));
             const auto t = thisTick;
-            const auto ft = prevSnapshotTick_;
+            const auto ft = keyframeTick_;
             const auto sz = static_cast<std::uint32_t>(raw.size());
             const auto* tp = reinterpret_cast<const uint8_t*>(&t);
             const auto* fp = reinterpret_cast<const uint8_t*>(&ft);
@@ -948,20 +967,22 @@ void Server::broadcastRegistry(const Registry& registry)
     }
 
     if (!sentDelta) {
-        // Full snapshot path.
+        // Full snapshot path.  This becomes the new keyframe baseline
+        // — every delta until the next forced-full will reference these
+        // bytes, so we hold onto them past this function.
         wirePayload.reserve(1 + sizeof(std::uint32_t) + raw.size());
         wirePayload.push_back(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
         const auto t = thisTick;
         const auto* tp = reinterpret_cast<const uint8_t*>(&t);
         wirePayload.insert(wirePayload.end(), tp, tp + sizeof(t));
         wirePayload.insert(wirePayload.end(), raw.begin(), raw.end());
-    }
 
-    // Save the just-serialized RAW (no packet prefix) bytes as the
-    // baseline for the *next* delta. We do this AFTER deciding the
-    // wire form so the delta we sent referenced the OLD prev.
-    prevSnapshotRaw_ = std::move(raw);
-    prevSnapshotTick_ = thisTick;
+        // PR-14: only a FULL replaces the keyframe baseline.  Deltas do
+        // NOT update it — that's the whole point.  Without this guard
+        // we'd be back to the pre-PR-14 cascade-on-loss behaviour.
+        keyframeRaw_ = std::move(raw);
+        keyframeTick_ = thisTick;
+    }
 
     const std::size_t wireBytes = wirePayload.size();
 
