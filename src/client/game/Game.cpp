@@ -1473,20 +1473,31 @@ SDL_AppResult Game::iterate()
                 if (!visible)
                     return;
 
-                AnimationInputs ai{};
-                ai.velocityWorld = vel.value;
-                ai.yawRad = inp.yaw;
-                ai.pitchRad = inp.pitch;
-                ai.grounded = ps.grounded;
-                ai.sprinting = ps.sprinting;
-                ai.crouching = ps.crouching;
-                ai.moveMode = static_cast<int>(ps.moveMode);
-                ai.wallRunSide = static_cast<int>(ps.wallRunSide);
-                ac.animator->update(ai, frameTime);
+                // Phase 3c — animation tick decoupling.  ozz pose sampling +
+                // skin-matrix flatten is the heaviest per-character CPU cost.
+                // Cap the per-character animation update rate at ~30 Hz; in
+                // between samples we reuse the previous skin matrices.  At
+                // 1000 fps this skips ~32/33 frames of ozz work per char.
+                constexpr float k_animationTick = 1.0f / 30.0f;
+                ac.animationAccumulator += frameTime;
+                if (ac.animationAccumulator >= k_animationTick || isLocal) {
+                    ac.animationAccumulator = std::fmod(ac.animationAccumulator, k_animationTick);
 
-                // Store model-space joint matrices for hitbox system.
-                auto& jm = registry.get_or_emplace<JointMatrices>(e);
-                jm.matrices = ac.animator->jointModelMatrices();
+                    AnimationInputs ai{};
+                    ai.velocityWorld = vel.value;
+                    ai.yawRad = inp.yaw;
+                    ai.pitchRad = inp.pitch;
+                    ai.grounded = ps.grounded;
+                    ai.sprinting = ps.sprinting;
+                    ai.crouching = ps.crouching;
+                    ai.moveMode = static_cast<int>(ps.moveMode);
+                    ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+                    ac.animator->update(ai, k_animationTick);
+
+                    // Store model-space joint matrices for hitbox system.
+                    auto& jm = registry.get_or_emplace<JointMatrices>(e);
+                    jm.matrices = ac.animator->jointModelMatrices();
+                }
 
                 // Skip drawing the local player's own body in first-person
                 // (the animator still ran above so hitboxes / future gun-IK
