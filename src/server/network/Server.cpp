@@ -9,6 +9,7 @@
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "network/transport/PacketHeader.hpp"
+#include "perf/Parallel.hpp" // PR-9: parallelFor for per-client syscall fan-out.
 #include "perf/Profiler.hpp" // PR-1: NetworkCounters & scope timers.
 #include "systems/EventQueue.hpp"
 
@@ -205,16 +206,35 @@ void Server::flushAllOutbound()
         }
     }
 
+    // PR-9 (server-perf): parallelize the per-client flush. SDL_net's
+    // NET_WriteToStreamSocket is documented thread-safe per-socket,
+    // and we hold one socket per Target (each Target has its own
+    // OutboundQueue + its own NET_StreamSocket*), so multiple TBB
+    // workers each draining a different client's queue is safe.
+    //
+    // The shared writes here are:
+    //   - `failed`: per-thread-local accumulator merged at the end
+    //   - `maxDepth`: atomic max via cmpxchg loop
+    //   - perf counters inside flushTo: already std::atomic
+    std::atomic<std::uint32_t> maxDepthAtomic{0};
+    std::mutex failedMutex;
     std::vector<ClientId> failed;
-    std::uint32_t maxDepth = 0;
-    for (const Target& t : targets) {
+
+    auto flushKernel = [&](const Target& t) {
         const auto depth = static_cast<std::uint32_t>(t.queue->depth());
-        if (depth > maxDepth)
-            maxDepth = depth;
+        std::uint32_t cur = maxDepthAtomic.load(std::memory_order_relaxed);
+        while (depth > cur && !maxDepthAtomic.compare_exchange_weak(cur, depth, std::memory_order_relaxed)) {
+        }
         if (!t.queue->flushTo(t.socket, k_maxAgeMs)) {
+            // Disconnects are rare; a brief mutex on the failure
+            // list is cheaper than a per-thread vector + merge.
+            std::lock_guard<std::mutex> fl(failedMutex);
             failed.push_back(t.id);
         }
-    }
+    };
+
+    ::group2::perf::parallelFor(targets.begin(), targets.end(), flushKernel);
+    const std::uint32_t maxDepth = maxDepthAtomic.load(std::memory_order_relaxed);
 
     // Phase 3: apply failures + republish atomics. Take the lock once.
     {
@@ -501,8 +521,17 @@ void Server::networkLoop()
                 // socket FD and the dest address. With 100 bots × ~5
                 // fragments per snapshot × 32 Hz, this is ~16k syscalls/s
                 // off the game thread's critical path.
+                //
+                // PR-9 (server-perf): parallelize the fan-out across
+                // TBB workers. NET_SendDatagram is documented thread-
+                // safe per-socket; multiple workers calling
+                // sendFragmented on the same UDP socket with different
+                // dest addresses race only on the socket FD's send
+                // buffer (kernel-side), which is the protocol stack's
+                // job to serialize. At 500 clients × 5 fragments × 32 Hz
+                // = 80k syscalls/sec — clearly worth fanning out.
                 if (payload && !udpTargets.empty()) {
-                    for (auto& t : udpTargets) {
+                    auto udpKernel = [this, &payload](UdpTarget& t) {
                         net::PacketHeader hdr{};
                         hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
                         hdr.connectionId = t.connectionId;
@@ -510,7 +539,8 @@ void Server::networkLoop()
                         hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
                         udpEndpoint_.sendFragmented(t.addr, hdr, payload->data(), static_cast<int>(payload->size()));
                         t.addr.release();
-                    }
+                    };
+                    ::group2::perf::parallelFor(udpTargets.begin(), udpTargets.end(), udpKernel);
                 }
 
                 // Step 3: TCP enqueue. Brief lock; per-client work is a
