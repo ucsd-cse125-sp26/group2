@@ -306,6 +306,21 @@ FetchContent_MakeAvailable(minimp3)
 add_library(minimp3 INTERFACE)
 target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
 
+# V-HACD — Volumetric Hierarchical Approximate Convex Decomposition.
+# Header-only library used by MapLoader to split non-convex collision meshes
+# into a small set of convex hulls (WorldBrushes), avoiding triMesh-edge
+# jitter on curved surfaces.  Implementation lives in
+# src/ecs/physics/VHACDImpl.cpp via the ENABLE_VHACD_IMPLEMENTATION define.
+FetchContent_Declare(
+    vhacd
+    GIT_REPOSITORY https://github.com/kmammou/v-hacd.git
+    GIT_TAG        v4.1.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(vhacd)
+add_library(vhacd INTERFACE)
+target_include_directories(vhacd SYSTEM INTERFACE ${vhacd_SOURCE_DIR}/include)
+
 # ozz-animation — runtime skeletal animation (CPU skinning, sampling, blending).
 # We only need the runtime + offline builders; disable all extras.
 set(ozz_build_tests     OFF CACHE BOOL "" FORCE)
@@ -701,6 +716,7 @@ add_executable(group2
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -833,6 +849,7 @@ target_link_libraries(group2 PRIVATE
     glm::glm
     SDL3_net::SDL3_net
     EnTT::EnTT
+    vhacd
     imgui_lib
     assimp
     stb_image
@@ -1020,6 +1037,7 @@ add_executable(client
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -1134,6 +1152,7 @@ target_link_libraries(client PRIVATE
     glm::glm
     SDL3_net::SDL3_net
     EnTT::EnTT
+    vhacd
     imgui_lib
     assimp
     stb_image
@@ -1205,6 +1224,7 @@ add_executable(server
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
         src/ecs/physics/TitanfallConstants.hpp
@@ -1293,6 +1313,7 @@ target_link_libraries(server PRIVATE
     EnTT::EnTT
     glm::glm
     assimp
+    vhacd
     tomlplusplus::tomlplusplus
     ozz_animation_offline
     ozz_animation
@@ -1354,6 +1375,24 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
         COMMENT "Copying animation assets to server binary directory"
         VERBATIM
     )
+endif()
+
+# Copy prop GLBs (top-level files in assets/) next to the server binary so
+# MapLoader::loadPropCollision can find them.  ServerGame.cpp loads bottle_a /
+# metallic_pallet_factory_store as collision-only props for prediction parity
+# with the client.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    file(GLOB _server_prop_glbs "${CMAKE_CURRENT_SOURCE_DIR}/assets/*.glb")
+    if(_server_prop_glbs)
+        add_custom_command(TARGET server POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${_server_prop_glbs}
+                    "$<TARGET_FILE_DIR:server>/assets/"
+            COMMENT "Copying prop GLBs to server binary directory"
+            VERBATIM
+        )
+    endif()
 endif()
 
 # ===========================================================================

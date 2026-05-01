@@ -177,32 +177,71 @@ bool Game::init()
     // Scale: the map was authored in meters; the game uses Quake units (inches).
     // 1 m = 39.3701 in.
     {
-        const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/" + kMapAsset.filename;
+        // Toggle: does this map use SEPARATED collision and visual meshes?
+        //   false → "prototype mode": every mesh in the GLB is both visual *and*
+        //           collision (used for blockout maps like map1.glb).
+        //   true  → "separated mode": collision-only meshes are tagged in Blender
+        //           (e.g. "COL_*" prefix) and excluded from the visual model.
+        //           Used for production maps where collision is hand-authored
+        //           independently from rendering geometry.
+        static constexpr bool k_separatedCollisionMap = true;
 
-        // 1) Extract collision geometry (prototype mode: all meshes → collision).
+        // Pattern that identifies collision-only nodes when in separated mode.
+        // The Blender export convention here is a "COL_" prefix; nodes whose
+        // names contain this substring (case-insensitive) are treated as
+        // collision-only and stripped from the visual mesh list.
+        static constexpr const char* k_collisionPattern = "COL_";
+
+        // In separated mode, should the loader auto-fit each collision mesh
+        // to a primitive (AABB / cylinder / sphere / brush) — or load the raw
+        // Blender geometry as-is (triangle mesh)?
+        //   true  (default) → auto-detect: convex shapes become cheap primitives
+        //                     or brushes; only truly non-convex meshes fall
+        //                     back to triMesh.  Smoother collision overall.
+        //   false           → trust the artist: every collision mesh stays a
+        //                     triMesh, vertex-for-vertex, exactly as authored.
+        static constexpr bool k_guessShapesProcessed = true;
+
+        const char* const mapFilename =
+            k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : kMapAsset.filename;
+
+        const char* base = SDL_GetBasePath();
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + mapFilename;
+
+        // 1) Extract collision geometry.
         physics::MapLoadOptions opts;
         opts.scale = kMapAsset.loadScale;
-        opts.allMeshesAreCollision = true; // Prototype map — every mesh is both visual and collision.
-        opts.addFloorPlane = false;        // Map geometry provides its own floor.
+        opts.allMeshesAreCollision = !k_separatedCollisionMap;
+        // In separated mode, recognise collision-prefixed nodes; in prototype
+        // mode, the field is unused (every mesh is collision by definition).
+        if (k_separatedCollisionMap)
+            opts.collisionCollection = k_collisionPattern;
+        opts.guessShapesProcessed = k_guessShapesProcessed;
+        opts.addFloorPlane = false; // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
-            SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes",
+            SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes, %zu cylinders, %zu spheres, "
+                    "%zu trimeshes",
                     mapCollision_.planes.size(),
                     mapCollision_.boxes.size(),
-                    mapCollision_.brushes.size());
+                    mapCollision_.brushes.size(),
+                    mapCollision_.cylinders.size(),
+                    mapCollision_.spheres.size(),
+                    mapCollision_.triMeshes.size());
         } else {
             SDL_Log("[client] WARNING: map collision load failed — falling back to testWorld()");
         }
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
+        // In separated mode, exclude collision-only nodes so they aren't rendered.
+        const std::string visualExclude = k_separatedCollisionMap ? std::string(k_collisionPattern) : std::string();
         const int mapId = addAssetDefinition(assets_, kMapAsset);
         const int mapModelIdx = renderer.loadSceneModel(
-            kMapAsset.filename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs);
+            mapFilename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs, visualExclude);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
             renderer.setModelScenePass(mapModelIdx, true);
-            SDL_Log("[client] map visual loaded (model index %d)", mapModelIdx);
+            SDL_Log("[client] map visual loaded (model index %d, exclude='%s')", mapModelIdx, visualExclude.c_str());
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
         }
@@ -216,6 +255,10 @@ bool Game::init()
         const std::string basePath = base ? base : "";
 
         // Helper: load a prop with render + collision in one call.
+        // `def.decomposeCollision = true` runs V-HACD on each non-convex sub-mesh
+        // so organic/detailed shapes (a bottle, a metallic pallet) end up as a
+        // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
+        // a few seconds of load time per prop but kills triMesh edge-jitter.
         auto loadProp = [&](const AssetDefinition& def) {
             const int id = addAssetDefinition(assets_, def);
             const int modelIdx = renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
@@ -226,7 +269,9 @@ bool Game::init()
 
             // Load collision at the same position/scale.
             const std::string fullPath = basePath + "assets/" + def.filename;
-            if (physics::loadPropCollision(fullPath, mapCollision_, def.loadTranslation, def.loadScale)) {
+            if (physics::loadPropCollision(
+                    fullPath, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision))
+            {
                 assets_.setHasCollision(id);
             }
         };

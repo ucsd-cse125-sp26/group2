@@ -67,7 +67,15 @@ public:
     [[nodiscard]] virtual const Camera& getCamera() const = 0;
 
     virtual void setParticleSystem(ParticleSystem* ps) = 0;
-    virtual int loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs) = 0;
+    /// @brief Load a model and return its index in the renderer's models list.
+    /// @param excludeNodesContaining  Optional case-insensitive substring; any
+    ///        node whose name contains it (and its descendants) is skipped.
+    ///        Used to drop collision-only meshes from a map's visual model.
+    virtual int loadSceneModel(const char* filename,
+                               glm::vec3 pos,
+                               float scale,
+                               bool flipUVs,
+                               const std::string& excludeNodesContaining = "") = 0;
     virtual int uploadSceneModel(const LoadedModel& model) = 0;
     virtual bool setVSync(bool enabled) = 0;
     virtual void

@@ -17,6 +17,7 @@ struct AssetDefinition
     glm::vec3 loadTranslation{0.0f};       ///< World translation used when loading static scene assets.
     float loadScale = 1.0f;                ///< Scale used when loading/uploading the model.
     bool flipUVs = false;                  ///< True for assets whose source UV orientation needs flipping.
+    bool decomposeCollision = false;       ///< True to run V-HACD on non-convex collision sub-meshes.
     glm::vec3 renderScale{1.0f};           ///< Default Renderable scale.
     glm::vec3 renderTranslation{0.0f};     ///< Default Renderable local translation.
     glm::vec3 renderRotationDegrees{0.0f}; ///< Default Renderable local rotation in degrees.
@@ -29,24 +30,21 @@ inline const AssetDefinition kMapAsset{
     .loadScale = 39.3701f,
 };
 
-inline const std::array<AssetDefinition, 3> kPropAssets{{
-    {.name = "porsche",
-     .filename = "free_1975_porsche_911_930_turbo.glb",
-     .role = AssetRole::Prop,
-     .loadTranslation = {-200.0f, 1.3f, 400.0f},
-     .loadScale = 40.0f,
-     .flipUVs = true},
+// Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
+inline const std::array<AssetDefinition, 2> kPropAssets{{
     {.name = "pallet",
      .filename = "metallic_pallet_factory_store.glb",
      .role = AssetRole::Prop,
      .loadTranslation = {0.0f, 0.0f, 600.0f},
      .loadScale = 0.25f,
-     .flipUVs = true},
+     .flipUVs = true,
+     .decomposeCollision = true},
     {.name = "bottle",
      .filename = "bottle_a.glb",
      .role = AssetRole::Prop,
      .loadTranslation = {100.0f, 0.0f, 400.0f},
-     .loadScale = 20.0f},
+     .loadScale = 20.0f,
+     .decomposeCollision = true},
 }};
 
 inline const AssetDefinition kWraithAsset{

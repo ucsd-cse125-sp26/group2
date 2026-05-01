@@ -30,7 +30,11 @@ public:
     [[nodiscard]] const Camera& getCamera() const override;
 
     void setParticleSystem(ParticleSystem* ps) override;
-    int loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) override;
+    int loadSceneModel(const char* filename,
+                       glm::vec3 pos,
+                       float scale,
+                       bool flipUVs = false,
+                       const std::string& excludeNodesContaining = "") override;
     int uploadSceneModel(const LoadedModel& model) override;
     bool setVSync(bool enabled) override;
     void

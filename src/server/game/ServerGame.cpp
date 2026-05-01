@@ -56,27 +56,56 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
 
     // ── Load map collision ──────────────────────────────────────────────
     {
+        // Toggle: does this map use SEPARATED collision and visual meshes?
+        // Must match the client (Game.cpp) for prediction parity — both sides
+        // need to extract the exact same collision primitives from the GLB.
+        //   false → "prototype mode": every mesh in the GLB is collision.
+        //   true  → "separated mode": only nodes whose name contains the
+        //           collision pattern (e.g. "COL_") are extracted as collision.
+        static constexpr bool k_separatedCollisionMap = true;
+        static constexpr const char* k_collisionPattern = "COL_";
+
+        // Should collision meshes be auto-fit to primitive shapes, or kept
+        // as raw triMeshes (the exact artist-authored Blender geometry)?
+        // Must match the client value in Game.cpp for prediction parity.
+        static constexpr bool k_guessShapesProcessed = true;
+
+        const char* const mapFilename =
+            k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : kMapAsset.filename;
+
         const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/" + kMapAsset.filename;
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + mapFilename;
 
         physics::MapLoadOptions opts;
         opts.scale = kMapAsset.loadScale;
-        opts.allMeshesAreCollision = true; // Prototype map — every mesh is collision.
-        opts.addFloorPlane = false;        // Map geometry provides its own floor.
+        opts.allMeshesAreCollision = !k_separatedCollisionMap;
+        if (k_separatedCollisionMap)
+            opts.collisionCollection = k_collisionPattern;
+        opts.guessShapesProcessed = k_guessShapesProcessed;
+        opts.addFloorPlane = false; // Map geometry provides its own floor.
 
         if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
-            SDL_Log("[server] map collision loaded: %zu planes, %zu boxes, %zu brushes",
+            SDL_Log("[server] map collision loaded: %zu planes, %zu boxes, %zu brushes, %zu cylinders, %zu spheres, "
+                    "%zu trimeshes",
                     mapCollision_.planes.size(),
                     mapCollision_.boxes.size(),
-                    mapCollision_.brushes.size());
+                    mapCollision_.brushes.size(),
+                    mapCollision_.cylinders.size(),
+                    mapCollision_.spheres.size(),
+                    mapCollision_.triMeshes.size());
         } else {
             SDL_Log("[server] WARNING: map collision load failed — falling back to testWorld()");
         }
 
         // Load prop collision — must match client for prediction parity.
+        // Props with `decomposeCollision = true` (pallet, bottle) are non-convex,
+        // so V-HACD turns each sub-mesh into a few `WorldBrush`es instead of a
+        // `WorldTriMesh`.  Server pays a one-shot startup cost but runtime
+        // collision is much smoother (no per-triangle jitter).
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
         for (const AssetDefinition& def : kPropAssets)
-            physics::loadPropCollision(assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale);
+            physics::loadPropCollision(
+                assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision);
 
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());
