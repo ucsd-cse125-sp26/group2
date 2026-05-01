@@ -581,6 +581,22 @@ bool Game::init()
     // Apply the default frame-rate-limit setting now that the renderer is ready.
     applyFrameRateLimit();
 
+    // Bench mode: BENCH_SECONDS=N runs the client for N seconds, then prints a
+    // single-line FPS summary to stderr and quits.  Driven by
+    // `scripts/perf-100bots.sh` for baseline + post-change measurements.
+    if (const char* envBench = SDL_getenv("BENCH_SECONDS")) {
+        const float seconds = std::strtof(envBench, nullptr);
+        if (seconds > 0.0f) {
+            benchSeconds_ = seconds;
+            benchActive_ = true;
+            benchStartTime_ = prevTime;
+            // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
+            limitFPSToMonitor = false;
+            renderer.setVSync(false);
+            SDL_Log("[bench] running for %.1fs then exiting", static_cast<double>(seconds));
+        }
+    }
+
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
 }
@@ -870,6 +886,23 @@ SDL_AppResult Game::iterate()
         statsFPS5pLow = sorted[static_cast<int>(static_cast<float>(count) * 0.05f)]; // 5th percentile
         // Most-recent sample (last written = head - 1).
         statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
+    }
+
+    // Bench mode: print summary + quit when the duration is up.
+    if (benchActive_) {
+        const float benchElapsed = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
+        if (benchElapsed >= benchSeconds_) {
+            std::fprintf(stderr,
+                         "[bench] elapsed=%.1fs cur=%.1f p1=%.1f p5=%.1f min=%.1f max=%.1f\n",
+                         static_cast<double>(benchElapsed),
+                         static_cast<double>(statsFPSCurrent),
+                         static_cast<double>(statsFPS1pLow),
+                         static_cast<double>(statsFPS5pLow),
+                         static_cast<double>(statsFPSMin),
+                         static_cast<double>(statsFPSMax));
+            std::fflush(stderr);
+            return SDL_APP_SUCCESS;
+        }
     }
 
     // 3. Input
