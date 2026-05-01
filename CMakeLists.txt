@@ -603,6 +603,9 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    # Util
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.hpp"
     # Particle system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.hpp"
@@ -924,6 +927,9 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    # Util
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.hpp"
     # Particle system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.hpp"

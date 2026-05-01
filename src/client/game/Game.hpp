@@ -22,6 +22,9 @@
 #include "sfx/SfxSystem.hpp"
 #include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
+#include "util/WorkerPool.hpp"
+
+#include <memory>
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
 #else
@@ -147,6 +150,15 @@ private:
     /// recent tick and feed it back into runMovement during replay.
     InputRingBuffer inputRing_;
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
+
+    /// Persistent thread pool for parallel-for over per-frame loops
+    /// (currently the animation update; future: parallel frustum cull,
+    /// particle update, ECS transforms).  Initialised in Game::init with a
+    /// worker count derived from `std::thread::hardware_concurrency() / 2`
+    /// (or `GROUP2_WORKERS` if set), so we leave half the cores for the
+    /// rest of the system.  Gated behind a unique_ptr so it constructs
+    /// AFTER `init()` reads the env override.
+    std::unique_ptr<WorkerPool> workerPool_;
 
     // Runtime-tunable loop settings (exposed via ImGui)
     float mouseSensitivity = 0.001f;       ///< Radians per pixel of mouse movement.

@@ -607,6 +607,25 @@ bool Game::init()
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
 
+    // Spin up the per-frame worker pool.  Default to half the host's logical
+    // cores so we leave headroom for the rest of the system; clamp to [0, 7]
+    // because parallel-for over ~30-character batches saturates well before
+    // 8 workers and over-subscribing just adds context-switch noise.
+    {
+        int hw = static_cast<int>(std::thread::hardware_concurrency());
+        if (hw <= 0)
+            hw = 4;
+        int workers = std::max(0, std::min(hw / 2, 7));
+        if (const char* p = SDL_getenv("GROUP2_WORKERS")) {
+            char* end = nullptr;
+            const long n = std::strtol(p, &end, 10);
+            if (*end == '\0' && n >= 0 && n <= 32)
+                workers = static_cast<int>(n);
+        }
+        workerPool_ = std::make_unique<WorkerPool>(workers);
+        SDL_Log("[client] WorkerPool: %d worker(s)", workers);
+    }
+
     // Apply the default frame-rate-limit setting now that the renderer is ready.
     applyFrameRateLimit();
 
@@ -1592,23 +1611,35 @@ SDL_AppResult Game::iterate()
     // The renderer then issues one instanced draw per rig mesh per pass.  No
     // CPU skinning, no per-entity vertex re-upload, no per-entity draws.
     {
-        std::vector<glm::mat4> bonePalette;
-        std::vector<Renderer::SkinnedInstance> skinnedInstances;
         const int numJoints = charRig_.numJoints();
-        if (numJoints > 0) {
-            // Reserve a generous upper bound; the bench harness drives 100+
-            // characters so this avoids constant reallocation at start-of-frame.
-            bonePalette.reserve(static_cast<size_t>(numJoints) * 128);
-            skinnedInstances.reserve(128);
-        }
         const float snapshotAlpha = client.getSnapshotAlpha();
+        constexpr float k_animationTick = 1.0f / 30.0f;
 
-        // Phase 2 — frustum cull animated chars.  Build 6 view-frustum planes
-        // from the camera's view-projection matrix; chars whose bounding sphere
-        // lies fully outside any plane skip animation sampling AND skinned
-        // draw entry.  Local player exempt (we still need its bones for hitbox /
-        // weapon IK).  Bounding sphere is conservative: the rig's vertical
-        // extent times an over-approximating 0.7 radius factor.
+        // ─── Phase 1: sequential prepass ────────────────────────────────────
+        // Walk the registry view ONCE on the main thread (entt views aren't
+        // thread-safe to iterate concurrently).  For each animated character
+        // build an AnimCandidate that captures everything needed by the
+        // parallel pass below, including pre-built AnimationInputs and a
+        // pre-computed world transform.  Out-of-view characters with no
+        // shadow contribution are dropped here.
+        struct AnimCandidate
+        {
+            entt::entity entity{};
+            AnimatedCharacter* ac = nullptr;
+            AnimationInputs ai;
+            glm::mat4 worldTransform{1.0f};
+            bool sampleThisFrame = false; ///< call animator->update()
+            bool drawThisFrame = false;   ///< write to instance/palette slots
+            bool isLocal = false;
+            uint32_t slot = 0;            ///< index into skinnedInstances + base into bonePalette
+        };
+        // Plain function-local (NOT thread_local — workers must see the
+        // main thread's vector through the lambda capture).  Reserved up
+        // front to avoid reallocs across frames.
+        std::vector<AnimCandidate> candidates;
+        candidates.reserve(128);
+
+        // Frustum extraction (Gribb-Hartmann).
         const glm::mat4 vp = renderer.getCamera().getViewProjection();
         struct Plane
         {
@@ -1616,8 +1647,6 @@ SDL_AppResult Game::iterate()
             float d;
         };
         Plane frustum[6];
-        // Extract planes from row-form VP matrix (Gribb–Hartmann).  Each plane
-        // points INWARD; a sphere is outside when distance < -radius.
         const glm::mat4 m = glm::transpose(vp);
         const auto extract = [&](int idx, const glm::vec4& row) {
             const glm::vec3 n(row.x, row.y, row.z);
@@ -1625,25 +1654,22 @@ SDL_AppResult Game::iterate()
             frustum[idx].n = n / len;
             frustum[idx].d = row.w / len;
         };
-        extract(0, m[3] + m[0]); // left
-        extract(1, m[3] - m[0]); // right
-        extract(2, m[3] + m[1]); // bottom
-        extract(3, m[3] - m[1]); // top
-        extract(4, m[3] + m[2]); // near
-        extract(5, m[3] - m[2]); // far
+        extract(0, m[3] + m[0]);
+        extract(1, m[3] - m[0]);
+        extract(2, m[3] + m[1]);
+        extract(3, m[3] - m[1]);
+        extract(4, m[3] + m[2]);
+        extract(5, m[3] - m[2]);
 
-        // Conservative sphere radius for an animated character — covers the
-        // bind-pose AABB plus a fudge factor for arm/leg extension during run.
         const float charRadius = 1.5f * kRigScale_ * (rigMeshMinY_ < 0.0f ? -rigMeshMinY_ : 100.0f);
-
         auto inFrustum = [&](const glm::vec3& center, float radius) {
-            for (const auto& p : frustum) {
+            for (const auto& p : frustum)
                 if (glm::dot(p.n, center) + p.d < -radius)
                     return false;
-            }
             return true;
         };
 
+        uint32_t drawSlot = 0;
         registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
             [&](entt::entity e,
                 AnimatedCharacter& ac,
@@ -1653,84 +1679,102 @@ SDL_AppResult Game::iterate()
                 const InputSnapshot& inp) {
                 if (!ac.animator)
                     return;
-
                 const bool isLocal = registry.all_of<LocalPlayer>(e);
-
-                // Cull off-screen characters (except the local player; its
-                // animator must keep running for hitboxes + weapon IK).
                 const bool visible = isLocal || inFrustum(pos.value, charRadius);
                 if (!visible)
                     return;
 
-                // Phase 3c — animation tick decoupling.  ozz pose sampling +
-                // skin-matrix flatten is the heaviest per-character CPU cost.
-                // Cap the per-character animation update rate at ~30 Hz; in
-                // between samples we reuse the previous skin matrices.  At
-                // 1000 fps this skips ~32/33 frames of ozz work per char.
-                constexpr float k_animationTick = 1.0f / 30.0f;
+                AnimCandidate c;
+                c.entity = e;
+                c.ac = &ac;
+                c.isLocal = isLocal;
+
+                // Animation tick decoupling: cap remote chars at 30 Hz.
                 ac.animationAccumulator += frameTime;
                 if (ac.animationAccumulator >= k_animationTick || isLocal) {
                     ac.animationAccumulator = std::fmod(ac.animationAccumulator, k_animationTick);
-
-                    AnimationInputs ai{};
-                    ai.velocityWorld = vel.value;
-                    ai.yawRad = inp.yaw;
-                    ai.pitchRad = inp.pitch;
-                    ai.grounded = ps.grounded;
-                    ai.sprinting = ps.sprinting;
-                    ai.crouching = ps.crouching;
-                    ai.moveMode = static_cast<int>(ps.moveMode);
-                    ai.wallRunSide = static_cast<int>(ps.wallRunSide);
-                    ac.animator->update(ai, k_animationTick);
-
-                    // Store model-space joint matrices for hitbox system.
-                    auto& jm = registry.get_or_emplace<JointMatrices>(e);
-                    jm.matrices = ac.animator->jointModelMatrices();
+                    c.sampleThisFrame = true;
+                    c.ai.velocityWorld = vel.value;
+                    c.ai.yawRad = inp.yaw;
+                    c.ai.pitchRad = inp.pitch;
+                    c.ai.grounded = ps.grounded;
+                    c.ai.sprinting = ps.sprinting;
+                    c.ai.crouching = ps.crouching;
+                    c.ai.moveMode = static_cast<int>(ps.moveMode);
+                    c.ai.wallRunSide = static_cast<int>(ps.wallRunSide);
                 }
 
-                // Skip drawing the local player's own body in first-person
-                // (the animator still ran above so hitboxes / future gun-IK
-                // stay coherent).
-                if (!animUI_.showLocalBody && isLocal)
-                    return;
+                // Skip drawing the local player's own body in first-person.
+                const bool drawBody = !(!animUI_.showLocalBody && isLocal);
+                if (drawBody && numJoints > 0) {
+                    c.drawThisFrame = true;
+                    c.slot = drawSlot++;
 
-                if (numJoints == 0)
-                    return;
-
-                // Build per-instance world transform — same recipe as the
-                // regular EntityRenderCmd path so the draw lines up exactly.
-                glm::vec3 renderPos = pos.value;
-                if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
-                    renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
-                }
-                glm::vec3 translation(0.0f);
-                glm::vec3 scale(kRigScale_);
-                glm::quat orient = glm::angleAxis(inp.yaw, glm::vec3{0, 1, 0});
-                if (const auto* rend = registry.try_get<Renderable>(e)) {
-                    translation = rend->translation;
-                    scale = rend->scale;
-                    orient = rend->orientation;
-                } else {
-                    // Fallback for entities that haven't reached the
-                    // refreshRemotePlayerRenderables block yet this frame —
-                    // align feet with AABB bottom from the rig metadata.
-                    if (const auto* shape = registry.try_get<CollisionShape>(e))
+                    // Build per-instance world transform.
+                    glm::vec3 renderPos = pos.value;
+                    if (const auto* prev = registry.try_get<PreviousPosition>(e))
+                        renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+                    glm::vec3 translation(0.0f);
+                    glm::vec3 scale(kRigScale_);
+                    glm::quat orient = glm::angleAxis(inp.yaw, glm::vec3{0, 1, 0});
+                    if (const auto* rend = registry.try_get<Renderable>(e)) {
+                        translation = rend->translation;
+                        scale = rend->scale;
+                        orient = rend->orientation;
+                    } else if (const auto* shape = registry.try_get<CollisionShape>(e)) {
                         translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                    }
+                    glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + translation);
+                    world *= glm::mat4_cast(orient);
+                    world = glm::scale(world, scale);
+                    c.worldTransform = world;
                 }
 
-                glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + translation);
-                world *= glm::mat4_cast(orient);
-                world = glm::scale(world, scale);
-
-                Renderer::SkinnedInstance inst{};
-                inst.worldTransform = world;
-                inst.paletteBase = static_cast<uint32_t>(skinnedInstances.size() * static_cast<size_t>(numJoints));
-                inst.materialId = 0;
-                skinnedInstances.push_back(inst);
-
-                const auto& sm = ac.animator->skinMatrices();
-                bonePalette.insert(bonePalette.end(), sm.begin(), sm.end());
+                candidates.push_back(c);
             });
+
+        // Pre-allocate output buffers so the parallel pass can write to
+        // distinct slots without contention.
+        std::vector<glm::mat4> bonePalette;
+        std::vector<Renderer::SkinnedInstance> skinnedInstances;
+        skinnedInstances.resize(drawSlot);
+        bonePalette.resize(static_cast<size_t>(drawSlot) * static_cast<size_t>(numJoints));
+
+        // ─── Phase 2: parallel ozz-sample + slot fill ───────────────────────
+        // Each candidate's animator is private; each candidate writes to
+        // distinct skinnedInstances[slot] and bonePalette[slot*numJoints..]
+        // ranges.  No shared mutable state, no synchronisation needed.
+        if (workerPool_ && !candidates.empty()) {
+            workerPool_->parallelFor(static_cast<int>(candidates.size()), [&](int begin, int end) {
+                for (int i = begin; i < end; ++i) {
+                    auto& c = candidates[static_cast<size_t>(i)];
+                    if (c.sampleThisFrame)
+                        c.ac->animator->update(c.ai, k_animationTick);
+                    if (c.drawThisFrame && numJoints > 0) {
+                        Renderer::SkinnedInstance inst{};
+                        inst.worldTransform = c.worldTransform;
+                        inst.paletteBase = c.slot * static_cast<uint32_t>(numJoints);
+                        inst.materialId = 0;
+                        skinnedInstances[c.slot] = inst;
+                        const auto& sm = c.ac->animator->skinMatrices();
+                        std::copy(sm.begin(),
+                                  sm.end(),
+                                  bonePalette.begin() +
+                                      static_cast<ptrdiff_t>(c.slot) * static_cast<ptrdiff_t>(numJoints));
+                    }
+                }
+            });
+        }
+
+        // ─── Phase 3: sequential registry writeback ─────────────────────────
+        // JointMatrices is an EnTT component; insert/update needs the main
+        // thread.  Cheap loop — just copies a per-char matrix array.
+        for (const auto& c : candidates) {
+            if (c.sampleThisFrame) {
+                auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
+                jm.matrices = c.ac->animator->jointModelMatrices();
+            }
+        }
 
         // Phase 3f — front-to-back sort by camera distance.  The bone palette
         // is keyed by paletteBase inside each SkinnedInstance, so we can
