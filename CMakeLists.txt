@@ -679,7 +679,9 @@ add_executable(group2
         src/ecs/components/Position.hpp
         src/ecs/components/Velocity.hpp
         src/ecs/components/CollisionShape.hpp
-        src/ecs/components/PlayerState.hpp
+        src/ecs/components/PlayerStateEnums.hpp
+        src/ecs/components/PlayerVisState.hpp
+        src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
         src/ecs/components/LocalPlayer.hpp
@@ -716,6 +718,12 @@ add_executable(group2
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -746,6 +754,8 @@ add_executable(group2
         src/ecs/components/Hitbox.hpp
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
+        src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
         src/ecs/components/Player.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
@@ -988,7 +998,9 @@ add_executable(client
         src/ecs/components/Position.hpp
         src/ecs/components/Velocity.hpp
         src/ecs/components/CollisionShape.hpp
-        src/ecs/components/PlayerState.hpp
+        src/ecs/components/PlayerStateEnums.hpp
+        src/ecs/components/PlayerVisState.hpp
+        src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
         src/ecs/components/LocalPlayer.hpp
@@ -1025,6 +1037,12 @@ add_executable(client
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1050,6 +1068,8 @@ add_executable(client
         src/ecs/components/Hitbox.hpp
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
+        src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
         src/ecs/components/Player.hpp
         src/network/MatchStatus.hpp
         src/client/systems/KillFeedEvent.hpp
@@ -1170,7 +1190,9 @@ add_executable(server
         src/ecs/components/Position.hpp
         src/ecs/components/Velocity.hpp
         src/ecs/components/CollisionShape.hpp
-        src/ecs/components/PlayerState.hpp
+        src/ecs/components/PlayerStateEnums.hpp
+        src/ecs/components/PlayerVisState.hpp
+        src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
         src/ecs/components/LocalPlayer.hpp
@@ -1197,6 +1219,12 @@ add_executable(server
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1229,8 +1257,13 @@ add_executable(server
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
         src/ecs/components/Hitbox.hpp
+        src/ecs/components/HitboxHistory.hpp
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
+        src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
+        src/server/systems/HitboxHistorySystem.hpp
+        src/server/systems/HitboxHistorySystem.cpp
         src/client/animation/CharacterRig.hpp
         src/client/animation/CharacterRig.cpp
         src/client/animation/CharacterAnimator.hpp
@@ -1323,15 +1356,76 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
     )
 endif()
 
+# ===========================================================================
+# Clientbot executable — headless network-only load-test bot.
+#
+# Spawns N TCP client connections in one process (one std::thread each),
+# sends idle InputSnapshots at the server tick rate, and drains incoming
+# server snapshots like a real client. No window, no GPU, no animation, no
+# physics — just network traffic. Used to load-test the server past the
+# ~5-client GPU-context limit on a single machine.
+# ===========================================================================
+add_executable(clientbot
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/Bot.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/Bot.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistryArchive.hpp"
+)
+
+# Headers under src/ are referenced via "network/...", "ecs/components/...".
+target_include_directories(clientbot PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+
+# Same library set as the server, minus assimp/ozz (no map/animation needed).
+target_link_libraries(clientbot PRIVATE
+    SDL3::SDL3-static
+    SDL3_net::SDL3_net
+    EnTT::EnTT
+    glm::glm
+    tomlplusplus::tomlplusplus
+)
+
+# Copy config.toml next to clientbot so it picks up the same server address
+# the real client uses by default.
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/config_clientbot.stamp"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CONFIG_TOML_SOURCE}"
+            "$<TARGET_FILE_DIR:clientbot>/config.toml"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_clientbot.stamp"
+    DEPENDS "${CONFIG_TOML_SOURCE}"
+    COMMENT "Copying config.toml to clientbot binary directory"
+    VERBATIM
+)
+add_custom_target(copy_clientbot_config DEPENDS "${CMAKE_BINARY_DIR}/config_clientbot.stamp")
+add_dependencies(clientbot copy_clientbot_config)
+
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
 set_compiler_warnings(client)
 set_compiler_warnings(server)
+set_compiler_warnings(clientbot)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
 enable_sanitizers(client)
 enable_sanitizers(server)
+enable_sanitizers(clientbot)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
 # without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on

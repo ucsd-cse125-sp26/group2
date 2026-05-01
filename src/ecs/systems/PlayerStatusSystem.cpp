@@ -10,7 +10,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -88,7 +88,8 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     registry.emplace_or_replace<InputSnapshot>(player);
     registry.emplace_or_replace<Position>(player, chooseRespawnPoint(registry));
     registry.emplace_or_replace<Velocity>(player);
-    registry.emplace_or_replace<PlayerState>(player);
+    registry.emplace_or_replace<PlayerVisState>(player);
+    registry.emplace_or_replace<PlayerSimState>(player);
     registry.emplace_or_replace<Health>(player, Health{});
     registry.emplace_or_replace<WeaponState>(player,
                                              WeaponState{
@@ -130,7 +131,7 @@ inline void handleDeath(entt::entity& player,
 {
     if (playerHealth.health <= 0) {
         // Update death
-        registry.get_or_emplace<PlayerState>(player).IsDead = true;
+        registry.get_or_emplace<PlayerVisState>(player).isDead = true;
         registry.get_or_emplace<Velocity>(player) = Velocity{};
         registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = false; });
         registry.remove<HitboxInstance>(player);

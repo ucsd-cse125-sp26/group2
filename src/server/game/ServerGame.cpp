@@ -10,9 +10,10 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
@@ -30,12 +31,26 @@
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/ShotEvent.hpp"
+#include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
 
-bool ServerGame::init(const char* addr, Uint16 port, int hz)
+#include <algorithm>
+
+bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, const TransportConfig& transport)
 {
     tickRateHz = hz;
+
+    // Phase 4a: snapshot rate ≤ tick rate. Both should be positive ints; we
+    // re-clamp here in case the caller didn't (NetworkConfig already
+    // clamps the loaded value to [1, 256]).
+    const int clampedSnapshotHz = std::max(1, std::min(snapshotHz, hz));
+    snapshotEveryNTicks = std::max(1, hz / clampedSnapshotHz);
+    SDL_Log("[server] tickRate=%d Hz, snapshotRate≈%d Hz (every %d ticks)",
+            hz,
+            hz / snapshotEveryNTicks,
+            snapshotEveryNTicks);
+
     clientEntities.clear(); // For safety
     registry.clear();
 
@@ -67,7 +82,7 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         physics::setActiveWorld(mapCollision_.geometry());
     }
 
-    if (!server.init(addr, port))
+    if (!server.init(addr, port, transport))
         return false;
 
     // ── Load animation subsystem for hitbox detection ──
@@ -206,6 +221,25 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // Update server-side animation and hitbox capsules before weapon raycasts.
     updateAnimationAndHitboxes(dt);
 
+    // Phase 6: capture this tick's capsules into each entity's HitboxHistory
+    // ring. Has to run *after* updateHitboxes (so the capsules reflect this
+    // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
+    // consistent history snapshot from which rewindHitboxes can pick).
+    systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
+
+    // Phase 6: per-shooter lag-comp scheduler. For every player entity
+    // bound to a connected client, set `LagCompTarget.targetServerTick`
+    // to `currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
+    // The hitscan path inside runWeapon reads this off the shooter
+    // entity to size the rewind window for that shooter's shot.
+    //
+    // Capping at k_maxLagCompTicks (default ~25 ticks ≈ 200 ms at
+    // 128 Hz) prevents pathologically high-ping shooters from
+    // rewinding deep into the past, which would let them hit targets
+    // that have long since moved out of cover and produce
+    // "shot-around-the-corner" feel for the victims.
+    updateLagCompTargets();
+
     std::vector<NetParticleEvent> particleEvents;
     systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
     systems::runMovement(registry, dt, physics::activeWorld());
@@ -216,8 +250,21 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     matchController.update(dt, registry, server);
 
-    // Update Client by sending the registry
-    server.broadcastRegistry(registry);
+    // Phase 4a: snapshot rate decoupled from tick rate. The registry
+    // snapshot is the by far biggest piece of per-tick wire traffic, and
+    // remote clients can still smoothly interpolate position over the
+    // snapshot interval (Phase 5's RemoteHistory + clientRenderTick will
+    // formalise this; today's PreviousPosition lerp covers the simpler
+    // case). Events (particles, kills) stay tick-accurate — they're
+    // discrete moments and ~1-tick latency materially affects gameplay
+    // feel (kill feed lag, missing tracers).
+    //
+    // Stage 3b's dedicated network thread continuously drains the per-
+    // client OutboundQueue to sockets at ~1 kHz, so the game-tick budget
+    // no longer pays for the I/O syscalls.
+    if ((tickCount % snapshotEveryNTicks) == 0) {
+        server.broadcastRegistry(registry);
+    }
     server.broadcastParticleEvents(particleEvents);
     server.broadcastKillEvents(pendingKillEvents);
     pendingKillEvents.clear();
@@ -248,7 +295,8 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);
     registry.emplace<CollisionShape>(player);
-    registry.emplace<PlayerState>(player);
+    registry.emplace<PlayerVisState>(player);
+    registry.emplace<PlayerSimState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
@@ -367,6 +415,47 @@ void ServerGame::detachServerAnimator(entt::entity player)
     serverAnimators_.erase(player);
 }
 
+void ServerGame::updateLagCompTargets()
+{
+    // Server-side cap on rewind depth. 25 ticks at 128 Hz ≈ 195 ms,
+    // matching the plan's "server-capped at 200 ms" rule. Above this
+    // a high-ping shooter could rewind targets behind cover that the
+    // victim has long since ducked behind, producing the classic
+    // "I shot him around the corner" feel for the receiver.
+    static constexpr uint32_t k_maxLagCompTicks = 25;
+
+    const auto currentServerTick = static_cast<uint32_t>(tickCount);
+    for (const auto& [clientId, entity] : clientEntities) {
+        if (!registry.valid(entity))
+            continue;
+
+        const uint16_t rttMs = server.getClientRttMs(clientId);
+        // Half-RTT in ticks. Round-to-nearest by adding half a tick
+        // before integer divide. (rttMs / 2 / 1000 * tickRateHz)
+        // reordered to keep the integer-only arithmetic exact at the
+        // cost of one extra add: rttHalfTicks = (rttMs * Hz + 1000) /
+        // 2000.
+        const uint32_t rttHalfTicks =
+            (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 1000u) / 2000u;
+        const uint32_t lagTicks = std::min<uint32_t>(rttHalfTicks, k_maxLagCompTicks);
+        const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
+                                        ? 0u // explicit "no rewind" sentinel
+                                        : (currentServerTick - lagTicks);
+
+        registry.emplace_or_replace<LagCompTarget>(entity, LagCompTarget{.targetServerTick = targetTick});
+
+        // Replicate this client's RTT to all clients via PlayerMatchStats.
+        // Already in the Synced tuple, so ships in the next snapshot. Each
+        // client's scoreboard HUD then reads the target row's `rttMs`
+        // instead of falling back to its own `NetworkStats::rttMs` for
+        // every row (which would mean every player on screen showed the
+        // *local* client's ping). Costs one uint16 per replicated player
+        // per snapshot — well under any other field in the component.
+        if (auto* stats = registry.try_get<PlayerMatchStats>(entity))
+            stats->rttMs = rttMs;
+    }
+}
+
 void ServerGame::updateAnimationAndHitboxes(float dt)
 {
     if (!animationLoaded_)
@@ -385,7 +474,7 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
             ai.yawRad = inp->yaw;
             ai.pitchRad = inp->pitch;
         }
-        if (const auto* ps = registry.try_get<PlayerState>(entity)) {
+        if (const auto* ps = registry.try_get<PlayerVisState>(entity)) {
             ai.grounded = ps->grounded;
             ai.sprinting = ps->sprinting;
             ai.crouching = ps->crouching;

@@ -17,7 +17,8 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -40,6 +41,8 @@
 #include "renderer/GraphicsConfig.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
+#include "systems/PredictionSystem.hpp"
+#include "systems/ReconciliationSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -304,7 +307,22 @@ bool Game::init()
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
-        registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+        // Phase 5a: PreviousPosition is now seeded by Client::dispatchMessage
+        // for ALL entities with Position on first snapshot, including the
+        // local player. Use emplace_or_replace here so this callback stays
+        // idempotent regardless of whether the seed pass got there first.
+        registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        // Phase 5b: emplace PlayerSimState on the local player so runMovement
+        // (which iterates `<..., PlayerSimState, ...>`) will process it
+        // during client-side prediction. PlayerSimState is a server-only
+        // component — remote players don't have it on the client, so the
+        // view filter naturally narrows to just the local player.
+        // Server's snapshots don't replicate PlayerSimState so this stays
+        // entirely client-side; that means subtle timer fields can drift
+        // between client/server — fixed by Phase 4b's owner-only stream
+        // when it lands.
+        registry.emplace_or_replace<PlayerSimState>(local);
 
         // Only add Controllable if the player is not already dead (edge case:
         // joining while mid-death on a long-running server).
@@ -433,7 +451,7 @@ bool Game::init()
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
 
     const NetworkAddress clientNet = netCfg.clientNetwork;
-    if (!client.init(clientNet.host.c_str(), clientNet.port)) {
+    if (!client.init(clientNet.host.c_str(), clientNet.port, netCfg.transport)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
         renderer.quit();
@@ -840,8 +858,6 @@ SDL_AppResult Game::iterate()
         }
     }
 
-    systems::runInputSend(registry, client);
-
     // Network stats: send periodic pings and update bandwidth counters
     client.updateStats(frameTime);
     pingTimer += frameTime;
@@ -859,16 +875,48 @@ SDL_AppResult Game::iterate()
         if (inputSyncedWithPhysics && mouseCaptured)
             systems::runMovementKeys(registry);
 
+        // Stamp the current InputSnapshot with the next predict tick BEFORE
+        // sending. The server uses this tick for dedup against
+        // lastAppliedInputTick, and Phase-5b prediction keys the input
+        // ring buffer by it. We bump once per tick *group* (not per inner
+        // tick) — multiple physics ticks in one frame share the same input,
+        // because we only sample input once per group.
+        ++clientPredictTick;
+        registry.view<InputSnapshot, LocalPlayer>().each(
+            [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+
+        // Send the redundant input batch (last k_inputRedundancy ticks).
+        systems::runInputSend(registry, client);
+
+        // Phase 5b: push the just-stamped input into the ring buffer so
+        // reconciliation can replay it after a snapshot arrives.
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
+
         physicsRan = true;
 
-        // Interpolate position between last two server updates
+        // Phase 5a: PreviousPosition is updated by Client::dispatchMessage
+        // when a snapshot arrives, not every physics tick. The renderer
+        // interpolates over the snapshot interval via
+        // client.getSnapshotAlpha() so motion stays smooth at the much-
+        // coarser snapshot rate (e.g. 32 Hz vs 128 Hz physics).
+        //
+        // Phase 5b: per physics tick we ALSO snapshot the local player's
+        // pos→prev BEFORE running prediction so the renderer can show a
+        // tick-rate-smooth interpolation of the local player even when
+        // server snapshots arrive far less frequently. The local player
+        // uses physics-tick alpha (in render code below); remote players
+        // use the snapshot alpha.
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
 
-            // Snapshot position before each tick so the last tick's delta is
-            // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
-            registry.view<Position, PreviousPosition>().each(
+            // Phase 5b: capture local pos→prev for tick-rate interp,
+            // then run client-side prediction. PlayerSimState filter on
+            // runMovement narrows automatically to just the local player
+            // (remotes don't have PlayerSimState on the client).
+            registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+            systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
 
             ++tickCount;
             ++ticksThisFrame;
@@ -878,6 +926,20 @@ SDL_AppResult Game::iterate()
         if (!client.poll(registry)) {
             // TODO: Update so reset to menu or some other non-crash state
             return SDL_APP_SUCCESS;
+        }
+
+        // Phase 5b: a snapshot just applied (overwriting the local
+        // player's Position with the server's authoritative value at the
+        // server-acked client tick). Replay the inputs we sent since
+        // then to restore the predicted state at the *current* predict
+        // tick — net effect is "server-side correction folded in,
+        // client-side immediate response preserved".
+        if (client.consumeSnapshotApplied()) {
+            const uint32_t ackedTick = client.getServerAckedClientTick();
+            if (ackedTick != 0 && clientPredictTick > ackedTick) {
+                systems::runReconciliation(
+                    registry, inputRing_, ackedTick, clientPredictTick, k_physicsDt, physics::activeWorld());
+            }
         }
 
         refreshRemotePlayerRenderables();
@@ -893,18 +955,22 @@ SDL_AppResult Game::iterate()
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
-    float targetRoll = 0.0f; // degrees, from PlayerState
+    float targetRoll = 0.0f; // degrees, from PlayerVisState
 
     if (renderSeparateFromPhysics) {
-        // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
+        // Phase 5b: local player uses physics-tick alpha — its Position
+        // updates every 7.8 ms (128 Hz) via client-side prediction, so
+        // the lerp window matches that interval. Phase 5a's snapshot
+        // alpha is used for *remote* entities (in the render-list loop
+        // below) where Position only updates on snapshot arrival.
         const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
-        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerState>().each(
+        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,
                 const PreviousPosition& prev,
                 const InputSnapshot& input,
                 const CollisionShape& shape,
-                const PlayerState& pstate) {
+                const PlayerVisState& pstate) {
                 const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
@@ -914,11 +980,11 @@ SDL_AppResult Game::iterate()
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
-        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerState>().each(
+        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,
                 const InputSnapshot& input,
                 const CollisionShape& shape,
-                const PlayerState& pstate) {
+                const PlayerVisState& pstate) {
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
                 renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
                 renderYaw = input.yaw;
@@ -1124,7 +1190,7 @@ SDL_AppResult Game::iterate()
     }
 
     // Grapple cable visual
-    registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& pstate) {
+    registry.view<LocalPlayer, PlayerVisState>().each([&](const PlayerVisState& pstate) {
         if (pstate.grappleActive) {
             // Draw cable from player hand to hook point every frame.
             const float cosPi = std::cos(renderPitch);
@@ -1153,11 +1219,11 @@ SDL_AppResult Game::iterate()
     // for skeleton-driven hitbox capsule placement.
     {
         std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity e,
-                                                                                          AnimatedCharacter& ac,
-                                                                                          const Velocity& vel,
-                                                                                          const PlayerState& ps,
-                                                                                          const InputSnapshot& inp) {
+        registry.view<AnimatedCharacter, Velocity, PlayerVisState, InputSnapshot>().each([&](entt::entity e,
+                                                                                             AnimatedCharacter& ac,
+                                                                                             const Velocity& vel,
+                                                                                             const PlayerVisState& ps,
+                                                                                             const InputSnapshot& inp) {
             if (!ac.animator || ac.modelIndex < 0)
                 return;
 
@@ -1191,6 +1257,11 @@ SDL_AppResult Game::iterate()
 
     // Build entity render list
     {
+        // Phase 5a: snapshot-rate alpha for remote-entity position lerp.
+        // Read once per frame; applied to every entity below that has a
+        // PreviousPosition (i.e. has received at least one snapshot).
+        const float snapshotAlpha = client.getSnapshotAlpha();
+
         std::vector<EntityRenderCmd> entityCmds;
         registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
             if (!rend.visible || rend.modelIndex < 0)
@@ -1202,7 +1273,18 @@ SDL_AppResult Game::iterate()
             if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
-            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
+            // Phase 5a: lerp from PreviousPosition (= last snapshot) to
+            // Position (= current snapshot) over the snapshot interval.
+            // Entities without PreviousPosition (e.g. just-spawned) fall
+            // back to the raw current position, but Client::dispatchMessage
+            // seeds PreviousPosition on first snapshot apply so this
+            // fallback should rarely fire in practice.
+            glm::vec3 renderPos = pos.value;
+            if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+            }
+
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + rend.translation);
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
@@ -1666,6 +1748,15 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
 
+    // Phase 6 testing: network simulator window (latency + packet loss).
+    // Slider values flow from DebugUI → Client each frame; idempotent when
+    // unchanged (Client clamps and atomically stores). Latency is split
+    // half-and-half across outbound + inbound delay queues; loss is an
+    // independent Bernoulli drop applied per-datagram in each direction.
+    debugUI.buildNetworkSimUI();
+    client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+    client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
+
     // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
 
     // Process ammo refill request — pulse refillAmmo on InputSnapshot for
@@ -1908,7 +1999,8 @@ SDL_AppResult Game::iterate()
             hudState.armor = static_cast<int>(hp.armor);
             hudState.maxArmor = 100;
         });
-        registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& ps) { hudState.isAlive = !ps.IsDead; });
+        registry.view<LocalPlayer, PlayerVisState>().each(
+            [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });
 
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
@@ -1991,8 +2083,8 @@ SDL_AppResult Game::iterate()
         // ── Scoreboard: all players ──
         thread_local std::vector<HudTeamMemberStatus> hudAllPlayers;
         hudAllPlayers.clear();
-        registry.view<ClientId, Health, PlayerState>().each(
-            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerState& ps) {
+        registry.view<ClientId, Health, PlayerVisState>().each(
+            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerVisState& ps) {
                 HudTeamMemberStatus status;
                 if (localClientId.value != -1 && cid == localClientId)
                     status.name = "You";
@@ -2002,12 +2094,21 @@ SDL_AppResult Game::iterate()
                     status.name = buf;
                 }
                 status.health = static_cast<int>(hp.health);
-                status.isAlive = !ps.IsDead;
+                status.isAlive = !ps.isDead;
                 if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
                     status.kills = pms->kills;
                     status.deaths = pms->deaths;
+                    // Per-player ping: the server stamps each client's
+                    // self-reported RTT onto their PlayerMatchStats.rttMs
+                    // every tick (see ServerGame::updateLagCompTargets),
+                    // which then rides the existing snapshot stream to
+                    // every connected client. Reading from this row's
+                    // own component instead of `client.getNetStats()`
+                    // means every scoreboard row shows the right
+                    // player's ping — not the local viewer's ping
+                    // duplicated across every line.
+                    status.ping = static_cast<int>(pms->rttMs);
                 }
-                status.ping = static_cast<int>(client.getNetStats().rttMs);
                 hudAllPlayers.push_back(status);
             });
         // For now all players go into allies (no team system exists).
@@ -2025,9 +2126,9 @@ SDL_AppResult Game::iterate()
 
         thread_local std::vector<HudMinimapDot> hudMinimapDots;
         hudMinimapDots.clear();
-        registry.view<ClientId, Position, PlayerState>().each(
-            [&](const ClientId& cid, const Position& pos, const PlayerState& ps) {
-                if (ps.IsDead)
+        registry.view<ClientId, Position, PlayerVisState>().each(
+            [&](const ClientId& cid, const Position& pos, const PlayerVisState& ps) {
+                if (ps.isDead)
                     return;
                 if (localClientId.value != -1 && cid == localClientId)
                     return; // Skip local player (always drawn at center).
@@ -2138,11 +2239,11 @@ void Game::refreshRemotePlayerRenderables()
     // collision AABB: translation.y = -halfExtents.y - meshMinY * scale.
     // This ensures the model tracks the AABB bottom automatically when
     // crouching changes the half-height — no manual offset update needed.
-    registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
-                                                                                   const Position&,
-                                                                                   const PlayerState& state,
-                                                                                   const InputSnapshot& input,
-                                                                                   const CollisionShape& shape) {
+    registry.view<Position, PlayerVisState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
+                                                                                      const Position&,
+                                                                                      const PlayerVisState& state,
+                                                                                      const InputSnapshot& input,
+                                                                                      const CollisionShape& shape) {
         if (registry.all_of<LocalPlayer>(e))
             return;
 
@@ -2163,7 +2264,7 @@ void Game::refreshRemotePlayerRenderables()
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
         rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        rend.visible = !state.IsDead;
+        rend.visible = !state.isDead;
     });
 }
 

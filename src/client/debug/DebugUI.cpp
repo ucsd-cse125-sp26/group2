@@ -8,7 +8,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -144,6 +144,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
 
     ImGui::SeparatorText("Gameplay");
     ImGui::Checkbox("Network Stats", &showNetworkStats);
+    ImGui::Checkbox("Network Sim", &showNetworkSim);
     ImGui::Checkbox("Weapon HUD", &showWeaponHud);
     ImGui::Checkbox("Particle System", &showParticleWindow_);
 
@@ -371,8 +372,8 @@ void DebugUI::buildInspectorContents(const Registry& registry,
             }
 
             // PlayerState
-            if (showPlayerState && registry.all_of<PlayerState>(entity)) {
-                const auto& c = registry.get<PlayerState>(entity);
+            if (showPlayerState && registry.all_of<PlayerVisState>(entity)) {
+                const auto& c = registry.get<PlayerVisState>(entity);
                 static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun", "Climbing", "LedgeGrab"};
                 const int k_modeIdx = static_cast<int>(c.moveMode);
                 ImGui::Text("PlayerState   mode:%s  grounded:%-3s  crouching:%-3s  sprint:%-3s",
@@ -474,13 +475,13 @@ void DebugUI::buildMovementChart(const Registry& registry)
 
     // Player
     const bool k_hasPlayer =
-        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerVisState>(localPlayer);
 
     if (k_hasPlayer) {
         const auto& pos = registry.get<Position>(localPlayer).value;
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const auto& playerState = registry.get<PlayerVisState>(localPlayer);
         const bool grounded = playerState.grounded;
 
         const ImVec2 k_pScreen = worldToScreen(pos.x, pos.z);
@@ -542,7 +543,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     if (k_hasPlayer) {
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const auto& playerState = registry.get<PlayerVisState>(localPlayer);
         const bool grounded = playerState.grounded;
         const float hSpeed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
         const glm::vec3 wishDir =
@@ -604,7 +605,7 @@ void DebugUI::buildBhopAnalyzer(const Registry& registry)
     }
 
     const bool k_hasPlayer =
-        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerVisState>(localPlayer);
 
     if (!k_hasPlayer) {
         ImGui::TextDisabled("No local player.");
@@ -614,7 +615,7 @@ void DebugUI::buildBhopAnalyzer(const Registry& registry)
 
     const auto& vel = registry.get<Velocity>(localPlayer).value;
     const auto& input = registry.get<InputSnapshot>(localPlayer);
-    const auto& playerState = registry.get<PlayerState>(localPlayer);
+    const auto& playerState = registry.get<PlayerVisState>(localPlayer);
     const bool grounded = playerState.grounded;
     const float yaw = input.yaw;
 
@@ -1121,6 +1122,101 @@ void DebugUI::buildNetworkUI(const NetworkStats& stats)
     ImGui::Text("Recv: %.2f MB   Send: %.2f MB",
                 static_cast<double>(stats.bytesRecvTotal) / (1024.0 * 1024.0),
                 static_cast<double>(stats.bytesSentTotal) / (1024.0 * 1024.0));
+
+    ImGui::End();
+}
+
+void DebugUI::buildNetworkSimUI()
+{
+    if (!showNetworkSim)
+        return;
+
+    ImGui::SetNextWindowPos({500.0f, 700.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({340.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::Begin("Network Sim", &showNetworkSim, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Latency ────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Latency");
+    ImGui::TextWrapped("Adds artificial round-trip latency. Half is applied to "
+                       "outbound, half to inbound, modelling a symmetric one-way delay.");
+    ImGui::Spacing();
+    ImGui::SliderInt("Sim. RTT (ms)", &simulatedLatencyMs_, 0, 200, "%d ms");
+
+    // Quick presets — common latency tiers for testing lag-comp /
+    // reconciliation behaviour at "LAN", "good WAN", "bad WAN", "edge".
+    if (ImGui::SmallButton("0##lat"))
+        simulatedLatencyMs_ = 0;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("30##lat"))
+        simulatedLatencyMs_ = 30;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("60##lat"))
+        simulatedLatencyMs_ = 60;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("100##lat"))
+        simulatedLatencyMs_ = 100;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("150##lat"))
+        simulatedLatencyMs_ = 150;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("200##lat"))
+        simulatedLatencyMs_ = 200;
+
+    if (simulatedLatencyMs_ == 0) {
+        ImGui::TextDisabled("Latency: off — packets take the fast path.");
+    } else {
+        ImGui::Text(
+            "Out %d ms / In %d ms / RTT +%d ms", simulatedLatencyMs_ / 2, simulatedLatencyMs_ / 2, simulatedLatencyMs_);
+    }
+
+    // ── Packet loss ────────────────────────────────────────────────────
+    ImGui::Spacing();
+    ImGui::SeparatorText("Packet Loss");
+    ImGui::TextWrapped("Independent Bernoulli drop on each direction. Slider value "
+                       "is per-datagram drop probability — fragmented snapshots and "
+                       "redundant inputs/events lose effective bandwidth at the "
+                       "compounded rate.");
+    ImGui::Spacing();
+    ImGui::SliderInt("Sim. Loss (%)", &simulatedLossPct_, 0, 50, "%d %%");
+
+    if (ImGui::SmallButton("0##loss"))
+        simulatedLossPct_ = 0;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("1##loss"))
+        simulatedLossPct_ = 1;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("5##loss"))
+        simulatedLossPct_ = 5;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("10##loss"))
+        simulatedLossPct_ = 10;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("25##loss"))
+        simulatedLossPct_ = 25;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("50##loss"))
+        simulatedLossPct_ = 50;
+
+    if (simulatedLossPct_ == 0) {
+        ImGui::TextDisabled("Loss: off — every UDP datagram delivered.");
+    } else {
+        // Compounded effective loss across redundancy layers, for
+        // playtester intuition.  Closed-form for an N-fragment / N-copy
+        // unit: 1 − (1 − p)^N if a single drop kills it (snapshots), or
+        // p^N if all copies must be dropped (reliable events).
+        const double p = static_cast<double>(simulatedLossPct_) / 100.0;
+        const double snapLoss = 1.0 - std::pow(1.0 - p, 5.0); // 5-fragment example
+        const double reliable = std::pow(p, 3.0);             // 3-copy redundancy
+        const double inputs = std::pow(p, 5.0);               // 5-tick redundancy
+        ImGui::Text("Per-datagram drop: %d %%", simulatedLossPct_);
+        ImGui::Text("≈ snapshot loss (5 frags): %.1f %%", snapLoss * 100.0);
+        ImGui::Text("≈ reliable-event loss:    %.2f %%", reliable * 100.0);
+        ImGui::Text("≈ input-tick loss:        %.3f %%", inputs * 100.0);
+    }
 
     ImGui::End();
 }

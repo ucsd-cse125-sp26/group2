@@ -1,0 +1,123 @@
+/// @file PlayerSimState.hpp
+/// @brief Server-only locomotion bookkeeping (timers, blacklists, lurch state).
+///
+/// Counterpart to PlayerVisState. These fields drive the server's
+/// MovementSystem / CollisionSystem but are not needed on remote clients —
+/// a viewer doesn't care that the player you're watching has 0.13 s of
+/// coyote-time remaining or that a particular wall is blacklisted from
+/// re-grab. Keeping these out of the per-tick replicated payload is the
+/// single biggest bandwidth cut in Phase 2 (272-byte PlayerState → ~64-byte
+/// PlayerVisState on the wire, with this ~150-byte struct staying server-
+/// side until Phase 5 mirrors it on the owning client for prediction).
+///
+/// All field semantics are unchanged from the original PlayerState — this
+/// is purely a structural split, no behavior change.
+
+#pragma once
+
+#include "PlayerVisState.hpp" // for PlayerStateRef + transitively PlayerStateEnums
+
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+
+/// @brief Server-only locomotion bookkeeping.
+///
+/// Read/written by MovementSystem and CollisionSystem on the server every
+/// physics tick. Will be mirrored on the owning client in Phase 5 for
+/// prediction; remote clients never see this.
+struct PlayerSimState
+{
+    // ── Jump state ─────────────────────────────────────────────────────────
+    bool canDoubleJump{true};     ///< Reset on land / wallrun / climb.
+    bool jumpedThisTick{false};   ///< Set during the tick a jump occurs (for lurch setup).
+    bool jumpHeldLastTick{false}; ///< Was jump key held on the previous tick (edge detection).
+    float jumpCooldown{0.0f};     ///< Minimum time before double jump is available (s).
+
+    // ── Coyote time ────────────────────────────────────────────────────────
+    float coyoteTimer{0.0f};      ///< Remaining grace time after leaving ground/wall (s).
+    bool wasGroundedLastTick{false};
+    float groundedDuration{0.0f}; ///< Time continuously grounded (s); resets on leaving ground.
+                                  ///< Distinguishes fresh ground jumps (lurch-eligible) from
+                                  ///< bhop chain continuations.
+
+    // ── Jump lurch ─────────────────────────────────────────────────────────
+    bool jumpLurchEnabled{false};     ///< True during the lurch grace window after jumping.
+    float jumpLurchTimer{0.0f};       ///< Time elapsed since the jump that enabled lurch (s).
+    glm::vec2 moveInputsOnJump{0.0f}; ///< WASD direction when jump started (for direction-change detection).
+
+    // ── Sliding ────────────────────────────────────────────────────────────
+    float slideTimer{0.0f};         ///< How long the current slide has lasted (s).
+    int slideFatigueCounter{0};     ///< Diminishing returns on consecutive slidehops.
+    float slideBoostCooldown{0.0f}; ///< Remaining cooldown before next slide boost (s).
+    int slideFatigueDecayAccum{0};  ///< Tick accumulator for fatigue recovery.
+    bool canEnterSlide{true};       ///< Cleared when in air, set on landing.
+
+    // ── Wallrunning ────────────────────────────────────────────────────────
+    glm::vec3 wallNormal{0.0f};    ///< Normal of the wall being run on.
+    glm::vec3 wallForward{0.0f};   ///< Direction of travel along the wall.
+    float wallRunTimer{0.0f};      ///< Time on current wall (s).
+    float wallRunSpeedTimer{0.0f}; ///< Timer for the speed-loss delay.
+    float exitWallTimer{0.0f};     ///< Remaining exit-wall grace time (s).
+    bool wasWallRunning{false};    ///< Set briefly after leaving wallrun (coyote wall jump).
+
+    // Wall blacklist: stores the last wall's normal + height to prevent regrab.
+    glm::vec3 wallBlacklistNormal{0.0f};
+    float wallBlacklistHeight{-1e10f};
+    bool wallBlacklistActive{false};
+
+    /// @brief Wall-jump autobhop lock.
+    ///
+    /// True when jump was already held at the moment the wallrun started
+    /// (i.e. the player rolled into the run with jump continuously held
+    /// from a bhop chain). Wall-jump and coyote-wall-jump are suppressed
+    /// while this is true so the player doesn't instantly bounce off the
+    /// wall. Cleared as soon as the jump key is released; the next press
+    /// is then a genuine "I want to jump off" rising edge.
+    bool wallJumpLocked{false};
+
+    // ── Climbing ───────────────────────────────────────────────────────────
+    glm::vec3 climbWallNormal{0.0f}; ///< Normal of the wall being climbed.
+    float climbTimer{0.0f};          ///< Time on current climb (s).
+    float exitClimbTimer{0.0f};
+    bool wasClimbing{false};
+
+    // Climb blacklist.
+    glm::vec3 climbBlacklistNormal{0.0f};
+    float climbBlacklistHeight{-1e10f};
+    bool climbBlacklistActive{false};
+
+    // ── Ledge grabbing ─────────────────────────────────────────────────────
+    glm::vec3 ledgePoint{0.0f};  ///< World-space position of the grabbed ledge.
+    glm::vec3 ledgeNormal{0.0f}; ///< Wall normal at the ledge.
+    float ledgeHoldTimer{0.0f};  ///< Time spent holding the ledge (s).
+    bool exitingLedge{false};
+    float exitLedgeTimer{0.0f};
+
+    // ── Grappling hook (Widowmaker-style: direct pull, look-biased launch) ─
+    bool grappleCooldownActive{false}; ///< True during cooldown between uses.
+    float grappleCooldownTimer{0.0f};  ///< Remaining cooldown time (s).
+    float grapplePullTimer{0.0f};      ///< Time spent being pulled (s).
+    glm::vec3 grapplePullDir{0.0f};    ///< Cached pull direction (toward anchor at fire time).
+    bool grappleInputLastTick{false};  ///< Edge detection on the grapple key.
+};
+
+/// @brief Combined-reference helper for code that needs both halves.
+///
+/// Most call sites in MovementSystem.cpp's helper functions used to take a
+/// single `PlayerState&` parameter and freely touch any field. After the
+/// Phase-2 split they need access to both halves; rather than rewriting
+/// every helper signature to take two refs, they take one PlayerStateRef
+/// and use `state.vis.X` / `state.sim.X` for the field access. Keeps the
+/// migration diff small inside MovementSystem.cpp.
+struct PlayerStateRef
+{
+    PlayerVisState& vis;
+    PlayerSimState& sim;
+};
+
+/// @brief Read-only counterpart of PlayerStateRef, for `const` consumers.
+struct ConstPlayerStateRef
+{
+    const PlayerVisState& vis;
+    const PlayerSimState& sim;
+};

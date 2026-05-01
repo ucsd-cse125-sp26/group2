@@ -68,7 +68,7 @@ enum class Mode : uint8_t
 };
 
 /// @brief Values of `MoveMode` as stored in AnimationInputs::moveMode.
-/// Kept in lockstep with the enum in src/ecs/components/PlayerState.hpp.
+/// Kept in lockstep with the enum in src/ecs/components/PlayerStateEnums.hpp.
 enum MoveModeValue
 {
     MoveModeOnFoot = 0,

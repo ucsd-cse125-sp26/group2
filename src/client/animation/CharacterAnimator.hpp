@@ -15,7 +15,7 @@
 /// @brief Driving inputs for the animation state machine.
 ///
 /// Read from the ECS each frame.  `moveMode` is the integer value of
-/// `MoveMode` from PlayerState (avoids a header dependency here).
+/// `MoveMode` from PlayerVisState (avoids a header dependency here).
 struct AnimationInputs
 {
     glm::vec3 velocityWorld{0.0f}; ///< World-space velocity (u/s).

@@ -39,7 +39,17 @@ public:
     /// @param size Size of the data buffer in bytes.
     /// @param localPlayerServerEntity Optional server-side entity ID of the local player (excluded from remote input
     /// application).
-    void apply(const uint8_t* data, size_t size, std::optional<entt::entity> localPlayerServerEntity = std::nullopt);
+    /// @param outServerAckedClientTick Optional out-param. If non-null,
+    /// receives the `tick` field from the local player's `InputSnapshot`
+    /// in the server's remote-input list — the most-recently-applied
+    /// client input tick the server has processed. Used by Phase 5b
+    /// reconciliation to know how far forward to replay client predicted
+    /// inputs after the snapshot apply. Set to 0 if the local player has
+    /// no input record in this snapshot (e.g. no inputs sent yet).
+    void apply(const uint8_t* data,
+               size_t size,
+               std::optional<entt::entity> localPlayerServerEntity = std::nullopt,
+               uint32_t* outServerAckedClientTick = nullptr);
 
     /// @brief Map a server-side entity ID to its local equivalent.
     /// @param e The server-side entity.
