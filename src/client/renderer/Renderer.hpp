@@ -423,6 +423,13 @@ public:
     float lastRecordMs = 0.0f;
     float lastSubmitMs = 0.0f;
 
+    /// When false, drawFrame skips ImGui prepare/render entirely (the ImGui
+    /// context still exists; we just don't submit its draw data this frame).
+    /// Game::init flips this to false when GROUP2_NO_IMGUI=1 is set, which
+    /// is the right configuration for shipping a release build that doesn't
+    /// need any of the debug menus.
+    bool imguiEnabled = true;
+
     // Anti-aliasing (live-tunable via ImGui)
     AAMode aaMode = AAMode::SMAA_T2x; ///< Current AA mode (default: recommended T2x).
     bool casEnabled = true;           ///< CAS sharpening on/off.

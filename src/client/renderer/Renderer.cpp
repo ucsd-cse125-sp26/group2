@@ -2241,8 +2241,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     if (particleSystem && toggles.particles)
         particleSystem->uploadToGpu(cmd);
 
-    // Prepare ImGui
-    ImDrawData* const drawData = ImGui::GetDrawData();
+    // Prepare ImGui (skip entirely when imguiEnabled = false; the bench flips
+    // this off so the entire ImGui CPU prepare + GPU render is bypassed).
+    ImDrawData* const drawData = imguiEnabled ? ImGui::GetDrawData() : nullptr;
     if (drawData)
         ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
 

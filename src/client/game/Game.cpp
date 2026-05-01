@@ -52,12 +52,18 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
 #include <numeric>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 namespace
 {
@@ -620,11 +626,61 @@ bool Game::init()
             // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
             limitFPSToMonitor = false;
             renderer.setVSync(false);
+            // Phase 3g — bench skips ImGui submission entirely (the ImGui
+            // context still exists for newFrame, but RenderDrawData and
+            // PrepareDrawData are short-circuited).  Removes ~0.04 ms / frame
+            // of fixed overhead on the median frame.
+            legacyRenderer().imguiEnabled = false;
             SDL_Log("[bench] running for %.1fs then exiting (warmup %.1fs)",
                     static_cast<double>(seconds),
                     static_cast<double>(k_benchWarmupSeconds));
         }
     }
+
+    // GROUP2_NO_IMGUI=1 — release-build kill switch.  Skips ImGui submission
+    // unconditionally.  The CMake/release pipeline can pre-set this for
+    // shipping builds that never need a debug menu.  Independent of bench
+    // mode so it can be combined with normal play.
+    if (const char* p = SDL_getenv("GROUP2_NO_IMGUI"); p && *p && *p != '0') {
+        legacyRenderer().imguiEnabled = false;
+        SDL_Log("[client] GROUP2_NO_IMGUI=1 \u2014 ImGui submission disabled");
+    }
+
+    // GROUP2_CLIENT_CORES="0,1,2,3" — pin the main render thread to the
+    // listed CPU cores via pthread_setaffinity_np.  Stops the OS scheduler
+    // from migrating us onto a core where the colocated server / 100 bot
+    // threads are spinning, which is the dominant cause of p1/p5 stalls
+    // we observed in the phase profiler (acquire/record/submit phases
+    // randomly bloating to several ms).  Linux only.
+#if defined(__linux__)
+    if (const char* corestr = SDL_getenv("GROUP2_CLIENT_CORES")) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        const char* p = corestr;
+        int coreCount = 0;
+        while (*p) {
+            char* end = nullptr;
+            const long c = std::strtol(p, &end, 10);
+            if (end == p)
+                break;
+            if (c >= 0 && c < CPU_SETSIZE) {
+                CPU_SET(static_cast<int>(c), &cpuset);
+                ++coreCount;
+            }
+            p = end;
+            if (*p == ',')
+                ++p;
+        }
+        if (coreCount > 0) {
+            const int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+            if (rc == 0) {
+                SDL_Log("[client] pinned render thread to %d core(s) (%s)", coreCount, corestr);
+            } else {
+                SDL_Log("[client] pthread_setaffinity_np failed: %s", std::strerror(rc));
+            }
+        }
+    }
+#endif
 
     // Bench-only kill switches for post-processing passes.  Lets a single
     // bench script flag isolate per-pass cost without persisting changes.
@@ -1039,6 +1095,7 @@ SDL_AppResult Game::iterate()
                     medAvg.total += sortedStats[i].total;
                     medAvg.input += sortedStats[i].input;
                     medAvg.physics += sortedStats[i].physics;
+                    medAvg.networkPoll += sortedStats[i].networkPoll;
                     medAvg.particles += sortedStats[i].particles;
                     medAvg.animation += sortedStats[i].animation;
                     medAvg.entityCmds += sortedStats[i].entityCmds;
@@ -1050,6 +1107,7 @@ SDL_AppResult Game::iterate()
                     slowAvg.total += sortedStats[i].total;
                     slowAvg.input += sortedStats[i].input;
                     slowAvg.physics += sortedStats[i].physics;
+                    slowAvg.networkPoll += sortedStats[i].networkPoll;
                     slowAvg.particles += sortedStats[i].particles;
                     slowAvg.animation += sortedStats[i].animation;
                     slowAvg.entityCmds += sortedStats[i].entityCmds;
@@ -1063,6 +1121,7 @@ SDL_AppResult Game::iterate()
                     s.total /= static_cast<float>(c);
                     s.input /= static_cast<float>(c);
                     s.physics /= static_cast<float>(c);
+                    s.networkPoll /= static_cast<float>(c);
                     s.particles /= static_cast<float>(c);
                     s.animation /= static_cast<float>(c);
                     s.entityCmds /= static_cast<float>(c);
@@ -1073,22 +1132,22 @@ SDL_AppResult Game::iterate()
                 avgRow(slowAvg, slowCount);
 
                 std::fprintf(stderr,
-                             "[bench] median-band  total=%5.2fms input=%4.2f physics=%4.2f anim=%4.2f "
-                             "particles=%4.2f entityCmds=%4.2f imgui=%4.2f draw=%5.2f\n",
+                             "[bench] median-band  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
                              static_cast<double>(medAvg.total),
-                             static_cast<double>(medAvg.input),
                              static_cast<double>(medAvg.physics),
+                             static_cast<double>(medAvg.networkPoll),
                              static_cast<double>(medAvg.animation),
                              static_cast<double>(medAvg.particles),
                              static_cast<double>(medAvg.entityCmds),
                              static_cast<double>(medAvg.imgui),
                              static_cast<double>(medAvg.drawFrame));
                 std::fprintf(stderr,
-                             "[bench] slowest-1%%  total=%5.2fms input=%4.2f physics=%4.2f anim=%4.2f "
-                             "particles=%4.2f entityCmds=%4.2f imgui=%4.2f draw=%5.2f\n",
+                             "[bench] slowest-1%%  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
                              static_cast<double>(slowAvg.total),
-                             static_cast<double>(slowAvg.input),
                              static_cast<double>(slowAvg.physics),
+                             static_cast<double>(slowAvg.networkPoll),
                              static_cast<double>(slowAvg.animation),
                              static_cast<double>(slowAvg.particles),
                              static_cast<double>(slowAvg.entityCmds),
@@ -1103,10 +1162,11 @@ SDL_AppResult Game::iterate()
                 for (size_t i = (n >= 5 ? n - 5 : 0); i < n; ++i) {
                     const auto& s = sortedStats[i];
                     std::fprintf(stderr,
-                                 "[bench]   total=%5.2fms phys=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
+                                 "[bench]   total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
                                  "ui=%4.2f draw=%5.2f (acq=%4.2f rec=%4.2f sub=%4.2f)\n",
                                  static_cast<double>(s.total),
                                  static_cast<double>(s.physics),
+                                 static_cast<double>(s.networkPoll),
                                  static_cast<double>(s.animation),
                                  static_cast<double>(s.particles),
                                  static_cast<double>(s.entityCmds),
@@ -1225,6 +1285,8 @@ SDL_AppResult Game::iterate()
             ++ticksThisFrame;
             ++statsPhysTicks;
         }
+
+        phaseSnap(phaseStats.physics);
 
         if (!client.poll(registry)) {
             // TODO: Update so reset to menu or some other non-crash state
@@ -1358,7 +1420,9 @@ SDL_AppResult Game::iterate()
         }
     }
 
-    phaseSnap(phaseStats.physics);
+    // The "physics" phase already captured at the top of the tick loop —
+    // here we close out the *post-tick* network/snapshot path separately.
+    phaseSnap(phaseStats.networkPoll);
 
     // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
