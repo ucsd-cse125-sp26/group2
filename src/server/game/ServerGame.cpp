@@ -31,6 +31,7 @@
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/ShotEvent.hpp"
+#include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 #include "server/systems/HitboxHistorySystem.hpp"
 
@@ -562,10 +563,41 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
     if (!animationLoaded_)
         return;
 
-    // Step 1: Update each server-side animator with current entity state.
+    // PR-3 (server-perf): split the per-animator update into a fan-out
+    // parallel kernel. The work is embarrassingly parallel across
+    // players — each animator reads only its own entity's components
+    // (read-only) and writes only its own JointMatrices slot. The
+    // single piece of shared state we have to handle is `entt::registry`
+    // itself: `get_or_emplace<JointMatrices>` may grow the underlying
+    // pool if the slot doesn't exist yet, and pool growth is NOT
+    // thread-safe.
+    //
+    // Pre-pass: ensure every valid animator entity has a JointMatrices
+    // component (sequential). Then the parallel pass only writes into
+    // already-allocated slots, which is safe — entt component pools
+    // tolerate concurrent writes to *distinct* entities once allocated.
+
+    // Phase 1a (sequential): pre-emplace JointMatrices and collect the
+    // work items. Reusing the static thread_local vector across ticks
+    // avoids per-tick allocation.
+    static thread_local std::vector<std::pair<entt::entity, CharacterAnimator*>> work;
+    work.clear();
+    work.reserve(serverAnimators_.size());
     for (auto& [entity, animator] : serverAnimators_) {
         if (!registry.valid(entity))
             continue;
+        // Alloc-if-needed, single-threaded. The return reference is
+        // intentionally discarded — we only care about the side-effect
+        // of guaranteeing the slot exists before the parallel pass.
+        (void)registry.get_or_emplace<JointMatrices>(entity);
+        work.emplace_back(entity, animator.get());
+    }
+
+    // Phase 1b (parallel): each animator updates and writes its own
+    // pre-emplaced JointMatrices slot.
+    ::group2::perf::parallelFor(work.begin(), work.end(), [&](const auto& item) {
+        const entt::entity entity = item.first;
+        CharacterAnimator* animator = item.second;
 
         // Build AnimationInputs from ECS components (same as client).
         AnimationInputs ai{};
@@ -585,12 +617,11 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
 
         animator->update(ai, dt);
 
-        // Write model-space joint matrices into the ECS component.
-        const auto& jointMats = animator->jointModelMatrices();
-        auto& jm = registry.get_or_emplace<JointMatrices>(entity);
-        jm.matrices = jointMats;
-    }
+        // Slot exists (Phase 1a); just write the matrices.
+        registry.get<JointMatrices>(entity).matrices = animator->jointModelMatrices();
+    });
 
     // Step 2: Transform bone poses into world-space hitbox capsules.
+    // updateHitboxes itself was parallelized in PR-3; see HitboxSystem.cpp.
     systems::updateHitboxes(registry, hitboxRig_, rigScale_, rigMeshMinY_);
 }

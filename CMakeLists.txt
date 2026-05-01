@@ -1209,6 +1209,8 @@ add_executable(server
     # PR-1 (server-perf): scoped profiler + 1 Hz aggregator.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.cpp"
+    # PR-3 (server-perf): parallel-STL fan-out helper.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Parallel.hpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -1312,6 +1314,15 @@ target_include_directories(server PRIVATE
 )
 
 # ---- Server link libraries ----
+#
+# PR-3 (server-perf): TBB is required by libstdc++'s parallel STL
+# (<execution> + std::execution::par_unseq). On Linux it's installed
+# system-wide via setup-linux.sh / setup-archlinux.sh; we use
+# `find_package` so missing TBB produces a clear error rather than a
+# cryptic linker symbol miss. macOS / Windows builds with libc++ /
+# MSVC's stdlib don't need this — their parallel STL ships in stdlib.
+find_package(TBB QUIET)
+
 target_link_libraries(server PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
@@ -1324,6 +1335,13 @@ target_link_libraries(server PRIVATE
     ozz_animation
     ozz_base
 )
+if(TBB_FOUND)
+    target_link_libraries(server PRIVATE TBB::tbb)
+    target_compile_definitions(server PRIVATE GROUP2_HAVE_TBB=1)
+    message(STATUS "Server: TBB found; std::execution::par_unseq enabled.")
+else()
+    message(STATUS "Server: TBB not found; std::execution policies will be sequential.")
+endif()
 
 # ---- Server precompiled header ----
 target_precompile_headers(server PRIVATE

@@ -3,6 +3,7 @@
 
 #include "game/ServerGame.hpp"
 #include "network/NetworkConfig.hpp"
+#include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 
 #include <SDL3/SDL.h>
@@ -167,6 +168,7 @@ int main()
     // a future config-reload path) doesn't require restarting the
     // thread; it sleeps cheaply when sampling is off.
     ::group2::perf::initFromEnv();
+    ::group2::perf::initParallelFromEnv();
     openCsvIfRequested();
     ::group2::perf::startAggregator(emitSnapshot);
 

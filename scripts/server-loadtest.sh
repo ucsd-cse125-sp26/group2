@@ -81,19 +81,26 @@ cleanup() {
     stopProcess "${SERVER_PID:-}" server
     # Belt-and-braces: if the PID-based stop missed anything (e.g. the
     # script was killed mid-pipe and never observed BOTS_PID), reap by
-    # binary path. We only target the build-dir binaries, never the
-    # user's own ${BUILD_DIR%/}-different processes.
-    if [[ -n "${BUILD_DIR:-}" ]]; then
-        pkill -9 -f "^${BUILD_DIR}/server\$"   2>/dev/null || true
-        pkill -9 -f "^${BUILD_DIR}/clientbot " 2>/dev/null || true
-    fi
+    # cwd-aware patterns. The server / clientbot are launched with a
+    # `cd ${BUILD_DIR}` + relative `./server`, so the live cmdline is
+    # the literal "./server" / "./clientbot ...". pkill's pattern is a
+    # regex over the full command line; we anchor with `^` and a
+    # space (or end-of-line for `./server`) so we don't match grep
+    # itself or the user's ${BUILD_DIR}-different binaries.
+    pkill -9 -f '^\./server($| )' 2>/dev/null || true
+    pkill -9 -f '^\./clientbot ' 2>/dev/null || true
     # Restore the original config.toml if we mutated it.
     if [[ -n "${BUILD_DIR:-}" ]] && [[ -f "${BUILD_DIR}/config.toml.loadtest.bak" ]]; then
         mv -f "${BUILD_DIR}/config.toml.loadtest.bak" "${BUILD_DIR}/config.toml"
     fi
     return ${code}
 }
-trap cleanup EXIT INT TERM
+# Include PIPE: when the caller pipes our stdout through `tail` /
+# `head`, that consumer can exit early and SIGPIPE us mid-run. Without
+# trapping PIPE the script dies silently and orphans the server +
+# bots — exactly the symptom that left two TIME_WAIT-bound ports and
+# a 99 % CPU clientbot fleet between rounds during PR-2/3 dev.
+trap cleanup EXIT INT TERM PIPE
 
 # ── config.toml: rewrite the port so the server binds SERVER_PORT.
 # Pre-existing config.toml is preserved by writing to a build-local copy
