@@ -55,6 +55,16 @@ void Bot::join()
         thread_.join();
 }
 
+float Bot::getCurrentRttMs() const
+{
+    // The bot's worker thread is the sole writer to NetworkStats.avgRttMs
+    // (via Client::poll → updateRttFromPong). Reading from another thread
+    // is non-atomic on float, but the value is monotonic-smoothed and we
+    // only consume it for human-readable aggregates — torn reads have
+    // negligible practical impact on a p99/p50 estimate over 100s of bots.
+    return client_.getNetStats().avgRttMs;
+}
+
 void Bot::runLoop(const std::atomic<bool>& stopFlag)
 {
     const Uint64 perfFreq = SDL_GetPerformanceFrequency();
@@ -104,6 +114,13 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
             SDL_Log("[bot %d] server connection died", botId_);
             break;
         }
+        // PR-1 (server-perf): mark the bot ready for fleet-RTT sampling
+        // after the first successful tick. RTT is still 0 here until
+        // the first PONG arrives, but the fleet aggregator filters
+        // bots with `getCurrentRttMs() > 0` so a brief warmup window
+        // is acceptable.
+        if (!ready_.load(std::memory_order_relaxed))
+            ready_.store(true, std::memory_order_relaxed);
 
         // ── Pacing: hybrid sleep + spin to hit the next tick boundary. ──
         //

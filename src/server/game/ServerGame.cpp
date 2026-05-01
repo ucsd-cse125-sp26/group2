@@ -31,6 +31,7 @@
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/ShotEvent.hpp"
+#include "perf/Profiler.hpp"
 #include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
@@ -235,49 +236,87 @@ void ServerGame::eventHandler(Event event)
 
 void ServerGame::tick(float dt, Uint64 nextTick)
 {
-    while (!server.isEmpty()) {
-        const Event event = server.dequeueEvent();
-        eventHandler(event);
+    // PR-1: per-tick wall clock. Recorded into the Profiler at end-of-tick
+    // so `[perf …]` log lines and CSV rows always reflect the tick budget
+    // including any work added by future PRs.
+    const Uint64 tickStartCounter = SDL_GetPerformanceCounter();
 
-        // Check tick time --> move to next if over
-        if (const Uint64 kNow = SDL_GetPerformanceCounter(); kNow >= nextTick) {
-            // TODO: Drop events in queue
-            SDL_Log("[server] Exceeded tick time for event handling.");
-            break;
+    {
+        GROUP2_PROF_SCOPE("eventDrain");
+        while (!server.isEmpty()) {
+            const Event event = server.dequeueEvent();
+            eventHandler(event);
+
+            // Check tick time --> move to next if over
+            if (const Uint64 kNow = SDL_GetPerformanceCounter(); kNow >= nextTick) {
+                // TODO: Drop events in queue
+                SDL_Log("[server] Exceeded tick time for event handling.");
+                break;
+            }
         }
     }
 
-    // Update server-side animation and hitbox capsules before weapon raycasts.
-    updateAnimationAndHitboxes(dt);
+    {
+        GROUP2_PROF_SCOPE("animation");
+        // Update server-side animation and hitbox capsules before weapon raycasts.
+        updateAnimationAndHitboxes(dt);
+    }
 
-    // Phase 6: capture this tick's capsules into each entity's HitboxHistory
-    // ring. Has to run *after* updateHitboxes (so the capsules reflect this
-    // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
-    // consistent history snapshot from which rewindHitboxes can pick).
-    systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
+    {
+        GROUP2_PROF_SCOPE("hitboxHistoryPush");
+        // Phase 6: capture this tick's capsules into each entity's HitboxHistory
+        // ring. Has to run *after* updateHitboxes (so the capsules reflect this
+        // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
+        // consistent history snapshot from which rewindHitboxes can pick).
+        systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
+    }
 
-    // Phase 6: per-shooter lag-comp scheduler. For every player entity
-    // bound to a connected client, set `LagCompTarget.targetServerTick`
-    // to `currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
-    // The hitscan path inside runWeapon reads this off the shooter
-    // entity to size the rewind window for that shooter's shot.
-    //
-    // Capping at k_maxLagCompTicks (default ~25 ticks ≈ 200 ms at
-    // 128 Hz) prevents pathologically high-ping shooters from
-    // rewinding deep into the past, which would let them hit targets
-    // that have long since moved out of cover and produce
-    // "shot-around-the-corner" feel for the victims.
-    updateLagCompTargets();
+    {
+        GROUP2_PROF_SCOPE("lagcompTargets");
+        // Phase 6: per-shooter lag-comp scheduler. For every player entity
+        // bound to a connected client, set `LagCompTarget.targetServerTick`
+        // to `currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
+        // The hitscan path inside runWeapon reads this off the shooter
+        // entity to size the rewind window for that shooter's shot.
+        //
+        // Capping at k_maxLagCompTicks (default ~25 ticks ≈ 200 ms at
+        // 128 Hz) prevents pathologically high-ping shooters from
+        // rewinding deep into the past, which would let them hit targets
+        // that have long since moved out of cover and produce
+        // "shot-around-the-corner" feel for the victims.
+        updateLagCompTargets();
+    }
 
     std::vector<NetParticleEvent> particleEvents;
-    systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
-    systems::runMovement(registry, dt, physics::activeWorld());
-    systems::runCollision(registry, dt, physics::activeWorld());
-    systems::runExplosion(registry, particleEvents, pendingKillEvents);
-    systems::runPlayerStatus(registry, dt);
-    systems::runWeaponSpawners(registry, dt);
+    {
+        GROUP2_PROF_SCOPE("weapon");
+        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
+    }
+    {
+        GROUP2_PROF_SCOPE("movement");
+        systems::runMovement(registry, dt, physics::activeWorld());
+    }
+    {
+        GROUP2_PROF_SCOPE("collision");
+        systems::runCollision(registry, dt, physics::activeWorld());
+    }
+    {
+        GROUP2_PROF_SCOPE("explosion");
+        systems::runExplosion(registry, particleEvents, pendingKillEvents);
+    }
+    {
+        GROUP2_PROF_SCOPE("playerStatus");
+        systems::runPlayerStatus(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("weaponSpawners");
+        systems::runWeaponSpawners(registry, dt);
+    }
 
-    matchController.update(dt, registry, server);
+    {
+        GROUP2_PROF_SCOPE("match");
+        matchController.update(dt, registry, server);
+    }
 
     // Phase 4a: snapshot rate decoupled from tick rate. The registry
     // snapshot is the by far biggest piece of per-tick wire traffic, and
@@ -292,13 +331,22 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // client OutboundQueue to sockets at ~1 kHz, so the game-tick budget
     // no longer pays for the I/O syscalls.
     if ((tickCount % snapshotEveryNTicks) == 0) {
+        GROUP2_PROF_SCOPE("broadcastRegistry");
         server.broadcastRegistry(registry);
     }
-    server.broadcastParticleEvents(particleEvents);
-    server.broadcastKillEvents(pendingKillEvents);
+    {
+        GROUP2_PROF_SCOPE("broadcastEvents");
+        server.broadcastParticleEvents(particleEvents);
+        server.broadcastKillEvents(pendingKillEvents);
+    }
     pendingKillEvents.clear();
 
     ++tickCount;
+
+    // Record the tick's total wall time for the 1 Hz aggregator. Cheap:
+    // a single atomic increment + min/max + histogram bucket bump.
+    const Uint64 tickEndCounter = SDL_GetPerformanceCounter();
+    ::group2::perf::tickEnd(::group2::perf::ticksToNs(tickEndCounter - tickStartCounter));
 
     // Log once per second so we can watch the test entity fall and land.
 

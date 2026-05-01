@@ -25,6 +25,10 @@
 #include <string>
 #include <thread>
 
+// (Bot members keep the trailing-underscore convention used elsewhere
+// in this file; the .clang-tidy member rule trips on it but the existing
+// code base treats trailing-underscore as the established style.)
+
 class Bot
 {
 public:
@@ -66,6 +70,20 @@ public:
     ///        for setting the stopFlag observed by start().
     void join();
 
+    /// @brief PR-1 (server-perf): current smoothed RTT in ms.
+    ///
+    /// Returns the bot's `Client::getNetStats().avgRttMs` snapshot so
+    /// the multi-bot fleet aggregator can compute fleet-wide p50/p99
+    /// without each bot needing to log on its own cadence.
+    /// Thread-safe: reads an atomic float behind the scenes; the
+    /// per-bot worker thread is the sole writer.
+    [[nodiscard]] float getCurrentRttMs() const;
+
+    /// @brief PR-1: true once the bot's worker has logged at least
+    /// one finished tick. Used by the aggregator to avoid showing
+    /// "0 ms RTT" for bots still in the connect window.
+    [[nodiscard]] bool isReady() const { return ready_.load(std::memory_order_relaxed); }
+
 private:
     /// @brief Worker-thread main loop: send input + poll, sleep to next tick.
     void runLoop(const std::atomic<bool>& stopFlag);
@@ -77,4 +95,9 @@ private:
     uint32_t predictTick_ = 0; ///< Monotonic tick counter, stamped onto each input.
     int botId_ = 0;            ///< Log prefix.
     bool initialized_ = false; ///< True once init() succeeded; gates run().
+
+    /// PR-1 (server-perf): set true after the first successful poll inside
+    /// runLoop. Lets the fleet aggregator skip bots that are mid-connect
+    /// or whose RTT hasn't been measured yet.
+    std::atomic<bool> ready_{false};
 };

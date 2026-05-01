@@ -619,6 +619,49 @@ bool Game::init()
         }
     }
 
+    // Bench-only kill switches for post-processing passes.  Lets a single
+    // bench script flag isolate per-pass cost without persisting changes.
+    //
+    //   BENCH_NO_POSTFX=1   — disable bloom + SSR + GTAO + volumetrics + TAA
+    //   BENCH_NO_SHADOWS=1  — disable cascaded shadow map pass
+    //   BENCH_NO_TAA=1      — disable TAA + motion vectors only
+    //   BENCH_NO_BLOOM=1    — disable bloom only
+    //   BENCH_NO_SSR=1      — disable SSR only
+    //   BENCH_NO_GTAO=1     — disable SSAO/GTAO only
+    //   BENCH_NO_VOL=1      — disable volumetric lighting only
+    if (const char* v = SDL_getenv("BENCH_NO_POSTFX"); v && *v && *v != '0') {
+        renderer.toggles.bloom = false;
+        renderer.toggles.ssr = false;
+        renderer.toggles.ssao = false;
+        renderer.toggles.volumetrics = false;
+        legacyRenderer().aaMode = AAMode::Off;
+        SDL_Log("[bench] post-FX disabled (bloom + ssr + gtao + volumetrics + AA)");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_SHADOWS"); v && *v && *v != '0') {
+        renderer.toggles.shadows = false;
+        SDL_Log("[bench] shadows disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_TAA"); v && *v && *v != '0') {
+        legacyRenderer().aaMode = AAMode::Off;
+        SDL_Log("[bench] TAA disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_BLOOM"); v && *v && *v != '0') {
+        renderer.toggles.bloom = false;
+        SDL_Log("[bench] bloom disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_SSR"); v && *v && *v != '0') {
+        renderer.toggles.ssr = false;
+        SDL_Log("[bench] SSR disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_GTAO"); v && *v && *v != '0') {
+        renderer.toggles.ssao = false;
+        SDL_Log("[bench] GTAO disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_VOL"); v && *v && *v != '0') {
+        renderer.toggles.volumetrics = false;
+        SDL_Log("[bench] volumetrics disabled");
+    }
+
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
 }

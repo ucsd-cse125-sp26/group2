@@ -9,6 +9,7 @@
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "network/transport/PacketHeader.hpp"
+#include "perf/Profiler.hpp" // PR-1: NetworkCounters & scope timers.
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL.h>
@@ -142,8 +143,18 @@ void Server::flushAllOutbound()
     constexpr Uint32 k_maxAgeMs = 300;
 
     // Caller (networkLoop or shutdown path) holds stateMutex_.
+    //
+    // PR-1: opportunistically sample the per-client outbound depth so the
+    // 1 Hz profiler line can show a backlog gauge ("are we keeping up
+    // with the broadcast rate?"). Single pass over `clients` is cheap.
+    auto& nc = ::group2::perf::net();
+    std::uint32_t maxDepth = 0;
+
     for (auto it = clients.begin(); it != clients.end();) {
         auto& conn = it->second;
+        const auto depth = static_cast<std::uint32_t>(conn.outbound.depth());
+        if (depth > maxDepth)
+            maxDepth = depth;
         if (!conn.outbound.flushTo(conn.msgStream.socket, k_maxAgeMs)) {
             // Socket error during flush — disconnect this client.
             disconnectClient(conn);
@@ -151,6 +162,13 @@ void Server::flushAllOutbound()
             continue;
         }
         ++it;
+    }
+
+    // `clientCount` is a gauge — store, don't add. `peakBacklog` is a
+    // per-window peak — bump only on rise, reset by aggregator.
+    nc.clientCount.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+    std::uint32_t cur = nc.peakBacklog.load(std::memory_order_relaxed);
+    while (maxDepth > cur && !nc.peakBacklog.compare_exchange_weak(cur, maxDepth, std::memory_order_relaxed)) {
     }
 }
 
@@ -408,11 +426,22 @@ void Server::disconnectClient(Connection conn)
 void Server::readClients()
 {
     // packet format is 4 byte length prefix
+    //
+    // PR-1: count inbound bytes + packets at the dispatcher boundary.
+    // We observe `size` directly inside the callback — it's the
+    // length of the wire message without its 4-byte length prefix,
+    // which is the closest thing we have to "useful payload bytes
+    // received." Adding the 4-byte framing accounts for total wire
+    // bytes; we do that with a single per-message correction.
+    auto& nc = ::group2::perf::net();
     for (auto it = clients.begin(); it != clients.end();) {
         auto& conn = it->second;
 
-        bool ok =
-            conn.msgStream.poll([this, &conn](const void* data, Uint32 size) { handleMessage(conn, data, size); });
+        bool ok = conn.msgStream.poll([this, &conn, &nc](const void* data, Uint32 size) {
+            nc.bytesRecv.fetch_add(size + sizeof(Uint32), std::memory_order_relaxed);
+            nc.packetsRecv.fetch_add(1, std::memory_order_relaxed);
+            handleMessage(conn, data, size);
+        });
 
         if (!ok) {
             disconnectClient(conn);
@@ -581,6 +610,17 @@ void Server::broadcastRegistry(const Registry& registry)
     // INPUT/PING goes through.
     const bool useUdp = transportConfig_.snapshotsOverUdp && udpEndpoint_.isOpen();
 
+    // PR-1: track snapshot wire cost. We attribute `buf.size()` per
+    // client even on the UDP fragmented path — it's the right number
+    // for "outbound bytes per snapshot tick"; the per-fragment header
+    // overhead is small enough we don't separately account for it
+    // here. `snapshotsSent` is the *fanout* count (one per client per
+    // tick), which is what determines whether the snapshot pipeline
+    // scales linearly with N.
+    auto& nc = ::group2::perf::net();
+    std::uint64_t fanoutBytes = 0;
+    std::uint64_t fanoutCount = 0;
+
     for (auto& [_, conn] : clients) {
         const bool canUseUdp = useUdp && conn.udpAddr.addr != nullptr;
         if (canUseUdp) {
@@ -600,7 +640,12 @@ void Server::broadcastRegistry(const Registry& registry)
             conn.outbound.enqueue(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY),
                                   frameMessage(buf.data(), static_cast<int>(buf.size())));
         }
+        fanoutBytes += buf.size();
+        ++fanoutCount;
     }
+
+    nc.bytesSent.fetch_add(fanoutBytes, std::memory_order_relaxed);
+    nc.snapshotsSent.fetch_add(fanoutCount, std::memory_order_relaxed);
 }
 
 void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events)
