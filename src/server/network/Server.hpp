@@ -308,4 +308,27 @@ private:
     // arriving mid-cycle replaces the old one without races.
     std::shared_ptr<const std::vector<uint8_t>> pendingSnapshotPayload_;
     std::shared_ptr<const std::vector<uint8_t>> pendingSnapshotFramed_;
+
+    // ── PR-4 (server-perf): atomic-published read snapshots ───────────────
+    //
+    // Pre-PR-4 the game-thread query path (snapshotClientRtts,
+    // getClientCount, broadcastMatchStatus's getClientCount) acquired
+    // `stateMutex_` once per call and competed with the network thread's
+    // long-running readClients() pass. At 200+ bots that lock-wait was
+    // the dominant tick-time spike (50 ms p99 on lagcompTargets, 25 ms
+    // on match) — see §9 of docs/server-perf-design.md.
+    //
+    // PR-4 publishes both a per-client RTT snapshot and a client-count
+    // gauge atomically from the network thread. The game thread reads
+    // them lock-free. Trade-offs:
+    //   - Snapshot is at most one network-thread cycle (~1 ms) stale.
+    //     For lag-comp's RTT/2 rewind window that's negligible.
+    //   - The shared_ptr atomic is std::atomic<std::shared_ptr<T>>
+    //     (C++20). Available in libstdc++ from version 12+.
+    struct ClientRttSnapshot
+    {
+        std::vector<std::pair<ClientId, uint16_t>> entries;
+    };
+    std::atomic<std::shared_ptr<const ClientRttSnapshot>> rttSnapshotAtomic_;
+    std::atomic<std::uint32_t> clientCountAtomic_{0};
 };

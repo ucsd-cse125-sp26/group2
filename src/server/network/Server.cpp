@@ -133,14 +133,18 @@ bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void*
 
 void Server::enqueueBroadcast(uint8_t replaceKey, const void* data, int len)
 {
-    // Frame the message once outside the lock — the framing copy doesn't
-    // touch any shared state — then lock briefly only to push per-client
-    // copies into each queue.
-    auto framed = frameMessage(data, len);
+    // PR-4 (server-perf): build the framed bytes ONCE into a
+    // shared_ptr; per-client enqueue is a pointer copy. Pre-PR-4 this
+    // copied the framed `std::vector<uint8_t>` per client — fine at
+    // ~10 clients but quadratic-feeling at 200 clients × 128 Hz of
+    // matchController-driven broadcasts (the per-tick MATCH_STATE
+    // broadcast was the dominant contributor to the `match` scope's
+    // 100+ ms p99 spike at 200 bots).
+    auto framed = std::make_shared<const std::vector<uint8_t>>(frameMessage(data, len));
 
     std::lock_guard<std::mutex> lock(stateMutex_);
     for (auto& [_, conn] : clients) {
-        conn.outbound.enqueue(replaceKey, std::vector<uint8_t>(framed));
+        conn.outbound.enqueue(replaceKey, framed);
     }
 }
 
@@ -178,6 +182,24 @@ void Server::flushAllOutbound()
     std::uint32_t cur = nc.peakBacklog.load(std::memory_order_relaxed);
     while (maxDepth > cur && !nc.peakBacklog.compare_exchange_weak(cur, maxDepth, std::memory_order_relaxed)) {
     }
+
+    // PR-4 (server-perf): publish the lock-free read snapshots that
+    // game-thread queries (`getClientCount`, `snapshotClientRtts`)
+    // consume without taking stateMutex_. We're already holding the
+    // mutex here (caller's responsibility) and iterating `clients`,
+    // so the cost is one extra pass + one shared_ptr allocation per
+    // network cycle — negligible vs. the lock-wait this saves on the
+    // game thread.
+    clientCountAtomic_.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+
+    // Build the RTT snapshot. Reusing a thread_local scratch vector
+    // would help, but the snapshot is held by shared_ptr and shared
+    // with readers, so we have to allocate fresh.
+    auto rttSnap = std::make_shared<ClientRttSnapshot>();
+    rttSnap->entries.reserve(clients.size());
+    for (const auto& [id, conn] : clients)
+        rttSnap->entries.emplace_back(id, conn.lastReportedRttMs);
+    rttSnapshotAtomic_.store(std::shared_ptr<const ClientRttSnapshot>(std::move(rttSnap)), std::memory_order_release);
 }
 
 void Server::enqueueReliableEvent(const void* data, int len)
@@ -775,8 +797,12 @@ void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events
 
 int Server::getClientCount()
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
-    return static_cast<int>(clients.size());
+    // PR-4 (server-perf): atomic gauge — published from
+    // flushAllOutbound on the network thread. Pre-PR-4 this acquired
+    // stateMutex_ and competed with the network thread's
+    // long-running readClients pass; at 200+ bots that put it on the
+    // matchController hot path's p99 spike list. Now lock-free.
+    return static_cast<int>(clientCountAtomic_.load(std::memory_order_relaxed));
 }
 
 uint16_t Server::getClientRttMs(ClientId clientId)
@@ -790,8 +816,25 @@ uint16_t Server::getClientRttMs(ClientId clientId)
 
 void Server::snapshotClientRtts(std::vector<std::pair<ClientId, uint16_t>>& out)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-4 (server-perf): read the atomic-published RTT cache the
+    // network thread maintains. Lock-free, at most one network-cycle
+    // (~1 ms) stale — well below the lag-comp scheduler's
+    // half-RTT-rounded-to-ticks resolution.
+    //
+    // Falls back to a freshly-built mutex-protected snapshot only on
+    // the very first call before the network thread has published
+    // anything. After that, every call is lock-free.
     out.clear();
+    auto cached = rttSnapshotAtomic_.load(std::memory_order_acquire);
+    if (cached) {
+        out.reserve(cached->entries.size());
+        out.assign(cached->entries.begin(), cached->entries.end());
+        return;
+    }
+
+    // Cold path: no published snapshot yet. Take the lock so we don't
+    // race with concurrent inserts by acceptClients.
+    std::lock_guard<std::mutex> lock(stateMutex_);
     out.reserve(clients.size());
     for (const auto& [id, conn] : clients)
         out.emplace_back(id, conn.lastReportedRttMs);

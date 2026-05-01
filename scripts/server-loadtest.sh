@@ -53,16 +53,18 @@ SUMMARY="${RUN_DIR}/summary.txt"
 echo "[loadtest] run dir: ${RUN_DIR}"
 echo "[loadtest] N=${NUM_BOTS} duration=${DURATION_S}s preset=${PRESET}"
 
-# `stopProcess pid label`: SIGINT for graceful shutdown; SIGKILL after a
-# 5 s grace period if the process didn't exit. Returns immediately if
-# `pid` is empty or already exited.
+# `stopProcess pid label`: SIGINT to the whole session (setsid leader),
+# SIGKILL after a 5 s grace if anything is left. Sending to `-${pid}`
+# (negative) targets the process group so any forks/threads die with
+# the leader. Without this, the bot's worker threads survived a plain
+# SIGINT to the leader and held the listen port for the next round.
 stopProcess() {
     local pid="$1"
     local label="$2"
     if [[ -z "${pid}" ]] || ! kill -0 "${pid}" 2>/dev/null; then
         return 0
     fi
-    kill -INT "${pid}" 2>/dev/null || true
+    kill -INT -- "-${pid}" 2>/dev/null || kill -INT "${pid}" 2>/dev/null || true
     for i in 1 2 3 4 5; do
         if ! kill -0 "${pid}" 2>/dev/null; then
             return 0
@@ -70,7 +72,7 @@ stopProcess() {
         sleep 1
     done
     echo "[loadtest] WARNING: ${label} (pid=${pid}) didn't exit on SIGINT, sending SIGKILL"
-    kill -KILL "${pid}" 2>/dev/null || true
+    kill -KILL -- "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
     wait "${pid}" 2>/dev/null || true
 }
 
@@ -111,12 +113,15 @@ cp "${BUILD_DIR}/config.toml" "${ORIG_CONFIG_BACKUP}"
 sed -E "s/(^port = )[0-9]+/\1${SERVER_PORT}/" "${ORIG_CONFIG_BACKUP}" > "${BUILD_DIR}/config.toml"
 
 # ── Server ─────────────────────────────────────────────────────────────
-(
-    cd "${BUILD_DIR}" && \
-    GROUP2_SERVER_PROFILE=1 \
-    GROUP2_SERVER_PROFILE_CSV="${SERVER_CSV}" \
-    ./server > "${SERVER_LOG}" 2>&1
-) &
+#
+# `setsid` puts the server in its own session so signalling
+# `${SERVER_PID}` reliably reaches it (the subshell-then-exec dance
+# was eating SIGINT before — we'd see orphan ./server processes after
+# the script exited). `exec` saves a fork; the env-var prefix sets
+# them just for this command.
+GROUP2_SERVER_PROFILE=1 \
+GROUP2_SERVER_PROFILE_CSV="${SERVER_CSV}" \
+setsid bash -c "cd '${BUILD_DIR}' && exec ./server > '${SERVER_LOG}' 2>&1" &
 SERVER_PID=$!
 
 # Wait for the server to bind. The server loads + V-HACD-decomposes map
@@ -138,12 +143,9 @@ for attempt in $(seq 1 60); do
 done
 
 # ── Bots ───────────────────────────────────────────────────────────────
-(
-    cd "${BUILD_DIR}" && \
-    GROUP2_BOT_FLEET_RTT=1 \
-    GROUP2_BOT_FLEET_RTT_CSV="${BOT_CSV}" \
-    ./clientbot "${NUM_BOTS}" "127.0.0.1:${SERVER_PORT}" > "${BOT_LOG}" 2>&1
-) &
+GROUP2_BOT_FLEET_RTT=1 \
+GROUP2_BOT_FLEET_RTT_CSV="${BOT_CSV}" \
+setsid bash -c "cd '${BUILD_DIR}' && exec ./clientbot '${NUM_BOTS}' '127.0.0.1:${SERVER_PORT}' > '${BOT_LOG}' 2>&1" &
 BOTS_PID=$!
 
 # ── Wait, then tear down. ──────────────────────────────────────────────
