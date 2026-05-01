@@ -157,6 +157,7 @@ private:
     int glowSphereModelIdx_ = -1;
     int movableSphereModelIdx_ = -1;
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
+    int weaponAssetIds_[4] = {-1, -1, -1, -1};
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
@@ -241,8 +242,7 @@ private:
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
 
-    // Scroll-wheel weapon switching
-    int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = prev slot, consumed each frame.
+    int pendingScrollSwitch_ = 0;    ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.

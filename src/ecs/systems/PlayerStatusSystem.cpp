@@ -58,8 +58,6 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
 {
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
-    const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
 
     registry.erase<RespawnTimer>(player);
     registry.erase<DeathInfo>(player);
@@ -83,20 +81,6 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
                                                          .type = WeaponType::RailGun,
                                                          .totalAmmo = railConfig.defaultAmmoCapacity,
                                                          .currentMagAmmo = railConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .tertiary =
-                                                     GunInstance{
-                                                         .type = WeaponType::EnergyGun,
-                                                         .totalAmmo = wingmanConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = wingmanConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .quaternary =
-                                                     GunInstance{
-                                                         .type = WeaponType::Rocket,
-                                                         .totalAmmo = rocketConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = rocketConfig.magazineSize,
                                                          .fireCooldown = 0.0f,
                                                      },
                                                  .current = WeaponSlot::PRIMARY,
@@ -204,17 +188,24 @@ inline void handleHealing(Health& playerHealth, float dt)
 
 void runPlayerStatus(Registry& registry, float dt)
 {
-    registry.view<Player>().each([&registry, dt](entt::entity e) {
-        if (registry.all_of<RespawnTimer>(e)) {
-            auto& respawnTimer = registry.get<RespawnTimer>(e);
-            respawnTimer.timeRemaining -= dt;
-            if (respawnTimer.timeRemaining <= 0) {
-                handleRespawn(e, registry);
+    registry.view<Player, InputSnapshot, Health>().each(
+        [&registry, dt](entt::entity e, InputSnapshot& snap, Health& health) {
+            if (registry.all_of<RespawnTimer>(e)) {
+                auto& respawnTimer = registry.get<RespawnTimer>(e);
+                respawnTimer.timeRemaining -= dt;
+                if (respawnTimer.timeRemaining <= 0) {
+                    handleRespawn(e, registry);
+                }
+            } else {
+                Health& playerHealth = registry.get_or_emplace<Health>(e);
+                handleHealing(playerHealth, dt);
             }
-        } else {
-            Health& playerHealth = registry.get_or_emplace<Health>(e);
-            handleHealing(playerHealth, dt);
-        }
-    });
+
+            if (snap.killSelf) {
+                snap.killSelf = false;
+                std::vector<NetKillEvent> kills;
+                applyDamage(999.0f, e, e, registry, kills, BodyRegion::Head);
+            }
+        });
 }
 } // namespace systems

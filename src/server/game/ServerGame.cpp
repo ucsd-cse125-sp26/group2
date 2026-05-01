@@ -4,6 +4,7 @@
 #include "ServerGame.hpp"
 
 #include "client/animation/CharacterAnimator.hpp"
+#include "ecs/AssetCatalog.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
@@ -14,6 +15,7 @@
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
+#include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -38,15 +40,12 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
     registry.clear();
 
     // ── Load map collision ──────────────────────────────────────────────
-    // Scale: the map was authored in meters; the game uses Quake units (inches).
     {
-        static constexpr float k_metersToInches = 39.3701f;
-
         const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + kMapAsset.filename;
 
         physics::MapLoadOptions opts;
-        opts.scale = k_metersToInches;
+        opts.scale = kMapAsset.loadScale;
         opts.allMeshesAreCollision = true; // Prototype map — every mesh is collision.
         opts.addFloorPlane = false;        // Map geometry provides its own floor.
 
@@ -61,11 +60,8 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
 
         // Load prop collision — must match client for prediction parity.
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
-        physics::loadPropCollision(
-            assetsDir + "free_1975_porsche_911_930_turbo.glb", mapCollision_, glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f);
-        physics::loadPropCollision(
-            assetsDir + "metallic_pallet_factory_store.glb", mapCollision_, glm::vec3(0.0f, 0.0f, 600.0f), 0.25f);
-        physics::loadPropCollision(assetsDir + "bottle_a.glb", mapCollision_, glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+        for (const AssetDefinition& def : kPropAssets)
+            physics::loadPropCollision(assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale);
 
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());
@@ -90,18 +86,36 @@ void ServerGame::run()
     Uint64 nextTick = SDL_GetPerformanceCounter();
 
     // temp weapon spawner
-    const entt::entity spawner = registry.create();
+    const entt::entity energySpawner = registry.create();
     registry.emplace<WeaponSpawner>(
-        spawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
-    registry.emplace<Position>(spawner, glm::vec3{12.0f, 15.0f, 12.0f});
-    registry.emplace<CollisionShape>(spawner);
+        energySpawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(energySpawner, glm::vec3{-100.0f, 15.0f, 0.0f});
+    registry.emplace<CollisionShape>(energySpawner);
 
     // temp rocket spawner
     const entt::entity rocketSpawner = registry.create();
-    registry.emplace<WeaponSpawner>(rocketSpawner,
-                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
-    registry.emplace<Position>(rocketSpawner, glm::vec3{-200.0f, 15.0f, 12.0f});
+    registry.emplace<WeaponSpawner>(
+        rocketSpawner, WeaponSpawner{.type = WeaponType::Rocket, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(rocketSpawner, glm::vec3{-100.0f, 15.0f, 120.0f});
     registry.emplace<CollisionShape>(rocketSpawner);
+
+    // temp rocket spawner
+    const entt::entity rifleSpawner = registry.create();
+    registry.emplace<WeaponSpawner>(rifleSpawner,
+                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(rifleSpawner, glm::vec3{-100.0f, 15.0f, -120.0f});
+    registry.emplace<CollisionShape>(rifleSpawner);
+
+    // temp rail gun spawner
+    const entt::entity railSpawner = registry.create();
+    registry.emplace<WeaponSpawner>(
+        railSpawner, WeaponSpawner{.type = WeaponType::RailGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(railSpawner, glm::vec3{-100.0f, 15.0f, -240.0f});
+    registry.emplace<CollisionShape>(railSpawner);
+
+    const entt::entity playerSpawner = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner);
+    registry.emplace<Position>(playerSpawner, glm::vec3{0.0f, 2000.0f, 0.0f});
 
     while (running) {
         server.poll();
@@ -229,8 +243,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
-    const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
     registry.emplace<WeaponState>(player,
                                   WeaponState{
                                       .primary =
@@ -245,20 +257,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                               .type = WeaponType::RailGun,
                                               .totalAmmo = railConfig.defaultAmmoCapacity,
                                               .currentMagAmmo = railConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .tertiary =
-                                          GunInstance{
-                                              .type = WeaponType::EnergyGun,
-                                              .totalAmmo = wingmanConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = wingmanConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .quaternary =
-                                          GunInstance{
-                                              .type = WeaponType::Rocket,
-                                              .totalAmmo = rocketConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = rocketConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .current = WeaponSlot::PRIMARY,

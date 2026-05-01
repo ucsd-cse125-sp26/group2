@@ -751,6 +751,7 @@ add_executable(group2
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/components/RespawnPoint.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
 )
