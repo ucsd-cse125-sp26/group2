@@ -144,6 +144,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
 
     ImGui::SeparatorText("Gameplay");
     ImGui::Checkbox("Network Stats", &showNetworkStats);
+    ImGui::Checkbox("Latency Simulator", &showLatencySim);
     ImGui::Checkbox("Weapon HUD", &showWeaponHud);
     ImGui::Checkbox("Particle System", &showParticleWindow_);
 
@@ -1121,6 +1122,59 @@ void DebugUI::buildNetworkUI(const NetworkStats& stats)
     ImGui::Text("Recv: %.2f MB   Send: %.2f MB",
                 static_cast<double>(stats.bytesRecvTotal) / (1024.0 * 1024.0),
                 static_cast<double>(stats.bytesSentTotal) / (1024.0 * 1024.0));
+
+    ImGui::End();
+}
+
+void DebugUI::buildLatencySimulatorUI()
+{
+    if (!showLatencySim)
+        return;
+
+    ImGui::SetNextWindowPos({500.0f, 700.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({340.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::Begin("Latency Simulator", &showLatencySim, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextWrapped("Adds artificial round-trip latency to the UDP transport. "
+                       "Half is applied to outbound packets, half to inbound, "
+                       "modelling a symmetric one-way delay.");
+    ImGui::Spacing();
+
+    ImGui::SliderInt("Sim. RTT (ms)", &simulatedLatencyMs_, 0, 200, "%d ms");
+
+    // Quick presets — common latency tiers for testing lag-comp /
+    // reconciliation behaviour at "LAN", "good WAN", "bad WAN", "edge".
+    if (ImGui::SmallButton("0 (off)"))
+        simulatedLatencyMs_ = 0;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("30"))
+        simulatedLatencyMs_ = 30;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("60"))
+        simulatedLatencyMs_ = 60;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("100"))
+        simulatedLatencyMs_ = 100;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("150"))
+        simulatedLatencyMs_ = 150;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("200"))
+        simulatedLatencyMs_ = 200;
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Effect");
+    if (simulatedLatencyMs_ == 0) {
+        ImGui::TextDisabled("Disabled — packets take their normal fast path.");
+    } else {
+        ImGui::Text("Outbound delay: %d ms", simulatedLatencyMs_ / 2);
+        ImGui::Text("Inbound delay:  %d ms", simulatedLatencyMs_ / 2);
+        ImGui::Text("Added to PING ping reading: ~%d ms", simulatedLatencyMs_);
+    }
 
     ImGui::End();
 }

@@ -30,6 +30,11 @@ bool Bot::init(const std::string& host, Uint16 port, int botId)
     return true;
 }
 
+void Bot::setSimulatedLatencyMs(int totalMs)
+{
+    client_.setSimulatedLatencyMs(totalMs);
+}
+
 void Bot::start(const std::atomic<bool>& stopFlag)
 {
     if (!initialized_) {

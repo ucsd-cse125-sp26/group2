@@ -138,6 +138,21 @@ int main(int argc, char* argv[])
 
     SDL_Log("[clientbot] launching %d bot(s) → %s:%u", numBots, host.c_str(), port);
 
+    // Optional latency simulator hook for testing Phase 6 lag-comp under
+    // bot-only load. Each bot applies `GROUP2_BOT_LATENCY_MS` ms of
+    // simulated round-trip delay on its UDP path. Defaults to 0 (off).
+    int botLatencyMs = 0;
+    if (const char* envLat = std::getenv("GROUP2_BOT_LATENCY_MS")) {
+        char* end = nullptr;
+        const long n = std::strtol(envLat, &end, 10);
+        if (*end == '\0' && n >= 0 && n <= 200) {
+            botLatencyMs = static_cast<int>(n);
+            SDL_Log("[clientbot] applying simulated %d ms RTT to all bots (GROUP2_BOT_LATENCY_MS)", botLatencyMs);
+        } else {
+            SDL_Log("[clientbot] ignoring invalid GROUP2_BOT_LATENCY_MS='%s' (need 0..200)", envLat);
+        }
+    }
+
     installSignalHandlers();
 
     // ── Spawn bots ────────────────────────────────────────────────────────
@@ -162,6 +177,8 @@ int main(int argc, char* argv[])
             // to clean up the ones that did connect.
             continue;
         }
+        if (botLatencyMs > 0)
+            bot->setSimulatedLatencyMs(botLatencyMs);
         bots.push_back(std::move(bot));
         ++connected;
 

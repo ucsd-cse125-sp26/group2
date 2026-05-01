@@ -154,11 +154,18 @@ void Client::sendPing()
         hdr.sequence = 0; // PING sequence not used yet — server just echoes payload
         hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
         // Payload is the raw [PacketType::PING][timestamp] bytes — server
-        // demuxes on channel + first payload byte.
+        // demuxes on channel + first payload byte. `sendUdpDelayed` either
+        // ships immediately (latency simulator off) or queues for the
+        // network thread's drain phase. Bandwidth accounting moves with it
+        // so deferred sends still register in `bytesSentTotal` once they
+        // actually leave the kernel.
         std::lock_guard<std::mutex> lock(stateMutex_);
-        if (udpEndpoint_.send(serverUdpAddr_, hdr, buf, static_cast<int>(sizeof(buf)))) {
-            stats.bytesSentTotal += sizeof(net::PacketHeader) + sizeof(buf);
-            bytesSentWindow += sizeof(net::PacketHeader) + sizeof(buf);
+        const int totalMs = simulatedLatencyMs_.load(std::memory_order_relaxed);
+        if (sendUdpDelayed(hdr, buf, static_cast<int>(sizeof(buf)))) {
+            if (totalMs == 0) {
+                stats.bytesSentTotal += sizeof(net::PacketHeader) + sizeof(buf);
+                bytesSentWindow += sizeof(net::PacketHeader) + sizeof(buf);
+            }
             return;
         }
         // Fall through to TCP if UDP send failed.
@@ -245,9 +252,12 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
         hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
 
         std::lock_guard<std::mutex> lock(stateMutex_);
-        if (udpEndpoint_.send(serverUdpAddr_, hdr, buf, static_cast<int>(totalLen))) {
-            stats.bytesSentTotal += sizeof(net::PacketHeader) + totalLen;
-            bytesSentWindow += sizeof(net::PacketHeader) + totalLen;
+        const int totalMs = simulatedLatencyMs_.load(std::memory_order_relaxed);
+        if (sendUdpDelayed(hdr, buf, static_cast<int>(totalLen))) {
+            if (totalMs == 0) {
+                stats.bytesSentTotal += sizeof(net::PacketHeader) + totalLen;
+                bytesSentWindow += sizeof(net::PacketHeader) + totalLen;
+            }
             return true;
         }
         // Fall through to TCP if UDP send failed (rare).
@@ -321,12 +331,99 @@ float Client::getSnapshotAlpha() const
     return std::clamp(a, 0.0f, 1.0f);
 }
 
+void Client::setSimulatedLatencyMs(int totalMs) noexcept
+{
+    // Clamp to slider range. Setting an unreasonably-high value would
+    // grow the delay queues without bound at high traffic rates; the
+    // 200 ms cap keeps queues bounded under normal load (~30 entries
+    // for a 128 Hz INPUT stream + 32 Hz inbound snapshots).
+    if (totalMs < 0)
+        totalMs = 0;
+    if (totalMs > 200)
+        totalMs = 200;
+    simulatedLatencyMs_.store(totalMs, std::memory_order_relaxed);
+}
+
+bool Client::sendUdpDelayed(net::PacketHeader hdr, const void* data, int len)
+{
+    // Caller already holds stateMutex_ — both the immediate send and
+    // the queue mutation are guarded by the existing lock. No re-lock.
+    const int totalMs = simulatedLatencyMs_.load(std::memory_order_relaxed);
+    if (totalMs == 0) {
+        return udpEndpoint_.send(serverUdpAddr_, hdr, data, len);
+    }
+
+    // Half the slider value goes to outbound, the other half to
+    // inbound — see the doc on `setSimulatedLatencyMs`.
+    const int outboundMs = totalMs / 2;
+    const Uint64 perfFreq = SDL_GetPerformanceFrequency();
+    const Uint64 delayCounters = perfFreq * static_cast<Uint64>(outboundMs) / 1000ULL;
+
+    DelayedOutbound entry;
+    entry.sendAtCounter = SDL_GetPerformanceCounter() + delayCounters;
+    entry.header = hdr;
+    entry.payload.assign(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + len);
+    entry.totalBytes = sizeof(net::PacketHeader) + static_cast<std::size_t>(len);
+    simLatOutbound_.push_back(std::move(entry));
+    return true;
+}
+
+void Client::recvUdpDelayed(std::vector<uint8_t>&& payload)
+{
+    const int totalMs = simulatedLatencyMs_.load(std::memory_order_relaxed);
+    if (totalMs == 0) {
+        udpRecvQueue_.emplace_back(std::move(payload));
+        return;
+    }
+
+    const int inboundMs = totalMs / 2;
+    const Uint64 perfFreq = SDL_GetPerformanceFrequency();
+    const Uint64 delayCounters = perfFreq * static_cast<Uint64>(inboundMs) / 1000ULL;
+
+    DelayedInbound entry;
+    entry.deliverAtCounter = SDL_GetPerformanceCounter() + delayCounters;
+    entry.payload = std::move(payload);
+    simLatInbound_.push_back(std::move(entry));
+}
+
 void Client::networkLoop()
 {
     // ~1 kHz cycle, symmetric to Server::networkLoop. Each phase takes the
     // mutex briefly so the game thread's enqueue / poll calls don't have
     // to wait for an entire I/O round-trip.
     while (!shouldStop_.load(std::memory_order_relaxed)) {
+        // ── Phase 6 latency simulator: drain ready delayed packets ──────
+        //
+        // Outbound — anything whose `sendAtCounter` has passed gets
+        // shipped to the kernel right now. Inbound — anything whose
+        // `deliverAtCounter` has passed gets moved into `udpRecvQueue_`
+        // for the game thread's next `poll`. Both queues are FIFO; the
+        // sendAt/deliverAt timestamps are monotonic for any given
+        // latency setting, so a simple while-front-ready loop preserves
+        // order. If the user lowers the slider mid-flight, in-flight
+        // entries still wait their original deadlines (acceptable —
+        // the simulator is a debug aid, not an SLA).
+        {
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            const Uint64 nowCounter = SDL_GetPerformanceCounter();
+            while (!simLatOutbound_.empty() && simLatOutbound_.front().sendAtCounter <= nowCounter) {
+                auto& entry = simLatOutbound_.front();
+                if (udpEndpoint_.isOpen() && serverUdpAddr_.addr) {
+                    if (udpEndpoint_.send(
+                            serverUdpAddr_, entry.header, entry.payload.data(), static_cast<int>(entry.payload.size())))
+                    {
+                        stats.bytesSentTotal += entry.totalBytes;
+                        bytesSentWindow += entry.totalBytes;
+                    }
+                }
+                simLatOutbound_.pop_front();
+            }
+            while (!simLatInbound_.empty() && simLatInbound_.front().deliverAtCounter <= nowCounter) {
+                udpRecvQueue_.emplace_back(std::move(simLatInbound_.front().payload));
+                simLatInbound_.pop_front();
+            }
+        }
+
         // Pump kernel reads into recvBuf.
         bool socketOk = true;
         {
@@ -382,16 +479,20 @@ void Client::networkLoop()
 
                 if (channel == net::ChannelId::Unreliable) {
                     // Snapshot stream + INPUT/PING. Fragmented if the
-                    // payload exceeded the MTU floor; reassemble.
+                    // payload exceeded the MTU floor; reassemble. The
+                    // delay (when the latency simulator is on) is applied
+                    // *after* reassembly — fragments arrive at their real
+                    // wire times, and the *complete* assembled message
+                    // takes the simulated trip back to the dispatch queue.
                     const bool isFragment = (msg.header.flags & 0x01) != 0;
                     if (!isFragment) {
-                        udpRecvQueue_.emplace_back(std::move(msg.payload));
+                        recvUdpDelayed(std::move(msg.payload));
                     } else {
                         std::vector<uint8_t> assembled;
                         const auto r = unreliableReassembler_.addFragment(
                             msg.header, msg.payload.data(), static_cast<int>(msg.payload.size()), assembled);
                         if (r == net::FragmentReassembler::Result::Complete) {
-                            udpRecvQueue_.emplace_back(std::move(assembled));
+                            recvUdpDelayed(std::move(assembled));
                         }
                     }
                 } else if (channel == net::ChannelId::ReliableOrdered) {
@@ -401,7 +502,7 @@ void Client::networkLoop()
                     // handles wrap and out-of-order without false
                     // positives on the typical RTT × redundancy span.
                     if (acceptReliableSequence(msg.header.sequence))
-                        udpRecvQueue_.emplace_back(std::move(msg.payload));
+                        recvUdpDelayed(std::move(msg.payload));
                 }
                 // Other channels: not yet defined; silently drop.
                 msg.from.release();

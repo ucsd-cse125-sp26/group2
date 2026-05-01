@@ -20,6 +20,7 @@
 #include <SDL3_net/SDL_net.h>
 #include <array>
 #include <atomic>
+#include <deque>
 #include <entt/entt.hpp>
 #include <mutex>
 #include <optional>
@@ -139,6 +140,34 @@ public:
     /// the cost of ~5x INPUT-packet payload (still tiny: ~200 bytes/packet).
     static constexpr size_t k_inputRedundancy = 5;
 
+    /// @brief Phase 6 testing: simulate added round-trip latency.
+    ///
+    /// Setting this to N causes outbound UDP datagrams to be held for
+    /// N/2 ms before the kernel sees them, and incoming UDP messages
+    /// to be held for N/2 ms before being delivered to the game-thread
+    /// dispatch queue. The two halves combined produce an extra N ms
+    /// of round-trip on top of whatever the real network has.
+    ///
+    /// Range: 0–200 ms (slider-bounded; values outside the range are
+    /// clamped on entry). 0 disables the simulator entirely — packets
+    /// take the same fast path they did before this feature existed,
+    /// no per-packet allocation, no extra mutex contention.
+    ///
+    /// Why split into outbound + inbound halves? It models a symmetric
+    /// real network: client→server and server→client each take half
+    /// the RTT. With outbound-only delay, the server would see stale
+    /// inputs but reply at full speed, leaving lag-comp's RTT/2 rewind
+    /// formula systematically under-correcting by the inbound half.
+    /// Symmetric delay matches the formula and gives the same hit-feel
+    /// as a real WAN player at the slider's RTT.
+    void setSimulatedLatencyMs(int totalMs) noexcept;
+
+    /// @brief Get the currently-effective simulated total RTT.
+    [[nodiscard]] int getSimulatedLatencyMs() const noexcept
+    {
+        return simulatedLatencyMs_.load(std::memory_order_relaxed);
+    }
+
 private:
     MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr;             ///< Resolved server address.
@@ -245,6 +274,54 @@ private:
     /// caller should dispatch this sequence (i.e. it's new); false
     /// if it's a duplicate or too old to track.
     bool acceptReliableSequence(uint16_t seq);
+
+    // ── Phase 6 testing: latency simulator ────────────────────────────────
+    //
+    // Two FIFO queues — outbound packets that haven't reached the kernel
+    // socket yet, and inbound payloads that haven't been delivered to the
+    // game thread's dispatch queue yet. Both are drained at the top of
+    // each `networkLoop` cycle: any entry whose target counter has passed
+    // is sent (or enqueued for dispatch). Both share `stateMutex_` because
+    // the existing send/receive paths already hold it; piggy-backing
+    // avoids a second mutex.
+    //
+    // Sized to grow with traffic — typical worst case is 200 ms × 128 Hz
+    // INPUT × 1 client + ~32 Hz inbound snapshot stream ≈ 30 entries.
+
+    /// @brief Total simulated RTT in ms (slider value, 0–200).
+    /// Atomic so the UI thread can write while the network thread reads.
+    std::atomic<int> simulatedLatencyMs_{0};
+
+    /// @brief One outbound UDP datagram queued for delayed send.
+    struct DelayedOutbound
+    {
+        Uint64 sendAtCounter;         ///< Performance counter at which to send.
+        net::PacketHeader header;     ///< Caller-supplied header (passed through verbatim).
+        std::vector<uint8_t> payload; ///< Datagram payload bytes.
+        std::size_t totalBytes;       ///< For deferred bandwidth accounting.
+    };
+    std::deque<DelayedOutbound> simLatOutbound_;
+
+    /// @brief One inbound payload queued for delayed dispatch.
+    struct DelayedInbound
+    {
+        Uint64 deliverAtCounter;      ///< Performance counter at which to enqueue.
+        std::vector<uint8_t> payload; ///< Already-assembled message ([PacketType][rest]).
+    };
+    std::deque<DelayedInbound> simLatInbound_;
+
+    /// @brief Send a UDP datagram immediately if the latency simulator is
+    /// off, otherwise queue it for delayed send. Caller MUST already hold
+    /// `stateMutex_` (matching the existing UDP send call sites).
+    /// @return False if the immediate send failed; true otherwise (queued
+    ///         sends always optimistically return true — failures surface
+    ///         later from the network thread's drain).
+    bool sendUdpDelayed(net::PacketHeader hdr, const void* data, int len);
+
+    /// @brief Enqueue an assembled UDP message into `udpRecvQueue_`
+    /// immediately if the simulator is off, otherwise hold it in the
+    /// inbound delay queue. Caller MUST already hold `stateMutex_`.
+    void recvUdpDelayed(std::vector<uint8_t>&& payload);
 
     /// @brief Network-thread main loop body.
     void networkLoop();

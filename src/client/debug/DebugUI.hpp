@@ -93,6 +93,23 @@ public:
 
     /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
     void buildNetworkUI(const NetworkStats& stats);
+
+    /// @brief Build the Latency Simulator window with a slider to add
+    /// fake round-trip latency. Useful for testing Phase 6 lag
+    /// compensation and Phase 5b reconciliation under non-LAN
+    /// conditions without setting up `tc qdisc`.
+    ///
+    /// The slider value (0–200 ms) is written into
+    /// `simulatedLatencyMs` and read by Game::iterate which forwards
+    /// it to `Client::setSimulatedLatencyMs`. Half the value is added
+    /// to outbound packets and half to inbound, modelling a symmetric
+    /// network with the slider's RTT.
+    void buildLatencySimulatorUI();
+
+    /// @brief The current latency-simulator setting in milliseconds (0–200).
+    /// Read by Game::iterate each frame to push to `Client::setSimulatedLatencyMs`.
+    [[nodiscard]] int getSimulatedLatencyMs() const noexcept { return simulatedLatencyMs_; }
+
     void buildWeaponUI(const Registry& registry);
 
     /// @brief Draw the Hitbox Debug window and (optionally) capsule wireframe overlay.
@@ -171,7 +188,13 @@ private:
     bool showLightingControls = false; ///< Show the Lighting Controls window.
     bool showSkybox = false;           ///< Show the Skybox window.
     bool showNetworkStats = false;     ///< Show the Network Stats window.
+    bool showLatencySim = false;       ///< Show the Latency Simulator window.
     bool showWeaponHud = false;        ///< Show the Weapon HUD debug window (disabled by default).
+
+    /// @brief Phase 6 testing: simulated round-trip latency in ms.
+    /// Written by the Latency Simulator window's slider, read by
+    /// Game::iterate to push to Client. Zero = simulator off.
+    int simulatedLatencyMs_ = 0;
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.

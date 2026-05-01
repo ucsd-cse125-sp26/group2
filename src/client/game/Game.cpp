@@ -1745,6 +1745,13 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
 
+    // Phase 6 testing: latency simulator window. Slider value flows from
+    // DebugUI → Client each frame; Client splits it across outbound and
+    // inbound UDP delay queues drained on its network thread. Idempotent
+    // when the value hasn't changed (Client clamps and atomically stores).
+    debugUI.buildLatencySimulatorUI();
+    client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+
     // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
 
     // Process ammo refill request — pulse refillAmmo on InputSnapshot for
