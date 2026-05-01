@@ -2019,29 +2019,35 @@ SDL_AppResult Game::iterate()
     // 10. Render
     debugUI.newFrame();
 
-    // Unified debug menu — one window with toggles for every debug panel.
-    debugUI.buildDebugMenu({
-        {"HUD Tweaker", &showHudDebug_},
-        {"Viewmodel Tweaker", &showViewmodelUI},
-        {"3P Weapon Tweaker", &showTPWeaponUI_},
-        {"Dynamic Lighting", &showDynLightUI_},
-        {"Animation Tester", &animUI_.show},
-    });
+    // Bench mode skips the heavy debug panels; ImGui still draws but the
+    // per-frame Build*UI cost is the difference between a few thousand ALU
+    // ops and ~hundred-microsecond ImGui buffer construction at the high
+    // bench frame-rates.
+    if (!benchActive_) {
+        // Unified debug menu — one window with toggles for every debug panel.
+        debugUI.buildDebugMenu({
+            {"HUD Tweaker", &showHudDebug_},
+            {"Viewmodel Tweaker", &showViewmodelUI},
+            {"3P Weapon Tweaker", &showTPWeaponUI_},
+            {"Dynamic Lighting", &showDynLightUI_},
+            {"Animation Tester", &animUI_.show},
+        });
 
-    debugUI.buildUI(registry,
-                    tickCount,
-                    mouseSensitivity,
-                    renderSeparateFromPhysics,
-                    inputSyncedWithPhysics,
-                    limitFPSToMonitor,
-                    renderer.ssrMode,
-                    measuredPhysicsHz,
-                    statsFPSCurrent,
-                    statsFPSMin,
-                    statsFPSMax,
-                    statsFPS1pLow,
-                    statsFPS5pLow);
-    debugUI.buildNetworkUI(client.getNetStats());
+        debugUI.buildUI(registry,
+                        tickCount,
+                        mouseSensitivity,
+                        renderSeparateFromPhysics,
+                        inputSyncedWithPhysics,
+                        limitFPSToMonitor,
+                        renderer.ssrMode,
+                        measuredPhysicsHz,
+                        statsFPSCurrent,
+                        statsFPSMin,
+                        statsFPSMax,
+                        statsFPS1pLow,
+                        statsFPS5pLow);
+        debugUI.buildNetworkUI(client.getNetStats());
+    }
 
     // Phase 6 testing: network simulator window (latency + packet loss).
     // Slider values flow from DebugUI → Client each frame; idempotent when
