@@ -52,7 +52,7 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
     Uint64 nextTick = SDL_GetPerformanceCounter() + tickDurationCounters;
 
     while (!stopFlag.load(std::memory_order_relaxed)) {
-        // ── Input: stamp tick onto a zero/idle InputSnapshot and send. ───
+        // ── Input: stamp tick onto a near-idle InputSnapshot and send. ──
         //
         // We don't need realistic inputs for load testing — the goal is to
         // exercise the same network path a real client uses (multi-input
@@ -60,7 +60,24 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
         // means the server applies idle state every tick; the wire traffic
         // and per-tick processing cost is identical to a real connected
         // player standing still.
+        //
+        // Phase 6: pulse `shooting=true` for a burst of consecutive
+        // ticks. Single-tick pulses get shadowed by the next tick's
+        // shooting=false inside the 5-input redundancy ring (the
+        // server applies inputs in order from each packet, so the
+        // last one in the packet wins for the entity's InputSnapshot
+        // that runWeapon sees). 32-tick bursts (~250 ms) ensure
+        // multiple subsequent packets carry shooting=true as the
+        // newest snapshot, so handleFire actually runs and exercises
+        // the lag-compensation path.
+        //
+        // Cadence: 32 ticks ON (~250 ms) every 256 ticks (~2 s). With
+        // typical fire cooldowns of 50–200 ms that gets ~1–4 shots
+        // per cycle per bot — enough activity to exercise the rewind
+        // path under bot-only tests, sparse enough not to saturate
+        // the kill feed.
         ++predictTick_;
+        input_.shooting = (predictTick_ % 256u) < 32u;
         input_.tick = predictTick_;
         if (!client_.sendInputSnapshot(input_)) {
             SDL_Log("[bot %d] sendInputSnapshot failed; bailing", botId_);
