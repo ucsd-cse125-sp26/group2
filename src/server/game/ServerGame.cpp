@@ -113,9 +113,22 @@ void ServerGame::run()
     registry.emplace<Position>(railSpawner, glm::vec3{-100.0f, 15.0f, -240.0f});
     registry.emplace<CollisionShape>(railSpawner);
 
-    const entt::entity playerSpawner = registry.create();
-    registry.emplace<RespawnPoint>(playerSpawner);
-    registry.emplace<Position>(playerSpawner, glm::vec3{0.0f, 2000.0f, 0.0f});
+    // Static respawn points
+    const entt::entity playerSpawner1 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner1);
+    registry.emplace<Position>(playerSpawner1, glm::vec3{0.0f, 2000.0f, 0.0f});
+
+    const entt::entity playerSpawner2 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner2);
+    registry.emplace<Position>(playerSpawner2, glm::vec3{800.0f, 40.0f, 800.0f});
+
+    const entt::entity playerSpawner3 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner3);
+    registry.emplace<Position>(playerSpawner3, glm::vec3{800.0f, 430.0f, -800.0f});
+
+    const entt::entity playerSpawner4 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner4);
+    registry.emplace<Position>(playerSpawner4, glm::vec3{0.0f, 200.0f, 0.0f});
 
     while (running) {
         server.poll();

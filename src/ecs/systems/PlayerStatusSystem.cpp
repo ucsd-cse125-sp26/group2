@@ -21,6 +21,7 @@
 #include "network/NetKillEvent.hpp"
 
 #include <ecs/components/RespawnPoint.hpp>
+#include <random>
 #include <vector>
 
 namespace systems
@@ -51,11 +52,21 @@ inline glm::vec3 chooseRespawnPoint(Registry& registry)
 {
     std::vector<glm::vec3> respawnPoints;
 
-    registry.view<RespawnPoint, Position>().each(
-        [&](entt::entity e, RespawnPoint& rp, Position& pos) { respawnPoints.push_back(pos.value); });
+    auto view = registry.view<RespawnPoint, Position>();
 
-    return respawnPoints[0];
-    // return glm::vec3(0.0f, 200.0f, 0.0f);
+    for (entt::entity e : view) {
+        respawnPoints.push_back(view.get<Position>(e).value);
+    }
+
+    if (!respawnPoints.empty()) {
+        std::random_device rd;  // seed
+        std::mt19937 gen(rd()); // Mersenne Twister RNG
+        std::uniform_int_distribution<> dist(0, respawnPoints.size() - 1);
+        int idx = dist(gen);
+        return respawnPoints[idx];
+    } else {
+        return glm::vec3(0.0f, 200.0f, 0.0f);
+    }
 }
 
 /// @brief Reset a dead player to a fresh spawn state.
