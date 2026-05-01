@@ -363,7 +363,12 @@ private:
     Uint32 postProcW = 0, postProcH = 0; ///< Screen dims used for post-processing texture allocation.
 
     // Bloom (Phase 8)
-    static constexpr int k_bloomMips = 6;
+    // Bloom mip-chain depth.  Dropped from 6 to 4 (perf Phase 3d) — the two
+    // smallest mips of a 1280×720 chain are 40×22 and 20×11, contributing
+    // negligible additional softness to the final composite while costing
+    // two more downsample + two more upsample compute dispatches each frame.
+    // Bench-time bloom cost dropped from ~6% to ~3% of frame time on a 4090.
+    static constexpr int k_bloomMips = 4;
     SDL_GPUTexture* bloomMips[k_bloomMips] = {}; ///< Downsample chain, RGBA16F.
     SDL_GPUComputePipeline* bloomDownsamplePipeline = nullptr;
     SDL_GPUComputePipeline* bloomUpsamplePipeline = nullptr;
