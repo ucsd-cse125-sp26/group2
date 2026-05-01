@@ -47,7 +47,7 @@ bool Client::init(const char* addr, Uint16 port, const TransportConfig& transpor
     msgStream.socket = sock;
     transportConfig_ = transport;
 
-    // PR-11: read GROUP2_CLIENT_INTERP_DELAY_TICKS once at connect.
+    // PR-11: read GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS once at connect.
     // Default 2 ticks (≈ 62.5 ms at 32 Hz snapshot rate) — Source-engine
     // / Valorant / Fortnite cadence.  0 disables the buffered render-
     // delay path entirely; remote-entity rendering falls back to the
@@ -55,10 +55,10 @@ bool Client::init(const char* addr, Uint16 port, const TransportConfig& transpor
     // (8 ticks ≈ 250 ms at 32 Hz, the InterpolationBuffer capacity) so
     // a typo in the env var can't push the renderer past the buffer's
     // history depth, which would have it permanently snapped to oldest.
-    if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_TICKS")) {
+    if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS")) {
         const int parsed = SDL_atoi(envDelay);
-        interpDelayTicks_ = std::clamp(parsed, 0, static_cast<int>(InterpolationBuffer::k_capacity));
-        SDL_Log("Client: GROUP2_CLIENT_INTERP_DELAY_TICKS=%d", interpDelayTicks_);
+        interpDelaySnapshots_ = std::clamp(parsed, 0, static_cast<int>(InterpolationBuffer::k_capacity));
+        SDL_Log("Client: GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=%d", interpDelaySnapshots_);
     }
 
     // Seed the loss simulator RNG once. random_device for fresh entropy
@@ -217,7 +217,8 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     if (inputRingCount_ < k_inputRedundancy)
         ++inputRingCount_;
 
-    // Pack [PacketType::INPUT (1B)] [count (1B)] [rttMs (2B)] [InputSnapshot * count].
+    // Pack [PacketType::INPUT (1B)] [count (1B)] [rttMs (2B)]
+    //      [interpDelaySnapshots (1B)] [InputSnapshot * count].
     //
     // Inputs are written oldest-first so the server can apply them in
     // tick order with a simple `tick > lastAppliedInputTick` check.
@@ -231,23 +232,37 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     // of waiting for a separate "ping update" packet to arrive on
     // its own channel. Rounded to the nearest ms; clamped to uint16
     // (0–65 s, far beyond the 200 ms cap the server applies).
+    //
+    // PR-12: the `interpDelaySnapshots` byte carries the client's
+    // render-delay value (PR-11 entity-interpolation). The server
+    // ADDS this term to RTT/2 in its lag-comp formula so the rewind
+    // target tick lines up with what the client *saw* on screen at
+    // input-sample time, not merely with what the server held at
+    // input-arrival time. Without this, players at higher cl_interp
+    // experience shots-behind-target — the server hits where the
+    // enemy was 50 ms ago (RTT/2) but the client aimed at where the
+    // enemy was 50 + 62.5 ms ago. One byte / packet — same
+    // negligible cost as rttMs.
     const auto count = static_cast<uint8_t>(inputRingCount_);
     const float rttClamped = std::clamp(stats.avgRttMs, 0.0f, 65535.0f);
     const auto rttMs = static_cast<uint16_t>(std::lround(rttClamped));
-    uint8_t buf[4 + k_inputRedundancy * sizeof(InputSnapshot)];
+    const auto interpDelaySnapshots =
+        static_cast<uint8_t>(std::clamp(interpDelaySnapshots_, 0, static_cast<int>(InterpolationBuffer::k_capacity)));
+    uint8_t buf[5 + k_inputRedundancy * sizeof(InputSnapshot)];
     buf[0] = static_cast<uint8_t>(PacketType::INPUT);
     buf[1] = count;
     std::memcpy(buf + 2, &rttMs, sizeof(uint16_t));
+    buf[4] = interpDelaySnapshots;
 
     // Oldest-first iteration: when ring is full, oldest is at head; otherwise
     // entries [0, count) are already in order.
     const size_t firstIdx = (inputRingCount_ == k_inputRedundancy) ? inputRingHead_ : 0;
     for (size_t i = 0; i < inputRingCount_; ++i) {
         const size_t srcIdx = (firstIdx + i) % k_inputRedundancy;
-        std::memcpy(buf + 4 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
+        std::memcpy(buf + 5 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
     }
 
-    const uint32_t totalLen = 4 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
+    const uint32_t totalLen = 5 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
 
     // ── Phase 3d-2: prefer UDP for INPUT once handshake completes ────────
     //
@@ -360,7 +375,7 @@ Uint64 Client::getSnapshotIntervalNs() const
 
 void Client::recordInterpolationSamples(Registry& registry, Uint64 captureNs)
 {
-    if (interpDelayTicks_ <= 0)
+    if (interpDelaySnapshots_ <= 0)
         return;
 
     // Sample (position, yaw) for every replicated entity except the
@@ -386,11 +401,11 @@ Uint64 Client::getInterpolationRenderTimeNs() const
     // snapshots before publishing a render time so the EMA has been
     // updated at least once with a real interval (otherwise we'd be
     // playing back at the wrong delay against a stale assumed 32 Hz).
-    if (interpDelayTicks_ <= 0 || lastSnapshotApplyNs_ == 0 || prevSnapshotApplyNs_ == 0)
+    if (interpDelaySnapshots_ <= 0 || lastSnapshotApplyNs_ == 0 || prevSnapshotApplyNs_ == 0)
         return 0;
 
     const Uint64 now = SDL_GetTicksNS();
-    const Uint64 delayNs = static_cast<Uint64>(interpDelayTicks_) * snapshotIntervalEmaNs_;
+    const Uint64 delayNs = static_cast<Uint64>(interpDelaySnapshots_) * snapshotIntervalEmaNs_;
 
     // Guard against the (unlikely) case where the simulator is running
     // a delay larger than the wall clock.  Returning 0 disables the

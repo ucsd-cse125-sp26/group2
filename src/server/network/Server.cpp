@@ -256,8 +256,13 @@ void Server::flushAllOutbound()
         clientCountAtomic_.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
         auto rttSnap = std::make_shared<ClientRttSnapshot>();
         rttSnap->entries.reserve(clients.size());
-        for (const auto& [id, conn] : clients)
-            rttSnap->entries.emplace_back(id, conn.lastReportedRttMs);
+        for (const auto& [id, conn] : clients) {
+            rttSnap->entries.push_back(ClientNetState{
+                .id = id,
+                .rttMs = conn.lastReportedRttMs,
+                .interpDelaySnapshots = conn.lastReportedInterpDelaySnapshots,
+            });
+        }
         rttSnapshotAtomic_.store(std::shared_ptr<const ClientRttSnapshot>(std::move(rttSnap)),
                                  std::memory_order_release);
     }
@@ -345,15 +350,15 @@ void Server::handleUdpUnreliable(uint32_t connId,
 
     switch (type) {
     case PacketType::INPUT: {
-        // Same parser as the TCP INPUT case. Wire format:
-        //   [count u8] [rttMs u16] [InputSnapshot * count]
-        if (subLen < 3)
+        // Same parser as the TCP INPUT case. Wire format (PR-12):
+        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [InputSnapshot * count]
+        if (subLen < 4)
             return;
         const uint8_t count = sub[0];
         constexpr uint8_t k_maxInputsPerPacket = 16;
         if (count == 0 || count > k_maxInputsPerPacket)
             return;
-        const uint32_t expectedSize = 3u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 4u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (subLen != expectedSize)
             return;
 
@@ -363,7 +368,15 @@ void Server::handleUdpUnreliable(uint32_t connId,
         std::memcpy(&rttMs, sub + 1, sizeof(uint16_t));
         conn.lastReportedRttMs = rttMs;
 
-        const uint8_t* base = sub + 3;
+        // PR-12: client's render-delay (in snapshots) — see
+        // Connection::lastReportedInterpDelaySnapshots for the lag-comp
+        // formula that consumes this.  Clamped to the
+        // InterpolationBuffer capacity to defend against malformed
+        // values; well-behaved clients never exceed 8.
+        const uint8_t interpDelaySnapshots = std::min<uint8_t>(sub[3], 8);
+        conn.lastReportedInterpDelaySnapshots = interpDelaySnapshots;
+
+        const uint8_t* base = sub + 4;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
@@ -723,16 +736,16 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     switch (type) {
     case PacketType::INPUT: {
-        // Multi-input wire format:
-        //   [count u8] [rttMs u16] [InputSnapshot * count],
+        // Multi-input wire format (PR-12):
+        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [InputSnapshot * count]
         // oldest-first. Each client packet carries the last
         // Client::k_inputRedundancy inputs. We dedup against
         // conn.lastAppliedInputTick — most entries in any given packet are
         // duplicates of already-applied snapshots and get skipped cheaply.
         // The rttMs prefix is the client's smoothed RTT estimate; the
-        // server uses RTT/2 as the rewind window for lag-compensated
-        // hitscan (Phase 6).
-        if (payloadLen < 3) {
+        // interpDelaySnapshots byte is the client's render-delay (PR-11).
+        // Both feed the lag-comp formula in updateLagCompTargets.
+        if (payloadLen < 4) {
             SDL_Log("Server: received undersized INPUT packet from client %d", conn.clientId.value);
             return;
         }
@@ -749,7 +762,7 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
             return;
         }
 
-        const uint32_t expectedSize = 3u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 4u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (payloadLen != expectedSize) {
             SDL_Log("Server: received INPUT packet of invalid size %u (expected %u for count %u)",
                     payloadLen,
@@ -765,7 +778,15 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         std::memcpy(&rttMs, payload + 1, sizeof(uint16_t));
         conn.lastReportedRttMs = rttMs;
 
-        const uint8_t* base = payload + 3;
+        // PR-12: client's render-delay (in snapshots) — feeds the
+        // lag-comp formula alongside RTT/2 so the server rewinds to
+        // exactly the world state the client SAW when firing, not
+        // merely to RTT/2 ago.  Clamped to InterpolationBuffer capacity
+        // to defend against malformed packets.
+        const uint8_t interpDelaySnapshots = std::min<uint8_t>(payload[3], 8);
+        conn.lastReportedInterpDelaySnapshots = interpDelaySnapshots;
+
+        const uint8_t* base = payload + 4;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
@@ -1009,12 +1030,14 @@ uint16_t Server::getClientRttMs(ClientId clientId)
     return it->second.lastReportedRttMs;
 }
 
-void Server::snapshotClientRtts(std::vector<std::pair<ClientId, uint16_t>>& out)
+void Server::snapshotClientNetStates(std::vector<ClientNetState>& out)
 {
     // PR-4 (server-perf): read the atomic-published RTT cache the
-    // network thread maintains. Lock-free, at most one network-cycle
-    // (~1 ms) stale — well below the lag-comp scheduler's
-    // half-RTT-rounded-to-ticks resolution.
+    // network thread maintains.  PR-12 extended each entry from
+    // `(id, rttMs)` to `(id, rttMs, interpDelaySnapshots)` so the
+    // lag-comp scheduler reads both rewind terms in one fetch.
+    // Lock-free, at most one network-cycle (~1 ms) stale — well below
+    // the lag-comp scheduler's half-RTT-rounded-to-ticks resolution.
     //
     // Falls back to a freshly-built mutex-protected snapshot only on
     // the very first call before the network thread has published
@@ -1032,8 +1055,13 @@ void Server::snapshotClientRtts(std::vector<std::pair<ClientId, uint16_t>>& out)
     // takes unique). Pure read.
     std::shared_lock<std::shared_mutex> lock(stateMutex_);
     out.reserve(clients.size());
-    for (const auto& [id, conn] : clients)
-        out.emplace_back(id, conn.lastReportedRttMs);
+    for (const auto& [id, conn] : clients) {
+        out.push_back(ClientNetState{
+            .id = id,
+            .rttMs = conn.lastReportedRttMs,
+            .interpDelaySnapshots = conn.lastReportedInterpDelaySnapshots,
+        });
+    }
 }
 
 void Server::broadcastMatchStatus(MatchStatePacket packet)

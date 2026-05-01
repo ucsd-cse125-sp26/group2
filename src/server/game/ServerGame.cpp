@@ -502,36 +502,53 @@ void ServerGame::detachServerAnimator(entt::entity player)
 
 void ServerGame::updateLagCompTargets()
 {
-    // Server-side cap on rewind depth. 25 ticks at 128 Hz ≈ 195 ms,
-    // matching the plan's "server-capped at 200 ms" rule. Above this
-    // a high-ping shooter could rewind targets behind cover that the
-    // victim has long since ducked behind, producing the classic
-    // "I shot him around the corner" feel for the receiver.
-    static constexpr uint32_t k_maxLagCompTicks = 25;
+    // PR-12: server-side cap on TOTAL rewind depth (RTT/2 + interp).
+    // Pre-PR-12 this was 25 ticks (~195 ms) covering RTT/2 only.
+    // After PR-11 added a client render delay, the lag-comp formula
+    // grows by `interpDelaySnapshots × snapshotEveryNTicks`, which at
+    // the worst-case (8 snapshots × 4 ticks/snapshot @ 32 Hz) adds
+    // 32 ticks (~250 ms).  Realistic values:
+    //   - Default cl_interp = 2 snapshots → 8 ticks (62.5 ms @ 32 Hz)
+    //                                     → 2 ticks (15.6 ms @ 128 Hz, post-PR-13)
+    //   - High-ping (200 ms RTT) shooter → 25 ticks RTT/2
+    //   - Worst combined: 25 + 32 = 57 ticks (~445 ms)
+    // We round up to 64 ticks (500 ms) for headroom.  HitboxHistory
+    // capacity (also bumped to 64 in PR-12) covers the same window.
+    static constexpr uint32_t k_maxLagCompTicks = 64;
 
-    // PR-2b: snapshot every client's RTT in one mutex acquisition,
-    // then drive the loop off the local copy. Pre-PR-2b this called
-    // `server.getClientRttMs(id)` per client, which acquired
-    // stateMutex_ each time — at 100 bots × 128 Hz that was ~13 k
-    // mutex ops/sec on the server's hot lock. Now: one lock per tick.
-    static thread_local std::vector<std::pair<ClientId, uint16_t>> rttCache;
-    server.snapshotClientRtts(rttCache);
+    // PR-2b + PR-12: snapshot every client's net state (RTT + interp
+    // delay) in one mostly-lock-free operation, then drive the loop
+    // off the local copy.
+    static thread_local std::vector<Server::ClientNetState> netCache;
+    server.snapshotClientNetStates(netCache);
 
     // Lookup map from cache for the inner loop. Reserve once, reuse
     // the std::unordered_map across ticks — avoids per-tick alloc.
-    static thread_local std::unordered_map<ClientId, uint16_t> rttById;
-    rttById.clear();
-    rttById.reserve(rttCache.size());
-    for (const auto& [id, rtt] : rttCache)
-        rttById.emplace(id, rtt);
+    struct NetCacheEntry
+    {
+        uint16_t rttMs;
+        uint8_t interpDelaySnapshots;
+    };
+    static thread_local std::unordered_map<ClientId, NetCacheEntry> netById;
+    netById.clear();
+    netById.reserve(netCache.size());
+    for (const auto& s : netCache)
+        netById.emplace(s.id, NetCacheEntry{.rttMs = s.rttMs, .interpDelaySnapshots = s.interpDelaySnapshots});
+
+    // Snapshot interval in physics ticks — used to convert the
+    // client's interpDelaySnapshots into a tick count.  Read from
+    // ServerGame's runtime config so it tracks any future env-var
+    // adjustment (e.g. PR-13 dropping snapshotEveryNTicks 4 → 1).
+    const auto snapshotEveryNTicksLocal = static_cast<uint32_t>(std::max(1, snapshotEveryNTicks));
 
     const auto currentServerTick = static_cast<uint32_t>(tickCount);
     for (const auto& [clientId, entity] : clientEntities) {
         if (!registry.valid(entity))
             continue;
 
-        const auto rttIt = rttById.find(clientId);
-        const uint16_t rttMs = (rttIt != rttById.end()) ? rttIt->second : 0;
+        const auto netIt = netById.find(clientId);
+        const uint16_t rttMs = (netIt != netById.end()) ? netIt->second.rttMs : 0;
+        const uint8_t interpDelaySnapshots = (netIt != netById.end()) ? netIt->second.interpDelaySnapshots : 0;
         // Half-RTT in ticks. Round-to-nearest by adding half a tick
         // before integer divide. (rttMs / 2 / 1000 * tickRateHz)
         // reordered to keep the integer-only arithmetic exact at the
@@ -539,7 +556,16 @@ void ServerGame::updateLagCompTargets()
         // 2000.
         const uint32_t rttHalfTicks =
             (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 1000u) / 2000u;
-        const uint32_t lagTicks = std::min<uint32_t>(rttHalfTicks, k_maxLagCompTicks);
+
+        // PR-12: client render-delay term.  The client renders remote
+        // entities at `now − interpDelaySnapshots × snapshotInterval`,
+        // so when they fire, their crosshair is over the target as
+        // the target appeared `interpDelayTicks` server ticks ago.
+        // The server must rewind by RTT/2 + this term to put the
+        // hitbox state where the client SAW it.
+        const uint32_t interpDelayTicks = static_cast<uint32_t>(interpDelaySnapshots) * snapshotEveryNTicksLocal;
+
+        const uint32_t lagTicks = std::min<uint32_t>(rttHalfTicks + interpDelayTicks, k_maxLagCompTicks);
         const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
                                         ? 0u // explicit "no rewind" sentinel
                                         : (currentServerTick - lagTicks);

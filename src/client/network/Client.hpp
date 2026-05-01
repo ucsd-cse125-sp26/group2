@@ -145,7 +145,7 @@ public:
     /// PR-11 (server-perf): Valorant / Fortnite / Source-engine `cl_interp`
     /// style render-delay interpolation.  Returns
     ///   `SDL_GetTicksNS() − delayTicks × snapshotIntervalNs()`
-    /// where `delayTicks` is read from `GROUP2_CLIENT_INTERP_DELAY_TICKS`
+    /// where `delayTicks` is read from `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS`
     /// (default 2) and `snapshotIntervalNs` is the EMA of the last two
     /// snapshot apply times.
     ///
@@ -301,8 +301,8 @@ private:
 
     // ── PR-11: render-delay interpolation ────────────────────────────────
     //
-    // `interpDelayTicks_` is read once at init() from the
-    // GROUP2_CLIENT_INTERP_DELAY_TICKS env var (default 2).  0 disables
+    // `interpDelaySnapshots_` is read once at init() from the
+    // GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS env var (default 2).  0 disables
     // the buffered render-delay path entirely; non-local entities
     // fall back to the Phase-5a (prev, cur, alpha) lerp.  Higher values
     // smooth more loss but make remote entities visibly behind server
@@ -316,7 +316,7 @@ private:
     // change during a session, so a single-pole IIR with α=0.25 is
     // ample.  Initial value matches the design's 32 Hz snapshot rate.
     static constexpr Uint64 k_defaultSnapshotIntervalNs = 1'000'000'000ULL / 32ULL;
-    int interpDelayTicks_ = 2;
+    int interpDelaySnapshots_ = 2;
     Uint64 snapshotIntervalEmaNs_ = k_defaultSnapshotIntervalNs;
 
     // ── Phase 5b: prediction reconciliation hand-off ──────────────────────
@@ -448,7 +448,7 @@ private:
     /// `LocalPlayer` tag is set by the `localPlayerReadyFn` callback,
     /// which fires earlier in dispatchMessage's UPDATE_REGISTRY/_DELTA
     /// path, so by the time this runs the exclude filter is correct).
-    /// No-op when `interpDelayTicks_` is 0 (kill switch).
+    /// No-op when `interpDelaySnapshots_` is 0 (kill switch).
     ///
     /// @param registry  Client registry post-Loader::apply.
     /// @param captureNs Wall-clock timestamp to stamp on every sample —

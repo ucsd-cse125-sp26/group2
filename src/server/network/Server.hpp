@@ -92,17 +92,26 @@ public:
     uint16_t getClientRttMs(ClientId clientId);
 
     /// @brief PR-2b (server-perf): bulk-snapshot every connected client's
-    /// last-reported RTT in one mutex acquisition. The game thread's
-    /// `updateLagCompTargets` calls this once per tick instead of
-    /// `getClientRttMs(...)` per client. At 100 bots × 128 Hz, the
-    /// per-client form was ~13 k mutex ops/sec on stateMutex_,
-    /// contending hard with the network thread; bulk snapshot
-    /// collapses to 1 op/tick.
+    /// last-reported network state in one (mostly lock-free) operation.
     ///
-    /// @param out Cleared and filled with `(clientId, rttMs)` pairs in
+    /// PR-12 expanded this from "just RTT" to "RTT + interp-delay" so
+    /// the game thread's `updateLagCompTargets` can compute the rewind
+    /// formula `targetServerTick = currentServerTick − (RTT/2 + interp)`
+    /// from a single snapshot.  At 100 bots × 128 Hz, the per-client
+    /// form was ~13 k mutex ops/sec on `stateMutex_`, contending hard
+    /// with the network thread; bulk snapshot collapses to 1 op/tick
+    /// (PR-4 atomic publish makes the read itself lock-free).
+    ///
+    /// @param out Cleared and filled with `ClientNetState` records in
     ///            unspecified order. Caller is expected to reuse the
     ///            same vector across ticks to avoid allocation churn.
-    void snapshotClientRtts(std::vector<std::pair<ClientId, uint16_t>>& out);
+    struct ClientNetState
+    {
+        ClientId id;
+        uint16_t rttMs;
+        uint8_t interpDelaySnapshots;
+    };
+    void snapshotClientNetStates(std::vector<ClientNetState>& out);
 
     /// @brief Broadcast match status updates to clients.
     void broadcastMatchStatus(MatchStatePacket packet);
@@ -208,6 +217,30 @@ private:
         /// their PING/PONG hasn't completed yet so any rewind would
         /// be guesswork).
         uint16_t lastReportedRttMs = 0;
+
+        /// @brief PR-12: client's most-recent self-reported render-delay
+        /// in *snapshots* (i.e. their `cl_interp` value).  The PR-11
+        /// renderer plays back at `now − N × snapshotInterval` for some
+        /// client-chosen N (default 2).  Lag comp must include this
+        /// term in its rewind so the server hitbox state lines up with
+        /// what the client SAW when they pulled the trigger — not
+        /// merely with what the server held at INPUT-arrival time.
+        ///
+        /// New rewind formula:
+        ///   `targetServerTick = currentServerTick
+        ///                       − clamp(rttHalfTicks + interpDelayTicks,
+        ///                               0, k_maxLagCompTicks)`
+        ///
+        /// where `interpDelayTicks = N × (tickRateHz / snapshotRateHz)`.
+        /// At default 32 Hz snapshots / 128 Hz physics, N=2 → 8 ticks
+        /// (~62.5 ms).  Clamped to InterpolationBuffer::k_capacity (8)
+        /// on the wire, so the worst case is 8 snapshots × 4 ticks =
+        /// 32 ticks (250 ms) of interp on top of RTT/2.
+        ///
+        /// Stays at 0 until the first INPUT packet arrives.  Source
+        /// engine ships this value over the wire as well — see TF2
+        /// `cl_interp` / Quake `cl_interp_ratio`.
+        uint8_t lastReportedInterpDelaySnapshots = 0;
     };
 
     /// @brief Dispatch a single decoded message from a client.
@@ -374,9 +407,14 @@ private:
     //     For lag-comp's RTT/2 rewind window that's negligible.
     //   - The shared_ptr atomic is std::atomic<std::shared_ptr<T>>
     //     (C++20). Available in libstdc++ from version 12+.
+    /// @brief Atomic-published snapshot of every connected client's
+    /// network state.  PR-12 extended this from `(id, rtt)` pairs to
+    /// `(id, rtt, interpDelaySnapshots)` so a single tick of
+    /// `updateLagCompTargets` can read both terms of the rewind
+    /// formula in one lock-free fetch.
     struct ClientRttSnapshot
     {
-        std::vector<std::pair<ClientId, uint16_t>> entries;
+        std::vector<ClientNetState> entries;
     };
     std::atomic<std::shared_ptr<const ClientRttSnapshot>> rttSnapshotAtomic_;
     std::atomic<std::uint32_t> clientCountAtomic_{0};
