@@ -2241,52 +2241,57 @@ SDL_AppResult Game::iterate()
         debugUI.buildNetworkUI(client.getNetStats());
     }
 
-    // Phase 6 testing: network simulator window (latency + packet loss).
-    // Slider values flow from DebugUI → Client each frame; idempotent when
-    // unchanged (Client clamps and atomically stores). Latency is split
-    // half-and-half across outbound + inbound delay queues; loss is an
-    // independent Bernoulli drop applied per-datagram in each direction.
-    debugUI.buildNetworkSimUI();
-    client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
-    client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
+    // All of the optional debug panels below are skipped in bench mode — none
+    // of them are visible to the user during a 25 s perf run, and at 1000+ fps
+    // even sub-microsecond ImGui widget allocs add up.  The buildHitboxUI
+    // call in particular projects every capsule for every entity into screen
+    // space, which scales linearly with bot count.
+    if (!benchActive_) {
+        // Phase 6 testing: network simulator window (latency + packet loss).
+        // Slider values flow from DebugUI → Client each frame; idempotent when
+        // unchanged (Client clamps and atomically stores). Latency is split
+        // half-and-half across outbound + inbound delay queues; loss is an
+        // independent Bernoulli drop applied per-datagram in each direction.
+        debugUI.buildNetworkSimUI();
+        client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+        client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
 
-    // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
+        // Process ammo refill request — pulse refillAmmo on InputSnapshot for
+        // exactly one frame so the server handles it once then stops.
+        {
+            const bool wantRefill = debugUI.pendingAmmoRefill_;
+            debugUI.pendingAmmoRefill_ = false;
+            registry.view<LocalPlayer, InputSnapshot>().each(
+                [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
+        }
+        debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
+        buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 
-    // Process ammo refill request — pulse refillAmmo on InputSnapshot for
-    // exactly one frame so the server handles it once then stops.
-    {
-        const bool wantRefill = debugUI.pendingAmmoRefill_;
-        debugUI.pendingAmmoRefill_ = false;
-        registry.view<LocalPlayer, InputSnapshot>().each(
-            [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
-    }
-    debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
-    buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
-
-    // Hitbox debug visualization — project capsules into screen space.
-    {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSize(window, &winW, &winH);
-        const float winWf = static_cast<float>(winW);
-        const float winHf = static_cast<float>(winH);
-        const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
-        const glm::mat4 hbProj =
-            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
-        const glm::mat4 hbVP = hbProj * hbView;
-        debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
-        debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
-    }
+        // Hitbox debug visualization — project capsules into screen space.
+        {
+            int winW = 0, winH = 0;
+            SDL_GetWindowSize(window, &winW, &winH);
+            const float winWf = static_cast<float>(winW);
+            const float winHf = static_cast<float>(winH);
+            const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
+            const glm::mat4 hbProj =
+                glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+            const glm::mat4 hbVP = hbProj * hbView;
+            debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
+            debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+        }
 #ifdef USE_HYBRID_RENDERER
-    debugUI.buildRenderTogglesUI(renderer.legacy());
-    debugUI.buildLightingUI(renderer.legacy());
-    debugUI.buildSkyboxUI(renderer.legacy());
+        debugUI.buildRenderTogglesUI(renderer.legacy());
+        debugUI.buildLightingUI(renderer.legacy());
+        debugUI.buildSkyboxUI(renderer.legacy());
 #else
-    debugUI.buildRenderTogglesUI(renderer);
-    debugUI.buildLightingUI(renderer);
-    debugUI.buildSkyboxUI(renderer);
+        debugUI.buildRenderTogglesUI(renderer);
+        debugUI.buildLightingUI(renderer);
+        debugUI.buildSkyboxUI(renderer);
 #endif
 
-    HudDebugPanel::build(hud_, &showHudDebug_);
+        HudDebugPanel::build(hud_, &showHudDebug_);
+    }
 
     // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
     if (showViewmodelUI) {
