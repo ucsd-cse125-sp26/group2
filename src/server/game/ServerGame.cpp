@@ -62,7 +62,7 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
         //   false → "prototype mode": every mesh in the GLB is collision.
         //   true  → "separated mode": only nodes whose name contains the
         //           collision pattern (e.g. "COL_") are extracted as collision.
-        static constexpr bool k_separatedCollisionMap = true;
+        static constexpr bool k_separatedCollisionMap = false;
         static constexpr const char* k_collisionPattern = "COL_";
 
         // Should collision meshes be auto-fit to primitive shapes, or kept
