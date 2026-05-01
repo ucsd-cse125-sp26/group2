@@ -2096,8 +2096,17 @@ SDL_AppResult Game::iterate()
                 if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
                     status.kills = pms->kills;
                     status.deaths = pms->deaths;
+                    // Per-player ping: the server stamps each client's
+                    // self-reported RTT onto their PlayerMatchStats.rttMs
+                    // every tick (see ServerGame::updateLagCompTargets),
+                    // which then rides the existing snapshot stream to
+                    // every connected client. Reading from this row's
+                    // own component instead of `client.getNetStats()`
+                    // means every scoreboard row shows the right
+                    // player's ping — not the local viewer's ping
+                    // duplicated across every line.
+                    status.ping = static_cast<int>(pms->rttMs);
                 }
-                status.ping = static_cast<int>(client.getNetStats().rttMs);
                 hudAllPlayers.push_back(status);
             });
         // For now all players go into allies (no team system exists).

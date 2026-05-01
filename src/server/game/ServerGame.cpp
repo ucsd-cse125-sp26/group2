@@ -432,6 +432,16 @@ void ServerGame::updateLagCompTargets()
                                         : (currentServerTick - lagTicks);
 
         registry.emplace_or_replace<LagCompTarget>(entity, LagCompTarget{.targetServerTick = targetTick});
+
+        // Replicate this client's RTT to all clients via PlayerMatchStats.
+        // Already in the Synced tuple, so ships in the next snapshot. Each
+        // client's scoreboard HUD then reads the target row's `rttMs`
+        // instead of falling back to its own `NetworkStats::rttMs` for
+        // every row (which would mean every player on screen showed the
+        // *local* client's ping). Costs one uint16 per replicated player
+        // per snapshot — well under any other field in the component.
+        if (auto* stats = registry.try_get<PlayerMatchStats>(entity))
+            stats->rttMs = rttMs;
     }
 }
 
