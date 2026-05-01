@@ -1543,6 +1543,24 @@ SDL_AppResult Game::iterate()
                 bonePalette.insert(bonePalette.end(), sm.begin(), sm.end());
             });
 
+        // Phase 3f — front-to-back sort by camera distance.  The bone palette
+        // is keyed by paletteBase inside each SkinnedInstance, so we can
+        // permute the instance vector independently of the palette and the
+        // shader still finds each char's joints correctly.  Front-to-back
+        // ordering means closer-to-camera chars draw first, write the depth,
+        // and farther chars behind them get early-Z'd through the heavy
+        // PBR fragment shader.  Trivial cost: 30·log(30) compares.
+        if (!skinnedInstances.empty()) {
+            const glm::vec3 camPos = cachedEye_;
+            std::sort(skinnedInstances.begin(),
+                      skinnedInstances.end(),
+                      [&](const Renderer::SkinnedInstance& a, const Renderer::SkinnedInstance& b) {
+                          const glm::vec3 ap = glm::vec3(a.worldTransform[3]);
+                          const glm::vec3 bp = glm::vec3(b.worldTransform[3]);
+                          return glm::dot(ap - camPos, ap - camPos) < glm::dot(bp - camPos, bp - camPos);
+                      });
+        }
+
         legacyRenderer().setSkinnedFrame(bonePalette, skinnedInstances);
 
         // Update hitbox capsules from bone transforms (client-side for debug visualization).
