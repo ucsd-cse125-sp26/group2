@@ -332,7 +332,37 @@ private:
     // ~16 ms at 128 Hz — fast enough that the initial value barely
     // matters in practice.
     static constexpr Uint64 k_defaultSnapshotIntervalNs = 1'000'000'000ULL / 128ULL;
-    int interpDelaySnapshots_ = 2;
+
+    // PR-16 (URGENT FIX): default DISABLED until PR-17 lands a unified
+    // `RenderPosition` system.  Background: PR-11 wired
+    // `entity_interpolation::sample()` into 3 specific Game.cpp render
+    // sites (skinned body, third-person model, third-person weapon)
+    // but the codebase has many MORE consumers of `Position.value` —
+    // tracers (TracerEffect.cpp:85, 95), ribbon trails
+    // (RibbonTrail.cpp:36, 58), smoke emitters (SmokeEffect.cpp:61),
+    // beam endpoints (Game.cpp BeamState path), audio source
+    // positions, etc.  When the body renders at `pos.value − 15.6 ms`
+    // but a tracer originates from raw `pos.value`, they diverge by
+    // ~6 units at typical movement speeds — visible misalignment, and
+    // hits feel broken because the player aims at the visually-
+    // delayed body while believing the body to be in real-time space.
+    //
+    // Default 0 cleanly falls back to the Phase-5a `(prev, cur, alpha)`
+    // lerp at every render site (the `if (interpRenderNs != 0)`
+    // guards in Game.cpp short-circuit) AND wires the server's
+    // lag-comp formula to its pre-PR-12 behaviour (interp delay term
+    // = 0 ticks, just RTT/2).  All visual consumers re-align at raw
+    // `pos.value` and hit-registration works.
+    //
+    // To opt back in: set `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=2` in
+    // the env.  The buffer + helpers + server lag-comp wiring all
+    // remain in place; this is purely a default flip.
+    //
+    // PR-17 will introduce a `RenderPosition` component computed once
+    // per frame from `entity_interpolation::sample` and have every
+    // visual consumer read THAT instead of `Position.value`, after
+    // which we can flip this default back to 2.
+    int interpDelaySnapshots_ = 0;
     Uint64 snapshotIntervalEmaNs_ = k_defaultSnapshotIntervalNs;
 
     // ── Phase 5b: prediction reconciliation hand-off ──────────────────────
