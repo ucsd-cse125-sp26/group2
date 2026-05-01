@@ -198,7 +198,11 @@ inline void handleFire(Registry& registry,
         // shooters with no `LagCompTarget` (e.g. the client TU, where
         // this same WeaponSystem.cpp is compiled but no entity ever
         // gets the component).
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
+        //
+        // PR-5 (server-perf): pass the ray to skip rewind work for
+        // players whose AABB doesn't intersect the shot. Cuts O(N)
+        // per shot to O(candidates).
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Apply DPS-based damage with body-region multiplier.
@@ -244,7 +248,8 @@ inline void handleFire(Registry& registry,
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
         // Phase 6 lag-compensated hitscan (see beam path for details).
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
+        // PR-5: ray-filtered rewind, see beam path.
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Snapshot armor before damage for shield-break detection.
@@ -324,7 +329,8 @@ inline void handleFire(Registry& registry,
 
     if (config.hitscan) {
         // Phase 6 lag-compensated hitscan (see beam path for details).
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
+        // PR-5: ray-filtered rewind.
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Snapshot armor before damage for shield-break detection.
