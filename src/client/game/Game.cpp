@@ -561,6 +561,28 @@ bool Game::init()
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
             }
+
+            // Install the shared rig on the renderer's skinned-character path
+            // (perf Phase 1B).  All animated entities will draw via instanced
+            // GPU skinning against this single GPU model — no per-entity
+            // clones, no CPU LBS, no per-frame vertex re-uploads.
+            {
+                const auto& rigMeshes = charRig_.meshes();
+                std::vector<std::vector<Renderer::SkinVertex>> skinPerMesh(rigMeshes.size());
+                for (size_t m = 0; m < rigMeshes.size(); ++m) {
+                    const auto& src = rigMeshes[m].skinWeights;
+                    auto& dst = skinPerMesh[m];
+                    dst.resize(src.size());
+                    for (size_t v = 0; v < src.size(); ++v) {
+                        for (int k = 0; k < 4; ++k) {
+                            dst[v].boneIndices[k] = src[v].boneIndices[k];
+                            dst[v].boneWeights[k] = src[v].weights[k];
+                        }
+                    }
+                }
+                if (!legacyRenderer().setSkinnedRig(charRig_.templateLoadedModel(), skinPerMesh, charRig_.numJoints()))
+                    SDL_Log("[client] WARNING: setSkinnedRig failed — falling back to per-entity path");
+            }
         }
 
         // Build and resolve hitbox definitions (client-side, for debug visualization).
@@ -1287,46 +1309,100 @@ SDL_AppResult Game::iterate()
         cachedEye_ = renderEye;
     }
 
-    // Update skeletal animation (CPU skinning) — per animated entity.
+    // Update skeletal animation + build the renderer's per-frame skinned
+    // palette + instance arrays (perf Phase 1B).
     //
-    // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
-    // CPU-skins every rig mesh, and streams the resulting vertices into its
-    // per-entity renderer model instance.
+    // For each animated entity we:
+    //   1. sample + blend its animation,
+    //   2. populate JointMatrices for the hitbox system,
+    //   3. append `numJoints` skin matrices to the flat palette,
+    //   4. append one entry to the instance buffer (world transform +
+    //      paletteBase = instanceIdx * numJoints).
     //
-    // Also populates the JointMatrices ECS component with model-space bone transforms
-    // for skeleton-driven hitbox capsule placement.
+    // The renderer then issues one instanced draw per rig mesh per pass.  No
+    // CPU skinning, no per-entity vertex re-upload, no per-entity draws.
     {
-        std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerVisState, InputSnapshot>().each([&](entt::entity e,
-                                                                                             AnimatedCharacter& ac,
-                                                                                             const Velocity& vel,
-                                                                                             const PlayerVisState& ps,
-                                                                                             const InputSnapshot& inp) {
-            if (!ac.animator || ac.modelIndex < 0)
-                return;
+        std::vector<glm::mat4> bonePalette;
+        std::vector<Renderer::SkinnedInstance> skinnedInstances;
+        const int numJoints = charRig_.numJoints();
+        if (numJoints > 0) {
+            // Reserve a generous upper bound; the bench harness drives 100+
+            // characters so this avoids constant reallocation at start-of-frame.
+            bonePalette.reserve(static_cast<size_t>(numJoints) * 128);
+            skinnedInstances.reserve(128);
+        }
+        const float snapshotAlpha = client.getSnapshotAlpha();
 
-            AnimationInputs ai{};
-            ai.velocityWorld = vel.value;
-            ai.yawRad = inp.yaw;
-            ai.pitchRad = inp.pitch;
-            ai.grounded = ps.grounded;
-            ai.sprinting = ps.sprinting;
-            ai.crouching = ps.crouching;
-            ai.moveMode = static_cast<int>(ps.moveMode);
-            ai.wallRunSide = static_cast<int>(ps.wallRunSide);
-            ac.animator->update(ai, frameTime);
+        registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
+            [&](entt::entity e,
+                AnimatedCharacter& ac,
+                const Position& pos,
+                const Velocity& vel,
+                const PlayerVisState& ps,
+                const InputSnapshot& inp) {
+                if (!ac.animator)
+                    return;
 
-            // Store model-space joint matrices for hitbox system.
-            auto& jm = registry.get_or_emplace<JointMatrices>(e);
-            jm.matrices = ac.animator->jointModelMatrices();
+                AnimationInputs ai{};
+                ai.velocityWorld = vel.value;
+                ai.yawRad = inp.yaw;
+                ai.pitchRad = inp.pitch;
+                ai.grounded = ps.grounded;
+                ai.sprinting = ps.sprinting;
+                ai.crouching = ps.crouching;
+                ai.moveMode = static_cast<int>(ps.moveMode);
+                ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+                ac.animator->update(ai, frameTime);
 
-            ac.animator->computeSkinnedVertices(skinnedBuffer);
-            for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
-                const auto& sv = skinnedBuffer[m];
-                renderer.updateModelMeshVertices(
-                    ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
-            }
-        });
+                // Store model-space joint matrices for hitbox system.
+                auto& jm = registry.get_or_emplace<JointMatrices>(e);
+                jm.matrices = ac.animator->jointModelMatrices();
+
+                // Skip drawing the local player's own body in first-person
+                // (the animator still ran above so hitboxes / future gun-IK
+                // stay coherent).
+                if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
+                    return;
+
+                if (numJoints == 0)
+                    return;
+
+                // Build per-instance world transform — same recipe as the
+                // regular EntityRenderCmd path so the draw lines up exactly.
+                glm::vec3 renderPos = pos.value;
+                if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                    renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+                }
+                glm::vec3 translation(0.0f);
+                glm::vec3 scale(kRigScale_);
+                glm::quat orient = glm::angleAxis(inp.yaw, glm::vec3{0, 1, 0});
+                if (const auto* rend = registry.try_get<Renderable>(e)) {
+                    translation = rend->translation;
+                    scale = rend->scale;
+                    orient = rend->orientation;
+                } else {
+                    // Fallback for entities that haven't reached the
+                    // refreshRemotePlayerRenderables block yet this frame —
+                    // align feet with AABB bottom from the rig metadata.
+                    if (const auto* shape = registry.try_get<CollisionShape>(e))
+                        translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                }
+
+                glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + translation);
+                world *= glm::mat4_cast(orient);
+                world = glm::scale(world, scale);
+
+                Renderer::SkinnedInstance inst{};
+                inst.worldTransform = world;
+                inst.paletteBase = static_cast<uint32_t>(skinnedInstances.size() * static_cast<size_t>(numJoints));
+                inst.materialId = 0;
+                skinnedInstances.push_back(inst);
+
+                const auto& sm = ac.animator->skinMatrices();
+                bonePalette.insert(bonePalette.end(), sm.begin(), sm.end());
+            });
+
+        legacyRenderer().setSkinnedFrame(bonePalette, skinnedInstances);
 
         // Update hitbox capsules from bone transforms (client-side for debug visualization).
         if (charRig_.isLoaded())
@@ -2329,11 +2405,16 @@ void Game::refreshRemotePlayerRenderables()
             attachAnimatedCharacter(e);
 
         const auto& ac = registry.get<AnimatedCharacter>(e);
-        if (ac.modelIndex < 0)
+        if (!ac.animator)
             return; // rig unavailable — leave entity un-rendered rather than crash.
 
         auto& rend = registry.get_or_emplace<Renderable>(e);
-        rend.modelIndex = ac.modelIndex;
+        // Perf Phase 1B: animated chars are drawn by the renderer's instanced
+        // skinned-rig pipeline, NOT via the regular EntityRenderCmd path.
+        // Setting modelIndex = -1 keeps Renderable's translation/scale/orientation
+        // up-to-date (used to derive the per-instance world transform below)
+        // while preventing the entity-render loop from drawing a duplicate.
+        rend.modelIndex = -1;
         // Bottom-of-AABB reference: align model feet with the AABB bottom.
         rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
         rend.scale = glm::vec3(kRigScale_);
@@ -2413,11 +2494,12 @@ void Game::attachAnimatedCharacter(entt::entity e)
     ac.animator = std::make_unique<CharacterAnimator>(charRig_, animLibrary_);
     ac.animator->setSkinningBackend(&skinBackend_);
 
-    // Each animated entity gets its OWN renderer model instance (clone of the
-    // rig template) so CPU-skinned vertices can stream into a private vertex
-    // buffer without fighting other entities for slots.
-    if (charRig_.isLoaded())
-        ac.modelIndex = renderer.uploadSceneModel(charRig_.templateLoadedModel());
+    // Perf Phase 1B: animated chars draw via the renderer's shared skinned-rig
+    // path (one VB/IB/textures for all chars, GPU LBS in vertex shader, instanced
+    // draw).  No per-entity model clone, no CPU skinning, no per-frame vertex
+    // re-upload.  modelIndex stays -1 so the regular EntityRenderCmd path
+    // skips animated chars (they're drawn by the skinned pipeline instead).
+    ac.modelIndex = -1;
 
     registry.emplace<AnimatedCharacter>(e, std::move(ac));
 }

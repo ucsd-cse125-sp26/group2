@@ -1635,6 +1635,9 @@ bool Renderer::init(SDL_Window* win)
         return false;
     // Shadow pipeline + shadow map texture + comparison sampler.
     initShadowPipeline();
+    // Skinned-character pipelines (perf Phase 1B).
+    if (!initSkinnedPipelines())
+        SDL_Log("Renderer: skinned pipelines unavailable — animated chars will fall back to per-entity path");
     {
         // Shadow atlas: D32_FLOAT, (2*k_shadowMapSize)² with 4 cascade viewports
         // in a 2×2 grid.  Each cascade occupies one quadrant at k_shadowMapSize².
@@ -2019,6 +2022,13 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         pendingVertexUploads.clear();
     }
 
+    // Upload skinned frame palette + instance SSBOs (perf Phase 1B).
+    if (skinnedRigInstalled && skinnedFrameDirty) {
+        SDL_GPUCopyPass* sCp = SDL_BeginGPUCopyPass(cmd);
+        uploadSkinnedFrame(cmd, sCp);
+        SDL_EndGPUCopyPass(sCp);
+    }
+
     if (!ensureDepthTexture(w, h) || !ensureHDRTarget(w, h)) {
         SDL_SubmitGPUCommandBuffer(cmd);
         return;
@@ -2281,6 +2291,34 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                     SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, 1, 0, 0, 0);
                 }
             }
+
+            // Skinned characters — single instanced draw per mesh (perf Phase 1B).
+            if (skinnedRigInstalled && shadowSkinnedPipeline && !skinnedFrameInstances.empty() && skinnedPaletteSSBO &&
+                skinnedInstanceSSBO)
+            {
+                SDL_BindGPUGraphicsPipeline(shadowPass, shadowSkinnedPipeline);
+                ShadowUBO shadowUBO{};
+                shadowUBO.lightVP = cascade.lightVP;
+                shadowUBO.model = glm::mat4(1.0f); // unused on the skinned path
+                SDL_PushGPUVertexUniformData(cmd, 0, &shadowUBO, sizeof(shadowUBO));
+
+                SDL_GPUBuffer* ssbos[2] = {skinnedPaletteSSBO, skinnedInstanceSSBO};
+                SDL_BindGPUVertexStorageBuffers(shadowPass, 0, ssbos, 2);
+
+                const Uint32 numInstances = static_cast<Uint32>(skinnedFrameInstances.size());
+                for (const auto& mesh : skinnedMeshes) {
+                    if (!mesh.vertexBuffer || !mesh.indexBuffer || !mesh.boneBuffer)
+                        continue;
+                    const SDL_GPUBufferBinding vbBinds[2] = {
+                        {.buffer = mesh.vertexBuffer, .offset = 0},
+                        {.buffer = mesh.boneBuffer, .offset = 0},
+                    };
+                    SDL_BindGPUVertexBuffers(shadowPass, 0, vbBinds, 2);
+                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                    SDL_BindGPUIndexBuffer(shadowPass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    SDL_DrawGPUIndexedPrimitives(shadowPass, mesh.indexCount, numInstances, 0, 0, 0);
+                }
+            }
         }
 
         SDL_EndGPURenderPass(shadowPass);
@@ -2506,6 +2544,74 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
                         SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, 1, 0, 0, 0);
                     }
+                }
+            }
+
+            // Skinned characters — instanced PBR draw (perf Phase 1B).
+            // Single draw per mesh covers every visible animated character; the
+            // vertex shader resolves per-instance bone palette + world transform
+            // from SSBOs.  Replaces the per-entity model loop above for
+            // animated chars (Game.cpp filters them out of entityRenderCmds).
+            if (toggles.entityModels && skinnedRigInstalled && pbrSkinnedPipeline && !skinnedFrameInstances.empty() &&
+                skinnedPaletteSSBO && skinnedInstanceSSBO)
+            {
+                SDL_BindGPUGraphicsPipeline(pass, pbrSkinnedPipeline);
+                SDL_PushGPUFragmentUniformData(cmd, 1, &lightData, sizeof(lightData));
+                SDL_PushGPUFragmentUniformData(cmd, 2, &shadowData, sizeof(shadowData));
+
+                // View/proj — model matrix is unused on the skinned path but the
+                // shader still declares the same Matrices block as pbr.vert.
+                Matrices skMats{};
+                skMats.model = glm::mat4(1.0f);
+                skMats.view = camera.getViewMatrix();
+                skMats.projection = camera.getProjectionMatrix();
+                skMats.normalMatrix = glm::mat4(1.0f);
+                SDL_PushGPUVertexUniformData(cmd, 0, &skMats, sizeof(skMats));
+
+                SDL_GPUBuffer* ssbos[2] = {skinnedPaletteSSBO, skinnedInstanceSSBO};
+                SDL_BindGPUVertexStorageBuffers(pass, 0, ssbos, 2);
+
+                const Uint32 numInstances = static_cast<Uint32>(skinnedFrameInstances.size());
+                for (const auto& mesh : skinnedMeshes) {
+                    if (!mesh.vertexBuffer || !mesh.indexBuffer || !mesh.boneBuffer)
+                        continue;
+
+                    MaterialUBO matUBO{};
+                    matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                    matUBO.metallicFactor = mesh.material.metallicFactor;
+                    matUBO.roughnessFactor = mesh.material.roughnessFactor;
+                    matUBO.aoStrength = mesh.material.aoStrength;
+                    matUBO.normalScale = mesh.material.normalScale;
+                    matUBO.emissiveFactor = mesh.material.emissiveFactor;
+                    SDL_PushGPUFragmentUniformData(cmd, 0, &matUBO, sizeof(matUBO));
+
+                    auto resolveTex = [&](int idx, SDL_GPUTexture* fallback) -> SDL_GPUTexture* {
+                        if (idx >= 0 && static_cast<size_t>(idx) < skinnedTextures.size() &&
+                            skinnedTextures[static_cast<size_t>(idx)])
+                            return skinnedTextures[static_cast<size_t>(idx)];
+                        return fallback;
+                    };
+                    const SDL_GPUTextureSamplerBinding samplers[8] = {
+                        {.texture = resolveTex(mesh.albedoTexIndex, fallbackWhite), .sampler = pbrSampler},
+                        {.texture = resolveTex(mesh.metallicRoughnessTexIndex, fallbackMR), .sampler = pbrSampler},
+                        {.texture = resolveTex(mesh.emissiveTexIndex, fallbackBlack), .sampler = pbrSampler},
+                        {.texture = resolveTex(mesh.normalTexIndex, fallbackFlatNormal), .sampler = pbrSampler},
+                        {.texture = irradianceMap, .sampler = iblSampler},
+                        {.texture = prefilterMap, .sampler = iblSampler},
+                        {.texture = brdfLUT, .sampler = iblSampler},
+                        {.texture = shadowMap ? shadowMap : fallbackWhite,
+                         .sampler = shadowSampler ? shadowSampler : pbrSampler},
+                    };
+                    SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
+
+                    const SDL_GPUBufferBinding vbBinds[2] = {
+                        {.buffer = mesh.vertexBuffer, .offset = 0},
+                        {.buffer = mesh.boneBuffer, .offset = 0},
+                    };
+                    SDL_BindGPUVertexBuffers(pass, 0, vbBinds, 2);
+                    const SDL_GPUBufferBinding ibBind = {.buffer = mesh.indexBuffer, .offset = 0};
+                    SDL_BindGPUIndexBuffer(pass, &ibBind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    SDL_DrawGPUIndexedPrimitives(pass, mesh.indexCount, numInstances, 0, 0, 0);
                 }
             }
 
@@ -3285,6 +3391,296 @@ void Renderer::updateModelMeshVertices(int modelIndex, int meshIndex, const Mode
     SDL_memcpy(upload.data.data(), vertices, bytes);
     pendingVertexUploads.push_back(std::move(upload));
 }
+
+// ─── Skinned character pipeline (perf Phase 1B) ──────────────────────────────
+
+bool Renderer::initSkinnedPipelines()
+{
+    // pbr_skinned.vert: 0 samplers, 1 UBO (Matrices), 2 storage buffers (palette, instances).
+    SDL_GPUShader* vert =
+        loadShaderFromFile("pbr_skinned.vert", SDL_GPU_SHADERSTAGE_VERTEX, /*samplers=*/0, /*ubos=*/1, /*ssbos=*/2);
+    SDL_GPUShader* frag = loadShaderFromFile("pbr.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, /*samplers=*/8, /*ubos=*/3);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device, vert);
+        SDL_ReleaseGPUShader(device, frag);
+        return false;
+    }
+
+    // Two vertex buffers:
+    //  slot 0 — ModelVertex (positions/normals/tex/tangent), shared with the rig template
+    //  slot 1 — SkinVertex  (4 bone indices + 4 weights)
+    const SDL_GPUVertexBufferDescription vbDescs[2] = {
+        {.slot = 0,
+         .pitch = sizeof(ModelVertex),
+         .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+         .instance_step_rate = 0},
+        {.slot = 1, .pitch = sizeof(SkinVertex), .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX, .instance_step_rate = 0},
+    };
+
+    const SDL_GPUVertexAttribute attrs[6] = {
+        {.location = 0, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 0},
+        {.location = 1, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, .offset = 12},
+        {.location = 2, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = 24},
+        {.location = 3, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, .offset = 32},
+        {.location = 4, .buffer_slot = 1, .format = SDL_GPU_VERTEXELEMENTFORMAT_INT4, .offset = 0},
+        {.location = 5, .buffer_slot = 1, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, .offset = 16},
+    };
+
+    SDL_GPUVertexInputState vertexInput{};
+    vertexInput.vertex_buffer_descriptions = vbDescs;
+    vertexInput.num_vertex_buffers = 2;
+    vertexInput.vertex_attributes = attrs;
+    vertexInput.num_vertex_attributes = 6;
+
+    SDL_GPUColorTargetDescription ct{};
+    ct.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.vertex_input_state = vertexInput;
+    pci.target_info.color_target_descriptions = &ct;
+    pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = true;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE; // matches pbrPipeline (rig may be double-sided)
+    pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+
+    pbrSkinnedPipeline = SDL_CreateGPUGraphicsPipeline(device, &pci);
+    SDL_ReleaseGPUShader(device, vert);
+    SDL_ReleaseGPUShader(device, frag);
+    if (!pbrSkinnedPipeline) {
+        SDL_Log("Renderer: pbrSkinnedPipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+
+    // Shadow variant — depth-only, position + bone data.
+    SDL_GPUShader* shadowVert =
+        loadShaderFromFile("shadow_skinned.vert", SDL_GPU_SHADERSTAGE_VERTEX, /*samplers=*/0, /*ubos=*/1, /*ssbos=*/2);
+    SDL_GPUShader* shadowFrag = loadShaderFromFile("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    if (!shadowVert || !shadowFrag) {
+        SDL_ReleaseGPUShader(device, shadowVert);
+        SDL_ReleaseGPUShader(device, shadowFrag);
+        return false;
+    }
+
+    // Same two-buffer vertex input but only positions + bone data are referenced.
+    SDL_GPUGraphicsPipelineCreateInfo spci{};
+    spci.vertex_shader = shadowVert;
+    spci.fragment_shader = shadowFrag;
+    spci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    spci.vertex_input_state = vertexInput;
+    spci.target_info.num_color_targets = 0;
+    spci.target_info.has_depth_stencil_target = true;
+    spci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    spci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    spci.depth_stencil_state.enable_depth_test = true;
+    spci.depth_stencil_state.enable_depth_write = true;
+    spci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    spci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    spci.rasterizer_state.depth_bias_constant_factor = 0.75f;
+    spci.rasterizer_state.depth_bias_slope_factor = 1.0f;
+    spci.rasterizer_state.enable_depth_bias = true;
+
+    shadowSkinnedPipeline = SDL_CreateGPUGraphicsPipeline(device, &spci);
+    SDL_ReleaseGPUShader(device, shadowVert);
+    SDL_ReleaseGPUShader(device, shadowFrag);
+    if (!shadowSkinnedPipeline) {
+        SDL_Log("Renderer: shadowSkinnedPipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
+
+    return true;
+}
+
+bool Renderer::setSkinnedRig(const LoadedModel& model,
+                             const std::vector<std::vector<SkinVertex>>& skinPerMesh,
+                             int numJoints)
+{
+    if (skinnedRigInstalled) {
+        SDL_Log("Renderer::setSkinnedRig: rig already installed; ignoring");
+        return false;
+    }
+    if (model.meshes.size() != skinPerMesh.size()) {
+        SDL_Log("Renderer::setSkinnedRig: mesh / skin-data count mismatch (%zu vs %zu)",
+                model.meshes.size(),
+                skinPerMesh.size());
+        return false;
+    }
+
+    // Reuse the existing model upload path to get vertex/index/textures onto the
+    // GPU.  We then attach a parallel SkinVertex buffer per mesh.
+    ModelInstance tmp;
+    if (!uploadModel(model, tmp))
+        return false;
+
+    skinnedNumJoints = numJoints;
+    skinnedTextures = tmp.textures;
+    skinnedMeshes.clear();
+    skinnedMeshes.reserve(tmp.meshes.size());
+
+    // Single big transfer buffer for all bone-data uploads (one mesh at a time).
+    Uint32 maxBoneBytes = 0;
+    for (const auto& sv : skinPerMesh)
+        maxBoneBytes = std::max(maxBoneBytes, static_cast<Uint32>(sv.size() * sizeof(SkinVertex)));
+    SDL_GPUTransferBuffer* boneXfer = nullptr;
+    if (maxBoneBytes > 0) {
+        SDL_GPUTransferBufferCreateInfo tbInfo{};
+        tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        tbInfo.size = maxBoneBytes;
+        boneXfer = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+    }
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+
+    for (size_t m = 0; m < tmp.meshes.size(); ++m) {
+        const auto& srcMesh = tmp.meshes[m];
+        const auto& boneData = skinPerMesh[m];
+
+        SkinnedMesh sm;
+        sm.vertexBuffer = srcMesh.vertexBuffer;
+        sm.indexBuffer = srcMesh.indexBuffer;
+        sm.indexCount = srcMesh.indexCount;
+        sm.albedoTexIndex = srcMesh.albedoTexIndex;
+        sm.normalTexIndex = srcMesh.normalTexIndex;
+        sm.metallicRoughnessTexIndex = srcMesh.metallicRoughnessTexIndex;
+        sm.emissiveTexIndex = srcMesh.emissiveTexIndex;
+        sm.material = srcMesh.material;
+
+        const Uint32 bytes = static_cast<Uint32>(boneData.size() * sizeof(SkinVertex));
+        if (bytes > 0) {
+            SDL_GPUBufferCreateInfo bInfo{};
+            bInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+            bInfo.size = bytes;
+            sm.boneBuffer = SDL_CreateGPUBuffer(device, &bInfo);
+
+            if (sm.boneBuffer && boneXfer) {
+                void* mapped = SDL_MapGPUTransferBuffer(device, boneXfer, /*cycle=*/true);
+                if (mapped) {
+                    SDL_memcpy(mapped, boneData.data(), bytes);
+                    SDL_UnmapGPUTransferBuffer(device, boneXfer);
+                    SDL_GPUTransferBufferLocation src{};
+                    src.transfer_buffer = boneXfer;
+                    src.offset = 0;
+                    SDL_GPUBufferRegion dst{};
+                    dst.buffer = sm.boneBuffer;
+                    dst.offset = 0;
+                    dst.size = bytes;
+                    SDL_UploadToGPUBuffer(cp, &src, &dst, /*cycle=*/false);
+                }
+            }
+        }
+
+        skinnedMeshes.push_back(sm);
+    }
+
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+
+    if (boneXfer)
+        SDL_ReleaseGPUTransferBuffer(device, boneXfer);
+
+    // We deliberately keep srcMesh's VB/IB; they were created by uploadModel and
+    // will be released in quit() via skinnedMeshes.  The temporary ModelInstance
+    // owned them; transfer ownership now by leaving `tmp` to drop.
+    tmp.meshes.clear();
+    tmp.textures.clear();
+
+    skinnedRigInstalled = true;
+    SDL_Log("Renderer: skinned rig installed — %zu mesh(es), %d joints", skinnedMeshes.size(), numJoints);
+    return true;
+}
+
+void Renderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+{
+    skinnedFramePalette = palette;
+    skinnedFrameInstances = instances;
+    skinnedFrameDirty = !instances.empty();
+}
+
+bool Renderer::ensureSkinnedSSBOs(Uint32 paletteBytes, Uint32 instanceBytes)
+{
+    auto growBuf = [&](SDL_GPUBuffer*& buf, Uint32& cap, Uint32 want, SDL_GPUBufferUsageFlags use) {
+        if (want == 0)
+            return true;
+        if (want > cap) {
+            if (buf)
+                SDL_ReleaseGPUBuffer(device, buf);
+            SDL_GPUBufferCreateInfo bInfo{};
+            bInfo.usage = use;
+            bInfo.size = want;
+            buf = SDL_CreateGPUBuffer(device, &bInfo);
+            cap = buf ? want : 0;
+            return buf != nullptr;
+        }
+        return true;
+    };
+    auto growXfer = [&](SDL_GPUTransferBuffer*& xfer, Uint32& cap, Uint32 want) {
+        if (want == 0)
+            return true;
+        if (want > cap) {
+            if (xfer)
+                SDL_ReleaseGPUTransferBuffer(device, xfer);
+            SDL_GPUTransferBufferCreateInfo tbInfo{};
+            tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            tbInfo.size = want;
+            xfer = SDL_CreateGPUTransferBuffer(device, &tbInfo);
+            cap = xfer ? want : 0;
+            return xfer != nullptr;
+        }
+        return true;
+    };
+    if (!growBuf(skinnedPaletteSSBO, skinnedPaletteCapacity, paletteBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+        return false;
+    if (!growBuf(
+            skinnedInstanceSSBO, skinnedInstanceCapacity, instanceBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+        return false;
+    if (!growXfer(skinnedPaletteXfer, skinnedPaletteXferCapacity, paletteBytes))
+        return false;
+    if (!growXfer(skinnedInstanceXfer, skinnedInstanceXferCapacity, instanceBytes))
+        return false;
+    return true;
+}
+
+void Renderer::uploadSkinnedFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUCopyPass* copyPass)
+{
+    if (!skinnedFrameDirty || skinnedFrameInstances.empty())
+        return;
+
+    const Uint32 paletteBytes = static_cast<Uint32>(skinnedFramePalette.size() * sizeof(glm::mat4));
+    const Uint32 instanceBytes = static_cast<Uint32>(skinnedFrameInstances.size() * sizeof(SkinnedInstance));
+    if (!ensureSkinnedSSBOs(paletteBytes, instanceBytes))
+        return;
+
+    auto upload = [&](SDL_GPUTransferBuffer* xfer, SDL_GPUBuffer* dst, const void* src, Uint32 bytes) {
+        if (bytes == 0 || !xfer || !dst)
+            return;
+        void* mapped = SDL_MapGPUTransferBuffer(device, xfer, /*cycle=*/true);
+        if (!mapped)
+            return;
+        SDL_memcpy(mapped, src, bytes);
+        SDL_UnmapGPUTransferBuffer(device, xfer);
+        SDL_GPUTransferBufferLocation s{};
+        s.transfer_buffer = xfer;
+        s.offset = 0;
+        SDL_GPUBufferRegion d{};
+        d.buffer = dst;
+        d.offset = 0;
+        d.size = bytes;
+        SDL_UploadToGPUBuffer(copyPass, &s, &d, /*cycle=*/false);
+    };
+    upload(skinnedPaletteXfer, skinnedPaletteSSBO, skinnedFramePalette.data(), paletteBytes);
+    upload(skinnedInstanceXfer, skinnedInstanceSSBO, skinnedFrameInstances.data(), instanceBytes);
+    (void)cmd;
+}
+
+// ─── End skinned character pipeline ───────────────────────────────────────────
 
 void Renderer::requestScreenshot(const std::string& path)
 {

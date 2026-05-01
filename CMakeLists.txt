@@ -485,6 +485,8 @@ set(SHADER_SOURCES
     model.vert model.frag               # legacy model shaders (kept for reference)
     geometry.vert geometry.frag          # graphics team Lambertian shaders
     pbr.vert pbr.frag                   # PBR Cook-Torrance (Phase 1)
+    pbr_skinned.vert                    # GPU skinning + instancing (perf Phase 1B)
+    shadow_skinned.vert                 # GPU skinning + instancing for shadow pass
     shadow.vert shadow.frag             # shadow map depth-only (Phase 2)
     fullscreen.vert tonemap.frag        # HDR tone mapping (Phase 4)
     skybox.vert skybox.frag             # environment skybox (Phase 5)
@@ -1204,6 +1206,9 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
+    # PR-1 (server-perf): scoped profiler + 1 Hz aggregator.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.cpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp

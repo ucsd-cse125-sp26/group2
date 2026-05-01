@@ -107,8 +107,12 @@ private:
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
 #ifdef USE_HYBRID_RENDERER
     HybridRenderer renderer;                     ///< Routes each call to the legacy or new renderer.
+    /// @brief Direct access to the legacy renderer instance (perf Phase 1B
+    /// reaches into legacy-only API: setSkinnedRig / setSkinnedFrame).
+    Renderer& legacyRenderer() noexcept { return renderer.legacy(); }
 #else
     Renderer renderer; ///< Legacy renderer.
+    Renderer& legacyRenderer() noexcept { return renderer; }
 #endif
     Registry registry;             ///< The shared ECS registry.
     Client client;                 ///< UDP network client.

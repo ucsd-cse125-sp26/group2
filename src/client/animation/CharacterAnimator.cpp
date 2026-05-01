@@ -230,6 +230,11 @@ const std::vector<glm::mat4>& CharacterAnimator::jointModelMatrices() const noex
     return impl_->jointModelMats;
 }
 
+const std::vector<glm::mat4>& CharacterAnimator::skinMatrices() const noexcept
+{
+    return impl_->skinMats;
+}
+
 namespace
 {
 

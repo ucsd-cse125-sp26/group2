@@ -106,6 +106,13 @@ public:
     /// Valid after a call to update().  Size = numJoints().
     [[nodiscard]] const std::vector<glm::mat4>& jointModelMatrices() const noexcept;
 
+    /// @brief Per-joint LBS skin matrices: `procedural * modelMat * inverseBind`.
+    ///        Identical to what `computeSkinnedVertices()` uses internally.
+    ///        Used by GPU skinning (perf Phase 1B) — flatten across all visible
+    ///        characters into a single palette SSBO and consume by the vertex
+    ///        shader.  Valid after a call to update().  Size = numJoints().
+    [[nodiscard]] const std::vector<glm::mat4>& skinMatrices() const noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
