@@ -100,4 +100,43 @@ private:
     /// runLoop. Lets the fleet aggregator skip bots that are mid-connect
     /// or whose RTT hasn't been measured yet.
     std::atomic<bool> ready_{false};
+
+    // ── PR-18: per-bot snapshot observation log ──────────────────────────
+    //
+    // Opened from `GROUP2_BOT_OBS_CSV_PREFIX` at init() if set; one CSV
+    // file per bot, named `<prefix><botId>.csv`.  Each row records one
+    // remote-entity sighting from the bot's perspective:
+    //
+    //     wallTimeNs,observerBotId,observedClientId,posX,posY,posZ
+    //
+    // Written ONCE per snapshot apply (not once per tick) — gated by
+    // `Client::consumeSnapshotApplied()` so the row count matches the
+    // snapshot stream, not the tick stream.
+    //
+    // The companion server-side `GROUP2_SERVER_TRUTH_CSV` log records the
+    // SAME columns from the server's perspective (with `serverTick` for
+    // alignment).  An offline Python tool (`scripts/netsync-analyze.py`)
+    // joins the two by wall-clock + clientId, interpolates between
+    // adjacent server samples, and reports euclidean desync per bot per
+    // entity per (sim RTT, sim loss) bucket.
+    //
+    // This framework would have caught the FragmentReassembler stuck-
+    // state bug (PR-17) instantly: bot's observation log freezes while
+    // server truth keeps moving → enormous desync values.  Going forward
+    // it lets us A/B-test future netcode changes (quantization, AoI
+    // culling, snapshot-rate changes) with hard numbers, not feel.
+    std::FILE* obsCsv_ = nullptr;
+
+    /// @brief Open the CSV if `GROUP2_BOT_OBS_CSV_PREFIX` is set.  No-op
+    /// if env unset or file open fails (graceful: load tests stay fast).
+    void openObservationLog();
+
+    /// @brief Walk the registry for `view<Position, ClientId>`, write one
+    /// row per replicated player entity to the bot's CSV.  Caller must
+    /// have already verified `Client::consumeSnapshotApplied()` so we
+    /// emit at snapshot rate, not tick rate.
+    void writeObservationLog();
+
+    /// @brief Flush + close the CSV if open.  Safe to call from dtor.
+    void closeObservationLog() noexcept;
 };

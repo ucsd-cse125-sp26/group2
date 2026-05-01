@@ -119,8 +119,14 @@ sed -E "s/(^port = )[0-9]+/\1${SERVER_PORT}/" "${ORIG_CONFIG_BACKUP}" > "${BUILD
 # was eating SIGINT before — we'd see orphan ./server processes after
 # the script exited). `exec` saves a fork; the env-var prefix sets
 # them just for this command.
+# PR-18: optional ground-truth log for the netsync analyzer.  The
+# `GROUP2_SERVER_TRUTH_CSV` env var is honored by ServerGame::init.
+# Set NETSYNC=1 to enable this whole capture+analyze flow.
+SERVER_TRUTH_CSV="${RUN_DIR}/server_truth.csv"
+
 GROUP2_SERVER_PROFILE=1 \
 GROUP2_SERVER_PROFILE_CSV="${SERVER_CSV}" \
+GROUP2_SERVER_TRUTH_CSV="${NETSYNC:+${SERVER_TRUTH_CSV}}" \
 setsid bash -c "cd '${BUILD_DIR}' && exec ./server > '${SERVER_LOG}' 2>&1" &
 SERVER_PID=$!
 
@@ -143,8 +149,15 @@ for attempt in $(seq 1 60); do
 done
 
 # ── Bots ───────────────────────────────────────────────────────────────
+# PR-18: per-bot snapshot-observation CSV prefix.  The bot writes
+# `<prefix><botId>.csv`; the netsync analyzer scans for `bot_*.csv`
+# under RUN_DIR.  Empty unless NETSYNC=1 so the default loadtest
+# stays cheap.
+BOT_OBS_PREFIX="${RUN_DIR}/bot_"
+
 GROUP2_BOT_FLEET_RTT=1 \
 GROUP2_BOT_FLEET_RTT_CSV="${BOT_CSV}" \
+GROUP2_BOT_OBS_CSV_PREFIX="${NETSYNC:+${BOT_OBS_PREFIX}}" \
 setsid bash -c "cd '${BUILD_DIR}' && exec ./clientbot '${NUM_BOTS}' '127.0.0.1:${SERVER_PORT}' > '${BOT_LOG}' 2>&1" &
 BOTS_PID=$!
 
@@ -178,6 +191,16 @@ SERVER_PID=""
     echo "Last 10 fleet RTT lines"
     echo "-----------------------"
     grep -E '^\[fleet rtt' "${BOT_LOG}" | tail -10 || true
+
+    # PR-18: netsync analysis if enabled.  Runs the Python analyzer
+    # against the just-captured server_truth.csv + bot_*.csv files
+    # and appends its summary to the run's summary.txt.
+    if [[ -n "${NETSYNC:-}" ]] && [[ -f "${SERVER_TRUTH_CSV}" ]]; then
+        echo
+        echo "PR-18 netsync analysis"
+        echo "----------------------"
+        python3 "${REPO_ROOT}/scripts/netsync-analyze.py" "${RUN_DIR}" || true
+    fi
 } | tee "${SUMMARY}"
 
 echo "[loadtest] done — see ${RUN_DIR}/"

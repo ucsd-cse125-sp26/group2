@@ -6,6 +6,7 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
@@ -119,6 +120,9 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
     // ── Load animation subsystem for hitbox detection ──
     initAnimation();
 
+    // PR-18: open the server-side ground-truth log if requested.
+    openGroundTruthLog();
+
     return true;
 }
 
@@ -199,6 +203,71 @@ void ServerGame::shutdown()
 {
     running = false;
     server.shutdown();
+    closeGroundTruthLog();
+}
+
+// ── PR-18: server-side ground-truth log ─────────────────────────────────
+
+void ServerGame::openGroundTruthLog()
+{
+    const char* path = std::getenv("GROUP2_SERVER_TRUTH_CSV");
+    if (path == nullptr || path[0] == '\0')
+        return;
+
+    truthCsv_ = std::fopen(path, "w");
+    if (truthCsv_ == nullptr) {
+        SDL_Log("[server] PR-18: failed to open ground-truth log at %s", path);
+        return;
+    }
+    std::fprintf(truthCsv_, "wallTimeNs,serverTick,clientId,posX,posY,posZ\n");
+    std::fflush(truthCsv_);
+
+    if (const char* div = std::getenv("GROUP2_SERVER_TRUTH_HZ_DIVIDER")) {
+        const int parsed = std::atoi(div);
+        if (parsed > 0)
+            truthHzDivider_ = parsed;
+    }
+    SDL_Log("[server] PR-18: writing ground-truth log to %s (every %d ticks)", path, truthHzDivider_);
+}
+
+void ServerGame::writeGroundTruthLogIfDue()
+{
+    if (truthCsv_ == nullptr)
+        return;
+    if ((tickCount % truthHzDivider_) != 0)
+        return;
+
+    // Wall-clock at sample time.  The offline analyzer assumes server
+    // and bot clocks are comparable — true on a single host (localhost
+    // load test).  If we ever do split-host testing the analyzer will
+    // need an explicit clock-skew estimator.
+    const Uint64 nowNs = SDL_GetTicksNS();
+
+    auto view = registry.view<const Position, const ClientId>();
+    for (const auto e : view) {
+        const auto& pos = view.get<const Position>(e);
+        const auto& cid = view.get<const ClientId>(e);
+        std::fprintf(truthCsv_,
+                     "%llu,%d,%u,%.4f,%.4f,%.4f\n",
+                     static_cast<unsigned long long>(nowNs),
+                     tickCount,
+                     static_cast<unsigned>(cid.value),
+                     static_cast<double>(pos.value.x),
+                     static_cast<double>(pos.value.y),
+                     static_cast<double>(pos.value.z));
+    }
+    // Per-second flushes would suffice but per-write keeps the file
+    // recoverable on a server crash.  At the throttled rate this is
+    // ~32 fwrite syscalls/sec — negligible.
+    std::fflush(truthCsv_);
+}
+
+void ServerGame::closeGroundTruthLog() noexcept
+{
+    if (truthCsv_ != nullptr) {
+        std::fclose(truthCsv_);
+        truthCsv_ = nullptr;
+    }
 }
 
 void ServerGame::eventHandler(Event event)
@@ -350,6 +419,13 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     pendingKillEvents.clear();
 
     ++tickCount;
+
+    // PR-18: ground-truth log for offline desync analysis.  Throttled
+    // sample of the server-authoritative state per replicated player.
+    // Cheap (~150 KB/s at 100 bots × 32 Hz) and silent when the env
+    // var isn't set.  Lives outside the tick-end profiler scope below
+    // so its I/O isn't attributed to any single ECS scope.
+    writeGroundTruthLogIfDue();
 
     // Record the tick's total wall time for the 1 Hz aggregator. Cheap:
     // a single atomic increment + min/max + histogram bucket bump.

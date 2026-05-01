@@ -162,4 +162,38 @@ private:
     /// Per-entity server animators (not ECS components to avoid pulling animation
     /// headers into the component registry).
     std::unordered_map<entt::entity, std::unique_ptr<CharacterAnimator>> serverAnimators_;
+
+    // ── PR-18: server-side ground-truth log ──────────────────────────────
+    //
+    // Opened from `GROUP2_SERVER_TRUTH_CSV` env var if set.  One global
+    // CSV file containing one row per replicated player per logged tick:
+    //
+    //     wallTimeNs,serverTick,clientId,posX,posY,posZ
+    //
+    // Throttled to every Nth tick (default 4 = 32 Hz at the 128 Hz tick
+    // rate; tunable via `GROUP2_SERVER_TRUTH_HZ_DIVIDER`).  Log rate is
+    // chosen to be high enough that linear interpolation between
+    // adjacent samples is a good approximation of "the server's
+    // position at any wall-clock time T", which is what the offline
+    // analyzer compares against bot-side observations.  At 32 Hz × 100
+    // bots × ~50 B/row = ~160 KB/s — trivial disk I/O cost on any
+    // reasonable test rig.
+    //
+    // No mutex needed: this runs on the game thread, on the same path
+    // as the existing tick logic, after the per-tick physics + lag-comp
+    // updates have settled.
+    std::FILE* truthCsv_ = nullptr;
+    int truthHzDivider_ = 4;
+
+    /// @brief Open the ground-truth CSV from env var if set.  No-op when
+    /// the env var is missing; load tests stay fast by default.
+    void openGroundTruthLog();
+
+    /// @brief Write one row per replicated player entity if the current
+    /// `tickCount` aligns with `truthHzDivider_`.  Called at the end of
+    /// each tick after the per-tick physics + broadcast settles.
+    void writeGroundTruthLogIfDue();
+
+    /// @brief Flush + close the CSV if open.  Safe to call from dtor.
+    void closeGroundTruthLog() noexcept;
 };

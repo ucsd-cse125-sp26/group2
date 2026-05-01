@@ -3,8 +3,12 @@
 
 #include "Bot.hpp"
 
+#include "ecs/components/ClientId.hpp"
+#include "ecs/components/Position.hpp"
+
 #include <SDL3/SDL.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #if defined(__linux__) || defined(__APPLE__) || defined(__unix__)
@@ -15,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <string>
 
 Bot::~Bot()
 {
@@ -22,6 +27,69 @@ Bot::~Bot()
         thread_.join();
     if (initialized_)
         client_.shutdown();
+    closeObservationLog();
+}
+
+// ── PR-18: per-bot snapshot observation log ─────────────────────────────
+
+void Bot::openObservationLog()
+{
+    const char* prefix = std::getenv("GROUP2_BOT_OBS_CSV_PREFIX");
+    if (prefix == nullptr || prefix[0] == '\0')
+        return;
+
+    // Path = `<prefix><botId>.csv`.  Bots run on independent threads,
+    // each with its own file, so no inter-thread coordination needed.
+    std::string path = std::string(prefix) + std::to_string(botId_) + ".csv";
+    obsCsv_ = std::fopen(path.c_str(), "w");
+    if (obsCsv_ == nullptr) {
+        SDL_Log("[bot %d] PR-18: failed to open observation log at %s", botId_, path.c_str());
+        return;
+    }
+    std::fprintf(obsCsv_, "wallTimeNs,observerBotId,observedClientId,posX,posY,posZ\n");
+    std::fflush(obsCsv_);
+    SDL_Log("[bot %d] PR-18: writing observation log to %s", botId_, path.c_str());
+}
+
+void Bot::writeObservationLog()
+{
+    if (obsCsv_ == nullptr)
+        return;
+
+    // Wall-clock at log time (after `client_.poll()` returned).  Used by
+    // the offline analyzer to align with the server-side ground-truth
+    // log via linear interpolation between adjacent server samples.
+    const Uint64 nowNs = SDL_GetTicksNS();
+
+    // Walk every replicated player entity (those carry ClientId).  This
+    // intentionally skips projectiles, weapon spawners, etc — the
+    // analyzer only cares about player desync for now.  Adding more
+    // categories is one-line per category.
+    auto view = registry_.view<const Position, const ClientId>();
+    for (const auto e : view) {
+        const auto& pos = view.get<const Position>(e);
+        const auto& cid = view.get<const ClientId>(e);
+        std::fprintf(obsCsv_,
+                     "%llu,%d,%u,%.4f,%.4f,%.4f\n",
+                     static_cast<unsigned long long>(nowNs),
+                     botId_,
+                     static_cast<unsigned>(cid.value),
+                     static_cast<double>(pos.value.x),
+                     static_cast<double>(pos.value.y),
+                     static_cast<double>(pos.value.z));
+    }
+    // Flush every snapshot — small per-bot file, predictable on crash.
+    // At 32-128 Hz × ~25 entities per snapshot × ~50 bytes/row this is
+    // ~150 KB/s/bot, well within disk budget on any modern test rig.
+    std::fflush(obsCsv_);
+}
+
+void Bot::closeObservationLog() noexcept
+{
+    if (obsCsv_ != nullptr) {
+        std::fclose(obsCsv_);
+        obsCsv_ = nullptr;
+    }
 }
 
 bool Bot::init(const std::string& host, Uint16 port, int botId)
@@ -38,6 +106,12 @@ bool Bot::init(const std::string& host, Uint16 port, int botId)
     // will still happily decode and apply snapshots into registry_.
     initialized_ = true;
     SDL_Log("[bot %d] connected to %s:%u", botId_, host.c_str(), port);
+
+    // PR-18: open the per-bot observation log if requested.  Done here
+    // (post-Client::init) so the bot's connection state is stable
+    // before we start accumulating snapshot rows.
+    openObservationLog();
+
     return true;
 }
 
@@ -293,6 +367,15 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
         // is acceptable.
         if (!ready_.load(std::memory_order_relaxed))
             ready_.store(true, std::memory_order_relaxed);
+
+        // PR-18: log observation only when a fresh snapshot was applied
+        // since the last poll.  `consumeSnapshotApplied()` is self-
+        // resetting, so this fires at the snapshot rate (≈32-128 Hz
+        // depending on server config) — much less noisy than
+        // logging every tick which would just duplicate rows when
+        // the snapshot stream lulls.
+        if (client_.consumeSnapshotApplied())
+            writeObservationLog();
 
         // ── Pacing: hybrid sleep + spin to hit the next tick boundary. ──
         //
