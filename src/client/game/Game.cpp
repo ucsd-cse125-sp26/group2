@@ -657,6 +657,17 @@ bool Game::init()
         }
     }
 
+    // BENCH_RENDER_SCALE=N — internal HDR + post-process resolution multiplier.
+    // 0.5 = quarter pixel count = ~4× fragment savings.  Tonemap reads HDR via
+    // linear sampler so the final swapchain image is bilinearly upscaled.
+    if (const char* p = SDL_getenv("BENCH_RENDER_SCALE")) {
+        const float s = std::strtof(p, nullptr);
+        if (s > 0.0f) {
+            legacyRenderer().renderScale = s;
+            SDL_Log("[client] BENCH_RENDER_SCALE=%.3f", static_cast<double>(s));
+        }
+    }
+
     // GROUP2_NO_IMGUI=1 — release-build kill switch.  Skips ImGui submission
     // unconditionally.  The CMake/release pipeline can pre-set this for
     // shipping builds that never need a debug menu.  Independent of bench

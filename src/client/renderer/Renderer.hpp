@@ -430,6 +430,14 @@ public:
     /// need any of the debug menus.
     bool imguiEnabled = true;
 
+    /// Internal-resolution multiplier for the HDR + post-process pipeline.
+    /// 1.0 = render at full swapchain res; 0.5 = quarter pixel count, ~4x
+    /// fragment-shader savings.  Tonemap reads via linear sampler so the
+    /// final image is bilinearly upscaled at no additional cost.  The
+    /// shadow atlas is independent of this and stays at its k_shadowMapSize
+    /// resolution.  Set via BENCH_RENDER_SCALE env var.
+    float renderScale = 1.0f;
+
     // Anti-aliasing (live-tunable via ImGui)
     AAMode aaMode = AAMode::SMAA_T2x; ///< Current AA mode (default: recommended T2x).
     bool casEnabled = true;           ///< CAS sharpening on/off.

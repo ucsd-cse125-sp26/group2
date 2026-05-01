@@ -1981,9 +1981,9 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     SDL_GPUTexture* swapchain = nullptr;
-    Uint32 w = 0, h = 0;
+    Uint32 swapchainW = 0, swapchainH = 0;
     const Uint64 acquireT0 = SDL_GetPerformanceCounter();
-    const bool acquired = SDL_AcquireGPUSwapchainTexture(cmd, window, &swapchain, &w, &h);
+    const bool acquired = SDL_AcquireGPUSwapchainTexture(cmd, window, &swapchain, &swapchainW, &swapchainH);
     const Uint64 acquireT1 = SDL_GetPerformanceCounter();
     lastAcquireMs = deltaMs(acquireT0, acquireT1);
     if (!acquired || !swapchain) {
@@ -1992,6 +1992,21 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         lastSubmitMs = 0.0f;
         return;
     }
+
+    // Render-scale (perf phase 4a).  All HDR-stage textures and post-process
+    // dispatches use the scaled (hdrW, hdrH).  The final tonemap pass writes
+    // the *swapchain* texture at full (swapchainW, swapchainH); tonemap's
+    // linear sampler upscales the smaller HDR target naturally.  Set scale
+    // < 1.0 to drop fragment-shader work multiplicatively across every
+    // post-process pass and the main HDR pass.
+    auto clampScale = [](float s) {
+        if (!(s > 0.05f && s <= 2.0f))
+            return 1.0f;
+        return s;
+    };
+    const float scale = clampScale(renderScale);
+    const Uint32 w = std::max(1u, static_cast<Uint32>(std::lround(static_cast<float>(swapchainW) * scale)));
+    const Uint32 h = std::max(1u, static_cast<Uint32>(std::lround(static_cast<float>(swapchainH) * scale)));
 
     // Flush pending skinned-mesh vertex uploads
     // Batched into this frame's command buffer — one copy pass for all meshes,
@@ -3187,8 +3202,12 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // PASS 2: Tone mapping -> swapchain (or captureRT for screenshots)
+    // Tonemap writes the *swapchain*, which is at full swapchain resolution.
+    // The HDR + post-process textures it samples are at the (potentially
+    // smaller) render-scale resolution; the linear sampler upscales them
+    // bilinearly during the fullscreen-triangle fragment pass for free.
     {
-        const bool capturing = !pendingCapPath.empty() && ensureCaptureRT(w, h, swapchainFormat);
+        const bool capturing = !pendingCapPath.empty() && ensureCaptureRT(swapchainW, swapchainH, swapchainFormat);
         SDL_GPUTexture* const renderTarget = capturing ? captureRT : swapchain;
 
         SDL_GPUColorTargetInfo ct{};
@@ -3254,15 +3273,15 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
         SDL_EndGPURenderPass(pass);
 
-        // Blit captureRT → swapchain if capturing.
+        // Blit captureRT → swapchain if capturing.  Both at swapchain res.
         if (capturing) {
             SDL_GPUBlitInfo blitInfo{};
             blitInfo.source.texture = captureRT;
-            blitInfo.source.w = w;
-            blitInfo.source.h = h;
+            blitInfo.source.w = swapchainW;
+            blitInfo.source.h = swapchainH;
             blitInfo.destination.texture = swapchain;
-            blitInfo.destination.w = w;
-            blitInfo.destination.h = h;
+            blitInfo.destination.w = swapchainW;
+            blitInfo.destination.h = swapchainH;
             blitInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
             blitInfo.filter = SDL_GPU_FILTER_NEAREST;
             SDL_BlitGPUTexture(cmd, &blitInfo);
@@ -3277,7 +3296,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     (void)drawT0; // total drawFrame ms is the caller's responsibility to time.
 
     if (!pendingCapPath.empty())
-        downloadAndSaveCapture(w, h);
+        downloadAndSaveCapture(swapchainW, swapchainH);
 }
 
 // Screenshot download
