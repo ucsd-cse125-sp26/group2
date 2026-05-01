@@ -2090,14 +2090,18 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         return SDL_CreateGPUTexture(device, &ci);
     };
 
-    // SSAO textures.
+    // SSAO textures — half resolution (perf Phase 3e).  The bilateral blur
+    // already softens edges + the GTAO output is monochromatic, so dropping
+    // to half-res is visually transparent but cuts dispatch work by 4×.
     if (!ssaoTexture || ppResize) {
         if (ssaoTexture)
             SDL_ReleaseGPUTexture(device, ssaoTexture);
         if (ssaoBlurTexture)
             SDL_ReleaseGPUTexture(device, ssaoBlurTexture);
-        ssaoTexture = makeR8(w, h);
-        ssaoBlurTexture = makeR8(w, h);
+        const Uint32 ssaoW = std::max(w / 2, 1u);
+        const Uint32 ssaoH = std::max(h / 2, 1u);
+        ssaoTexture = makeR8(ssaoW, ssaoH);
+        ssaoBlurTexture = makeR8(ssaoW, ssaoH);
     }
 
     // SSR, volumetric, TAA, motion vectors.
@@ -2682,10 +2686,15 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             int numSteps;
             float _p1, _p2;
         } gtaoUBO{};
+        // Half-resolution AO targets (perf Phase 3e).  The shader still uses
+        // full-res screenSize to reconstruct view-space positions correctly;
+        // only the dispatch grid + storage texture are halved.
+        const Uint32 aoW = std::max(w / 2, 1u);
+        const Uint32 aoH = std::max(h / 2, 1u);
         // Use the unjittered projection so AO is stable across jittered frames.
         gtaoUBO.proj = unjitteredProj;
         gtaoUBO.invProj = glm::inverse(unjitteredProj);
-        gtaoUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        gtaoUBO.screenSize = glm::vec2(static_cast<float>(aoW), static_cast<float>(aoH));
         gtaoUBO.radius = ssaoRadius;
         gtaoUBO.falloffExp = ssaoFalloff;
         // Phase 3: trimmed slice/step counts.  Quality difference is barely
@@ -2700,7 +2709,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         SDL_GPUTextureSamplerBinding depthSamp = {.texture = depthTexture, .sampler = nearestDepthSampler};
         SDL_BindGPUComputeSamplers(aoPass, 0, &depthSamp, 1);
         SDL_PushGPUComputeUniformData(cmd, 0, &gtaoUBO, sizeof(gtaoUBO));
-        SDL_DispatchGPUCompute(aoPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_DispatchGPUCompute(aoPass, (aoW + 15) / 16, (aoH + 15) / 16, 1);
         SDL_EndGPUComputePass(aoPass);
 
         // Bilateral blur pass → ssaoBlurTexture (clean AO).
@@ -2712,7 +2721,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             float projB;
             float _p1, _p2, _p3;
         } blurUBO{};
-        blurUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        blurUBO.screenSize = glm::vec2(static_cast<float>(aoW), static_cast<float>(aoH));
         blurUBO.depthSigma = 0.005f;
         blurUBO.projA = unjitteredProj[2][2];
         blurUBO.projB = unjitteredProj[3][2];
@@ -2726,7 +2735,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         };
         SDL_BindGPUComputeSamplers(blurPass, 0, blurSamplers, 2);
         SDL_PushGPUComputeUniformData(cmd, 0, &blurUBO, sizeof(blurUBO));
-        SDL_DispatchGPUCompute(blurPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_DispatchGPUCompute(blurPass, (aoW + 15) / 16, (aoH + 15) / 16, 1);
         SDL_EndGPUComputePass(blurPass);
     }
 
