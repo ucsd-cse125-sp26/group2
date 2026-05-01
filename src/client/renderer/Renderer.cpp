@@ -450,10 +450,11 @@ bool Renderer::initShadowPipeline()
     pci.depth_stencil_state.enable_depth_test = true;
     pci.depth_stencil_state.enable_depth_write = true;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    // No culling in shadow pass — the camera Y-flip reverses winding in the
-    // main pass but the shadow projection has no flip, so BACK culling would
-    // actually cull the FRONT faces.  Disabling culling is the standard fix.
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    // Cull FRONT faces (relative to the light) in the shadow pass — i.e.
+    // rasterize the back of each caster.  Halves the shadow rasterization
+    // workload AND eliminates most shadow acne on lit surfaces because the
+    // recorded depth is on the far side of the caster, not the near side.
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_FRONT;
     // Depth bias to reduce shadow acne.
     pci.rasterizer_state.depth_bias_constant_factor = 0.75f;
     pci.rasterizer_state.depth_bias_slope_factor = 1.0f;
@@ -2293,8 +2294,13 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             }
 
             // Skinned characters — single instanced draw per mesh (perf Phase 1B).
-            if (skinnedRigInstalled && shadowSkinnedPipeline && !skinnedFrameInstances.empty() && skinnedPaletteSSBO &&
-                skinnedInstanceSSBO)
+            //
+            // Phase 3 — skinned chars only contribute to the near cascades
+            // (0 + 1).  Cascades 2 + 3 cover distant terrain where character-
+            // sized shadow detail is invisible anyway, and skipping them
+            // halves the skinned-shadow vertex shader workload.
+            if (c < 2 && skinnedRigInstalled && shadowSkinnedPipeline && !skinnedFrameInstances.empty() &&
+                skinnedPaletteSSBO && skinnedInstanceSSBO)
             {
                 SDL_BindGPUGraphicsPipeline(shadowPass, shadowSkinnedPipeline);
                 ShadowUBO shadowUBO{};
@@ -3482,7 +3488,7 @@ bool Renderer::initSkinnedPipelines()
     spci.depth_stencil_state.enable_depth_test = true;
     spci.depth_stencil_state.enable_depth_write = true;
     spci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    spci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    spci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_FRONT; // mirror legacy shadow pipeline (Phase 3)
     spci.rasterizer_state.depth_bias_constant_factor = 0.75f;
     spci.rasterizer_state.depth_bias_slope_factor = 1.0f;
     spci.rasterizer_state.enable_depth_bias = true;
