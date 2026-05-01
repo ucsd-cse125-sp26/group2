@@ -129,5 +129,4 @@ inline MaterialIdInt getMaterialIdFromString(const std::string& strId)
     return fnv1a32(strId);
 }
 
-
 } // namespace Asset

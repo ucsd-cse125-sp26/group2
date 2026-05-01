@@ -20,6 +20,8 @@
 #include "ecs/registry/Registry.hpp"
 #include "network/NetKillEvent.hpp"
 
+#include <ecs/components/RespawnPoint.hpp>
+#include <random>
 #include <vector>
 
 namespace systems
@@ -46,6 +48,27 @@ void applyHeal(float amount, Health& playerHealth)
     }
 }
 
+inline glm::vec3 chooseRespawnPoint(Registry& registry)
+{
+    std::vector<glm::vec3> respawnPoints;
+
+    auto view = registry.view<RespawnPoint, Position>();
+
+    for (entt::entity e : view) {
+        respawnPoints.push_back(view.get<Position>(e).value);
+    }
+
+    if (!respawnPoints.empty()) {
+        std::random_device rd;  // seed
+        std::mt19937 gen(rd()); // Mersenne Twister RNG
+        std::uniform_int_distribution<> dist(0, respawnPoints.size() - 1);
+        int idx = dist(gen);
+        return respawnPoints[idx];
+    } else {
+        return glm::vec3(0.0f, 200.0f, 0.0f);
+    }
+}
+
 /// @brief Reset a dead player to a fresh spawn state.
 ///
 /// Clears the respawn timer and death info, restores visibility, resets
@@ -63,7 +86,7 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     registry.erase<DeathInfo>(player);
     registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = true; });
     registry.emplace_or_replace<InputSnapshot>(player);
-    registry.emplace_or_replace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
+    registry.emplace_or_replace<Position>(player, chooseRespawnPoint(registry));
     registry.emplace_or_replace<Velocity>(player);
     registry.emplace_or_replace<PlayerState>(player);
     registry.emplace_or_replace<Health>(player, Health{});
@@ -188,24 +211,23 @@ inline void handleHealing(Health& playerHealth, float dt)
 
 void runPlayerStatus(Registry& registry, float dt)
 {
-    registry.view<Player, InputSnapshot, Health>().each(
-        [&registry, dt](entt::entity e, InputSnapshot& snap, Health& health) {
-            if (registry.all_of<RespawnTimer>(e)) {
-                auto& respawnTimer = registry.get<RespawnTimer>(e);
-                respawnTimer.timeRemaining -= dt;
-                if (respawnTimer.timeRemaining <= 0) {
-                    handleRespawn(e, registry);
-                }
-            } else {
-                Health& playerHealth = registry.get_or_emplace<Health>(e);
-                handleHealing(playerHealth, dt);
+    registry.view<Player, InputSnapshot>().each([&registry, dt](entt::entity e, InputSnapshot& snap) {
+        if (registry.all_of<RespawnTimer>(e)) {
+            auto& respawnTimer = registry.get<RespawnTimer>(e);
+            respawnTimer.timeRemaining -= dt;
+            if (respawnTimer.timeRemaining <= 0) {
+                handleRespawn(e, registry);
             }
+        } else {
+            Health& playerHealth = registry.get_or_emplace<Health>(e);
+            handleHealing(playerHealth, dt);
+        }
 
-            if (snap.killSelf) {
-                snap.killSelf = false;
-                std::vector<NetKillEvent> kills;
-                applyDamage(999.0f, e, e, registry, kills, BodyRegion::Head);
-            }
-        });
+        if (snap.killSelf) {
+            snap.killSelf = false;
+            std::vector<NetKillEvent> kills;
+            applyDamage(999.0f, e, e, registry, kills, BodyRegion::Head);
+        }
+    });
 }
 } // namespace systems

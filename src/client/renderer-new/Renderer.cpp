@@ -239,7 +239,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
-void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass ,const Asset::Mesh& mesh) const
+void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
 {
     SDL_GPUBufferBinding vertexBufferBinding{};
     vertexBufferBinding.buffer = mesh.vBufferInfo_.gpuBuff;

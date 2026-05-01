@@ -55,5 +55,9 @@ private:
     /// @param nodeAi The current Assimp scene node.
     /// @param sceneAi The full Assimp scene.
     /// @param k_modelId The model ID to attach extracted elements to.
-    static void pushAiNodeMeshesToModelElements(const std::string &meshNameSpace,const aiNode &nodeAi,const aiScene &sceneAi,const ModelIdInt k_modelId,const uint32_t modelIndexNode);
+    static void pushAiNodeMeshesToModelElements(const std::string& meshNameSpace,
+                                                const aiNode& nodeAi,
+                                                const aiScene& sceneAi,
+                                                const ModelIdInt k_modelId,
+                                                const uint32_t modelIndexNode);
 };
