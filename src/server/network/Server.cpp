@@ -86,7 +86,7 @@ void Server::shutdown()
         networkThread_.join();
     }
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    std::unique_lock<std::shared_mutex> lock(stateMutex_);
     if (server) {
         SDL_Log("Server: shutting down");
         NET_DestroyServer(server);
@@ -122,7 +122,10 @@ std::vector<uint8_t> frameMessage(const void* data, int len)
 
 bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void* data, int len)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — we only read the clients map structure
+    // (lookup) and write into the target's `outbound` queue, which
+    // self-locks (PR-5b).
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     auto it = clients.find(clientId);
     if (it == clients.end())
         return false;
@@ -142,7 +145,11 @@ void Server::enqueueBroadcast(uint8_t replaceKey, const void* data, int len)
     // 100+ ms p99 spike at 200 bots).
     auto framed = std::make_shared<const std::vector<uint8_t>>(frameMessage(data, len));
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — we read the clients map and write into each
+    // client's `outbound`, which self-locks (PR-5b). Multiple
+    // game-thread broadcasts can run concurrently with each other and
+    // with the network thread's `flushAllOutbound` phase 2.
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     for (auto& [_, conn] : clients) {
         conn.outbound.enqueue(replaceKey, framed);
     }
@@ -187,7 +194,11 @@ void Server::flushAllOutbound()
     targets.clear();
 
     {
-        std::lock_guard<std::mutex> lock(stateMutex_);
+        // PR-6: shared lock — we only read the clients map.
+        // Pointers stay valid because the only writers are this
+        // thread (acceptClients / disconnect-application) and we're
+        // not running those concurrently with this snapshot.
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
         targets.reserve(clients.size());
         for (auto& [id, conn] : clients) {
             targets.push_back(Target{id, &conn.outbound, conn.msgStream.socket});
@@ -207,7 +218,7 @@ void Server::flushAllOutbound()
 
     // Phase 3: apply failures + republish atomics. Take the lock once.
     {
-        std::lock_guard<std::mutex> lock(stateMutex_);
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
         for (ClientId id : failed) {
             if (auto it = clients.find(id); it != clients.end()) {
                 disconnectClient(it->second);
@@ -259,7 +270,7 @@ void Server::enqueueReliableEvent(const void* data, int len)
         // 4-byte length-prefixed framed payload for the TCP fallback.
         auto sharedFramed = std::make_shared<const std::vector<uint8_t>>(frameMessage(data, len));
 
-        std::lock_guard<std::mutex> lock(stateMutex_);
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
 
         if (!transportConfig_.eventsOverUdp || !udpEndpoint_.isOpen()) {
             // TCP fallback. replaceKey = 0 → never drop on age, always ship.
@@ -381,21 +392,23 @@ void Server::networkLoop()
     // having to wait for an entire I/O cycle to finish.
     while (!shouldStop_.load(std::memory_order_relaxed)) {
         {
-            std::lock_guard<std::mutex> lock(stateMutex_);
+            std::unique_lock<std::shared_mutex> lock(stateMutex_);
             acceptClients();
         }
-        {
-            std::lock_guard<std::mutex> lock(stateMutex_);
-            readClients();
-        }
+        // PR-6: readClients now manages its own shared/unique split.
+        readClients();
 
         // ── Phase 3d: UDP receive phase ──────────────────────────────
         //
-        // Drain all available datagrams in one batch. Held under the
-        // state mutex so handleUdpInput's enqueue path is serialized
-        // with the game thread's dequeueEvent.
+        // PR-6: shared lock. handleUdpUnreliable reads the clients map
+        // (lookup by connectionId), updates per-Connection state
+        // (lastReportedRttMs, udpAddr) — those are written only by
+        // the network thread (this code), so no race with concurrent
+        // shared lockers reading per-Conn state. eventQueue.enqueue
+        // is self-locked. PONG send (`udpEndpoint_.send`) doesn't
+        // touch shared state.
         if (udpEndpoint_.isOpen()) {
-            std::lock_guard<std::mutex> lock(stateMutex_);
+            std::shared_lock<std::shared_mutex> lock(stateMutex_);
             net::UdpReceivedMessage msg;
             int drained = 0;
             constexpr int k_maxDatagramsPerCycle = 512;
@@ -436,7 +449,7 @@ void Server::networkLoop()
             std::shared_ptr<const std::vector<uint8_t>> payload;
             std::shared_ptr<const std::vector<uint8_t>> framed;
             {
-                std::lock_guard<std::mutex> lock(stateMutex_);
+                std::unique_lock<std::shared_mutex> lock(stateMutex_);
                 payload = std::exchange(pendingSnapshotPayload_, nullptr);
                 framed = std::exchange(pendingSnapshotFramed_, nullptr);
             }
@@ -460,7 +473,10 @@ void Server::networkLoop()
                 tcpTargets.clear();
 
                 {
-                    std::lock_guard<std::mutex> lock(stateMutex_);
+                    // PR-6: shared lock — we read the clients map and
+                    // bump per-Conn `udpSnapshotSequence`, which is
+                    // single-writer (this thread).
+                    std::shared_lock<std::shared_mutex> lock(stateMutex_);
                     const bool useUdp = transportConfig_.snapshotsOverUdp && udpEndpoint_.isOpen();
                     for (auto& [id, conn] : clients) {
                         const bool canUseUdp = useUdp && conn.udpAddr.addr != nullptr;
@@ -501,7 +517,8 @@ void Server::networkLoop()
                 // shared_ptr copy (PR-2) so the inner loop is O(N)
                 // pointer copies, not O(N) memcpys.
                 if (framed && !tcpTargets.empty()) {
-                    std::lock_guard<std::mutex> lock(stateMutex_);
+                    // PR-6: shared lock — per-Conn outbound is self-locked.
+                    std::shared_lock<std::shared_mutex> lock(stateMutex_);
                     for (const ClientId& id : tcpTargets) {
                         if (auto it = clients.find(id); it != clients.end()) {
                             it->second.outbound.enqueue(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY), framed);
@@ -526,7 +543,7 @@ void Server::networkLoop()
         // cycles so a single dropped datagram doesn't lose the event
         // (and the client's sequence-based dedup catches the dups).
         if (udpEndpoint_.isOpen()) {
-            std::lock_guard<std::mutex> lock(stateMutex_);
+            std::unique_lock<std::shared_mutex> lock(stateMutex_);
             for (auto& [_, conn] : clients) {
                 if (conn.udpAddr.addr == nullptr || conn.reliableQueue.empty())
                     continue;
@@ -616,23 +633,52 @@ void Server::readClients()
     // which is the closest thing we have to "useful payload bytes
     // received." Adding the 4-byte framing accounts for total wire
     // bytes; we do that with a single per-message correction.
+    //
+    // PR-6 (server-perf): two-phase read with shared / unique split.
+    //
+    //   Phase 1 (shared lock): iterate clients, drive each socket's
+    //           msgStream.poll. Per-Connection state (`recvBuf`,
+    //           `lastAppliedInputTick`, `lastReportedRttMs`,
+    //           `udpAddr`) is single-writer (this thread), so other
+    //           shared-lock holders (game-thread `enqueueBroadcast`,
+    //           `notifyPlayerClientId`) don't race. Failed sockets
+    //           are collected for deferred disconnect.
+    //
+    //   Phase 2 (unique lock, only if any failed): apply disconnects.
+    //           Briefer than the read pass; runs after we've already
+    //           given every healthy client its read cycle.
+    //
+    // Pre-PR-6 this whole loop ran under a unique lock, blocking
+    // every game-thread broadcast / lookup for the full pass — at
+    // 300 clients that pass took 25-50 ms p99 wall time and starved
+    // the simulation thread.
     auto& nc = ::group2::perf::net();
-    for (auto it = clients.begin(); it != clients.end();) {
-        auto& conn = it->second;
 
-        bool ok = conn.msgStream.poll([this, &conn, &nc](const void* data, Uint32 size) {
-            nc.bytesRecv.fetch_add(size + sizeof(Uint32), std::memory_order_relaxed);
-            nc.packetsRecv.fetch_add(1, std::memory_order_relaxed);
-            handleMessage(conn, data, size);
-        });
+    static thread_local std::vector<ClientId> failed;
+    failed.clear();
 
-        if (!ok) {
-            disconnectClient(conn);
-            it = clients.erase(it);
-            continue;
+    {
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        for (auto& [_, conn] : clients) {
+            bool ok = conn.msgStream.poll([this, &conn, &nc](const void* data, Uint32 size) {
+                nc.bytesRecv.fetch_add(size + sizeof(Uint32), std::memory_order_relaxed);
+                nc.packetsRecv.fetch_add(1, std::memory_order_relaxed);
+                handleMessage(conn, data, size);
+            });
+            if (!ok) {
+                failed.push_back(conn.clientId);
+            }
         }
+    }
 
-        ++it;
+    if (!failed.empty()) {
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
+        for (ClientId id : failed) {
+            if (auto it = clients.find(id); it != clients.end()) {
+                disconnectClient(it->second);
+                clients.erase(it);
+            }
+        }
     }
 }
 
@@ -761,7 +807,11 @@ void Server::drainEvents(std::vector<Event>& out)
 // NOTE: playerEntity is the entity id of the player
 bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — we look up by clientId, set
+    // `pendingInitialization=false` (per-Conn write, single writer:
+    // this is only called once per client init from the game thread),
+    // and call per-Conn `outbound.enqueue` (self-locked).
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     auto it = clients.find(clientId);
     if (it == clients.end())
         return false;
@@ -819,7 +869,7 @@ void Server::broadcastRegistry(const Registry& registry)
 
     std::size_t fanout = 0;
     {
-        std::lock_guard<std::mutex> lock(stateMutex_);
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
         // Replace any in-flight snapshot the network thread hasn't
         // picked up yet — only the freshest is meaningful.
         pendingSnapshotPayload_ = std::move(payload);
@@ -866,7 +916,10 @@ int Server::getClientCount()
 
 uint16_t Server::getClientRttMs(ClientId clientId)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — pure read. Modern callers should use
+    // snapshotClientRtts (lock-free) instead; this single-client
+    // form is kept for compat.
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     const auto it = clients.find(clientId);
     if (it == clients.end())
         return 0;
@@ -891,9 +944,10 @@ void Server::snapshotClientRtts(std::vector<std::pair<ClientId, uint16_t>>& out)
         return;
     }
 
-    // Cold path: no published snapshot yet. Take the lock so we don't
-    // race with concurrent inserts by acceptClients.
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // Cold path: no published snapshot yet. Take a shared lock so we
+    // don't race with concurrent inserts by acceptClients (which
+    // takes unique). Pure read.
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     out.reserve(clients.size());
     for (const auto& [id, conn] : clients)
         out.emplace_back(id, conn.lastReportedRttMs);

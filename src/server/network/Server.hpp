@@ -22,6 +22,7 @@
 #include <entt/entity/entity.hpp>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -304,7 +305,12 @@ private:
     // network thread (acceptClients / readClients / flushAllOutbound) hold
     // it during state mutation. Lock holds are kept short (one phase at a
     // time) so the game thread isn't starved.
-    std::mutex stateMutex_;
+    // PR-6 (server-perf): shared_mutex so read-mostly paths
+    // (enqueueBroadcast iterating clients, flushAllOutbound's phase 1
+    // snapshot, readClients's per-client poll, UDP receive) can take
+    // shared locks and run concurrently. Writers (acceptClients,
+    // disconnect-application, reliable-queue mutation) take unique.
+    std::shared_mutex stateMutex_;
     std::thread networkThread_;
     std::atomic<bool> shouldStop_{false};
 
