@@ -15,6 +15,7 @@
 #include "ecs/components/PlayerState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
+#include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -111,6 +112,10 @@ void ServerGame::run()
         railSpawner, WeaponSpawner{.type = WeaponType::RailGun, .spawnCooldown = 0.0, .hasWeapon = false});
     registry.emplace<Position>(railSpawner, glm::vec3{-100.0f, 15.0f, -240.0f});
     registry.emplace<CollisionShape>(railSpawner);
+
+    const entt::entity playerSpawner = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner);
+    registry.emplace<Position>(playerSpawner, glm::vec3{0.0f, 2000.0f, 0.0f});
 
     while (running) {
         server.poll();

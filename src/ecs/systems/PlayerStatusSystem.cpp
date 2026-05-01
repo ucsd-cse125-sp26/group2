@@ -202,9 +202,9 @@ void runPlayerStatus(Registry& registry, float dt)
             }
 
             if (snap.killSelf) {
-                health.health = 0;
+                snap.killSelf = false;
                 std::vector<NetKillEvent> kills;
-                handleDeath(e, health, e, registry, kills, BodyRegion::Head);
+                applyDamage(999.0f, e, e, registry, kills, BodyRegion::Head);
             }
         });
 }
