@@ -94,8 +94,14 @@ std::vector<uint8_t> serialize(const entt::registry& registry)
     return std::move(packetArchive.buffer);
 }
 
-void Loader::apply(const uint8_t* data, size_t size, const std::optional<entt::entity> localPlayerServerEntity)
+void Loader::apply(const uint8_t* data,
+                   size_t size,
+                   const std::optional<entt::entity> localPlayerServerEntity,
+                   uint32_t* outServerAckedClientTick)
 {
+    if (outServerAckedClientTick)
+        *outServerAckedClientTick = 0;
+
     InputArchive packetArchive(data, size);
     uint32_t snapshotSize = 0;
     packetArchive(snapshotSize);
@@ -129,6 +135,14 @@ void Loader::apply(const uint8_t* data, size_t size, const std::optional<entt::e
         }
 
         if (entity == localPlayerEntity) {
+            // Don't overwrite the client's locally-stamped InputSnapshot —
+            // that would clobber the input the client just sent for the
+            // current predict tick. But DO read the server's tick field:
+            // it tells us the most-recently-applied client tick the
+            // server has processed, which Phase 5b reconciliation uses to
+            // know where to start the input replay from.
+            if (outServerAckedClientTick)
+                *outServerAckedClientTick = record.input.tick;
             continue;
         }
 

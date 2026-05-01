@@ -222,10 +222,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
 
     for (const auto& modelPair : Asset::models_) {
         glm::mat4 modelMatrix = glm::mat4(1.0f);
-        // modelMatrix[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        SDL_PushGPUVertexUniformData(cmd, 1, &modelMatrix, sizeof(glm::mat4));
+        modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
 
         for (auto& element : modelPair.second.modelElements_) {
+            glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;
+            SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
             Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
             drawMesh(pass, mesh);
         }

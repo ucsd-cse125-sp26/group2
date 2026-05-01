@@ -16,6 +16,7 @@
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "ecs/systems/LagCompensation.hpp"
 
 #include <SDL3/SDL_log.h>
 
@@ -36,16 +37,10 @@ namespace systems
 /// @return Reference to the equipped gun.
 inline GunInstance& getEquippedGun(WeaponState& weapon)
 {
-    switch (weapon.current) {
-    case WeaponSlot::SECONDARY:
-        return weapon.secondary;
-    case WeaponSlot::TERTIARY:
-        return weapon.tertiary;
-    case WeaponSlot::QUATERNARY:
-        return weapon.quaternary;
-    default:
+    if (weapon.current == WeaponSlot::PRIMARY) {
         return weapon.primary;
     }
+    return weapon.secondary;
 }
 
 /// @brief Apply weapon slot switch from player input.
@@ -57,10 +52,6 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary) {
         weapon.current = WeaponSlot::SECONDARY;
-    } else if (input.switchToTertiary) {
-        weapon.current = WeaponSlot::TERTIARY;
-    } else if (input.switchToQuaternary) {
-        weapon.current = WeaponSlot::QUATERNARY;
     }
 }
 
@@ -73,8 +64,6 @@ inline void handleCooldown(WeaponState& weapon, float dt)
 
     reduce(weapon.primary);
     reduce(weapon.secondary);
-    reduce(weapon.tertiary);
-    reduce(weapon.quaternary);
 }
 
 /// @brief Reload the gun's magazine from reserve ammo.
@@ -200,6 +189,16 @@ inline void handleFire(Registry& registry,
         // Raycast to find beam endpoint.
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
+        // Phase 6 lag-compensated hitscan. The guard reads
+        // `LagCompTarget` off `shooter` (set each tick by the server's
+        // lag-comp scheduler from this client's reported RTT), swaps
+        // every other player's `HitboxInstance::capsules` for the
+        // historical sample matching the attacker's screen at fire
+        // time, and restores live capsules on scope exit. No-op for
+        // shooters with no `LagCompTarget` (e.g. the client TU, where
+        // this same WeaponSystem.cpp is compiled but no entity ever
+        // gets the component).
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Apply DPS-based damage with body-region multiplier.
@@ -244,6 +243,8 @@ inline void handleFire(Registry& registry,
 
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
+        // Phase 6 lag-compensated hitscan (see beam path for details).
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Snapshot armor before damage for shield-break detection.
@@ -322,6 +323,8 @@ inline void handleFire(Registry& registry,
     const glm::vec3 muzzle = muzzleOrigin(eye, direction);
 
     if (config.hitscan) {
+        // Phase 6 lag-compensated hitscan (see beam path for details).
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
         // Snapshot armor before damage for shield-break detection.
@@ -439,7 +442,6 @@ void runWeapon(Registry& registry,
             };
             refill(weapon.primary);
             refill(weapon.secondary);
-            refill(weapon.tertiary);
             input.refillAmmo = false; // consume the flag
         }
     });

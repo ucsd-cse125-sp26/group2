@@ -4,16 +4,19 @@
 #include "ServerGame.hpp"
 
 #include "client/animation/CharacterAnimator.hpp"
+#include "ecs/AssetCatalog.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
+#include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -28,20 +31,31 @@
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/ShotEvent.hpp"
+#include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
 
-bool ServerGame::init(const char* addr, Uint16 port, int hz)
+#include <algorithm>
+
+bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, const TransportConfig& transport)
 {
     tickRateHz = hz;
+
+    // Phase 4a: snapshot rate ≤ tick rate. Both should be positive ints; we
+    // re-clamp here in case the caller didn't (NetworkConfig already
+    // clamps the loaded value to [1, 256]).
+    const int clampedSnapshotHz = std::max(1, std::min(snapshotHz, hz));
+    snapshotEveryNTicks = std::max(1, hz / clampedSnapshotHz);
+    SDL_Log("[server] tickRate=%d Hz, snapshotRate≈%d Hz (every %d ticks)",
+            hz,
+            hz / snapshotEveryNTicks,
+            snapshotEveryNTicks);
+
     clientEntities.clear(); // For safety
     registry.clear();
 
     // ── Load map collision ──────────────────────────────────────────────
-    // Scale: the map was authored in meters; the game uses Quake units (inches).
     {
-        static constexpr float k_metersToInches = 39.3701f;
-
         // Toggle: does this map use SEPARATED collision and visual meshes?
         // Must match the client (Game.cpp) for prediction parity — both sides
         // need to extract the exact same collision primitives from the GLB.
@@ -56,13 +70,14 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         // Must match the client value in Game.cpp for prediction parity.
         static constexpr bool k_guessShapesProcessed = true;
 
-        const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
+        const char* const mapFilename =
+            k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : kMapAsset.filename;
 
         const char* base = SDL_GetBasePath();
         const std::string mapPath = std::string(base ? base : "") + "assets/" + mapFilename;
 
         physics::MapLoadOptions opts;
-        opts.scale = k_metersToInches;
+        opts.scale = kMapAsset.loadScale;
         opts.allMeshesAreCollision = !k_separatedCollisionMap;
         if (k_separatedCollisionMap)
             opts.collisionCollection = k_collisionPattern;
@@ -83,29 +98,20 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
         }
 
         // Load prop collision — must match client for prediction parity.
-        // Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
-        // `decomposeNonConvex = true`: pallet + bottle are non-convex, so
-        // V-HACD turns each non-convex sub-mesh into a few `WorldBrush`es
-        // instead of a `WorldTriMesh`.  Server pays a one-shot startup cost
-        // but runtime collision is much smoother (no per-triangle jitter).
-        // Must mirror the client setting in Game.cpp for prediction parity.
+        // Props with `decomposeCollision = true` (pallet, bottle) are non-convex,
+        // so V-HACD turns each sub-mesh into a few `WorldBrush`es instead of a
+        // `WorldTriMesh`.  Server pays a one-shot startup cost but runtime
+        // collision is much smoother (no per-triangle jitter).
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
-        physics::loadPropCollision(assetsDir + "metallic_pallet_factory_store.glb",
-                                   mapCollision_,
-                                   glm::vec3(0.0f, 0.0f, 600.0f),
-                                   0.25f,
-                                   /*decomposeNonConvex=*/true);
-        physics::loadPropCollision(assetsDir + "bottle_a.glb",
-                                   mapCollision_,
-                                   glm::vec3(100.0f, 0.0f, 400.0f),
-                                   20.0f,
-                                   /*decomposeNonConvex=*/true);
+        for (const AssetDefinition& def : kPropAssets)
+            physics::loadPropCollision(
+                assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision);
 
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());
     }
 
-    if (!server.init(addr, port))
+    if (!server.init(addr, port, transport))
         return false;
 
     // ── Load animation subsystem for hitbox detection ──
@@ -124,18 +130,49 @@ void ServerGame::run()
     Uint64 nextTick = SDL_GetPerformanceCounter();
 
     // temp weapon spawner
-    const entt::entity spawner = registry.create();
+    const entt::entity energySpawner = registry.create();
     registry.emplace<WeaponSpawner>(
-        spawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
-    registry.emplace<Position>(spawner, glm::vec3{12.0f, 15.0f, 12.0f});
-    registry.emplace<CollisionShape>(spawner);
+        energySpawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(energySpawner, glm::vec3{-100.0f, 15.0f, 0.0f});
+    registry.emplace<CollisionShape>(energySpawner);
 
     // temp rocket spawner
     const entt::entity rocketSpawner = registry.create();
-    registry.emplace<WeaponSpawner>(rocketSpawner,
-                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0, .hasWeapon = false});
-    registry.emplace<Position>(rocketSpawner, glm::vec3{-200.0f, 15.0f, 12.0f});
+    registry.emplace<WeaponSpawner>(
+        rocketSpawner, WeaponSpawner{.type = WeaponType::Rocket, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(rocketSpawner, glm::vec3{-100.0f, 15.0f, 120.0f});
     registry.emplace<CollisionShape>(rocketSpawner);
+
+    // temp rocket spawner
+    const entt::entity rifleSpawner = registry.create();
+    registry.emplace<WeaponSpawner>(rifleSpawner,
+                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(rifleSpawner, glm::vec3{-100.0f, 15.0f, -120.0f});
+    registry.emplace<CollisionShape>(rifleSpawner);
+
+    // temp rail gun spawner
+    const entt::entity railSpawner = registry.create();
+    registry.emplace<WeaponSpawner>(
+        railSpawner, WeaponSpawner{.type = WeaponType::RailGun, .spawnCooldown = 0.0, .hasWeapon = false});
+    registry.emplace<Position>(railSpawner, glm::vec3{-100.0f, 15.0f, -240.0f});
+    registry.emplace<CollisionShape>(railSpawner);
+
+    // Static respawn points
+    const entt::entity playerSpawner1 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner1);
+    registry.emplace<Position>(playerSpawner1, glm::vec3{0.0f, 2000.0f, 0.0f});
+
+    const entt::entity playerSpawner2 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner2);
+    registry.emplace<Position>(playerSpawner2, glm::vec3{800.0f, 40.0f, 800.0f});
+
+    const entt::entity playerSpawner3 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner3);
+    registry.emplace<Position>(playerSpawner3, glm::vec3{800.0f, 430.0f, -800.0f});
+
+    const entt::entity playerSpawner4 = registry.create();
+    registry.emplace<RespawnPoint>(playerSpawner4);
+    registry.emplace<Position>(playerSpawner4, glm::vec3{0.0f, 200.0f, 0.0f});
 
     while (running) {
         server.poll();
@@ -213,6 +250,25 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // Update server-side animation and hitbox capsules before weapon raycasts.
     updateAnimationAndHitboxes(dt);
 
+    // Phase 6: capture this tick's capsules into each entity's HitboxHistory
+    // ring. Has to run *after* updateHitboxes (so the capsules reflect this
+    // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
+    // consistent history snapshot from which rewindHitboxes can pick).
+    systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
+
+    // Phase 6: per-shooter lag-comp scheduler. For every player entity
+    // bound to a connected client, set `LagCompTarget.targetServerTick`
+    // to `currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
+    // The hitscan path inside runWeapon reads this off the shooter
+    // entity to size the rewind window for that shooter's shot.
+    //
+    // Capping at k_maxLagCompTicks (default ~25 ticks ≈ 200 ms at
+    // 128 Hz) prevents pathologically high-ping shooters from
+    // rewinding deep into the past, which would let them hit targets
+    // that have long since moved out of cover and produce
+    // "shot-around-the-corner" feel for the victims.
+    updateLagCompTargets();
+
     std::vector<NetParticleEvent> particleEvents;
     systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
     systems::runMovement(registry, dt, physics::activeWorld());
@@ -223,8 +279,21 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     matchController.update(dt, registry, server);
 
-    // Update Client by sending the registry
-    server.broadcastRegistry(registry);
+    // Phase 4a: snapshot rate decoupled from tick rate. The registry
+    // snapshot is the by far biggest piece of per-tick wire traffic, and
+    // remote clients can still smoothly interpolate position over the
+    // snapshot interval (Phase 5's RemoteHistory + clientRenderTick will
+    // formalise this; today's PreviousPosition lerp covers the simpler
+    // case). Events (particles, kills) stay tick-accurate — they're
+    // discrete moments and ~1-tick latency materially affects gameplay
+    // feel (kill feed lag, missing tracers).
+    //
+    // Stage 3b's dedicated network thread continuously drains the per-
+    // client OutboundQueue to sockets at ~1 kHz, so the game-tick budget
+    // no longer pays for the I/O syscalls.
+    if ((tickCount % snapshotEveryNTicks) == 0) {
+        server.broadcastRegistry(registry);
+    }
     server.broadcastParticleEvents(particleEvents);
     server.broadcastKillEvents(pendingKillEvents);
     pendingKillEvents.clear();
@@ -264,8 +333,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    const WeaponConfig& wingmanConfig = getWeaponConfig(WeaponType::EnergyGun);
-    const WeaponConfig& rocketConfig = getWeaponConfig(WeaponType::Rocket);
     registry.emplace<WeaponState>(player,
                                   WeaponState{
                                       .primary =
@@ -280,20 +347,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                               .type = WeaponType::RailGun,
                                               .totalAmmo = railConfig.defaultAmmoCapacity,
                                               .currentMagAmmo = railConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .tertiary =
-                                          GunInstance{
-                                              .type = WeaponType::EnergyGun,
-                                              .totalAmmo = wingmanConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = wingmanConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .quaternary =
-                                          GunInstance{
-                                              .type = WeaponType::Rocket,
-                                              .totalAmmo = rocketConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = rocketConfig.magazineSize,
                                               .fireCooldown = 0.0f,
                                           },
                                       .current = WeaponSlot::PRIMARY,
@@ -389,6 +442,47 @@ void ServerGame::attachServerAnimator(entt::entity player)
 void ServerGame::detachServerAnimator(entt::entity player)
 {
     serverAnimators_.erase(player);
+}
+
+void ServerGame::updateLagCompTargets()
+{
+    // Server-side cap on rewind depth. 25 ticks at 128 Hz ≈ 195 ms,
+    // matching the plan's "server-capped at 200 ms" rule. Above this
+    // a high-ping shooter could rewind targets behind cover that the
+    // victim has long since ducked behind, producing the classic
+    // "I shot him around the corner" feel for the receiver.
+    static constexpr uint32_t k_maxLagCompTicks = 25;
+
+    const auto currentServerTick = static_cast<uint32_t>(tickCount);
+    for (const auto& [clientId, entity] : clientEntities) {
+        if (!registry.valid(entity))
+            continue;
+
+        const uint16_t rttMs = server.getClientRttMs(clientId);
+        // Half-RTT in ticks. Round-to-nearest by adding half a tick
+        // before integer divide. (rttMs / 2 / 1000 * tickRateHz)
+        // reordered to keep the integer-only arithmetic exact at the
+        // cost of one extra add: rttHalfTicks = (rttMs * Hz + 1000) /
+        // 2000.
+        const uint32_t rttHalfTicks =
+            (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 1000u) / 2000u;
+        const uint32_t lagTicks = std::min<uint32_t>(rttHalfTicks, k_maxLagCompTicks);
+        const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
+                                        ? 0u // explicit "no rewind" sentinel
+                                        : (currentServerTick - lagTicks);
+
+        registry.emplace_or_replace<LagCompTarget>(entity, LagCompTarget{.targetServerTick = targetTick});
+
+        // Replicate this client's RTT to all clients via PlayerMatchStats.
+        // Already in the Synced tuple, so ships in the next snapshot. Each
+        // client's scoreboard HUD then reads the target row's `rttMs`
+        // instead of falling back to its own `NetworkStats::rttMs` for
+        // every row (which would mean every player on screen showed the
+        // *local* client's ping). Costs one uint16 per replicated player
+        // per snapshot — well under any other field in the component.
+        if (auto* stats = registry.try_get<PlayerMatchStats>(entity))
+            stats->rttMs = rttMs;
+    }
 }
 
 void ServerGame::updateAnimationAndHitboxes(float dt)

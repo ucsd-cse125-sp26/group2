@@ -45,6 +45,19 @@ public:
     /// @return False on connection failure.
     bool init(const std::string& host, Uint16 port, int botId);
 
+    /// @brief Apply a simulated round-trip latency on the bot's UDP path.
+    /// Wraps `Client::setSimulatedLatencyMs` so the latency simulator
+    /// is exercised under bot-only load tests (the real client UI's
+    /// slider is the other entry point).
+    /// @param totalMs Total RTT (0–200) split half-and-half across
+    ///                outbound and inbound packet queues.
+    void setSimulatedLatencyMs(int totalMs);
+
+    /// @brief Apply a simulated UDP packet-loss percentage to the bot's
+    /// UDP path. Wraps `Client::setSimulatedLossPercent`.
+    /// @param percent Per-datagram drop probability (0–100).
+    void setSimulatedLossPercent(int percent);
+
     /// @brief Spawn the worker thread. Returns immediately.
     /// @param stopFlag Shared shutdown signal. Loop exits when set true.
     void start(const std::atomic<bool>& stopFlag);

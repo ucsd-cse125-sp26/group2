@@ -46,7 +46,11 @@ extern "C" void onSignal(int /*sig*/)
 
 void installSignalHandlers()
 {
-    struct sigaction sa{};
+    // `= {}` value-initialises every field. Same effect as `sa{};` but
+    // formats identically under clang-format-18 and clang-format-22 —
+    // the v18 layout-disagreement with the brace-init-only form was the
+    // sole reason this file failed the PR CI's clang-format-18 gate.
+    struct sigaction sa = {};
     sa.sa_handler = onSignal;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0; // no SA_RESTART; let blocking calls return EINTR if any
@@ -138,6 +142,35 @@ int main(int argc, char* argv[])
 
     SDL_Log("[clientbot] launching %d bot(s) → %s:%u", numBots, host.c_str(), port);
 
+    // Optional latency simulator hook for testing Phase 6 lag-comp under
+    // bot-only load. Each bot applies `GROUP2_BOT_LATENCY_MS` ms of
+    // simulated round-trip delay on its UDP path. Defaults to 0 (off).
+    int botLatencyMs = 0;
+    if (const char* envLat = std::getenv("GROUP2_BOT_LATENCY_MS")) {
+        char* end = nullptr;
+        const long n = std::strtol(envLat, &end, 10);
+        if (*end == '\0' && n >= 0 && n <= 200) {
+            botLatencyMs = static_cast<int>(n);
+            SDL_Log("[clientbot] applying simulated %d ms RTT to all bots (GROUP2_BOT_LATENCY_MS)", botLatencyMs);
+        } else {
+            SDL_Log("[clientbot] ignoring invalid GROUP2_BOT_LATENCY_MS='%s' (need 0..200)", envLat);
+        }
+    }
+
+    // Same for simulated packet loss. Each bot drops both directions
+    // independently at this rate. Defaults to 0 (off).
+    int botLossPct = 0;
+    if (const char* envLoss = std::getenv("GROUP2_BOT_LOSS_PCT")) {
+        char* end = nullptr;
+        const long n = std::strtol(envLoss, &end, 10);
+        if (*end == '\0' && n >= 0 && n <= 100) {
+            botLossPct = static_cast<int>(n);
+            SDL_Log("[clientbot] applying simulated %d %% UDP loss to all bots (GROUP2_BOT_LOSS_PCT)", botLossPct);
+        } else {
+            SDL_Log("[clientbot] ignoring invalid GROUP2_BOT_LOSS_PCT='%s' (need 0..100)", envLoss);
+        }
+    }
+
     installSignalHandlers();
 
     // ── Spawn bots ────────────────────────────────────────────────────────
@@ -162,6 +195,10 @@ int main(int argc, char* argv[])
             // to clean up the ones that did connect.
             continue;
         }
+        if (botLatencyMs > 0)
+            bot->setSimulatedLatencyMs(botLatencyMs);
+        if (botLossPct > 0)
+            bot->setSimulatedLossPercent(botLossPct);
         bots.push_back(std::move(bot));
         ++connected;
 

@@ -12,8 +12,10 @@
 #pragma once
 
 #include <cstdint>
+#include <glm/vec3.hpp>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 /// @brief Describes how a registered asset should be used.
 enum class AssetRole : uint8_t
@@ -27,11 +29,14 @@ enum class AssetRole : uint8_t
 /// @brief One entry in the asset registry.
 struct AssetEntry
 {
-    std::string name;          ///< Human-readable name (e.g. "porsche", "wraith", "map1").
-    std::string filename;      ///< GLB filename relative to assets/ (empty for procedural).
+    std::string name;                      ///< Human-readable name (e.g. "porsche", "wraith", "map1").
+    std::string filename;                  ///< GLB filename relative to assets/ (empty for procedural).
     AssetRole role = AssetRole::Entity;
-    int32_t modelIndex = -1;   ///< Renderer model index (-1 = not uploaded to GPU yet).
-    bool hasCollision = false; ///< True if collision was generated for this asset.
+    glm::vec3 renderScale{1.0f};           ///< Default per-entity render scale for this asset.
+    glm::vec3 renderTranslation{0.0f};     ///< Default per-entity local translation for this asset.
+    glm::vec3 renderRotationDegrees{0.0f}; ///< Default per-entity local Euler rotation in degrees.
+    int32_t modelIndex = -1;               ///< Renderer model index (-1 = not uploaded to GPU yet).
+    bool hasCollision = false;             ///< True if collision was generated for this asset.
 };
 
 /// @brief Central asset registry — maps names to renderer model indices.
@@ -45,10 +50,20 @@ class AssetRegistry
 {
 public:
     /// @brief Register a new asset. Returns its asset ID (index into entries_).
-    int add(const std::string& name, const std::string& filename = "", AssetRole role = AssetRole::Entity)
+    int add(const std::string& name,
+            const std::string& filename = "",
+            AssetRole role = AssetRole::Entity,
+            glm::vec3 renderScale = glm::vec3{1.0f},
+            glm::vec3 renderTranslation = glm::vec3{0.0f},
+            glm::vec3 renderRotationDegrees = glm::vec3{0.0f})
     {
         const int id = static_cast<int>(entries_.size());
-        entries_.push_back({.name = name, .filename = filename, .role = role});
+        entries_.push_back({.name = name,
+                            .filename = filename,
+                            .role = role,
+                            .renderScale = renderScale,
+                            .renderTranslation = renderTranslation,
+                            .renderRotationDegrees = renderRotationDegrees});
         nameToId_[name] = id;
         return id;
     }

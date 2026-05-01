@@ -11,6 +11,7 @@
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
 #include "systems/MatchController.hpp"
 
@@ -28,11 +29,22 @@ class ServerGame
 {
 public:
     /// @brief Bind to the given address and port, spawn test entities.
-    /// @param addr       Hostname or IP to bind to (e.g. "127.0.0.1").
-    /// @param port       TCP port to listen on.
-    /// @param tickRateHz Physics tick rate in Hz (default 128).
+    /// @param addr        Hostname or IP to bind to (e.g. "127.0.0.1").
+    /// @param port        TCP port to listen on.
+    /// @param tickRateHz  Physics tick rate in Hz (default 128).
+    /// @param snapshotHz  Registry snapshot send rate in Hz (default 32).
+    ///                    Must be ≤ tickRateHz; clamped if not. Phase 4
+    ///                    decouples snapshot rate from tick rate so the
+    ///                    server can keep deterministic 128 Hz physics
+    ///                    while only paying the serialization+broadcast
+    ///                    cost a fraction as often.
+    /// @param transport   Phase 3d: UDP sidecar feature toggles.
     /// @return True on success, false on network or initialisation failure.
-    bool init(const char* addr, Uint16 port, int tickRateHz = 128);
+    bool init(const char* addr,
+              Uint16 port,
+              int tickRateHz = 128,
+              int snapshotHz = 32,
+              const TransportConfig& transport = {});
 
     /// @brief Block on the game loop until shutdown() is called.
     ///
@@ -105,6 +117,22 @@ private:
     /// Called once per tick before weapon/damage systems.
     void updateAnimationAndHitboxes(float dt);
 
+    /// @brief Phase 6: write `LagCompTarget` onto each connected
+    /// player's entity from their connection's last-reported RTT.
+    ///
+    /// Translates `Connection::lastReportedRttMs` (ms) into a
+    /// `targetServerTick = max(0, currentServerTick - rewindTicks)`,
+    /// where `rewindTicks = clamp(rttMs * tickRateHz / 2000, 0,
+    /// k_maxLagCompTicks)`. Players with no client connection (e.g.
+    /// AI bots in a future expansion) keep their previous target,
+    /// which on the next pushHitboxHistory will become a valid
+    /// rewind anchor — but for now, only entities bound through
+    /// `clientEntities` get a target.
+    ///
+    /// Called once per tick between `pushHitboxHistory` and
+    /// `runWeapon`.
+    void updateLagCompTargets();
+
     physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
 
     Server server;                           ///< Owns the TCP socket and network I/O.
@@ -115,6 +143,13 @@ private:
     bool running = false;                        ///< Loop continues while true.
     int tickRateHz = 128;                        ///< Physics ticks per second.
     int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
+
+    /// @brief Send a registry snapshot every Nth tick. Computed in init() as
+    /// `max(1, tickRateHz / snapshotHz)` so the snapshot rate is roughly
+    /// `tickRateHz / snapshotEveryNTicks` Hz. With the default 128 / 32 = 4
+    /// the server snapshots every 4th tick — 4× less serialization +
+    /// broadcast work than pre-Phase-4.
+    int snapshotEveryNTicks = 4;
 
     // ── Server-side animation subsystem ──
     CharacterRig serverRig_;             ///< Shared skeleton (loaded from same FBX as client).

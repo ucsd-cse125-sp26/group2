@@ -41,19 +41,19 @@ void MessageStream::recvCompact()
     recvHead = 0;
 }
 
-bool MessageStream::poll(const std::function<void(const void* data, Uint32 size)>& callback)
+bool MessageStream::pumpReads()
 {
     if (!socket)
         return false;
 
-    // ── 1. Drain the kernel receive buffer fully ──────────────────────────
+    // ── Drain the kernel receive buffer fully ──────────────────────────
     //
     // Loop until the socket reports zero bytes available. Without this, a
-    // single poll() call only pulls k_readChunkBytes per game-thread tick,
-    // capping the client's drain rate. When the server produces faster than
-    // that, the kernel buffer accumulates indefinitely → snapshots queue up
-    // → PONG bytes get stuck behind them → measured ping spikes (the new-
-    // client ping-decay symptom).
+    // single call only pulls k_readChunkBytes per invocation, capping the
+    // drain rate. When the server produces faster than that, the kernel
+    // buffer accumulates indefinitely → snapshots queue up → PONG bytes
+    // get stuck behind them → measured ping spikes (the new-client
+    // ping-decay symptom).
     //
     // NET_ReadFromStreamSocket is non-blocking: returns 0 when the kernel
     // buffer is empty, >0 with the byte count, <0 on socket error.
@@ -66,9 +66,11 @@ bool MessageStream::poll(const std::function<void(const void* data, Uint32 size)
             break;        // kernel buffer empty → done draining
         recvBuf.insert(recvBuf.end(), buf, buf + n);
     }
+    return true;
+}
 
-    // ── 2. Drain complete framed messages out of recvBuf ──────────────────
-    //
+void MessageStream::drainComplete(const std::function<void(const void* data, Uint32 size)>& callback)
+{
     // Use a head offset rather than vector::erase(begin,...) which is O(N)
     // and turns "drain 10 backlogged messages of M bytes each" into O(N^2)
     // memmove work — a self-amplifying lag spiral. We compact only when the
@@ -86,8 +88,6 @@ bool MessageStream::poll(const std::function<void(const void* data, Uint32 size)
         recvHead += sizeof(Uint32) + len;
     }
 
-    // ── 3. Compact when worthwhile ───────────────────────────────────────
-    //
     // Cap memory growth without paying compact cost on every consumed
     // message. The thresholds bias toward "compact rarely, but always when
     // the buffer gets big".
@@ -97,6 +97,15 @@ bool MessageStream::poll(const std::function<void(const void* data, Uint32 size)
     {
         recvCompact();
     }
+}
 
+bool MessageStream::poll(const std::function<void(const void* data, Uint32 size)>& callback)
+{
+    // Single-threaded convenience: pump the kernel into recvBuf, then
+    // dispatch any complete frames. Stage 3c splits these phases across
+    // a network thread (pumpReads) and the game thread (drainComplete).
+    if (!pumpReads())
+        return false;
+    drainComplete(callback);
     return true;
 }

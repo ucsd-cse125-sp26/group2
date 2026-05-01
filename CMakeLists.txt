@@ -734,6 +734,12 @@ add_executable(group2
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -764,11 +770,14 @@ add_executable(group2
         src/ecs/components/Hitbox.hpp
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
+        src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
         src/ecs/components/Player.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/components/RespawnPoint.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
 )
@@ -1046,6 +1055,12 @@ add_executable(client
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1071,6 +1086,8 @@ add_executable(client
         src/ecs/components/Hitbox.hpp
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
+        src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
         src/ecs/components/Player.hpp
         src/network/MatchStatus.hpp
         src/client/systems/KillFeedEvent.hpp
@@ -1222,6 +1239,12 @@ add_executable(server
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/OutboundQueue.hpp
+        src/network/OutboundQueue.cpp
+        src/network/transport/FragmentReassembler.hpp
+        src/network/transport/PacketHeader.hpp
+        src/network/transport/UdpEndpoint.hpp
+        src/network/transport/UdpEndpoint.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1254,8 +1277,13 @@ add_executable(server
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
         src/ecs/components/Hitbox.hpp
+        src/ecs/components/HitboxHistory.hpp
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
+        src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
+        src/server/systems/HitboxHistorySystem.hpp
+        src/server/systems/HitboxHistorySystem.cpp
         src/client/animation/CharacterRig.hpp
         src/client/animation/CharacterRig.cpp
         src/client/animation/CharacterAnimator.hpp
@@ -1386,6 +1414,11 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistryArchive.hpp"

@@ -20,6 +20,7 @@
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "sfx/SfxSystem.hpp"
+#include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
@@ -124,9 +125,15 @@ private:
     /// Bumped once per physics tick group inside iterate() and copied into the
     /// local player's InputSnapshot.tick before each send. The server uses
     /// this to dedup re-sent inputs (multi-input redundancy) and apply only
-    /// inputs newer than its lastAppliedInputTick. Phase-5 prediction will
-    /// also use this as the key into the input ring buffer.
+    /// inputs newer than its lastAppliedInputTick. Phase-5 prediction also
+    /// keys the input ring buffer by it.
     uint32_t clientPredictTick = 0;
+
+    /// @brief Phase 5b: ring buffer of recent stamped inputs for replay-
+    /// based reconciliation. Each entry is keyed by clientPredictTick so
+    /// runReconciliation can look up the input that was sent for any
+    /// recent tick and feed it back into runMovement during replay.
+    InputRingBuffer inputRing_;
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
 
     // Runtime-tunable loop settings (exposed via ImGui)
@@ -165,6 +172,7 @@ private:
     int glowSphereModelIdx_ = -1;
     int movableSphereModelIdx_ = -1;
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
+    int weaponAssetIds_[4] = {-1, -1, -1, -1};
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
@@ -249,8 +257,7 @@ private:
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
 
-    // Scroll-wheel weapon switching
-    int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = prev slot, consumed each frame.
+    int pendingScrollSwitch_ = 0;    ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.

@@ -5,6 +5,7 @@
 
 #include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
+#include "ecs/AssetCatalog.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
@@ -16,6 +17,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
@@ -39,12 +41,15 @@
 #include "renderer/GraphicsConfig.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
+#include "systems/PredictionSystem.hpp"
+#include "systems/ReconciliationSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -52,6 +57,22 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
+
+namespace
+{
+int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
+{
+    return assets.add(
+        def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
+}
+
+glm::quat assetRotation(const AssetEntry& asset)
+{
+    const glm::vec3 r = glm::radians(asset.renderRotationDegrees);
+    return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
+           glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
+}
+} // namespace
 
 bool Game::init()
 {
@@ -156,8 +177,6 @@ bool Game::init()
     // Scale: the map was authored in meters; the game uses Quake units (inches).
     // 1 m = 39.3701 in.
     {
-        static constexpr float k_metersToInches = 39.3701f;
-
         // Toggle: does this map use SEPARATED collision and visual meshes?
         //   false → "prototype mode": every mesh in the GLB is both visual *and*
         //           collision (used for blockout maps like map1.glb).
@@ -183,14 +202,15 @@ bool Game::init()
         //                     triMesh, vertex-for-vertex, exactly as authored.
         static constexpr bool k_guessShapesProcessed = true;
 
-        const char* const mapFilename = k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : "maps/map1.glb";
+        const char* const mapFilename =
+            k_separatedCollisionMap ? "maps/map1_script_collisions.glb" : kMapAsset.filename;
 
         const char* base = SDL_GetBasePath();
         const std::string mapPath = std::string(base ? base : "") + "assets/" + mapFilename;
 
         // 1) Extract collision geometry.
         physics::MapLoadOptions opts;
-        opts.scale = k_metersToInches;
+        opts.scale = kMapAsset.loadScale;
         opts.allMeshesAreCollision = !k_separatedCollisionMap;
         // In separated mode, recognise collision-prefixed nodes; in prototype
         // mode, the field is unused (every mesh is collision by definition).
@@ -215,9 +235,9 @@ bool Game::init()
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
         // In separated mode, exclude collision-only nodes so they aren't rendered.
         const std::string visualExclude = k_separatedCollisionMap ? std::string(k_collisionPattern) : std::string();
-        const int mapId = assets_.add("map1", mapFilename, AssetRole::Map);
-        const int mapModelIdx =
-            renderer.loadSceneModel(mapFilename, glm::vec3(0.0f), k_metersToInches, false, visualExclude);
+        const int mapId = addAssetDefinition(assets_, kMapAsset);
+        const int mapModelIdx = renderer.loadSceneModel(
+            mapFilename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs, visualExclude);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
             renderer.setModelScenePass(mapModelIdx, true);
@@ -235,45 +255,29 @@ bool Game::init()
         const std::string basePath = base ? base : "";
 
         // Helper: load a prop with render + collision in one call.
-        // `decomposeProp = true` runs V-HACD on each non-convex sub-mesh so
-        // organic/detailed shapes (a bottle, a metallic pallet) end up as a
+        // `def.decomposeCollision = true` runs V-HACD on each non-convex sub-mesh
+        // so organic/detailed shapes (a bottle, a metallic pallet) end up as a
         // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
         // a few seconds of load time per prop but kills triMesh edge-jitter.
-        auto loadProp = [&](const char* name,
-                            const char* filename,
-                            glm::vec3 pos,
-                            float scale,
-                            bool flipUVs = false,
-                            bool decomposeProp = false) {
-            const int id = assets_.add(name, filename, AssetRole::Prop);
-            const int modelIdx = renderer.loadSceneModel(filename, pos, scale, flipUVs);
+        auto loadProp = [&](const AssetDefinition& def) {
+            const int id = addAssetDefinition(assets_, def);
+            const int modelIdx = renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
             assets_.setModelIndex(id, modelIdx);
             if (modelIdx >= 0) {
                 renderer.setModelScenePass(modelIdx, true);
             }
 
             // Load collision at the same position/scale.
-            const std::string fullPath = basePath + "assets/" + filename;
-            if (physics::loadPropCollision(fullPath, mapCollision_, pos, scale, decomposeProp)) {
+            const std::string fullPath = basePath + "assets/" + def.filename;
+            if (physics::loadPropCollision(
+                    fullPath, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision))
+            {
                 assets_.setHasCollision(id);
             }
         };
 
-        // Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
-        // Pallet + bottle are organic/non-convex; decompose them via V-HACD so
-        // collision stays smooth even when the player slides along curved parts.
-        loadProp("pallet",
-                 "metallic_pallet_factory_store.glb",
-                 glm::vec3(0.0f, 0.0f, 600.0f),
-                 0.25f,
-                 /*flipUVs=*/true,
-                 /*decomposeProp=*/true);
-        loadProp("bottle",
-                 "bottle_a.glb",
-                 glm::vec3(100.0f, 0.0f, 400.0f),
-                 20.0f,
-                 /*flipUVs=*/false,
-                 /*decomposeProp=*/true);
+        for (const AssetDefinition& def : kPropAssets)
+            loadProp(def);
 
         // Update the active world with the new collision data (map + all props).
         physics::setActiveWorld(mapCollision_.geometry());
@@ -281,8 +285,9 @@ bool Game::init()
 
     // ── Load entity models (render only, drawn via EntityRenderCmd) ──────
     {
-        const int id = assets_.add("wraith", "Apex_Legend_Wraith.glb", AssetRole::Entity);
-        wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+        const int id = addAssetDefinition(assets_, kWraithAsset);
+        wraithModelIdx = renderer.loadSceneModel(
+            kWraithAsset.filename, kWraithAsset.loadTranslation, kWraithAsset.loadScale, kWraithAsset.flipUVs);
         assets_.setModelIndex(id, wraithModelIdx);
         if (wraithModelIdx < 0)
             SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
@@ -290,15 +295,16 @@ bool Game::init()
 
     // Load all weapon models (per WeaponType)
     {
-        static const char* k_weaponNames[] = {"weapon_rifle", "weapon_rocket", "weapon_railgun", "weapon_energy"};
-        for (int i = 0; i < 4; ++i) {
-            const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
-            if (info.filename) {
-                const int id = assets_.add(k_weaponNames[i], info.filename, AssetRole::Entity);
-                weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
+        for (std::size_t i = 0; i < kWeaponAssets.size(); ++i) {
+            const AssetDefinition& def = kWeaponAssets[i];
+            if (def.filename) {
+                const int id = addAssetDefinition(assets_, def);
+                weaponAssetIds_[i] = id;
+                weaponModelIndices_[i] =
+                    renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
                 assets_.setModelIndex(id, weaponModelIndices_[i]);
                 if (weaponModelIndices_[i] < 0)
-                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
             }
         }
     }
@@ -306,19 +312,19 @@ bool Game::init()
     // ── Procedural effects ──────────────────────────────────────────────
     {
         LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
-        const int id = assets_.add("glow_sphere", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[0]);
         glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
         assets_.setModelIndex(id, glowSphereModelIdx_);
     }
     {
         LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
-        const int id = assets_.add("glow_sphere_movable", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[1]);
         movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
         assets_.setModelIndex(id, movableSphereModelIdx_);
     }
     {
         LoadedModel cylModel = createGlowCylinder(24, 1, glm::vec3(8.0f, 2.0f, 10.0f));
-        const int id = assets_.add("glow_cylinder", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[2]);
         glowCylinderModelIdx_ = renderer.uploadSceneModel(cylModel);
         assets_.setModelIndex(id, glowCylinderModelIdx_);
     }
@@ -346,7 +352,22 @@ bool Game::init()
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
-        registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+        // Phase 5a: PreviousPosition is now seeded by Client::dispatchMessage
+        // for ALL entities with Position on first snapshot, including the
+        // local player. Use emplace_or_replace here so this callback stays
+        // idempotent regardless of whether the seed pass got there first.
+        registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        // Phase 5b: emplace PlayerSimState on the local player so runMovement
+        // (which iterates `<..., PlayerSimState, ...>`) will process it
+        // during client-side prediction. PlayerSimState is a server-only
+        // component — remote players don't have it on the client, so the
+        // view filter naturally narrows to just the local player.
+        // Server's snapshots don't replicate PlayerSimState so this stays
+        // entirely client-side; that means subtle timer fields can drift
+        // between client/server — fixed by Phase 4b's owner-only stream
+        // when it lands.
+        registry.emplace_or_replace<PlayerSimState>(local);
 
         // Only add Controllable if the player is not already dead (edge case:
         // joining while mid-death on a long-running server).
@@ -475,7 +496,7 @@ bool Game::init()
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
 
     const NetworkAddress clientNet = netCfg.clientNetwork;
-    if (!client.init(clientNet.host.c_str(), clientNet.port)) {
+    if (!client.init(clientNet.host.c_str(), clientNet.port, netCfg.transport)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
         renderer.quit();
@@ -685,12 +706,12 @@ SDL_AppResult Game::event(SDL_Event* event)
         sfxSystem.handleEvent(*event);
     }
 
-    // Scroll wheel cycles weapon slots
+    // Scroll wheel toggles between primary and secondary weapon slots.
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
         if (event->wheel.y > 0)
-            pendingScrollSwitch_ = -1; // scroll up → previous slot
+            pendingScrollSwitch_ = -1;
         else if (event->wheel.y < 0)
-            pendingScrollSwitch_ = 1;  // scroll down → next slot
+            pendingScrollSwitch_ = 1;
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
@@ -867,21 +888,16 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry);
         systems::runWeaponKeys(registry);
 
-        // Apply scroll-wheel weapon switch (overrides key-based switch for this frame)
+        // Apply scroll-wheel weapon switch, constrained to primary/secondary.
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
-                // Determine current slot from WeaponState
-                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2, QUATERNARY=3
+                int slotIdx = 0;
                 registry.view<LocalPlayer, WeaponState>().each(
                     [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
 
-                // Cycle: add direction, wrap around 4 slots
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 4) % 4;
-
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 2) % 2;
                 snap.switchToPrimary = (slotIdx == 0);
                 snap.switchToSecondary = (slotIdx == 1);
-                snap.switchToTertiary = (slotIdx == 2);
-                snap.switchToQuaternary = (slotIdx == 3);
             });
             pendingScrollSwitch_ = 0;
         }
@@ -906,7 +922,7 @@ SDL_AppResult Game::iterate()
 
         // Stamp the current InputSnapshot with the next predict tick BEFORE
         // sending. The server uses this tick for dedup against
-        // lastAppliedInputTick, and Phase-5 prediction will key the input
+        // lastAppliedInputTick, and Phase-5b prediction keys the input
         // ring buffer by it. We bump once per tick *group* (not per inner
         // tick) — multiple physics ticks in one frame share the same input,
         // because we only sample input once per group.
@@ -914,21 +930,38 @@ SDL_AppResult Game::iterate()
         registry.view<InputSnapshot, LocalPlayer>().each(
             [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
 
-        // Send the redundant input batch (last k_inputRedundancy ticks). With
-        // TCP loss is a non-issue, but redundancy is still worth keeping for
-        // the Phase-3 UDP swap — same wire format works for both transports.
+        // Send the redundant input batch (last k_inputRedundancy ticks).
         systems::runInputSend(registry, client);
+
+        // Phase 5b: push the just-stamped input into the ring buffer so
+        // reconciliation can replay it after a snapshot arrives.
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
 
         physicsRan = true;
 
-        // Interpolate position between last two server updates
+        // Phase 5a: PreviousPosition is updated by Client::dispatchMessage
+        // when a snapshot arrives, not every physics tick. The renderer
+        // interpolates over the snapshot interval via
+        // client.getSnapshotAlpha() so motion stays smooth at the much-
+        // coarser snapshot rate (e.g. 32 Hz vs 128 Hz physics).
+        //
+        // Phase 5b: per physics tick we ALSO snapshot the local player's
+        // pos→prev BEFORE running prediction so the renderer can show a
+        // tick-rate-smooth interpolation of the local player even when
+        // server snapshots arrive far less frequently. The local player
+        // uses physics-tick alpha (in render code below); remote players
+        // use the snapshot alpha.
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
 
-            // Snapshot position before each tick so the last tick's delta is
-            // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
-            registry.view<Position, PreviousPosition>().each(
+            // Phase 5b: capture local pos→prev for tick-rate interp,
+            // then run client-side prediction. PlayerSimState filter on
+            // runMovement narrows automatically to just the local player
+            // (remotes don't have PlayerSimState on the client).
+            registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+            systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
 
             ++tickCount;
             ++ticksThisFrame;
@@ -938,6 +971,20 @@ SDL_AppResult Game::iterate()
         if (!client.poll(registry)) {
             // TODO: Update so reset to menu or some other non-crash state
             return SDL_APP_SUCCESS;
+        }
+
+        // Phase 5b: a snapshot just applied (overwriting the local
+        // player's Position with the server's authoritative value at the
+        // server-acked client tick). Replay the inputs we sent since
+        // then to restore the predicted state at the *current* predict
+        // tick — net effect is "server-side correction folded in,
+        // client-side immediate response preserved".
+        if (client.consumeSnapshotApplied()) {
+            const uint32_t ackedTick = client.getServerAckedClientTick();
+            if (ackedTick != 0 && clientPredictTick > ackedTick) {
+                systems::runReconciliation(
+                    registry, inputRing_, ackedTick, clientPredictTick, k_physicsDt, physics::activeWorld());
+            }
         }
 
         refreshRemotePlayerRenderables();
@@ -956,7 +1003,11 @@ SDL_AppResult Game::iterate()
     float targetRoll = 0.0f; // degrees, from PlayerVisState
 
     if (renderSeparateFromPhysics) {
-        // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
+        // Phase 5b: local player uses physics-tick alpha — its Position
+        // updates every 7.8 ms (128 Hz) via client-side prediction, so
+        // the lerp window matches that interval. Phase 5a's snapshot
+        // alpha is used for *remote* entities (in the render-list loop
+        // below) where Position only updates on snapshot arrival.
         const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
         registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerVisState>().each(
@@ -1006,9 +1057,7 @@ SDL_AppResult Game::iterate()
             // Check ammo — don't spawn VFX if the magazine is empty.
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-                const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
-                                         : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                                 : ws.primary;
+                const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
                 hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
             });
 
@@ -1065,9 +1114,7 @@ SDL_AppResult Game::iterate()
         // Charge rifle: play load sound once when charging starts.
         bool isChargingNow = false;
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
-                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                             : ws.primary;
+            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
             if (getWeaponConfig(gun.type).isCharge && gun.chargeTime > 0.0f)
                 isChargingNow = true;
         });
@@ -1255,6 +1302,11 @@ SDL_AppResult Game::iterate()
 
     // Build entity render list
     {
+        // Phase 5a: snapshot-rate alpha for remote-entity position lerp.
+        // Read once per frame; applied to every entity below that has a
+        // PreviousPosition (i.e. has received at least one snapshot).
+        const float snapshotAlpha = client.getSnapshotAlpha();
+
         std::vector<EntityRenderCmd> entityCmds;
         registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
             if (!rend.visible || rend.modelIndex < 0)
@@ -1266,7 +1318,18 @@ SDL_AppResult Game::iterate()
             if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
-            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
+            // Phase 5a: lerp from PreviousPosition (= last snapshot) to
+            // Position (= current snapshot) over the snapshot interval.
+            // Entities without PreviousPosition (e.g. just-spawned) fall
+            // back to the raw current position, but Client::dispatchMessage
+            // seeds PreviousPosition on first snapshot apply so this
+            // fallback should rarely fire in practice.
+            glm::vec3 renderPos = pos.value;
+            if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+            }
+
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + rend.translation);
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
@@ -1284,10 +1347,7 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<RespawnTimer>(e))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
-                                     : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
-                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                             : ws.primary;
+            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
                 return;
@@ -1479,10 +1539,7 @@ SDL_AppResult Game::iterate()
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
-                                 : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
-                                 : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                         : ws.primary;
+        const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
         currentEquippedType_ = gun.type;
     });
 
@@ -1736,6 +1793,15 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
 
+    // Phase 6 testing: network simulator window (latency + packet loss).
+    // Slider values flow from DebugUI → Client each frame; idempotent when
+    // unchanged (Client clamps and atomically stores). Latency is split
+    // half-and-half across outbound + inbound delay queues; loss is an
+    // independent Bernoulli drop applied per-datagram in each direction.
+    debugUI.buildNetworkSimUI();
+    client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+    client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
+
     // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
 
     // Process ammo refill request — pulse refillAmmo on InputSnapshot for
@@ -1984,18 +2050,8 @@ SDL_AppResult Game::iterate()
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
             const GunInstance* gun = &ws.primary;
-            switch (ws.current) {
-            case WeaponSlot::SECONDARY:
+            if (ws.current == WeaponSlot::SECONDARY) {
                 gun = &ws.secondary;
-                break;
-            case WeaponSlot::TERTIARY:
-                gun = &ws.tertiary;
-                break;
-            case WeaponSlot::QUATERNARY:
-                gun = &ws.quaternary;
-                break;
-            default:
-                break;
             }
             hudState.ammoClip = gun->currentMagAmmo;
             hudState.ammoReserve = gun->totalAmmo;
@@ -2087,8 +2143,17 @@ SDL_AppResult Game::iterate()
                 if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
                     status.kills = pms->kills;
                     status.deaths = pms->deaths;
+                    // Per-player ping: the server stamps each client's
+                    // self-reported RTT onto their PlayerMatchStats.rttMs
+                    // every tick (see ServerGame::updateLagCompTargets),
+                    // which then rides the existing snapshot stream to
+                    // every connected client. Reading from this row's
+                    // own component instead of `client.getNetStats()`
+                    // means every scoreboard row shows the right
+                    // player's ping — not the local viewer's ping
+                    // duplicated across every line.
+                    status.ping = static_cast<int>(pms->rttMs);
                 }
-                status.ping = static_cast<int>(client.getNetStats().rttMs);
                 hudAllPlayers.push_back(status);
             });
         // For now all players go into allies (no team system exists).
@@ -2267,37 +2332,42 @@ void Game::refreshRemoteRespawnRenderables()
     registry.view<Position, WeaponSpawner, CollisionShape>().each(
         [&](entt::entity e, const Position&, const WeaponSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            rend.modelIndex = 1;
-
-            switch (spawner.type) {
-            case WeaponType::Rifle:
-                rend.modelIndex = 6;
-                rend.scale = glm::vec3(0.025f);
-                break;
-            case WeaponType::RailGun:
-                rend.modelIndex = 7;
-                rend.scale = glm::vec3(1.0f);
-                break;
-            case WeaponType::Rocket:
-                rend.modelIndex = 8;
-                rend.scale = glm::vec3(0.025f);
-                break;
-            case WeaponType::EnergyGun:
-                rend.modelIndex = 9;
-                rend.scale = glm::vec3(1.0f);
-                break;
-            default:
-                rend.modelIndex = 1;
-                rend.scale = glm::vec3(1.0f);
+            const int weaponIndex = static_cast<int>(spawner.type);
+            if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
+                weaponAssetIds_[weaponIndex] < 0)
+            {
+                rend.modelIndex = -1;
+                rend.visible = false;
+                return;
             }
 
-            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            // rend.scale = glm::vec3(1);
-            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-            rend.visible = true;
-            // if (spawner.hasWeapon) {
-            //     rend.visible = true;
-            // }
+            const int assetId = weaponAssetIds_[weaponIndex];
+            const AssetEntry& asset = assets_.entry(assetId);
+
+            rend.modelIndex = asset.modelIndex;
+            rend.scale = asset.renderScale;
+
+            // Weapon bob and rotate
+            static constexpr float k_spawnerSpinRadiansPerSec = glm::radians(45.0f);
+            static constexpr float k_spawnerBobAmplitude = 6.0f;
+            static constexpr float k_spawnerBobHz = 0.6f;
+            static constexpr float k_twoPi = 6.28318530718f;
+
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.visible = spawner.hasWeapon;
+
+            if (spawner.hasWeapon) {
+                rend.orientation =
+                    glm::angleAxis(t * k_spawnerSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
+
+                rend.translation =
+                    asset.renderTranslation +
+                    glm::vec3{0.0f, std::sin(t * k_twoPi * k_spawnerBobHz) * k_spawnerBobAmplitude, 0.0f};
+            } else {
+                rend.orientation = assetRotation(asset);
+                rend.translation = asset.renderTranslation;
+            }
         });
 }
 
