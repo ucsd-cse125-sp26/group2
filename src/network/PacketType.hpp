@@ -16,4 +16,15 @@ enum class PacketType : uint8_t
     PONG,             ///< Server -> Client: latency measurement reply (echoes timestamp).
     MATCH_STATE,      ///< Server -> All clients: match phase transition update.
     KILL_EVENT,       ///< Server -> All clients: player kill notification.
+
+    /// @brief Server -> Client: delta against a previously-received full snapshot.
+    ///
+    /// PR-10 (server-perf): wire format of the payload is
+    ///   `[currentTick:u32] [fromTick:u32] [baselineSize:u32] [rleDelta:bytes]`
+    /// where `rleDelta` is an RLE stream of (skipBytes:u32, copyBytes:u32,
+    /// copyData:u8[copyBytes]) triples — apply over a copy of the baseline
+    /// at `fromTick` to reconstruct the full snapshot bytes for tick
+    /// `currentTick`. Clients drop the packet if they don't currently have
+    /// the baseline; a periodic UPDATE_REGISTRY (full keyframe) recovers.
+    UPDATE_REGISTRY_DELTA,
 };

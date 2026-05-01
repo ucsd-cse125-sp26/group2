@@ -865,36 +865,94 @@ bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 
 void Server::broadcastRegistry(const Registry& registry)
 {
-    // PR-2: serialize once on the game thread, then publish a pair of
-    // shared_ptr-wrapped byte buffers for the network thread to fan
-    // out. Pre-PR-2, this function ran the full per-client send loop
-    // (~1.57 ms p50 at 50 bots in PR-1 baseline) holding stateMutex_
-    // the entire time — which both burned tick budget and starved the
-    // network thread's I/O cycle.
-    //
     // Two buffers because the two transports want different shapes:
-    //   - UDP: raw payload `[PacketType][serialized state]`. The
+    //   - UDP: raw payload `[PacketType][...wire fields]`. The
     //     PacketHeader is added per-fragment by `sendFragmented`.
-    //   - TCP: framed `[len:u32][PacketType][serialized state]`. Goes
+    //   - TCP: framed `[len:u32][PacketType][...wire fields]`. Goes
     //     straight into OutboundQueue → NET_WriteToStreamSocket.
     //
     // Both are immutable post-publish. The shared_ptr lets N clients
     // observe the same bytes via N pointer copies.
-    auto raw = registry_serialization::serialize(registry);
-    raw.insert(raw.begin(), static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
-    const std::size_t snapBytes = raw.size();
+    //
+    // PR-10 (server-perf): wire format gains a snapshot tick + an
+    // optional delta variant.
+    //
+    //   Full snapshot (UPDATE_REGISTRY):
+    //     [PacketType:u8] [tick:u32] [serializedBytes...]
+    //
+    //   Delta snapshot (UPDATE_REGISTRY_DELTA):
+    //     [PacketType:u8] [tick:u32] [fromTick:u32]
+    //     [baselineSize:u32] [rlePatch...]
+    //
+    // We always serialize the full registry first, then decide which
+    // form to ship by patch size. Force a full keyframe every Nth
+    // snapshot so clients that lost a delta resync within ≤ 500 ms.
 
-    // Build the framed TCP-fallback buffer once. Pre-PR-2 this was a
-    // per-client `frameMessage()` call inside the broadcast loop —
-    // O(N) heap allocations and memcpys. Now it's exactly one.
-    std::vector<uint8_t> framedBuf(sizeof(Uint32) + snapBytes);
-    {
-        const auto msgLen = static_cast<Uint32>(snapBytes);
-        std::memcpy(framedBuf.data(), &msgLen, sizeof(msgLen));
-        std::memcpy(framedBuf.data() + sizeof(msgLen), raw.data(), snapBytes);
+    constexpr std::uint32_t k_keyframeInterval = 16;
+
+    auto raw = registry_serialization::serialize(registry);
+    const std::uint32_t thisTick = ++snapshotCounter_;
+    const bool forceFull =
+        prevSnapshotRaw_.empty() || prevSnapshotTick_ == 0 || (snapshotCounter_ % k_keyframeInterval) == 0;
+
+    std::vector<uint8_t> wirePayload; // [PacketType][...] — UDP raw form
+    bool sentDelta = false;
+
+    if (!forceFull && raw.size() == prevSnapshotRaw_.size()) {
+        auto patch = registry_serialization::encodeDelta(prevSnapshotRaw_, raw);
+        // Only ship a delta if the patch beats the full by >25 %.
+        // Otherwise the per-client wire saving doesn't justify the
+        // extra encode/decode CPU. Threshold is pragmatic; revisit
+        // once we have a real-traffic profile.
+        const std::size_t deltaWireSize = 1 /*PacketType*/ + sizeof(std::uint32_t) /*tick*/ +
+                                          sizeof(std::uint32_t) /*fromTick*/ + sizeof(std::uint32_t) /*size*/ +
+                                          patch.size();
+        const std::size_t fullWireSize = 1 + sizeof(std::uint32_t) + raw.size();
+        if (deltaWireSize * 4 < fullWireSize * 3) {
+            // Build delta wire payload.
+            wirePayload.reserve(deltaWireSize);
+            wirePayload.push_back(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY_DELTA));
+            const auto t = thisTick;
+            const auto ft = prevSnapshotTick_;
+            const auto sz = static_cast<std::uint32_t>(raw.size());
+            const auto* tp = reinterpret_cast<const uint8_t*>(&t);
+            const auto* fp = reinterpret_cast<const uint8_t*>(&ft);
+            const auto* sp = reinterpret_cast<const uint8_t*>(&sz);
+            wirePayload.insert(wirePayload.end(), tp, tp + sizeof(t));
+            wirePayload.insert(wirePayload.end(), fp, fp + sizeof(ft));
+            wirePayload.insert(wirePayload.end(), sp, sp + sizeof(sz));
+            wirePayload.insert(wirePayload.end(), patch.begin(), patch.end());
+            sentDelta = true;
+        }
     }
 
-    auto payload = std::make_shared<const std::vector<uint8_t>>(std::move(raw));
+    if (!sentDelta) {
+        // Full snapshot path.
+        wirePayload.reserve(1 + sizeof(std::uint32_t) + raw.size());
+        wirePayload.push_back(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
+        const auto t = thisTick;
+        const auto* tp = reinterpret_cast<const uint8_t*>(&t);
+        wirePayload.insert(wirePayload.end(), tp, tp + sizeof(t));
+        wirePayload.insert(wirePayload.end(), raw.begin(), raw.end());
+    }
+
+    // Save the just-serialized RAW (no packet prefix) bytes as the
+    // baseline for the *next* delta. We do this AFTER deciding the
+    // wire form so the delta we sent referenced the OLD prev.
+    prevSnapshotRaw_ = std::move(raw);
+    prevSnapshotTick_ = thisTick;
+
+    const std::size_t wireBytes = wirePayload.size();
+
+    // Build the TCP-framed buffer once.
+    std::vector<uint8_t> framedBuf(sizeof(Uint32) + wireBytes);
+    {
+        const auto msgLen = static_cast<Uint32>(wireBytes);
+        std::memcpy(framedBuf.data(), &msgLen, sizeof(msgLen));
+        std::memcpy(framedBuf.data() + sizeof(msgLen), wirePayload.data(), wireBytes);
+    }
+
+    auto payload = std::make_shared<const std::vector<uint8_t>>(std::move(wirePayload));
     auto framed = std::make_shared<const std::vector<uint8_t>>(std::move(framedBuf));
 
     std::size_t fanout = 0;
@@ -907,13 +965,8 @@ void Server::broadcastRegistry(const Registry& registry)
         fanout = clients.size();
     }
 
-    // PR-1 telemetry: `bytesSent` and `snapshotsSent` are the fanout
-    // figures; per-client send happens later on the network thread but
-    // we attribute it here so the 1 Hz log line correlates wire cost
-    // with the snapshot tick that produced it. Approximation matches
-    // the pre-PR-2 behavior to within rounding.
     auto& nc = ::group2::perf::net();
-    nc.bytesSent.fetch_add(static_cast<std::uint64_t>(snapBytes) * fanout, std::memory_order_relaxed);
+    nc.bytesSent.fetch_add(static_cast<std::uint64_t>(wireBytes) * fanout, std::memory_order_relaxed);
     nc.snapshotsSent.fetch_add(fanout, std::memory_order_relaxed);
 }
 

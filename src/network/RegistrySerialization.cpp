@@ -135,6 +135,92 @@ using Synced = std::tuple<entt::entity,
                           RespawnTimer,
                           WeaponSpawner>;
 
+// ── PR-10: snapshot delta encoding ──────────────────────────────────────
+
+std::vector<uint8_t> encodeDelta(const std::vector<uint8_t>& baseline, const std::vector<uint8_t>& current)
+{
+    std::vector<uint8_t> patch;
+    if (baseline.size() != current.size()) {
+        // Caller contract violation; return empty patch and let the
+        // caller fall back to a full snapshot. Defensive only — server
+        // already guards this.
+        return patch;
+    }
+
+    // Worst-case patch size = current.size() + a few dozen bytes of
+    // headers. Reserving once avoids reallocation churn.
+    patch.reserve(current.size() + 16);
+
+    const std::size_t n = current.size();
+    std::size_t i = 0;
+    while (i < n) {
+        // Run of unchanged bytes.
+        std::size_t skipStart = i;
+        while (i < n && current[i] == baseline[i])
+            ++i;
+        const auto skipLen = static_cast<std::uint32_t>(i - skipStart);
+
+        // Run of changed bytes.
+        std::size_t copyStart = i;
+        while (i < n && current[i] != baseline[i])
+            ++i;
+        const auto copyLen = static_cast<std::uint32_t>(i - copyStart);
+
+        // Skip header.
+        const auto* sl = reinterpret_cast<const std::uint8_t*>(&skipLen);
+        patch.insert(patch.end(), sl, sl + sizeof(skipLen));
+        // Copy header.
+        const auto* cl = reinterpret_cast<const std::uint8_t*>(&copyLen);
+        patch.insert(patch.end(), cl, cl + sizeof(copyLen));
+        // Copy bytes.
+        if (copyLen > 0) {
+            patch.insert(patch.end(),
+                         current.begin() + static_cast<std::ptrdiff_t>(copyStart),
+                         current.begin() + static_cast<std::ptrdiff_t>(copyStart + copyLen));
+        }
+    }
+
+    return patch;
+}
+
+std::vector<uint8_t>
+applyDelta(const std::vector<uint8_t>& baseline, const uint8_t* patch, std::size_t patchSize, std::size_t outputSize)
+{
+    std::vector<uint8_t> output;
+    if (baseline.size() != outputSize)
+        return output; // size mismatch → cannot apply
+
+    output.assign(baseline.begin(), baseline.end());
+
+    std::size_t pos = 0;
+    std::size_t patchPos = 0;
+    while (pos < outputSize) {
+        if (patchPos + 2 * sizeof(std::uint32_t) > patchSize) {
+            // Truncated patch — bail with empty output (drop packet).
+            return std::vector<uint8_t>{};
+        }
+        std::uint32_t skipLen = 0;
+        std::uint32_t copyLen = 0;
+        std::memcpy(&skipLen, patch + patchPos, sizeof(skipLen));
+        patchPos += sizeof(skipLen);
+        std::memcpy(&copyLen, patch + patchPos, sizeof(copyLen));
+        patchPos += sizeof(copyLen);
+
+        // Skip range copies from baseline (already there in `output`).
+        pos += skipLen;
+
+        if (pos + copyLen > outputSize || patchPos + copyLen > patchSize)
+            return std::vector<uint8_t>{}; // malformed
+
+        if (copyLen > 0) {
+            std::memcpy(output.data() + pos, patch + patchPos, copyLen);
+            patchPos += copyLen;
+            pos += copyLen;
+        }
+    }
+    return output;
+}
+
 std::vector<uint8_t> serialize(const entt::registry& registry)
 {
     OutputArchive snapshotArchive;

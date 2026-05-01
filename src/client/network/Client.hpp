@@ -206,7 +206,23 @@ private:
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     bool localPlayerReadyNotified = false;         ///< True if localPlayerReadyFn has been called.
 
-    NetworkStats stats;                            ///< Live network metrics.
+    // ── PR-10 (server-perf): snapshot delta encoding state ──────────────
+    //
+    // `lastSnapshotPayload_` holds the most-recent FULL snapshot's raw
+    // entt-serialized bytes (no PacketType prefix, no tick). When a
+    // DELTA packet arrives we apply its patch on top of these bytes
+    // to reconstruct the new full state, then feed *that* into the
+    // existing Loader. Both bytes and tick are then replaced so
+    // subsequent deltas have the right baseline.
+    //
+    // If `fromTick` on a DELTA doesn't match `lastSnapshotTick_` the
+    // packet is silently dropped (the missing piece) — the next
+    // periodic full keyframe (every 16 snapshots ≈ 500 ms at 32 Hz)
+    // will resync.
+    std::vector<uint8_t> lastSnapshotPayload_;
+    std::uint32_t lastSnapshotTick_ = 0;
+
+    NetworkStats stats; ///< Live network metrics.
 
     // Bandwidth tracking — accumulated between updateStats() calls.
     uint64_t bytesSentWindow = 0;

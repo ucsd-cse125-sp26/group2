@@ -336,6 +336,28 @@ private:
     std::shared_ptr<const std::vector<uint8_t>> pendingSnapshotPayload_;
     std::shared_ptr<const std::vector<uint8_t>> pendingSnapshotFramed_;
 
+    // ── PR-10 (server-perf): snapshot delta encoding state ────────────────
+    //
+    // `prevSnapshotRaw_` is the *unprefixed* `registry_serialization::
+    // serialize()` output from the previous broadcastRegistry call —
+    // i.e. NOT the wire-prefixed form, just the entt-snapshot bytes.
+    // We diff the next call's serialize() against this; if the patch
+    // is at least 25% smaller than a full payload AND the size matches
+    // (entity count unchanged), we ship a DELTA packet referencing
+    // `prevSnapshotTick_`. Clients drop the DELTA if their last-applied
+    // tick != `prevSnapshotTick_` — they wait for the next FULL.
+    //
+    // `snapshotCounter_` increments each broadcastRegistry call. Every
+    // `k_keyframeInterval`-th call is forced to FULL regardless of
+    // delta size, so clients that fell behind one delta still resync
+    // within ≤ 500 ms (at 32 Hz × 16 = 500 ms).
+    //
+    // All three fields are touched only on the game thread inside
+    // broadcastRegistry — no synchronisation needed.
+    std::vector<uint8_t> prevSnapshotRaw_;
+    std::uint32_t prevSnapshotTick_ = 0;
+    std::uint32_t snapshotCounter_ = 0;
+
     // ── PR-4 (server-perf): atomic-published read snapshots ───────────────
     //
     // Pre-PR-4 the game-thread query path (snapshotClientRtts,

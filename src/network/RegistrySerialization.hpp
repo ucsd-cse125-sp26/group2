@@ -26,6 +26,47 @@ struct RemoteInputRecord
 /// @return A byte vector containing the serialized snapshot.
 std::vector<uint8_t> serialize(const entt::registry& registry);
 
+// ── PR-10 (server-perf): snapshot delta encoding ────────────────────────
+//
+// Two helpers pair to give a simple bytewise diff against a prior
+// snapshot.  Format:
+//   [skip:u32] [copy:u32] [copy_bytes : u8 × copy] (repeated until output
+//                                                   covers `current.size()`)
+// The decoder walks the same triples, copying `skip` bytes from the
+// baseline and `copy` bytes from the patch into the output buffer.
+//
+// Caller contract: only emit a delta when `baseline.size() ==
+// current.size()`. Different sizes mean the entt entity-list section
+// shifted; the sequential skip/copy form would mis-align. Server
+// falls back to a full snapshot in that case.
+//
+// `encodeDelta` returns the patch bytes only — callers prepend the
+// `[currentTick:u32] [fromTick:u32] [size:u32]` wire header outside.
+
+/// @brief Compute an RLE byte-diff patch from `baseline` to `current`.
+///
+/// Both buffers MUST have the same size; the returned patch reconstructs
+/// `current` from a copy of `baseline` via `applyDelta`. The patch is
+/// always smaller than `current` only when many bytes are unchanged;
+/// callers should compare patch size to full size before sending.
+///
+/// @param baseline  Bytes the receiver currently holds.
+/// @param current   Bytes the receiver should arrive at.
+/// @return Patch bytes (possibly empty if both inputs are byte-identical).
+std::vector<uint8_t> encodeDelta(const std::vector<uint8_t>& baseline, const std::vector<uint8_t>& current);
+
+/// @brief Reconstruct `current` from `baseline` + patch.
+///
+/// @param baseline  Receiver's stored baseline (size must match
+///                  `outputSize`).
+/// @param patch     The bytes returned by a prior `encodeDelta`.
+/// @param outputSize Expected size of the reconstructed buffer (passed
+///                  on the wire as the third u32 of the delta header).
+/// @return Reconstructed buffer of size `outputSize`, or empty on parse
+///         error (truncated patch, malformed offsets).
+std::vector<uint8_t>
+applyDelta(const std::vector<uint8_t>& baseline, const uint8_t* patch, std::size_t patchSize, std::size_t outputSize);
+
 /// @brief Deserializes registry snapshots received from the server and applies them locally.
 class Loader
 {

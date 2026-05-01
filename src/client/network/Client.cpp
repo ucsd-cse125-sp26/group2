@@ -597,6 +597,17 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         break;
     }
     case PacketType::UPDATE_REGISTRY: {
+        // PR-10: wire format gained a tick prefix —
+        //   payload = [tick:u32] [serializedBytes...]
+        // The serialized bytes are what we both apply and stash as the
+        // baseline for the next DELTA.
+        if (payloadSize < sizeof(std::uint32_t))
+            break;
+        std::uint32_t snapshotTick = 0;
+        std::memcpy(&snapshotTick, payload, sizeof(snapshotTick));
+        const uint8_t* serBytes = payload + sizeof(snapshotTick);
+        const Uint32 serSize = payloadSize - sizeof(snapshotTick);
+
         // Phase 5a: copy current Position into PreviousPosition BEFORE the
         // continuous_loader rewrites Position from the snapshot. This gives
         // the renderer a (prev, pos) pair that brackets the most-recent
@@ -615,10 +626,17 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         // getServerAckedClientTick() to know where to start replaying
         // stored inputs from for reconciliation.
         uint32_t ackedTick = 0;
-        registryLoader->apply(payload, payloadSize, localPlayerEntity, &ackedTick);
+        registryLoader->apply(serBytes, serSize, localPlayerEntity, &ackedTick);
         if (ackedTick != 0)
             serverAckedClientTick_ = ackedTick;
         snapshotAppliedFlag_ = true;
+
+        // PR-10: stash the raw serialized bytes as the baseline for the
+        // next DELTA packet. We copy here — the loader-apply path may
+        // have advanced its internal cursor but the source bytes are
+        // still ours.
+        lastSnapshotPayload_.assign(serBytes, serBytes + serSize);
+        lastSnapshotTick_ = snapshotTick;
 
         // Newly-spawned entities (created by the snapshot apply above) have
         // a default-constructed PreviousPosition (or none at all). Without
@@ -639,6 +657,80 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         ++registryUpdatesWindow;
 
         // call the local player ready callback once we have the registry update that includes the local player
+        if (!localPlayerReadyNotified && localPlayerEntity && localPlayerReadyFn) {
+            auto local = registryLoader->map(*localPlayerEntity);
+            if (local != entt::null) {
+                localPlayerReadyFn(local);
+                localPlayerReadyNotified = true;
+            }
+        }
+        break;
+    }
+    case PacketType::UPDATE_REGISTRY_DELTA: {
+        // PR-10: wire format —
+        //   [tick:u32] [fromTick:u32] [baselineSize:u32] [rlePatch...]
+        // We reconstruct the full snapshot bytes by applying the patch
+        // on top of `lastSnapshotPayload_`, then run the existing
+        // Loader::apply on the reconstructed bytes — exactly as if a
+        // FULL had arrived.
+        constexpr Uint32 k_headerSize = 3 * sizeof(std::uint32_t);
+        if (payloadSize < k_headerSize)
+            break;
+        std::uint32_t snapshotTick = 0;
+        std::uint32_t fromTick = 0;
+        std::uint32_t baselineSize = 0;
+        std::memcpy(&snapshotTick, payload + 0 * sizeof(std::uint32_t), sizeof(std::uint32_t));
+        std::memcpy(&fromTick, payload + 1 * sizeof(std::uint32_t), sizeof(std::uint32_t));
+        std::memcpy(&baselineSize, payload + 2 * sizeof(std::uint32_t), sizeof(std::uint32_t));
+
+        // Drop if we don't have the right baseline. The next FULL
+        // (every 16th snapshot ≈ 500 ms at 32 Hz) re-syncs us.
+        if (fromTick != lastSnapshotTick_ || lastSnapshotPayload_.empty() ||
+            lastSnapshotPayload_.size() != baselineSize)
+        {
+            // Silent drop is fine — receiver is allowed to discard
+            // packets it can't apply. SDL_Log here would spam at
+            // delta cadence on packet loss.
+            break;
+        }
+
+        const uint8_t* patchData = payload + k_headerSize;
+        const Uint32 patchSize = payloadSize - k_headerSize;
+        auto reconstructed =
+            registry_serialization::applyDelta(lastSnapshotPayload_, patchData, patchSize, baselineSize);
+        if (reconstructed.empty())
+            break; // malformed patch — drop, wait for next FULL.
+
+        // Phase 5a (mirrored from FULL path): copy Position →
+        // PreviousPosition before the loader rewrites Position.
+        registry.view<Position, PreviousPosition>().each(
+            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+        if (!registryLoader)
+            registryLoader.emplace(registry);
+
+        uint32_t ackedTick = 0;
+        registryLoader->apply(
+            reconstructed.data(), static_cast<size_t>(reconstructed.size()), localPlayerEntity, &ackedTick);
+        if (ackedTick != 0)
+            serverAckedClientTick_ = ackedTick;
+        snapshotAppliedFlag_ = true;
+
+        // Mirrored seed pass for newly-spawned entities.
+        registry.view<Position>(entt::exclude<PreviousPosition>).each([&registry](entt::entity e, const Position& pos) {
+            registry.emplace<PreviousPosition>(e, pos.value);
+        });
+
+        prevSnapshotApplyNs_ = lastSnapshotApplyNs_;
+        lastSnapshotApplyNs_ = SDL_GetTicksNS();
+
+        // The reconstructed bytes BECOME the new baseline.
+        lastSnapshotPayload_ = std::move(reconstructed);
+        lastSnapshotTick_ = snapshotTick;
+
+        stats.registryUpdateSize = payloadSize; // wire size, not reconstructed size
+        ++registryUpdatesWindow;
+
         if (!localPlayerReadyNotified && localPlayerEntity && localPlayerReadyFn) {
             auto local = registryLoader->map(*localPlayerEntity);
             if (local != entt::null) {
