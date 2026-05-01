@@ -2854,7 +2854,13 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
     }
 
     // Volumetrics (Phase 10)
-    if (volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
+    // Volumetric is only read by tonemap which already gates on toggles.volumetrics
+    // (using fallbackBlack when off).  Skipping the compute when the toggle is off
+    // is safe — the texture keeps its previous content but no consumer reads it
+    // this frame.  The earlier crash from skipping was triggered by GTAO/bloom/
+    // SSR (whose textures *are* read by other passes); volumetric is the cleanly
+    // gateable one.
+    if (toggles.volumetrics && volumetricPipeline && volumetricTexture && depthTexture && shadowMap && shadowSampler) {
         struct
         {
             glm::mat4 invViewProj;
