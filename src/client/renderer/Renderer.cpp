@@ -2104,14 +2104,21 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         ssaoBlurTexture = makeR8(ssaoW, ssaoH);
     }
 
-    // SSR, volumetric, TAA, motion vectors.
+    // SSR (perf Phase 3e — half-resolution).  SSR is a heavy ray-march pass
+    // and its output is already noisy/temporally-accumulated; a half-res
+    // SSR target is hard to distinguish from a full-res one but cuts the
+    // pass's cost by 4×.  Both consumers (next-frame SSR temporal blend,
+    // tonemap composite) sample with the linear sampler, so bilinear
+    // upscaling is free.
     if (!ssrTexture[0] || ppResize) {
         for (auto*& t : ssrTexture) {
             if (t)
                 SDL_ReleaseGPUTexture(device, t);
         }
-        ssrTexture[0] = makeRGBA16F(w, h);
-        ssrTexture[1] = makeRGBA16F(w, h);
+        const Uint32 ssrW = std::max(w / 2, 1u);
+        const Uint32 ssrH = std::max(h / 2, 1u);
+        ssrTexture[0] = makeRGBA16F(ssrW, ssrH);
+        ssrTexture[1] = makeRGBA16F(ssrW, ssrH);
     }
     if (!volumetricTexture || ppResize) {
         if (volumetricTexture)
@@ -2817,10 +2824,13 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
             int ssrModeVal;
             float _pad1, _pad2, _pad3;
         } ssrUBO{};
+        // Half-resolution dispatch (matches SSR target size from ensure-textures).
+        const Uint32 ssrW = std::max(w / 2, 1u);
+        const Uint32 ssrH = std::max(h / 2, 1u);
         ssrUBO.proj = camera.getProjectionMatrix();
         ssrUBO.invProj = glm::inverse(camera.getProjectionMatrix());
         ssrUBO.view = camera.getViewMatrix();
-        ssrUBO.screenSize = glm::vec2(static_cast<float>(w), static_cast<float>(h));
+        ssrUBO.screenSize = glm::vec2(static_cast<float>(ssrW), static_cast<float>(ssrH));
         ssrUBO.maxDist = 500.0f;
         ssrUBO.thickness = 5.0f;
         ssrUBO.frameIndex = static_cast<float>(ssrFrameCounter % 64);
@@ -2838,7 +2848,7 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         };
         SDL_BindGPUComputeSamplers(ssrPass, 0, ssrSamplers, 4);
         SDL_PushGPUComputeUniformData(cmd, 0, &ssrUBO, sizeof(ssrUBO));
-        SDL_DispatchGPUCompute(ssrPass, (w + 15) / 16, (h + 15) / 16, 1);
+        SDL_DispatchGPUCompute(ssrPass, (ssrW + 15) / 16, (ssrH + 15) / 16, 1);
         SDL_EndGPUComputePass(ssrPass);
         ssrCurrentIdx = ssrDst;
     }
