@@ -99,7 +99,15 @@ public:
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
-    static constexpr int k_maxTicksPerFrame = 8; ///< Spiral-of-death guard: max physics ticks per iterate().
+    /// Spiral-of-death guard: max physics ticks per iterate().  Dropped from
+    /// 8 to 2 in Phase 3g — the bench profiler showed the slowest frames are
+    /// dominated by catch-up bursts (e.g. 8 ticks × ~2 ms = 16 ms in one
+    /// frame, dragging p1/p5).  Capping at 2 spreads the catch-up across
+    /// more render frames so any individual frame's worst case is ~4 ms
+    /// instead of ~16 ms.  Visual consequence on a stall: physics simulation
+    /// briefly runs 0.5× wall speed until the accumulator drains naturally;
+    /// human-imperceptible at 1000+ render Hz.
+    static constexpr int k_maxTicksPerFrame = 2;
     static constexpr int k_fpsHistorySize = 512; ///< Samples in the rolling FPS ring buffer.
 
     NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.

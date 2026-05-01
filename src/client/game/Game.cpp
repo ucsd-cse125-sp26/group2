@@ -1017,6 +1017,105 @@ SDL_AppResult Game::iterate()
                          static_cast<double>(fps(msP99)),
                          static_cast<double>(fps(msSlowest)),
                          static_cast<double>(fps(msFastest)));
+
+            // Phase breakdown: split frames into "fast median band" (frames
+            // near the median) vs. "slowest 1%" (the p1 tail).  Average each
+            // phase across each band, plus dump a few representative slow
+            // frames so we can see the actual stalls.
+            if (!benchFrameStats_.empty()) {
+                auto sortedStats = benchFrameStats_;
+                std::sort(sortedStats.begin(), sortedStats.end(), [](const FrameSectionMs& a, const FrameSectionMs& b) {
+                    return a.total < b.total;
+                });
+
+                const size_t n = sortedStats.size();
+                const size_t medLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.45f);
+                const size_t medHi = static_cast<size_t>(static_cast<float>(n - 1) * 0.55f);
+                const size_t slowLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.99f);
+
+                FrameSectionMs medAvg{}, slowAvg{};
+                size_t medCount = 0, slowCount = 0;
+                for (size_t i = medLo; i <= medHi; ++i) {
+                    medAvg.total += sortedStats[i].total;
+                    medAvg.input += sortedStats[i].input;
+                    medAvg.physics += sortedStats[i].physics;
+                    medAvg.particles += sortedStats[i].particles;
+                    medAvg.animation += sortedStats[i].animation;
+                    medAvg.entityCmds += sortedStats[i].entityCmds;
+                    medAvg.imgui += sortedStats[i].imgui;
+                    medAvg.drawFrame += sortedStats[i].drawFrame;
+                    ++medCount;
+                }
+                for (size_t i = slowLo; i < n; ++i) {
+                    slowAvg.total += sortedStats[i].total;
+                    slowAvg.input += sortedStats[i].input;
+                    slowAvg.physics += sortedStats[i].physics;
+                    slowAvg.particles += sortedStats[i].particles;
+                    slowAvg.animation += sortedStats[i].animation;
+                    slowAvg.entityCmds += sortedStats[i].entityCmds;
+                    slowAvg.imgui += sortedStats[i].imgui;
+                    slowAvg.drawFrame += sortedStats[i].drawFrame;
+                    ++slowCount;
+                }
+                auto avgRow = [&](FrameSectionMs& s, size_t c) {
+                    if (c == 0)
+                        return;
+                    s.total /= static_cast<float>(c);
+                    s.input /= static_cast<float>(c);
+                    s.physics /= static_cast<float>(c);
+                    s.particles /= static_cast<float>(c);
+                    s.animation /= static_cast<float>(c);
+                    s.entityCmds /= static_cast<float>(c);
+                    s.imgui /= static_cast<float>(c);
+                    s.drawFrame /= static_cast<float>(c);
+                };
+                avgRow(medAvg, medCount);
+                avgRow(slowAvg, slowCount);
+
+                std::fprintf(stderr,
+                             "[bench] median-band  total=%5.2fms input=%4.2f physics=%4.2f anim=%4.2f "
+                             "particles=%4.2f entityCmds=%4.2f imgui=%4.2f draw=%5.2f\n",
+                             static_cast<double>(medAvg.total),
+                             static_cast<double>(medAvg.input),
+                             static_cast<double>(medAvg.physics),
+                             static_cast<double>(medAvg.animation),
+                             static_cast<double>(medAvg.particles),
+                             static_cast<double>(medAvg.entityCmds),
+                             static_cast<double>(medAvg.imgui),
+                             static_cast<double>(medAvg.drawFrame));
+                std::fprintf(stderr,
+                             "[bench] slowest-1%%  total=%5.2fms input=%4.2f physics=%4.2f anim=%4.2f "
+                             "particles=%4.2f entityCmds=%4.2f imgui=%4.2f draw=%5.2f\n",
+                             static_cast<double>(slowAvg.total),
+                             static_cast<double>(slowAvg.input),
+                             static_cast<double>(slowAvg.physics),
+                             static_cast<double>(slowAvg.animation),
+                             static_cast<double>(slowAvg.particles),
+                             static_cast<double>(slowAvg.entityCmds),
+                             static_cast<double>(slowAvg.imgui),
+                             static_cast<double>(slowAvg.drawFrame));
+
+                // Top 5 slowest frames, full breakdown — to spot one-off
+                // stalls (e.g. a single drawFrame=120ms in an otherwise
+                // tight set of slow frames means a true GPU stall, not a
+                // CPU section regressing).
+                std::fprintf(stderr, "[bench] top-5 slowest individual frames:\n");
+                for (size_t i = (n >= 5 ? n - 5 : 0); i < n; ++i) {
+                    const auto& s = sortedStats[i];
+                    std::fprintf(stderr,
+                                 "[bench]   total=%5.2fms input=%4.2f phys=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
+                                 "ui=%4.2f draw=%5.2f\n",
+                                 static_cast<double>(s.total),
+                                 static_cast<double>(s.input),
+                                 static_cast<double>(s.physics),
+                                 static_cast<double>(s.animation),
+                                 static_cast<double>(s.particles),
+                                 static_cast<double>(s.entityCmds),
+                                 static_cast<double>(s.imgui),
+                                 static_cast<double>(s.drawFrame));
+                }
+            }
+
             std::fflush(stderr);
             return SDL_APP_SUCCESS;
         }
@@ -1257,11 +1356,14 @@ SDL_AppResult Game::iterate()
         }
     }
 
+    phaseSnap(phaseStats.physics);
+
     // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
+    phaseSnap(phaseStats.particles);
 
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
@@ -1588,6 +1690,7 @@ SDL_AppResult Game::iterate()
         if (charRig_.isLoaded())
             systems::updateHitboxes(registry, clientHitboxRig_, kRigScale_, rigMeshMinY_);
     }
+    phaseSnap(phaseStats.animation);
 
     // Build entity render list
     {
@@ -2101,6 +2204,8 @@ SDL_AppResult Game::iterate()
     // call setVSync only when it actually flips (avoids per-frame API calls).
     const bool prevLimitFPS = limitFPSToMonitor;
 
+    phaseSnap(phaseStats.entityCmds);
+
     // 10. Render
     debugUI.newFrame();
 
@@ -2577,7 +2682,18 @@ SDL_AppResult Game::iterate()
         if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
             currentCameraRoll_ = 0.0f;
     }
+    phaseSnap(phaseStats.imgui);
     renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
+    phaseSnap(phaseStats.drawFrame);
+
+    if (benchActive_) {
+        const Uint64 endTick = SDL_GetPerformanceCounter();
+        phaseStats.total = static_cast<float>(endTick - k_now) * 1000.0f / static_cast<float>(k_perfFreq);
+        // Only retain frames that match what benchFrameTimesMs_ collects (post-warmup).
+        const float benchElapsedNow = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
+        if (benchElapsedNow >= k_benchWarmupSeconds && phaseStats.total > 0.0f && phaseStats.total < 250.0f)
+            benchFrameStats_.push_back(phaseStats);
+    }
 
     if (limitFPSToMonitor != prevLimitFPS)
         applyFrameRateLimit();
