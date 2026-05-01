@@ -333,6 +333,12 @@ private:
         float particles = 0.0f;
         float imgui = 0.0f;
         float drawFrame = 0.0f; ///< Renderer drawFrame (CPU + GPU acquire).
+        // Sub-breakdown of drawFrame, populated from Renderer::lastAcquire/Record/SubmitMs.
+        // The "acquire" ms specifically captures swapchain back-pressure stalls — when
+        // the GPU hasn't released a previous swap image, the CPU thread blocks here.
+        float drawAcquire = 0.0f;
+        float drawRecord = 0.0f;
+        float drawSubmit = 0.0f;
     };
     std::vector<FrameSectionMs> benchFrameStats_;
 

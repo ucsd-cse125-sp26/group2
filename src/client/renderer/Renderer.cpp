@@ -1960,6 +1960,13 @@ static std::array<CascadeInfo, 4> computeCascades(
 
 void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch, const float roll)
 {
+    // Per-frame phase timing (read by Game::iterate's bench profiler).
+    const Uint64 perfFreq = SDL_GetPerformanceFrequency();
+    const Uint64 drawT0 = SDL_GetPerformanceCounter();
+    auto deltaMs = [&](Uint64 from, Uint64 to) {
+        return static_cast<float>(to - from) * 1000.0f / static_cast<float>(perfFreq);
+    };
+
     // Camera setup. setTarget() handles the forward-vector math from
     // pitch/yaw and applies roll by tilting the up vector around forward
     // (used for wallrun camera tilt).
@@ -1968,13 +1975,21 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
 
     // Acquire GPU resources
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-    if (!cmd)
+    if (!cmd) {
+        lastAcquireMs = lastRecordMs = lastSubmitMs = 0.0f;
         return;
+    }
 
     SDL_GPUTexture* swapchain = nullptr;
     Uint32 w = 0, h = 0;
-    if (!SDL_AcquireGPUSwapchainTexture(cmd, window, &swapchain, &w, &h) || !swapchain) {
+    const Uint64 acquireT0 = SDL_GetPerformanceCounter();
+    const bool acquired = SDL_AcquireGPUSwapchainTexture(cmd, window, &swapchain, &w, &h);
+    const Uint64 acquireT1 = SDL_GetPerformanceCounter();
+    lastAcquireMs = deltaMs(acquireT0, acquireT1);
+    if (!acquired || !swapchain) {
         SDL_SubmitGPUCommandBuffer(cmd);
+        lastRecordMs = 0.0f;
+        lastSubmitMs = 0.0f;
         return;
     }
 
@@ -3253,7 +3268,12 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
         }
     }
 
+    const Uint64 submitT0 = SDL_GetPerformanceCounter();
     SDL_SubmitGPUCommandBuffer(cmd);
+    const Uint64 submitT1 = SDL_GetPerformanceCounter();
+    lastRecordMs = deltaMs(acquireT1, submitT0);
+    lastSubmitMs = deltaMs(submitT0, submitT1);
+    (void)drawT0; // total drawFrame ms is the caller's responsibility to time.
 
     if (!pendingCapPath.empty())
         downloadAndSaveCapture(w, h);

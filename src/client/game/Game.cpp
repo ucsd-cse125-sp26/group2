@@ -1103,16 +1103,18 @@ SDL_AppResult Game::iterate()
                 for (size_t i = (n >= 5 ? n - 5 : 0); i < n; ++i) {
                     const auto& s = sortedStats[i];
                     std::fprintf(stderr,
-                                 "[bench]   total=%5.2fms input=%4.2f phys=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
-                                 "ui=%4.2f draw=%5.2f\n",
+                                 "[bench]   total=%5.2fms phys=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
+                                 "ui=%4.2f draw=%5.2f (acq=%4.2f rec=%4.2f sub=%4.2f)\n",
                                  static_cast<double>(s.total),
-                                 static_cast<double>(s.input),
                                  static_cast<double>(s.physics),
                                  static_cast<double>(s.animation),
                                  static_cast<double>(s.particles),
                                  static_cast<double>(s.entityCmds),
                                  static_cast<double>(s.imgui),
-                                 static_cast<double>(s.drawFrame));
+                                 static_cast<double>(s.drawFrame),
+                                 static_cast<double>(s.drawAcquire),
+                                 static_cast<double>(s.drawRecord),
+                                 static_cast<double>(s.drawSubmit));
                 }
             }
 
@@ -2687,6 +2689,9 @@ SDL_AppResult Game::iterate()
     phaseSnap(phaseStats.drawFrame);
 
     if (benchActive_) {
+        phaseStats.drawAcquire = legacyRenderer().lastAcquireMs;
+        phaseStats.drawRecord = legacyRenderer().lastRecordMs;
+        phaseStats.drawSubmit = legacyRenderer().lastSubmitMs;
         const Uint64 endTick = SDL_GetPerformanceCounter();
         phaseStats.total = static_cast<float>(endTick - k_now) * 1000.0f / static_cast<float>(k_perfFreq);
         // Only retain frames that match what benchFrameTimesMs_ collects (post-warmup).

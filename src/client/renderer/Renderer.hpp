@@ -415,6 +415,14 @@ public:
     int ssrMode = 2;       ///< 0=Sharp, 1=Stochastic, 2=Masked (default).
     RenderToggles toggles; ///< Live-tunable feature toggles (checked every frame).
 
+    /// Most-recent drawFrame() phase timings in milliseconds.  Populated each
+    /// frame for the bench profiler in Game::iterate() to attribute the slow
+    /// drawFrame tail (swapchain acquire stall vs. record-time stall vs.
+    /// submit-time stall).  All zero outside drawFrame.
+    float lastAcquireMs = 0.0f;
+    float lastRecordMs = 0.0f;
+    float lastSubmitMs = 0.0f;
+
     // Anti-aliasing (live-tunable via ImGui)
     AAMode aaMode = AAMode::SMAA_T2x; ///< Current AA mode (default: recommended T2x).
     bool casEnabled = true;           ///< CAS sharpening on/off.
