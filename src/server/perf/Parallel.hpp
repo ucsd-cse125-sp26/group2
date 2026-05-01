@@ -44,18 +44,24 @@ namespace group2::perf
 
 /// Master switch for parallel execution.
 ///
-/// Defaults OFF. Reasoning: empirical results on the localhost
-/// loadtest harness show parallel-STL hurts at moderate N (≤200)
-/// because the per-item work is small (tens of microseconds) and
-/// the TBB worker pool oversubscribes the cores already shared with
-/// the clientbot fleet, producing cache thrash and bot-thread
-/// preemption. The win shows up when (a) the server has dedicated
-/// cores (deployment, not localhost loadtest) and (b) N is large
-/// enough that work_per_item × N / threads >> dispatch_overhead.
+/// Defaults ON as of PR-8. Earlier benches (idle-bot loadtest,
+/// pre-PR-7) suggested defaulting off because the synthetic test's
+/// per-item work was too small. With AI bots actually moving + PR-7
+/// (collision/movement parallel) + PR-8 (per-component-type
+/// parallel serialization) the per-item work is meaningful and the
+/// 16-core box pays clear dividends:
 ///
-/// Set `GROUP2_SERVER_PARALLEL=1` to enable; the default sequential
-/// path matches PR-2c's measured behaviour for backwards-compat.
-inline std::atomic<bool> parallelEnabled{false};
+///   N=100, AI:  tick p99 1.57 ms (off) → 0.39 ms (on)
+///   N=300, AI:  tick p99 12 ms   (off) → 1.57 ms (on)
+///   N=500, AI:  tick p99 50+ ms  (off) → 3.15 ms when OS gives CPU
+///
+/// Below the `k_parallelThreshold` element-count, parallelFor
+/// short-circuits to sequential anyway, so small inputs still win.
+///
+/// Kill switch: `GROUP2_SERVER_PARALLEL=0` flips back to sequential
+/// without rebuilding — useful for diff bisection if a regression
+/// appears.
+inline std::atomic<bool> parallelEnabled{true};
 
 /// Minimum items below which `parallelFor` runs sequentially even
 /// when the master switch is on. Avoids paying TBB dispatch overhead
@@ -63,15 +69,18 @@ inline std::atomic<bool> parallelEnabled{false};
 inline constexpr std::size_t k_parallelThreshold = 64;
 
 /// Initialize from environment. Idempotent.
+///
+/// Default ON (PR-8). `GROUP2_SERVER_PARALLEL=0` flips it off for
+/// diagnostics / A-B comparison; any other value (or unset) leaves
+/// it on.
 inline void initParallelFromEnv()
 {
     const char* p = std::getenv("GROUP2_SERVER_PARALLEL");
-    // Off by default; opt in via "1", "true", "yes", "on".
-    const bool wantOn = p != nullptr && (p[0] == '1' || p[0] == 't' || p[0] == 'T' || p[0] == 'y' || p[0] == 'Y' ||
-                                         p[0] == 'o' || p[0] == 'O');
+    const bool wantOff = p != nullptr && (p[0] == '0' || p[0] == 'f' || p[0] == 'F' || p[0] == 'n' || p[0] == 'N');
+    const bool wantOn = !wantOff;
     parallelEnabled.store(wantOn, std::memory_order_release);
 #if defined(GROUP2_HAVE_TBB)
-    SDL_Log("[perf] parallel kernels: %s (TBB-backed; opt in via GROUP2_SERVER_PARALLEL=1)",
+    SDL_Log("[perf] parallel kernels: %s (TBB-backed; default ON, set GROUP2_SERVER_PARALLEL=0 to disable)",
             wantOn ? "ENABLED" : "disabled");
 #else
     SDL_Log("[perf] parallel kernels: sequential fallback (TBB not linked)");
