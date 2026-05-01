@@ -587,6 +587,9 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    # PR-11 (server-perf): client-side render-delay interpolation
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.cpp"
@@ -704,6 +707,7 @@ add_executable(group2
         src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/InterpolationBuffer.hpp
         src/ecs/components/LocalPlayer.hpp
         src/ecs/components/Renderable.hpp
         src/ecs/components/Projectile.hpp
@@ -913,6 +917,9 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    # PR-11 (server-perf): client-side render-delay interpolation
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
@@ -1028,6 +1035,7 @@ add_executable(client
         src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/InterpolationBuffer.hpp
         src/ecs/components/LocalPlayer.hpp
         src/ecs/components/Renderable.hpp
         src/ecs/components/Projectile.hpp
@@ -1227,6 +1235,7 @@ add_executable(server
         src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/InterpolationBuffer.hpp
         src/ecs/components/LocalPlayer.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
@@ -1439,6 +1448,11 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/Bot.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    # PR-11 (server-perf): bot links Client.cpp so it carries the same
+    # interpolation-buffer code path; the bot never reads the buffer
+    # itself, but the helpers must be findable at link time.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"

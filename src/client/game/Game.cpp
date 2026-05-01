@@ -33,6 +33,7 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
+#include "network/EntityInterpolation.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -1613,6 +1614,11 @@ SDL_AppResult Game::iterate()
     {
         const int numJoints = charRig_.numJoints();
         const float snapshotAlpha = client.getSnapshotAlpha();
+        // PR-11: render-time = now − N × snapshotInterval (default 2 ticks
+        // ≈ 62.5 ms at 32 Hz).  0 means "no buffered playback yet" — the
+        // renderer falls back to the Phase-5a (prev, cur, alpha) lerp
+        // through `entity_interpolation::sample`'s fallback path.
+        const Uint64 interpRenderNs = client.getInterpolationRenderTimeNs();
         constexpr float k_animationTick = 1.0f / 30.0f;
 
         // ─── Phase 1: sequential prepass ────────────────────────────────────
@@ -1711,12 +1717,29 @@ SDL_AppResult Game::iterate()
                     c.slot = drawSlot++;
 
                     // Build per-instance world transform.
+                    //
+                    // PR-11: for non-local entities prefer the
+                    // InterpolationBuffer-driven path — playback at
+                    // `now − N × snapshotInterval` smooths jitter and
+                    // hides single-snapshot losses.  Local-player render
+                    // continues to use the Phase-5a (prev, cur, alpha)
+                    // lerp because the local entity's `Position` is
+                    // client-side-predicted (Phase 5b reconciliation),
+                    // not snapshot-driven, so its InterpolationBuffer
+                    // would lag the predicted truth by `interpDelay`.
                     glm::vec3 renderPos = pos.value;
-                    if (const auto* prev = registry.try_get<PreviousPosition>(e))
+                    float renderYaw = inp.yaw;
+                    if (!isLocal && interpRenderNs != 0) {
+                        const auto sampled =
+                            entity_interpolation::sample(registry, e, interpRenderNs, pos.value, inp.yaw);
+                        renderPos = sampled.position;
+                        renderYaw = sampled.yaw;
+                    } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
                         renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+                    }
                     glm::vec3 translation(0.0f);
                     glm::vec3 scale(kRigScale_);
-                    glm::quat orient = glm::angleAxis(inp.yaw, glm::vec3{0, 1, 0});
+                    glm::quat orient = glm::angleAxis(renderYaw, glm::vec3{0, 1, 0});
                     if (const auto* rend = registry.try_get<Renderable>(e)) {
                         translation = rend->translation;
                         scale = rend->scale;
@@ -1808,6 +1831,13 @@ SDL_AppResult Game::iterate()
         // Read once per frame; applied to every entity below that has a
         // PreviousPosition (i.e. has received at least one snapshot).
         const float snapshotAlpha = client.getSnapshotAlpha();
+        // PR-11: render-delay timestamp for non-local entities.  See the
+        // animation-pass site above for the full rationale; in short,
+        // playing back at `now − N × snapshotInterval` lets the renderer
+        // always have a buffered "future" sample to lerp toward, hiding
+        // single-snapshot losses and smoothing jitter.  0 means
+        // "no buffered playback" — fall through to the Phase-5a lerp.
+        const Uint64 interpRenderNs = client.getInterpolationRenderTimeNs();
 
         // Phase 3f: extract view frustum for culling entity render commands +
         // third-person weapons.  Same Gribb-Hartmann decomposition we use for
@@ -1854,14 +1884,17 @@ SDL_AppResult Game::iterate()
             if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
-            // Phase 5a: lerp from PreviousPosition (= last snapshot) to
-            // Position (= current snapshot) over the snapshot interval.
-            // Entities without PreviousPosition (e.g. just-spawned) fall
-            // back to the raw current position, but Client::dispatchMessage
-            // seeds PreviousPosition on first snapshot apply so this
-            // fallback should rarely fire in practice.
+            // PR-11: render-delay path for non-local entities.  Locals
+            // are excluded earlier (line ~1854); for everyone else we
+            // play back at `now − N × snapshotInterval`, which always
+            // has at least one buffered future sample to lerp toward.
+            // Falls through to the Phase-5a (prev, cur, alpha) lerp
+            // when the buffer isn't available yet (first 1-2 snapshots,
+            // or render-delay disabled via env var).
             glm::vec3 renderPos = pos.value;
-            if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+            if (interpRenderNs != 0) {
+                renderPos = entity_interpolation::sample(registry, e, interpRenderNs, pos.value, 0.0f).position;
+            } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
                 renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
             }
 
@@ -1889,10 +1922,24 @@ SDL_AppResult Game::iterate()
                 return;
             if (registry.all_of<RespawnTimer>(e))
                 return;
+
+            // PR-11: pull the interpolated player transform so the
+            // weapon hangs off the same body the renderer just drew at
+            // line 1730.  Without this, the player skin animates at
+            // `now − N × snapshotInterval` while the weapon sticks to
+            // the most-recent server position, separating the two by
+            // ~62 ms of motion (visible "ghost gun").
+            glm::vec3 playerPos = pos.value;
+            float yaw = input.yaw;
+            if (interpRenderNs != 0) {
+                const auto sampled = entity_interpolation::sample(registry, e, interpRenderNs, pos.value, input.yaw);
+                playerPos = sampled.position;
+                yaw = sampled.yaw;
+            }
             // Phase 3f: a remote third-person weapon ~50 world-units long;
             // a 100-unit cull radius around the player position is a tight
             // fit and skips the entire weapon draw when off-screen.
-            if (!entityVisible(pos.value, 100.0f))
+            if (!entityVisible(playerPos, 100.0f))
                 return;
 
             const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
@@ -1903,13 +1950,12 @@ SDL_AppResult Game::iterate()
             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
 
             // Player orientation vectors (horizontal plane)
-            const float yaw = input.yaw;
             const glm::vec3 pFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
             const glm::vec3 pRight = glm::normalize(glm::cross(pFwd, glm::vec3{0, 1, 0}));
 
             // Weapon world position = player center + hand offset
             glm::vec3 wpnPos =
-                pos.value + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
+                playerPos + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
 
             // Build transform: translate -> yaw -> pitch -> roll -> scale
             glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);

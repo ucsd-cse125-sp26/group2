@@ -132,7 +132,40 @@ public:
     /// snapshot rate; freezes at 1.0 (entity at "current" pos, no extrapolation)
     /// when a snapshot is overdue. Returns 1.0 before two snapshots have
     /// arrived (no interpolation reference yet).
+    ///
+    /// @note PR-11 supersedes this for non-local entities.  When the
+    /// `InterpolationBuffer` path is in effect, the renderer uses
+    /// `getInterpolationRenderTimeNs()` to play back at `now − delay`
+    /// instead of lerping forward over the most recent interval.  The
+    /// alpha here remains the local-player / fallback path.
     [[nodiscard]] float getSnapshotAlpha() const;
+
+    /// @brief Render time the renderer should display non-local entities at.
+    ///
+    /// PR-11 (server-perf): Valorant / Fortnite / Source-engine `cl_interp`
+    /// style render-delay interpolation.  Returns
+    ///   `SDL_GetTicksNS() − delayTicks × snapshotIntervalNs()`
+    /// where `delayTicks` is read from `GROUP2_CLIENT_INTERP_DELAY_TICKS`
+    /// (default 2) and `snapshotIntervalNs` is the EMA of the last two
+    /// snapshot apply times.
+    ///
+    /// Returns 0 until two snapshots have been applied — callers treat 0
+    /// as "no buffered playback yet, fall back to the Phase-5a alpha
+    /// path" (see `entity_interpolation::sample`).
+    ///
+    /// Why N=2?  At 32 Hz snapshot rate, 2 ticks ≈ 62.5 ms — enough that
+    /// the renderer always has at least one buffered "future" sample to
+    /// interpolate toward, so a single dropped snapshot is invisible.
+    /// Trade-off: visual feedback for remote players is delayed by 62.5 ms
+    /// from server truth, but lag-comp on the server already accounts
+    /// for the client's display-time-to-fire-time gap (Phase 6 lag comp).
+    [[nodiscard]] Uint64 getInterpolationRenderTimeNs() const;
+
+    /// @brief Approximate snapshot interval in nanoseconds.
+    ///
+    /// EMA over the last two snapshot apply times.  Falls back to the
+    /// default 32 Hz period (~31.25 ms) before two snapshots have arrived.
+    [[nodiscard]] Uint64 getSnapshotIntervalNs() const;
 
     /// @brief Number of recent inputs included in each INPUT packet for redundancy.
     ///
@@ -266,6 +299,26 @@ private:
     Uint64 lastSnapshotApplyNs_ = 0;
     Uint64 prevSnapshotApplyNs_ = 0;
 
+    // ── PR-11: render-delay interpolation ────────────────────────────────
+    //
+    // `interpDelayTicks_` is read once at init() from the
+    // GROUP2_CLIENT_INTERP_DELAY_TICKS env var (default 2).  0 disables
+    // the buffered render-delay path entirely; non-local entities
+    // fall back to the Phase-5a (prev, cur, alpha) lerp.  Higher values
+    // smooth more loss but make remote entities visibly behind server
+    // truth.  Source engine ships 2 (62.5 ms at 32 Hz) — that's our
+    // default and matches Valorant / Fortnite cadence.
+    //
+    // EMA of snapshot apply intervals.  `prevSnapshotApplyNs_` and
+    // `lastSnapshotApplyNs_` already give a single most-recent interval;
+    // the EMA smooths burst arrivals so the render-delay computation
+    // doesn't wobble when packets arrive bunched.  Snapshot rate doesn't
+    // change during a session, so a single-pole IIR with α=0.25 is
+    // ample.  Initial value matches the design's 32 Hz snapshot rate.
+    static constexpr Uint64 k_defaultSnapshotIntervalNs = 1'000'000'000ULL / 32ULL;
+    int interpDelayTicks_ = 2;
+    Uint64 snapshotIntervalEmaNs_ = k_defaultSnapshotIntervalNs;
+
     // ── Phase 5b: prediction reconciliation hand-off ──────────────────────
     //
     // Updated by dispatchMessage on every UPDATE_REGISTRY apply. The game
@@ -388,4 +441,17 @@ private:
     /// @brief Decode and dispatch a single complete framed message.
     /// Called by poll(registry) after pulling the bytes out of recvBuf.
     void dispatchMessage(const uint8_t* data, Uint32 size, Registry& registry);
+
+    /// @brief PR-11: append a sample to every replicated remote entity's
+    /// `InterpolationBuffer`, AFTER the loader has rewritten the registry
+    /// from the just-arrived snapshot.  Skips the local player (the
+    /// `LocalPlayer` tag is set by the `localPlayerReadyFn` callback,
+    /// which fires earlier in dispatchMessage's UPDATE_REGISTRY/_DELTA
+    /// path, so by the time this runs the exclude filter is correct).
+    /// No-op when `interpDelayTicks_` is 0 (kill switch).
+    ///
+    /// @param registry  Client registry post-Loader::apply.
+    /// @param captureNs Wall-clock timestamp to stamp on every sample —
+    ///                  same value for every entity in the same snapshot.
+    void recordInterpolationSamples(Registry& registry, Uint64 captureNs);
 };

@@ -3,6 +3,9 @@
 
 #include "Client.hpp"
 
+#include "EntityInterpolation.hpp"
+#include "ecs/components/InterpolationBuffer.hpp"
+#include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "network/MatchStatus.hpp"
@@ -43,6 +46,20 @@ bool Client::init(const char* addr, Uint16 port, const TransportConfig& transpor
 
     msgStream.socket = sock;
     transportConfig_ = transport;
+
+    // PR-11: read GROUP2_CLIENT_INTERP_DELAY_TICKS once at connect.
+    // Default 2 ticks (≈ 62.5 ms at 32 Hz snapshot rate) — Source-engine
+    // / Valorant / Fortnite cadence.  0 disables the buffered render-
+    // delay path entirely; remote-entity rendering falls back to the
+    // Phase-5a `(prev, cur, alpha)` lerp.  Clamp to a sane upper bound
+    // (8 ticks ≈ 250 ms at 32 Hz, the InterpolationBuffer capacity) so
+    // a typo in the env var can't push the renderer past the buffer's
+    // history depth, which would have it permanently snapped to oldest.
+    if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_TICKS")) {
+        const int parsed = SDL_atoi(envDelay);
+        interpDelayTicks_ = std::clamp(parsed, 0, static_cast<int>(InterpolationBuffer::k_capacity));
+        SDL_Log("Client: GROUP2_CLIENT_INTERP_DELAY_TICKS=%d", interpDelayTicks_);
+    }
 
     // Seed the loss simulator RNG once. random_device for fresh entropy
     // across runs; deterministic per-session so loss patterns are at
@@ -334,6 +351,54 @@ float Client::getSnapshotAlpha() const
     // banding when packets are late.
     const float a = static_cast<float>(elapsed) / static_cast<float>(interval);
     return std::clamp(a, 0.0f, 1.0f);
+}
+
+Uint64 Client::getSnapshotIntervalNs() const
+{
+    return snapshotIntervalEmaNs_;
+}
+
+void Client::recordInterpolationSamples(Registry& registry, Uint64 captureNs)
+{
+    if (interpDelayTicks_ <= 0)
+        return;
+
+    // Sample (position, yaw) for every replicated entity except the
+    // local player.  Players carry yaw on their `InputSnapshot` (the
+    // server replicates it as part of the registry); other replicated
+    // entities (projectiles, weapon pickups) get yaw=0, which is fine —
+    // the renderer doesn't ask for their yaw via `sample` (only Position
+    // is interpolated for non-player entities, see Game.cpp render path).
+    auto view = registry.view<Position>(entt::exclude<LocalPlayer>);
+    for (const auto e : view) {
+        const auto& pos = view.get<Position>(e);
+        float yaw = 0.0f;
+        if (const auto* inp = registry.try_get<InputSnapshot>(e))
+            yaw = inp->yaw;
+        entity_interpolation::appendSample(registry, e, captureNs, pos.value, yaw);
+    }
+}
+
+Uint64 Client::getInterpolationRenderTimeNs() const
+{
+    // Disabled by env var, or no buffered playback yet — caller falls
+    // back to the Phase-5a (prev, cur, alpha) path.  We require two
+    // snapshots before publishing a render time so the EMA has been
+    // updated at least once with a real interval (otherwise we'd be
+    // playing back at the wrong delay against a stale assumed 32 Hz).
+    if (interpDelayTicks_ <= 0 || lastSnapshotApplyNs_ == 0 || prevSnapshotApplyNs_ == 0)
+        return 0;
+
+    const Uint64 now = SDL_GetTicksNS();
+    const Uint64 delayNs = static_cast<Uint64>(interpDelayTicks_) * snapshotIntervalEmaNs_;
+
+    // Guard against the (unlikely) case where the simulator is running
+    // a delay larger than the wall clock.  Returning 0 disables the
+    // path cleanly until enough time has accrued.
+    if (delayNs >= now)
+        return 0;
+
+    return now - delayNs;
 }
 
 void Client::setSimulatedLatencyMs(int totalMs) noexcept
@@ -653,6 +718,17 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         prevSnapshotApplyNs_ = lastSnapshotApplyNs_;
         lastSnapshotApplyNs_ = SDL_GetTicksNS();
 
+        // PR-11: refresh the snapshot-interval EMA from the most recent
+        // gap.  Single-pole IIR with α = 1/4 gives a ~4-sample (~125 ms
+        // at 32 Hz) time constant — fast enough to track real changes
+        // (e.g. server tick rate adjusting under load), slow enough to
+        // ride out one or two delayed snapshots without wobbling the
+        // render-delay timestamp.
+        if (prevSnapshotApplyNs_ != 0 && lastSnapshotApplyNs_ > prevSnapshotApplyNs_) {
+            const Uint64 interval = lastSnapshotApplyNs_ - prevSnapshotApplyNs_;
+            snapshotIntervalEmaNs_ = (3 * snapshotIntervalEmaNs_ + interval) / 4;
+        }
+
         stats.registryUpdateSize = payloadSize;
         ++registryUpdatesWindow;
 
@@ -664,6 +740,12 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
                 localPlayerReadyNotified = true;
             }
         }
+
+        // PR-11: capture interpolation samples AFTER the local-player
+        // callback fires, so the LocalPlayer tag is in place and the
+        // exclude filter inside `recordInterpolationSamples` skips the
+        // local entity correctly even on the very first snapshot.
+        recordInterpolationSamples(registry, lastSnapshotApplyNs_);
         break;
     }
     case PacketType::UPDATE_REGISTRY_DELTA: {
@@ -724,6 +806,15 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         prevSnapshotApplyNs_ = lastSnapshotApplyNs_;
         lastSnapshotApplyNs_ = SDL_GetTicksNS();
 
+        // PR-11: mirror the FULL path's EMA update on DELTA applies too.
+        // Both packet types advance the snapshot stream, so both should
+        // contribute to the interval estimate the render-delay
+        // computation reads.
+        if (prevSnapshotApplyNs_ != 0 && lastSnapshotApplyNs_ > prevSnapshotApplyNs_) {
+            const Uint64 interval = lastSnapshotApplyNs_ - prevSnapshotApplyNs_;
+            snapshotIntervalEmaNs_ = (3 * snapshotIntervalEmaNs_ + interval) / 4;
+        }
+
         // The reconstructed bytes BECOME the new baseline.
         lastSnapshotPayload_ = std::move(reconstructed);
         lastSnapshotTick_ = snapshotTick;
@@ -738,6 +829,12 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
                 localPlayerReadyNotified = true;
             }
         }
+
+        // PR-11: capture interpolation samples after the local-player
+        // callback so the LocalPlayer tag is set before the exclude
+        // filter fires on the first snapshot.  Same pattern as the
+        // UPDATE_REGISTRY path above.
+        recordInterpolationSamples(registry, lastSnapshotApplyNs_);
         break;
     }
     case PacketType::PARTICLE_SPAWN: {
