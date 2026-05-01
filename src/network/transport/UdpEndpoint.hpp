@@ -119,10 +119,25 @@ public:
     ///                    `fragmentInfo` are overwritten per-fragment.
     /// @param data        Payload bytes (split internally).
     /// @param dataLen     Total payload length.
+    /// @param redundancy PR-15 (server-perf): send each individual
+    ///         fragment this many times back-to-back.  Receivers'
+    ///         `FragmentReassembler` deduplicates by (sequence,
+    ///         fragmentIndex), so duplicate copies just fill any gaps
+    ///         left by single-copy losses.  Default 1 = no redundancy
+    ///         (legacy behaviour).  At `redundancy = 2` and 5 % per-
+    ///         fragment loss, P(any single fragment lost) drops from
+    ///         5 % → 5 %² = 0.25 %; for a 9-fragment FULL keyframe,
+    ///         P(at least one fragment fully lost) goes 37 % → 2 %.
+    ///         Used for FULL keyframes which can't tolerate any
+    ///         fragment loss (the entire snapshot is then unusable);
+    ///         DELTAs default to redundancy=1 since a single dropped
+    ///         delta only costs one frame's worth of state at PR-14's
+    ///         per-keyframe baseline.
     /// @return False on socket error or if the payload would need more
     ///         than 256 fragments (sanity cap; 256 × ~1.18 KB ≈ 302 KB
     ///         logical-message ceiling, vastly more than we'll need).
-    bool sendFragmented(const UdpEndpointAddr& dest, PacketHeader hdr, const void* data, int dataLen);
+    bool
+    sendFragmented(const UdpEndpointAddr& dest, PacketHeader hdr, const void* data, int dataLen, int redundancy = 1);
 
     /// @brief Try to receive one datagram (non-blocking).
     /// @param out Filled in on success.

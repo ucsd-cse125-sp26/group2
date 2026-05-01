@@ -544,13 +544,34 @@ void Server::networkLoop()
                 // job to serialize. At 500 clients × 5 fragments × 32 Hz
                 // = 80k syscalls/sec — clearly worth fanning out.
                 if (payload && !udpTargets.empty()) {
-                    auto udpKernel = [this, &payload](UdpTarget& t) {
+                    // PR-15: FULL keyframes get fragment-level redundancy
+                    // (each fragment sent twice).  Single fragment loss in
+                    // an unredundant FULL kills the whole keyframe — and
+                    // because of the PR-14 keyframe-baseline design, that
+                    // also blanks the next ~62 ms of DELTAs for the client
+                    // (no valid baseline to decode against).  At ~9
+                    // fragments per FULL and 5 % loss, P(FULL succeeds)
+                    // climbs from 63 % → 98 % with redundancy=2.  Bandwidth
+                    // hit is contained: FULLs are 1-of-8 snapshots so
+                    // doubling them costs ~12 % extra wire BW, well below
+                    // PR-10's 5× delta savings.
+                    //
+                    // DELTAs stay redundancy=1 — they're typically 1
+                    // fragment, drop independently, and the next
+                    // (independently-decodable!) DELTA arrives 7.8 ms
+                    // later.  No amplification to defeat.
+                    const bool isFullKeyframe =
+                        !payload->empty() && static_cast<PacketType>(payload->front()) == PacketType::UPDATE_REGISTRY;
+                    const int udpRedundancy = isFullKeyframe ? 2 : 1;
+
+                    auto udpKernel = [this, &payload, udpRedundancy](UdpTarget& t) {
                         net::PacketHeader hdr{};
                         hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
                         hdr.connectionId = t.connectionId;
                         hdr.sequence = t.sequence;
                         hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
-                        udpEndpoint_.sendFragmented(t.addr, hdr, payload->data(), static_cast<int>(payload->size()));
+                        udpEndpoint_.sendFragmented(
+                            t.addr, hdr, payload->data(), static_cast<int>(payload->size()), udpRedundancy);
                         t.addr.release();
                     };
                     ::group2::perf::parallelFor(udpTargets.begin(), udpTargets.end(), udpKernel);
