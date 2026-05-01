@@ -400,20 +400,41 @@ are the wins, here's the wall" is a perfectly good deliverable.
 | `530d7b9` | PR-3: parallel-STL hooks for animation + hitbox | Optional TBB-backed `parallelFor`; pre-emplace + parallel kernel pattern. **Default off**: localhost loadtest oversubscribes cores with the bot fleet. |
 | `229a97e` | PR-4: atomic-published read snapshots + match throttle | Lock-free `getClientCount` and `snapshotClientRtts`; shared-frame for events broadcast; match replicate-on-change. Together they push the "server-keeps-up" range from ~100 bots to ~300 bots. |
 | `dc0b868` | test: bot env vars `NO_SPIN`, `TICK_HZ` | Lets the loadtest harness fit ≥ 200 bots on a single host without the spinning bot fleet starving the server. Production gameplay clients keep the spin. |
+| `201737a` | PR-5a: share-frame in `enqueueReliableEvent` | Last per-client copy in the broadcast path goes away. `Connection::PendingReliableEvent::framed` becomes `shared_ptr<const vector<u8>>`. At 300 bots cuts `broadcastEvents` p99 from 25-50 ms to ≤ 6.29 ms. |
+| `1d175ee` + `2351d1a` | PR-5b: `OutboundQueue` self-locks; lock-light `flushAllOutbound` | Three-phase flush: short lock to snapshot per-client targets, lock-free syscall fan-out, short lock to apply disconnects + republish atomic snapshots. `OutboundQueue` carries its own `std::mutex`; `Connection` becomes non-copyable; `MessageStream` grows a default ctor. The follow-up commit fixes a missed-lock bug in the first cut. |
 
 ### Empirical results (relwithdebinfo, localhost, no simulated latency)
 
-PR-1 baseline → after PR-2/3/4 plus the PR-4 bot lightening
+Final state after PR-1/2/3/4/5a/5b plus the PR-4 bot lightening
 (`GROUP2_BOT_NO_SPIN=1`, 128 Hz bot tick rate kept):
 
-| N    | Pre-PR-2 tick p99 | Post-PR-4 tick p99 | Post-PR-4 fleet RTT p99 | Status |
-|-----:|------------------:|-------------------:|------------------------:|:-------|
-|  20  | 0.79 ms          | 0.79 ms            | 7.91 ms                 | trivial |
-|  50  | 3.15 ms          | 0.79 ms            | 8.10–8.30 ms            | 4× faster, target hit |
-| 100  | 25–50 ms (broken) | 3.15 ms            | 14–21 ms                | tick under budget; RTT under 15 ms at p50 |
-| 200  | broken            | 1.57–6.29 ms       | ~39 ms                  | server keeps up at 128 Hz; RTT high due to network-thread saturation on PONG |
-| 300  | broken            | 50.33 ms (broadcast spikes) | 132–155 ms          | server still ticks at 128 Hz; PONG round-trip dominates |
-| 500  | not reachable    | not reachable       | not reachable           | fails — host CPU saturated by 500 clientbot threads even with no-spin |
+| N    | Pre-PR-2 tick p99 | Final tick p99 | Final fleet RTT p50 / p99 | Status |
+|-----:|------------------:|---------------:|--------------------------:|:-------|
+|  20  | 0.79 ms          | 0.79 ms        | (not in this sweep)       | trivial |
+|  50  | 3.15 ms          | **0.79 ms**    | 7.89 / **8.09 ms**        | 4× tick win; target met |
+| 100  | 25-50 ms (broken) | **1.57 ms**    | 7.91 / **15.44 ms**       | tick 16-32× lower; RTT p50 under target, p99 just barely over |
+| 200  | broken           | **1.57 ms**    | 31.31 / 39.38 ms          | server keeps up at full 128 Hz; RTT bounded by single-threaded I/O on PONG path |
+| 300  | broken           | 25.17 ms       | ~130 / ~290 ms (high variance) | host CPU saturating: 300+ bot threads + server share 16 cores |
+| 500  | not reachable    | not reachable  | not reachable             | fails — host CPU saturated by 500 clientbot threads even with no-spin |
+
+Per-PR cumulative wins on the headline scopes:
+
+  `broadcastRegistry` p50 (N=50):   1.57 ms (PR-1 baseline)
+                                   → 0.01 ms (PR-2 share-frame + deferred fanout)        — 157×
+                                   → 0.01 ms (PR-3/4 unchanged)
+                                   → 0.01 ms (PR-5 unchanged at this N)
+
+  Tick p99 (N=100):   25-50 ms (PR-1, broken)
+                    → 6.29 ms   (PR-2 broadcast)
+                    → 3.15 ms   (PR-4 atomic reads + match throttle)
+                    → 1.57 ms   (PR-5b lock-light flush)                                 — 16-32×
+
+  Fleet RTT p99 (N=100): 28-44 ms (PR-3, broken)
+                       → 14-21 ms (PR-4)
+                       → 15.44 ms (PR-5b)                                                — 2× under target at p50
+
+  ECS scopes (N=200): each ≤ 0.79 ms p99 (animation, movement, collision, weapon, etc.) — well below the 7.81 ms tick budget
+  even with 200 player simulations.
 
 Single-PR headline win: `broadcastRegistry` dropped from 1.57 ms
 p50 (50 bots) to **0.01 ms** — a 157× collapse — via PR-2's
