@@ -20,11 +20,24 @@
 #include "entt/entity/fwd.hpp"
 #include "network/RegistryArchive.hpp"
 
+#include <array>
 #include <cstdint>
 #include <entt/entt.hpp>
 #include <stdexcept>
 #include <tuple>
+#include <utility>
 #include <vector>
+
+// PR-8 (server-perf): optional parallel-STL hooks for the per-type
+// serialization fan-out. Header-only on the server build path; client
+// TUs compile this file without the perf module on the include path,
+// so we fall back to sequential there.
+#if __has_include("perf/Parallel.hpp")
+#include "perf/Parallel.hpp"
+#define GROUP2_REGSER_HAS_PARALLEL 1
+#else
+#define GROUP2_REGSER_HAS_PARALLEL 0
+#endif
 
 namespace
 {
@@ -33,6 +46,64 @@ template <typename S, typename A, typename... Cs>
 void getAll(S& snapshot, A& archive, std::tuple<Cs...>*)
 {
     (snapshot.template get<Cs>(archive), ...);
+}
+
+// PR-8 (server-perf): parallel per-type fan-out helper.
+//
+// Each call to `entt::snapshot.get<T>(archive)` is self-contained
+// for type T — it writes the count of entities with T, then each
+// (entity, component) pair into the archive. Different Ts touch
+// disjoint storages in the registry, so reading them concurrently
+// is safe as long as nothing is mutating those storages
+// concurrently. broadcastRegistry runs on the game thread *after*
+// all ECS systems have finished mutating, so the precondition
+// holds.
+//
+// We allocate one OutputArchive per type, dispatch the
+// serialisation as N independent jobs to the parallel-STL pool,
+// and concatenate the per-type buffers in tuple order at the end.
+// The receiving Loader walks the same tuple in the same order, so
+// the wire bytes are identical to the sequential form.
+template <typename Tuple, std::size_t... Is>
+void serializeParallelImpl(const entt::registry& registry, OutputArchive& output, std::index_sequence<Is...> /*seq*/)
+{
+    constexpr std::size_t k_n = sizeof...(Is);
+    std::array<OutputArchive, k_n> archives;
+
+#if GROUP2_REGSER_HAS_PARALLEL
+    std::array<std::size_t, k_n> indices = {Is...};
+    // Per-type kernel — captures the shared registry by reference and
+    // writes into its own archive slot. `entt::snapshot{registry}` is
+    // a thin wrapper; constructing one per task is free.
+    auto kernel = [&registry, &archives](std::size_t idx) {
+        // Dispatch on idx → tuple element. Each tuple position has its
+        // own kernel; we generate them via an inner index-sequence.
+        // The fold-expression resolves the matching `Is` at compile
+        // time; only one branch fires per kernel call.
+        auto snap = entt::snapshot{registry};
+        ((idx == Is ? (snap.template get<std::tuple_element_t<Is, Tuple>>(archives[Is]), 0) : 0), ...);
+    };
+    ::group2::perf::parallelFor(indices.begin(), indices.end(), kernel);
+#else
+    // Sequential fallback — same as the original `getAll` path, but
+    // routed through the per-type-archive form so the merge step is
+    // identical between the two builds.
+    auto snap = entt::snapshot{registry};
+    ((snap.template get<std::tuple_element_t<Is, Tuple>>(archives[Is])), ...);
+#endif
+
+    // Concatenate per-type buffers in tuple order. This is a sequential
+    // pass, but each insertion is just a memcpy and the total size is
+    // bounded by the snapshot wire size — typically 10s of KB.
+    for (std::size_t i = 0; i < k_n; ++i) {
+        output.buffer.insert(output.buffer.end(), archives[i].buffer.begin(), archives[i].buffer.end());
+    }
+}
+
+template <typename Tuple>
+void serializeParallel(const entt::registry& registry, OutputArchive& output)
+{
+    serializeParallelImpl<Tuple>(registry, output, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
 }
 
 } // namespace
@@ -68,8 +139,19 @@ std::vector<uint8_t> serialize(const entt::registry& registry)
 {
     OutputArchive snapshotArchive;
 
-    auto snapshot = entt::snapshot{registry};
-    getAll(snapshot, snapshotArchive, static_cast<Synced*>(nullptr));
+    // PR-8 (server-perf): per-type parallel serialisation. With 14
+    // component types in `Synced` and 16 cores available, each type
+    // serialises in parallel into its own archive; we concat in
+    // tuple order at the end. Pre-PR-8 the sequential
+    // `getAll(snapshot, archive, Synced*)` form took 25-100 ms p99
+    // at 300-500 entities and was the dominant CPU scope on
+    // snapshot ticks.
+    //
+    // The fall-through (sequential) form is preserved on builds
+    // without the perf module — the wire bytes are identical
+    // because the merge step concatenates in the same order the
+    // Loader expects.
+    serializeParallel<Synced>(registry, snapshotArchive);
 
     std::vector<RemoteInputRecord> remoteInputs;
     if (const auto view = registry.view<const InputSnapshot>(); !view.empty()) {
