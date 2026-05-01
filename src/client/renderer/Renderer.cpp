@@ -3745,10 +3745,22 @@ bool Renderer::setVSync(const bool enabled)
 {
     SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
     if (!enabled) {
-        if (SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX))
-            mode = SDL_GPU_PRESENTMODE_MAILBOX;
-        else
+        // Bench profiling showed mailbox occasionally stalls on submit/acquire
+        // waiting for queued swap images to roll over.  Honour an env override
+        // (BENCH_PRESENT=mailbox|immediate|vsync) so we can A/B without
+        // recompiling, but default to MAILBOX for normal play (smooth
+        // tear-free frames) and let the bench harness flip to IMMEDIATE when
+        // it wants the lowest-back-pressure path.
+        const char* p = SDL_getenv("BENCH_PRESENT");
+        if (p && SDL_strcasecmp(p, "immediate") == 0) {
             mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+        } else if (p && SDL_strcasecmp(p, "mailbox") == 0) {
+            mode = SDL_GPU_PRESENTMODE_MAILBOX;
+        } else if (SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX)) {
+            mode = SDL_GPU_PRESENTMODE_MAILBOX;
+        } else {
+            mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+        }
     }
     if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
         SDL_Log("Renderer: setVSync failed: %s", SDL_GetError());
