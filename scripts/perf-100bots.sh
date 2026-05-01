@@ -36,7 +36,16 @@ echo "[perf] bots=$BOTS seconds=$SECONDS_TO_RUN log=$LOG"
 pkill -f "$BUILD_DIR/server"   >/dev/null 2>&1 || true
 pkill -f "$BUILD_DIR/clientbot" >/dev/null 2>&1 || true
 pkill -f "$BUILD_DIR/group2"   >/dev/null 2>&1 || true
-sleep 0.3
+# TCP TIME_WAIT can block the port for ~60s; force-clear by killing any
+# process still bound to 9999.  fuser exits non-zero if nothing was bound.
+fuser -k 9999/tcp >/dev/null 2>&1 || true
+# Wait for sockets to actually close (TIME_WAIT cycles through within a few
+# seconds once the binding process is gone, since the bench server uses
+# SO_REUSEADDR if available).
+for _ in {1..20}; do
+    if ! ss -tnl 2>/dev/null | grep -q ":9999 "; then break; fi
+    sleep 0.2
+done
 
 cleanup() {
     echo "[perf] cleanup"

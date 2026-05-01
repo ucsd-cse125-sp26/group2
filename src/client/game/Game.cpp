@@ -1333,6 +1333,47 @@ SDL_AppResult Game::iterate()
         }
         const float snapshotAlpha = client.getSnapshotAlpha();
 
+        // Phase 2 — frustum cull animated chars.  Build 6 view-frustum planes
+        // from the camera's view-projection matrix; chars whose bounding sphere
+        // lies fully outside any plane skip animation sampling AND skinned
+        // draw entry.  Local player exempt (we still need its bones for hitbox /
+        // weapon IK).  Bounding sphere is conservative: the rig's vertical
+        // extent times an over-approximating 0.7 radius factor.
+        const glm::mat4 vp = renderer.getCamera().getViewProjection();
+        struct Plane
+        {
+            glm::vec3 n;
+            float d;
+        };
+        Plane frustum[6];
+        // Extract planes from row-form VP matrix (Gribb–Hartmann).  Each plane
+        // points INWARD; a sphere is outside when distance < -radius.
+        const glm::mat4 m = glm::transpose(vp);
+        const auto extract = [&](int idx, const glm::vec4& row) {
+            const glm::vec3 n(row.x, row.y, row.z);
+            const float len = glm::length(n);
+            frustum[idx].n = n / len;
+            frustum[idx].d = row.w / len;
+        };
+        extract(0, m[3] + m[0]); // left
+        extract(1, m[3] - m[0]); // right
+        extract(2, m[3] + m[1]); // bottom
+        extract(3, m[3] - m[1]); // top
+        extract(4, m[3] + m[2]); // near
+        extract(5, m[3] - m[2]); // far
+
+        // Conservative sphere radius for an animated character — covers the
+        // bind-pose AABB plus a fudge factor for arm/leg extension during run.
+        const float charRadius = 1.5f * kRigScale_ * (rigMeshMinY_ < 0.0f ? -rigMeshMinY_ : 100.0f);
+
+        auto inFrustum = [&](const glm::vec3& center, float radius) {
+            for (const auto& p : frustum) {
+                if (glm::dot(p.n, center) + p.d < -radius)
+                    return false;
+            }
+            return true;
+        };
+
         registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
             [&](entt::entity e,
                 AnimatedCharacter& ac,
@@ -1341,6 +1382,14 @@ SDL_AppResult Game::iterate()
                 const PlayerVisState& ps,
                 const InputSnapshot& inp) {
                 if (!ac.animator)
+                    return;
+
+                const bool isLocal = registry.all_of<LocalPlayer>(e);
+
+                // Cull off-screen characters (except the local player; its
+                // animator must keep running for hitboxes + weapon IK).
+                const bool visible = isLocal || inFrustum(pos.value, charRadius);
+                if (!visible)
                     return;
 
                 AnimationInputs ai{};
@@ -1361,7 +1410,7 @@ SDL_AppResult Game::iterate()
                 // Skip drawing the local player's own body in first-person
                 // (the animator still ran above so hitboxes / future gun-IK
                 // stay coherent).
-                if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
+                if (!animUI_.showLocalBody && isLocal)
                     return;
 
                 if (numJoints == 0)
