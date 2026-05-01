@@ -16,7 +16,7 @@
 set -uo pipefail
 
 BOTS="${1:-100}"
-SECONDS_TO_RUN="${2:-15}"
+SECONDS_TO_RUN="${2:-20}"
 BUILD_DIR="${3:-build/release}"
 
 cd "$(dirname "$0")/.."
@@ -60,9 +60,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # 1. Server (background) — wait until it logs "listening"
+# Map loading + V-HACD decomposition can take 10-30s on a cold start, so
+# we poll for up to 60s.
 "$BUILD_DIR/server" >>"$LOG" 2>&1 &
 SERVER_PID=$!
-for _ in {1..50}; do
+for _ in {1..600}; do
     if grep -q "Server: listening" "$LOG" 2>/dev/null; then break; fi
     sleep 0.1
 done

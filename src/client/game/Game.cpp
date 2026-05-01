@@ -57,6 +57,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
+#include <numeric>
 
 namespace
 {
@@ -612,10 +613,15 @@ bool Game::init()
             benchSeconds_ = seconds;
             benchActive_ = true;
             benchStartTime_ = prevTime;
+            // Reserve enough room for ~5000 fps × bench duration (worst case),
+            // so push_back never reallocates inside the hot path.
+            benchFrameTimesMs_.reserve(static_cast<size_t>(seconds * 5000.0f));
             // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
             limitFPSToMonitor = false;
             renderer.setVSync(false);
-            SDL_Log("[bench] running for %.1fs then exiting", static_cast<double>(seconds));
+            SDL_Log("[bench] running for %.1fs then exiting (warmup %.1fs)",
+                    static_cast<double>(seconds),
+                    static_cast<double>(k_benchWarmupSeconds));
         }
     }
 
@@ -953,18 +959,50 @@ SDL_AppResult Game::iterate()
         statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
     }
 
-    // Bench mode: print summary + quit when the duration is up.
+    // Bench mode: collect per-frame timings (after warmup) then aggregate +
+    // print + quit when the duration is up.
     if (benchActive_) {
         const float benchElapsed = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
+        // Record this frame's wall-clock time once we're past the warmup window.
+        if (benchElapsed >= k_benchWarmupSeconds && frameTime > 0.0f && frameTime < 0.25f)
+            benchFrameTimesMs_.push_back(frameTime * 1000.0f);
+
         if (benchElapsed >= benchSeconds_) {
+            const auto countSamples = benchFrameTimesMs_.size();
+            if (countSamples == 0) {
+                std::fprintf(stderr, "[bench] no samples collected (warmup window > duration?)\n");
+                return SDL_APP_SUCCESS;
+            }
+
+            // Sort ascending: low ms = fast frames, high ms = slow frames.
+            // We'll convert to FPS (=1000/ms) for the summary, so worst-frame
+            // FPS = 1000 / max-ms = the LOW percentiles.
+            auto frames = benchFrameTimesMs_;
+            std::sort(frames.begin(), frames.end());
+            auto pct = [&](float p) {
+                const auto idx = static_cast<size_t>(static_cast<float>(countSamples - 1) * p);
+                return frames[idx];
+            };
+            const float msMedian = pct(0.50f);
+            const float msAvg = std::accumulate(frames.begin(), frames.end(), 0.0f) / static_cast<float>(countSamples);
+            const float msP95 = pct(0.95f); // 95th-percentile slowest = 5% lows
+            const float msP99 = pct(0.99f); // 99th-percentile slowest = 1% lows
+            const float msFastest = frames.front();
+            const float msSlowest = frames.back();
+
+            auto fps = [](float ms) { return ms > 0.0f ? 1000.0f / ms : 0.0f; };
+
             std::fprintf(stderr,
-                         "[bench] elapsed=%.1fs cur=%.1f p1=%.1f p5=%.1f min=%.1f max=%.1f\n",
+                         "[bench] elapsed=%.1fs samples=%zu "
+                         "avg=%.1f median=%.1f p5=%.1f p1=%.1f min=%.1f max=%.1f\n",
                          static_cast<double>(benchElapsed),
-                         static_cast<double>(statsFPSCurrent),
-                         static_cast<double>(statsFPS1pLow),
-                         static_cast<double>(statsFPS5pLow),
-                         static_cast<double>(statsFPSMin),
-                         static_cast<double>(statsFPSMax));
+                         countSamples,
+                         static_cast<double>(fps(msAvg)),
+                         static_cast<double>(fps(msMedian)),
+                         static_cast<double>(fps(msP95)),
+                         static_cast<double>(fps(msP99)),
+                         static_cast<double>(fps(msSlowest)),
+                         static_cast<double>(fps(msFastest)));
             std::fflush(stderr);
             return SDL_APP_SUCCESS;
         }

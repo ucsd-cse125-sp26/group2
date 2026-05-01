@@ -302,9 +302,11 @@ private:
     // Benchmark mode: when BENCH_SECONDS env var is set to a positive number,
     // the client runs for that many seconds, prints a one-line FPS summary to
     // stderr, then quits.  Powers `scripts/perf-100bots.sh`.
-    float benchSeconds_ = 0.0f; ///< Bench duration in seconds (0 = disabled).
-    Uint64 benchStartTime_ = 0; ///< Perf counter at first iterate() in bench mode.
-    bool benchActive_ = false;  ///< True after BENCH_SECONDS read at init.
+    float benchSeconds_ = 0.0f;                         ///< Bench duration in seconds (0 = disabled).
+    Uint64 benchStartTime_ = 0;                         ///< Perf counter at first iterate() in bench mode.
+    bool benchActive_ = false;                          ///< True after BENCH_SECONDS read at init.
+    static constexpr float k_benchWarmupSeconds = 2.0f; ///< Skip the first N seconds (pipeline warmup).
+    std::vector<float> benchFrameTimesMs_;              ///< Per-frame ms after warmup; reservation in init().
 
     /// @brief Attach a fresh `AnimatedCharacter` component to an entity.
     ///
