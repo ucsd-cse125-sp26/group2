@@ -117,6 +117,22 @@ private:
     /// Called once per tick before weapon/damage systems.
     void updateAnimationAndHitboxes(float dt);
 
+    /// @brief Phase 6: write `LagCompTarget` onto each connected
+    /// player's entity from their connection's last-reported RTT.
+    ///
+    /// Translates `Connection::lastReportedRttMs` (ms) into a
+    /// `targetServerTick = max(0, currentServerTick - rewindTicks)`,
+    /// where `rewindTicks = clamp(rttMs * tickRateHz / 2000, 0,
+    /// k_maxLagCompTicks)`. Players with no client connection (e.g.
+    /// AI bots in a future expansion) keep their previous target,
+    /// which on the next pushHitboxHistory will become a valid
+    /// rewind anchor — but for now, only entities bound through
+    /// `clientEntities` get a target.
+    ///
+    /// Called once per tick between `pushHitboxHistory` and
+    /// `runWeapon`.
+    void updateLagCompTargets();
+
     physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
 
     Server server;                           ///< Owns the TCP socket and network I/O.

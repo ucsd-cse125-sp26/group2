@@ -73,6 +73,14 @@ public:
     /// @return The client count.
     int getClientCount();
 
+    /// @brief Phase 6: get this client's most-recently-reported smoothed RTT.
+    /// @param clientId Network client identifier.
+    /// @return RTT in milliseconds, or 0 if the client isn't connected
+    ///         or hasn't sent its first INPUT packet yet (which carries
+    ///         the RTT field — see the wire format note in
+    ///         `Connection::lastReportedRttMs`).
+    uint16_t getClientRttMs(ClientId clientId);
+
     /// @brief Broadcast match status updates to clients.
     void broadcastMatchStatus(MatchStatePacket packet);
 

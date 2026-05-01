@@ -9,6 +9,7 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
@@ -196,10 +197,21 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // Phase 6: capture this tick's capsules into each entity's HitboxHistory
     // ring. Has to run *after* updateHitboxes (so the capsules reflect this
     // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
-    // consistent history snapshot, even though Phase 6's rewindHitboxes is
-    // still a no-op). Pushing here means a future "flip" — actually doing
-    // the rewind — needs no further system-ordering changes.
+    // consistent history snapshot from which rewindHitboxes can pick).
     systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
+
+    // Phase 6: per-shooter lag-comp scheduler. For every player entity
+    // bound to a connected client, set `LagCompTarget.targetServerTick`
+    // to `currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
+    // The hitscan path inside runWeapon reads this off the shooter
+    // entity to size the rewind window for that shooter's shot.
+    //
+    // Capping at k_maxLagCompTicks (default ~25 ticks ≈ 200 ms at
+    // 128 Hz) prevents pathologically high-ping shooters from
+    // rewinding deep into the past, which would let them hit targets
+    // that have long since moved out of cover and produce
+    // "shot-around-the-corner" feel for the victims.
+    updateLagCompTargets();
 
     std::vector<NetParticleEvent> particleEvents;
     systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
@@ -390,6 +402,37 @@ void ServerGame::attachServerAnimator(entt::entity player)
 void ServerGame::detachServerAnimator(entt::entity player)
 {
     serverAnimators_.erase(player);
+}
+
+void ServerGame::updateLagCompTargets()
+{
+    // Server-side cap on rewind depth. 25 ticks at 128 Hz ≈ 195 ms,
+    // matching the plan's "server-capped at 200 ms" rule. Above this
+    // a high-ping shooter could rewind targets behind cover that the
+    // victim has long since ducked behind, producing the classic
+    // "I shot him around the corner" feel for the receiver.
+    static constexpr uint32_t k_maxLagCompTicks = 25;
+
+    const auto currentServerTick = static_cast<uint32_t>(tickCount);
+    for (const auto& [clientId, entity] : clientEntities) {
+        if (!registry.valid(entity))
+            continue;
+
+        const uint16_t rttMs = server.getClientRttMs(clientId);
+        // Half-RTT in ticks. Round-to-nearest by adding half a tick
+        // before integer divide. (rttMs / 2 / 1000 * tickRateHz)
+        // reordered to keep the integer-only arithmetic exact at the
+        // cost of one extra add: rttHalfTicks = (rttMs * Hz + 1000) /
+        // 2000.
+        const uint32_t rttHalfTicks =
+            (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 1000u) / 2000u;
+        const uint32_t lagTicks = std::min<uint32_t>(rttHalfTicks, k_maxLagCompTicks);
+        const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
+                                        ? 0u // explicit "no rewind" sentinel
+                                        : (currentServerTick - lagTicks);
+
+        registry.emplace_or_replace<LagCompTarget>(entity, LagCompTarget{.targetServerTick = targetTick});
+    }
 }
 
 void ServerGame::updateAnimationAndHitboxes(float dt)

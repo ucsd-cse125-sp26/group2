@@ -626,6 +626,15 @@ int Server::getClientCount()
     return static_cast<int>(clients.size());
 }
 
+uint16_t Server::getClientRttMs(ClientId clientId)
+{
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    const auto it = clients.find(clientId);
+    if (it == clients.end())
+        return 0;
+    return it->second.lastReportedRttMs;
+}
+
 void Server::broadcastMatchStatus(MatchStatePacket packet)
 {
     std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(MatchStatePacket));

@@ -755,6 +755,7 @@ add_executable(group2
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
         src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
         src/ecs/components/Player.hpp
         src/client/systems/KillFeedEvent.hpp
         src/ecs/components/RespawnTimer.hpp
@@ -1067,6 +1068,7 @@ add_executable(client
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
         src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
         src/ecs/components/Player.hpp
         src/network/MatchStatus.hpp
         src/client/systems/KillFeedEvent.hpp
@@ -1258,6 +1260,7 @@ add_executable(server
         src/ecs/systems/HitboxSystem.hpp
         src/ecs/systems/HitboxSystem.cpp
         src/ecs/systems/LagCompensation.hpp
+        src/ecs/components/LagCompTarget.hpp
         src/server/systems/HitboxHistorySystem.hpp
         src/server/systems/HitboxHistorySystem.cpp
         src/client/animation/CharacterRig.hpp
