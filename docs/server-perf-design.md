@@ -398,44 +398,67 @@ are the wins, here's the wall" is a perfectly good deliverable.
 | `d1fe4a9` | PR-1: scoped profiler + fleet RTT + harness | Foundation: per-system timers, 1 Hz aggregator, CSV out, bot fleet aggregator, `scripts/server-loadtest.sh`. |
 | `cf7f97a` | PR-2: defer snapshot fanout, share-frame, bulk drains | Snapshot bytes shared via `shared_ptr`; per-client UDP fanout deferred to network thread; `EventQueue` self-locks; bulk RTT snapshot. **Largest measured win.** |
 | `530d7b9` | PR-3: parallel-STL hooks for animation + hitbox | Optional TBB-backed `parallelFor`; pre-emplace + parallel kernel pattern. **Default off**: localhost loadtest oversubscribes cores with the bot fleet. |
+| `229a97e` | PR-4: atomic-published read snapshots + match throttle | Lock-free `getClientCount` and `snapshotClientRtts`; shared-frame for events broadcast; match replicate-on-change. Together they push the "server-keeps-up" range from ~100 bots to ~300 bots. |
+| `dc0b868` | test: bot env vars `NO_SPIN`, `TICK_HZ` | Lets the loadtest harness fit ≥ 200 bots on a single host without the spinning bot fleet starving the server. Production gameplay clients keep the spin. |
 
 ### Empirical results (relwithdebinfo, localhost, no simulated latency)
 
-| N    | Pre-PR-2 tick p99 | Post-PR-2 tick p99 | Post-PR-2 fleet RTT p99 | Status |
+PR-1 baseline → after PR-2/3/4 plus the PR-4 bot lightening
+(`GROUP2_BOT_NO_SPIN=1`, 128 Hz bot tick rate kept):
+
+| N    | Pre-PR-2 tick p99 | Post-PR-4 tick p99 | Post-PR-4 fleet RTT p99 | Status |
 |-----:|------------------:|-------------------:|------------------------:|:-------|
 |  20  | 0.79 ms          | 0.79 ms            | 7.91 ms                 | trivial |
 |  50  | 3.15 ms          | 0.79 ms            | 8.10–8.30 ms            | 4× faster, target hit |
-| 100  | 25–50 ms (broken) | 3.15–6.29 ms       | 14–21 ms (occasional spike to 22+) | tick under budget; RTT mostly under 15 ms |
-| 200  | n/a              | 50+ ms (broken)     | 25–48 ms                | fails — network-thread lock saturation |
-| 500  | not reachable    | not reachable       | not reachable           | fails — bot-side CPU exhausts the test machine first |
+| 100  | 25–50 ms (broken) | 3.15 ms            | 14–21 ms                | tick under budget; RTT under 15 ms at p50 |
+| 200  | broken            | 1.57–6.29 ms       | ~39 ms                  | server keeps up at 128 Hz; RTT high due to network-thread saturation on PONG |
+| 300  | broken            | 50.33 ms (broadcast spikes) | 132–155 ms          | server still ticks at 128 Hz; PONG round-trip dominates |
+| 500  | not reachable    | not reachable       | not reachable           | fails — host CPU saturated by 500 clientbot threads even with no-spin |
 
-`broadcastRegistry` itself dropped from 1.57 ms p50 (50 bots) to
-0.01 ms — a 157× collapse. That's the headline single-PR win.
+Single-PR headline win: `broadcastRegistry` dropped from 1.57 ms
+p50 (50 bots) to **0.01 ms** — a 157× collapse — via PR-2's
+shared-frame + deferred-fanout work.
 
-### Where the wall is
+PR-4 gave: lock-free `getClientCount` / `snapshotClientRtts` (atomic
+RTT cache), `enqueueBroadcast` shared-frame for events, and the
+match-state replicate-on-change throttle. Combined with the bot
+no-spin flag, it pushed the working range from "≤ 100 bots" to
+"≥ 300 bots with server still ticking at 128 Hz."
 
-At ≥ 200 bots two structural limits meet:
+### Where the wall is (post-PR-4)
 
-1. **Bot-side CPU on a shared host.** Each clientbot thread spins
-   to maintain 128 Hz cadence; at 200 threads on a 16-core box,
-   the bot fleet alone consumes ~13 cores. The server's tick
-   thread gets context-switched out and the OS scheduler can't
-   keep all bots on time. Fleet RTT degrades because *bots don't
-   get to run often enough*, not because the server is slow.
-   (Confirmed by per-tick wall samples: `tickN < 128/sec` once
-   the fleet saturates the host.)
+PR-4's atomic-published read snapshots fixed the second limit
+listed in the previous version of this section — the game-thread
+`getClientCount` / `snapshotClientRtts` paths are now lock-free,
+and the per-tick MATCH_STATE broadcast is now replicate-on-change.
+Combined with the PR-4 bot no-spin flag, the server now ticks at
+the full 128 Hz at ≥ 300 bots on the localhost loadtest harness.
 
-2. **Single-threaded network I/O.** `Server::networkLoop` holds
-   `stateMutex_` for the duration of `readClients()`, which
-   iterates every connected client's socket. At 200+ clients
-   that lock-hold time exceeds 10 ms, and any game-thread
-   function that takes the same mutex (`getClientCount`,
-   the unsplit halves of `lagcompTargets` that PR-2c didn't
-   reach, `broadcastMatchStatus`) waits the full duration.
-   Lock-wait shows up in the profile as huge p99 spikes on
-   otherwise cheap scopes.
+The remaining wall at ≥ 300 bots is now PONG/snapshot delivery
+latency on the network thread:
 
-The first is hardware; the second is architectural.
+1. **PONG round-trip latency.** PING/PONG is sent on the network
+   thread inside `handleUdpUnreliable` while still holding
+   `stateMutex_`. Pre-PR-4 this was overshadowed by other
+   contention; now that the game thread is unblocked, the bottleneck
+   is the network thread itself. With 300 clients pushing 30 KB
+   snapshots × 32 Hz = ~700 MB/s outbound, the network thread's
+   per-cycle send loop (deferred snapshot fanout + reliable-event
+   queue drains + flushAllOutbound) is the single saturating
+   resource. Fleet RTT p99 climbs to 130-150 ms at 300 bots — well
+   above the 15 ms target but driven by single-threaded I/O, not
+   by the simulation.
+
+2. **Bot-side CPU on a shared host.** Even with `NO_SPIN`, 500
+   clientbot threads on a 16-core box compete with the server for
+   cores. At 500 the OS scheduler can't keep both fleets and
+   the server on time. This is the same hardware wall as before,
+   just relocated.
+
+The first is architectural (multi-threaded I/O is the real fix —
+shard `networkLoop` workers by connectionId, drop per-client lock
+to a per-Connection mutex, allow PONGs to ship in parallel). The
+second is hardware.
 
 ### What still needs to happen for 500 bots
 

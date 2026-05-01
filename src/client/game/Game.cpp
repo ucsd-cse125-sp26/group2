@@ -185,7 +185,7 @@ bool Game::init()
         //           (e.g. "COL_*" prefix) and excluded from the visual model.
         //           Used for production maps where collision is hand-authored
         //           independently from rendering geometry.
-        static constexpr bool k_separatedCollisionMap = true;
+        static constexpr bool k_separatedCollisionMap = false;
 
         // Pattern that identifies collision-only nodes when in separated mode.
         // The Blender export convention here is a "COL_" prefix; nodes whose
