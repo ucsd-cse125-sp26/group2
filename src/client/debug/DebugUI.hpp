@@ -94,21 +94,29 @@ public:
     /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
     void buildNetworkUI(const NetworkStats& stats);
 
-    /// @brief Build the Latency Simulator window with a slider to add
-    /// fake round-trip latency. Useful for testing Phase 6 lag
-    /// compensation and Phase 5b reconciliation under non-LAN
-    /// conditions without setting up `tc qdisc`.
+    /// @brief Build the Network Simulator window with sliders to add
+    /// fake round-trip latency and packet loss. Useful for testing
+    /// Phase 6 lag compensation and Phase 5b reconciliation under
+    /// non-LAN conditions without setting up `tc qdisc`.
     ///
-    /// The slider value (0–200 ms) is written into
-    /// `simulatedLatencyMs` and read by Game::iterate which forwards
+    /// Latency slider value (0–200 ms) is written into
+    /// `simulatedLatencyMs_` and read by Game::iterate which forwards
     /// it to `Client::setSimulatedLatencyMs`. Half the value is added
     /// to outbound packets and half to inbound, modelling a symmetric
     /// network with the slider's RTT.
-    void buildLatencySimulatorUI();
+    ///
+    /// Packet-loss slider value (0–50 %) is written into
+    /// `simulatedLossPct_`, forwarded to `Client::setSimulatedLossPercent`,
+    /// and applied as an independent Bernoulli drop in each direction.
+    void buildNetworkSimUI();
 
     /// @brief The current latency-simulator setting in milliseconds (0–200).
     /// Read by Game::iterate each frame to push to `Client::setSimulatedLatencyMs`.
     [[nodiscard]] int getSimulatedLatencyMs() const noexcept { return simulatedLatencyMs_; }
+
+    /// @brief The current packet-loss setting (0–50 %).
+    /// Read by Game::iterate each frame to push to `Client::setSimulatedLossPercent`.
+    [[nodiscard]] int getSimulatedLossPercent() const noexcept { return simulatedLossPct_; }
 
     void buildWeaponUI(const Registry& registry);
 
@@ -188,13 +196,17 @@ private:
     bool showLightingControls = false; ///< Show the Lighting Controls window.
     bool showSkybox = false;           ///< Show the Skybox window.
     bool showNetworkStats = false;     ///< Show the Network Stats window.
-    bool showLatencySim = false;       ///< Show the Latency Simulator window.
+    bool showNetworkSim = false;       ///< Show the Network Simulator (latency + loss) window.
     bool showWeaponHud = false;        ///< Show the Weapon HUD debug window (disabled by default).
 
     /// @brief Phase 6 testing: simulated round-trip latency in ms.
-    /// Written by the Latency Simulator window's slider, read by
+    /// Written by the Network Simulator window's slider, read by
     /// Game::iterate to push to Client. Zero = simulator off.
     int simulatedLatencyMs_ = 0;
+
+    /// @brief Phase 6 testing: simulated UDP packet loss in percent.
+    /// Applied independently to each direction. Zero = simulator off.
+    int simulatedLossPct_ = 0;
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.

@@ -44,6 +44,11 @@ bool Client::init(const char* addr, Uint16 port, const TransportConfig& transpor
     msgStream.socket = sock;
     transportConfig_ = transport;
 
+    // Seed the loss simulator RNG once. random_device for fresh entropy
+    // across runs; deterministic per-session so loss patterns are at
+    // least repeatable within a single test run.
+    simLossRng_.seed(std::random_device{}());
+
     SDL_Log("Client created, server address is %s", NET_GetAddressString(serverAddr));
 
     // ── Phase 3d-1: open UDP sidecar ─────────────────────────────────────
@@ -344,10 +349,42 @@ void Client::setSimulatedLatencyMs(int totalMs) noexcept
     simulatedLatencyMs_.store(totalMs, std::memory_order_relaxed);
 }
 
+void Client::setSimulatedLossPercent(int percent) noexcept
+{
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
+    simulatedLossPercent_.store(percent, std::memory_order_relaxed);
+}
+
+bool Client::shouldDropPacketLocked()
+{
+    const int pct = simulatedLossPercent_.load(std::memory_order_relaxed);
+    if (pct <= 0)
+        return false;
+    if (pct >= 100)
+        return true;
+    // uniform_int_distribution[0, 99] → P(value < pct) == pct/100,
+    // matching the slider's "% packets dropped" semantics.
+    std::uniform_int_distribution<int> dist(0, 99);
+    return dist(simLossRng_) < pct;
+}
+
 bool Client::sendUdpDelayed(net::PacketHeader hdr, const void* data, int len)
 {
     // Caller already holds stateMutex_ — both the immediate send and
     // the queue mutation are guarded by the existing lock. No re-lock.
+
+    // Phase 6 testing: simulated outbound packet loss. Roll before
+    // anything else so the dropped packet doesn't even consume a
+    // sequence/header slot. Returning `true` (optimistic success) keeps
+    // the existing TCP-fallback logic in callers from triggering — the
+    // simulator drops should look like clean UDP loss to upper layers,
+    // not "send failed, fall back to TCP".
+    if (shouldDropPacketLocked())
+        return true;
+
     const int totalMs = simulatedLatencyMs_.load(std::memory_order_relaxed);
     if (totalMs == 0) {
         return udpEndpoint_.send(serverUdpAddr_, hdr, data, len);
@@ -471,6 +508,18 @@ void Client::networkLoop()
             while (drained < k_maxDatagramsPerCycle && udpEndpoint_.tryReceive(msg)) {
                 ++drained;
                 if (msg.header.connectionId != connectionId_ || msg.payload.empty()) {
+                    msg.from.release();
+                    continue;
+                }
+
+                // Phase 6 testing: simulated inbound packet loss. Apply
+                // at the *datagram* level — before fragment reassembly and
+                // before reliable-channel dedup — so that redundancy
+                // mechanisms see realistic per-fragment / per-copy drop
+                // patterns (a snapshot needs every fragment to assemble;
+                // a reliable event survives if any of its 3 redundant
+                // copies make it).
+                if (shouldDropPacketLocked()) {
                     msg.from.release();
                     continue;
                 }

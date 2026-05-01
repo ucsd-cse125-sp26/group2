@@ -153,6 +153,20 @@ int main(int argc, char* argv[])
         }
     }
 
+    // Same for simulated packet loss. Each bot drops both directions
+    // independently at this rate. Defaults to 0 (off).
+    int botLossPct = 0;
+    if (const char* envLoss = std::getenv("GROUP2_BOT_LOSS_PCT")) {
+        char* end = nullptr;
+        const long n = std::strtol(envLoss, &end, 10);
+        if (*end == '\0' && n >= 0 && n <= 100) {
+            botLossPct = static_cast<int>(n);
+            SDL_Log("[clientbot] applying simulated %d %% UDP loss to all bots (GROUP2_BOT_LOSS_PCT)", botLossPct);
+        } else {
+            SDL_Log("[clientbot] ignoring invalid GROUP2_BOT_LOSS_PCT='%s' (need 0..100)", envLoss);
+        }
+    }
+
     installSignalHandlers();
 
     // ── Spawn bots ────────────────────────────────────────────────────────
@@ -179,6 +193,8 @@ int main(int argc, char* argv[])
         }
         if (botLatencyMs > 0)
             bot->setSimulatedLatencyMs(botLatencyMs);
+        if (botLossPct > 0)
+            bot->setSimulatedLossPercent(botLossPct);
         bots.push_back(std::move(bot));
         ++connected;
 

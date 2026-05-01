@@ -53,6 +53,11 @@ public:
     ///                outbound and inbound packet queues.
     void setSimulatedLatencyMs(int totalMs);
 
+    /// @brief Apply a simulated UDP packet-loss percentage to the bot's
+    /// UDP path. Wraps `Client::setSimulatedLossPercent`.
+    /// @param percent Per-datagram drop probability (0–100).
+    void setSimulatedLossPercent(int percent);
+
     /// @brief Spawn the worker thread. Returns immediately.
     /// @param stopFlag Shared shutdown signal. Loop exits when set true.
     void start(const std::atomic<bool>& stopFlag);

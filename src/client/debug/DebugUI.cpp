@@ -144,7 +144,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
 
     ImGui::SeparatorText("Gameplay");
     ImGui::Checkbox("Network Stats", &showNetworkStats);
-    ImGui::Checkbox("Latency Simulator", &showLatencySim);
+    ImGui::Checkbox("Network Sim", &showNetworkSim);
     ImGui::Checkbox("Weapon HUD", &showWeaponHud);
     ImGui::Checkbox("Particle System", &showParticleWindow_);
 
@@ -1126,54 +1126,96 @@ void DebugUI::buildNetworkUI(const NetworkStats& stats)
     ImGui::End();
 }
 
-void DebugUI::buildLatencySimulatorUI()
+void DebugUI::buildNetworkSimUI()
 {
-    if (!showLatencySim)
+    if (!showNetworkSim)
         return;
 
     ImGui::SetNextWindowPos({500.0f, 700.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({340.0f, 0.0f}, ImGuiCond_FirstUseEver);
     constexpr ImGuiWindowFlags k_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize;
-    if (!ImGui::Begin("Latency Simulator", &showLatencySim, k_flags)) {
+    if (!ImGui::Begin("Network Sim", &showNetworkSim, k_flags)) {
         ImGui::End();
         return;
     }
 
-    ImGui::TextWrapped("Adds artificial round-trip latency to the UDP transport. "
-                       "Half is applied to outbound packets, half to inbound, "
-                       "modelling a symmetric one-way delay.");
+    // ── Latency ────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Latency");
+    ImGui::TextWrapped("Adds artificial round-trip latency. Half is applied to "
+                       "outbound, half to inbound, modelling a symmetric one-way delay.");
     ImGui::Spacing();
-
     ImGui::SliderInt("Sim. RTT (ms)", &simulatedLatencyMs_, 0, 200, "%d ms");
 
     // Quick presets — common latency tiers for testing lag-comp /
     // reconciliation behaviour at "LAN", "good WAN", "bad WAN", "edge".
-    if (ImGui::SmallButton("0 (off)"))
+    if (ImGui::SmallButton("0##lat"))
         simulatedLatencyMs_ = 0;
     ImGui::SameLine();
-    if (ImGui::SmallButton("30"))
+    if (ImGui::SmallButton("30##lat"))
         simulatedLatencyMs_ = 30;
     ImGui::SameLine();
-    if (ImGui::SmallButton("60"))
+    if (ImGui::SmallButton("60##lat"))
         simulatedLatencyMs_ = 60;
     ImGui::SameLine();
-    if (ImGui::SmallButton("100"))
+    if (ImGui::SmallButton("100##lat"))
         simulatedLatencyMs_ = 100;
     ImGui::SameLine();
-    if (ImGui::SmallButton("150"))
+    if (ImGui::SmallButton("150##lat"))
         simulatedLatencyMs_ = 150;
     ImGui::SameLine();
-    if (ImGui::SmallButton("200"))
+    if (ImGui::SmallButton("200##lat"))
         simulatedLatencyMs_ = 200;
 
-    ImGui::Spacing();
-    ImGui::SeparatorText("Effect");
     if (simulatedLatencyMs_ == 0) {
-        ImGui::TextDisabled("Disabled — packets take their normal fast path.");
+        ImGui::TextDisabled("Latency: off — packets take the fast path.");
     } else {
-        ImGui::Text("Outbound delay: %d ms", simulatedLatencyMs_ / 2);
-        ImGui::Text("Inbound delay:  %d ms", simulatedLatencyMs_ / 2);
-        ImGui::Text("Added to PING ping reading: ~%d ms", simulatedLatencyMs_);
+        ImGui::Text(
+            "Out %d ms / In %d ms / RTT +%d ms", simulatedLatencyMs_ / 2, simulatedLatencyMs_ / 2, simulatedLatencyMs_);
+    }
+
+    // ── Packet loss ────────────────────────────────────────────────────
+    ImGui::Spacing();
+    ImGui::SeparatorText("Packet Loss");
+    ImGui::TextWrapped("Independent Bernoulli drop on each direction. Slider value "
+                       "is per-datagram drop probability — fragmented snapshots and "
+                       "redundant inputs/events lose effective bandwidth at the "
+                       "compounded rate.");
+    ImGui::Spacing();
+    ImGui::SliderInt("Sim. Loss (%)", &simulatedLossPct_, 0, 50, "%d %%");
+
+    if (ImGui::SmallButton("0##loss"))
+        simulatedLossPct_ = 0;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("1##loss"))
+        simulatedLossPct_ = 1;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("5##loss"))
+        simulatedLossPct_ = 5;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("10##loss"))
+        simulatedLossPct_ = 10;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("25##loss"))
+        simulatedLossPct_ = 25;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("50##loss"))
+        simulatedLossPct_ = 50;
+
+    if (simulatedLossPct_ == 0) {
+        ImGui::TextDisabled("Loss: off — every UDP datagram delivered.");
+    } else {
+        // Compounded effective loss across redundancy layers, for
+        // playtester intuition.  Closed-form for an N-fragment / N-copy
+        // unit: 1 − (1 − p)^N if a single drop kills it (snapshots), or
+        // p^N if all copies must be dropped (reliable events).
+        const double p = static_cast<double>(simulatedLossPct_) / 100.0;
+        const double snapLoss = 1.0 - std::pow(1.0 - p, 5.0); // 5-fragment example
+        const double reliable = std::pow(p, 3.0);             // 3-copy redundancy
+        const double inputs = std::pow(p, 5.0);               // 5-tick redundancy
+        ImGui::Text("Per-datagram drop: %d %%", simulatedLossPct_);
+        ImGui::Text("≈ snapshot loss (5 frags): %.1f %%", snapLoss * 100.0);
+        ImGui::Text("≈ reliable-event loss:    %.2f %%", reliable * 100.0);
+        ImGui::Text("≈ input-tick loss:        %.3f %%", inputs * 100.0);
     }
 
     ImGui::End();

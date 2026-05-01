@@ -1745,12 +1745,14 @@ SDL_AppResult Game::iterate()
                     statsFPS5pLow);
     debugUI.buildNetworkUI(client.getNetStats());
 
-    // Phase 6 testing: latency simulator window. Slider value flows from
-    // DebugUI → Client each frame; Client splits it across outbound and
-    // inbound UDP delay queues drained on its network thread. Idempotent
-    // when the value hasn't changed (Client clamps and atomically stores).
-    debugUI.buildLatencySimulatorUI();
+    // Phase 6 testing: network simulator window (latency + packet loss).
+    // Slider values flow from DebugUI → Client each frame; idempotent when
+    // unchanged (Client clamps and atomically stores). Latency is split
+    // half-and-half across outbound + inbound delay queues; loss is an
+    // independent Bernoulli drop applied per-datagram in each direction.
+    debugUI.buildNetworkSimUI();
     client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+    client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
 
     // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
 

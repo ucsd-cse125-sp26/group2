@@ -24,6 +24,7 @@
 #include <entt/entt.hpp>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <thread>
 
 /// @brief Live network statistics updated each frame.
@@ -168,6 +169,32 @@ public:
         return simulatedLatencyMs_.load(std::memory_order_relaxed);
     }
 
+    /// @brief Phase 6 testing: simulate UDP packet loss.
+    ///
+    /// Setting this to N makes each outbound and each inbound UDP
+    /// datagram an independent N% Bernoulli drop. With redundancy
+    /// disabled (PING/PONG) you'll see N% loss directly. With
+    /// redundancy on (5-input INPUT packets, 3x reliable events,
+    /// fragmented snapshots) effective loss is much lower:
+    ///   - Inputs: a tick is lost only if 5 consecutive packets are
+    ///     dropped — at 50% loss that's ~3 % per-tick loss.
+    ///   - Reliable events: lost only if all 3 redundant copies
+    ///     are dropped — at 50% loss that's ~12.5 % per-event loss.
+    ///   - Fragmented snapshots: any single fragment loss kills the
+    ///     whole snapshot — at 50% loss with 5 fragments that's
+    ///     ~97 % per-snapshot loss. Use small values (5–15 %) for
+    ///     testing snapshot resilience.
+    ///
+    /// Range: 0–100. 0 disables. Higher values are accepted but pin
+    /// the connection (the slider in the debug UI caps at 50 %).
+    void setSimulatedLossPercent(int percent) noexcept;
+
+    /// @brief Get the currently-effective simulated packet loss %.
+    [[nodiscard]] int getSimulatedLossPercent() const noexcept
+    {
+        return simulatedLossPercent_.load(std::memory_order_relaxed);
+    }
+
 private:
     MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr;             ///< Resolved server address.
@@ -291,6 +318,22 @@ private:
     /// @brief Total simulated RTT in ms (slider value, 0–200).
     /// Atomic so the UI thread can write while the network thread reads.
     std::atomic<int> simulatedLatencyMs_{0};
+
+    /// @brief Per-direction independent UDP-drop probability (slider
+    /// value, 0–100). Each outbound and each inbound datagram rolls
+    /// against this; rolls below the threshold are dropped silently.
+    std::atomic<int> simulatedLossPercent_{0};
+
+    /// @brief PRNG for the loss simulator. Always accessed under
+    /// `stateMutex_` (every loss-roll site already holds it for
+    /// other reasons). Seeded once in `init()` so behaviour varies
+    /// run-to-run; not cryptographically secure, but the simulator
+    /// is a debug aid, not a security boundary.
+    std::mt19937 simLossRng_{};
+
+    /// @brief Roll the loss RNG. Caller MUST already hold `stateMutex_`.
+    /// @return True when the caller should treat the packet as dropped.
+    bool shouldDropPacketLocked();
 
     /// @brief One outbound UDP datagram queued for delayed send.
     struct DelayedOutbound

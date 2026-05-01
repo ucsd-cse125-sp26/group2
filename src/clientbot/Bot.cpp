@@ -35,6 +35,11 @@ void Bot::setSimulatedLatencyMs(int totalMs)
     client_.setSimulatedLatencyMs(totalMs);
 }
 
+void Bot::setSimulatedLossPercent(int percent)
+{
+    client_.setSimulatedLossPercent(percent);
+}
+
 void Bot::start(const std::atomic<bool>& stopFlag)
 {
     if (!initialized_) {
