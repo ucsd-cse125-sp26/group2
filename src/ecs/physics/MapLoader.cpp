@@ -545,6 +545,33 @@ bool buildBrushFromHull(const VHACD::IVHACD::ConvexHull& hull, WorldBrush& outBr
     if (static_cast<int>(uniquePlanes.size()) < 4 || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
         return false;
 
+    // SANITY CHECK: every hull vertex must satisfy `dot(n, v) - dist <= 0` for
+    // every plane (with a small tolerance for face vertices that lie *on* the
+    // plane).  If any vertex sits outside its own brush by more than the
+    // tolerance, the brush is malformed (wrong winding, bad dedup, bad face
+    // normal) and bullets/players will fly straight through it because the
+    // sweep tests against half-spaces that don't actually enclose the hull.
+    // Reject the brush so the caller can fall through to triMesh.
+    const float k_validateTolerance = meshDiag * 0.01f; // 1% of mesh diagonal
+    for (const auto& v : verts) {
+        for (const auto& plane : uniquePlanes) {
+            const float d = glm::dot(plane.normal, v) - plane.distance;
+            if (d > k_validateTolerance) {
+                SDL_Log("MapLoader: rejecting V-HACD hull — vertex (%.2f,%.2f,%.2f) is %.3f outside plane "
+                        "(normal=%.2f,%.2f,%.2f dist=%.2f) — malformed convex region",
+                        static_cast<double>(v.x),
+                        static_cast<double>(v.y),
+                        static_cast<double>(v.z),
+                        static_cast<double>(d),
+                        static_cast<double>(plane.normal.x),
+                        static_cast<double>(plane.normal.y),
+                        static_cast<double>(plane.normal.z),
+                        static_cast<double>(plane.distance));
+                return false;
+            }
+        }
+    }
+
     outBrush.planeCount = static_cast<int>(uniquePlanes.size());
     for (int i = 0; i < outBrush.planeCount; ++i) {
         outBrush.planes[i].normal = uniquePlanes[static_cast<size_t>(i)].normal;
@@ -1055,7 +1082,8 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     return true;
 }
 
-bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3 position, float scale)
+bool loadPropCollision(
+    const std::string& path, MapCollisionData& out, glm::vec3 position, float scale, bool decomposeNonConvex)
 {
     Assimp::Importer importer;
 
@@ -1083,35 +1111,28 @@ bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3
     // We can't use extractCollision directly because it computes the transform
     // from the node hierarchy.  Instead, use a simple recursive walk that
     // multiplies our prop transform with each node's accumulated transform.
+    // decomposeNonConvex is captured by the walker so non-convex sub-meshes
+    // either go through V-HACD (smoother runtime collision, slower load) or
+    // fall back to triMesh (instant load, jittery on curved contacts).
     struct Walker
     {
-        static void
-        walk(const aiNode* node, const aiScene* scene, const glm::mat4& parentTransform, MapCollisionData& out)
+        bool decompose;
+        void walk(const aiNode* node, const aiScene* scene, const glm::mat4& parentTransform, MapCollisionData& out)
         {
             const glm::mat4 world = parentTransform * aiToGlm(node->mTransformation);
 
             for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
                 const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
                 // Scale = 1.0 because the scale is already baked into the transform.
-                // decomposeNonConvex = false: props are loaded one-shot per call
-                // and a typical prop GLB has many meshes, V-HACD on each at
-                // load time would slow startup unacceptably.  Props use the
-                // existing primitive auto-detection + triMesh fallback.
-                extractMeshCollision(mesh,
-                                     world,
-                                     1.0f,
-                                     "",
-                                     node->mName.C_Str(),
-                                     /*decomposeNonConvex=*/false,
-                                     out);
+                extractMeshCollision(mesh, world, 1.0f, "", node->mName.C_Str(), decompose, out);
             }
 
             for (unsigned int c = 0; c < node->mNumChildren; ++c)
                 walk(node->mChildren[c], scene, world, out);
         }
     };
-
-    Walker::walk(scene->mRootNode, scene, propTransform, out);
+    Walker walker{decomposeNonConvex};
+    walker.walk(scene->mRootNode, scene, propTransform, out);
 
     const auto newBoxes = out.boxes.size() - prevBoxes;
     const auto newCyls = out.cylinders.size() - prevCyls;

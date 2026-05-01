@@ -84,10 +84,22 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz)
 
         // Load prop collision — must match client for prediction parity.
         // Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
+        // `decomposeNonConvex = true`: pallet + bottle are non-convex, so
+        // V-HACD turns each non-convex sub-mesh into a few `WorldBrush`es
+        // instead of a `WorldTriMesh`.  Server pays a one-shot startup cost
+        // but runtime collision is much smoother (no per-triangle jitter).
+        // Must mirror the client setting in Game.cpp for prediction parity.
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
-        physics::loadPropCollision(
-            assetsDir + "metallic_pallet_factory_store.glb", mapCollision_, glm::vec3(0.0f, 0.0f, 600.0f), 0.25f);
-        physics::loadPropCollision(assetsDir + "bottle_a.glb", mapCollision_, glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+        physics::loadPropCollision(assetsDir + "metallic_pallet_factory_store.glb",
+                                   mapCollision_,
+                                   glm::vec3(0.0f, 0.0f, 600.0f),
+                                   0.25f,
+                                   /*decomposeNonConvex=*/true);
+        physics::loadPropCollision(assetsDir + "bottle_a.glb",
+                                   mapCollision_,
+                                   glm::vec3(100.0f, 0.0f, 400.0f),
+                                   20.0f,
+                                   /*decomposeNonConvex=*/true);
 
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());

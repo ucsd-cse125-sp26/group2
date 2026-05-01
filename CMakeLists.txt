@@ -1349,6 +1349,24 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
     )
 endif()
 
+# Copy prop GLBs (top-level files in assets/) next to the server binary so
+# MapLoader::loadPropCollision can find them.  ServerGame.cpp loads bottle_a /
+# metallic_pallet_factory_store as collision-only props for prediction parity
+# with the client.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    file(GLOB _server_prop_glbs "${CMAKE_CURRENT_SOURCE_DIR}/assets/*.glb")
+    if(_server_prop_glbs)
+        add_custom_command(TARGET server POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${_server_prop_glbs}
+                    "$<TARGET_FILE_DIR:server>/assets/"
+            COMMENT "Copying prop GLBs to server binary directory"
+            VERBATIM
+        )
+    endif()
+endif()
+
 # ===========================================================================
 # Clientbot executable — headless network-only load-test bot.
 #

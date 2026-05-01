@@ -235,7 +235,16 @@ bool Game::init()
         const std::string basePath = base ? base : "";
 
         // Helper: load a prop with render + collision in one call.
-        auto loadProp = [&](const char* name, const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
+        // `decomposeProp = true` runs V-HACD on each non-convex sub-mesh so
+        // organic/detailed shapes (a bottle, a metallic pallet) end up as a
+        // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
+        // a few seconds of load time per prop but kills triMesh edge-jitter.
+        auto loadProp = [&](const char* name,
+                            const char* filename,
+                            glm::vec3 pos,
+                            float scale,
+                            bool flipUVs = false,
+                            bool decomposeProp = false) {
             const int id = assets_.add(name, filename, AssetRole::Prop);
             const int modelIdx = renderer.loadSceneModel(filename, pos, scale, flipUVs);
             assets_.setModelIndex(id, modelIdx);
@@ -245,14 +254,26 @@ bool Game::init()
 
             // Load collision at the same position/scale.
             const std::string fullPath = basePath + "assets/" + filename;
-            if (physics::loadPropCollision(fullPath, mapCollision_, pos, scale)) {
+            if (physics::loadPropCollision(fullPath, mapCollision_, pos, scale, decomposeProp)) {
                 assets_.setHasCollision(id);
             }
         };
 
         // Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
-        loadProp("pallet", "metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
-        loadProp("bottle", "bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+        // Pallet + bottle are organic/non-convex; decompose them via V-HACD so
+        // collision stays smooth even when the player slides along curved parts.
+        loadProp("pallet",
+                 "metallic_pallet_factory_store.glb",
+                 glm::vec3(0.0f, 0.0f, 600.0f),
+                 0.25f,
+                 /*flipUVs=*/true,
+                 /*decomposeProp=*/true);
+        loadProp("bottle",
+                 "bottle_a.glb",
+                 glm::vec3(100.0f, 0.0f, 400.0f),
+                 20.0f,
+                 /*flipUVs=*/false,
+                 /*decomposeProp=*/true);
 
         // Update the active world with the new collision data (map + all props).
         physics::setActiveWorld(mapCollision_.geometry());

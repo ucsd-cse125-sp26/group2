@@ -160,7 +160,16 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
 /// @param out      Existing collision data to append to.
 /// @param position World-space position of the prop.
 /// @param scale    Uniform scale factor.
+/// @param decomposeNonConvex
+///                 When true, non-convex meshes inside the prop are run through
+///                 V-HACD convex decomposition (each becomes a small set of
+///                 `WorldBrush`es) instead of falling back to `WorldTriMesh`.
+///                 Smoother runtime collision on irregular shapes (a bottle, a
+///                 bent metal pallet) at the cost of seconds-per-mesh load time.
+///                 Default false because a prop GLB can hold dozens of sub-
+///                 meshes and decomposing every one of them blows up startup.
 /// @return True on success.
-bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3 position, float scale);
+bool loadPropCollision(
+    const std::string& path, MapCollisionData& out, glm::vec3 position, float scale, bool decomposeNonConvex = false);
 
 } // namespace physics

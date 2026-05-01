@@ -293,6 +293,79 @@ inline bool raycastTriMesh(glm::vec3 origin,
     return anyHit;
 }
 
+/// @brief Ray vs convex brush intersection (generalised slab method).
+///
+/// A `WorldBrush` is the intersection of half-spaces defined by planes with
+/// **outward** normals; the solid interior satisfies `dot(n, p) <= distance`
+/// for every plane.  A ray hits the brush at the *latest* plane it enters
+/// from outside, provided that t doesn't exceed the *earliest* plane it
+/// exits.  Mirrors the logic in `sweepAABBvsBrush` but for a point-ray
+/// instead of a swept AABB.
+inline bool raycastBrush(glm::vec3 origin,
+                         glm::vec3 direction,
+                         const WorldBrush& brush,
+                         float maxDistance,
+                         float& outDistance,
+                         glm::vec3& outNormal)
+{
+    float tEntry = 0.0f;
+    float tExit = maxDistance;
+    glm::vec3 entryNormal{0.0f, 1.0f, 0.0f};
+    bool startsOutside = false;
+
+    for (int i = 0; i < brush.planeCount; ++i) {
+        const Plane& plane = brush.planes[i];
+
+        // Signed distance from origin to plane (outward normal):
+        //   > 0 → outside (free space)
+        //   < 0 → inside  (solid)
+        const float dist = glm::dot(plane.normal, origin) - plane.distance;
+        const float denom = glm::dot(plane.normal, direction);
+
+        if (dist > 0.0f)
+            startsOutside = true;
+
+        if (std::abs(denom) < k_parallelEpsilon) {
+            // Ray parallel to this plane: if origin is outside, the ray is
+            // entirely outside this plane's solid half-space → can't be in
+            // the brush at any t.  If inside, this plane doesn't constrain
+            // the [tEntry, tExit] interval.
+            if (dist > 0.0f)
+                return false;
+            continue;
+        }
+
+        // t at which the ray crosses the plane.
+        const float t = -dist / denom;
+
+        if (denom < 0.0f) {
+            // Ray heading from outside (dist > 0) toward inside (dist < 0):
+            // entering this plane's solid half-space.  Track the latest
+            // entry across all planes.
+            if (t > tEntry) {
+                tEntry = t;
+                entryNormal = plane.normal;
+            }
+        } else {
+            // Ray heading from inside toward outside: exiting.  Track the
+            // earliest exit.
+            if (t < tExit)
+                tExit = t;
+        }
+    }
+
+    // Origin must be outside the brush; depenetration handles the inside case.
+    if (!startsOutside)
+        return false;
+    // Need a non-empty intersection window of [tEntry, tExit] within [0, maxDistance].
+    if (tEntry >= tExit || tEntry < 0.0f || tEntry >= maxDistance)
+        return false;
+
+    outDistance = tEntry;
+    outNormal = entryNormal;
+    return true;
+}
+
 /// @brief Raycast against all static world geometry (planes + boxes + cylinders + spheres).
 inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const WorldGeometry& world)
 {
@@ -323,6 +396,18 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
             continue;
         }
 
+        bestHit.hit = true;
+        bestHit.distance = distance;
+        bestHit.point = origin + direction * distance;
+        bestHit.normal = normal;
+        bestHit.surface = SurfaceType::Concrete;
+    }
+
+    for (const WorldBrush& brush : world.brushes) {
+        float distance = bestHit.distance;
+        glm::vec3 normal{0.0f};
+        if (!raycastBrush(origin, direction, brush, bestHit.distance, distance, normal))
+            continue;
         bestHit.hit = true;
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
