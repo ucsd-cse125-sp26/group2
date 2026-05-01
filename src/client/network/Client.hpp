@@ -315,7 +315,13 @@ private:
     // doesn't wobble when packets arrive bunched.  Snapshot rate doesn't
     // change during a session, so a single-pole IIR with α=0.25 is
     // ample.  Initial value matches the design's 32 Hz snapshot rate.
-    static constexpr Uint64 k_defaultSnapshotIntervalNs = 1'000'000'000ULL / 32ULL;
+    // PR-13: 128 Hz default snapshot rate (AAA-pro cadence).  EMA
+    // self-corrects once two snapshots have arrived if the actual
+    // rate differs (e.g. legacy server running at 32 Hz from a
+    // pre-PR-13 config.toml).  The two-snapshot warmup window is
+    // ~16 ms at 128 Hz — fast enough that the initial value barely
+    // matters in practice.
+    static constexpr Uint64 k_defaultSnapshotIntervalNs = 1'000'000'000ULL / 128ULL;
     int interpDelaySnapshots_ = 2;
     Uint64 snapshotIntervalEmaNs_ = k_defaultSnapshotIntervalNs;
 
