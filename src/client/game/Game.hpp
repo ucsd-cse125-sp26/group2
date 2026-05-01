@@ -308,6 +308,26 @@ private:
     static constexpr float k_benchWarmupSeconds = 2.0f; ///< Skip the first N seconds (pipeline warmup).
     std::vector<float> benchFrameTimesMs_;              ///< Per-frame ms after warmup; reservation in init().
 
+    /// Per-frame phase-time breakdown.  Captured every frame in bench mode,
+    /// then the slowest 10 frames' breakdowns are dumped at exit so we can
+    /// attribute p1/p5 spikes to specific subsystems (e.g. "the spike was a
+    /// drawFrame stall waiting for the swapchain" vs "an animation-update
+    /// burst hit several chars at once").
+    struct FrameSectionMs
+    {
+        float total = 0.0f;
+        float input = 0.0f;
+        float networkPoll = 0.0f;
+        float physics = 0.0f;
+        float animation = 0.0f;        ///< ozz pose + skin matrix + hitbox.
+        float skinPaletteBuild = 0.0f; ///< Frustum cull + palette + instance build.
+        float entityCmds = 0.0f;       ///< Renderable + 3p weapon list build.
+        float particles = 0.0f;
+        float imgui = 0.0f;
+        float drawFrame = 0.0f; ///< Renderer drawFrame (CPU + GPU acquire).
+    };
+    std::vector<FrameSectionMs> benchFrameStats_;
+
     /// @brief Attach a fresh `AnimatedCharacter` component to an entity.
     ///
     /// Creates a new CharacterAnimator wired to the shared rig + clip library +

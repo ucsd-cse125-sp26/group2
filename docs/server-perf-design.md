@@ -402,20 +402,21 @@ are the wins, here's the wall" is a perfectly good deliverable.
 | `dc0b868` | test: bot env vars `NO_SPIN`, `TICK_HZ` | Lets the loadtest harness fit ≥ 200 bots on a single host without the spinning bot fleet starving the server. Production gameplay clients keep the spin. |
 | `201737a` | PR-5a: share-frame in `enqueueReliableEvent` | Last per-client copy in the broadcast path goes away. `Connection::PendingReliableEvent::framed` becomes `shared_ptr<const vector<u8>>`. At 300 bots cuts `broadcastEvents` p99 from 25-50 ms to ≤ 6.29 ms. |
 | `1d175ee` + `2351d1a` | PR-5b: `OutboundQueue` self-locks; lock-light `flushAllOutbound` | Three-phase flush: short lock to snapshot per-client targets, lock-free syscall fan-out, short lock to apply disconnects + republish atomic snapshots. `OutboundQueue` carries its own `std::mutex`; `Connection` becomes non-copyable; `MessageStream` grows a default ctor. The follow-up commit fixes a missed-lock bug in the first cut. |
+| `89442cc` | PR-6: `shared_mutex` for clients map + `readClients` shared/deferred | Closes §9 unblocker #2. Read-mostly paths (`enqueueBroadcast`, snapshot fanout, UDP receive, `readClients`) take `shared_lock`; writers (`acceptClients`, disconnect-application, `enqueueReliableEvent`, reliable-queue drain) take `unique_lock`. `readClients` refactored to two-phase: shared-lock read pass + deferred unique-lock disconnect. **At 300 bots: tick p99 25.17 → 6.29 ms (4× lower); tickN 117 → 128 (server keeps up at full 128 Hz); fleet RTT p99 ~290 → 123 ms.** |
 
 ### Empirical results (relwithdebinfo, localhost, no simulated latency)
 
 Final state after PR-1/2/3/4/5a/5b plus the PR-4 bot lightening
 (`GROUP2_BOT_NO_SPIN=1`, 128 Hz bot tick rate kept):
 
-| N    | Pre-PR-2 tick p99 | Final tick p99 | Final fleet RTT p50 / p99 | Status |
-|-----:|------------------:|---------------:|--------------------------:|:-------|
-|  20  | 0.79 ms          | 0.79 ms        | (not in this sweep)       | trivial |
-|  50  | 3.15 ms          | **0.79 ms**    | 7.89 / **8.09 ms**        | 4× tick win; target met |
-| 100  | 25-50 ms (broken) | **1.57 ms**    | 7.91 / **15.44 ms**       | tick 16-32× lower; RTT p50 under target, p99 just barely over |
-| 200  | broken           | **1.57 ms**    | 31.31 / 39.38 ms          | server keeps up at full 128 Hz; RTT bounded by single-threaded I/O on PONG path |
-| 300  | broken           | 25.17 ms       | ~130 / ~290 ms (high variance) | host CPU saturating: 300+ bot threads + server share 16 cores |
-| 500  | not reachable    | not reachable  | not reachable             | fails — host CPU saturated by 500 clientbot threads even with no-spin |
+| N    | Pre-PR-2 tick p99 | Final tick p99 (post-PR-6) | Final fleet RTT p50 / p99 | Status |
+|-----:|------------------:|---------------------------:|--------------------------:|:-------|
+|  50  | 3.15 ms          | **0.39-0.79 ms**           | 7.86-7.92 / **8.08-8.13 ms** | trivial; 4-8× tick win |
+| 100  | 25-50 ms (broken) | **0.79 ms**                | 7.92 / **15.64 ms**       | tick 30+× lower; RTT under target at p50, on edge at p99 |
+| 200  | broken           | 1.57-12.58 ms              | 31.31 / 39.40 ms          | server holds 128 Hz; RTT bounded by single-threaded PONG send |
+| 300  | broken           | **6.29 ms**                | 85.66 / **123.44 ms**     | tick 4× lower than PR-5b; server holds 128 Hz; RTT high but no longer multi-second variance |
+| 400  | broken           | 200+ ms (variance huge)    | 257 / 557 ms              | host CPU exhausted: ~400 clientbot threads at ~99% on 16 cores |
+| 500  | not reachable    | not reachable              | not reachable             | fails — host CPU completely saturated by 500 bot threads |
 
 Per-PR cumulative wins on the headline scopes:
 
@@ -427,7 +428,13 @@ Per-PR cumulative wins on the headline scopes:
   Tick p99 (N=100):   25-50 ms (PR-1, broken)
                     → 6.29 ms   (PR-2 broadcast)
                     → 3.15 ms   (PR-4 atomic reads + match throttle)
-                    → 1.57 ms   (PR-5b lock-light flush)                                 — 16-32×
+                    → 1.57 ms   (PR-5b lock-light flush)
+                    → **0.79 ms** (PR-6 shared_mutex + readClients shared)               — 30-60×
+
+  Tick p99 (N=300):   broken    (PR-1)
+                    → 50.33 ms  (PR-2 broadcast)
+                    → 25.17 ms  (PR-5a/b)
+                    → **6.29 ms** (PR-6)                                                  — 4× from PR-5b
 
   Fleet RTT p99 (N=100): 28-44 ms (PR-3, broken)
                        → 14-21 ms (PR-4)

@@ -616,6 +616,7 @@ bool Game::init()
             // Reserve enough room for ~5000 fps × bench duration (worst case),
             // so push_back never reallocates inside the hot path.
             benchFrameTimesMs_.reserve(static_cast<size_t>(seconds * 5000.0f));
+            benchFrameStats_.reserve(static_cast<size_t>(seconds * 5000.0f));
             // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
             limitFPSToMonitor = false;
             renderer.setVSync(false);
@@ -896,6 +897,19 @@ SDL_AppResult Game::iterate()
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
+    // Per-frame phase timer state (only consumed in bench mode).  We track
+    // monotonic wall-clock per phase via a single "lastTick" cursor; phases
+    // are sequential in iterate() so a section's elapsed = current - last.
+    FrameSectionMs phaseStats{};
+    Uint64 phaseLastTick = k_now;
+    const auto phaseSnap = [&](float& outMs) {
+        if (!benchActive_)
+            return;
+        const Uint64 nowTick = SDL_GetPerformanceCounter();
+        outMs = static_cast<float>(nowTick - phaseLastTick) * 1000.0f / static_cast<float>(k_perfFreq);
+        phaseLastTick = nowTick;
+    };
+
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
 
     // If the game was suspended (backgrounded / minimized), the raw delta can
@@ -1008,6 +1022,11 @@ SDL_AppResult Game::iterate()
         }
     }
 
+    // Mark the start of the input phase for the bench profiler.  Anything
+    // before this (suspend handling, stats ring update, bench summary check)
+    // is bundled into the implicit "preamble" attributable to "total".
+    phaseLastTick = SDL_GetPerformanceCounter();
+
     // 3. Input
     //
     // Mouse look runs EVERY iterate() call — this keeps camera rotation
@@ -1040,6 +1059,8 @@ SDL_AppResult Game::iterate()
     }
 
     // Network stats: send periodic pings and update bandwidth counters
+    phaseSnap(phaseStats.input);
+
     client.updateStats(frameTime);
     pingTimer += frameTime;
     if (pingTimer >= 1.0f) {
