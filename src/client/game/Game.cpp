@@ -1275,88 +1275,30 @@ SDL_AppResult Game::iterate()
         if (inputSyncedWithPhysics && mouseCaptured)
             systems::runMovementKeys(registry);
 
-        // PR-20.8 (jitter root-cause fix): rising-edge detector ONLY
-        // here.  Tick-stamping + ring push + send all moved INSIDE
-        // the per-physics-tick while loop below so each physics
-        // tick gets its own client tick, matching the server's
-        // per-tick input-application model.  Pre-PR-20.8 we
-        // incremented once per ITERATE while running N physics
-        // ticks per iterate; reconciliation replayed 1:1 (one
-        // runMovement per stored tick), under-running prediction
-        // by `(N-1) × dt × velocity` per replayed tick.  At 30 ms
-        // simulated RTT that produced ~3 units of backward snap on
-        // every snapshot — visible as continuous movement jitter.
-        bool firePulledThisFrame = false;
-        registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
-            const bool wasShooting = prevShootingForDebug_;
-            const bool nowShooting = snap.shooting;
-            prevShootingForDebug_ = nowShooting;
-            if (nowShooting && !wasShooting)
-                firePulledThisFrame = true;
-        });
-        if (firePulledThisFrame) {
-            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
-                [&](entt::entity localEntity,
-                    const InputSnapshot& snap,
-                    const Position& pos,
-                    const CollisionShape& shape) {
-                    net::shotdebug::ShotDebugCapture cap;
-                    cap.shotInputTick = snap.tick;
-                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
-                    const float cp = std::cos(snap.pitch);
-                    cap.direction = glm::normalize(
-                        glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
-                    cap.range = physics::k_hitscanRange;
-
-                    // PR-20.6 (root-cause fix): local raycast against
-                    // capsules + world.  `resolveHitscanHitbox`
-                    // unconditionally fills `hit.point` — either the
-                    // closest world geometry hit, the closest capsule
-                    // hit, or `origin + direction * k_hitscanRange`
-                    // when nothing was struck.  We ALWAYS forward
-                    // `hit.point` into `cap.hitPoint`; the rendering
-                    // path uses it directly so blue tracers always
-                    // terminate on whatever the client believed was
-                    // in the way (a wall, a capsule, or 5000 u of air).
-                    //
-                    // `cap.hitTargetClientId` is the ID of the
-                    // PLAYER hit (so the UI can display it); a wall
-                    // hit leaves it at the miss sentinel even though
-                    // the tracer DOES terminate on the wall.
-                    const physics::HitboxHit localHit =
-                        physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
-                    cap.hitPoint = localHit.point;
-                    cap.hitTargetClientId = net::shotdebug::k_missClientId;
-                    cap.hitRegion = 0;
-                    if (localHit.entity != entt::null && registry.valid(localHit.entity)) {
-                        if (const auto* tcid = registry.try_get<ClientId>(localHit.entity)) {
-                            cap.hitTargetClientId = static_cast<std::uint16_t>(tcid->value);
-                            cap.hitRegion = static_cast<std::uint8_t>(localHit.region);
-                        }
-                    }
-
-                    // Snapshot every visible remote player's CURRENT
-                    // capsules.  The server's reply will carry the
-                    // historical (rewound) capsules; the UI overlays
-                    // them so the user can SEE the rewind delta.
-                    auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
-                    cap.targets.reserve(remoteView.size_hint());
-                    for (const auto e : remoteView) {
-                        if (e == localEntity)
-                            continue;
-                        const auto& hb = remoteView.get<HitboxInstance>(e);
-                        if (hb.capsules.empty())
-                            continue;
-                        const auto& cid = remoteView.get<ClientId>(e);
-                        net::shotdebug::ShotDebugCapture::Target tgt;
-                        tgt.clientId = static_cast<std::uint16_t>(cid.value);
-                        tgt.capsules = hb.capsules;
-                        cap.targets.push_back(std::move(tgt));
-                    }
-                    debugUI.pushClientShot(cap);
-                });
-        }
-
+        // PR-24 (off-by-one + capsule staleness fix): the fire detection
+        // and capture block used to live HERE, before the physics while
+        // loop.  Two regressions:
+        //   1. snap.tick was the OLD value (pre-increment), but the
+        //      wire-format input (sent in `runInputSend` after the
+        //      while loop) carries the NEW value.  Server's debug
+        //      capture stamped the new value → tick mismatch → debug
+        //      UI showed two ring slots for the same shot.  PR-20.1
+        //      had originally fixed this by capturing AFTER the stamp;
+        //      PR-20.8's jitter fix moved the stamp into the while
+        //      loop but left the capture before it.
+        //   2. The captured capsules were from the PREVIOUS frame's
+        //      `updateHitboxes` (the current frame's `applyInterpolated
+        //      Transforms` + `updateHitboxes` haven't run yet).  At
+        //      60 fps that's ~16 ms staler than what the user sees on
+        //      screen — the BLUE capsules in the debug overlay didn't
+        //      reflect what the player was actually aiming at.
+        //
+        // Both fixed in PR-24 by moving the entire capture to right
+        // after `systems::updateHitboxes` (search for "PR-24 fire
+        // detection" further down).  We still need the rising-edge
+        // detector to advance `prevShootingForDebug_` here so it stays
+        // exactly once per iterate (the post-physics block reads the
+        // SAME `snap.shooting` we set in `runWeaponKeys` above).
         physicsRan = true;
 
         // PR-20.8 (jitter root-cause): tick-stamp + ring-push + send
@@ -1943,6 +1885,94 @@ SDL_AppResult Game::iterate()
         // Update hitbox capsules from bone transforms (client-side for debug visualization).
         if (charRig_.isLoaded())
             systems::updateHitboxes(registry, clientHitboxRig_, kRigScale_, rigMeshMinY_);
+
+        // ── PR-24 fire detection: capture client view of the shot the
+        // user just fired, paired against the server's `SHOT_DEBUG_REPORT`
+        // by `(shooterClientId, shotInputTick)`.
+        //
+        // Placed RIGHT AFTER `updateHitboxes` so the captured state matches
+        // exactly what the user sees on screen this frame:
+        //   * `Position.value` for the local player is the post-prediction
+        //     post-reconciliation value the renderer uses (LocalPlayer is
+        //     excluded from `applyInterpolatedTransforms`).
+        //   * `Position.value` for remote players is the PR-19 interp-
+        //     delayed value (`applyInterpolatedTransforms` already ran).
+        //   * `HitboxInstance.capsules` for every entity reflect the
+        //     just-recomputed bones at THIS frame's pose.
+        // And `snap.tick` carries the post-physics-loop value — the SAME
+        // value `runInputSend` put on the wire and the server stamps on
+        // its debug capture.  Pre-PR-24 the capture lived BEFORE the
+        // physics loop, reading old `snap.tick` and previous-frame
+        // capsules; both the off-by-one tick mismatch and the visible
+        // blue-capsule-vs-actual-aim-target staleness are gone.
+        bool firePulledThisFrame = false;
+        registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+            const bool wasShooting = prevShootingForDebug_;
+            const bool nowShooting = snap.shooting;
+            prevShootingForDebug_ = nowShooting;
+            if (nowShooting && !wasShooting)
+                firePulledThisFrame = true;
+        });
+        if (firePulledThisFrame) {
+            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
+                [&](entt::entity localEntity,
+                    const InputSnapshot& snap,
+                    const Position& pos,
+                    const CollisionShape& shape) {
+                    net::shotdebug::ShotDebugCapture cap;
+                    cap.shotInputTick = snap.tick; // PR-24: post-physics value, matches wire
+                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float cp = std::cos(snap.pitch);
+                    cap.direction = glm::normalize(
+                        glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
+                    cap.range = physics::k_hitscanRange;
+
+                    // PR-20.6 (root-cause fix): local raycast against
+                    // capsules + world.  `resolveHitscanHitbox`
+                    // unconditionally fills `hit.point` — either the
+                    // closest world geometry hit, the closest capsule
+                    // hit, or `origin + direction * k_hitscanRange`
+                    // when nothing was struck.  We ALWAYS forward
+                    // `hit.point` into `cap.hitPoint`; the rendering
+                    // path uses it directly so blue tracers always
+                    // terminate on whatever the client believed was
+                    // in the way (a wall, a capsule, or 5000 u of air).
+                    const physics::HitboxHit localHit =
+                        physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
+                    cap.hitPoint = localHit.point;
+                    cap.hitTargetClientId = net::shotdebug::k_missClientId;
+                    cap.hitRegion = 0;
+                    if (localHit.entity != entt::null && registry.valid(localHit.entity)) {
+                        if (const auto* tcid = registry.try_get<ClientId>(localHit.entity)) {
+                            cap.hitTargetClientId = static_cast<std::uint16_t>(tcid->value);
+                            cap.hitRegion = static_cast<std::uint8_t>(localHit.region);
+                        }
+                    }
+
+                    // Snapshot every visible remote player's CURRENT
+                    // (post-`updateHitboxes`, post-`applyInterpolated
+                    // Transforms`) capsules.  The server's reply will
+                    // carry the rewound capsules; the UI overlays them
+                    // so the user can SEE the rewind delta — and now
+                    // the blue capsules really are what the user saw
+                    // when they pulled the trigger this frame.
+                    auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
+                    cap.targets.reserve(remoteView.size_hint());
+                    for (const auto e : remoteView) {
+                        if (e == localEntity)
+                            continue;
+                        const auto& hb = remoteView.get<HitboxInstance>(e);
+                        if (hb.capsules.empty())
+                            continue;
+                        const auto& cid = remoteView.get<ClientId>(e);
+                        net::shotdebug::ShotDebugCapture::Target tgt;
+                        tgt.clientId = static_cast<std::uint16_t>(cid.value);
+                        tgt.capsules = hb.capsules;
+                        cap.targets.push_back(std::move(tgt));
+                    }
+                    debugUI.pushClientShot(cap);
+                });
+        }
     }
     phaseSnap(phaseStats.animation);
 

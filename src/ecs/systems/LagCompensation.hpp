@@ -41,10 +41,12 @@
 #include "ecs/components/HitboxHistory.hpp"
 #include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Velocity.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/registry/Registry.hpp"
 
 #include <cstdint>
+#include <glm/common.hpp> // glm::abs
 #include <glm/vec3.hpp>
 #include <utility>
 #include <vector>
@@ -157,31 +159,50 @@ inline RewindHitboxesGuard rewindHitboxes(Registry& registry,
     const uint32_t targetTick = target->targetServerTick;
     const bool haveFilter = rayOrigin != nullptr && rayDirection != nullptr && rayMaxDistance > 0.0f;
 
+    // PR-24 (broad-phase fix): how far back in time we're rewinding,
+    // in seconds.  The pre-PR-24 broad-phase filter tested ray vs the
+    // entity's LIVE AABB (live position ± live halfExtents).  At
+    // sprint speed (~700 u/s) and 100 ms RTT the entity has moved
+    // ~70 u between the rewind tick and now — well outside the 32 u
+    // X/Z width of the default player AABB.  Result: fast-moving
+    // targets whose live position was OFF the ray but whose
+    // historical position was ON the ray got broad-phase REJECTED.
+    // Their capsules stayed LIVE (no rewind), so the raycast tested
+    // against the unrewound capsules and reported a miss; the user
+    // saw the shot-debug visualizer's red capsules at the LIVE
+    // position, identical to "no rollback at all".  Original PR-5
+    // assumed 72 u half-extent — that's our Y, but X/Z is only 16 u.
+    //
+    // Fix: dilate the broad-phase AABB by `|velocity| × lagWindow` on
+    // each axis to cover the full range of positions the entity could
+    // have occupied during the rewind window.  Cheap (one mul + one
+    // add) and rarely false-rejects even at sprint+200ms.
+    const float lagWindowSec = static_cast<float>(target->lagTicks) / 128.0f;
+
     auto view = registry.view<HitboxInstance, HitboxHistory>();
     view.each([&](entt::entity entity, HitboxInstance& inst, const HitboxHistory& hist) {
         if (entity == shooter)
             return;
 
-        // PR-5: ray-AABB broad-phase pre-filter. We use the player's
-        // *current* Position+CollisionShape rather than the historical
-        // capsule centers — same approximation the hitscan
-        // raycastPlayerHitboxes broad-phase uses. For RTTs ≤ 200 ms
-        // (the lag-comp cap) and player speeds ≤ ~400 u/s, the
-        // position-shift is ~80 u — well within the typical 72 u
-        // half-extent player AABB, so the filter rarely false-rejects
-        // a hit that the historical capsule would have caught.
+        // PR-5/PR-24: ray-AABB broad-phase pre-filter, dilated by
+        // possible motion over the rewind window so fast-moving
+        // entities aren't false-rejected (see comment above).
         if (haveFilter) {
             const auto* pos = registry.try_get<Position>(entity);
             const auto* shape = registry.try_get<CollisionShape>(entity);
             if (pos != nullptr && shape != nullptr) {
+                glm::vec3 expand = shape->halfExtents;
+                if (const auto* vel = registry.try_get<Velocity>(entity)) {
+                    expand += glm::abs(vel->value) * lagWindowSec;
+                }
                 const physics::WorldAABB bounds{
-                    .min = pos->value - shape->halfExtents,
-                    .max = pos->value + shape->halfExtents,
+                    .min = pos->value - expand,
+                    .max = pos->value + expand,
                 };
                 float aabbDist = rayMaxDistance;
                 glm::vec3 aabbNormal{0.0f};
                 if (!physics::raycastAABB(*rayOrigin, *rayDirection, bounds, rayMaxDistance, aabbDist, aabbNormal)) {
-                    return; // skip rewind for this player — ray doesn't reach their AABB
+                    return; // skip rewind for this player — ray doesn't reach their motion-extruded AABB
                 }
             }
         }
