@@ -781,3 +781,55 @@ numbers measure exactly what their names claim:
 
 Future regressions in any one of these four can now be diagnosed
 without false positives from the others.
+
+### PR-24: shot-debug visualizer regressions root-caused
+
+User-reported after manual lag-comp testing:
+
+1. *"For one hit, to see all four things (client ray, server ray, client
+   hitboxes, server hitboxes) we have to set visible last N=2."* — debug
+   UI showed two ring slots per shot.
+2. *"Sometimes the rewind looks almost perfect (just minor pose
+   difference), sometimes massive position difference as if it didn't
+   roll back at all."*
+
+Root causes:
+
+- **(1) Off-by-one tick mismatch.** PR-20.8 (movement-jitter root cause)
+  moved `++clientPredictTick` and the `snap.tick = clientPredictTick`
+  stamp INSIDE the per-physics-tick while loop but left the fire-detect
+  block BEFORE it. Client capture stamped OLD `snap.tick`; server
+  stamped NEW `snap.tick` (post-loop value, the one on the wire) →
+  mismatch. PR-20.1 had originally fixed this; PR-20.8 silently
+  regressed it. **Fix:** moved fire-detect + capture from before the
+  physics loop to AFTER `systems::updateHitboxes` (lines ~1944), gaining
+  fresh capsules too.
+- **(2) Broad-phase AABB filter false-rejected fast-moving targets.**
+  PR-5's lag-comp ray-AABB pre-filter used the entity's LIVE position +
+  halfExtents only. Comment claimed "well within the typical 72 u
+  half-extent player AABB" but that's the Y axis (height); X/Z are
+  16 u, so the broad-phase AABB is only 32 u wide. At sprint speed
+  (~700 u/s) and 100 ms RTT the entity has moved ~70 u between the
+  rewind tick and now — well outside that 32 u window. Filter rejected
+  → entity skipped rewind → capsules stayed LIVE → raycast tested
+  against unrewound capsules → server miss; debug visualizer's red
+  capsules showed the LIVE pose at LIVE position, indistinguishable from
+  "no rollback at all". **Fix:** dilate the broad-phase AABB by
+  `|velocity| × lagTicks/128` on each axis to cover the full range of
+  positions the entity could have occupied during the rewind window.
+
+PR-24 RTT sweep results (8 bots, 20 s, GROUP2_BOT_AIM=1):
+
+| RTT (ms) | PR-23 bothHit same-target | **PR-24 bothHit same-target** | Δ |
+|---------:|:--------------------------|:------------------------------|:---|
+| 0    | 74.5 % | **79.8 %** | +5.3 pp |
+| 100  | 40.8 % | **63.5 %** | +22.7 pp |
+| 200  | 23.5 % | **36.5 %** | +13.0 pp |
+
+Biggest gain at RTT=100 ms (the broad-phase false-reject rate was highest
+in this band — fast enough motion to escape the live AABB, but lag-comp
+window short enough that the rewinder is *trying* to rewind precisely).
+At RTT=200 ms the lag-comp window is so wide that other sources of
+discrepancy (animation timing between client and server, render-time
+EMA jitter) start contributing to the residual `bothHit different-
+target` rate.
