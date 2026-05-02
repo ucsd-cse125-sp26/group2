@@ -280,12 +280,16 @@ inline void captureShotDebug(Registry& registry,
         }
     }
 
-    // Snapshot every other player's CURRENT (i.e. rewound) capsule
-    // list.  `RewindHitboxesGuard`'s ray-AABB pre-filter already
-    // restored capsules for OUT-of-range players to live state, so
-    // walking the full view here actually picks up only the
-    // historical samples the rewinder cared about — exactly what we
-    // want to render.  Skip the shooter itself.
+    // Snapshot the CURRENT (rewound) capsules of every player whose
+    // capsule-derived AABB intersects the shot ray — i.e. every
+    // entity the broad-phase inside `raycastPlayerHitboxes` actually
+    // CONSIDERED for this shot.  Pre-PR-26 we copied capsules for
+    // every replicated player, so the debug visualizer drew red
+    // wireframes for all enemies on the map even when the shot
+    // narrowly grazed only one.  Visual clutter; user couldn't tell
+    // which target the server was hit-testing against.  Filtering by
+    // the same broad-phase the raycast uses means the overlay shows
+    // exactly the candidates that went through narrow-phase.
     auto view = registry.view<HitboxInstance, ClientId>();
     cap.targets.reserve(view.size_hint());
     for (const auto e : view) {
@@ -294,6 +298,20 @@ inline void captureShotDebug(Registry& registry,
         const auto& hb = view.get<HitboxInstance>(e);
         if (hb.capsules.empty())
             continue;
+
+        // Capsule-derived AABB (matches PR-25's broad-phase exactly).
+        glm::vec3 boundsMin{std::numeric_limits<float>::max()};
+        glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
+        for (const auto& c : hb.capsules) {
+            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - glm::vec3{c.radius});
+            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + glm::vec3{c.radius});
+        }
+        const physics::WorldAABB bounds{.min = boundsMin, .max = boundsMax};
+        float aabbDist = range;
+        glm::vec3 aabbNormal{0.0f};
+        if (!physics::raycastAABB(origin, direction, bounds, range, aabbDist, aabbNormal))
+            continue;
+
         const auto& cid = view.get<ClientId>(e);
         net::shotdebug::ShotDebugCapture::Target tgt;
         tgt.clientId = static_cast<std::uint16_t>(cid.value);

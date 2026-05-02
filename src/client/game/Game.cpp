@@ -1949,13 +1949,17 @@ SDL_AppResult Game::iterate()
                         }
                     }
 
-                    // Snapshot every visible remote player's CURRENT
-                    // (post-`updateHitboxes`, post-`applyInterpolated
-                    // Transforms`) capsules.  The server's reply will
-                    // carry the rewound capsules; the UI overlays them
-                    // so the user can SEE the rewind delta — and now
-                    // the blue capsules really are what the user saw
-                    // when they pulled the trigger this frame.
+                    // PR-26: snapshot capsules ONLY for entities whose
+                    // capsule-derived AABB the shot ray intersects —
+                    // i.e. exactly the targets the broad-phase inside
+                    // `raycastPlayerHitboxes` would have considered.
+                    // Pre-PR-26 we copied capsules for every visible
+                    // remote player, so the debug visualizer drew blue
+                    // wireframes for ALL enemies on the map even when
+                    // the shot grazed only one.  The server-side
+                    // capture (`captureShotDebug` in `WeaponSystem.
+                    // cpp`) applies the same filter so the overlay
+                    // looks identical across the join — clutter-free.
                     auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
                     cap.targets.reserve(remoteView.size_hint());
                     for (const auto e : remoteView) {
@@ -1964,6 +1968,19 @@ SDL_AppResult Game::iterate()
                         const auto& hb = remoteView.get<HitboxInstance>(e);
                         if (hb.capsules.empty())
                             continue;
+
+                        glm::vec3 boundsMin{std::numeric_limits<float>::max()};
+                        glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
+                        for (const auto& c : hb.capsules) {
+                            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - glm::vec3{c.radius});
+                            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + glm::vec3{c.radius});
+                        }
+                        const physics::WorldAABB bounds{.min = boundsMin, .max = boundsMax};
+                        float aabbDist = cap.range;
+                        glm::vec3 aabbNormal{0.0f};
+                        if (!physics::raycastAABB(cap.origin, cap.direction, bounds, cap.range, aabbDist, aabbNormal))
+                            continue;
+
                         const auto& cid = remoteView.get<ClientId>(e);
                         net::shotdebug::ShotDebugCapture::Target tgt;
                         tgt.clientId = static_cast<std::uint16_t>(cid.value);
