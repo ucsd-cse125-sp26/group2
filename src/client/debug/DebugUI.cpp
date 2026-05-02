@@ -151,6 +151,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::SeparatorText("Physics");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+    ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
     // External panels (owned by Game)
     if (externalPanels.size() > 0) {
@@ -1856,6 +1857,184 @@ void DebugUI::buildCollisionUI(const physics::WorldGeometry& world,
         const ImU32 triColor = IM_COL32(200, 50, 255, 220);
         for (const auto& tm : world.triMeshes)
             drawTriMeshWireframe(dl, tm, viewProj, screenWidth, screenHeight, triColor);
+    }
+}
+
+// ── PR-20: Shot debug visualizer (CSGO sv_showimpacts) ──────────────────
+
+namespace
+{
+
+/// @brief Find the ring slot whose pair matches `tick`.  Returns -1 if
+/// no entry matches.  Linear scan; ring is small (≤ 30).
+int findShotPairByTick(const std::array<DebugUI::ShotDebugPair, DebugUI::k_shotRingMax>& ring,
+                       int liveCount,
+                       std::uint32_t tick)
+{
+    const int n = std::min(liveCount, DebugUI::k_shotRingMax);
+    for (int i = 0; i < n; ++i) {
+        if (ring[i].shotInputTick == tick && (ring[i].hasClient || ring[i].hasServer))
+            return i;
+    }
+    return -1;
+}
+
+/// @brief Solid-color ImU32 helper that lets the user override alpha.
+ImU32 col(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
+{
+    return IM_COL32(r, g, b, a);
+}
+
+} // namespace
+
+void DebugUI::pushClientShot(const net::shotdebug::ShotDebugCapture& cap)
+{
+    int idx = findShotPairByTick(shotRing, shotRingCount, cap.shotInputTick);
+    if (idx < 0) {
+        // New entry — claim the head slot, advance.
+        idx = shotRingHead;
+        shotRing[idx] = {};
+        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRingHead = (shotRingHead + 1) % k_shotRingMax;
+        if (shotRingCount < k_shotRingMax)
+            ++shotRingCount;
+    }
+    shotRing[idx].clientView = cap;
+    shotRing[idx].hasClient = true;
+}
+
+void DebugUI::pushServerShot(const net::shotdebug::ShotDebugCapture& cap)
+{
+    int idx = findShotPairByTick(shotRing, shotRingCount, cap.shotInputTick);
+    if (idx < 0) {
+        idx = shotRingHead;
+        shotRing[idx] = {};
+        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRingHead = (shotRingHead + 1) % k_shotRingMax;
+        if (shotRingCount < k_shotRingMax)
+            ++shotRingCount;
+    }
+    shotRing[idx].serverView = cap;
+    shotRing[idx].hasServer = true;
+}
+
+void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight)
+{
+    if (showShotDebugWindow) {
+        if (ImGui::Begin("Shot Debug (sv_showimpacts)", &showShotDebugWindow)) {
+            ImGui::Checkbox("Draw 3D overlay", &drawShotDebugOverlay);
+            ImGui::SliderInt("Visible last N", &shotDebugVisibleCount, 1, k_shotRingMax);
+            ImGui::SliderInt("Highlight (0=all)", &shotDebugSelectIdx, 0, shotDebugVisibleCount);
+            ImGui::Separator();
+            ImGui::TextDisabled("Blue = client view at fire time");
+            ImGui::TextDisabled("Red  = server's rewound state");
+            ImGui::TextDisabled("Bright = highlighted, dim = others in window");
+            ImGui::Separator();
+
+            // Per-shot summary table.  Walk newest-first by stepping
+            // backwards from head.
+            if (ImGui::BeginTable(
+                    "##shots", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingFixedFit))
+            {
+                ImGui::TableSetupColumn("# (newest=1)");
+                ImGui::TableSetupColumn("tick");
+                ImGui::TableSetupColumn("client");
+                ImGui::TableSetupColumn("server");
+                ImGui::TableSetupColumn("hit");
+                ImGui::TableHeadersRow();
+                const int show = std::min(shotRingCount, shotDebugVisibleCount);
+                for (int i = 0; i < show; ++i) {
+                    const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
+                    const auto& p = shotRing[idx];
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d", i + 1);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%u", p.shotInputTick);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%s", p.hasClient ? "Y" : "—");
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%s", p.hasServer ? "Y" : "—");
+                    ImGui::TableNextColumn();
+                    if (p.hasServer) {
+                        if (p.serverView.hitTargetClientId == net::shotdebug::k_missClientId)
+                            ImGui::TextDisabled("miss");
+                        else
+                            ImGui::Text("hit cid=%u r=%d",
+                                        static_cast<unsigned>(p.serverView.hitTargetClientId),
+                                        static_cast<int>(p.serverView.hitRegion));
+                    } else {
+                        ImGui::TextDisabled("…");
+                    }
+                }
+                ImGui::EndTable();
+            }
+        }
+        ImGui::End();
+    }
+
+    // 3D overlay — same VP/screen the hitbox debug overlay uses.  We
+    // draw on the foreground draw list so capsules render OVER the
+    // game (debug overlay is meant to be obvious, not subtle).
+    if (!drawShotDebugOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const int show = std::min(shotRingCount, shotDebugVisibleCount);
+    for (int i = 0; i < show; ++i) {
+        const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
+        const auto& p = shotRing[idx];
+
+        // Dim non-highlighted shots so the user can pick out the
+        // selected one without losing context of recent ones.
+        const bool isHighlighted = (shotDebugSelectIdx == 0) || (shotDebugSelectIdx == (i + 1));
+        const std::uint8_t alpha = isHighlighted ? 255 : 60;
+
+        // Blue = client view.
+        if (p.hasClient) {
+            const auto& c = p.clientView;
+            const glm::vec3 endPt =
+                (c.hitTargetClientId != net::shotdebug::k_missClientId) ? c.hitPoint : c.origin + c.direction * c.range;
+            drawWorldLine(dl, c.origin, endPt, viewProj, screenWidth, screenHeight, col(80, 160, 255, alpha), 2.0f);
+            for (const auto& tgt : c.targets) {
+                for (const auto& cap : tgt.capsules) {
+                    drawCapsuleWireframe(dl,
+                                         cap.pointA,
+                                         cap.pointB,
+                                         cap.radius,
+                                         viewProj,
+                                         screenWidth,
+                                         screenHeight,
+                                         col(80, 160, 255, alpha));
+                }
+            }
+            // Marker at endPt.
+            ImVec2 sp;
+            if (worldToScreen(endPt, viewProj, screenWidth, screenHeight, sp))
+                dl->AddCircleFilled(sp, 4.0f, col(80, 160, 255, alpha));
+        }
+        // Red = server rewound view.
+        if (p.hasServer) {
+            const auto& s = p.serverView;
+            const glm::vec3 endPt =
+                (s.hitTargetClientId != net::shotdebug::k_missClientId) ? s.hitPoint : s.origin + s.direction * s.range;
+            drawWorldLine(dl, s.origin, endPt, viewProj, screenWidth, screenHeight, col(255, 80, 80, alpha), 2.0f);
+            for (const auto& tgt : s.targets) {
+                for (const auto& cap : tgt.capsules) {
+                    drawCapsuleWireframe(dl,
+                                         cap.pointA,
+                                         cap.pointB,
+                                         cap.radius,
+                                         viewProj,
+                                         screenWidth,
+                                         screenHeight,
+                                         col(255, 80, 80, alpha));
+                }
+            }
+            ImVec2 sp;
+            if (worldToScreen(endPt, viewProj, screenWidth, screenHeight, sp))
+                dl->AddCircleFilled(sp, 4.0f, col(255, 80, 80, alpha));
+        }
     }
 }
 

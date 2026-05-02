@@ -27,4 +27,16 @@ enum class PacketType : uint8_t
     /// `currentTick`. Clients drop the packet if they don't currently have
     /// the baseline; a periodic UPDATE_REGISTRY (full keyframe) recovers.
     UPDATE_REGISTRY_DELTA,
+
+    /// @brief Server -> single shooter: lag-comp shot debug snapshot.
+    ///
+    /// PR-20: CSGO sv_showimpacts-style debug visualizer.  Sent only
+    /// to the shooter client (not broadcast) immediately after the
+    /// server resolves a hitscan shot.  Carries the rewound state the
+    /// server saw when it processed the shot — origin + direction +
+    /// hit point + per-target rewound capsule list — so the client
+    /// can overlay "what server hit" (red) on top of "what I aimed at"
+    /// (blue) and visually inspect lag-comp alignment.  Wire format
+    /// defined in `network/ShotDebugReport.hpp`.
+    SHOT_DEBUG_REPORT,
 };

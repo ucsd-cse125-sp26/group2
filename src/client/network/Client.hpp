@@ -11,6 +11,7 @@
 #include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/ShotDebugReport.hpp" // PR-20: shared wire-format + runtime capture struct.
 #include "network/ShotEvent.hpp"
 #include "network/transport/FragmentReassembler.hpp"
 #include "network/transport/UdpEndpoint.hpp"
@@ -48,6 +49,12 @@ public:
     using ParticleEventCallback = std::function<void(const NetParticleEvent& evt, entt::entity localEntity)>;
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
+    /// @brief PR-20: callback for SHOT_DEBUG_REPORT.  Fired on the
+    /// game thread inside `dispatchMessage` after the bytes have been
+    /// parsed back into a `ShotDebugCapture`.  The DebugUI registers
+    /// this and pairs the report with its own client-side fire-time
+    /// snapshot by `shotInputTick`.
+    using ShotDebugCallback = std::function<void(const net::shotdebug::ShotDebugCapture&)>;
 
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr      Hostname or IP address of the server.
@@ -88,6 +95,7 @@ public:
     void onParticleEvent(ParticleEventCallback fn) { particleEventFn_ = std::move(fn); }
     void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
+    void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
@@ -271,6 +279,7 @@ private:
     ParticleEventCallback particleEventFn_;        ///< Called for each replicated particle event from server.
     MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     KillEventCallback killEventFn_;                ///< Called for each replicated kill event from server.
+    ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     bool localPlayerReadyNotified = false;         ///< True if localPlayerReadyFn has been called.
 

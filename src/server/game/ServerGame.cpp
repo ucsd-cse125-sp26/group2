@@ -31,6 +31,8 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
+#include "network/PacketType.hpp"
+#include "network/ShotDebugReport.hpp"
 #include "network/ShotEvent.hpp"
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
@@ -373,9 +375,13 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     }
 
     std::vector<NetParticleEvent> particleEvents;
+    // PR-20: per-shot rewound state for the lag-comp debug visualiser.
+    // Populated only when the weapon system fires a hitscan; sent
+    // unicast to the shooter after the broadcast events block below.
+    std::vector<net::shotdebug::ShotDebugCapture> shotDebugReports;
     {
         GROUP2_PROF_SCOPE("weapon");
-        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
+        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, &shotDebugReports);
     }
     {
         GROUP2_PROF_SCOPE("movement");
@@ -425,6 +431,75 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         server.broadcastKillEvents(pendingKillEvents);
     }
     pendingKillEvents.clear();
+
+    // PR-20: serialize each captured shot-debug report and send it
+    // unicast to the shooter that produced it.  Wire format defined in
+    // `network/ShotDebugReport.hpp`.  Layout:
+    //   [PacketType:1][ReportHeader:48][TargetHeader:4 + WireCapsule:32 × N] × numTargets
+    //
+    // Capped per-tick to avoid pathological cases (a player held LMB
+    // on a beam weapon for the whole tick → multiple captures all
+    // referencing nearly-identical state).  In practice we see 1-2
+    // entries per tick per shooting player.
+    if (!shotDebugReports.empty()) {
+        GROUP2_PROF_SCOPE("shotDebugSend");
+        for (const auto& cap : shotDebugReports) {
+            // Reserve worst-case so we only allocate once per shot.
+            std::size_t total = 1 /*PacketType*/ + sizeof(net::shotdebug::ReportHeader);
+            for (const auto& tgt : cap.targets)
+                total +=
+                    sizeof(net::shotdebug::TargetHeader) + tgt.capsules.size() * sizeof(net::shotdebug::WireCapsule);
+            std::vector<std::uint8_t> bytes;
+            bytes.reserve(total);
+            bytes.push_back(static_cast<std::uint8_t>(PacketType::SHOT_DEBUG_REPORT));
+
+            net::shotdebug::ReportHeader rh{};
+            rh.shotInputTick = cap.shotInputTick;
+            rh.hitTargetClientId = cap.hitTargetClientId;
+            rh.hitRegion = cap.hitRegion;
+            rh.numTargets = static_cast<std::uint8_t>(std::min<std::size_t>(cap.targets.size(), 255));
+            rh.originX = cap.origin.x;
+            rh.originY = cap.origin.y;
+            rh.originZ = cap.origin.z;
+            rh.dirX = cap.direction.x;
+            rh.dirY = cap.direction.y;
+            rh.dirZ = cap.direction.z;
+            rh.range = cap.range;
+            rh.hitX = cap.hitPoint.x;
+            rh.hitY = cap.hitPoint.y;
+            rh.hitZ = cap.hitPoint.z;
+            const auto* rhBytes = reinterpret_cast<const std::uint8_t*>(&rh);
+            bytes.insert(bytes.end(), rhBytes, rhBytes + sizeof(rh));
+
+            for (std::uint8_t i = 0; i < rh.numTargets; ++i) {
+                const auto& tgt = cap.targets[i];
+                net::shotdebug::TargetHeader th{};
+                th.targetClientId = tgt.clientId;
+                th.numCapsules = static_cast<std::uint8_t>(std::min<std::size_t>(tgt.capsules.size(), 255));
+                const auto* thBytes = reinterpret_cast<const std::uint8_t*>(&th);
+                bytes.insert(bytes.end(), thBytes, thBytes + sizeof(th));
+                for (std::uint8_t c = 0; c < th.numCapsules; ++c) {
+                    const auto& src = tgt.capsules[c];
+                    net::shotdebug::WireCapsule wc{};
+                    wc.pointAx = src.pointA.x;
+                    wc.pointAy = src.pointA.y;
+                    wc.pointAz = src.pointA.z;
+                    wc.pointBx = src.pointB.x;
+                    wc.pointBy = src.pointB.y;
+                    wc.pointBz = src.pointB.z;
+                    wc.radius = src.radius;
+                    wc.region = static_cast<std::uint8_t>(src.region);
+                    const auto* wcBytes = reinterpret_cast<const std::uint8_t*>(&wc);
+                    bytes.insert(bytes.end(), wcBytes, wcBytes + sizeof(wc));
+                }
+            }
+            // replaceKey 0 = always append, never drop on age.  These
+            // are diagnostic packets — losing one is fine, but if the
+            // queue happened to coalesce them by key the user would
+            // see only the most-recent shot in the ring buffer.
+            server.sendToClient(ClientId{cap.shooterClientId}, bytes.data(), static_cast<int>(bytes.size()));
+        }
+    }
 
     ++tickCount;
 

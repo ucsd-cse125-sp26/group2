@@ -1106,6 +1106,11 @@ void Server::snapshotClientNetStates(std::vector<ClientNetState>& out)
     }
 }
 
+bool Server::sendToClient(const ClientId& clientId, const void* data, int len)
+{
+    return enqueueTo(clientId, /*replaceKey*/ 0, data, len);
+}
+
 void Server::broadcastMatchStatus(MatchStatePacket packet)
 {
     std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(MatchStatePacket));

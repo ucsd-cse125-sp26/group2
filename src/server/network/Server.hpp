@@ -119,6 +119,13 @@ public:
     /// @brief Broadcast kill events to clients for kill feed updates.
     void broadcastKillEvents(const std::vector<NetKillEvent>& events);
 
+    /// @brief PR-20: unicast a serialized SHOT_DEBUG_REPORT (or any
+    /// other already-framed payload) to a single client.  Wraps the
+    /// private `enqueueTo` so call sites in `ServerGame` can address
+    /// the shooter without the broadcast cost paid by every player.
+    /// @return False if the client isn't currently connected.
+    bool sendToClient(const ClientId& clientId, const void* data, int len);
+
     /// @brief Drain every connection's outbound queue to its socket.
     ///
     /// Call once per server tick, after all per-tick broadcasts. Disconnects

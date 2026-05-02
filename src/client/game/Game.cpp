@@ -499,6 +499,12 @@ bool Game::init()
         // TODO: Specific handling for local player deaths (display enemy health)
     });
 
+    // PR-20: hand each SHOT_DEBUG_REPORT off to the DebugUI's ring
+    // buffer.  Pairs with the client-side fire-time snapshot the
+    // game thread captures inside iterate() (see fire-detection
+    // block).  Always-on so the user can flip the overlay any time.
+    client.onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
+
     // Initialize runtime 3P weapon params from defaults
     for (int i = 0; i < 4; ++i)
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
@@ -1234,6 +1240,57 @@ SDL_AppResult Game::iterate()
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry);
         systems::runWeaponKeys(registry);
+
+        // PR-20: capture the local player's view at fire-time for the
+        // CSGO sv_showimpacts visualizer.  Detects the false→true
+        // transition on `input.shooting` (rising edge = "trigger
+        // pull"), grabs the eye + look ray, and snapshots every
+        // remote player's CURRENT (post-anim, post-interpolation)
+        // hitbox capsules.  Pushes one row into DebugUI's ring; the
+        // companion server-side SHOT_DEBUG_REPORT will pair with it
+        // by `shotInputTick`.  Skipped when the local player isn't
+        // alive yet (no entity with LocalPlayer + InputSnapshot +
+        // CollisionShape).
+        registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
+            [&](entt::entity localEntity, const InputSnapshot& snap, const Position& pos, const CollisionShape& shape) {
+                const bool wasShooting = prevShootingForDebug_;
+                const bool nowShooting = snap.shooting;
+                prevShootingForDebug_ = nowShooting;
+                if (!nowShooting || wasShooting)
+                    return; // not a rising edge
+
+                net::shotdebug::ShotDebugCapture cap;
+                cap.shotInputTick = clientPredictTick;
+                cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                const float cp = std::cos(snap.pitch);
+                cap.direction =
+                    glm::normalize(glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
+                cap.range = physics::k_hitscanRange;
+                cap.hitTargetClientId = net::shotdebug::k_missClientId;
+                cap.hitRegion = 0;
+                cap.hitPoint = cap.origin + cap.direction * cap.range;
+
+                // Snapshot every visible remote player's CURRENT
+                // capsules — this is what the local player SAW on
+                // their screen at the moment they pulled the trigger.
+                // The server's reply will carry the rewound
+                // historical capsules, and the UI overlays them.
+                auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
+                cap.targets.reserve(remoteView.size_hint());
+                for (const auto e : remoteView) {
+                    if (e == localEntity)
+                        continue;
+                    const auto& hb = remoteView.get<HitboxInstance>(e);
+                    if (hb.capsules.empty())
+                        continue;
+                    const auto& cid = remoteView.get<ClientId>(e);
+                    net::shotdebug::ShotDebugCapture::Target tgt;
+                    tgt.clientId = static_cast<std::uint16_t>(cid.value);
+                    tgt.capsules = hb.capsules;
+                    cap.targets.push_back(std::move(tgt));
+                }
+                debugUI.pushClientShot(cap);
+            });
 
         // Apply scroll-wheel weapon switch, constrained to primary/secondary.
         if (pendingScrollSwitch_ != 0) {
@@ -2459,6 +2516,13 @@ SDL_AppResult Game::iterate()
             const glm::mat4 hbVP = hbProj * hbView;
             debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+            // PR-20: CSGO sv_showimpacts-style shot debug.  Window
+            // toggles + ring-buffer slider + per-shot summary table;
+            // when `drawShotDebugOverlay` is checked we also render
+            // the blue (client) / red (server-rewound) capsule pairs
+            // in the 3D world via the same VP we just built for the
+            // hitbox overlay.
+            debugUI.buildShotDebugUI(hbVP, winWf, winHf);
         }
 #ifdef USE_HYBRID_RENDERER
         debugUI.buildRenderTogglesUI(renderer.legacy());

@@ -966,6 +966,64 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         }
         break;
     }
+    case PacketType::SHOT_DEBUG_REPORT: {
+        // PR-20: parse the wire format defined in
+        // `network/ShotDebugReport.hpp` back into a runtime
+        // ShotDebugCapture.  Strict size checks at every step —
+        // malformed packets get dropped silently rather than
+        // crashing the diagnostic UI.
+        using namespace net::shotdebug;
+        if (payloadSize < sizeof(ReportHeader))
+            break;
+        ReportHeader rh{};
+        std::memcpy(&rh, payload, sizeof(ReportHeader));
+
+        ShotDebugCapture cap;
+        cap.shooterClientId = 0; // server doesn't echo this back; not needed by UI
+        cap.shotInputTick = rh.shotInputTick;
+        cap.hitTargetClientId = rh.hitTargetClientId;
+        cap.hitRegion = rh.hitRegion;
+        cap.origin = {rh.originX, rh.originY, rh.originZ};
+        cap.direction = {rh.dirX, rh.dirY, rh.dirZ};
+        cap.range = rh.range;
+        cap.hitPoint = {rh.hitX, rh.hitY, rh.hitZ};
+        cap.targets.reserve(rh.numTargets);
+
+        std::size_t off = sizeof(ReportHeader);
+        bool malformed = false;
+        for (std::uint8_t t = 0; t < rh.numTargets; ++t) {
+            if (off + sizeof(TargetHeader) > payloadSize) {
+                malformed = true;
+                break;
+            }
+            TargetHeader th{};
+            std::memcpy(&th, payload + off, sizeof(TargetHeader));
+            off += sizeof(TargetHeader);
+            const std::size_t need = std::size_t{th.numCapsules} * sizeof(WireCapsule);
+            if (off + need > payloadSize) {
+                malformed = true;
+                break;
+            }
+            ShotDebugCapture::Target tgt;
+            tgt.clientId = th.targetClientId;
+            tgt.capsules.reserve(th.numCapsules);
+            for (std::uint8_t c = 0; c < th.numCapsules; ++c) {
+                WireCapsule wc{};
+                std::memcpy(&wc, payload + off, sizeof(WireCapsule));
+                off += sizeof(WireCapsule);
+                WorldCapsule rc{};
+                rc.pointA = {wc.pointAx, wc.pointAy, wc.pointAz};
+                rc.pointB = {wc.pointBx, wc.pointBy, wc.pointBz};
+                rc.radius = wc.radius;
+                rc.region = static_cast<BodyRegion>(wc.region);
+                tgt.capsules.push_back(rc);
+            }
+            cap.targets.push_back(std::move(tgt));
+        }
+        if (!malformed && shotDebugFn_)
+            shotDebugFn_(cap);
+        break;
+    }
     default:
         SDL_Log("Client: unknown message type %d", static_cast<int>(type));
         break;

@@ -179,6 +179,77 @@ logShot(Registry& registry, entt::entity shooter, std::uint32_t shotInputTick, c
 #endif
 }
 
+// PR-20: capture the post-rewind state for the lag-comp debug
+// visualizer.  Pushes one row into `*out` carrying:
+//   - the shooter's own ClientId (so ServerGame can address the
+//     unicast SHOT_DEBUG_REPORT packet),
+//   - shot ray (origin, dir, range),
+//   - hit target + hit point + region,
+//   - the REWOUND capsule list of every player entity in lag-comp
+//     range (the same capsules `resolveHitscanHitbox` just raycast).
+//
+// Caller MUST hold the `RewindHitboxesGuard` active around the call
+// — that's what makes `HitboxInstance::capsules` carry historical
+// data instead of live data.  No-op when `out == nullptr` (client
+// TU running WeaponSystem for prediction).
+inline void captureShotDebug(Registry& registry,
+                             entt::entity shooter,
+                             std::uint32_t shotInputTick,
+                             const glm::vec3& origin,
+                             const glm::vec3& direction,
+                             float range,
+                             const physics::HitboxHit& hit,
+                             std::vector<net::shotdebug::ShotDebugCapture>* out)
+{
+    if (out == nullptr)
+        return;
+
+    // Need a real ClientId on the shooter — bots / map entities
+    // without one can't be addressed for the unicast reply.
+    const auto* shooterCid = registry.try_get<ClientId>(shooter);
+    if (shooterCid == nullptr)
+        return;
+
+    net::shotdebug::ShotDebugCapture cap;
+    cap.shooterClientId = static_cast<std::uint16_t>(shooterCid->value);
+    cap.shotInputTick = shotInputTick;
+    cap.origin = origin;
+    cap.direction = direction;
+    cap.range = range;
+    cap.hitTargetClientId = net::shotdebug::k_missClientId;
+    cap.hitRegion = 0;
+    cap.hitPoint = hit.point;
+    if (hit.entity != entt::null && registry.valid(hit.entity)) {
+        if (const auto* tid = registry.try_get<ClientId>(hit.entity)) {
+            cap.hitTargetClientId = static_cast<std::uint16_t>(tid->value);
+            cap.hitRegion = static_cast<std::uint8_t>(hit.region);
+        }
+    }
+
+    // Snapshot every other player's CURRENT (i.e. rewound) capsule
+    // list.  `RewindHitboxesGuard`'s ray-AABB pre-filter already
+    // restored capsules for OUT-of-range players to live state, so
+    // walking the full view here actually picks up only the
+    // historical samples the rewinder cared about — exactly what we
+    // want to render.  Skip the shooter itself.
+    auto view = registry.view<HitboxInstance, ClientId>();
+    cap.targets.reserve(view.size_hint());
+    for (const auto e : view) {
+        if (e == shooter)
+            continue;
+        const auto& hb = view.get<HitboxInstance>(e);
+        if (hb.capsules.empty())
+            continue;
+        const auto& cid = view.get<ClientId>(e);
+        net::shotdebug::ShotDebugCapture::Target tgt;
+        tgt.clientId = static_cast<std::uint16_t>(cid.value);
+        tgt.capsules = hb.capsules; // copy while rewound
+        cap.targets.push_back(std::move(tgt));
+    }
+
+    out->push_back(std::move(cap));
+}
+
 /// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
 ///
 /// Handles three weapon archetypes:
@@ -198,6 +269,12 @@ logShot(Registry& registry, entt::entity shooter, std::uint32_t shotInputTick, c
 /// @param dt            Fixed physics delta time in seconds.
 /// @param outParticles  Accumulates particle events for network broadcast.
 /// @param killEvents    Accumulates kill events for network broadcast.
+/// @param outShotDebug  PR-20: optional server-side debug capture sink.
+///                      When non-null, each hitscan-fire path pushes one
+///                      `ShotDebugCapture` row while `RewindHitboxesGuard`
+///                      is still active, so the captured `targets[*].
+///                      capsules` reflect the historical sample the
+///                      server actually raycast against.
 inline void handleFire(Registry& registry,
                        entt::entity shooter,
                        const InputSnapshot& input,
@@ -206,7 +283,8 @@ inline void handleFire(Registry& registry,
                        WeaponState& weapon,
                        float dt,
                        std::vector<NetParticleEvent>& outParticles,
-                       std::vector<NetKillEvent>& killEvents)
+                       std::vector<NetKillEvent>& killEvents,
+                       std::vector<net::shotdebug::ShotDebugCapture>* outShotDebug)
 {
     GunInstance& gun = getEquippedGun(weapon);
     const WeaponConfig& config = getWeaponConfig(gun.type);
@@ -250,6 +328,10 @@ inline void handleFire(Registry& registry,
         // PR-18b: log to server-side shot-resolution CSV (no-op when
         // env unset).  Beam path: every active-fire tick records.
         logShot(registry, shooter, input.tick, hit);
+        // PR-20: capture rewound state for the live debug visualizer
+        // (no-op on client TU and when no shooter ClientId).  Must
+        // happen WHILE rewindGuard is still in scope.
+        captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 
         // Apply DPS-based damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
@@ -301,6 +383,8 @@ inline void handleFire(Registry& registry,
         // PR-18b: log to server-side shot-resolution CSV.  Charge
         // path: one log row per release-fire.
         logShot(registry, shooter, input.tick, hit);
+        // PR-20: capture rewound state for the live debug visualizer.
+        captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 
         // Snapshot armor before damage for shield-break detection.
         float chargeArmorBefore = 0.f;
@@ -386,6 +470,8 @@ inline void handleFire(Registry& registry,
         // PR-18b: log to server-side shot-resolution CSV.  Discrete
         // hitscan path: one log row per click-fire.
         logShot(registry, shooter, input.tick, hit);
+        // PR-20: capture rewound state for the live debug visualizer.
+        captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 
         // Snapshot armor before damage for shield-break detection.
         float armorBefore = 0.f;
@@ -468,7 +554,8 @@ inline void handleFire(Registry& registry,
 void runWeapon(Registry& registry,
                float dt,
                std::vector<NetParticleEvent>& outParticles,
-               std::vector<NetKillEvent>& killEvents)
+               std::vector<NetKillEvent>& killEvents,
+               std::vector<net::shotdebug::ShotDebugCapture>* outShotDebug)
 {
     auto view = registry.view<InputSnapshot, Position, CollisionShape, WeaponState>();
     view.each([&](entt::entity shooter,
@@ -487,7 +574,7 @@ void runWeapon(Registry& registry,
                 beam->active = false;
         }
 
-        handleFire(registry, shooter, input, pos, shape, weapon, dt, outParticles, killEvents);
+        handleFire(registry, shooter, input, pos, shape, weapon, dt, outParticles, killEvents, outShotDebug);
         if (input.reload) {
             GunInstance& gun = getEquippedGun(weapon);
             handleReload(gun);

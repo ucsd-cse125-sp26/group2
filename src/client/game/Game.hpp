@@ -144,6 +144,16 @@ private:
     /// keys the input ring buffer by it.
     uint32_t clientPredictTick = 0;
 
+    /// @brief PR-20: tracks last frame's `input.shooting` so the
+    /// fire-rising-edge detector inside `iterate()` only captures
+    /// the FIRST tick of a click (a "trigger pull"), not every tick
+    /// the button is held.  Survives across frames as a member; is
+    /// naturally reset when the local player respawns because the
+    /// View<LocalPlayer> branch returns early during the dead-window
+    /// (no InputSnapshot present).  Implementation detail of the
+    /// shot-debug visualizer.
+    bool prevShootingForDebug_ = false;
+
     /// @brief Phase 5b: ring buffer of recent stamped inputs for replay-
     /// based reconciliation. Each entry is keyed by clientPredictTick so
     /// runReconciliation can look up the input that was sent for any
