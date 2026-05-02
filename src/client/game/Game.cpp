@@ -1275,30 +1275,17 @@ SDL_AppResult Game::iterate()
         if (inputSyncedWithPhysics && mouseCaptured)
             systems::runMovementKeys(registry);
 
-        // Stamp the current InputSnapshot with the next predict tick BEFORE
-        // sending. The server uses this tick for dedup against
-        // lastAppliedInputTick, and Phase-5b prediction keys the input
-        // ring buffer by it. We bump once per tick *group* (not per inner
-        // tick) — multiple physics ticks in one frame share the same input,
-        // because we only sample input once per group.
-        ++clientPredictTick;
-        registry.view<InputSnapshot, LocalPlayer>().each(
-            [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
-
-        // PR-20.1 (off-by-one fix): capture happens AFTER the tick
-        // increment + snap.tick stamp above, so cap.shotInputTick
-        // matches what the server will see in the INPUT packet.
-        // Pre-PR-20.1 the capture used `clientPredictTick` BEFORE the
-        // increment, producing a one-tick mismatch between client and
-        // server entries (the UI showed them as two separate ring
-        // slots for the same shot).
-        //
-        // PR-20.2: also raycast against visible enemy capsules locally
-        // (`physics::resolveHitscanHitbox`) so the blue tracer
-        // terminates at the enemy hitbox the client SAW rather than
-        // going to full hitscan range.  When the server's red ray
-        // hits the same capsule (and rewind is correct), the two
-        // endpoints overlap.
+        // PR-20.8 (jitter root-cause fix): rising-edge detector ONLY
+        // here.  Tick-stamping + ring push + send all moved INSIDE
+        // the per-physics-tick while loop below so each physics
+        // tick gets its own client tick, matching the server's
+        // per-tick input-application model.  Pre-PR-20.8 we
+        // incremented once per ITERATE while running N physics
+        // ticks per iterate; reconciliation replayed 1:1 (one
+        // runMovement per stored tick), under-running prediction
+        // by `(N-1) × dt × velocity` per replayed tick.  At 30 ms
+        // simulated RTT that produced ~3 units of backward snap on
+        // every snapshot — visible as continuous movement jitter.
         bool firePulledThisFrame = false;
         registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
             const bool wasShooting = prevShootingForDebug_;
@@ -1370,35 +1357,44 @@ SDL_AppResult Game::iterate()
                 });
         }
 
-        // Send the redundant input batch (last k_inputRedundancy ticks).
-        systems::runInputSend(registry, client);
-
-        // Phase 5b: push the just-stamped input into the ring buffer so
-        // reconciliation can replay it after a snapshot arrives.
-        registry.view<LocalPlayer, InputSnapshot>().each(
-            [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
-
         physicsRan = true;
 
-        // Phase 5a: PreviousPosition is updated by Client::dispatchMessage
-        // when a snapshot arrives, not every physics tick. The renderer
-        // interpolates over the snapshot interval via
-        // client.getSnapshotAlpha() so motion stays smooth at the much-
-        // coarser snapshot rate (e.g. 32 Hz vs 128 Hz physics).
+        // PR-20.8 (jitter root-cause): tick-stamp + ring-push + send
+        // moved INSIDE the per-physics-tick loop.  Each physics tick
+        // gets its own `clientPredictTick`, its own InputSnapshot
+        // tick stamp, and its own ring entry.  Reconciliation's 1:1
+        // replay (one `runMovement` per stored tick) now exactly
+        // matches prediction's 1:1 advance (one `runMovement` per
+        // physics tick).  Pre-PR-20.8 the increment was OUTSIDE the
+        // loop while runPrediction ran N times per iterate at
+        // 60 fps × 128 Hz physics, making replay always under-run
+        // by `(N-1) × dt × velocity` per stored tick.
         //
-        // Phase 5b: per physics tick we ALSO snapshot the local player's
-        // pos→prev BEFORE running prediction so the renderer can show a
-        // tick-rate-smooth interpolation of the local player even when
-        // server snapshots arrive far less frequently. The local player
-        // uses physics-tick alpha (in render code below); remote players
-        // use the snapshot alpha.
+        // Phase 5a/b: PreviousPosition is updated by Client::
+        // dispatchMessage when a snapshot arrives, not every physics
+        // tick.  The renderer interpolates over the snapshot interval
+        // via `client.getSnapshotAlpha()` so motion stays smooth at
+        // the much-coarser snapshot rate.  Per physics tick we ALSO
+        // snapshot the local player's pos→prev BEFORE running
+        // prediction so the renderer shows tick-rate-smooth
+        // interpolation of the local player.
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
 
-            // Phase 5b: capture local pos→prev for tick-rate interp,
-            // then run client-side prediction. PlayerSimState filter on
-            // runMovement narrows automatically to just the local player
-            // (remotes don't have PlayerSimState on the client).
+            // Per-physics-tick: increment + stamp + ring push.
+            // All physics ticks in this iterate see the same input
+            // sampled at runWeaponKeys/runMovementKeys time above —
+            // we just give each tick its own monotonic tick number.
+            ++clientPredictTick;
+            registry.view<InputSnapshot, LocalPlayer>().each(
+                [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+            registry.view<LocalPlayer, InputSnapshot>().each(
+                [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
+
+            // Capture local pos→prev for tick-rate interp, then run
+            // client-side prediction.  `PlayerSimState` filter on
+            // runMovement narrows to just the local player (remotes
+            // don't have `PlayerSimState` on the client).
             registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
             systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
@@ -1407,6 +1403,14 @@ SDL_AppResult Game::iterate()
             ++ticksThisFrame;
             ++statsPhysTicks;
         }
+
+        // Send the redundant input batch ONCE per iterate.  After the
+        // physics loop has stamped the LATEST clientPredictTick into
+        // `snap.tick`, so the packet's most-recent input carries the
+        // last physics tick's number.  Prior k_inputRedundancy
+        // ticks are pulled from `Client::inputRing_` (which the
+        // sendInputSnapshot path appends to internally).
+        systems::runInputSend(registry, client);
 
         phaseSnap(phaseStats.physics);
 
