@@ -167,6 +167,41 @@ public:
     /// default 32 Hz period (~31.25 ms) before two snapshots have arrived.
     [[nodiscard]] Uint64 getSnapshotIntervalNs() const;
 
+    /// @brief PR-19: overwrite `Position.value` (and `InputSnapshot.yaw`)
+    /// for every non-local entity with an `InterpolationBuffer` to its
+    /// interpolated render-time value.  Runs once per frame, BEFORE any
+    /// renderer / particle / sfx / tracer code reads `pos.value` —
+    /// every visual consumer thereafter sees a single, consistent
+    /// interpolated source of truth.
+    ///
+    /// Pre-PR-19 the renderer interpolated at 3 specific call sites
+    /// while tracers, ribbon trails, smoke emitters, and beam endpoints
+    /// kept reading raw `pos.value`.  At 128 Hz × 2-snapshot delay
+    /// (~16 ms) that's ~6-unit visible separation between the body
+    /// and effects originating from "where the body really is right now".
+    ///
+    /// Why mutate `Position.value` in place rather than ship a separate
+    /// `RenderPosition` component?  Two reasons: (1) every consumer
+    /// already reads `pos.value`, no per-call-site touch-up needed; (2)
+    /// the next snapshot apply unconditionally overwrites `pos.value`
+    /// with the server-authoritative value (entt's continuous_loader),
+    /// so the mutation has no lasting effect on registry state — it's
+    /// effectively a per-frame derived view.  Concrete cycle:
+    ///
+    ///   1. Snapshot apply → pos.value = server's value at tick T.
+    ///   2. recordInterpolationSamples reads server value, appends.
+    ///   3. (this method) → pos.value = interp_sample(buffer, renderTime).
+    ///   4. Renderer + particles + tracers + sfx read pos.value.
+    ///   5. Next snapshot apply re-overwrites pos.value with new server
+    ///      value (step 1 again).
+    ///
+    /// No-op when render-delay interp is disabled (`interpDelaySnapshots_
+    /// == 0`) or no buffered playback yet (renderTimeNs == 0).
+    /// Excludes local player (which has no `InterpolationBuffer` because
+    /// `recordInterpolationSamples` filters local out, and which is
+    /// driven by client-side prediction anyway).
+    void applyInterpolatedTransforms(Registry& registry);
+
     /// @brief Number of recent inputs included in each INPUT packet for redundancy.
     ///
     /// At 128 Hz client tick rate, 5 inputs covers ~40 ms of redundancy —
@@ -333,36 +368,27 @@ private:
     // matters in practice.
     static constexpr Uint64 k_defaultSnapshotIntervalNs = 1'000'000'000ULL / 128ULL;
 
-    // PR-16 (URGENT FIX): default DISABLED until PR-17 lands a unified
-    // `RenderPosition` system.  Background: PR-11 wired
-    // `entity_interpolation::sample()` into 3 specific Game.cpp render
-    // sites (skinned body, third-person model, third-person weapon)
-    // but the codebase has many MORE consumers of `Position.value` —
-    // tracers (TracerEffect.cpp:85, 95), ribbon trails
-    // (RibbonTrail.cpp:36, 58), smoke emitters (SmokeEffect.cpp:61),
-    // beam endpoints (Game.cpp BeamState path), audio source
-    // positions, etc.  When the body renders at `pos.value − 15.6 ms`
-    // but a tracer originates from raw `pos.value`, they diverge by
-    // ~6 units at typical movement speeds — visible misalignment, and
-    // hits feel broken because the player aims at the visually-
-    // delayed body while believing the body to be in real-time space.
+    // PR-19: re-enabled default = 2 snapshots after `Client::
+    // applyInterpolatedTransforms` started overwriting Position +
+    // InputSnapshot.yaw in place every frame.  Now ALL visual
+    // consumers (renderer, tracers, ribbon trails, smoke emitters,
+    // beam endpoints, sfx) read from a single source of truth —
+    // `pos.value`, freshly written each frame to the interpolated
+    // value — so there's no more 6-unit body-vs-tracer separation
+    // that PR-16 was the emergency hotfix for.
     //
-    // Default 0 cleanly falls back to the Phase-5a `(prev, cur, alpha)`
-    // lerp at every render site (the `if (interpRenderNs != 0)`
-    // guards in Game.cpp short-circuit) AND wires the server's
-    // lag-comp formula to its pre-PR-12 behaviour (interp delay term
-    // = 0 ticks, just RTT/2).  All visual consumers re-align at raw
-    // `pos.value` and hit-registration works.
+    // PR-16's history (kept for posterity): pre-PR-19, PR-11 wired
+    // `entity_interpolation::sample()` into 3 specific Game.cpp
+    // render sites only, missing TracerEffect / RibbonTrail /
+    // SmokeEffect / BeamState / sfx.  PR-16 default-flipped this to
+    // 0 to disable the misaligned interp until PR-19's unified
+    // approach landed.  PR-17 (FragmentReassembler stuck-state)
+    // turned out to be the bigger source of "models in wrong
+    // locations" — once that was fixed and PR-19 unifies the read
+    // path, default-on is safe again.
     //
-    // To opt back in: set `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=2` in
-    // the env.  The buffer + helpers + server lag-comp wiring all
-    // remain in place; this is purely a default flip.
-    //
-    // PR-17 will introduce a `RenderPosition` component computed once
-    // per frame from `entity_interpolation::sample` and have every
-    // visual consumer read THAT instead of `Position.value`, after
-    // which we can flip this default back to 2.
-    int interpDelaySnapshots_ = 0;
+    // To disable: set `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=0`.
+    int interpDelaySnapshots_ = 2;
     Uint64 snapshotIntervalEmaNs_ = k_defaultSnapshotIntervalNs;
 
     // ── Phase 5b: prediction reconciliation hand-off ──────────────────────

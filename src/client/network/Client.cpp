@@ -373,6 +373,46 @@ Uint64 Client::getSnapshotIntervalNs() const
     return snapshotIntervalEmaNs_;
 }
 
+void Client::applyInterpolatedTransforms(Registry& registry)
+{
+    // PR-19: opt-out semantics — disabled if cl_interp = 0 or no
+    // buffered playback yet.  In both cases the registry's `pos.value`
+    // already holds the server-authoritative state from the most
+    // recent snapshot apply, which is the right thing for consumers
+    // to see (Phase-5a behaviour).
+    if (interpDelaySnapshots_ <= 0)
+        return;
+    const Uint64 renderTimeNs = getInterpolationRenderTimeNs();
+    if (renderTimeNs == 0)
+        return;
+
+    // Walk every entity that has an InterpolationBuffer (created by
+    // recordInterpolationSamples for non-local entities only — see
+    // that function for the LocalPlayer exclude).  Sample each buffer
+    // at the shared render-time and overwrite Position + yaw in place.
+    //
+    // Each sample() call is O(buffer count) ≤ 8 — branch-light linear
+    // scan.  At 100 entities × 60 FPS = 6 k samples/s server-wide,
+    // negligible cost.
+    auto view = registry.view<Position, InterpolationBuffer>();
+    for (const auto e : view) {
+        auto& pos = view.get<Position>(e);
+        // Yaw fallback comes from the entity's own InputSnapshot if
+        // present; otherwise 0.  The sample() helper internally
+        // returns the fallback when the buffer can't bracket the
+        // requested time, so unbuffered cases preserve current state.
+        float fallbackYaw = 0.0f;
+        InputSnapshot* snap = registry.try_get<InputSnapshot>(e);
+        if (snap != nullptr)
+            fallbackYaw = snap->yaw;
+
+        const auto sampled = entity_interpolation::sample(registry, e, renderTimeNs, pos.value, fallbackYaw);
+        pos.value = sampled.position;
+        if (snap != nullptr)
+            snap->yaw = sampled.yaw;
+    }
+}
+
 void Client::recordInterpolationSamples(Registry& registry, Uint64 captureNs)
 {
     if (interpDelaySnapshots_ <= 0)

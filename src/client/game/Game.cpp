@@ -1610,6 +1610,17 @@ SDL_AppResult Game::iterate()
         cachedEye_ = renderEye;
     }
 
+    // PR-19: unified pre-render interpolation pass.  Walks every
+    // non-local entity with an `InterpolationBuffer` and overwrites
+    // its `Position.value` + `InputSnapshot.yaw` with the buffer-
+    // sampled values at `now − N × snapshotInterval`.  Every
+    // downstream visual consumer (renderer, tracers, ribbon trails,
+    // smoke emitters, beam endpoints, sfx) reads `pos.value`
+    // directly, so they all align on a single interpolated
+    // source-of-truth — no body-vs-tracer mismatch.  No-op when
+    // `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=0`.
+    client.applyInterpolatedTransforms(registry);
+
     // Update skeletal animation + build the renderer's per-frame skinned
     // palette + instance arrays (perf Phase 1B).
     //
@@ -1729,22 +1740,26 @@ SDL_AppResult Game::iterate()
 
                     // Build per-instance world transform.
                     //
-                    // PR-11: for non-local entities prefer the
-                    // InterpolationBuffer-driven path — playback at
-                    // `now − N × snapshotInterval` smooths jitter and
-                    // hides single-snapshot losses.  Local-player render
-                    // continues to use the Phase-5a (prev, cur, alpha)
-                    // lerp because the local entity's `Position` is
-                    // client-side-predicted (Phase 5b reconciliation),
-                    // not snapshot-driven, so its InterpolationBuffer
-                    // would lag the predicted truth by `interpDelay`.
+                    // PR-19: when the buffered render-delay path is
+                    // active (interpRenderNs != 0), `Client::
+                    // applyInterpolatedTransforms` has ALREADY
+                    // overwritten `pos.value` and `inp.yaw` with the
+                    // interpolated render-time values for non-local
+                    // entities.  We just read them directly — same
+                    // source-of-truth as tracers / ribbon trails /
+                    // smoke / beams / sfx, so no body-vs-effect
+                    // misalignment.
+                    //
+                    // When the buffered path is OFF (env-disabled
+                    // cl_interp = 0), or for the local player (which
+                    // uses client-side prediction, not interp), fall
+                    // back to the Phase-5a (prev, cur, alpha) lerp
+                    // for snapshot-rate motion smoothness.
                     glm::vec3 renderPos = pos.value;
                     float renderYaw = inp.yaw;
                     if (!isLocal && interpRenderNs != 0) {
-                        const auto sampled =
-                            entity_interpolation::sample(registry, e, interpRenderNs, pos.value, inp.yaw);
-                        renderPos = sampled.position;
-                        renderYaw = sampled.yaw;
+                        // pos.value already pre-interpolated by
+                        // applyInterpolatedTransforms; no work here.
                     } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
                         renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
                     }
@@ -1895,16 +1910,15 @@ SDL_AppResult Game::iterate()
             if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
-            // PR-11: render-delay path for non-local entities.  Locals
-            // are excluded earlier (line ~1854); for everyone else we
-            // play back at `now − N × snapshotInterval`, which always
-            // has at least one buffered future sample to lerp toward.
-            // Falls through to the Phase-5a (prev, cur, alpha) lerp
-            // when the buffer isn't available yet (first 1-2 snapshots,
-            // or render-delay disabled via env var).
+            // PR-19: pos.value is already pre-interpolated by
+            // `Client::applyInterpolatedTransforms` for non-local
+            // entities when buffered render-delay is active.  When
+            // disabled, fall back to the Phase-5a (prev, cur, alpha)
+            // lerp for snapshot-rate smoothness.  Same dual-path
+            // pattern as the skinned-body site above.
             glm::vec3 renderPos = pos.value;
             if (interpRenderNs != 0) {
-                renderPos = entity_interpolation::sample(registry, e, interpRenderNs, pos.value, 0.0f).position;
+                // pos.value already pre-interpolated; no work here.
             } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
                 renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
             }
@@ -1940,13 +1954,14 @@ SDL_AppResult Game::iterate()
             // `now − N × snapshotInterval` while the weapon sticks to
             // the most-recent server position, separating the two by
             // ~62 ms of motion (visible "ghost gun").
-            glm::vec3 playerPos = pos.value;
-            float yaw = input.yaw;
-            if (interpRenderNs != 0) {
-                const auto sampled = entity_interpolation::sample(registry, e, interpRenderNs, pos.value, input.yaw);
-                playerPos = sampled.position;
-                yaw = sampled.yaw;
-            }
+            // PR-19: pos.value + input.yaw are already pre-interpolated
+            // by `Client::applyInterpolatedTransforms` when buffered
+            // render-delay is active, so the weapon naturally hangs
+            // off the same body the skinned-character pass just drew.
+            // No explicit sample() call needed any more — single
+            // source of truth = pos.value (and InputSnapshot.yaw).
+            const glm::vec3 playerPos = pos.value;
+            const float yaw = input.yaw;
             // Phase 3f: a remote third-person weapon ~50 world-units long;
             // a 100-unit cull radius around the player position is a tight
             // fit and skips the entire weapon draw when off-screen.
