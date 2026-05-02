@@ -587,3 +587,102 @@ The PRs that landed (PR-1 through PR-3) are independent wins
 that pay even if the user never goes beyond 100 bots in real
 gameplay; they don't depend on the deferred work for their
 value.
+
+## §10 Post-perf netcode regression framework (PR-15 → PR-22)
+
+After the §9 perf wins shipped, a series of bug reports against
+the simulated-RTT / simulated-loss UI sliders and shot-debug
+visualizer surfaced subtle netcode bugs that the synthetic load
+tests couldn't see (they all run at near-zero loopback RTT and 0
+loss). PR-15 → PR-22 add a deterministic regression net for
+those scenarios.
+
+### Landed PRs (netcode regressions + framework)
+
+| Commit | Title | What it does |
+|--------|-------|--------------|
+| `150386c` | PR-15: per-fragment redundancy on FULL keyframes | At lossy links, FULL-snapshot fragmentation could lose a fragment and stall the keyframe path. Each fragment now carries its own redundancy header so the receiver can tolerate single-fragment drops without forcing a re-fragment. |
+| `06ca94f` | PR-16: default-disable PR-11 render-delay interp (regression) | PR-11's render-delay interp had been default-on, but at the high-RTT lag-comp formula in PR-12 it created a visible target-snap when shots resolved. Defaulted off pending a unified solution (delivered in PR-19). |
+| `b1f961a` | PR-17: FragmentReassembler swapped Stale-check args | One-line bug in the per-stream stale-fragment GC was discarding GOOD fragments and keeping STALE ones, causing snapshot reassembly to spin forever in TIME_WAIT-style states. Reproduced + fixed by extending the fragment unit tests. |
+| `095ccee` | PR-18: deterministic netsync regression test framework | First half of the regression net: per-bot snapshot observation log (`bot_<id>.csv`) + server-side ground-truth log (`server_truth.csv`) + offline `scripts/netsync-analyze.py` that joins by wall-clock + clientId, interpolates between adjacent server samples, and reports euclidean desync per (bot, observed entity, RTT bucket). Would have caught PR-17 instantly. |
+| `4806bc7` | PR-18b: server shot-resolution log + hit-rate analyzer | Second half: server stamps `(shooterClientId, shotInputTick, hitClientId, hitX/Y/Z, hitRegion)` per resolved shot to `server_shots.csv`. Independent of the desync analysis — runs even when the truth log is off. |
+| `ac9d566` | PR-19: unified pre-render interpolation; re-enable interp default | Re-lands PR-11's render-delay interp, this time mutating `Position.value` once per frame BEFORE every visual consumer (renderer, particles, tracers, beams) reads it. Pre-PR-19 the renderer interpolated at 3 sites while tracers/ribbons/smoke kept reading raw `pos.value` — at 128 Hz × 2-snapshot delay (~16 ms) that was ~6 units of visible body-vs-effects separation. |
+| `a3570da` | PR-20: CSGO `sv_showimpacts`-style lag-comp visualizer | New `SHOT_DEBUG_REPORT` packet: server captures the rewound capsule pose for every player in lag-comp range during each hit-scan, plus the resolved hit point, and unicasts the whole capture back to the shooter. Client renders blue (where I shot) vs red (what the server resolved) tracers + capsule outlines. The visualizer surfaced PR-20.6 / 20.7 / 20.9 below. |
+| `de0e91d`+`beba38a`+`d7141dc`+`e2555aa`+`069b933` | PR-20.1-20.9 follow-ups | Five separate root-cause fixes the visualizer made visible: off-by-one between input.tick and predict.tick on shot ID; `Player`-tag filter on the client raycast that excluded the shooter's local hit-test; conditional that discarded the wall-impact end point; lag-comp formula was `RTT/2 + interp` when our render model needs `RTT + interp` (we don't extrapolate remote players forward); `dispatchMessage`'s `prev = pos` view was overwriting the local player's per-physics-tick prev — fixed by `entt::exclude<LocalPlayer>`. |
+| `10a9f63` | PR-21: hit-reg analysis — bot aim AI + shot-intent log | Bot learns to aim (gated by `GROUP2_BOT_AIM=1`); rising-edge shot-intent CSV per bot; analyzer joins bot intent with `server_shots.csv` and reports per-RTT hit-rate, intended-vs-actual target distribution, hit-region distribution, intended-target → server-hit-point distance. |
+| `(this PR)` | PR-22: client-vs-server-rewind comparison | Extends the framework to capture **everything needed to diagnose lag-comp differences between what the client saw and what the server resolved**, per the user's PR-22 brief: `LagCompTarget` carries `lagTicks` + `rttMs`; `server_shots.csv` records the shot ray (origin, direction), shooter RTT, lag-comp ticks, and the hit target's rewound vs current position; `bot_shots_*.csv` records the bot's local AABB raycast (bot's view of "who I hit"); analyzer reports a four-quadrant agreement matrix (both hit / only client / only server / neither), bothHit-same-target rate, lag-comp drift distribution, and ray-origin desync between server's view of shooter origin and the bot's view. |
+
+### PR-22 RTT sweep results (8 bots, 20 s, GROUP2_BOT_AIM=1, cl_interp default = 2 snapshots)
+
+The sweep below uses the new framework to characterize hit-reg
+quality vs simulated RTT. Each row is a 20 s test where every
+bot fires only when it has a closest-target in view, aiming at
+the target's chest.
+
+| RTT (ms) | Server hit rate | bothHit same-target | Lag-comp drift p99 (XZ, units) | Ray-origin desync mean (units) | Hit on intended (% of resolved) |
+|---------:|:----------------|:--------------------|:--------------------------------|:--------------------------------|:--------------------------------|
+| 0    | 10.0 % | 74.2 % | 17.75 | ~3   | 7.6 % |
+| 30   | 8.1 %  | 69.4 % | 25.01 | 13.2 | 5.9 % |
+| 100  | 3.4 %  | 30.8 % | 34.20 | 39.3 | 1.2 % |
+| 200  | 3.0 %  | 34.6 % | 59.02 | 65.3 | 1.2 % |
+
+Notes:
+
+- **Lag-comp drift growing with RTT** is *exactly the rewinder doing its job*:
+  at RTT=200 ms with players moving ~300 u/s, the rewound capsule sits
+  ~60 units behind the live foot position. The framework now lets us
+  graph this and watch for regressions where the rewinder under- or
+  over-shoots.
+- **Hit rate falls 10 % → 3 %** despite lag-comp covering the rewind
+  perfectly. Two contributing factors the analyzer surfaced:
+    - **Ray-origin desync grows with RTT** (3 → 65 units): the bot's view of
+      its OWN position diverges from the server's view of where the bot
+      WAS at fire time. The bot uses the latest snapshot apply (no
+      client-side prediction in the bot fleet); the server uses the
+      live `pos.value` at shot resolution. With 8-bot melee at 300 u/s,
+      this self-position drift alone moves the ray origin ~half a body
+      width per 100 ms RTT.
+    - **bothHit same-target collapses** from 74 % at RTT=0 to ~30 % at
+      RTT=100+: when both client (AABB) and server (capsule) decide
+      there was a hit, they agree on WHO at high RTT only a third of
+      the time. This is the fingerprint of the local AABB checking a
+      different snapshot tick than the server's rewound capsule.
+- **`onlyClientHit` dominates (90 %+)** at every RTT — but this is an
+  artifact of bots having no replicated `HitboxInstance` (capsules are
+  not in the `Synced` tuple), so the bot's local raycast is broad-phase
+  AABB only. AABB is much wider than the server's skeleton-driven
+  capsules, so any AABB hit on a thin limb fails the capsule narrow
+  phase. A real client (which builds capsules locally from animation)
+  would not see this asymmetry; the framework's job is to report
+  client-vs-server-rewind delta on real client traces in the future.
+
+### What the framework now catches
+
+- PR-17 fragment-reassembler stuck-state: bot observation log freezes
+  while server truth keeps moving → enormous desync values.
+- PR-20.6 client-side raycast filter bug: `bothHit` would have been ~0
+  for the local `Player`-filtered view.
+- PR-20.7 lag-comp formula bug: `bothHit same-target` rate would have
+  collapsed at RTT > 0 — the symptom we just baselined.
+- PR-20.9 jitter bug: `ray-origin desync` would have spiked frame-to-
+  frame instead of growing smoothly with RTT.
+- Future quantization / AoI-culling / snapshot-rate changes: the four
+  numbers (hit rate, bothHit-same-target, lag-comp drift, ray-origin
+  desync) are independent enough to surface either a worse client view
+  or a worse server lag-comp without false positives on the other.
+
+### Forward work surfaced by PR-22 results
+
+1. **Client-side prediction in clientbot** — the high `ray-origin
+   desync` at RTT > 0 is partially the bot's own self-position drift,
+   not lag-comp. Adding the same Phase-5b prediction the real client
+   has would eliminate this and make the metric a clean lag-comp
+   measure.
+2. **Replicate `HitboxInstance` (or expose a capsule cache)** so the
+   bot's local raycast is comparable to the server's. Until then,
+   `onlyClientHit` is dominated by AABB-vs-capsule asymmetry, not
+   lag-comp.
+3. **Hit-reg-under-loss sweep** — the framework supports
+   `GROUP2_BOT_LOSS_PERCENT`; we haven't run it. PR-15's per-fragment
+   redundancy expects the headline numbers to barely move under 5 %
+   loss; the framework can verify.

@@ -44,18 +44,22 @@ void openIfRequested()
         SDL_Log("[server] PR-18b: failed to open shots log at %s", path);
         return;
     }
-    std::fprintf(file, "wallTimeNs,shooterClientId,shotInputTick,hitClientId,hitX,hitY,hitZ,hitRegion\n");
+    // PR-22: schema grew from 8 → 23 columns.  Old runs without the
+    // PR-22 columns are still loadable by the analyzer because we use
+    // a DictReader and tolerate missing keys.
+    std::fprintf(file,
+                 "wallTimeNs,shooterClientId,shotInputTick,"
+                 "hitClientId,hitX,hitY,hitZ,hitRegion,"
+                 "originX,originY,originZ,"
+                 "dirX,dirY,dirZ,"
+                 "shooterRttMs,lagCompTicks,"
+                 "hitTargetRewoundX,hitTargetRewoundY,hitTargetRewoundZ,"
+                 "hitTargetCurrentX,hitTargetCurrentY,hitTargetCurrentZ\n");
     std::fflush(file);
     SDL_Log("[server] PR-18b: writing shot-resolution log to %s", path);
 }
 
-void recordShotResolution(std::uint16_t shooterClientId,
-                          std::uint32_t shotInputTick,
-                          std::uint16_t hitClientId,
-                          float hitX,
-                          float hitY,
-                          float hitZ,
-                          int hitRegion)
+void recordShotResolution(const ShotResolution& shot)
 {
     std::lock_guard<std::mutex> lock(mu);
     if (file == nullptr)
@@ -63,15 +67,32 @@ void recordShotResolution(std::uint16_t shooterClientId,
 
     const Uint64 nowNs = SDL_GetTicksNS();
     std::fprintf(file,
-                 "%llu,%u,%u,%u,%.4f,%.4f,%.4f,%d\n",
+                 "%llu,%u,%u,%u,%.4f,%.4f,%.4f,%d,"
+                 "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
+                 "%u,%u,"
+                 "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
                  static_cast<unsigned long long>(nowNs),
-                 static_cast<unsigned>(shooterClientId),
-                 static_cast<unsigned>(shotInputTick),
-                 static_cast<unsigned>(hitClientId),
-                 static_cast<double>(hitX),
-                 static_cast<double>(hitY),
-                 static_cast<double>(hitZ),
-                 hitRegion);
+                 static_cast<unsigned>(shot.shooterClientId),
+                 static_cast<unsigned>(shot.shotInputTick),
+                 static_cast<unsigned>(shot.hitClientId),
+                 static_cast<double>(shot.hitX),
+                 static_cast<double>(shot.hitY),
+                 static_cast<double>(shot.hitZ),
+                 shot.hitRegion,
+                 static_cast<double>(shot.originX),
+                 static_cast<double>(shot.originY),
+                 static_cast<double>(shot.originZ),
+                 static_cast<double>(shot.dirX),
+                 static_cast<double>(shot.dirY),
+                 static_cast<double>(shot.dirZ),
+                 static_cast<unsigned>(shot.shooterRttMs),
+                 static_cast<unsigned>(shot.lagCompTicks),
+                 static_cast<double>(shot.hitTargetRewoundX),
+                 static_cast<double>(shot.hitTargetRewoundY),
+                 static_cast<double>(shot.hitTargetRewoundZ),
+                 static_cast<double>(shot.hitTargetCurrentX),
+                 static_cast<double>(shot.hitTargetCurrentY),
+                 static_cast<double>(shot.hitTargetCurrentZ));
     // No flush — we'd be calling it ~150-300 times/sec at high
     // fire-rate fleet sizes.  The game thread's tick-end profiler
     // flush gives a natural every-1s snapshot anyway, and the file

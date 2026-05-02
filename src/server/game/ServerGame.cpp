@@ -752,7 +752,17 @@ void ServerGame::updateLagCompTargets()
                                         ? 0u // explicit "no rewind" sentinel
                                         : (currentServerTick - lagTicks);
 
-        registry.emplace_or_replace<LagCompTarget>(entity, LagCompTarget{.targetServerTick = targetTick});
+        // PR-22: stash `lagTicks` and `rttMs` alongside `targetServerTick`
+        // so the shot-log can record them per-shot without plumbing
+        // `tickCount` and `netById` into `WeaponSystem::handleFire`.
+        // The rewinder ignores these fields; they're informational.
+        registry.emplace_or_replace<LagCompTarget>(
+            entity,
+            LagCompTarget{
+                .targetServerTick = targetTick,
+                .lagTicks = static_cast<uint16_t>(std::min<uint32_t>(lagTicks, 0xFFFFu)),
+                .rttMs = rttMs,
+            });
 
         // Replicate this client's RTT to all clients via PlayerMatchStats.
         // Already in the Synced tuple, so ships in the next snapshot. Each

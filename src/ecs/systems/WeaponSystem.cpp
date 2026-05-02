@@ -156,25 +156,79 @@ inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
 // connect-time).  Hit target's ClientId is resolved from `hit.entity`
 // or set to `k_missClientId` for misses.  No-op on client TUs (the
 // `#if GROUP2_HAS_SHOTLOG` guard collapses to a stubbed body).
-inline void
-logShot(Registry& registry, entt::entity shooter, std::uint32_t shotInputTick, const physics::HitboxHit& hit)
+//
+// PR-22 (netsync): also records the shot ray (origin, direction), the
+// shooter's `LagCompTarget` (RTT + rewind ticks), and the hit target's
+// rewound vs current position.  Caller MUST have an active
+// `RewindHitboxesGuard` so reading the hit target's `HitboxInstance::
+// capsules` returns the historical (rewound) sample — exactly what
+// the raycast just hit.  `Position.value` is unchanged by the guard
+// and gives the live (current) foot position.
+inline void logShot(Registry& registry,
+                    entt::entity shooter,
+                    std::uint32_t shotInputTick,
+                    const glm::vec3& origin,
+                    const glm::vec3& direction,
+                    const physics::HitboxHit& hit)
 {
 #if GROUP2_HAS_SHOTLOG
-    std::uint16_t shooterCid = 0;
-    if (const auto* sid = registry.try_get<ClientId>(shooter))
-        shooterCid = static_cast<std::uint16_t>(sid->value);
+    group2::perf::shotlog::ShotResolution row;
+    row.shotInputTick = shotInputTick;
 
-    std::uint16_t hitCid = group2::perf::shotlog::k_missClientId;
+    if (const auto* sid = registry.try_get<ClientId>(shooter))
+        row.shooterClientId = static_cast<std::uint16_t>(sid->value);
+
+    row.hitX = hit.point.x;
+    row.hitY = hit.point.y;
+    row.hitZ = hit.point.z;
+    row.hitRegion = static_cast<int>(hit.region);
+
+    row.originX = origin.x;
+    row.originY = origin.y;
+    row.originZ = origin.z;
+    row.dirX = direction.x;
+    row.dirY = direction.y;
+    row.dirZ = direction.z;
+
+    if (const auto* lagComp = registry.try_get<LagCompTarget>(shooter)) {
+        row.shooterRttMs = lagComp->rttMs;
+        row.lagCompTicks = lagComp->lagTicks;
+    }
+
     if (hit.entity != entt::null && registry.valid(hit.entity)) {
         if (const auto* tid = registry.try_get<ClientId>(hit.entity))
-            hitCid = static_cast<std::uint16_t>(tid->value);
+            row.hitClientId = static_cast<std::uint16_t>(tid->value);
+
+        // Rewound centre: while the guard is active, `capsules[0]` is
+        // the historical sample.  Capsule index 0 is the body capsule
+        // for our rig (see Hitbox.hpp); its midpoint is a stable
+        // rewound-pose anchor.
+        if (const auto* hb = registry.try_get<HitboxInstance>(hit.entity); hb != nullptr && !hb->capsules.empty()) {
+            const auto& cap0 = hb->capsules[0];
+            const glm::vec3 centroid = (cap0.pointA + cap0.pointB) * 0.5f;
+            row.hitTargetRewoundX = centroid.x;
+            row.hitTargetRewoundY = centroid.y;
+            row.hitTargetRewoundZ = centroid.z;
+        }
+
+        // Current centre: `Position.value` is unchanged by the rewind
+        // guard.  This is the live foot position at server-now-tick;
+        // the analyzer subtracts capsule-midpoint vertical offset
+        // when computing drift.
+        if (const auto* tpos = registry.try_get<Position>(hit.entity)) {
+            row.hitTargetCurrentX = tpos->value.x;
+            row.hitTargetCurrentY = tpos->value.y;
+            row.hitTargetCurrentZ = tpos->value.z;
+        }
     }
-    group2::perf::shotlog::recordShotResolution(
-        shooterCid, shotInputTick, hitCid, hit.point.x, hit.point.y, hit.point.z, static_cast<int>(hit.region));
+
+    group2::perf::shotlog::recordShotResolution(row);
 #else
     (void)registry;
     (void)shooter;
     (void)shotInputTick;
+    (void)origin;
+    (void)direction;
     (void)hit;
 #endif
 }
@@ -327,7 +381,7 @@ inline void handleFire(Registry& registry,
 
         // PR-18b: log to server-side shot-resolution CSV (no-op when
         // env unset).  Beam path: every active-fire tick records.
-        logShot(registry, shooter, input.tick, hit);
+        logShot(registry, shooter, input.tick, eye, direction, hit);
         // PR-20: capture rewound state for the live debug visualizer
         // (no-op on client TU and when no shooter ClientId).  Must
         // happen WHILE rewindGuard is still in scope.
@@ -382,7 +436,7 @@ inline void handleFire(Registry& registry,
 
         // PR-18b: log to server-side shot-resolution CSV.  Charge
         // path: one log row per release-fire.
-        logShot(registry, shooter, input.tick, hit);
+        logShot(registry, shooter, input.tick, eye, direction, hit);
         // PR-20: capture rewound state for the live debug visualizer.
         captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 
@@ -469,7 +523,7 @@ inline void handleFire(Registry& registry,
 
         // PR-18b: log to server-side shot-resolution CSV.  Discrete
         // hitscan path: one log row per click-fire.
-        logShot(registry, shooter, input.tick, hit);
+        logShot(registry, shooter, input.tick, eye, direction, hit);
         // PR-20: capture rewound state for the live debug visualizer.
         captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 

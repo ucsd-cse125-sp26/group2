@@ -158,13 +158,25 @@ private:
     /// rising edge of `input_.shooting`.  No-op when the log isn't
     /// open.  `intendedTargetEntity == entt::null` means the bot
     /// fired without aiming at any visible target (random fire).
+    ///
+    /// PR-22: also records the bot's local AABB raycast result —
+    /// "who the bot would think it hit" with the limited information
+    /// it has on its side.  Bots have no replicated `HitboxInstance`
+    /// (capsule-level skeleton), so this is necessarily AABB-only;
+    /// the server still does full capsule lag-comp.  Mismatches
+    /// between bot-side and server-side hits are the headline
+    /// hit-reg signal the netsync analyzer reports.
     void writeShotIntent(std::uint16_t shooterClientId,
                          std::uint32_t shotInputTick,
                          const glm::vec3& origin,
                          const glm::vec3& direction,
                          std::uint16_t intendedTargetClientId,
                          const glm::vec3& intendedTargetPos,
-                         float intendedTargetDist);
+                         float intendedTargetDist,
+                         bool botRayHit,
+                         std::uint16_t botHitClientId,
+                         const glm::vec3& botHitPos,
+                         float botHitDist);
 
     /// @brief Flush + close the shot log if open.  Safe from dtor.
     void closeShotsLog() noexcept;

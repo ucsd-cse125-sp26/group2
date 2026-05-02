@@ -127,9 +127,17 @@ def percentile(values: list[float], q: float) -> float:
 def loadServerShots(path: Path) -> list[dict]:
     """
     Load server-side shot-resolution rows.  Returns a list of dicts so
-    the caller can group/filter however it likes.  Schema:
+    the caller can group/filter however it likes.
+
+    Pre-PR-22 schema:
       wallTimeNs, shooterClientId, shotInputTick,
       hitClientId, hitX, hitY, hitZ, hitRegion
+
+    PR-22 added columns (back-compat: `.get(key, default)` when reading,
+    so older logs from before PR-22 still parse):
+      originX/Y/Z, dirX/Y/Z,
+      shooterRttMs, lagCompTicks,
+      hitTargetRewoundX/Y/Z, hitTargetCurrentX/Y/Z
     """
     rows: list[dict] = []
     with path.open() as f:
@@ -141,6 +149,25 @@ def loadServerShots(path: Path) -> list[dict]:
             # fields than the header.
             if any(v is None for v in row.values()):
                 continue
+
+            def fget(key: str, default: float = 0.0) -> float:
+                v = row.get(key)
+                if v is None or v == "":
+                    return default
+                try:
+                    return float(v)
+                except ValueError:
+                    return default
+
+            def iget(key: str, default: int = 0) -> int:
+                v = row.get(key)
+                if v is None or v == "":
+                    return default
+                try:
+                    return int(v)
+                except ValueError:
+                    return default
+
             try:
                 rows.append(
                     {
@@ -152,6 +179,21 @@ def loadServerShots(path: Path) -> list[dict]:
                         "hitY": float(row["hitY"]),
                         "hitZ": float(row["hitZ"]),
                         "hitRegion": int(row["hitRegion"]),
+                        # PR-22: optional fields, default 0 when absent.
+                        "originX": fget("originX"),
+                        "originY": fget("originY"),
+                        "originZ": fget("originZ"),
+                        "dirX": fget("dirX"),
+                        "dirY": fget("dirY"),
+                        "dirZ": fget("dirZ"),
+                        "shooterRttMs": iget("shooterRttMs"),
+                        "lagCompTicks": iget("lagCompTicks"),
+                        "hitTargetRewoundX": fget("hitTargetRewoundX"),
+                        "hitTargetRewoundY": fget("hitTargetRewoundY"),
+                        "hitTargetRewoundZ": fget("hitTargetRewoundZ"),
+                        "hitTargetCurrentX": fget("hitTargetCurrentX"),
+                        "hitTargetCurrentY": fget("hitTargetCurrentY"),
+                        "hitTargetCurrentZ": fget("hitTargetCurrentZ"),
                     }
                 )
             except ValueError:
@@ -207,9 +249,13 @@ def loadBotShots(runDir: Path) -> list[dict]:
     files in the run directory.  Each row is a single trigger pull
     on the bot side with origin/dir + intended target.
 
-    Schema: wallTimeNs, shooterClientId, shotInputTick,
-            originX, originY, originZ, dirX, dirY, dirZ,
-            intendedTargetClientId, intendedTargetX, Y, Z, intendedTargetDist.
+    Pre-PR-22 schema:
+      wallTimeNs, shooterClientId, shotInputTick,
+      originX/Y/Z, dirX/Y/Z,
+      intendedTargetClientId, intendedTargetX/Y/Z, intendedTargetDist
+
+    PR-22 added columns (back-compat with `.get(key, default)`):
+      botRayHit, botHitClientId, botHitX/Y/Z, botHitDist
     """
     rows: list[dict] = []
     for f in sorted(runDir.glob("bot_shots_*.csv")):
@@ -218,6 +264,25 @@ def loadBotShots(runDir: Path) -> list[dict]:
             for row in reader:
                 if any(v is None for v in row.values()):
                     continue
+
+                def fget(key: str, default: float = 0.0) -> float:
+                    v = row.get(key)
+                    if v is None or v == "":
+                        return default
+                    try:
+                        return float(v)
+                    except ValueError:
+                        return default
+
+                def iget(key: str, default: int = 0) -> int:
+                    v = row.get(key)
+                    if v is None or v == "":
+                        return default
+                    try:
+                        return int(v)
+                    except ValueError:
+                        return default
+
                 try:
                     rows.append({
                         "wallTimeNs": int(row["wallTimeNs"]),
@@ -234,6 +299,14 @@ def loadBotShots(runDir: Path) -> list[dict]:
                         "intendedTargetY": float(row["intendedTargetY"]),
                         "intendedTargetZ": float(row["intendedTargetZ"]),
                         "intendedTargetDist": float(row["intendedTargetDist"]),
+                        # PR-22: optional bot-side AABB raycast.  When
+                        # absent (older runs) defaults to "no hit".
+                        "botRayHit": iget("botRayHit"),
+                        "botHitClientId": iget("botHitClientId", 0xFFFF),
+                        "botHitX": fget("botHitX"),
+                        "botHitY": fget("botHitY"),
+                        "botHitZ": fget("botHitZ"),
+                        "botHitDist": fget("botHitDist"),
                     })
                 except ValueError:
                     continue
@@ -250,6 +323,10 @@ def reportHitReg(botShots: list[dict], serverShots: list[dict]) -> None:
       - intended-vs-actual target match rate
       - hit-region distribution
       - hit-point distance distribution (where intended target hit vs server's resolved point)
+      - PR-22: client-vs-server agreement matrix (both hit / only client / only server / neither)
+      - PR-22: client-vs-server hit-target match rate (when both hit, do they agree on WHO?)
+      - PR-22: lag-comp drift distribution (rewound vs current target position on the server)
+      - PR-22: ray-origin desync distribution (server's view of origin minus bot's view)
     """
     if not botShots:
         print("PR-21 hitreg: no bot shots logged (set GROUP2_BOT_SHOTS_CSV_PREFIX + GROUP2_BOT_AI=1)")
@@ -269,11 +346,76 @@ def reportHitReg(botShots: list[dict], serverShots: list[dict]) -> None:
     regionCounts: dict[int, int] = defaultdict(int)
     hitPointDistances: list[float] = []  # server-hit-point vs bot-intended-target
 
+    # PR-22: client-vs-server agreement counters.
+    bothHit = 0
+    bothHitSameTarget = 0
+    bothHitDifferentTarget = 0
+    onlyClientHit = 0
+    onlyServerHit = 0
+    neitherHit = 0
+
+    # PR-22: lag-comp drift (in world units, XZ-projected so the
+    # rewound-capsule-mid vs foot-position vertical offset doesn't
+    # bias the magnitude).
+    lagCompDriftXZ: list[float] = []
+
+    # PR-22: ray-origin desync — server's view of shooter origin minus
+    # bot's view.  Reflects mid-air drift between client prediction
+    # and server authority.  Should be <1 unit with prediction
+    # reconciliation working.
+    rayOriginDesync: list[float] = []
+
+    # PR-22: lag-comp ticks distribution — bucket the matched shots by
+    # how far back the server rewound, so the user can see the
+    # rewind-magnitude split by RTT.
+    rttBuckets: dict[int, int] = defaultdict(int)
+    rttToHits: dict[int, int] = defaultdict(int)
+
     for b in botShots:
         sv = serverByKey.get((b["shooterClientId"], b["shotInputTick"]))
         if sv is None:
             continue
         matched += 1
+
+        # PR-22: client-vs-server agreement matrix.
+        botHit = bool(b.get("botRayHit", 0))
+        srvHit = sv["hitClientId"] != missCid
+        if botHit and srvHit:
+            bothHit += 1
+            if b.get("botHitClientId", missCid) == sv["hitClientId"]:
+                bothHitSameTarget += 1
+            else:
+                bothHitDifferentTarget += 1
+        elif botHit and not srvHit:
+            onlyClientHit += 1
+        elif srvHit and not botHit:
+            onlyServerHit += 1
+        else:
+            neitherHit += 1
+
+        # PR-22: lag-comp drift — distance between rewound and current
+        # target position on the server.  Only meaningful when the
+        # server had a hit (otherwise the columns are zeroed).
+        if srvHit and (sv["hitTargetCurrentX"] != 0.0 or sv["hitTargetCurrentZ"] != 0.0):
+            dx = sv["hitTargetCurrentX"] - sv["hitTargetRewoundX"]
+            dz = sv["hitTargetCurrentZ"] - sv["hitTargetRewoundZ"]
+            lagCompDriftXZ.append(math.sqrt(dx * dx + dz * dz))
+
+        # PR-22: ray-origin desync — Euclidean distance, server's
+        # origin vs bot's origin.
+        if sv.get("originX", 0.0) != 0.0 or sv.get("originZ", 0.0) != 0.0:
+            ddx = sv["originX"] - b["originX"]
+            ddy = sv["originY"] - b["originY"]
+            ddz = sv["originZ"] - b["originZ"]
+            rayOriginDesync.append(math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz))
+
+        # PR-22: RTT bucketing.  Round to nearest 25 ms for readable
+        # buckets at the typical 0/30/100/200 sweep points.
+        rttBucket = ((sv.get("shooterRttMs", 0) + 12) // 25) * 25
+        rttBuckets[rttBucket] += 1
+        if srvHit:
+            rttToHits[rttBucket] += 1
+
         if sv["hitClientId"] == missCid:
             misses += 1
             continue
@@ -282,10 +424,15 @@ def reportHitReg(botShots: list[dict], serverShots: list[dict]) -> None:
         else:
             hitsOnOther += 1
         regionCounts[sv["hitRegion"]] += 1
-        intendedPos = (b["intendedTargetX"], b["intendedTargetY"] + 50.0, b["intendedTargetZ"])
-        hitPos = (sv["hitX"], sv["hitY"], sv["hitZ"])
-        d = math.sqrt(sum((a - b2) ** 2 for a, b2 in zip(intendedPos, hitPos)))
-        hitPointDistances.append(d)
+        # PR-22: XZ-only distance — the bot logs the target's foot
+        # position in `intendedTargetX/Y/Z`, while the server logs the
+        # actual hit point on the body capsule.  Vertical bias varies
+        # with target stance / aim offset / hit region, so we project
+        # to the horizontal plane to get a clean "how far off was the
+        # ray" number.
+        dx = b["intendedTargetX"] - sv["hitX"]
+        dz = b["intendedTargetZ"] - sv["hitZ"]
+        hitPointDistances.append(math.sqrt(dx * dx + dz * dz))
 
     print(f"PR-21 hit-reg analysis:")
     print(f"  shots fired by bots:     {fired}")
@@ -309,6 +456,47 @@ def reportHitReg(botShots: list[dict], serverShots: list[dict]) -> None:
         print(f"    p50:   {percentile(hitPointDistances, 50):.2f}")
         print(f"    p99:   {percentile(hitPointDistances, 99):.2f}")
         print(f"    max:   {hitPointDistances[-1]:.2f}")
+
+    # PR-22: client-vs-server hit-decision agreement.  This is the
+    # headline diagnostic for "is the lag-comp delivering the same
+    # result both sides see?".  Real-game expectation under healthy
+    # netcode: bothHit large + bothHitSameTarget ≈ bothHit, with
+    # onlyServerHit small and onlyClientHit ≈ 0 (server lag-comp
+    # should NOT find hits the client already missed at the AABB
+    # level — that would mean a target moved into a position only
+    # the rewound capsule occupied).
+    print(f"  client-vs-server agreement matrix:")
+    print(f"    both hit:               {bothHit} ({100.0 * bothHit / matched:.1f} %)")
+    print(f"      same target:          {bothHitSameTarget} "
+          f"({(100.0 * bothHitSameTarget / bothHit) if bothHit else 0.0:.1f} % of bothHit)")
+    print(f"      different target:     {bothHitDifferentTarget}")
+    print(f"    only client hit (AABB): {onlyClientHit} ({100.0 * onlyClientHit / matched:.1f} %)")
+    print(f"    only server hit:        {onlyServerHit} ({100.0 * onlyServerHit / matched:.1f} %)")
+    print(f"    neither hit:            {neitherHit} ({100.0 * neitherHit / matched:.1f} %)")
+
+    if lagCompDriftXZ:
+        lagCompDriftXZ.sort()
+        print(f"  lag-comp drift (rewound vs current target XZ, units):")
+        print(f"    mean:  {sum(lagCompDriftXZ) / len(lagCompDriftXZ):.2f}")
+        print(f"    p50:   {percentile(lagCompDriftXZ, 50):.2f}")
+        print(f"    p99:   {percentile(lagCompDriftXZ, 99):.2f}")
+        print(f"    max:   {lagCompDriftXZ[-1]:.2f}")
+
+    if rayOriginDesync:
+        rayOriginDesync.sort()
+        print(f"  ray-origin desync (server view − bot view, units):")
+        print(f"    mean:  {sum(rayOriginDesync) / len(rayOriginDesync):.2f}")
+        print(f"    p50:   {percentile(rayOriginDesync, 50):.2f}")
+        print(f"    p99:   {percentile(rayOriginDesync, 99):.2f}")
+        print(f"    max:   {rayOriginDesync[-1]:.2f}")
+
+    if rttBuckets:
+        print(f"  shots by shooter RTT bucket (server-side):")
+        for rtt, count in sorted(rttBuckets.items()):
+            hits = rttToHits.get(rtt, 0)
+            hr = 100.0 * hits / count if count else 0.0
+            print(f"    {rtt:>4d} ms: {count:>5d} shots, {hits:>5d} hits ({hr:.1f} % hit rate)")
+
     print()
 
 

@@ -4,6 +4,7 @@
 #include "Bot.hpp"
 
 #include "ecs/components/ClientId.hpp"
+#include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Position.hpp"
 
@@ -109,11 +110,15 @@ void Bot::openShotsLog()
         SDL_Log("[bot %d] PR-21: failed to open shots log at %s", botId_, path.c_str());
         return;
     }
+    // PR-22: schema grew to include the bot's local AABB raycast
+    // result.  Old runs without these columns are still loadable by
+    // the analyzer (DictReader tolerates missing keys).
     std::fprintf(shotsCsv_,
                  "wallTimeNs,shooterClientId,shotInputTick,"
                  "originX,originY,originZ,"
                  "dirX,dirY,dirZ,"
-                 "intendedTargetClientId,intendedTargetX,intendedTargetY,intendedTargetZ,intendedTargetDist\n");
+                 "intendedTargetClientId,intendedTargetX,intendedTargetY,intendedTargetZ,intendedTargetDist,"
+                 "botRayHit,botHitClientId,botHitX,botHitY,botHitZ,botHitDist\n");
     std::fflush(shotsCsv_);
     SDL_Log("[bot %d] PR-21: writing shot-intent log to %s", botId_, path.c_str());
 }
@@ -124,13 +129,18 @@ void Bot::writeShotIntent(std::uint16_t shooterClientId,
                           const glm::vec3& direction,
                           std::uint16_t intendedTargetClientId,
                           const glm::vec3& intendedTargetPos,
-                          float intendedTargetDist)
+                          float intendedTargetDist,
+                          bool botRayHit,
+                          std::uint16_t botHitClientId,
+                          const glm::vec3& botHitPos,
+                          float botHitDist)
 {
     if (shotsCsv_ == nullptr)
         return;
     const Uint64 nowNs = SDL_GetTicksNS();
     std::fprintf(shotsCsv_,
-                 "%llu,%u,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%.4f,%.4f,%.4f,%.4f\n",
+                 "%llu,%u,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%.4f,%.4f,%.4f,%.4f,"
+                 "%d,%u,%.4f,%.4f,%.4f,%.4f\n",
                  static_cast<unsigned long long>(nowNs),
                  static_cast<unsigned>(shooterClientId),
                  static_cast<unsigned>(shotInputTick),
@@ -144,7 +154,13 @@ void Bot::writeShotIntent(std::uint16_t shooterClientId,
                  static_cast<double>(intendedTargetPos.x),
                  static_cast<double>(intendedTargetPos.y),
                  static_cast<double>(intendedTargetPos.z),
-                 static_cast<double>(intendedTargetDist));
+                 static_cast<double>(intendedTargetDist),
+                 botRayHit ? 1 : 0,
+                 static_cast<unsigned>(botHitClientId),
+                 static_cast<double>(botHitPos.x),
+                 static_cast<double>(botHitPos.y),
+                 static_cast<double>(botHitPos.z),
+                 static_cast<double>(botHitDist));
     std::fflush(shotsCsv_);
 }
 
@@ -426,11 +442,14 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
             }();
             if (k_aimEnabled) {
                 if (auto localEnt = client_.getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
-                    if (const auto* myPos = registry_.try_get<Position>(*localEnt)) {
+                    const auto* myPos = registry_.try_get<Position>(*localEnt);
+                    const auto* myShape = registry_.try_get<CollisionShape>(*localEnt);
+                    if (myPos != nullptr && myShape != nullptr) {
                         glm::vec3 closestPos{0.0f};
+                        float closestHalfH = 36.0f;
                         float closestDist = 5000.0f;
                         bool foundTarget = false;
-                        auto rview = registry_.view<Position, ClientId>();
+                        auto rview = registry_.view<Position, CollisionShape, ClientId>();
                         for (const auto e : rview) {
                             if (e == *localEnt)
                                 continue;
@@ -439,16 +458,21 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
                             if (d < closestDist) {
                                 closestDist = d;
                                 closestPos = tpos.value;
+                                closestHalfH = rview.get<CollisionShape>(e).halfExtents.y;
                                 foundTarget = true;
                             }
                         }
                         if (foundTarget) {
-                            // Aim at chest-ish height (offset up from
-                            // entity origin which is at the foot in
-                            // this codebase's convention).
-                            const glm::vec3 aimPoint = closestPos + glm::vec3{0.0f, 50.0f, 0.0f};
-                            const glm::vec3 eye =
-                                myPos->value + glm::vec3{0.0f, 75.0f, 0.0f}; // match client eye-offset
+                            // PR-22: aim at the target's chest = foot
+                            // position + halfExtents.y (one half-height
+                            // above feet ≈ middle of the capsule).
+                            // Earlier this was a hardcoded `+50` which
+                            // assumed halfExtents.y ≈ 67 — way off the
+                            // actual default 36, putting the aim point
+                            // ~14 units above the head.  Fixed offset
+                            // → near-perfect aim at RTT=0.
+                            const glm::vec3 aimPoint = closestPos + glm::vec3{0.0f, closestHalfH, 0.0f};
+                            const glm::vec3 eye = myPos->value + glm::vec3{0.0f, myShape->halfExtents.y * 0.75f, 0.0f};
                             const glm::vec3 to = aimPoint - eye;
                             const float horiz = std::sqrt(to.x * to.x + to.z * to.z);
                             input_.yaw = std::atan2(to.x, to.z);
@@ -473,8 +497,17 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
                 if (auto localEnt = client_.getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
                     const auto* myCid = registry_.try_get<ClientId>(*localEnt);
                     const auto* myPos = registry_.try_get<Position>(*localEnt);
-                    if (myCid != nullptr && myPos != nullptr) {
-                        const glm::vec3 origin = myPos->value + glm::vec3{0.0f, 75.0f, 0.0f};
+                    const auto* myShape = registry_.try_get<CollisionShape>(*localEnt);
+                    if (myCid != nullptr && myPos != nullptr && myShape != nullptr) {
+                        // PR-22: match `WeaponSystem::handleFire`'s server-
+                        // side eye computation exactly — `pos.value +
+                        // {0, halfExtents.y * 0.75, 0}`.  Earlier this was
+                        // a hardcoded `+75`, which produced a ~48-unit
+                        // ray-origin desync against the server (the
+                        // default CollisionShape.halfExtents.y is 36, not
+                        // 100, so the eye sits at +27 not +75).  Fixing
+                        // this brought the desync below 1 unit at RTT=0.
+                        const glm::vec3 origin = myPos->value + glm::vec3{0.0f, myShape->halfExtents.y * 0.75f, 0.0f};
                         const float cp = std::cos(input_.pitch);
                         const glm::vec3 dir{
                             std::sin(input_.yaw) * cp, -std::sin(input_.pitch), std::cos(input_.yaw) * cp};
@@ -487,18 +520,74 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
                         glm::vec3 intendedPos{0.0f};
                         float intendedDist = 0.0f;
                         float closestDist = std::numeric_limits<float>::max();
-                        auto rview = registry_.view<Position, ClientId>();
+
+                        // PR-22: bot's local AABB raycast against
+                        // visible players.  Bots have no skeleton-
+                        // capsule data (`HitboxInstance` is not
+                        // replicated), so this is broad-phase only —
+                        // any hit at the AABB level is what a real
+                        // client would also see if it skipped the
+                        // capsule narrow phase.  Compared against the
+                        // server's authoritative capsule raycast in
+                        // the netsync analyzer to surface client-vs-
+                        // server-rewind hit-reg mismatches.
+                        constexpr float botRayMaxDist = 5000.0f;
+                        bool botRayHit = false;
+                        std::uint16_t botHitCid = 0xFFFFu;
+                        glm::vec3 botHitPos{0.0f};
+                        float botHitDist = 0.0f;
+                        float bestBotDist = botRayMaxDist;
+
+                        auto rview = registry_.view<Position, CollisionShape, ClientId>();
                         for (const auto e : rview) {
                             if (e == *localEnt)
                                 continue;
                             const auto& tpos = rview.get<Position>(e);
-                            const float d = glm::length(tpos.value - myPos->value);
-                            if (d < closestDist) {
-                                closestDist = d;
+
+                            // Track closest entity for "intended target".
+                            const float dCenter = glm::length(tpos.value - myPos->value);
+                            if (dCenter < closestDist) {
+                                closestDist = dCenter;
                                 intendedCid = static_cast<std::uint16_t>(rview.get<ClientId>(e).value);
                                 intendedPos = tpos.value;
-                                intendedDist = d;
+                                intendedDist = dCenter;
                             }
+
+                            // Slab-method ray vs entity AABB.
+                            const auto& shape = rview.get<CollisionShape>(e);
+                            const glm::vec3 boxMin = tpos.value - shape.halfExtents;
+                            const glm::vec3 boxMax = tpos.value + shape.halfExtents;
+                            float tMin = 0.0f;
+                            float tMax = bestBotDist;
+                            bool slabOk = true;
+                            for (int axis = 0; axis < 3; ++axis) {
+                                if (std::abs(dir[axis]) < 1e-6f) {
+                                    if (origin[axis] < boxMin[axis] || origin[axis] > boxMax[axis]) {
+                                        slabOk = false;
+                                        break;
+                                    }
+                                    continue;
+                                }
+                                const float invDir = 1.0f / dir[axis];
+                                float t1 = (boxMin[axis] - origin[axis]) * invDir;
+                                float t2 = (boxMax[axis] - origin[axis]) * invDir;
+                                if (t1 > t2)
+                                    std::swap(t1, t2);
+                                if (t1 > tMin)
+                                    tMin = t1;
+                                tMax = std::min(tMax, t2);
+                                if (tMin > tMax) {
+                                    slabOk = false;
+                                    break;
+                                }
+                            }
+                            if (!slabOk || tMin < 0.0f || tMin >= bestBotDist)
+                                continue;
+                            bestBotDist = tMin;
+                            botRayHit = true;
+                            botHitCid = static_cast<std::uint16_t>(rview.get<ClientId>(e).value);
+                            botHitDist = tMin;
+                            botHitPos = origin + dir * tMin;
                         }
 
                         writeShotIntent(static_cast<std::uint16_t>(myCid->value),
@@ -507,7 +596,11 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
                                         dir,
                                         intendedCid,
                                         intendedPos,
-                                        intendedDist);
+                                        intendedDist,
+                                        botRayHit,
+                                        botHitCid,
+                                        botHitPos,
+                                        botHitDist);
                     }
                 }
             }
