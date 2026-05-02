@@ -303,6 +303,52 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     return send(buf, totalLen);
 }
 
+bool Client::sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetClientId, const AnimSnapshot& targetAnim)
+{
+    // PR-27 wire format:
+    //   [PacketType::SHOT_INTENT : u8]
+    //   [shotInputTick           : u32]
+    //   [targetClientId          : u16]
+    //   [AnimSnapshot 5×4-byte slots = 20B]
+    // Total payload = 27 bytes.  Sent on UDP unreliable channel
+    // alongside INPUT (PR-27 only fires on rising edge of shooting,
+    // ≤ ~10 Hz worst case → ~270 B/s/client).
+    constexpr std::size_t animBytes = anim_snapshot::k_wireSize;
+    constexpr std::size_t payloadLen = 1 + sizeof(uint32_t) + sizeof(uint16_t) + animBytes;
+    static_assert(payloadLen == 27, "SHOT_INTENT wire size must equal 27 bytes");
+
+    uint8_t buf[payloadLen];
+    buf[0] = static_cast<uint8_t>(PacketType::SHOT_INTENT);
+    std::memcpy(buf + 1, &shotInputTick, sizeof(uint32_t));
+    std::memcpy(buf + 1 + sizeof(uint32_t), &targetClientId, sizeof(uint16_t));
+    anim_snapshot::packSnapshot(targetAnim, buf + 1 + sizeof(uint32_t) + sizeof(uint16_t));
+
+    // SHOT_INTENT prefers UDP for the same reasons as INPUT — single-
+    // shot packets are loss-tolerant: a missed SHOT_INTENT just means
+    // the server falls back to its own historical anim state for that
+    // shot, which is the pre-PR-27 behaviour.  No retransmit, no
+    // bandwidth cost on TCP.
+    if (transportConfig_.inputsOverUdp && udpEndpoint_.isOpen() && connectionId_ != 0 && serverUdpAddr_.addr) {
+        net::PacketHeader hdr{};
+        hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+        hdr.connectionId = connectionId_;
+        hdr.sequence = udpInputSequence_++; // share INPUT's sequence space — both unreliable
+        hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
+
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        const int totalMs = simulatedLatencyMs_.load(std::memory_order_relaxed);
+        if (sendUdpDelayed(hdr, buf, static_cast<int>(payloadLen))) {
+            if (totalMs == 0) {
+                stats.bytesSentTotal += sizeof(net::PacketHeader) + payloadLen;
+                bytesSentWindow += sizeof(net::PacketHeader) + payloadLen;
+            }
+            return true;
+        }
+    }
+
+    return send(buf, payloadLen);
+}
+
 bool Client::acceptReliableSequence(uint16_t seq)
 {
     // First sequence ever — accept and seed the window.

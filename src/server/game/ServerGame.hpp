@@ -6,6 +6,7 @@
 #include "client/animation/AnimationLibrary.hpp"
 #include "client/animation/CharacterAnimator.hpp"
 #include "client/animation/CharacterRig.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/physics/MapLoader.hpp"
@@ -13,6 +14,7 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
+#include "systems/Event.hpp" // PR-27: ShotIntentPayload
 #include "systems/MatchController.hpp"
 
 #include <SDL3/SDL.h>
@@ -196,4 +198,38 @@ private:
 
     /// @brief Flush + close the CSV if open.  Safe to call from dtor.
     void closeGroundTruthLog() noexcept;
+
+    // ── PR-27: pending client SHOT_INTENTs ───────────────────────────────
+    //
+    // The network thread enqueues `EventType::ShotIntent` events into
+    // `eventQueue`; the game thread's `processEvent` drains them and
+    // stashes the payload here, keyed by `(shooterClientId,
+    // shotInputTick)`.  When the weapon-system path resolves a shot
+    // for the same shooter at the same input tick, it looks up the
+    // intent here, computes the anim-state delta vs the historical
+    // sample, and emits the result to `server_shots.csv`.
+    //
+    // Bounded at `k_pendingShotIntentsMax = 256` entries (~2 s of
+    // shots at the 128 Hz fire-rate ceiling).  The map is single-
+    // threaded read/write on the game thread.
+    struct ShotIntentKey
+    {
+        std::uint16_t shooterClientId = 0;
+        std::uint32_t shotInputTick = 0;
+        bool operator==(const ShotIntentKey& o) const noexcept
+        {
+            return shooterClientId == o.shooterClientId && shotInputTick == o.shotInputTick;
+        }
+    };
+    struct ShotIntentKeyHash
+    {
+        std::size_t operator()(const ShotIntentKey& k) const noexcept
+        {
+            // Mix shooter into the high bits so two shots from the
+            // same shooter at adjacent ticks aren't bucket-adjacent.
+            return (static_cast<std::size_t>(k.shooterClientId) << 32) ^ k.shotInputTick;
+        }
+    };
+    static constexpr std::size_t k_pendingShotIntentsMax = 256;
+    std::unordered_map<ShotIntentKey, ShotIntentPayload, ShotIntentKeyHash> pendingShotIntents_;
 };

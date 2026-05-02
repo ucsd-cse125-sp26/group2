@@ -44,9 +44,9 @@ void openIfRequested()
         SDL_Log("[server] PR-18b: failed to open shots log at %s", path);
         return;
     }
-    // PR-22: schema grew from 8 → 23 columns.  Old runs without the
-    // PR-22 columns are still loadable by the analyzer because we use
-    // a DictReader and tolerate missing keys.
+    // PR-22 / PR-27: schema grows incrementally.  Old runs without
+    // newer columns are still loadable by the analyzer because it
+    // uses a DictReader and tolerates missing keys.
     std::fprintf(file,
                  "wallTimeNs,shooterClientId,shotInputTick,"
                  "hitClientId,hitX,hitY,hitZ,hitRegion,"
@@ -54,7 +54,8 @@ void openIfRequested()
                  "dirX,dirY,dirZ,"
                  "shooterRttMs,lagCompTicks,"
                  "hitTargetRewoundX,hitTargetRewoundY,hitTargetRewoundZ,"
-                 "hitTargetCurrentX,hitTargetCurrentY,hitTargetCurrentZ\n");
+                 "hitTargetCurrentX,hitTargetCurrentY,hitTargetCurrentZ,"
+                 "clientIntentTargetClientId,animStateDelta,clientIntentReceived\n");
     std::fflush(file);
     SDL_Log("[server] PR-18b: writing shot-resolution log to %s", path);
 }
@@ -70,7 +71,8 @@ void recordShotResolution(const ShotResolution& shot)
                  "%llu,%u,%u,%u,%.4f,%.4f,%.4f,%d,"
                  "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
                  "%u,%u,"
-                 "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
+                 "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
+                 "%u,%.6f,%d\n",
                  static_cast<unsigned long long>(nowNs),
                  static_cast<unsigned>(shot.shooterClientId),
                  static_cast<unsigned>(shot.shotInputTick),
@@ -92,7 +94,10 @@ void recordShotResolution(const ShotResolution& shot)
                  static_cast<double>(shot.hitTargetRewoundZ),
                  static_cast<double>(shot.hitTargetCurrentX),
                  static_cast<double>(shot.hitTargetCurrentY),
-                 static_cast<double>(shot.hitTargetCurrentZ));
+                 static_cast<double>(shot.hitTargetCurrentZ),
+                 static_cast<unsigned>(shot.clientIntentTargetClientId),
+                 static_cast<double>(shot.animStateDelta),
+                 shot.clientIntentReceived);
     // No flush — we'd be calling it ~150-300 times/sec at high
     // fire-rate fleet sizes.  The game thread's tick-end profiler
     // flush gives a natural every-1s snapshot anyway, and the file

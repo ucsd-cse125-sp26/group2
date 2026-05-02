@@ -39,4 +39,23 @@ enum class PacketType : uint8_t
     /// (blue) and visually inspect lag-comp alignment.  Wire format
     /// defined in `network/ShotDebugReport.hpp`.
     SHOT_DEBUG_REPORT,
+
+    /// @brief Client -> Server: animation-state assertion for a single shot.
+    ///
+    /// PR-27 (netsync): on the rising edge of `input.shooting`, the
+    /// client snapshots the target's animation state (5 ClipSampler
+    /// slots) and sends it alongside the input.  The server, when it
+    /// processes the corresponding INPUT, looks up the historical
+    /// `AnimSnapshot` for the target at the rewound tick and computes
+    /// `anim_snapshot::delta(client, server)`.  When that delta is
+    /// below an empirically-tuned epsilon, the server may accept the
+    /// client's view of the pose (PR-27b future work — accept logic).
+    /// Currently the delta is logged to `server_shots.csv` for
+    /// telemetry only (PR-27a — instrument first, tune epsilon from
+    /// data).  Wire format:
+    ///   `[type:u8] [shotInputTick:u32] [targetClientId:u16]
+    ///    [AnimSnapshot:20B = 5 * (clipIdRaw:u8, timeRatioQ:u16, weightQ:u8)]`
+    /// → 27 bytes per shot.  Sent on UDP alongside INPUT (rising-edge
+    /// only; ~10 Hz worst case → ~270 B/s/client).
+    SHOT_INTENT,
 };

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchStatus.hpp"
@@ -84,6 +85,15 @@ public:
     /// or reorder. Caller is responsible for stamping `snap.tick` with the
     /// current `clientPredictTick` before calling.
     bool sendInputSnapshot(const InputSnapshot& snap);
+
+    /// @brief PR-27 (netsync): send a SHOT_INTENT packet describing the
+    /// client's view of the target's animation state at fire time.
+    /// Server pairs this with the corresponding INPUT (by
+    /// `(shooterClientId, shotInputTick)`) and computes the anim-state
+    /// delta against its own historical state at the rewound tick.
+    /// Sent once per rising-edge of `input.shooting`.  `targetClientId`
+    /// = `0xFFFF` when the client wasn't aiming at any specific target.
+    bool sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetClientId, const AnimSnapshot& targetAnim);
 
     /// @brief Send a PING packet to the server for RTT measurement.
     void sendPing();

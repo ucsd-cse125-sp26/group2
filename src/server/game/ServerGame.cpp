@@ -5,6 +5,7 @@
 
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
@@ -309,6 +310,25 @@ void ServerGame::eventHandler(Event event)
         input = event.movementIntent;
         break;
     }
+    case EventType::ShotIntent: {
+        // PR-27: stash the per-shot client assertion under
+        // `(shooterClientId, shotInputTick)` so the weapon-system path
+        // can pick it up when it processes that tick's INPUT.  The
+        // map is bounded — old keys age out (256 entries cap, ~2 s of
+        // shots at the 128 Hz fire-rate ceiling).
+        ShotIntentKey key{.shooterClientId = static_cast<std::uint16_t>(event.clientId.value),
+                          .shotInputTick = event.shotIntent.shotInputTick};
+        pendingShotIntents_[key] = event.shotIntent;
+        if (pendingShotIntents_.size() > k_pendingShotIntentsMax) {
+            // Evict the oldest entry — std::unordered_map iteration
+            // order isn't stable but we just need SOMETHING to drop.
+            // The intent isn't critical (server falls back to its own
+            // anim history); this keeps memory bounded under abnormal
+            // packet rates without requiring a separate LRU.
+            pendingShotIntents_.erase(pendingShotIntents_.begin());
+        }
+        break;
+    }
     default:
         break;
     }
@@ -380,6 +400,37 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // unicast to the shooter after the broadcast events block below.
     std::vector<net::shotdebug::ShotDebugCapture> shotDebugReports;
     {
+        // PR-27: stash pending SHOT_INTENTs onto each shooter as a
+        // transient `PendingShotIntent` component, keyed by the
+        // shooter's CURRENT input tick.  `WeaponSystem::handleFire`
+        // reads this when logging the shot to record the client-
+        // asserted target id + anim state delta in `server_shots.csv`.
+        // Anything left over after this loop runs is ageing out — the
+        // map is also bounded by `k_pendingShotIntentsMax` (256
+        // entries) on the enqueue side.
+        for (const auto& [clientId, entity] : clientEntities) {
+            if (!registry.valid(entity))
+                continue;
+            const auto* input = registry.try_get<InputSnapshot>(entity);
+            if (input == nullptr) {
+                registry.remove<PendingShotIntent>(entity);
+                continue;
+            }
+            ShotIntentKey key{.shooterClientId = static_cast<std::uint16_t>(clientId.value),
+                              .shotInputTick = input->tick};
+            auto it = pendingShotIntents_.find(key);
+            if (it != pendingShotIntents_.end()) {
+                registry.emplace_or_replace<PendingShotIntent>(
+                    entity,
+                    PendingShotIntent{.received = true,
+                                      .targetClientId = it->second.targetClientId,
+                                      .targetAnim = it->second.targetAnim});
+                pendingShotIntents_.erase(it);
+            } else {
+                // No matching intent — ensure no stale component lingers.
+                registry.remove<PendingShotIntent>(entity);
+            }
+        }
         GROUP2_PROF_SCOPE("weapon");
         systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, &shotDebugReports);
     }
@@ -837,6 +888,22 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
 
         // Slot exists (Phase 1a); just write the matrices.
         registry.get<JointMatrices>(entity).matrices = animator->jointModelMatrices();
+
+        // PR-27 (netsync): mirror the animator's sampler array into an
+        // `AnimSnapshot` ECS component.  HitboxHistorySystem reads it
+        // the same tick to seed each ring slot's `anim` field, so the
+        // shot-resolution path can compare client-claimed vs server-
+        // historical animation state.  Cheap copy: 5 slots × 9 bytes.
+        auto& snap = registry.get_or_emplace<AnimSnapshot>(entity);
+        const auto& samplers = animator->samplers();
+        for (std::size_t i = 0; i < AnimSnapshot::k_numSlots && i < samplers.size(); ++i) {
+            const auto& src = samplers[i];
+            const bool active = src.active && src.weight > 0.0f;
+            auto& dst = snap.slots[i];
+            dst.clipIdRaw = active ? static_cast<std::uint8_t>(src.id) : 0xFFu;
+            dst.timeRatio = active ? src.timeRatio : 0.0f;
+            dst.weight = active ? src.weight : 0.0f;
+        }
     });
 
     // Step 2: Transform bone poses into world-space hitbox capsules.

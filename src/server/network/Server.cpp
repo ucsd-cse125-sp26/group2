@@ -3,6 +3,7 @@
 
 #include "Server.hpp"
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "network/MatchStatus.hpp"
@@ -389,6 +390,25 @@ void Server::handleUdpUnreliable(uint32_t connId,
             eventQueue.enqueue(event);
             conn.lastAppliedInputTick = snap.tick;
         }
+        break;
+    }
+    case PacketType::SHOT_INTENT: {
+        // PR-27 wire format (mirrors `Client::sendShotIntent`):
+        //   [shotInputTick u32] [targetClientId u16] [AnimSnapshot 20B]
+        // → 26-byte payload after the type byte.  Loss-tolerant: if a
+        // SHOT_INTENT is dropped, the server falls back to its own
+        // historical anim state for that shot (pre-PR-27 behaviour).
+        constexpr std::size_t k_shotIntentPayloadLen = sizeof(uint32_t) + sizeof(uint16_t) + anim_snapshot::k_wireSize;
+        static_assert(k_shotIntentPayloadLen == 26, "SHOT_INTENT payload size mismatch");
+        if (subLen != k_shotIntentPayloadLen)
+            return;
+        Event event{};
+        event.type = EventType::ShotIntent;
+        event.clientId = conn.clientId;
+        std::memcpy(&event.shotIntent.shotInputTick, sub, sizeof(uint32_t));
+        std::memcpy(&event.shotIntent.targetClientId, sub + sizeof(uint32_t), sizeof(uint16_t));
+        event.shotIntent.targetAnim = anim_snapshot::unpackSnapshot(sub + sizeof(uint32_t) + sizeof(uint16_t));
+        eventQueue.enqueue(event);
         break;
     }
     case PacketType::PING: {

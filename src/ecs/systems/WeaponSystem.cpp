@@ -4,12 +4,15 @@
 #include "ecs/systems/WeaponSystem.hpp"
 
 #include "PlayerStatusSystem.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
+#include "ecs/components/HitboxHistory.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
@@ -219,6 +222,57 @@ inline void logShot(Registry& registry,
             row.hitTargetCurrentX = tpos->value.x;
             row.hitTargetCurrentY = tpos->value.y;
             row.hitTargetCurrentZ = tpos->value.z;
+        }
+    }
+
+    // PR-27: client-asserted animation-state telemetry.  ServerGame
+    // stashes paired SHOT_INTENTs on the shooter as `PendingShotIntent`
+    // before runWeapon; here we read it, find the matching anim
+    // history sample on the target at the rewound tick, and compute
+    // the delta.  Numbers go to `server_shots.csv` for telemetry only
+    // — PR-27b will use the delta to gate accepting the client's view.
+    if (const auto* intent = registry.try_get<PendingShotIntent>(shooter); intent != nullptr && intent->received) {
+        row.clientIntentReceived = 1;
+        row.clientIntentTargetClientId = intent->targetClientId;
+
+        // Compute delta only when both ids match — comparing client's
+        // anim of target X to server's anim of target Y is meaningless.
+        if (row.hitClientId == intent->targetClientId &&
+            intent->targetClientId != group2::perf::shotlog::k_missClientId)
+        {
+            // Look up server's HISTORICAL anim state for this target
+            // at the rewound tick.  `LagCompTarget.targetServerTick`
+            // tells us which historical sample to pull from the ring;
+            // 0 means "no rewind", in which case the LIVE anim state
+            // on the target is the right comparison.
+            AnimSnapshot serverAnim{};
+            bool serverAnimResolved = false;
+            if (const auto* hist = registry.try_get<HitboxHistory>(hit.entity)) {
+                std::uint32_t targetTick = 0;
+                if (const auto* lc = registry.try_get<LagCompTarget>(shooter))
+                    targetTick = lc->targetServerTick;
+                if (targetTick != 0) {
+                    const HitboxHistorySample* best = nullptr;
+                    for (std::size_t i = 0; i < hist->count; ++i) {
+                        const auto& s = hist->ring[i];
+                        if (s.tick == 0 || s.tick > targetTick)
+                            continue;
+                        if (best == nullptr || s.tick > best->tick)
+                            best = &s;
+                    }
+                    if (best != nullptr) {
+                        serverAnim = best->anim;
+                        serverAnimResolved = true;
+                    }
+                }
+            }
+            // Fallback to LIVE anim state when no historical sample
+            // exists (just-spawned target / no rewind requested).
+            if (!serverAnimResolved) {
+                if (const auto* live = registry.try_get<AnimSnapshot>(hit.entity))
+                    serverAnim = *live;
+            }
+            row.animStateDelta = anim_snapshot::delta(intent->targetAnim, serverAnim);
         }
     }
 

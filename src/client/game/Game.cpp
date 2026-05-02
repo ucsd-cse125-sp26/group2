@@ -1859,6 +1859,24 @@ SDL_AppResult Game::iterate()
             if (c.sampleThisFrame) {
                 auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
                 jm.matrices = c.ac->animator->jointModelMatrices();
+
+                // PR-27 (netsync): mirror the animator's sampler array
+                // into an `AnimSnapshot` ECS component, same pattern as
+                // the server.  The shot-debug fire-detection block (a
+                // few lines below) reads this off the target entity
+                // when sending `SHOT_INTENT`.  Server's history ring
+                // captures its OWN per-tick `AnimSnapshot`; the two
+                // get compared in the shot-resolution path.
+                auto& snap = registry.get_or_emplace<AnimSnapshot>(c.entity);
+                const auto& samplers = c.ac->animator->samplers();
+                for (std::size_t i = 0; i < AnimSnapshot::k_numSlots && i < samplers.size(); ++i) {
+                    const auto& src = samplers[i];
+                    const bool active = src.active && src.weight > 0.0f;
+                    auto& dst = snap.slots[i];
+                    dst.clipIdRaw = active ? static_cast<std::uint8_t>(src.id) : 0xFFu;
+                    dst.timeRatio = active ? src.timeRatio : 0.0f;
+                    dst.weight = active ? src.weight : 0.0f;
+                }
             }
         }
 
@@ -1993,6 +2011,37 @@ SDL_AppResult Game::iterate()
                         cap.targets.push_back(std::move(tgt));
                     }
                     debugUI.pushClientShot(cap);
+
+                    // ── PR-27a: SHOT_INTENT — send client's view of the
+                    // intended target's animation state at fire time.
+                    // Server pairs by `(shooterClientId, shotInputTick)`,
+                    // computes anim-state delta vs its own historical
+                    // snapshot, logs to `server_shots.csv`.  No-op for
+                    // shots that aren't aimed at anyone close.
+                    //
+                    // Target selection precedence:
+                    //   1. Local raycast hit → that's clearly the
+                    //      "intended target" (cap.hitTargetClientId).
+                    //   2. Otherwise, closest near-miss capsule-AABB
+                    //      candidate (first entry in `cap.targets`,
+                    //      already filtered by ray-vs-AABB).
+                    //   3. No candidates → 0xFFFF (no-target sentinel);
+                    //      the server logs a "no target" row.
+                    std::uint16_t intentTargetCid = cap.hitTargetClientId;
+                    AnimSnapshot intentAnim{};
+                    if (intentTargetCid == net::shotdebug::k_missClientId && !cap.targets.empty()) {
+                        intentTargetCid = cap.targets.front().clientId;
+                    }
+                    if (intentTargetCid != net::shotdebug::k_missClientId) {
+                        // Find the entity for this clientId and read its
+                        // current AnimSnapshot.  Same component the
+                        // animator-update loop above just refreshed.
+                        registry.view<ClientId, AnimSnapshot>().each([&](const ClientId& cid, const AnimSnapshot& a) {
+                            if (cid.value == intentTargetCid)
+                                intentAnim = a;
+                        });
+                    }
+                    client.sendShotIntent(snap.tick, intentTargetCid, intentAnim);
                 });
         }
     }

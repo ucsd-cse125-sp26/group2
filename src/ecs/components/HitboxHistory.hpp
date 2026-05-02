@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/Hitbox.hpp"
 
 #include <array>
@@ -40,6 +41,16 @@ struct HitboxHistorySample
 {
     uint32_t tick = 0; ///< Server tick when the sample was recorded. 0 = unset.
     std::vector<WorldCapsule> capsules;
+
+    /// @brief PR-27: animation-state snapshot captured the same tick.
+    ///
+    /// Filled by `pushHitboxHistory` from the entity's live `AnimSnapshot`
+    /// component, which the server's animation pass updates each tick.
+    /// Used by the shot-resolution path to compare against the client's
+    /// claimed animation state of the target — when the delta is small,
+    /// the server can accept the client's view of the pose (PR-27b);
+    /// either way the delta is logged for telemetry (PR-27a).
+    AnimSnapshot anim{};
 };
 
 /// @brief Ring buffer of recent hitbox snapshots for one entity.

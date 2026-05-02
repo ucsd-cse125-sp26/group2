@@ -80,6 +80,25 @@ struct ShotResolution
     float hitTargetCurrentX = 0.0f;
     float hitTargetCurrentY = 0.0f;
     float hitTargetCurrentZ = 0.0f;
+
+    // PR-27 (netsync): client-asserted animation-state telemetry.
+    // Populated when the shooter's SHOT_INTENT was paired with this
+    // shot at resolution time; otherwise the columns stay zero/sentinel.
+    //   * `clientIntentTargetClientId` — who the client thought it was
+    //     shooting at; `0xFFFF` if the SHOT_INTENT wasn't received
+    //     (UDP loss) or the client wasn't aiming at anyone close.
+    //   * `animStateDelta` — `anim_snapshot::delta` between the
+    //     client's reported anim state and the server's historical
+    //     anim state for the same target at the rewound tick.  `0`
+    //     means perfect agreement; `> ~0.10` means visibly drifted.
+    //     Only meaningful when both ids match (server hit the target
+    //     the client claimed to be aiming at).
+    //   * `clientIntentReceived` — `1` when SHOT_INTENT was paired,
+    //     `0` when not.  Lets the analyzer compute "% of shots with
+    //     client intent" without needing to look at sentinel values.
+    std::uint16_t clientIntentTargetClientId = k_missClientId;
+    float animStateDelta = 0.0f;
+    int clientIntentReceived = 0;
 };
 
 /// @brief Append one shot-resolution row.  Thread-safe — the
