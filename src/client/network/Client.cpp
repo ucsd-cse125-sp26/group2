@@ -6,8 +6,10 @@
 #include "EntityInterpolation.hpp"
 #include "ecs/components/InterpolationBuffer.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Velocity.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
@@ -462,8 +464,35 @@ void Client::applyInterpolatedTransforms(Registry& registry)
 
         const auto sampled = entity_interpolation::sample(registry, e, renderTimeNs, pos.value, fallbackYaw);
         pos.value = sampled.position;
-        if (snap != nullptr)
+        if (snap != nullptr) {
             snap->yaw = sampled.yaw;
+            // PR-28: also write back interp-delayed pitch.  Animator
+            // and renderer both read pitch from `InputSnapshot` for
+            // remote players (head/neck bone tilt).
+            if (sampled.fromBuffer)
+                snap->pitch = sampled.pitch;
+        }
+
+        // PR-28: also write back interp-delayed Velocity and the
+        // animator-relevant PlayerVisState bits.  Pre-PR-28 these
+        // were left at their LATEST-snapshot values, which preceded
+        // the body's interp-delayed Position by `cl_interp ×
+        // snapshotInterval`.  At 30+ ms that produced the locomotion-
+        // state mismatch PR-27a measured (0.41-median anim-state
+        // delta).  Lag-comp (server-side) is unaffected — the server
+        // continues to read its OWN live state, never these client-
+        // mutated values.
+        if (sampled.fromBuffer) {
+            if (auto* vel = registry.try_get<Velocity>(e))
+                vel->value = sampled.velocity;
+            if (auto* ps = registry.try_get<PlayerVisState>(e)) {
+                ps->moveMode = static_cast<MoveMode>(sampled.moveMode);
+                ps->wallRunSide = static_cast<WallSide>(sampled.wallRunSide);
+                ps->grounded = sampled.grounded;
+                ps->sprinting = sampled.sprinting;
+                ps->crouching = sampled.crouching;
+            }
+        }
     }
 }
 
@@ -472,19 +501,34 @@ void Client::recordInterpolationSamples(Registry& registry, Uint64 captureNs)
     if (interpDelaySnapshots_ <= 0)
         return;
 
-    // Sample (position, yaw) for every replicated entity except the
-    // local player.  Players carry yaw on their `InputSnapshot` (the
-    // server replicates it as part of the registry); other replicated
-    // entities (projectiles, weapon pickups) get yaw=0, which is fine —
-    // the renderer doesn't ask for their yaw via `sample` (only Position
-    // is interpolated for non-player entities, see Game.cpp render path).
+    // PR-28: capture position + animator inputs for every replicated
+    // non-local entity.  Pre-PR-28 only `(position, yaw)` were buffered;
+    // the animator continued to read LATEST-snapshot Velocity / pitch /
+    // PlayerVisState bits while the body rendered at `now − cl_interp`,
+    // so locomotion-state transitions visibly preceded the body motion.
+    // PR-27a's telemetry caught the resulting 0.41-median anim-state
+    // delta.  Buffering the animator inputs here lines body and pose up
+    // at the same logical instant.  Fields without a server source
+    // (e.g. yaw on a projectile) default to 0 — animator never reads
+    // those for non-player entities anyway.
     auto view = registry.view<Position>(entt::exclude<LocalPlayer>);
     for (const auto e : view) {
-        const auto& pos = view.get<Position>(e);
-        float yaw = 0.0f;
-        if (const auto* inp = registry.try_get<InputSnapshot>(e))
-            yaw = inp->yaw;
-        entity_interpolation::appendSample(registry, e, captureNs, pos.value, yaw);
+        entity_interpolation::SampleInputs inputs;
+        inputs.position = view.get<Position>(e).value;
+        if (const auto* vel = registry.try_get<Velocity>(e))
+            inputs.velocity = vel->value;
+        if (const auto* inp = registry.try_get<InputSnapshot>(e)) {
+            inputs.yaw = inp->yaw;
+            inputs.pitch = inp->pitch;
+        }
+        if (const auto* ps = registry.try_get<PlayerVisState>(e)) {
+            inputs.moveMode = static_cast<std::uint8_t>(ps->moveMode);
+            inputs.wallRunSide = static_cast<std::uint8_t>(ps->wallRunSide);
+            inputs.grounded = ps->grounded;
+            inputs.sprinting = ps->sprinting;
+            inputs.crouching = ps->crouching;
+        }
+        entity_interpolation::appendSample(registry, e, captureNs, inputs);
     }
 }
 

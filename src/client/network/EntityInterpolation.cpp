@@ -13,7 +13,24 @@
 namespace entity_interpolation
 {
 
-void appendSample(entt::registry& registry, entt::entity e, Uint64 captureNs, const glm::vec3& position, float yaw)
+namespace
+{
+inline void writeSample(InterpolationBuffer::Sample& slot, Uint64 captureNs, const SampleInputs& in)
+{
+    slot.captureNs = captureNs;
+    slot.position = in.position;
+    slot.velocity = in.velocity;
+    slot.yaw = in.yaw;
+    slot.pitch = in.pitch;
+    slot.moveMode = in.moveMode;
+    slot.wallRunSide = in.wallRunSide;
+    slot.grounded = in.grounded;
+    slot.sprinting = in.sprinting;
+    slot.crouching = in.crouching;
+}
+} // namespace
+
+void appendSample(entt::registry& registry, entt::entity e, Uint64 captureNs, const SampleInputs& inputs)
 {
     auto& buf = registry.get_or_emplace<InterpolationBuffer>(e);
 
@@ -24,16 +41,12 @@ void appendSample(entt::registry& registry, entt::entity e, Uint64 captureNs, co
     if (buf.count > 0) {
         const std::size_t lastIdx = (buf.head + InterpolationBuffer::k_capacity - 1) % InterpolationBuffer::k_capacity;
         if (buf.ring[lastIdx].captureNs == captureNs) {
-            buf.ring[lastIdx].position = position;
-            buf.ring[lastIdx].yaw = yaw;
+            writeSample(buf.ring[lastIdx], captureNs, inputs);
             return;
         }
     }
 
-    auto& slot = buf.ring[buf.head];
-    slot.captureNs = captureNs;
-    slot.position = position;
-    slot.yaw = yaw;
+    writeSample(buf.ring[buf.head], captureNs, inputs);
     buf.head = (buf.head + 1) % InterpolationBuffer::k_capacity;
     if (buf.count < InterpolationBuffer::k_capacity)
         ++buf.count;
@@ -58,6 +71,21 @@ float lerpYaw(float a, float b, float t) noexcept
     return a + diff * t;
 }
 
+} // namespace
+
+namespace
+{
+/// @brief PR-28: copy a sample's discrete (non-lerped) fields into the
+/// output.  Continuous fields are filled by the caller (lerped or
+/// snap-to-end as appropriate).
+inline void copyDiscreteFields(InterpolatedTransform& out, const InterpolationBuffer::Sample& s)
+{
+    out.moveMode = s.moveMode;
+    out.wallRunSide = s.wallRunSide;
+    out.grounded = s.grounded;
+    out.sprinting = s.sprinting;
+    out.crouching = s.crouching;
+}
 } // namespace
 
 InterpolatedTransform sample(const entt::registry& registry,
@@ -88,13 +116,19 @@ InterpolatedTransform sample(const entt::registry& registry,
     // visually offensive than an overshooting one).
     if (renderTimeNs <= oldest.captureNs) {
         out.position = oldest.position;
+        out.velocity = oldest.velocity;
         out.yaw = oldest.yaw;
+        out.pitch = oldest.pitch;
+        copyDiscreteFields(out, oldest);
         out.fromBuffer = true;
         return out;
     }
     if (renderTimeNs >= newest.captureNs) {
         out.position = newest.position;
+        out.velocity = newest.velocity;
         out.yaw = newest.yaw;
+        out.pitch = newest.pitch;
+        copyDiscreteFields(out, newest);
         out.fromBuffer = true;
         return out;
     }
@@ -111,13 +145,22 @@ InterpolatedTransform sample(const entt::registry& registry,
                 // Degenerate (caller violated monotonic-timestamps invariant);
                 // bias to newer to keep motion forward-progressing.
                 out.position = b.position;
+                out.velocity = b.velocity;
                 out.yaw = b.yaw;
+                out.pitch = b.pitch;
+                copyDiscreteFields(out, b);
                 out.fromBuffer = true;
                 return out;
             }
             const float t = static_cast<float>(renderTimeNs - a.captureNs) / static_cast<float>(span);
             out.position = glm::mix(a.position, b.position, t);
+            out.velocity = glm::mix(a.velocity, b.velocity, t);
             out.yaw = lerpYaw(a.yaw, b.yaw, t);
+            out.pitch = a.pitch + (b.pitch - a.pitch) * t;
+            // Discrete fields take the older bracketing sample so
+            // animation state-machine transitions snap at the same
+            // instant the visible motion crosses the sample boundary.
+            copyDiscreteFields(out, a);
             out.fromBuffer = true;
             return out;
         }
@@ -126,7 +169,10 @@ InterpolatedTransform sample(const entt::registry& registry,
     // Shouldn't reach: oldest/newest bracket the timestamp by the early
     // checks above. Fall back to newest for safety.
     out.position = newest.position;
+    out.velocity = newest.velocity;
     out.yaw = newest.yaw;
+    out.pitch = newest.pitch;
+    copyDiscreteFields(out, newest);
     out.fromBuffer = true;
     return out;
 }
