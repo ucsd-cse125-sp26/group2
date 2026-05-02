@@ -737,13 +737,31 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         const Uint32 serSize = payloadSize - sizeof(snapshotTick);
 
         // Phase 5a: copy current Position into PreviousPosition BEFORE the
-        // continuous_loader rewrites Position from the snapshot. This gives
-        // the renderer a (prev, pos) pair that brackets the most-recent
-        // snapshot transition, lerped over the full ~31 ms snapshot
-        // interval (vs. the old per-physics-tick lerp which only spanned
-        // ~7.8 ms and produced visible step jitter at 32 Hz snapshot rate).
-        registry.view<Position, PreviousPosition>().each(
-            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+        // continuous_loader rewrites Position from the snapshot.  This
+        // gives the renderer a (prev, pos) pair that brackets the
+        // most-recent snapshot transition for REMOTE players, lerped
+        // over the snapshot interval.
+        //
+        // PR-20.9 (root-cause local-jitter fix): exclude LocalPlayer.
+        // Phase 5b's design intent — per the comment in Game.cpp's
+        // physics loop — is "local player uses physics-tick alpha,
+        // remote players use snapshot alpha."  When this view
+        // included the local player, its `prev` got reset every
+        // snapshot apply (128 Hz post-PR-13) to the post-physics-
+        // tick `pos`.  Combined with reconciliation FP drift between
+        // client-side prediction and server's authoritative state
+        // at the acked tick, the renderer's `lerp(prev, pos,
+        // physics-tick-alpha)` then interpolated over the tiny
+        // drift each snapshot — visible as continuous backward
+        // jitter under any simulated RTT (replay span grows with
+        // RTT, so drift accumulates and the snap each snapshot is
+        // a few units instead of sub-pixel).  Excluding local here
+        // makes the per-physics-tick `prev = pos` in Game.cpp the
+        // SOLE writer of local's PreviousPosition, restoring
+        // tick-rate-smooth interpolation regardless of what
+        // reconciliation produces this frame.
+        registry.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
+            .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
         if (!registryLoader)
             registryLoader.emplace(registry);
@@ -850,10 +868,13 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         if (reconstructed.empty())
             break; // malformed patch — drop, wait for next FULL.
 
-        // Phase 5a (mirrored from FULL path): copy Position →
-        // PreviousPosition before the loader rewrites Position.
-        registry.view<Position, PreviousPosition>().each(
-            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+        // PR-20.9 (mirrored from FULL path): exclude LocalPlayer from
+        // the snapshot-rate prev=pos so the per-physics-tick path in
+        // Game.cpp is the sole writer of local's PreviousPosition.
+        // See the long comment on the FULL path for the full
+        // jitter-under-simulated-RTT diagnosis.
+        registry.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
+            .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
         if (!registryLoader)
             registryLoader.emplace(registry);
