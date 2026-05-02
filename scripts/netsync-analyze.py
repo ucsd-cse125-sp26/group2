@@ -501,21 +501,36 @@ def reportHitReg(botShots: list[dict], serverShots: list[dict]) -> None:
             hr = 100.0 * hits / count if count else 0.0
             print(f"    {rtt:>4d} ms: {count:>5d} shots, {hits:>5d} hits ({hr:.1f} % hit rate)")
 
-    # PR-27: client-asserted animation-state delta distribution.
-    # Only counts shots where (a) the client SHOT_INTENT was received,
-    # and (b) the server's hit target matches the client's claimed
-    # target — those are the rows where `animStateDelta` is meaningful.
+    print()
+
+
+def reportClientIntentAnim(serverShots: list[dict]) -> None:
+    """
+    PR-27a — client-asserted animation-state delta distribution.
+
+    Independent of the bot-intent (PR-21) path: real-client traces don't
+    have `bot_shots_*.csv`, but they DO populate `server_shots.csv`'s
+    `clientIntentReceived / clientIntentTargetClientId / animStateDelta`
+    columns whenever the client sent a SHOT_INTENT.  Only counts shots
+    where (a) SHOT_INTENT was received, and (b) the server's hit target
+    matches the client's claimed target — those are the rows where
+    `animStateDelta` has a comparable meaning.
+    """
+    if not serverShots:
+        return
+
     intentReceived = 0
     intentMatchedTarget = 0
     intentMissingTarget = 0  # client claimed someone, server hit someone else
     intentNoTarget = 0       # client said "no target" (0xFFFF)
     animDeltas: list[float] = []
+    missCid = 0xFFFF
     for sv in serverShots:
         if not sv.get("clientIntentReceived", 0):
             continue
         intentReceived += 1
-        clientTgt = sv.get("clientIntentTargetClientId", 0xFFFF)
-        if clientTgt == 0xFFFF:
+        clientTgt = sv.get("clientIntentTargetClientId", missCid)
+        if clientTgt == missCid:
             intentNoTarget += 1
             continue
         if sv["hitClientId"] == clientTgt:
@@ -524,41 +539,44 @@ def reportHitReg(botShots: list[dict], serverShots: list[dict]) -> None:
         else:
             intentMissingTarget += 1
 
-    if intentReceived > 0:
-        print(f"  PR-27 client anim-state assertions:")
-        print(f"    SHOT_INTENT received:   {intentReceived} ({100.0 * intentReceived / matched:.1f} % of matched shots)")
-        print(f"    matched target  (server hit who client claimed):       {intentMatchedTarget}")
-        print(f"    different target (server hit someone else):            {intentMissingTarget}")
-        print(f"    no specific target claimed by client (0xFFFF):         {intentNoTarget}")
-        if animDeltas:
-            animDeltas.sort()
-            avg = sum(animDeltas) / len(animDeltas)
-            print(f"    anim-state delta (matched-target only, dimensionless):")
-            print(f"      mean:  {avg:.4f}")
-            print(f"      p50:   {percentile(animDeltas, 50):.4f}")
-            print(f"      p90:   {percentile(animDeltas, 90):.4f}")
-            print(f"      p99:   {percentile(animDeltas, 99):.4f}")
-            print(f"      max:   {animDeltas[-1]:.4f}")
-            # Bucket against an indicative epsilon (PR-27a default = 0.10).
-            buckets = [(0.01, 0), (0.05, 0), (0.10, 0), (0.25, 0), (1.0, 0)]
-            over1 = 0
-            for d in animDeltas:
-                placed = False
-                for i, (thr, _) in enumerate(buckets):
-                    if d <= thr:
-                        buckets[i] = (thr, buckets[i][1] + 1)
-                        placed = True
-                        break
-                if not placed:
-                    over1 += 1
-            print(f"      distribution (cumulative buckets):")
-            for thr, cnt in buckets:
-                pct = 100.0 * cnt / len(animDeltas)
-                print(f"        Δ ≤ {thr:.2f}: {cnt:>5d} ({pct:5.1f} %)")
-            if over1 > 0:
-                pct = 100.0 * over1 / len(animDeltas)
-                print(f"        Δ >  1.00: {over1:>5d} ({pct:5.1f} %)  // different clip / state machine disagreement")
+    if intentReceived == 0:
+        return
 
+    total = len(serverShots)
+    print("PR-27 client anim-state assertions:")
+    print(f"  total resolved shots:      {total}")
+    print(f"  SHOT_INTENT received:      {intentReceived} ({100.0 * intentReceived / total:.1f} % of all shots)")
+    print(f"  matched target  (server hit who client claimed):       {intentMatchedTarget}")
+    print(f"  different target (server hit someone else):            {intentMissingTarget}")
+    print(f"  no specific target claimed by client (0xFFFF):         {intentNoTarget}")
+    if animDeltas:
+        animDeltas.sort()
+        avg = sum(animDeltas) / len(animDeltas)
+        print("  anim-state delta (matched-target only, dimensionless):")
+        print(f"    mean:  {avg:.4f}")
+        print(f"    p50:   {percentile(animDeltas, 50):.4f}")
+        print(f"    p90:   {percentile(animDeltas, 90):.4f}")
+        print(f"    p99:   {percentile(animDeltas, 99):.4f}")
+        print(f"    max:   {animDeltas[-1]:.4f}")
+        # Bucket against an indicative epsilon (PR-27a default = 0.10).
+        buckets = [(0.01, 0), (0.05, 0), (0.10, 0), (0.25, 0), (1.0, 0)]
+        over1 = 0
+        for d in animDeltas:
+            placed = False
+            for i, (thr, _) in enumerate(buckets):
+                if d <= thr:
+                    buckets[i] = (thr, buckets[i][1] + 1)
+                    placed = True
+                    break
+            if not placed:
+                over1 += 1
+        print("    distribution (cumulative buckets):")
+        for thr, cnt in buckets:
+            pct = 100.0 * cnt / len(animDeltas)
+            print(f"      Δ ≤ {thr:.2f}: {cnt:>5d} ({pct:5.1f} %)")
+        if over1 > 0:
+            pct = 100.0 * over1 / len(animDeltas)
+            print(f"      Δ >  1.00: {over1:>5d} ({pct:5.1f} %)  // different clip / state-machine disagreement")
     print()
 
 
@@ -590,15 +608,27 @@ def main() -> int:
     if botShots:
         reportHitReg(botShots, serverShots)
 
+    # PR-27a: report the client-asserted anim-state delta block.
+    # Independent of bot data — populates from `server_shots.csv`'s
+    # `clientIntentReceived / animStateDelta` columns whether the
+    # shooter is a real client (SHOT_INTENT sent) or a bot (skipped).
+    reportClientIntentAnim(serverShots)
+
+    # PR-27a: bot-only and real-client-only runs both want to use this
+    # script.  The bot-driven netsync framework cares about the truth-
+    # log desync analysis below; real-client traces typically only
+    # have `server_shots.csv` and don't need it.  Skip gracefully
+    # when the truth log is missing or empty rather than failing the
+    # whole report.
     truthPath = args.runDir / "server_truth.csv"
     if not truthPath.exists():
-        print(f"error: missing {truthPath}", file=sys.stderr)
-        return 1
+        print(f"note: {truthPath} missing; skipping desync analysis", file=sys.stderr)
+        return 0
 
     truth = loadServerTruth(truthPath)
     if not truth:
-        print(f"error: server_truth.csv is empty (no rows)", file=sys.stderr)
-        return 1
+        print(f"note: server_truth.csv is empty; skipping desync analysis", file=sys.stderr)
+        return 0
 
     # PR-22b: `bot_*.csv` matches both observation logs (bot_0.csv) AND
     # shot-intent logs (bot_shots_0.csv).  Filter to numeric-suffix
