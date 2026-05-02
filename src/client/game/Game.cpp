@@ -1949,17 +1949,21 @@ SDL_AppResult Game::iterate()
                         }
                     }
 
-                    // PR-26: snapshot capsules ONLY for entities whose
-                    // capsule-derived AABB the shot ray intersects —
-                    // i.e. exactly the targets the broad-phase inside
-                    // `raycastPlayerHitboxes` would have considered.
-                    // Pre-PR-26 we copied capsules for every visible
-                    // remote player, so the debug visualizer drew blue
-                    // wireframes for ALL enemies on the map even when
-                    // the shot grazed only one.  The server-side
-                    // capture (`captureShotDebug` in `WeaponSystem.
-                    // cpp`) applies the same filter so the overlay
-                    // looks identical across the join — clutter-free.
+                    // PR-26 + PR-26.1: snapshot capsules for entities
+                    // whose capsule-derived AABB — DILATED by an
+                    // aim-margin — intersects the shot ray.  Goal is
+                    // "show the targets I was approximately aiming at",
+                    // not "show the targets the ray geometrically hit".
+                    // PR-26's tight filter dropped near-miss targets
+                    // (ray passed just outside the head capsule and the
+                    // wireframe vanished); the user wanted to keep
+                    // those visible so they can SEE why a miss
+                    // happened (lag-comp drift, animation pose, etc).
+                    // Distant unrelated enemies still skipped — they
+                    // never come close to the ray.  Server-side
+                    // `captureShotDebug` uses the same margin so the
+                    // overlay's blue/red sets line up.
+                    constexpr float shotDebugAimMargin = 50.0f;
                     auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
                     cap.targets.reserve(remoteView.size_hint());
                     for (const auto e : remoteView) {
@@ -1972,8 +1976,9 @@ SDL_AppResult Game::iterate()
                         glm::vec3 boundsMin{std::numeric_limits<float>::max()};
                         glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
                         for (const auto& c : hb.capsules) {
-                            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - glm::vec3{c.radius});
-                            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + glm::vec3{c.radius});
+                            const glm::vec3 capRadius{c.radius + shotDebugAimMargin};
+                            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - capRadius);
+                            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + capRadius);
                         }
                         const physics::WorldAABB bounds{.min = boundsMin, .max = boundsMax};
                         float aabbDist = cap.range;

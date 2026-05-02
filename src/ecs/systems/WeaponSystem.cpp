@@ -281,15 +281,18 @@ inline void captureShotDebug(Registry& registry,
     }
 
     // Snapshot the CURRENT (rewound) capsules of every player whose
-    // capsule-derived AABB intersects the shot ray — i.e. every
-    // entity the broad-phase inside `raycastPlayerHitboxes` actually
-    // CONSIDERED for this shot.  Pre-PR-26 we copied capsules for
-    // every replicated player, so the debug visualizer drew red
-    // wireframes for all enemies on the map even when the shot
-    // narrowly grazed only one.  Visual clutter; user couldn't tell
-    // which target the server was hit-testing against.  Filtering by
-    // the same broad-phase the raycast uses means the overlay shows
-    // exactly the candidates that went through narrow-phase.
+    // capsule-derived AABB — DILATED by `shotDebugAimMargin` on each
+    // axis — intersects the shot ray.  PR-26 originally used the
+    // exact capsule AABB (the same broad-phase as the raycast); user
+    // feedback was that misses dropped the target wireframe entirely,
+    // even when the shot was clearly aimed at them ("ray went 5 cm
+    // above the head and I lost the wireframe").  The aim margin
+    // turns the filter into "show whoever I was approximately
+    // shooting at" rather than "show whoever the ray geometrically
+    // hit" — clutter still gone (distant unrelated enemies skipped),
+    // but near-miss targets stay visible so the user can see WHY the
+    // shot missed (rewind lag-comp drift, animation pose, etc).
+    constexpr float shotDebugAimMargin = 50.0f;
     auto view = registry.view<HitboxInstance, ClientId>();
     cap.targets.reserve(view.size_hint());
     for (const auto e : view) {
@@ -299,12 +302,12 @@ inline void captureShotDebug(Registry& registry,
         if (hb.capsules.empty())
             continue;
 
-        // Capsule-derived AABB (matches PR-25's broad-phase exactly).
         glm::vec3 boundsMin{std::numeric_limits<float>::max()};
         glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
         for (const auto& c : hb.capsules) {
-            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - glm::vec3{c.radius});
-            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + glm::vec3{c.radius});
+            const glm::vec3 capRadius{c.radius + shotDebugAimMargin};
+            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - capRadius);
+            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + capRadius);
         }
         const physics::WorldAABB bounds{.min = boundsMin, .max = boundsMax};
         float aabbDist = range;
