@@ -1321,24 +1321,31 @@ SDL_AppResult Game::iterate()
                         glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
                     cap.range = physics::k_hitscanRange;
 
-                    // Local raycast against capsules + world.  Same
-                    // `resolveHitscanHitbox` the server uses, but here
-                    // operating on the client's CURRENT (post-anim,
-                    // post-PR-19-interpolation) capsule positions —
-                    // i.e. exactly what the player saw on screen.
+                    // PR-20.6 (root-cause fix): local raycast against
+                    // capsules + world.  `resolveHitscanHitbox`
+                    // unconditionally fills `hit.point` — either the
+                    // closest world geometry hit, the closest capsule
+                    // hit, or `origin + direction * k_hitscanRange`
+                    // when nothing was struck.  We ALWAYS forward
+                    // `hit.point` into `cap.hitPoint`; the rendering
+                    // path uses it directly so blue tracers always
+                    // terminate on whatever the client believed was
+                    // in the way (a wall, a capsule, or 5000 u of air).
+                    //
+                    // `cap.hitTargetClientId` is the ID of the
+                    // PLAYER hit (so the UI can display it); a wall
+                    // hit leaves it at the miss sentinel even though
+                    // the tracer DOES terminate on the wall.
                     const physics::HitboxHit localHit =
                         physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
+                    cap.hitPoint = localHit.point;
+                    cap.hitTargetClientId = net::shotdebug::k_missClientId;
+                    cap.hitRegion = 0;
                     if (localHit.entity != entt::null && registry.valid(localHit.entity)) {
-                        cap.hitTargetClientId = net::shotdebug::k_missClientId;
-                        cap.hitRegion = static_cast<std::uint8_t>(localHit.region);
                         if (const auto* tcid = registry.try_get<ClientId>(localHit.entity)) {
                             cap.hitTargetClientId = static_cast<std::uint16_t>(tcid->value);
+                            cap.hitRegion = static_cast<std::uint8_t>(localHit.region);
                         }
-                        cap.hitPoint = localHit.point;
-                    } else {
-                        cap.hitTargetClientId = net::shotdebug::k_missClientId;
-                        cap.hitRegion = 0;
-                        cap.hitPoint = cap.origin + cap.direction * cap.range;
                     }
 
                     // Snapshot every visible remote player's CURRENT

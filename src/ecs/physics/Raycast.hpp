@@ -620,16 +620,29 @@ inline bool raycastCapsule(glm::vec3 origin,
 ///
 /// Uses a broad-phase AABB check (CollisionShape) before testing individual
 /// capsules, so only nearby players pay the narrow-phase cost.
+///
+/// PR-20.6 (root-cause fix): pre-PR-20.6 the view required the `Player`
+/// tag.  That worked on the server (which emplaces `Player` per
+/// connected client), but not on the CLIENT — `Player` is not in
+/// the replicated `Synced` tuple (`network/RegistrySerialization.cpp`)
+/// and the client never emplaces it locally.  Result: client-side
+/// `resolveHitscanHitbox` walked an empty view, no capsule hits
+/// ever registered, and the shot-debug visualizer's blue tracer
+/// flew straight through every enemy.  `HitboxInstance` is only
+/// added by `systems::updateHitboxes` to entities with
+/// `JointMatrices` — i.e. animated characters — so it's a stronger
+/// gate than `Player` anyway and the filter is now strictly more
+/// permissive without picking up any non-character entities.
 inline HitboxHit raycastPlayerHitboxes(
     Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction, float maxDistance)
 {
     HitboxHit bestHit;
     bestHit.distance = maxDistance;
 
-    registry.view<Position, Player, CollisionShape, HitboxInstance>().each([&](const entt::entity entity,
-                                                                               const Position& pos,
-                                                                               const CollisionShape& shape,
-                                                                               const HitboxInstance& hitboxes) {
+    registry.view<Position, CollisionShape, HitboxInstance>().each([&](const entt::entity entity,
+                                                                       const Position& pos,
+                                                                       const CollisionShape& shape,
+                                                                       const HitboxInstance& hitboxes) {
         if (entity == shooter)
             return;
 

@@ -2120,8 +2120,16 @@ void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, flo
         // capsules still render their on-screen portion.
         if (showClient && p.hasClient) {
             const auto& c = p.clientView;
-            const glm::vec3 endPt =
-                (c.hitTargetClientId != net::shotdebug::k_missClientId) ? c.hitPoint : c.origin + c.direction * c.range;
+            // PR-20.6: use `c.hitPoint` directly.  Pre-PR-20.6 we
+            // fell back to `origin + dir * range` whenever
+            // `hitTargetClientId == k_missClientId`, which silently
+            // discarded WALL hits (those leave hitTargetClientId at
+            // the miss sentinel because no PLAYER was hit, even
+            // though `resolveHitscanHitbox` correctly resolved the
+            // wall geometry into `hit.point`).  The capture path
+            // now writes `cap.hitPoint = localHit.point`
+            // unconditionally, so here we simply use it.
+            const glm::vec3 endPt = c.hitPoint;
             drawWorldLineClipped(
                 dl, c.origin, endPt, viewProj, screenWidth, screenHeight, col(80, 160, 255, alpha), 2.0f);
             for (const auto& tgt : c.targets) {
@@ -2141,8 +2149,11 @@ void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, flo
         // Red = server's rewound view of the same shot.
         if (showServer && p.hasServer) {
             const auto& s = p.serverView;
-            const glm::vec3 endPt =
-                (s.hitTargetClientId != net::shotdebug::k_missClientId) ? s.hitPoint : s.origin + s.direction * s.range;
+            // PR-20.6: same fix on the server side — server-captured
+            // `s.hitPoint` is already the correct world-or-capsule
+            // hit point or full-range endpoint, regardless of
+            // whether a PLAYER was hit.
+            const glm::vec3 endPt = s.hitPoint;
             drawWorldLineClipped(
                 dl, s.origin, endPt, viewProj, screenWidth, screenHeight, col(255, 80, 80, alpha), 2.0f);
             for (const auto& tgt : s.targets) {
