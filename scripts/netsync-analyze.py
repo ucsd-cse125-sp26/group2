@@ -201,6 +201,117 @@ def reportShots(rows: list[dict]) -> None:
     print()
 
 
+def loadBotShots(runDir: Path) -> list[dict]:
+    """
+    Load PR-21 bot-side shot-intent rows across all `bot_shots_*.csv`
+    files in the run directory.  Each row is a single trigger pull
+    on the bot side with origin/dir + intended target.
+
+    Schema: wallTimeNs, shooterClientId, shotInputTick,
+            originX, originY, originZ, dirX, dirY, dirZ,
+            intendedTargetClientId, intendedTargetX, Y, Z, intendedTargetDist.
+    """
+    rows: list[dict] = []
+    for f in sorted(runDir.glob("bot_shots_*.csv")):
+        with f.open() as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                if any(v is None for v in row.values()):
+                    continue
+                try:
+                    rows.append({
+                        "wallTimeNs": int(row["wallTimeNs"]),
+                        "shooterClientId": int(row["shooterClientId"]),
+                        "shotInputTick": int(row["shotInputTick"]),
+                        "originX": float(row["originX"]),
+                        "originY": float(row["originY"]),
+                        "originZ": float(row["originZ"]),
+                        "dirX": float(row["dirX"]),
+                        "dirY": float(row["dirY"]),
+                        "dirZ": float(row["dirZ"]),
+                        "intendedTargetClientId": int(row["intendedTargetClientId"]),
+                        "intendedTargetX": float(row["intendedTargetX"]),
+                        "intendedTargetY": float(row["intendedTargetY"]),
+                        "intendedTargetZ": float(row["intendedTargetZ"]),
+                        "intendedTargetDist": float(row["intendedTargetDist"]),
+                    })
+                except ValueError:
+                    continue
+    return rows
+
+
+def reportHitReg(botShots: list[dict], serverShots: list[dict]) -> None:
+    """
+    Join bot-side intent with server-side resolution by
+    `(shooterClientId, shotInputTick)` and report:
+
+      - total shots fired vs server-resolved (ratio = packet-loss + tick-mismatch indicator)
+      - hit rate (server-side determined)
+      - intended-vs-actual target match rate
+      - hit-region distribution
+      - hit-point distance distribution (where intended target hit vs server's resolved point)
+    """
+    if not botShots:
+        print("PR-21 hitreg: no bot shots logged (set GROUP2_BOT_SHOTS_CSV_PREFIX + GROUP2_BOT_AI=1)")
+        print()
+        return
+
+    serverByKey: dict[tuple[int, int], dict] = {}
+    for s in serverShots:
+        serverByKey[(s["shooterClientId"], s["shotInputTick"])] = s
+
+    missCid = 0xFFFF
+    fired = len(botShots)
+    matched = 0
+    hitsOnIntended = 0
+    hitsOnOther = 0
+    misses = 0
+    regionCounts: dict[int, int] = defaultdict(int)
+    hitPointDistances: list[float] = []  # server-hit-point vs bot-intended-target
+
+    for b in botShots:
+        sv = serverByKey.get((b["shooterClientId"], b["shotInputTick"]))
+        if sv is None:
+            continue
+        matched += 1
+        if sv["hitClientId"] == missCid:
+            misses += 1
+            continue
+        if sv["hitClientId"] == b["intendedTargetClientId"]:
+            hitsOnIntended += 1
+        else:
+            hitsOnOther += 1
+        regionCounts[sv["hitRegion"]] += 1
+        intendedPos = (b["intendedTargetX"], b["intendedTargetY"] + 50.0, b["intendedTargetZ"])
+        hitPos = (sv["hitX"], sv["hitY"], sv["hitZ"])
+        d = math.sqrt(sum((a - b2) ** 2 for a, b2 in zip(intendedPos, hitPos)))
+        hitPointDistances.append(d)
+
+    print(f"PR-21 hit-reg analysis:")
+    print(f"  shots fired by bots:     {fired}")
+    print(f"  shots resolved by server: {matched} ({100.0 * matched / fired:.1f} %)")
+    if matched == 0:
+        print(f"  no shots matched between bot intent and server resolution")
+        print()
+        return
+    print(f"  hits on intended target: {hitsOnIntended} ({100.0 * hitsOnIntended / matched:.1f} %)")
+    print(f"  hits on OTHER target:    {hitsOnOther} ({100.0 * hitsOnOther / matched:.1f} %)")
+    print(f"  misses:                  {misses} ({100.0 * misses / matched:.1f} %)")
+    if regionCounts:
+        print(f"  hit-region distribution (server-side):")
+        for region, count in sorted(regionCounts.items()):
+            pct = 100.0 * count / max(1, hitsOnIntended + hitsOnOther)
+            print(f"    region {region}: {count} ({pct:.1f}% of hits)")
+    if hitPointDistances:
+        hitPointDistances.sort()
+        print(f"  intended-target → server-hit-point distance (units):")
+        print(f"    mean:  {sum(hitPointDistances) / len(hitPointDistances):.2f}")
+        print(f"    p50:   {percentile(hitPointDistances, 50):.2f}")
+        print(f"    p99:   {percentile(hitPointDistances, 99):.2f}")
+        print(f"    max:   {hitPointDistances[-1]:.2f}")
+    print()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runDir", type=Path, help="directory containing server_truth.csv + bot_*.csv")
@@ -217,8 +328,17 @@ def main() -> int:
     # regression tests and is independent of the desync analysis
     # below.  Both blocks render even if one input is missing.
     shotsPath = args.runDir / "server_shots.csv"
+    serverShots: list[dict] = []
     if shotsPath.exists():
-        reportShots(loadServerShots(shotsPath))
+        serverShots = loadServerShots(shotsPath)
+        reportShots(serverShots)
+
+    # PR-21: when bot shot-intent logs exist, join with server's
+    # resolution log and report hit-reg accuracy.  Intended-vs-actual
+    # target distinction is the headline lag-comp signal.
+    botShots = loadBotShots(args.runDir)
+    if botShots:
+        reportHitReg(botShots, serverShots)
 
     truthPath = args.runDir / "server_truth.csv"
     if not truthPath.exists():

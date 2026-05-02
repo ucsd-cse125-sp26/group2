@@ -158,9 +158,15 @@ done
 # stays cheap.
 BOT_OBS_PREFIX="${RUN_DIR}/bot_"
 
+# PR-21: bot shot-intent CSV prefix.  Pairs with the server-side
+# `GROUP2_SERVER_SHOTS_CSV` set above; the analyzer joins them by
+# `(shooterClientId, shotInputTick)` to compute hit-reg accuracy.
+BOT_SHOTS_PREFIX="${RUN_DIR}/bot_shots_"
+
 GROUP2_BOT_FLEET_RTT=1 \
 GROUP2_BOT_FLEET_RTT_CSV="${BOT_CSV}" \
 GROUP2_BOT_OBS_CSV_PREFIX="${NETSYNC:+${BOT_OBS_PREFIX}}" \
+GROUP2_BOT_SHOTS_CSV_PREFIX="${NETSYNC:+${BOT_SHOTS_PREFIX}}" \
 setsid bash -c "cd '${BUILD_DIR}' && exec ./clientbot '${NUM_BOTS}' '127.0.0.1:${SERVER_PORT}' > '${BOT_LOG}' 2>&1" &
 BOTS_PID=$!
 

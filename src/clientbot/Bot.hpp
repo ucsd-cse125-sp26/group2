@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <glm/vec3.hpp>
 #include <string>
 #include <thread>
 
@@ -126,6 +127,47 @@ private:
     // it lets us A/B-test future netcode changes (quantization, AoI
     // culling, snapshot-rate changes) with hard numbers, not feel.
     std::FILE* obsCsv_ = nullptr;
+
+    // ── PR-21: bot-side shot-intent log ──────────────────────────────────
+    //
+    // Opened from `GROUP2_BOT_SHOTS_CSV_PREFIX` at init() if set.  One
+    // CSV per bot, named `<prefix><botId>.csv`.  Each row records ONE
+    // intentional fire (rising edge of `input.shooting`) with the
+    // information needed to join against the server-side
+    // `server_shots.csv` produced by PR-18b's `perf::shotlog`:
+    //
+    //   wallTimeNs,shooterClientId,shotInputTick,
+    //   originX,originY,originZ,
+    //   dirX,dirY,dirZ,
+    //   intendedTargetClientId,
+    //   intendedTargetX,intendedTargetY,intendedTargetZ,
+    //   intendedTargetDist
+    //
+    // The matching key is `(shooterClientId, shotInputTick)` — the
+    // server stamps the same pair on every shot in `server_shots.csv`.
+    // The Python analyzer joins them and reports per-RTT hit rate,
+    // intended-vs-actual target distribution, region match, etc.
+    std::FILE* shotsCsv_ = nullptr;
+    bool prevShootingForLog_ = false; ///< Rising-edge detector for fire log.
+
+    /// @brief Open the shot-intent log if `GROUP2_BOT_SHOTS_CSV_PREFIX`
+    /// is set.  No-op when env var is missing.
+    void openShotsLog();
+
+    /// @brief Append a shot-intent row.  Called from runLoop on the
+    /// rising edge of `input_.shooting`.  No-op when the log isn't
+    /// open.  `intendedTargetEntity == entt::null` means the bot
+    /// fired without aiming at any visible target (random fire).
+    void writeShotIntent(std::uint16_t shooterClientId,
+                         std::uint32_t shotInputTick,
+                         const glm::vec3& origin,
+                         const glm::vec3& direction,
+                         std::uint16_t intendedTargetClientId,
+                         const glm::vec3& intendedTargetPos,
+                         float intendedTargetDist);
+
+    /// @brief Flush + close the shot log if open.  Safe from dtor.
+    void closeShotsLog() noexcept;
 
     /// @brief Open the CSV if `GROUP2_BOT_OBS_CSV_PREFIX` is set.  No-op
     /// if env unset or file open fails (graceful: load tests stay fast).

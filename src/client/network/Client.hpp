@@ -148,6 +148,22 @@ public:
     /// alpha here remains the local-player / fallback path.
     [[nodiscard]] float getSnapshotAlpha() const;
 
+    /// @brief PR-21: server-assigned local-player entity (post-mapping).
+    /// Returns nullopt before the first snapshot containing the local
+    /// player has applied (i.e. before the `localPlayerReadyFn` callback
+    /// has fired).  After that, returns the LOCAL `entt::entity` (mapped
+    /// through `continuous_loader`) that the bot or game thread can use
+    /// to find its own player in the registry.
+    [[nodiscard]] std::optional<entt::entity> getLocalPlayerEntity() const
+    {
+        if (!localPlayerEntity.has_value() || !registryLoader.has_value())
+            return std::nullopt;
+        const entt::entity mapped = registryLoader->map(*localPlayerEntity);
+        if (mapped == entt::null)
+            return std::nullopt;
+        return mapped;
+    }
+
     /// @brief Render time the renderer should display non-local entities at.
     ///
     /// PR-11 (server-perf): Valorant / Fortnite / Source-engine `cl_interp`

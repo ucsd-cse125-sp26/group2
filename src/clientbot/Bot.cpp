@@ -4,6 +4,7 @@
 #include "Bot.hpp"
 
 #include "ecs/components/ClientId.hpp"
+#include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Position.hpp"
 
 #include <SDL3/SDL.h>
@@ -11,6 +12,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <glm/geometric.hpp>
+#include <limits>
 #if defined(__linux__) || defined(__APPLE__) || defined(__unix__)
 #include <pthread.h>
 #include <sched.h>
@@ -28,6 +31,7 @@ Bot::~Bot()
     if (initialized_)
         client_.shutdown();
     closeObservationLog();
+    closeShotsLog();
 }
 
 // ── PR-18: per-bot snapshot observation log ─────────────────────────────
@@ -92,6 +96,66 @@ void Bot::closeObservationLog() noexcept
     }
 }
 
+// ── PR-21: bot-side shot-intent log ─────────────────────────────────────
+
+void Bot::openShotsLog()
+{
+    const char* prefix = std::getenv("GROUP2_BOT_SHOTS_CSV_PREFIX");
+    if (prefix == nullptr || prefix[0] == '\0')
+        return;
+    std::string path = std::string(prefix) + std::to_string(botId_) + ".csv";
+    shotsCsv_ = std::fopen(path.c_str(), "w");
+    if (shotsCsv_ == nullptr) {
+        SDL_Log("[bot %d] PR-21: failed to open shots log at %s", botId_, path.c_str());
+        return;
+    }
+    std::fprintf(shotsCsv_,
+                 "wallTimeNs,shooterClientId,shotInputTick,"
+                 "originX,originY,originZ,"
+                 "dirX,dirY,dirZ,"
+                 "intendedTargetClientId,intendedTargetX,intendedTargetY,intendedTargetZ,intendedTargetDist\n");
+    std::fflush(shotsCsv_);
+    SDL_Log("[bot %d] PR-21: writing shot-intent log to %s", botId_, path.c_str());
+}
+
+void Bot::writeShotIntent(std::uint16_t shooterClientId,
+                          std::uint32_t shotInputTick,
+                          const glm::vec3& origin,
+                          const glm::vec3& direction,
+                          std::uint16_t intendedTargetClientId,
+                          const glm::vec3& intendedTargetPos,
+                          float intendedTargetDist)
+{
+    if (shotsCsv_ == nullptr)
+        return;
+    const Uint64 nowNs = SDL_GetTicksNS();
+    std::fprintf(shotsCsv_,
+                 "%llu,%u,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%.4f,%.4f,%.4f,%.4f\n",
+                 static_cast<unsigned long long>(nowNs),
+                 static_cast<unsigned>(shooterClientId),
+                 static_cast<unsigned>(shotInputTick),
+                 static_cast<double>(origin.x),
+                 static_cast<double>(origin.y),
+                 static_cast<double>(origin.z),
+                 static_cast<double>(direction.x),
+                 static_cast<double>(direction.y),
+                 static_cast<double>(direction.z),
+                 static_cast<unsigned>(intendedTargetClientId),
+                 static_cast<double>(intendedTargetPos.x),
+                 static_cast<double>(intendedTargetPos.y),
+                 static_cast<double>(intendedTargetPos.z),
+                 static_cast<double>(intendedTargetDist));
+    std::fflush(shotsCsv_);
+}
+
+void Bot::closeShotsLog() noexcept
+{
+    if (shotsCsv_ != nullptr) {
+        std::fclose(shotsCsv_);
+        shotsCsv_ = nullptr;
+    }
+}
+
 bool Bot::init(const std::string& host, Uint16 port, int botId)
 {
     botId_ = botId;
@@ -111,6 +175,8 @@ bool Bot::init(const std::string& host, Uint16 port, int botId)
     // (post-Client::init) so the bot's connection state is stable
     // before we start accumulating snapshot rows.
     openObservationLog();
+    // PR-21: open the per-bot shot-intent log if requested.
+    openShotsLog();
 
     return true;
 }
@@ -343,6 +409,108 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
             // Override the deterministic shooting cadence: pulse with a much
             // higher duty cycle so the lag-comp + bullet-VFX path runs hot.
             input_.shooting = uni01(rng) < 0.10f;
+
+            // PR-21: aim-at-closest-target.  When `GROUP2_BOT_AIM=1`, the
+            // bot replaces the random yaw/pitch sweep with a real aim
+            // vector toward the closest visible remote player's centre
+            // mass.  Combined with the existing 10 % shooting roll, this
+            // gives an order-of-magnitude better hit rate than random
+            // aim — necessary for the netsync framework's hit-reg
+            // analysis at varying simulated RTT to produce meaningful
+            // signal.  Toggle separately from `GROUP2_BOT_AI` so the
+            // existing load-test benchmarks see the same random-aim
+            // behaviour.
+            static const bool k_aimEnabled = []() {
+                const char* p = std::getenv("GROUP2_BOT_AIM");
+                return p != nullptr && p[0] != '\0' && p[0] != '0';
+            }();
+            if (k_aimEnabled) {
+                if (auto localEnt = client_.getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
+                    if (const auto* myPos = registry_.try_get<Position>(*localEnt)) {
+                        glm::vec3 closestPos{0.0f};
+                        float closestDist = 5000.0f;
+                        bool foundTarget = false;
+                        auto rview = registry_.view<Position, ClientId>();
+                        for (const auto e : rview) {
+                            if (e == *localEnt)
+                                continue;
+                            const auto& tpos = rview.get<Position>(e);
+                            const float d = glm::length(tpos.value - myPos->value);
+                            if (d < closestDist) {
+                                closestDist = d;
+                                closestPos = tpos.value;
+                                foundTarget = true;
+                            }
+                        }
+                        if (foundTarget) {
+                            // Aim at chest-ish height (offset up from
+                            // entity origin which is at the foot in
+                            // this codebase's convention).
+                            const glm::vec3 aimPoint = closestPos + glm::vec3{0.0f, 50.0f, 0.0f};
+                            const glm::vec3 eye =
+                                myPos->value + glm::vec3{0.0f, 75.0f, 0.0f}; // match client eye-offset
+                            const glm::vec3 to = aimPoint - eye;
+                            const float horiz = std::sqrt(to.x * to.x + to.z * to.z);
+                            input_.yaw = std::atan2(to.x, to.z);
+                            input_.pitch = -std::atan2(to.y, std::max(horiz, 0.001f));
+                        }
+                    }
+                }
+            }
+        }
+
+        // PR-21: log shot intent on the rising edge of input.shooting.
+        // Logged AFTER all aim/AI updates so the recorded yaw/pitch /
+        // origin reflect the values that actually go on the wire this
+        // tick.  Ordering matches the `(shooterClientId, shotInputTick)`
+        // join key used by the analyzer (server stamps the same tick on
+        // its side via `perf::shotlog::recordShotResolution`).
+        {
+            const bool wasShooting = prevShootingForLog_;
+            const bool nowShooting = input_.shooting;
+            prevShootingForLog_ = nowShooting;
+            if (nowShooting && !wasShooting && shotsCsv_ != nullptr) {
+                if (auto localEnt = client_.getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
+                    const auto* myCid = registry_.try_get<ClientId>(*localEnt);
+                    const auto* myPos = registry_.try_get<Position>(*localEnt);
+                    if (myCid != nullptr && myPos != nullptr) {
+                        const glm::vec3 origin = myPos->value + glm::vec3{0.0f, 75.0f, 0.0f};
+                        const float cp = std::cos(input_.pitch);
+                        const glm::vec3 dir{
+                            std::sin(input_.yaw) * cp, -std::sin(input_.pitch), std::cos(input_.yaw) * cp};
+
+                        // Intended target = closest other entity (mirror
+                        // of the aim-at-target search above).  Logged so
+                        // the analyzer can compare "who the bot meant to
+                        // hit" vs "who the server actually hit".
+                        std::uint16_t intendedCid = 0xFFFFu;
+                        glm::vec3 intendedPos{0.0f};
+                        float intendedDist = 0.0f;
+                        float closestDist = std::numeric_limits<float>::max();
+                        auto rview = registry_.view<Position, ClientId>();
+                        for (const auto e : rview) {
+                            if (e == *localEnt)
+                                continue;
+                            const auto& tpos = rview.get<Position>(e);
+                            const float d = glm::length(tpos.value - myPos->value);
+                            if (d < closestDist) {
+                                closestDist = d;
+                                intendedCid = static_cast<std::uint16_t>(rview.get<ClientId>(e).value);
+                                intendedPos = tpos.value;
+                                intendedDist = d;
+                            }
+                        }
+
+                        writeShotIntent(static_cast<std::uint16_t>(myCid->value),
+                                        input_.tick,
+                                        origin,
+                                        dir,
+                                        intendedCid,
+                                        intendedPos,
+                                        intendedDist);
+                    }
+                }
+            }
         }
 
         if (!client_.sendInputSnapshot(input_)) {
