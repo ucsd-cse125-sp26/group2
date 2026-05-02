@@ -538,9 +538,13 @@ def main() -> int:
         print(f"error: server_truth.csv is empty (no rows)", file=sys.stderr)
         return 1
 
-    botFiles = sorted(args.runDir.glob("bot_*.csv"))
+    # PR-22b: `bot_*.csv` matches both observation logs (bot_0.csv) AND
+    # shot-intent logs (bot_shots_0.csv).  Filter to numeric-suffix
+    # observation logs only — shot logs are loaded separately by
+    # `loadBotShots`.
+    botFiles = sorted(p for p in args.runDir.glob("bot_*.csv") if "shots" not in p.name)
     if not botFiles:
-        print(f"error: no bot_*.csv files in {args.runDir}", file=sys.stderr)
+        print(f"error: no bot observation csvs in {args.runDir}", file=sys.stderr)
         return 1
 
     # Aggregate desync values keyed by (observerBotId, observedClientId)

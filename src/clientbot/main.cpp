@@ -14,6 +14,9 @@
 /// + Registry; nothing else is shared.
 
 #include "Bot.hpp"
+#include "ecs/AssetCatalog.hpp"
+#include "ecs/physics/MapLoader.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "network/NetworkConfig.hpp"
 
 #include <SDL3/SDL.h>
@@ -241,6 +244,54 @@ int main(int argc, char* argv[])
     const Uint16 port = portOverride != 0 ? portOverride : cfg.serverNetwork.port;
 
     SDL_Log("[clientbot] launching %d bot(s) → %s:%u", numBots, host.c_str(), port);
+
+    // ── PR-23: load map collision once for all bots ──────────────────────
+    //
+    // Client-side prediction needs world geometry — `runMovement` +
+    // `runCollision` raycast against `physics::activeWorld()`.  This is
+    // a Meyer's-singleton, so loading once here populates it for every
+    // bot in the process.
+    //
+    // We mirror `Game::setup`'s settings (k_separatedCollisionMap=false,
+    // prototype mode using `map1.glb`) so the bot's prediction matches
+    // what a real client would compute.  See `client/game/Game.cpp:195`
+    // for the toggle's full doc — short version: prototype maps treat
+    // every mesh as both visual and collision; production maps tag
+    // collision-only nodes (this map doesn't).
+    //
+    // CRITICAL lifetime: `WorldGeometry` holds `std::span`s into the
+    // vectors inside `MapCollisionData`, NOT copies.  `setActiveWorld`
+    // stashes those spans verbatim in the singleton, so `mapCollision`
+    // MUST outlive every `physics::activeWorld()` access — which
+    // means it has to live for the whole process.  Hoist into `main`
+    // scope (not into a `{}` block) so it survives until process exit.
+    physics::MapCollisionData mapCollision;
+    {
+        const std::string mapPath = std::string(base ? base : "") + "assets/" + kMapAsset.filename;
+        physics::MapLoadOptions opts;
+        opts.scale = kMapAsset.loadScale;
+        opts.allMeshesAreCollision = true;
+        opts.guessShapesProcessed = true;
+        opts.addFloorPlane = false; // Map provides its own floor.
+        if (physics::loadMapCollision(mapPath, mapCollision, opts)) {
+            SDL_Log("[clientbot] map collision loaded: %zu planes, %zu boxes, %zu brushes, %zu cylinders, %zu spheres, "
+                    "%zu trimeshes",
+                    mapCollision.planes.size(),
+                    mapCollision.boxes.size(),
+                    mapCollision.brushes.size(),
+                    mapCollision.cylinders.size(),
+                    mapCollision.spheres.size(),
+                    mapCollision.triMeshes.size());
+        } else {
+            SDL_Log("[clientbot] WARNING: map collision load failed — prediction will use testWorld()");
+        }
+        const std::string assetsDir = std::string(base ? base : "") + "assets/";
+        for (const AssetDefinition& def : kPropAssets) {
+            physics::loadPropCollision(
+                assetsDir + def.filename, mapCollision, def.loadTranslation, def.loadScale, def.decomposeCollision);
+        }
+        physics::setActiveWorld(mapCollision.geometry());
+    }
 
     // Optional latency simulator hook for testing Phase 6 lag-comp under
     // bot-only load. Each bot applies `GROUP2_BOT_LATENCY_MS` ms of

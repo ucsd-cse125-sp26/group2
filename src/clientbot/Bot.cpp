@@ -6,7 +6,20 @@
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
+#include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Velocity.hpp"
+#include "ecs/physics/SweptCollision.hpp"
+#include "ecs/physics/WorldData.hpp"
+// PR-23: prediction + reconciliation systems shared with the real
+// client.  All four headers are header-only, so the only extra .cpp
+// links the bot picks up beyond pre-PR-23 are MovementSystem.cpp +
+// CollisionSystem.cpp + map loaders (wired in CMakeLists).
+#include "systems/InputSendSystem.hpp"
+#include "systems/PredictionSystem.hpp"
+#include "systems/ReconciliationSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -172,9 +185,50 @@ void Bot::closeShotsLog() noexcept
     }
 }
 
+// PR-23: register the `onLocalPlayerReady` callback that emplaces the
+// client-only components needed for prediction.  Mirrors
+// `Game::setup`'s identical block (`registry.emplace<LocalPlayer>(local)`
+// + InputSnapshot + PreviousPosition + PlayerSimState).  Called BEFORE
+// `client_.init()` so the callback is set when the first snapshot
+// containing the local player applies.
+//
+// What each component is for:
+//   * `LocalPlayer`     — tag used by `runMovement`'s view filter and
+//                         `Client::dispatchMessage`'s prev=pos exclude.
+//   * `InputSnapshot`   — replicated to the local player so
+//                         `runMovement` and `runInputSend` find it.
+//   * `PreviousPosition`— renderer would normally use this for
+//                         tick-rate interp; bot doesn't render, but
+//                         `runReconciliation` keeps it in sync as a
+//                         side-effect of `runPrediction`'s view.
+//   * `PlayerSimState`  — server-only component that the prediction
+//                         view uses as a filter.  Without it,
+//                         `runMovement` skips the local player on
+//                         the bot just like it does on remote
+//                         players in the real client.
+void Bot::setupLocalPlayerCallback()
+{
+    client_.onLocalPlayerReady([this](entt::entity local) {
+        registry_.emplace<LocalPlayer>(local);
+        registry_.emplace<InputSnapshot>(local);
+        // PR-23 (analog of Game.cpp:367): seed PreviousPosition from
+        // current Position so the per-tick prev=pos capture inside
+        // the runLoop has a starting value.
+        registry_.emplace_or_replace<PreviousPosition>(local, registry_.get<Position>(local).value);
+        registry_.emplace_or_replace<PlayerSimState>(local);
+        localPlayerReady_ = true;
+        SDL_Log("[bot %d] PR-23: local player ready (entity=%u) — prediction enabled",
+                botId_,
+                static_cast<unsigned>(local));
+    });
+}
+
 bool Bot::init(const std::string& host, Uint16 port, int botId)
 {
     botId_ = botId;
+    // PR-23: callback MUST be set before client_.init() so the first
+    // snapshot's localPlayerReadyFn fires correctly.
+    setupLocalPlayerCallback();
     if (!client_.init(host.c_str(), port)) {
         SDL_Log("[bot %d] connection failed", botId_);
         return false;
@@ -606,9 +660,63 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
             }
         }
 
-        if (!client_.sendInputSnapshot(input_)) {
-            SDL_Log("[bot %d] sendInputSnapshot failed; bailing", botId_);
-            break;
+        // ── PR-23: prediction + reconciliation (parity with real client) ──
+        //
+        // Pre-PR-23 the bot called `client_.sendInputSnapshot(input_)`
+        // directly and never advanced `Position` locally — its view of
+        // its own position lagged the server's by `RTT/2 + interpDelay`,
+        // which polluted the PR-22 ray-origin-desync metric.  This block
+        // now mirrors `Game.cpp::iterate`'s physics-while-loop:
+        //
+        //   1. Stamp this physics tick onto the local entity's
+        //      `InputSnapshot` component (same one `runMovement` and
+        //      `runInputSend` read), and push to the ring for replay.
+        //   2. Capture pos→prev so the renderer-style interpolation
+        //      term is consistent with the real client.
+        //   3. `runPrediction` advances Position+Velocity locally with
+        //      the same MovementSystem + CollisionSystem the server
+        //      runs, against the same world geometry (loaded once in
+        //      `main.cpp`).
+        //   4. After `client_.poll`, if a snapshot just rewrote
+        //      Position from the server's authoritative value, replay
+        //      stored inputs from `serverAckedClientTick + 1` through
+        //      `predictTick_` so the bot lands back at the predicted
+        //      "now" position (same as Game.cpp's reconcile path).
+        //
+        // We only do this once `localPlayerReady_` is true.  Before
+        // that, the bot's local entity doesn't yet have `LocalPlayer +
+        // InputSnapshot + PlayerSimState`, so the views are empty and
+        // the call would no-op anyway — but the explicit gate makes
+        // the intent obvious.  The bot's tick rate (`tickHz`) and the
+        // physics dt (`physicsDt`) are decoupled: each outer-loop
+        // iteration is one physics step from prediction's view, so
+        // running the bot at <128 Hz means prediction runs at <128 Hz
+        // too, which would diverge from the server.  We use the real
+        // client's physics dt unconditionally — same value as
+        // `Game::physicsDt`.
+        constexpr float physicsDt = 1.0f / 128.0f;
+        if (localPlayerReady_) {
+            // Mirror `input_` into the local entity's component so the
+            // shared systems (which iterate via views) see the latest
+            // AI-generated input.  Same one-tick offset semantics as
+            // `Game.cpp:1389` — input is sampled once per outer
+            // iteration, then stamped per physics tick.
+            registry_.view<InputSnapshot, LocalPlayer>().each([this](InputSnapshot& snap) {
+                snap = input_;
+                snap.tick = predictTick_;
+            });
+            inputRing_.push(predictTick_, input_);
+            registry_.view<LocalPlayer, Position, PreviousPosition>().each(
+                [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+            systems::runPrediction(registry_, physicsDt, physics::activeWorld());
+            systems::runInputSend(registry_, client_);
+        } else {
+            // Pre-localPlayerReady: send raw input directly so we still
+            // exchange PINGs and exercise the connection.
+            if (!client_.sendInputSnapshot(input_)) {
+                SDL_Log("[bot %d] sendInputSnapshot failed; bailing", botId_);
+                break;
+            }
         }
 
         // ── Drain inbound: snapshots, particle/kill events, PONG. ────────
@@ -635,8 +743,20 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
         // depending on server config) — much less noisy than
         // logging every tick which would just duplicate rows when
         // the snapshot stream lulls.
-        if (client_.consumeSnapshotApplied())
+        if (client_.consumeSnapshotApplied()) {
             writeObservationLog();
+            // PR-23: snapshot apply just rewrote Position to server's
+            // authoritative state at `serverAckedClientTick`.  Replay
+            // every input we've sent since then so we land back at the
+            // predicted state.  Identical to `Game.cpp:1428-1434`.
+            if (localPlayerReady_) {
+                const uint32_t ackedTick = client_.getServerAckedClientTick();
+                if (ackedTick != 0 && predictTick_ > ackedTick) {
+                    systems::runReconciliation(
+                        registry_, inputRing_, ackedTick, predictTick_, physicsDt, physics::activeWorld());
+                }
+            }
+        }
 
         // ── Pacing: hybrid sleep + spin to hit the next tick boundary. ──
         //

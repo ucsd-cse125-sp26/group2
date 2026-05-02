@@ -17,6 +17,9 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/Client.hpp"
+// PR-23: prediction parity with the real client.  Header-only, so just
+// pulling in InputRingBuffer is enough at the .hpp level.
+#include "systems/InputRingBuffer.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
@@ -101,6 +104,42 @@ private:
     /// runLoop. Lets the fleet aggregator skip bots that are mid-connect
     /// or whose RTT hasn't been measured yet.
     std::atomic<bool> ready_{false};
+
+    // ── PR-23: prediction + reconciliation (parity with real client) ────
+    //
+    // Client-side prediction lets the bot simulate its OWN movement
+    // locally each physics tick.  Pre-PR-23 the bot's `Position` only
+    // moved when a server snapshot applied, which meant the bot's view
+    // of its own position lagged the server's by `RTT/2 + interpDelay`.
+    // For lag-comp / hit-reg testing under simulated RTT that drift was
+    // a measurement artifact (not a real-client behaviour), polluting
+    // the PR-22 ray-origin-desync metric with self-position lag the
+    // real client doesn't have.
+    //
+    // The bot now mirrors `client/game/Game.cpp::iterate`:
+    //   * each physics tick, push (predictTick_, input_) into ring,
+    //     run `systems::runPrediction` on the bot's local entity
+    //   * after `client_.poll`, if a snapshot just applied, call
+    //     `systems::runReconciliation` from `serverAckedClientTick`
+    //     forward to `predictTick_`.
+    // Same code paths the real client runs — divergence between bot
+    // and real client is now data-only (different inputs), not
+    // architectural.
+    InputRingBuffer inputRing_;
+
+    /// @brief Set true once `localPlayerReadyFn` fires for this bot.
+    /// Gates the prediction loop so we don't try to runPrediction
+    /// before the bot has its `LocalPlayer` / `InputSnapshot` /
+    /// `PlayerSimState` components in the registry.
+    bool localPlayerReady_ = false;
+
+    /// @brief PR-23: set up the `onLocalPlayerReady` callback that
+    /// emplaces `LocalPlayer + InputSnapshot + PreviousPosition +
+    /// PlayerSimState` on the bot's local entity, mirroring
+    /// `Game::onLocalPlayerReady`.  Called from `init()` BEFORE
+    /// `client_.init()` so the callback is wired before the first
+    /// snapshot lands.
+    void setupLocalPlayerCallback();
 
     // ── PR-18: per-bot snapshot observation log ──────────────────────────
     //

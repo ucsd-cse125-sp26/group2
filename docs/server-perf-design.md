@@ -673,11 +673,8 @@ Notes:
 
 ### Forward work surfaced by PR-22 results
 
-1. **Client-side prediction in clientbot** — the high `ray-origin
-   desync` at RTT > 0 is partially the bot's own self-position drift,
-   not lag-comp. Adding the same Phase-5b prediction the real client
-   has would eliminate this and make the metric a clean lag-comp
-   measure.
+1. **Client-side prediction in clientbot** — *addressed by PR-23
+   below.*
 2. **Replicate `HitboxInstance` (or expose a capsule cache)** so the
    bot's local raycast is comparable to the server's. Until then,
    `onlyClientHit` is dominated by AABB-vs-capsule asymmetry, not
@@ -686,3 +683,101 @@ Notes:
    `GROUP2_BOT_LOSS_PERCENT`; we haven't run it. PR-15's per-fragment
    redundancy expects the headline numbers to barely move under 5 %
    loss; the framework can verify.
+
+### PR-23: clientbot prediction parity with the real client
+
+Pre-PR-23 the clientbot was deliberately lightweight — *"no window,
+no GPU, no animation, no physics — just network traffic"* per its
+CMake comment. That was correct for the original Phase-1/2 server-
+perf goals (synthesise N TCP clients per host) but wrong for the
+hit-reg testing the framework now does: bots' `Position` only moved
+when a server snapshot applied, so each bot's view of its OWN
+position lagged the server by `RTT/2 + interpDelay`. The PR-22
+ray-origin-desync metric was therefore polluted by self-position
+drift the real client doesn't have (the real client uses Phase-5b
+client-side prediction to advance its local Position immediately).
+
+PR-23 makes the bot extend the real client's behaviour: same map
+geometry loaded, same `runMovement + runCollision` per physics tick,
+same `runReconciliation` on snapshot apply, same `LocalPlayer +
+InputSnapshot + PreviousPosition + PlayerSimState` components on
+the local entity. Divergence between clientbot and real client is
+now data-only (different inputs — bot's AI, real client's keyboard)
+rather than architectural. Render / audio / animation are still
+absent (bot's job is to run many at once, not to render).
+
+CMake-wise this added `MovementSystem.cpp` + `CollisionSystem.cpp`
++ `MapLoader.cpp` + `VHACDImpl.cpp` + `ExplosionSystem.cpp` +
+`PlayerStatusSystem.cpp` to the clientbot target, plus the
+`assimp` and `vhacd` link deps the server / client already pulled.
+The map is loaded once per process (`MapCollisionData` lives in
+`main`'s scope, `setActiveWorld` stashes the spans pointing into it,
+so all bots share the same `physics::activeWorld()` singleton).
+
+#### PR-23 RTT sweep results (8 bots, 20 s, GROUP2_BOT_AIM=1, cl_interp default)
+
+The PR-22 sweep is repeated below with prediction enabled.  Headline:
+`ray-origin desync` collapses across the entire RTT range — the bot's
+view of its own position now matches the server's after the standard
+prediction-reconcile loop, so the metric is now a clean lag-comp
+measurement rather than a polluted blend of lag-comp + self-position
+lag.
+
+| RTT (ms) | PR-22 hit rate | PR-23 hit rate | PR-22 ray-origin desync mean | PR-23 ray-origin desync mean (p50) | PR-22 intended→hit mean | PR-23 intended→hit mean |
+|---------:|:--------------:|:--------------:|:----------------------------:|:----------------------------------:|:-----------------------:|:-----------------------:|
+| 0    | 10.0 % | **14.5 %** | 3.07 u  | **1.77 u (p50 0.00)** | 26.57 u | **4.22 u**  |
+| 30   | 8.1 %  | **11.5 %** | 13.17 u | **6.64 u (p50 0.00)** | 29.27 u | **6.04 u**  |
+| 100  | 3.4 %  | **11.7 %** | 39.33 u | **6.60 u (p50 0.00)** | 37.87 u | **6.15 u**  |
+| 200  | 3.0 %  | **8.3 %**  | 65.26 u | **11.31 u (p50 0.33)** | 67.43 u | **10.11 u** |
+
+Notes:
+
+- **`ray-origin desync` p50 ≈ 0.00 at every RTT.** The bot's
+  predicted position now matches the server's authoritative position
+  for the *median* shot, regardless of RTT. The mean is dominated by
+  transient outliers — single ~1900 u spikes during the connect
+  window before the bot has its first server-acked tick. The `p99`
+  of 0.00 / 0.73 / 84.99 / 77.22 across the sweep tells the story:
+  prediction is bit-exact for almost every shot, with rare outliers
+  during respawn / disconnect transitions.
+- **`intended → hit-point` distance drops 6×** at every RTT (~26-67 u
+  pre-PR-23 → ~4-10 u post-PR-23). The bot's aim ray now actually
+  starts from where the server thinks the shooter is, so the geometry
+  the analyzer reports is the geometry that mattered to lag-comp.
+- **Hit rate jumps 2-3× at high RTT** (3.0 % → 8.3 % at RTT=200).
+  This isn't lag-comp suddenly working better — it's the bot now
+  actually aiming where it thinks it's aiming. Pre-PR-23, the bot's
+  ray fired from 65 u behind where it should, so even a "correct"
+  aim missed.
+- **Lag-comp drift** distribution narrows slightly (this metric is
+  about REMOTE players' rewound vs current pos on the server, which
+  PR-23 doesn't touch directly — the small change is from the bot
+  fleet now moving like real clients, so the targets the framework
+  observes have realistic motion patterns).
+- **`bothHit same-target`** is no longer monotonically decreasing
+  with RTT — at RTT=100 it actually rises 30.8 → 40.8 % vs PR-22.
+  Pre-PR-23 the bot's local AABB was raycasting from a position
+  ~40 u behind server-truth, polluting the comparison; with the
+  origins now aligned, the comparison is honest.
+
+#### What the framework now measures honestly
+
+With PR-23 closing the bot/client behavior gap, the four headline
+numbers measure exactly what their names claim:
+
+- **`ray-origin desync`** — server's view of shooter origin minus
+  bot's view. Captures Phase-5b prediction quality + reconciliation
+  correctness. Should be ≈ 0 absent prediction bugs.
+- **`lag-comp drift`** — distance the server's rewinder moved the
+  hit target backwards in time. Grows linearly with RTT × target
+  velocity. Captures the lag-comp system's job.
+- **`bothHit same-target`** — when both bot's local AABB and
+  server's capsule raycast both hit, do they agree on *who*?
+  Captures whether the bot's view of remote-player positions
+  (interpolated, render-delayed) lines up with the server's
+  rewound capsule positions.
+- **`hit rate`** — pure shot-resolution outcome. Bot AI quality +
+  capsule vs AABB asymmetry + actual lag-comp accuracy.
+
+Future regressions in any one of these four can now be diagnosed
+without false positives from the others.
