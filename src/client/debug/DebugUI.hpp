@@ -198,6 +198,12 @@ public:
     /// 0 means "show all in the visible window".
     int shotDebugSelectIdx = 0;
 
+    /// @brief Which side(s) to render in the 3D overlay.  Maps to a
+    /// dropdown in the UI panel: 0=Both, 1=Client only, 2=Server only.
+    /// The underlying data is always captured for both sides; this
+    /// only filters the render.
+    int shotDebugViewMode = 0;
+
     /// @brief Append a fire-time snapshot the local client just took.
     /// Pairs with any matching server view (by `shotInputTick`).
     void pushClientShot(const net::shotdebug::ShotDebugCapture& cap);

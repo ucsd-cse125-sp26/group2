@@ -1241,57 +1241,6 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry);
         systems::runWeaponKeys(registry);
 
-        // PR-20: capture the local player's view at fire-time for the
-        // CSGO sv_showimpacts visualizer.  Detects the false→true
-        // transition on `input.shooting` (rising edge = "trigger
-        // pull"), grabs the eye + look ray, and snapshots every
-        // remote player's CURRENT (post-anim, post-interpolation)
-        // hitbox capsules.  Pushes one row into DebugUI's ring; the
-        // companion server-side SHOT_DEBUG_REPORT will pair with it
-        // by `shotInputTick`.  Skipped when the local player isn't
-        // alive yet (no entity with LocalPlayer + InputSnapshot +
-        // CollisionShape).
-        registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
-            [&](entt::entity localEntity, const InputSnapshot& snap, const Position& pos, const CollisionShape& shape) {
-                const bool wasShooting = prevShootingForDebug_;
-                const bool nowShooting = snap.shooting;
-                prevShootingForDebug_ = nowShooting;
-                if (!nowShooting || wasShooting)
-                    return; // not a rising edge
-
-                net::shotdebug::ShotDebugCapture cap;
-                cap.shotInputTick = clientPredictTick;
-                cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
-                const float cp = std::cos(snap.pitch);
-                cap.direction =
-                    glm::normalize(glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
-                cap.range = physics::k_hitscanRange;
-                cap.hitTargetClientId = net::shotdebug::k_missClientId;
-                cap.hitRegion = 0;
-                cap.hitPoint = cap.origin + cap.direction * cap.range;
-
-                // Snapshot every visible remote player's CURRENT
-                // capsules — this is what the local player SAW on
-                // their screen at the moment they pulled the trigger.
-                // The server's reply will carry the rewound
-                // historical capsules, and the UI overlays them.
-                auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
-                cap.targets.reserve(remoteView.size_hint());
-                for (const auto e : remoteView) {
-                    if (e == localEntity)
-                        continue;
-                    const auto& hb = remoteView.get<HitboxInstance>(e);
-                    if (hb.capsules.empty())
-                        continue;
-                    const auto& cid = remoteView.get<ClientId>(e);
-                    net::shotdebug::ShotDebugCapture::Target tgt;
-                    tgt.clientId = static_cast<std::uint16_t>(cid.value);
-                    tgt.capsules = hb.capsules;
-                    cap.targets.push_back(std::move(tgt));
-                }
-                debugUI.pushClientShot(cap);
-            });
-
         // Apply scroll-wheel weapon switch, constrained to primary/secondary.
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
@@ -1335,6 +1284,84 @@ SDL_AppResult Game::iterate()
         ++clientPredictTick;
         registry.view<InputSnapshot, LocalPlayer>().each(
             [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+
+        // PR-20.1 (off-by-one fix): capture happens AFTER the tick
+        // increment + snap.tick stamp above, so cap.shotInputTick
+        // matches what the server will see in the INPUT packet.
+        // Pre-PR-20.1 the capture used `clientPredictTick` BEFORE the
+        // increment, producing a one-tick mismatch between client and
+        // server entries (the UI showed them as two separate ring
+        // slots for the same shot).
+        //
+        // PR-20.2: also raycast against visible enemy capsules locally
+        // (`physics::resolveHitscanHitbox`) so the blue tracer
+        // terminates at the enemy hitbox the client SAW rather than
+        // going to full hitscan range.  When the server's red ray
+        // hits the same capsule (and rewind is correct), the two
+        // endpoints overlap.
+        bool firePulledThisFrame = false;
+        registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+            const bool wasShooting = prevShootingForDebug_;
+            const bool nowShooting = snap.shooting;
+            prevShootingForDebug_ = nowShooting;
+            if (nowShooting && !wasShooting)
+                firePulledThisFrame = true;
+        });
+        if (firePulledThisFrame) {
+            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
+                [&](entt::entity localEntity,
+                    const InputSnapshot& snap,
+                    const Position& pos,
+                    const CollisionShape& shape) {
+                    net::shotdebug::ShotDebugCapture cap;
+                    cap.shotInputTick = snap.tick;
+                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float cp = std::cos(snap.pitch);
+                    cap.direction = glm::normalize(
+                        glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
+                    cap.range = physics::k_hitscanRange;
+
+                    // Local raycast against capsules + world.  Same
+                    // `resolveHitscanHitbox` the server uses, but here
+                    // operating on the client's CURRENT (post-anim,
+                    // post-PR-19-interpolation) capsule positions —
+                    // i.e. exactly what the player saw on screen.
+                    const physics::HitboxHit localHit =
+                        physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
+                    if (localHit.entity != entt::null && registry.valid(localHit.entity)) {
+                        cap.hitTargetClientId = net::shotdebug::k_missClientId;
+                        cap.hitRegion = static_cast<std::uint8_t>(localHit.region);
+                        if (const auto* tcid = registry.try_get<ClientId>(localHit.entity)) {
+                            cap.hitTargetClientId = static_cast<std::uint16_t>(tcid->value);
+                        }
+                        cap.hitPoint = localHit.point;
+                    } else {
+                        cap.hitTargetClientId = net::shotdebug::k_missClientId;
+                        cap.hitRegion = 0;
+                        cap.hitPoint = cap.origin + cap.direction * cap.range;
+                    }
+
+                    // Snapshot every visible remote player's CURRENT
+                    // capsules.  The server's reply will carry the
+                    // historical (rewound) capsules; the UI overlays
+                    // them so the user can SEE the rewind delta.
+                    auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
+                    cap.targets.reserve(remoteView.size_hint());
+                    for (const auto e : remoteView) {
+                        if (e == localEntity)
+                            continue;
+                        const auto& hb = remoteView.get<HitboxInstance>(e);
+                        if (hb.capsules.empty())
+                            continue;
+                        const auto& cid = remoteView.get<ClientId>(e);
+                        net::shotdebug::ShotDebugCapture::Target tgt;
+                        tgt.clientId = static_cast<std::uint16_t>(cid.value);
+                        tgt.capsules = hb.capsules;
+                        cap.targets.push_back(std::move(tgt));
+                    }
+                    debugUI.pushClientShot(cap);
+                });
+        }
 
         // Send the redundant input batch (last k_inputRedundancy ticks).
         systems::runInputSend(registry, client);
