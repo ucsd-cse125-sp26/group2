@@ -1225,6 +1225,9 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.cpp"
     # PR-3 (server-perf): parallel-STL fan-out helper.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Parallel.hpp"
+    # PR-18b (netsync): server-side shot-resolution log.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/ShotLog.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/ShotLog.cpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp

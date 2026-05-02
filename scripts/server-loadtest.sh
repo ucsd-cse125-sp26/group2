@@ -123,10 +123,13 @@ sed -E "s/(^port = )[0-9]+/\1${SERVER_PORT}/" "${ORIG_CONFIG_BACKUP}" > "${BUILD
 # `GROUP2_SERVER_TRUTH_CSV` env var is honored by ServerGame::init.
 # Set NETSYNC=1 to enable this whole capture+analyze flow.
 SERVER_TRUTH_CSV="${RUN_DIR}/server_truth.csv"
+# PR-18b: optional shot-resolution log.
+SERVER_SHOTS_CSV="${RUN_DIR}/server_shots.csv"
 
 GROUP2_SERVER_PROFILE=1 \
 GROUP2_SERVER_PROFILE_CSV="${SERVER_CSV}" \
 GROUP2_SERVER_TRUTH_CSV="${NETSYNC:+${SERVER_TRUTH_CSV}}" \
+GROUP2_SERVER_SHOTS_CSV="${NETSYNC:+${SERVER_SHOTS_CSV}}" \
 setsid bash -c "cd '${BUILD_DIR}' && exec ./server > '${SERVER_LOG}' 2>&1" &
 SERVER_PID=$!
 

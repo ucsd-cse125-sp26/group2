@@ -5,6 +5,7 @@
 
 #include "PlayerStatusSystem.hpp"
 #include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
@@ -17,6 +18,18 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/LagCompensation.hpp"
+
+// PR-18b: server-side shot-resolution log.  Server-only — the
+// client TU compiles this same file but doesn't have `perf/ShotLog`
+// on its include path, so we conditionally include and stub the
+// call when missing.  Same `__has_include` pattern as
+// RegistrySerialization.cpp's parallel-STL hook.
+#if __has_include("perf/ShotLog.hpp")
+#include "perf/ShotLog.hpp"
+#define GROUP2_HAS_SHOTLOG 1
+#else
+#define GROUP2_HAS_SHOTLOG 0
+#endif
 
 #include <SDL3/SDL_log.h>
 
@@ -137,6 +150,35 @@ inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
     return eye + right * 15.0f - up * 8.0f + direction * 5.0f;
 }
 
+// PR-18b: log a single hitscan shot's resolution to the optional
+// server-side shot-resolution CSV.  Reads shooter's ClientId out of
+// the registry (the server stamps one on every replicated player at
+// connect-time).  Hit target's ClientId is resolved from `hit.entity`
+// or set to `k_missClientId` for misses.  No-op on client TUs (the
+// `#if GROUP2_HAS_SHOTLOG` guard collapses to a stubbed body).
+inline void
+logShot(Registry& registry, entt::entity shooter, std::uint32_t shotInputTick, const physics::HitboxHit& hit)
+{
+#if GROUP2_HAS_SHOTLOG
+    std::uint16_t shooterCid = 0;
+    if (const auto* sid = registry.try_get<ClientId>(shooter))
+        shooterCid = static_cast<std::uint16_t>(sid->value);
+
+    std::uint16_t hitCid = group2::perf::shotlog::k_missClientId;
+    if (hit.entity != entt::null && registry.valid(hit.entity)) {
+        if (const auto* tid = registry.try_get<ClientId>(hit.entity))
+            hitCid = static_cast<std::uint16_t>(tid->value);
+    }
+    group2::perf::shotlog::recordShotResolution(
+        shooterCid, shotInputTick, hitCid, hit.point.x, hit.point.y, hit.point.z, static_cast<int>(hit.region));
+#else
+    (void)registry;
+    (void)shooter;
+    (void)shotInputTick;
+    (void)hit;
+#endif
+}
+
 /// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
 ///
 /// Handles three weapon archetypes:
@@ -205,6 +247,10 @@ inline void handleFire(Registry& registry,
         const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
 
+        // PR-18b: log to server-side shot-resolution CSV (no-op when
+        // env unset).  Beam path: every active-fire tick records.
+        logShot(registry, shooter, input.tick, hit);
+
         // Apply DPS-based damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
@@ -251,6 +297,10 @@ inline void handleFire(Registry& registry,
         // PR-5: ray-filtered rewind, see beam path.
         const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+
+        // PR-18b: log to server-side shot-resolution CSV.  Charge
+        // path: one log row per release-fire.
+        logShot(registry, shooter, input.tick, hit);
 
         // Snapshot armor before damage for shield-break detection.
         float chargeArmorBefore = 0.f;
@@ -332,6 +382,10 @@ inline void handleFire(Registry& registry,
         // PR-5: ray-filtered rewind.
         const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+
+        // PR-18b: log to server-side shot-resolution CSV.  Discrete
+        // hitscan path: one log row per click-fire.
+        logShot(registry, shooter, input.tick, hit);
 
         // Snapshot armor before damage for shield-break detection.
         float armorBefore = 0.f;

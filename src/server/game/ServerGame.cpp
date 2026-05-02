@@ -34,6 +34,7 @@
 #include "network/ShotEvent.hpp"
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
+#include "perf/ShotLog.hpp"
 #include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
@@ -122,6 +123,12 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
 
     // PR-18: open the server-side ground-truth log if requested.
     openGroundTruthLog();
+    // PR-18b: open the server-side shot-resolution log if requested.
+    // Implemented as a free function in `perf::shotlog` rather than a
+    // ServerGame member because WeaponSystem.cpp (which calls it) is
+    // shared between server and client TUs and shouldn't depend on
+    // server-only types.
+    ::group2::perf::shotlog::openIfRequested();
 
     return true;
 }
@@ -204,6 +211,7 @@ void ServerGame::shutdown()
     running = false;
     server.shutdown();
     closeGroundTruthLog();
+    ::group2::perf::shotlog::close();
 }
 
 // ── PR-18: server-side ground-truth log ─────────────────────────────────

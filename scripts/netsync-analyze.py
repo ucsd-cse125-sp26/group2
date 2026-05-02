@@ -124,6 +124,83 @@ def percentile(values: list[float], q: float) -> float:
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+def loadServerShots(path: Path) -> list[dict]:
+    """
+    Load server-side shot-resolution rows.  Returns a list of dicts so
+    the caller can group/filter however it likes.  Schema:
+      wallTimeNs, shooterClientId, shotInputTick,
+      hitClientId, hitX, hitY, hitZ, hitRegion
+    """
+    rows: list[dict] = []
+    with path.open() as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Skip truncated final rows — common when SIGINT hits the
+            # server mid-fprintf during the loadtest harness teardown.
+            # Any cell being None means csv.DictReader saw fewer
+            # fields than the header.
+            if any(v is None for v in row.values()):
+                continue
+            try:
+                rows.append(
+                    {
+                        "wallTimeNs": int(row["wallTimeNs"]),
+                        "shooterClientId": int(row["shooterClientId"]),
+                        "shotInputTick": int(row["shotInputTick"]),
+                        "hitClientId": int(row["hitClientId"]),
+                        "hitX": float(row["hitX"]),
+                        "hitY": float(row["hitY"]),
+                        "hitZ": float(row["hitZ"]),
+                        "hitRegion": int(row["hitRegion"]),
+                    }
+                )
+            except ValueError:
+                # Malformed numeric cell — skip silently rather than
+                # abort the whole report.
+                continue
+    return rows
+
+
+def reportShots(rows: list[dict]) -> None:
+    """
+    Hit-rate report keyed off the server's authoritative shot log.
+    A "hit" is any non-`k_missClientId` (= 65535) hitClientId.
+    """
+    if not rows:
+        print("no shots logged")
+        return
+    missCid = 0xFFFF
+    total = len(rows)
+    hits = sum(1 for r in rows if r["hitClientId"] != missCid)
+    misses = total - hits
+    hitRate = hits / total if total > 0 else 0.0
+
+    perShooter: dict[int, list[dict]] = defaultdict(list)
+    for r in rows:
+        perShooter[r["shooterClientId"]].append(r)
+
+    print(f"PR-18b shot-resolution log:")
+    print(f"  total shots resolved:   {total}")
+    print(f"  hits:                   {hits}")
+    print(f"  misses:                 {misses}")
+    print(f"  global hit rate:        {hitRate*100:.1f} %")
+    print(f"  shooting clients:       {len(perShooter)}")
+
+    perRegionCount: dict[int, int] = defaultdict(int)
+    for r in rows:
+        if r["hitClientId"] != missCid:
+            perRegionCount[r["hitRegion"]] += 1
+    if perRegionCount:
+        print(f"  hit-region distribution:")
+        # Region IDs match `physics::HitboxRegion` enum.  We don't import
+        # the enum here; numeric IDs are sufficient for regression tests
+        # and the user can grep the C++ side if a name lookup is needed.
+        for region, count in sorted(perRegionCount.items()):
+            pct = count * 100.0 / hits if hits > 0 else 0.0
+            print(f"    region {region}: {count} ({pct:.1f}% of hits)")
+    print()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runDir", type=Path, help="directory containing server_truth.csv + bot_*.csv")
@@ -134,6 +211,14 @@ def main() -> int:
         help="show top-N (observer, observed) pairs by mean desync (default 5)",
     )
     args = parser.parse_args()
+
+    # PR-18b: report shot-resolution stats first when the file is
+    # present.  Hit-rate is the headline metric for hitreg-under-loss
+    # regression tests and is independent of the desync analysis
+    # below.  Both blocks render even if one input is missing.
+    shotsPath = args.runDir / "server_shots.csv"
+    if shotsPath.exists():
+        reportShots(loadServerShots(shotsPath))
 
     truthPath = args.runDir / "server_truth.csv"
     if not truthPath.exists():
