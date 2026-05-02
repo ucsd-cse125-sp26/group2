@@ -391,10 +391,18 @@ void Client::applyInterpolatedTransforms(Registry& registry)
     // that function for the LocalPlayer exclude).  Sample each buffer
     // at the shared render-time and overwrite Position + yaw in place.
     //
-    // Each sample() call is O(buffer count) ≤ 8 — branch-light linear
-    // scan.  At 100 entities × 60 FPS = 6 k samples/s server-wide,
-    // negligible cost.
-    auto view = registry.view<Position, InterpolationBuffer>();
+    // PR-20.7 (defensive): explicit `exclude<LocalPlayer>` here even
+    // though `recordInterpolationSamples` already filters local out.
+    // Belt-and-suspenders for the corner case where the local player
+    // somehow ended up with an InterpolationBuffer (server-side
+    // entity re-creation across respawn, packet ordering during the
+    // ASSIGN_CLIENT_ID → first-snapshot transition, etc.) — without
+    // this exclude the local player's `pos.value` would get
+    // overwritten with a 16 ms-stale interpolated value every frame,
+    // visibly fighting client-side prediction.  The user reported
+    // movement jitter at 30 ms simulated RTT; this guards against
+    // that path even if the original sample-side filter slipped.
+    auto view = registry.view<Position, InterpolationBuffer>(entt::exclude<LocalPlayer>);
     for (const auto e : view) {
         auto& pos = view.get<Position>(e);
         // Yaw fallback comes from the entity's own InputSnapshot if

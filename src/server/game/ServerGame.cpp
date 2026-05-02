@@ -661,18 +661,40 @@ void ServerGame::detachServerAnimator(entt::entity player)
 
 void ServerGame::updateLagCompTargets()
 {
-    // PR-12: server-side cap on TOTAL rewind depth (RTT/2 + interp).
-    // Pre-PR-12 this was 25 ticks (~195 ms) covering RTT/2 only.
-    // After PR-11 added a client render delay, the lag-comp formula
-    // grows by `interpDelaySnapshots × snapshotEveryNTicks`, which at
-    // the worst-case (8 snapshots × 4 ticks/snapshot @ 32 Hz) adds
-    // 32 ticks (~250 ms).  Realistic values:
-    //   - Default cl_interp = 2 snapshots → 8 ticks (62.5 ms @ 32 Hz)
-    //                                     → 2 ticks (15.6 ms @ 128 Hz, post-PR-13)
-    //   - High-ping (200 ms RTT) shooter → 25 ticks RTT/2
-    //   - Worst combined: 25 + 32 = 57 ticks (~445 ms)
-    // We round up to 64 ticks (500 ms) for headroom.  HitboxHistory
-    // capacity (also bumped to 64 in PR-12) covers the same window.
+    // PR-20.7 (root-cause fix): rewind = RTT + cl_interp, NOT
+    // RTT/2 + cl_interp.
+    //
+    // Pre-PR-20.7 we used the Source-engine formula `RTT/2 + interp`,
+    // which is correct ONLY when the client predicts other players
+    // forward to its estimate of server-now (so the client renders
+    // enemies at `server_now − cl_interp`).  Our client does not do
+    // that prediction — it renders at `most_recent_snapshot_apply −
+    // cl_interp`.  The most-recent snapshot was generated at
+    // `server_now − inbound_RTT/2`, so our client actually renders
+    // enemies at `server_now − RTT/2 − cl_interp`.
+    //
+    // Concrete derivation (T = client clock time of fire, sync'd to
+    // server clock):
+    //   client renders enemy at server time   T − RTT/2 − cl_interp
+    //   server processes input at server time T + RTT/2  (outbound)
+    //   server should rewind to exactly       T − RTT/2 − cl_interp
+    //   rewind amount = (T + RTT/2) − (T − RTT/2 − cl_interp)
+    //                 = RTT + cl_interp
+    //
+    // Symptom of the under-rewind at 100 ms simulated RTT: red
+    // (server-rewound) capsule was ~50 ms (i.e. RTT/2) AHEAD of blue
+    // (client-rendered) capsule in the shot-debug visualizer.  At
+    // 400 u/s enemy speed that's ~20 units of visible separation —
+    // exactly what the user reported.  Bumping the rewind to
+    // `rttTicks + interpDelayTicks` collapses that gap to
+    // sub-tick / quantization noise.
+    //
+    // Cap on total rewind depth.  Worst case at the limits:
+    //   RTT 200 ms = 25.6 ticks  (PR-12 simulator cap)
+    //   interp 8 snapshots × 1 tick @ 128 Hz = 8 ticks
+    //   total = ~34 ticks (~265 ms).
+    // 64 ticks (500 ms) gives plenty of headroom.  HitboxHistory
+    // capacity is also 64; both cap and history match.
     static constexpr uint32_t k_maxLagCompTicks = 64;
 
     // PR-2b + PR-12: snapshot every client's net state (RTT + interp
@@ -708,23 +730,24 @@ void ServerGame::updateLagCompTargets()
         const auto netIt = netById.find(clientId);
         const uint16_t rttMs = (netIt != netById.end()) ? netIt->second.rttMs : 0;
         const uint8_t interpDelaySnapshots = (netIt != netById.end()) ? netIt->second.interpDelaySnapshots : 0;
-        // Half-RTT in ticks. Round-to-nearest by adding half a tick
-        // before integer divide. (rttMs / 2 / 1000 * tickRateHz)
-        // reordered to keep the integer-only arithmetic exact at the
-        // cost of one extra add: rttHalfTicks = (rttMs * Hz + 1000) /
-        // 2000.
-        const uint32_t rttHalfTicks =
-            (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 1000u) / 2000u;
+        // PR-20.7: full-RTT (NOT half-RTT) in ticks.  Round-to-nearest
+        // via integer-only `(rttMs * Hz + 500) / 1000`.  See the long
+        // header comment on this function for the derivation; in
+        // short, our client renders remote players at
+        // `most_recent_snapshot_apply − cl_interp` rather than
+        // predicting them forward to estimated server-now, so the
+        // rewind has to absorb both the inbound and outbound legs of
+        // the RTT — not just the outbound half.
+        const uint32_t rttTicks = (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 500u) / 1000u;
 
         // PR-12: client render-delay term.  The client renders remote
-        // entities at `now − interpDelaySnapshots × snapshotInterval`,
-        // so when they fire, their crosshair is over the target as
-        // the target appeared `interpDelayTicks` server ticks ago.
-        // The server must rewind by RTT/2 + this term to put the
-        // hitbox state where the client SAW it.
+        // entities at `most_recent_apply − interpDelaySnapshots ×
+        // snapshotInterval`; the rewind subtracts this on top of the
+        // full-RTT term so the server lands on exactly the historical
+        // capsule state the client SAW on screen at fire time.
         const uint32_t interpDelayTicks = static_cast<uint32_t>(interpDelaySnapshots) * snapshotEveryNTicksLocal;
 
-        const uint32_t lagTicks = std::min<uint32_t>(rttHalfTicks + interpDelayTicks, k_maxLagCompTicks);
+        const uint32_t lagTicks = std::min<uint32_t>(rttTicks + interpDelayTicks, k_maxLagCompTicks);
         const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
                                         ? 0u // explicit "no rewind" sentinel
                                         : (currentServerTick - lagTicks);
