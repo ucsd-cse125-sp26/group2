@@ -45,7 +45,14 @@ struct InterpolatedTransform
     bool sprinting = false;       ///< PR-28.
     bool crouching = false;       ///< PR-28.
 
-    bool fromBuffer = false;      ///< True if a real lerp happened; false on fallback.
+    /// @brief PR-29: server-authoritative animation state at the render
+    /// tick.  Per-slot timeRatio is LERPed between bracketing samples
+    /// when both share the same `clipIdRaw`; otherwise snaps to older
+    /// (clip transitions are discrete state).  Caller hands this to
+    /// `CharacterAnimator::renderFromServer(...)`.
+    AnimSnapshot anim{};
+
+    bool fromBuffer = false; ///< True if a real lerp happened; false on fallback.
 };
 
 /// @brief PR-28: full sample payload.  `appendSample` takes one of these
@@ -61,6 +68,11 @@ struct SampleInputs
     bool grounded = false;
     bool sprinting = false;
     bool crouching = false;
+
+    /// @brief PR-29: server's animation state at this snapshot tick.
+    /// Sourced from the entity's `AnimSnapshot` component (replicated
+    /// in the Synced tuple).
+    AnimSnapshot anim{};
 };
 
 /// @brief Append a snapshot sample at @p captureNs into the entity's

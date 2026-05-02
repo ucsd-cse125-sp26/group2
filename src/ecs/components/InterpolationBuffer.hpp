@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "AnimSnapshot.hpp"
+
 #include <SDL3/SDL_stdinc.h>
 
 #include <array>
@@ -69,6 +71,15 @@ struct InterpolationBuffer
         bool grounded = false;        ///< PR-28.
         bool sprinting = false;       ///< PR-28.
         bool crouching = false;       ///< PR-28.
+
+        /// @brief PR-29: server-authoritative animation state at this
+        /// sample's tick.  Replicated via the Synced tuple, captured
+        /// here per-snapshot so the renderer can render the body's
+        /// interp-delayed pose with `CharacterAnimator::
+        /// renderFromServer(buffered.anim, …)` instead of letting the
+        /// client's animator free-run and accumulate timeRatio drift
+        /// against the server's authoritative animator.
+        AnimSnapshot anim{};
     };
 
     std::array<Sample, k_capacity> ring{};

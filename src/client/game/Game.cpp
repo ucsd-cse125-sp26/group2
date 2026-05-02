@@ -1834,8 +1834,30 @@ SDL_AppResult Game::iterate()
             workerPool_->parallelFor(static_cast<int>(candidates.size()), [&](int begin, int end) {
                 for (int i = begin; i < end; ++i) {
                     auto& c = candidates[static_cast<size_t>(i)];
-                    if (c.sampleThisFrame)
-                        c.ac->animator->update(c.ai, k_animationTick);
+                    if (c.sampleThisFrame) {
+                        // PR-29: REMOTE players render at server's
+                        // authoritative animation state (replicated via
+                        // the Synced tuple, interp-delayed to body-render-
+                        // time by `applyInterpolatedTransforms`'s
+                        // `AnimSnapshot` writeback above).  LOCAL player
+                        // continues to use `update()` — its prediction-
+                        // driven state machine is authoritative on the
+                        // client side.  Eliminates the ~0.4-median
+                        // anim-state drift PR-27a's telemetry caught:
+                        // server runs animator at 128 Hz, client at
+                        // 30 Hz; same total rate but per-clip start-
+                        // time offsets persisted for the lifetime of
+                        // each clip.
+                        if (c.isLocal) {
+                            c.ac->animator->update(c.ai, k_animationTick);
+                        } else {
+                            const auto* serverAnim = registry.try_get<AnimSnapshot>(c.entity);
+                            if (serverAnim != nullptr)
+                                c.ac->animator->renderFromServer(*serverAnim, c.ai);
+                            else
+                                c.ac->animator->update(c.ai, k_animationTick);
+                        }
+                    }
                     if (c.drawThisFrame && numJoints > 0) {
                         Renderer::SkinnedInstance inst{};
                         inst.worldTransform = c.worldTransform;

@@ -3,6 +3,7 @@
 
 #include "RegistrySerialization.hpp"
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
@@ -120,6 +121,17 @@ namespace registry_serialization
 // of Phase 2: the per-player on-the-wire share of the registry payload
 // drops from ~280 B to ~64 B (≈4× reduction) before any other deltas /
 // quantization land in Phase 4.
+// PR-29: AnimSnapshot is in the synced set so the client can render
+// remote players' animation state at server-authoritative `timeRatio`,
+// eliminating the residual ~0.4-median anim-state drift PR-27a's
+// telemetry caught (server animator at 128 Hz, client at 30 Hz —
+// they advanced at the same total rate but the per-clip start-time
+// offset persisted for the lifetime of each clip).  Wire cost:
+// `5 × (1 + 4 + 4) = 45 B / player / snapshot`, ~46 KB/s at 16 players
+// × 128 Hz before delta encoding.  In practice timeRatio changes
+// every tick but `clipIdRaw + weight` are stable, so PR-10's RLE
+// delta encoder compresses the steady-state contribution to roughly
+// the timeRatio bytes (~20 B / player / tick) → ~20 KB/s post-delta.
 using Synced = std::tuple<entt::entity,
                           Position,
                           Velocity,
@@ -133,7 +145,8 @@ using Synced = std::tuple<entt::entity,
                           ClientId,
                           DeathInfo,
                           RespawnTimer,
-                          WeaponSpawner>;
+                          WeaponSpawner,
+                          AnimSnapshot>;
 
 // ── PR-10: snapshot delta encoding ──────────────────────────────────────
 

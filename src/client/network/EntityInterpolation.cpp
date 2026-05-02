@@ -27,6 +27,7 @@ inline void writeSample(InterpolationBuffer::Sample& slot, Uint64 captureNs, con
     slot.grounded = in.grounded;
     slot.sprinting = in.sprinting;
     slot.crouching = in.crouching;
+    slot.anim = in.anim; // PR-29: server-authoritative animation state at this tick.
 }
 } // namespace
 
@@ -86,6 +87,35 @@ inline void copyDiscreteFields(InterpolatedTransform& out, const InterpolationBu
     out.sprinting = s.sprinting;
     out.crouching = s.crouching;
 }
+
+/// @brief PR-29: blend two animation snapshots per slot.  Per slot:
+///   * different clip-id → snap to older (state transitions are discrete);
+///   * same clip-id, same active-state → lerp `timeRatio` and `weight`;
+///   * different active-state → snap to older (treated as transition).
+/// The fold-back-to-older is what makes the discrete "started a new
+/// clip" event happen at the SAME tick the body's pose-change is rendered.
+inline AnimSnapshot lerpAnim(const AnimSnapshot& a, const AnimSnapshot& b, float t)
+{
+    AnimSnapshot out = a;
+    for (std::size_t i = 0; i < AnimSnapshot::k_numSlots; ++i) {
+        const auto& sa = a.slots[i];
+        const auto& sb = b.slots[i];
+        const bool aActive = sa.weight > 0.0f;
+        const bool bActive = sb.weight > 0.0f;
+        if (sa.clipIdRaw != sb.clipIdRaw || aActive != bActive) {
+            out.slots[i] = sa; // discrete transition — snap to older
+            continue;
+        }
+        if (!aActive) {
+            out.slots[i] = sa; // both inactive — nothing to lerp
+            continue;
+        }
+        out.slots[i].clipIdRaw = sa.clipIdRaw;
+        out.slots[i].timeRatio = sa.timeRatio + (sb.timeRatio - sa.timeRatio) * t;
+        out.slots[i].weight = sa.weight + (sb.weight - sa.weight) * t;
+    }
+    return out;
+}
 } // namespace
 
 InterpolatedTransform sample(const entt::registry& registry,
@@ -120,6 +150,7 @@ InterpolatedTransform sample(const entt::registry& registry,
         out.yaw = oldest.yaw;
         out.pitch = oldest.pitch;
         copyDiscreteFields(out, oldest);
+        out.anim = oldest.anim;
         out.fromBuffer = true;
         return out;
     }
@@ -129,6 +160,7 @@ InterpolatedTransform sample(const entt::registry& registry,
         out.yaw = newest.yaw;
         out.pitch = newest.pitch;
         copyDiscreteFields(out, newest);
+        out.anim = newest.anim;
         out.fromBuffer = true;
         return out;
     }
@@ -149,6 +181,7 @@ InterpolatedTransform sample(const entt::registry& registry,
                 out.yaw = b.yaw;
                 out.pitch = b.pitch;
                 copyDiscreteFields(out, b);
+                out.anim = b.anim;
                 out.fromBuffer = true;
                 return out;
             }
@@ -161,6 +194,11 @@ InterpolatedTransform sample(const entt::registry& registry,
             // animation state-machine transitions snap at the same
             // instant the visible motion crosses the sample boundary.
             copyDiscreteFields(out, a);
+            // PR-29: anim slots LERP timeRatio (per-slot, when both
+            // bracketing samples have the same clip), snap discrete
+            // fields to older (clip transitions match the body-pose
+            // transition instant exactly).
+            out.anim = lerpAnim(a.anim, b.anim, t);
             out.fromBuffer = true;
             return out;
         }
@@ -173,6 +211,7 @@ InterpolatedTransform sample(const entt::registry& registry,
     out.yaw = newest.yaw;
     out.pitch = newest.pitch;
     copyDiscreteFields(out, newest);
+    out.anim = newest.anim;
     out.fromBuffer = true;
     return out;
 }

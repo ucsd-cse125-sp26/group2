@@ -492,6 +492,17 @@ void Client::applyInterpolatedTransforms(Registry& registry)
                 ps->sprinting = sampled.sprinting;
                 ps->crouching = sampled.crouching;
             }
+            // PR-29: write back interp-delayed `AnimSnapshot` so the
+            // renderer's `CharacterAnimator::renderFromServer(...)`
+            // call picks up server-authoritative animation state at
+            // the same body-render-time the position is at.  Without
+            // this, the buffered timeRatio would only be available on
+            // entity's "live" component (snapshot-latest) and the
+            // animator would render the body at "now" rather than
+            // "now - cl_interp", reintroducing the drift PR-29 is
+            // here to eliminate.
+            if (auto* anim = registry.try_get<AnimSnapshot>(e))
+                *anim = sampled.anim;
         }
     }
 }
@@ -528,6 +539,10 @@ void Client::recordInterpolationSamples(Registry& registry, Uint64 captureNs)
             inputs.sprinting = ps->sprinting;
             inputs.crouching = ps->crouching;
         }
+        // PR-29: server-authoritative animation state from the just-
+        // applied snapshot.  Replicated via the Synced tuple.
+        if (const auto* anim = registry.try_get<AnimSnapshot>(e))
+            inputs.anim = *anim;
         entity_interpolation::appendSample(registry, e, captureNs, inputs);
     }
 }
