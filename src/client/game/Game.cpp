@@ -1499,7 +1499,7 @@ SDL_AppResult Game::iterate()
     });
 
     // Auto-apply per-weapon viewmodel defaults when weapon changes
-    if (currentEquippedType_ != lastEquippedType_) {
+    if (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_) {
         const auto& vp = getViewmodelParams(currentEquippedType_);
         vmScale = vp.scale;
         vmForward = vp.forward;
@@ -1509,6 +1509,7 @@ SDL_AppResult Game::iterate()
         vmPitchOffset = vp.pitchOffset;
         vmRollOffset = vp.rollOffset;
         lastEquippedType_ = currentEquippedType_;
+        viewmodelDefaultsApplied_ = true;
     }
 
     const int currentWeaponModelIdx = weaponModelIndices_[static_cast<int>(currentEquippedType_)];
