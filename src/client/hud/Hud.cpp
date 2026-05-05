@@ -14,6 +14,7 @@
 #include "widgets/HitMarkerWidget.hpp"
 #include "widgets/KillFeed.hpp"
 #include "widgets/Minimap.hpp"
+#include "widgets/PickupPrompt.hpp"
 #include "widgets/RoundTimer.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/TeamStatusBar.hpp"
@@ -180,4 +181,5 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<Scoreboard>());
     widgets_.push_back(std::make_unique<BuyMenu>());
     widgets_.push_back(std::make_unique<Minimap>());
+    widgets_.push_back(std::make_unique<PickupPrompt>());
 }

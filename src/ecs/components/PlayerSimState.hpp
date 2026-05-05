@@ -28,7 +28,9 @@
 struct PlayerSimState
 {
     // ── Jump state ─────────────────────────────────────────────────────────
-    bool canDoubleJump{true};     ///< Reset on land / wallrun / climb.
+    bool canDoubleJump{true};     ///< Refreshed only after `k_doubleJumpGroundedRefreshTime` of continuous
+                                  ///< grounded OnFoot time. Wall jumps, climb jumps, slidehops, ledge mantles,
+                                  ///< and instant landings do NOT refresh it.
     bool jumpedThisTick{false};   ///< Set during the tick a jump occurs (for lurch setup).
     bool jumpHeldLastTick{false}; ///< Was jump key held on the previous tick (edge detection).
     float jumpCooldown{0.0f};     ///< Minimum time before double jump is available (s).
@@ -99,6 +101,13 @@ struct PlayerSimState
     float grapplePullTimer{0.0f};      ///< Time spent being pulled (s).
     glm::vec3 grapplePullDir{0.0f};    ///< Cached pull direction (toward anchor at fire time).
     bool grappleInputLastTick{false};  ///< Edge detection on the grapple key.
+
+    // ── Grapple perch mode (hold jump while grappling → arc above hook) ─
+    // No state needed: the trajectory is computed each tick purely from
+    // current Position + replicated grapplePoint, so it stays in sync
+    // across server simulation, client prediction, and reconciliation
+    // replay (PlayerSimState is server-only, so anything stateful here
+    // would drift on every snapshot apply and cause visible jitter).
 };
 
 /// @brief Combined-reference helper for code that needs both halves.

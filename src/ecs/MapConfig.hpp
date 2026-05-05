@@ -42,7 +42,7 @@ namespace gamemap
 ///
 /// IMPORTANT: this flag controls *how* the map is processed, not *which* map
 /// is loaded. The map filename comes solely from `kMapAsset` in `AssetCatalog.hpp`.
-inline constexpr bool k_separatedCollisionMap = true;
+inline constexpr bool k_separatedCollisionMap = false;
 
 /// @brief Substring that identifies collision-only nodes in separated mode.
 /// Matched case-insensitively against Assimp node names.

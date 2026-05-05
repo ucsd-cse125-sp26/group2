@@ -181,6 +181,12 @@ struct HudGameState
     bool armorBroke = false;     ///< True the frame armor dropped to zero.
     // isAlive already covers death vignette.
 
+    // Weapon pickup prompt — populated by Game when the local player is in
+    // range of (and looking at) an available weapon spawner. The HUD reads
+    // these to render a "Press F to pick up <Weapon>" hint.
+    bool pickupAvailable = false; ///< True when a pickup is currently actionable.
+    int pickupWeaponId = 0;       ///< Mirrors WeaponType: 0=Rifle, 1=Rocket, 2=RailGun, 3=EnergyGun.
+
     // Screen dimensions (set by Game each frame).
     float screenW = 1280.f, screenH = 720.f;
 };

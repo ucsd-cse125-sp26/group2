@@ -3,6 +3,7 @@
 
 #include "debug/DebugUI.hpp"
 
+#include "client/systems/GamepadAimAssistSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -168,6 +169,8 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
 void DebugUI::buildUI(const Registry& registry,
                       const int tickCount,
                       float& mouseSensitivity,
+                      float& gamepadLookSensitivity,
+                      systems::GamepadAimAssistConfig& aimAssistCfg,
                       bool& renderSeparateFromPhysics,
                       bool& inputSyncedWithPhysics,
                       bool& limitFPSToMonitor,
@@ -192,6 +195,8 @@ void DebugUI::buildUI(const Registry& registry,
             buildInspectorContents(registry,
                                    tickCount,
                                    mouseSensitivity,
+                                   gamepadLookSensitivity,
+                                   aimAssistCfg,
                                    renderSeparateFromPhysics,
                                    inputSyncedWithPhysics,
                                    limitFPSToMonitor,
@@ -221,6 +226,8 @@ void DebugUI::buildUI(const Registry& registry,
 void DebugUI::buildInspectorContents(const Registry& registry,
                                      const int tickCount,
                                      float& mouseSensitivity,
+                                     float& gamepadLookSensitivity,
+                                     systems::GamepadAimAssistConfig& aimAssistCfg,
                                      bool& renderSeparateFromPhysics,
                                      bool& inputSyncedWithPhysics,
                                      bool& limitFPSToMonitor,
@@ -241,6 +248,69 @@ void DebugUI::buildInspectorContents(const Registry& registry,
 
     // Logarithmic slider so both ends of the range are equally reachable.
     ImGui::SliderFloat("Mouse Sensitivity", &mouseSensitivity, 0.0001f, 0.0200f, "%.4f", ImGuiSliderFlags_Logarithmic);
+
+    // Gamepad right-stick look speed in radians/second at full deflection.
+    // Linear feels right here — the useful range is much narrower than mouse
+    // sensitivity (1..15 rad/s covers everything from "console aim assist"
+    // to "very twitchy"), and a linear slider preserves intuitive doubling.
+    ImGui::SliderFloat("Gamepad Look Sensitivity", &gamepadLookSensitivity, 1.0f, 15.0f, "%.2f rad/s");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("Right-stick angular speed at full deflection.\n"
+                          "6.0 rad/s ≈ 343°/s (default).\n"
+                          "Affects only the gamepad — mouse uses its own slider above.");
+
+    // ── Gamepad aim assist (collapsible) ──────────────────────────────────
+    // Tucked behind a header so the inspector stays clean for kbm players.
+    // All sliders live-edit the active config struct on the Game class, so
+    // tuning is immediate.  Default-open while we iterate on the feel.
+    if (ImGui::CollapsingHeader("Gamepad Aim Assist", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Enabled", &aimAssistCfg.enabled);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Master toggle.  No effect when no gamepad is connected.");
+
+        ImGui::BeginDisabled(!aimAssistCfg.enabled);
+
+        ImGui::SliderFloat("Inner Cone (deg)", &aimAssistCfg.innerConeDeg, 0.0f, 15.0f, "%.1f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Crosshair-to-target angle below which assist is at full strength.");
+
+        ImGui::SliderFloat("Outer Cone (deg)", &aimAssistCfg.outerConeDeg, 0.0f, 30.0f, "%.1f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Angle at which assist fades to zero.\n"
+                              "Larger = bigger \"magnet\" but more obvious.");
+
+        ImGui::SliderFloat("Max Range (units)", &aimAssistCfg.maxRange, 200.0f, 8000.0f, "%.0f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Targets beyond this distance get no aim assist.");
+
+        ImGui::SliderFloat("Activation Stick %", &aimAssistCfg.activationStickThresh, 0.0f, 0.30f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Stick deflection (left or right) required to activate assist.\n"
+                              "0.05 = 5 %% (default).  Holding still disables all assist.");
+
+        ImGui::SliderFloat("Rotational Compensation", &aimAssistCfg.rotationalCompensation, 0.0f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Fraction of the target's apparent angular velocity that aim\n"
+                              "assist contributes per frame.  0.0 = no rotational help,\n"
+                              "1.0 = perfect tracking (aimbot).  Default 0.8.\n"
+                              "A stationary enemy contributes ZERO regardless of this value —\n"
+                              "the pull is driven by frame-to-frame change in the anchor\n"
+                              "position, not by absolute angle to the target.");
+
+        ImGui::SliderFloat("Max Pull Rate (rad/s)", &aimAssistCfg.maxPullRate, 0.5f, 8.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Hard cap on how fast the camera can be pulled by assist.\n"
+                              "Safety net for snapshot warps / target teleports.\n"
+                              "3.0 rad/s ≈ 172°/s (default).");
+
+        ImGui::SliderFloat("Slowdown Strength", &aimAssistCfg.slowdownStrength, 0.10f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Effective look sensitivity when crosshair is on a target.\n"
+                              "Lower = stronger slowdown / stickier feel.\n"
+                              "1.0 = no slowdown, 0.35 = 35 %% speed (default).");
+
+        ImGui::EndDisabled();
+    }
 
     ImGui::Checkbox("Render Separately from Physics", &renderSeparateFromPhysics);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
