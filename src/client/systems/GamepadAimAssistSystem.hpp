@@ -97,7 +97,7 @@ struct GamepadAimAssistConfig
     /// Default 0.8 — assist contributes 80 % of the angular velocity
     /// needed to glue to a moving target, leaving 20 % for the player.
     /// Bumped up from 0.6 after tester feedback that 60 % felt weak.
-    float rotationalCompensation = 1.0f;
+    float rotationalCompensation = 0.8f;
 
     /// @brief Hard cap on rotational pull this frame, in radians/second.
     /// Prevents the assist from teleporting onto a target that just spawned
@@ -240,7 +240,11 @@ inline void runGamepadAimAssist(Registry& registry,
 
     const float moveStickMag = std::sqrt(lx * lx + ly * ly);
     const float lookStickMag = std::sqrt(rx * rx + ry * ry);
-    if (moveStickMag < cfg.activationStickThresh && lookStickMag < cfg.activationStickThresh) {
+
+    // When activationStickThresh <= 0, aim assist is always active (useful
+    // for testing rotational assist on a single PC without a second player).
+    const bool alwaysActive = cfg.activationStickThresh <= 0.0f;
+    if (!alwaysActive && moveStickMag < cfg.activationStickThresh && lookStickMag < cfg.activationStickThresh) {
         // Player held still — keep the state so the anchor doesn't reset
         // when they nudge again, but skip pull/slowdown this frame.
         return;
@@ -324,23 +328,29 @@ inline void runGamepadAimAssist(Registry& registry,
         return;
     }
 
-    // Cone × distance falloff — both already clamped, product in [0, 1].
+    // Cone falloff: 1.0 inside inner cone, 0.0 outside outer cone.
     const float coneFactor =
         aimassist::coneFalloff(bestAngle, glm::radians(cfg.innerConeDeg), glm::radians(cfg.outerConeDeg));
+    // Distance falloff: 1.0 at point-blank, 0.0 at maxRange.
     const float distFactor = 1.0f - std::clamp(bestDist / cfg.maxRange, 0.0f, 1.0f);
+    // Combined strength drives slowdown.  Rotational pull uses coneFactor
+    // alone so that rotationalCompensation=1.0 gives perfect tracking at
+    // any valid distance.
     const float strength = coneFactor * distFactor;
-    if (strength <= 0.0f) {
-        // In the cone outer ring with strength 0 — keep state alive so
-        // the anchor persists as the player approaches the target, but
-        // skip slowdown / pull this frame.
+
+    if (coneFactor <= 0.0f) {
+        // Outside the outer cone — nothing to do, but keep state alive so
+        // the anchor persists as the player approaches the target.
         return;
     }
 
-    // Target AABB derived from Position (centre) + CollisionShape::halfExtents.
-    // Used both for the anchor projection and as a clamp envelope so the
-    // anchor never drifts off the silhouette.
-    const glm::vec3 aabbMin = bestTargetPos - bestHalfExtents;
-    const glm::vec3 aabbMax = bestTargetPos + bestHalfExtents;
+    // Target AABB derived from Position (centre) + CollisionShape::halfExtents,
+    // with horizontal half-extents clamped to 18 so the aim-assist silhouette
+    // is closer to the real character width rather than the full collision box.
+    const glm::vec3 aaHalfExtents{
+        std::min(bestHalfExtents.x, 18.0f), bestHalfExtents.y, std::min(bestHalfExtents.z, 18.0f)};
+    const glm::vec3 aabbMin = bestTargetPos - aaHalfExtents;
+    const glm::vec3 aabbMax = bestTargetPos + aaHalfExtents;
 
     // Detect target-switch (or first-ever frame): re-initialise state.
     const bool switchedTarget = (state.lastTarget != bestTarget);
@@ -355,17 +365,69 @@ inline void runGamepadAimAssist(Registry& registry,
         // applies (it depends only on current strength, not on history).
     }
 
+    // ── Compute direction to target center for asymmetric slowdown ──────
+    // Offset from crosshair to target centre in (yaw, pitch) space.
+    const glm::vec3 dirToTarget = glm::normalize(bestTargetPos - eye);
+    float targetYaw = 0.0f, targetPitch = 0.0f;
+    aimassist::dirToYawPitch(dirToTarget, targetYaw, targetPitch);
+    const float dYawToTarget = std::remainder(targetYaw - curYaw, glm::radians(360.0f));
+    const float dPitchToTarget = targetPitch - curPitch;
+
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        // ── 1. Slowdown — refund part of the look input runGamepadLook
-        //       integrated this frame.  Independent of frame history.
-        if (lookStickMag >= cfg.activationStickThresh) {
-            const float refund = (1.0f - cfg.slowdownStrength) * strength;
+        // ── 1. Asymmetric slowdown — refund part of look input, but MORE
+        //       when moving away from target centre and LESS when moving
+        //       toward it.  Proximity to centre amplifies the effect (curve).
+        if (alwaysActive || lookStickMag >= cfg.activationStickThresh) {
+            // Stick direction in (yaw, pitch) camera-motion space.
+            // runGamepadLook does: yaw -= rx*..., pitch += ry*...
+            // So stick-induced camera motion direction is (-rx, +ry).
+            const float stickYaw = -rx;
+            const float stickPitch = ry;
+
+            const float stickLen = std::sqrt(stickYaw * stickYaw + stickPitch * stickPitch);
+            const float targetOffsetLen = std::sqrt(dYawToTarget * dYawToTarget + dPitchToTarget * dPitchToTarget);
+
+            float dirDot = 0.0f;
+            if (stickLen > 1e-4f && targetOffsetLen > 1e-4f) {
+                // Normalised dot product: +1 = moving directly toward target
+                // centre, -1 = directly away.
+                dirDot = (stickYaw * dYawToTarget + stickPitch * dPitchToTarget) / (stickLen * targetOffsetLen);
+                dirDot = std::clamp(dirDot, -1.0f, 1.0f);
+            }
+
+            // Proximity factor: how close the crosshair is to target centre.
+            // 1.0 = dead centre, 0.0 = at outer cone edge.  Squared for a
+            // curve that ramps up quickly near centre.
+            const float outerRad = glm::radians(cfg.outerConeDeg);
+            const float proximity = 1.0f - std::clamp(bestAngle / outerRad, 0.0f, 1.0f);
+            const float proxCurve = proximity * proximity;
+
+            // Asymmetric strength:
+            //   dirDot > 0 (toward centre): raise effective slowdown toward 1.0
+            //     (less friction — let player get on target easily)
+            //   dirDot < 0 (away from centre): lower effective slowdown toward 0.0
+            //     (more friction — resist leaving target)
+            // Scaled by proximity curve so the effect is strongest near centre.
+            float effectiveSlowdown = cfg.slowdownStrength;
+            if (dirDot > 0.0f) {
+                // Moving toward: lerp slowdown up toward 1.0 (less sticky)
+                effectiveSlowdown = cfg.slowdownStrength + (1.0f - cfg.slowdownStrength) * dirDot * proxCurve;
+            } else {
+                // Moving away: lerp slowdown down toward 0.0 (more sticky)
+                effectiveSlowdown = cfg.slowdownStrength * (1.0f + dirDot * proxCurve);
+            }
+            effectiveSlowdown = std::clamp(effectiveSlowdown, 0.0f, 1.0f);
+
+            const float refund = (1.0f - effectiveSlowdown) * strength;
             snap.yaw += rx * lookSens * dt * refund;
             snap.pitch -= ry * lookSens * dt * refund;
         }
 
         // ── 2. Movement-tracking rotational pull.
         //       Skipped on the acquisition frame (no previous-frame anchor).
+        //       Uses coneFactor only (NOT distFactor) — rotationalCompensation
+        //       of 1.0 means perfect tracking regardless of distance, as long
+        //       as the target is within the cone and range.
         if (state.initialised && !switchedTarget) {
             // Use the SAME anchor_local for both endpoints — that isolates
             // the contribution of (target movement) + (player translation),
@@ -388,12 +450,16 @@ inline void runGamepadAimAssist(Registry& registry,
             const float dPitch = pitchCur - pitchPrev;
 
             // Compensate `rotationalCompensation` of the apparent motion,
-            // capped by `maxPullRate` so a teleport spike can't fling the
+            // scaled by coneFactor (smooth falloff at cone edge) but NOT by
+            // distFactor — distance already gates target selection, and the
+            // user expects 1.0 to mean "perfect tracking" at any valid range.
+            // Capped by `maxPullRate` so a teleport spike can't fling the
             // camera off the player's actual aim.
             const float maxThisFrame = cfg.maxPullRate * dt;
-            const float yawPull = std::clamp(cfg.rotationalCompensation * strength * dYaw, -maxThisFrame, maxThisFrame);
+            const float yawPull =
+                std::clamp(cfg.rotationalCompensation * coneFactor * dYaw, -maxThisFrame, maxThisFrame);
             const float pitchPull =
-                std::clamp(cfg.rotationalCompensation * strength * dPitch, -maxThisFrame, maxThisFrame);
+                std::clamp(cfg.rotationalCompensation * coneFactor * dPitch, -maxThisFrame, maxThisFrame);
             snap.yaw += yawPull;
             snap.pitch += pitchPull;
 
