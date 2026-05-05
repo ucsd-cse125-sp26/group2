@@ -161,6 +161,23 @@ private:
     InputRingBuffer inputRing_;
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
 
+    /// @brief Currently-bound gamepad, or nullptr if none is plugged in.
+    ///
+    /// Opened on SDL_EVENT_GAMEPAD_ADDED (first device wins — extra controllers
+    /// are ignored until the active one disconnects), closed on
+    /// SDL_EVENT_GAMEPAD_REMOVED.  SDL3's gamepad mapping database normalises
+    /// every supported controller (Xbox 360 / One, DualShock, Switch Pro, ...)
+    /// onto the same logical buttons + axes, so the input mapping in
+    /// InputSampleSystem.hpp works uniformly across devices.
+    SDL_Gamepad* activeGamepad_ = nullptr;
+    /// @brief SDL_JoystickID of the active gamepad — needed to identify the
+    /// device on SDL_EVENT_GAMEPAD_REMOVED so we don't tear down a different
+    /// controller when a second one disconnects.
+    SDL_JoystickID activeGamepadId_ = 0;
+    /// @brief Right-stick look speed in radians per second at full deflection.
+    /// Roughly equivalent to ~170°/s, a reasonable console FPS default.
+    float gamepadLookSensitivity = 3.0f;
+
     /// Persistent thread pool for parallel-for over per-frame loops
     /// (currently the animation update; future: parallel frustum cull,
     /// particle update, ECS transforms).  Initialised in Game::init with a
@@ -264,12 +281,12 @@ private:
     float prevArmor_ = 100.f;
 
     // Viewmodel tuning (live-adjustable via ImGui)
-    float vmScale = 1.0f;        ///< Weapon model scale (model is in mm).
-    float vmForward = 0.0f;      ///< Forward offset from eye (Quake units).
+    float vmScale = 1.0f;         ///< Weapon model scale (model is in mm).
+    float vmForward = 0.0f;       ///< Forward offset from eye (Quake units).
     float vmRight = 0.0f;         ///< Right offset from eye.
-    float vmDown = 0.0f;         ///< Downward offset from eye.
-    float vmYawOffset = 0.0f;    ///< Extra yaw (degrees) applied to the model before camera orient.
-    float vmPitchOffset = 0.0f;  ///< Extra pitch (degrees).
+    float vmDown = 0.0f;          ///< Downward offset from eye.
+    float vmYawOffset = 0.0f;     ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 0.0f;   ///< Extra pitch (degrees).
     float vmRollOffset = 0.0f;    ///< Extra roll (degrees).
     bool showViewmodelUI = false; ///< Show the Viewmodel Tweaker window.
 

@@ -92,7 +92,12 @@ bool Game::init()
 #endif
     SDL_SetAppMetadata(k_appName, "0.1.0", "com.cse125.group2");
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    // SDL_INIT_GAMEPAD pulls in the gamepad subsystem so we receive
+    // SDL_EVENT_GAMEPAD_ADDED / _REMOVED and can call SDL_OpenGamepad.  It also
+    // implicitly initialises the joystick subsystem.  Already-connected pads
+    // fire SDL_EVENT_GAMEPAD_ADDED automatically once SDL pumps events, so the
+    // event handler is the single point that opens devices.
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return false;
     }
@@ -280,9 +285,9 @@ bool Game::init()
         {
             const int id = addAssetDefinition(assets_, kRocketProjectile);
             rocketProjectileModelIdx_ = renderer.loadSceneModel(kRocketProjectile.filename,
-                                                                 kRocketProjectile.loadTranslation,
-                                                                 kRocketProjectile.loadScale,
-                                                                 kRocketProjectile.flipUVs);
+                                                                kRocketProjectile.loadTranslation,
+                                                                kRocketProjectile.loadScale,
+                                                                kRocketProjectile.flipUVs);
             assets_.setModelIndex(id, rocketProjectileModelIdx_);
 
             if (rocketProjectileModelIdx_ < 0)
@@ -860,6 +865,36 @@ SDL_AppResult Game::event(SDL_Event* event)
         sfxSystem.handleEvent(*event);
     }
 
+    // ── Gamepad hot-plug ──────────────────────────────────────────────────
+    // SDL fires _ADDED for already-connected pads at startup once events are
+    // pumped, so this single handler covers both runtime hot-plug AND the
+    // initial bind.  We accept the first pad to arrive and ignore additional
+    // ones — multi-controller support (split-screen / co-op) would need an
+    // entity-per-controller scheme in the ECS, out of scope for this change.
+    if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
+        if (!activeGamepad_) {
+            const SDL_JoystickID id = event->gdevice.which;
+            activeGamepad_ = SDL_OpenGamepad(id);
+            if (activeGamepad_) {
+                activeGamepadId_ = id;
+                const char* name = SDL_GetGamepadName(activeGamepad_);
+                SDL_Log("[input] gamepad connected: %s (id=%u)", name ? name : "unknown", id);
+            } else {
+                SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
+            }
+        }
+    } else if (event->type == SDL_EVENT_GAMEPAD_REMOVED) {
+        // Only tear down if the disconnected device is the one we're using —
+        // otherwise an unrelated unplug (e.g. a second pad we never opened)
+        // would leave us with a dangling-but-non-null handle.
+        if (activeGamepad_ && event->gdevice.which == activeGamepadId_) {
+            SDL_Log("[input] gamepad disconnected (id=%u)", activeGamepadId_);
+            SDL_CloseGamepad(activeGamepad_);
+            activeGamepad_ = nullptr;
+            activeGamepadId_ = 0;
+        }
+    }
+
     // Scroll wheel toggles between primary and secondary weapon slots.
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
         if (event->wheel.y > 0)
@@ -1214,6 +1249,16 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry);
         systems::runWeaponKeys(registry);
 
+        // Gamepad samplers run AFTER kbm so they OR into the same flags —
+        // a player can use kbm and pad simultaneously without either source
+        // stomping the other.  Look additively composes (mouse delta + stick
+        // delta) so the camera tracks whichever input is moving.  No-ops
+        // cheaply when activeGamepad_ is nullptr.
+        systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime);
+        if (!inputSyncedWithPhysics)
+            systems::runGamepadMovement(registry, activeGamepad_);
+        systems::runGamepadWeapon(registry, activeGamepad_);
+
         // Apply scroll-wheel weapon switch, constrained to primary/secondary.
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
@@ -1245,8 +1290,12 @@ SDL_AppResult Game::iterate()
 
     if (accumulator >= k_physicsDt) {
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured)
+        if (inputSyncedWithPhysics && mouseCaptured) {
             systems::runMovementKeys(registry);
+            // Gamepad movement is sampled on the same cadence and ORs into
+            // the same flags so kbm + pad stay coherent under physics-sync.
+            systems::runGamepadMovement(registry, activeGamepad_);
+        }
 
         // PR-24 (off-by-one + capsule staleness fix): the fire detection
         // and capture block used to live HERE, before the physics while
@@ -1399,9 +1448,9 @@ SDL_AppResult Game::iterate()
             });
     }
 
-    // Local weapon VFX — fires continuously while LMB is held, respecting cooldown.
-    // This mirrors the server's fire rate so the local player sees tracers/impacts
-    // at the same cadence as the server processes shots.
+    // Local weapon VFX — fires continuously while the fire input is held,
+    // respecting cooldown.  Mirrors the server's fire rate so the local
+    // player sees tracers/impacts at the same cadence as the server.
     // Beam weapons (EnergyGun) are driven by BeamState from the registry,
     // so they skip per-shot VFX here.
     {
@@ -1412,8 +1461,18 @@ SDL_AppResult Game::iterate()
         if (!wpnCfg.isBeam && !wpnCfg.isCharge) {
             localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
-            const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
-            const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
+            // Read fire intent from the local player's InputSnapshot rather
+            // than polling the mouse directly: snap.shooting is the merged
+            // bus that the input samplers (kbm + gamepad) all OR into, so
+            // every fire source — LMB, gamepad RT, future bindings — drives
+            // local VFX/SFX uniformly.  Still gate on mouseCaptured so a
+            // stale flag (player held trigger when alt-tabbing into the
+            // debug menu) doesn't keep firing while no input is being sampled.
+            bool shooting = false;
+            if (mouseCaptured) {
+                registry.view<LocalPlayer, InputSnapshot>().each(
+                    [&](const InputSnapshot& snap) { shooting = snap.shooting; });
+            }
 
             // Check ammo — don't spawn VFX if the magazine is empty.
             bool hasAmmo = false;
@@ -3115,6 +3174,11 @@ void Game::quit()
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();
+    if (activeGamepad_) {
+        SDL_CloseGamepad(activeGamepad_);
+        activeGamepad_ = nullptr;
+        activeGamepadId_ = 0;
+    }
     SDL_DestroyWindow(window);
     NET_Quit();
     SDL_Quit();

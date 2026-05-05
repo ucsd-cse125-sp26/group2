@@ -1035,6 +1035,31 @@ glm::vec3 lookDirFromInput(const InputSnapshot& input)
     return {std::sin(input.yaw) * k_cosPitch, -std::sin(input.pitch), std::cos(input.yaw) * k_cosPitch};
 }
 
+/// @brief Reset the transient bezier-perch fields (call from every grapple-end path).
+void resetGrapplePerch(PlayerStateRef state)
+{
+    state.sim.grapplePerchActive = false;
+    state.sim.grapplePerchElapsed = 0.0f;
+    state.sim.grapplePerchDuration = 0.0f;
+}
+
+/// @brief End-point of the perch arc for a given hook + player half-height.
+///
+/// Sits `k_grapplePerchFeetOffset + halfExtentY` directly above the hook
+/// point, so the player's feet land `k_grapplePerchFeetOffset` above the
+/// hook (typically on top of the platform that owns the hooked corner).
+glm::vec3 perchEndPoint(glm::vec3 hookPoint, float halfExtentY)
+{
+    return hookPoint + glm::vec3(0.0f, tms::k_grapplePerchFeetOffset + halfExtentY, 0.0f);
+}
+
+/// @brief Quadratic Bezier: B(t) = (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2.
+glm::vec3 evalQuadraticBezier(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, float t)
+{
+    const float k_u = 1.0f - t;
+    return k_u * k_u * p0 + 2.0f * k_u * t * p1 + t * t * p2;
+}
+
 /// @brief Detach the grapple and apply the look-biased launch impulse.
 ///
 /// The launch velocity is a blend of the grapple-line direction and the
@@ -1068,6 +1093,7 @@ void grappleDetachWithLaunch(glm::vec3& vel, PlayerStateRef state, const InputSn
     state.sim.grappleCooldownActive = true;
     state.sim.grappleCooldownTimer = tms::k_grappleCooldown;
     state.vis.grounded = false;
+    resetGrapplePerch(state);
 }
 
 /// @brief Fire grapple on E press.  One-shot: press E to fire, not hold.
@@ -1096,21 +1122,94 @@ void tryFireGrapple(PlayerStateRef state,
 
     // Force airborne — the grapple lifts you off the ground immediately.
     state.vis.grounded = false;
+
+    // Defensive: clear any stale perch state from a previous grapple.
+    resetGrapplePerch(state);
 }
 
-/// @brief Pull the player directly toward the anchor.  No air control, no gravity.
+/// @brief Pull the player toward the anchor, or arc-perch above it if jump is held.
 ///
-/// Velocity is overridden each tick (not additive). The player flies in a
-/// straight line toward the anchor point at k_grapplePullSpeed.
-void handleGrapple(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& input, glm::vec3 pos, float /*dt*/)
+/// Two modes:
+/// - **Default (jump not held):** velocity is overridden each tick to point
+///   directly at the anchor at `k_grapplePullSpeed`. Pure linear flight,
+///   no gravity, no air control. Crouch cancels (drop). Arrival or timeout
+///   triggers a look-biased launch.
+/// - **Perch (jump held):** the end-point shifts to `perchEndPoint` (above
+///   the hook by `k_grapplePerchFeetOffset + halfExtentY`) and the player
+///   follows a quadratic Bezier whose control point sits at the end-point's
+///   vertical level, midway horizontally. Result: an upward arc that lands
+///   you on top of the platform whose corner you hooked. No launch on
+///   arrival — you drop the last few units onto the surface.
+void handleGrapple(glm::vec3& vel,
+                   PlayerStateRef state,
+                   const InputSnapshot& input,
+                   glm::vec3 pos,
+                   const CollisionShape& shape,
+                   float dt)
 {
     if (!state.vis.grappleActive)
         return;
 
+    // Crouch always cancels — no-launch drop. Same in both modes.
+    if (input.crouch) {
+        state.vis.grappleActive = false;
+        state.sim.grappleCooldownActive = true;
+        state.sim.grappleCooldownTimer = tms::k_grappleCooldown;
+        resetGrapplePerch(state);
+        return;
+    }
+
+    // ── Perch mode: held jump → bezier arc above the hook ──────────────
+    if (input.jump) {
+        const glm::vec3 k_perchEnd = perchEndPoint(state.vis.grapplePoint, shape.halfExtents.y);
+
+        // First tick of perch: snapshot start position and compute traversal time.
+        if (!state.sim.grapplePerchActive) {
+            state.sim.grapplePerchActive = true;
+            state.sim.grapplePerchStart = pos;
+            const float k_chord = glm::length(k_perchEnd - pos);
+            // Total time = chord / pullSpeed, padded by k_grapplePerchTimeMult to
+            // account for the bezier path being longer than the straight chord.
+            state.sim.grapplePerchDuration =
+                std::max(0.05f, k_chord / tms::k_grapplePullSpeed * tms::k_grapplePerchTimeMult);
+            state.sim.grapplePerchElapsed = 0.0f;
+        }
+
+        state.sim.grapplePerchElapsed += dt;
+        const float k_t = std::clamp(state.sim.grapplePerchElapsed / state.sim.grapplePerchDuration, 0.0f, 1.0f);
+
+        // Bezier control: midpoint horizontally, at the end-point's vertical level.
+        const glm::vec3 k_p0 = state.sim.grapplePerchStart;
+        const glm::vec3 k_p2 = k_perchEnd;
+        const glm::vec3 k_p1{(k_p0.x + k_p2.x) * 0.5f, k_p2.y, (k_p0.z + k_p2.z) * 0.5f};
+
+        const glm::vec3 k_desired = evalQuadraticBezier(k_p0, k_p1, k_p2, k_t);
+
+        // Drive the player to the curve point this tick by setting velocity.
+        // The existing position-integration / collision pipeline does the move,
+        // so a wall in the way will halt the player naturally.
+        vel = (k_desired - pos) / dt;
+
+        // Arrival: time exhausted or close enough to perch end-point.
+        const float k_distToEnd = glm::length(k_p2 - pos);
+        if (k_t >= 1.0f || k_distToEnd < tms::k_grappleDetachDist) {
+            // Land on the platform — no launch impulse.
+            state.vis.grappleActive = false;
+            state.sim.grappleCooldownActive = true;
+            state.sim.grappleCooldownTimer = tms::k_grappleCooldown;
+            state.vis.grounded = false;
+            resetGrapplePerch(state);
+        }
+        return;
+    }
+
+    // Jump released — clear perch state so a future re-press starts a fresh arc.
+    resetGrapplePerch(state);
+
     const glm::vec3 k_toHook = state.vis.grapplePoint - pos;
     const float k_dist = glm::length(k_toHook);
 
-    // ── Detach conditions ───────────────────────────────────────────────
+    // ── Detach conditions (default linear-pull mode) ────────────────────
 
     // Arrived at anchor — auto-detach with launch.
     if (k_dist < tms::k_grappleDetachDist) {
@@ -1118,23 +1217,9 @@ void handleGrapple(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& in
         return;
     }
 
-    // Jump to cancel early — detach with launch (the skill expression).
-    if (input.jump) {
-        grappleDetachWithLaunch(vel, state, input, pos);
-        return;
-    }
-
     // Safety timeout.
     if (state.sim.grapplePullTimer > tms::k_grappleMaxDuration) {
         grappleDetachWithLaunch(vel, state, input, pos);
-        return;
-    }
-
-    // Crouch to cancel without launch (just drop).
-    if (input.crouch) {
-        state.vis.grappleActive = false;
-        state.sim.grappleCooldownActive = true;
-        state.sim.grappleCooldownTimer = tms::k_grappleCooldown;
         return;
     }
 
@@ -1316,8 +1401,9 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                             state.vis.pendingUncrouch = true;
                     }
 
-                    // Pull overrides velocity. Jump/crouch detach is handled inside.
-                    handleGrapple(vel.value, state, input, pos.value, dt);
+                    // Pull overrides velocity. Jump = perch arc, crouch = drop, both
+                    // handled inside handleGrapple.
+                    handleGrapple(vel.value, state, input, pos.value, shape, dt);
 
                     // If still active after handleGrapple, mark as pulling
                     // to skip all remaining movement this tick.

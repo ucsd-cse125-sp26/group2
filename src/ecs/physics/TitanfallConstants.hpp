@@ -23,7 +23,7 @@ constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s)
 // Jumping
 
 constexpr float k_jumpSpeed = 330.0f;       ///< Upward velocity on ground jump (u/s). Must mirror physics::k_jumpSpeed.
-constexpr float k_doubleJumpSpeed = 220.0f; ///< Upward velocity on air jump (u/s).
+constexpr float k_doubleJumpSpeed = 270.0f; ///< Upward velocity on air jump (u/s).
 constexpr float k_slidehopJumpSpeed = 250.0f; ///< Upward velocity when jumping during slide (u/s).
 constexpr float k_doubleJumpCooldown = 0.10f; ///< Min time after first jump before double jump is allowed (s).
 
@@ -124,7 +124,7 @@ constexpr float k_crouchingHalfHeight = 22.0f; ///< Crouching/sliding AABB half-
 
 // Grappling hook (Widowmaker-style: direct pull → look-biased launch)
 
-constexpr float k_grappleMaxRange = 2000.0f; ///< Max hook distance (~20 m in Quake units).
+constexpr float k_grappleMaxRange = 4000.0f; ///< Max hook distance (~20 m in Quake units).
 constexpr float k_grapplePullSpeed = 800.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive.
 constexpr float k_grappleDetachDist = 80.0f; ///< Auto-detach when this close to anchor (~2 m).
 constexpr float k_grappleMaxDuration = 5.0f; ///< Safety timeout (s).
@@ -132,5 +132,13 @@ constexpr float k_grappleCooldown = 5.0f;    ///< Cooldown between grapples (s).
 constexpr float k_grappleLaunchLookBias =
     0.6f; ///< Look-direction weight on detach launch (0 = pure grapple dir, 1 = pure look).
 constexpr float k_grappleLaunchSpeedMult = 1.15f; ///< Speed multiplier on launch (slight boost for momentum).
+
+// Grapple perch (hold-jump → bezier arc lands you above the hook point)
+
+constexpr float k_grapplePerchFeetOffset = 50.0f; ///< Feet height above the hook point in perch mode (u).
+                                                  ///< Lets you grapple to a corner/wall and land on top of the platform
+                                                  ///< rather than slamming into the surface you hooked.
+constexpr float k_grapplePerchTimeMult = 1.3f;    ///< Bezier traversal duration as a multiple of (chord / pullSpeed).
+                                                  ///< 1.0 = same time as a straight-line pull; >1 = slower arc.
 
 } // namespace tms

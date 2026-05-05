@@ -99,6 +99,12 @@ struct PlayerSimState
     float grapplePullTimer{0.0f};      ///< Time spent being pulled (s).
     glm::vec3 grapplePullDir{0.0f};    ///< Cached pull direction (toward anchor at fire time).
     bool grappleInputLastTick{false};  ///< Edge detection on the grapple key.
+
+    // ── Grapple perch mode (hold jump while grappling → bezier arc above hook) ─
+    bool grapplePerchActive{false};    ///< True while in bezier-arc perch mode.
+    glm::vec3 grapplePerchStart{0.0f}; ///< Player position when this perch arc began (bezier P0).
+    float grapplePerchElapsed{0.0f};   ///< Time elapsed since perch arc began (s).
+    float grapplePerchDuration{0.0f};  ///< Total time to traverse the perch arc (s).
 };
 
 /// @brief Combined-reference helper for code that needs both halves.
