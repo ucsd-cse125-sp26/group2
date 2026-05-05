@@ -45,38 +45,38 @@ struct RecoilParams
 inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
     static constexpr std::array<ViewmodelParams, 4> k_params{{
-        // Rifle (R-301) — existing tuning
-        {.scale = 0.03f,
-         .forward = 21.0f,
-         .right = 5.5f,
-         .down = 22.5f,
-         .yawOffset = 58.0f,
-         .pitchOffset = 12.0f,
-         .rollOffset = 2.0f},
-        // Rocket — fallback to R-301 tuning
-        {.scale = 0.03f,
-         .forward = 21.0f,
-         .right = 5.5f,
-         .down = 22.5f,
-         .yawOffset = 58.0f,
-         .pitchOffset = 12.0f,
-         .rollOffset = 2.0f},
-        // RailGun (Triple Take) — marksman
-        {.scale = 1.5f,
-         .forward = 38.0f,
-         .right = 15.0f,
-         .down = 16.5f,
-         .yawOffset = -9.0f,
-         .pitchOffset = 93.0f,
-         .rollOffset = -8.0f},
-        // EnergyGun (Wingman)
-        {.scale = 1.5f,
-         .forward = 23.5f,
-         .right = 11.5f,
-         .down = 12.0f,
-         .yawOffset = 2.0f,
-         .pitchOffset = 90.0f,
-         .rollOffset = 4.5f},
+        // Rifle — existing tuning
+        {.scale = 39.0f,
+         .forward = 78.0f,
+         .right = 37.0f,
+         .down = -11.0f,
+         .yawOffset = 0.0f,
+         .pitchOffset = -1.0f,
+         .rollOffset = 0.0f},
+        // Rocket — fallback to rifle tuning
+        {.scale = 39.0f,
+         .forward = 7.0f,
+         .right = 27.0f,
+         .down = 77.5f,
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f},
+        // RailGun — marksman
+        {.scale = 20.0f,
+         .forward = 48.0f,
+         .right = 30.0f,
+         .down = 27.0f,
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f},
+        // EnergyGun
+        {.scale = 20.0f,
+         .forward = 80.0f,
+         .right = 38.5f,
+         .down = 24.0f,
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -86,21 +86,21 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type)
 {
     static const std::array<ThirdPersonWeaponParams, 4> k_params{{
-        // Rifle (R-301)
+        // Rifle
         {.scale = 0.025f,
          .handOffset = {1.5f, -3.5f, 14.0f},
          .yawOffset = -47.0f,
          .pitchOffset = 13.0f,
          .rollOffset = 0.0f},
-        // Rocket — fallback to R-301
+        // Rocket
         {.scale = 0.025f,
          .handOffset = {1.5f, -3.5f, 14.0f},
          .yawOffset = -47.0f,
          .pitchOffset = 13.0f,
          .rollOffset = 0.0f},
-        // RailGun (Triple Take)
+        // RailGun
         {.scale = 1.0f, .handOffset = {7.5f, 7.5f, 15.0f}, .yawOffset = 0.0f, .pitchOffset = 96.0f, .rollOffset = 2.0f},
-        // EnergyGun (Wingman)
+        // EnergyGun
         {.scale = 1.0f, .handOffset = {7.5f, 7.0f, 6.0f}, .yawOffset = 6.0f, .pitchOffset = 94.0f, .rollOffset = 0.0f},
     }};
 

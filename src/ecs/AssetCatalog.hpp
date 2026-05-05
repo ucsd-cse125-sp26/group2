@@ -54,29 +54,36 @@ inline const AssetDefinition kWraithAsset{
     .loadScale = 8.0f,
 };
 
+inline const AssetDefinition kRocketProjectile{
+    .name = "rocket_projectile",
+    .filename = "bottle_a.glb", // update with rocket projectile asset
+    .role = AssetRole::Entity,
+    .loadScale = 20.0f,
+};
+
 inline const std::array<AssetDefinition, 4> kWeaponAssets{{
     {.name = "weapon_rifle",
-     .filename = "r-301_-_apex_legends.glb",
+     .filename = "assault_rifle.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
-     .renderScale = {0.025f, 0.025f, 0.025f}},
+     .renderScale = {20.0f, 20.0f, 20.0f}},
     {.name = "weapon_rocket",
-     .filename = "r-301_-_apex_legends.glb",
+     .filename = "rocket_launcher.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
-     .renderScale = {0.025f, 0.025f, 0.025f}},
+     .renderScale = {20.0f, 20.0f, 20.0f}},
     {.name = "weapon_railgun",
-     .filename = "apex_legends_triple_take_marksman.glb",
+     .filename = "rail_gun.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
-     .renderScale = {1.0f, 1.0f, 1.0f},
-     .renderRotationDegrees = {90.0f, 0.0f, 0.0f}},
+     .renderScale = {20.0f, 20.0f, 20.0f},
+     .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
     {.name = "weapon_energy",
-     .filename = "apex_legends_wingman_pistol.glb",
+     .filename = "energy_gun.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
-     .renderScale = {1.0f, 1.0f, 1.0f},
-     .renderRotationDegrees = {90.0f, 0.0f, 0.0f}},
+     .renderScale = {20.0f, 20.0f, 20.0f},
+     .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
 }};
 
 inline const std::array<AssetDefinition, 3> kEffectAssets{{

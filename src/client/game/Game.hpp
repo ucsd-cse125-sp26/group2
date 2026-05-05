@@ -208,6 +208,8 @@ private:
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
     int weaponAssetIds_[4] = {-1, -1, -1, -1};
 
+    int rocketProjectileModelIdx_ = -1;
+
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
     bool showHudDebug_ = false;                          ///< Show the HUD Tweaker panel.
@@ -230,6 +232,7 @@ private:
     float beamLightSpacing_ = 60.0f;                     ///< Distance between point lights along beam.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
+    bool viewmodelDefaultsApplied_ = false;
 
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
@@ -261,13 +264,13 @@ private:
     float prevArmor_ = 100.f;
 
     // Viewmodel tuning (live-adjustable via ImGui)
-    float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).
-    float vmForward = 21.0f;      ///< Forward offset from eye (Quake units).
-    float vmRight = 5.5f;         ///< Right offset from eye.
-    float vmDown = 22.5f;         ///< Downward offset from eye.
-    float vmYawOffset = 58.0f;    ///< Extra yaw (degrees) applied to the model before camera orient.
-    float vmPitchOffset = 12.0f;  ///< Extra pitch (degrees).
-    float vmRollOffset = 2.0f;    ///< Extra roll (degrees).
+    float vmScale = 1.0f;        ///< Weapon model scale (model is in mm).
+    float vmForward = 0.0f;      ///< Forward offset from eye (Quake units).
+    float vmRight = 0.0f;         ///< Right offset from eye.
+    float vmDown = 0.0f;         ///< Downward offset from eye.
+    float vmYawOffset = 0.0f;    ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 0.0f;  ///< Extra pitch (degrees).
+    float vmRollOffset = 0.0f;    ///< Extra roll (degrees).
     bool showViewmodelUI = false; ///< Show the Viewmodel Tweaker window.
 
     // Weapon sway state (CoD-style barrel lead)
