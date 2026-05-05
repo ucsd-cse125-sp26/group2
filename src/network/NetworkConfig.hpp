@@ -15,23 +15,42 @@ struct NetworkAddress
 
 /// @brief Server-side replication tuning parameters.
 ///
-/// Phase 4: snapshot rate is decoupled from the simulation tick rate. The
-/// server still runs physics at `tickHz` (the deterministic-physics tick
-/// rate, currently hardcoded to 128 in ServerGame). Registry snapshots are
-/// emitted every `1000 / snapshotHz` ms instead of every tick — at the
-/// default 32 Hz that's a 4× bandwidth reduction with no change to
-/// gameplay behaviour.
+/// PR-13 (post server-perf): default snapshot rate is now **128 Hz**
+/// (= tick rate).  This is the same cadence Valorant / CS2 / Apex run.
+/// Pre-PR-13 default was 32 Hz, chosen as a bandwidth/CPU compromise;
+/// PR-10's snapshot delta encoding makes the wire cost of 128 Hz
+/// roughly 0.8× the pre-PR-10 32 Hz baseline (4× more snapshots × 0.2×
+/// each via delta) — i.e. cheaper than where we started, despite 4×
+/// the rate.
 ///
-/// @note Lower snapshot rates (e.g. 32 Hz) make remote-player visual
-/// motion noticeably step-y because the client only gets new positions
-/// every ~31 ms. Phase 5's RemoteHistory + render-time interpolation is
-/// what makes a 32 Hz snapshot rate visually smooth. Until then, set
-/// `snapshotHz` to `tickHz` (128) for full visual smoothness, or accept
-/// the trade-off in exchange for the bandwidth/CPU win on the server.
+/// What this buys:
+///   - Render delay drops 62.5 ms → 15.6 ms (PR-11 entity interp,
+///     2-snapshot default).  Targets feel ~1 frame behind the server,
+///     not 4.
+///   - Lag-comp resolution improves: rewind tick math now snaps to a
+///     ~7.8 ms boundary instead of ~31 ms.  Hits register on the
+///     same tick they happened, not the same snapshot interval.
+///   - Server CPU: each snapshot is parallel-serialised (PR-8) and
+///     the 4× rate increase costs ~4× the broadcastRegistry scope.
+///     At 200 bots that scope was 0.79 ms p99 in the 32 Hz tests, so
+///     128 Hz pushes it to ~3 ms p99 — still under the 7.8 ms tick.
+///
+/// Override with `[serverRep] snapshotHz = N` in config.toml or the
+/// `SERVER_SNAPSHOT_HZ` env var if you need to claw back bandwidth on
+/// a constrained network.  Lower values (e.g. 64 Hz or the legacy
+/// 32 Hz) still work — render-delay-interpolation (PR-11) and lag-comp
+/// (PR-12) both adapt automatically via the snapshotEveryNTicks field.
+///
+/// @note On the server side, the runtime still defaults to 32 Hz when
+/// the field is loaded from a pre-PR-13 config.toml that explicitly
+/// sets `snapshotHz = 32`.  Only the *built-in* default changed.
 struct ServerReplicationConfig
 {
-    /// @brief How often the server emits a registry snapshot. Plan default: 32 Hz.
-    int snapshotHz = 32;
+    /// @brief How often the server emits a registry snapshot.
+    /// PR-13 default: 128 Hz (full physics-tick rate).  Tournament-
+    /// title cadence; render delay ≈ 16 ms with PR-11's 2-snapshot
+    /// interpolation buffer.
+    int snapshotHz = 128;
 };
 
 /// @brief Phase 3d: per-feature toggles for the UDP transport rollout.

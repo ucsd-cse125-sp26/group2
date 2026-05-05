@@ -6,6 +6,7 @@
 #include "client/animation/AnimationLibrary.hpp"
 #include "client/animation/CharacterAnimator.hpp"
 #include "client/animation/CharacterRig.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/physics/MapLoader.hpp"
@@ -13,6 +14,7 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
+#include "systems/Event.hpp" // PR-27: ShotIntentPayload
 #include "systems/MatchController.hpp"
 
 #include <SDL3/SDL.h>
@@ -162,4 +164,72 @@ private:
     /// Per-entity server animators (not ECS components to avoid pulling animation
     /// headers into the component registry).
     std::unordered_map<entt::entity, std::unique_ptr<CharacterAnimator>> serverAnimators_;
+
+    // ── PR-18: server-side ground-truth log ──────────────────────────────
+    //
+    // Opened from `GROUP2_SERVER_TRUTH_CSV` env var if set.  One global
+    // CSV file containing one row per replicated player per logged tick:
+    //
+    //     wallTimeNs,serverTick,clientId,posX,posY,posZ
+    //
+    // Throttled to every Nth tick (default 4 = 32 Hz at the 128 Hz tick
+    // rate; tunable via `GROUP2_SERVER_TRUTH_HZ_DIVIDER`).  Log rate is
+    // chosen to be high enough that linear interpolation between
+    // adjacent samples is a good approximation of "the server's
+    // position at any wall-clock time T", which is what the offline
+    // analyzer compares against bot-side observations.  At 32 Hz × 100
+    // bots × ~50 B/row = ~160 KB/s — trivial disk I/O cost on any
+    // reasonable test rig.
+    //
+    // No mutex needed: this runs on the game thread, on the same path
+    // as the existing tick logic, after the per-tick physics + lag-comp
+    // updates have settled.
+    std::FILE* truthCsv_ = nullptr;
+    int truthHzDivider_ = 4;
+
+    /// @brief Open the ground-truth CSV from env var if set.  No-op when
+    /// the env var is missing; load tests stay fast by default.
+    void openGroundTruthLog();
+
+    /// @brief Write one row per replicated player entity if the current
+    /// `tickCount` aligns with `truthHzDivider_`.  Called at the end of
+    /// each tick after the per-tick physics + broadcast settles.
+    void writeGroundTruthLogIfDue();
+
+    /// @brief Flush + close the CSV if open.  Safe to call from dtor.
+    void closeGroundTruthLog() noexcept;
+
+    // ── PR-27: pending client SHOT_INTENTs ───────────────────────────────
+    //
+    // The network thread enqueues `EventType::ShotIntent` events into
+    // `eventQueue`; the game thread's `processEvent` drains them and
+    // stashes the payload here, keyed by `(shooterClientId,
+    // shotInputTick)`.  When the weapon-system path resolves a shot
+    // for the same shooter at the same input tick, it looks up the
+    // intent here, computes the anim-state delta vs the historical
+    // sample, and emits the result to `server_shots.csv`.
+    //
+    // Bounded at `k_pendingShotIntentsMax = 256` entries (~2 s of
+    // shots at the 128 Hz fire-rate ceiling).  The map is single-
+    // threaded read/write on the game thread.
+    struct ShotIntentKey
+    {
+        std::uint16_t shooterClientId = 0;
+        std::uint32_t shotInputTick = 0;
+        bool operator==(const ShotIntentKey& o) const noexcept
+        {
+            return shooterClientId == o.shooterClientId && shotInputTick == o.shotInputTick;
+        }
+    };
+    struct ShotIntentKeyHash
+    {
+        std::size_t operator()(const ShotIntentKey& k) const noexcept
+        {
+            // Mix shooter into the high bits so two shots from the
+            // same shooter at adjacent ticks aren't bucket-adjacent.
+            return (static_cast<std::size_t>(k.shooterClientId) << 32) ^ k.shotInputTick;
+        }
+    };
+    static constexpr std::size_t k_pendingShotIntentsMax = 256;
+    std::unordered_map<ShotIntentKey, ShotIntentPayload, ShotIntentKeyHash> pendingShotIntents_;
 };

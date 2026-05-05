@@ -84,17 +84,77 @@ bool isUnderCollectionNode(const aiNode* node, const std::string& collectionName
     return false;
 }
 
-/// @brief Determine the collision sub-collection type from ancestor node names.
-/// Returns: "boxes", "brushes", "cylinders", "spheres", "meshes", or "" (auto).
+/// @brief Parse an explicit `COL_<TYPE>_<name>` prefix on the node's own name.
 ///
-/// Two Blender authoring conventions are supported:
-///   1. **Sub-collection (plural):** wrap collision objects in a child collection
-///      named "Boxes", "Cylinders", "Spheres", "Brushes", or "Meshes".  The
-///      collection becomes a parent node in the GLB; we walk ancestors here.
-///   2. **Object name (singular):** name the collision object after its shape
-///      (the Blender default for primitive adds — "Cylinder", "Sphere", etc.).
-///      Useful when collision is tagged by name prefix (e.g. "COL_Cylinder")
-///      instead of nested sub-collections.
+/// PR-31 — primary authoring path going forward.  Lets the user (or the
+/// Blender export script) declare a collision shape unambiguously per
+/// object, without depending on sub-collection nesting OR on the loader's
+/// geometric heuristics getting it right.  Mapping (case-insensitive on
+/// the type word):
+///
+///   `COL_BOX_*`       / `COL_AABB_*`     → "boxes"
+///   `COL_RAMP_*`      / `COL_WEDGE_*`    → "brushes" (5-plane wedge)
+///   `COL_BRUSH_*`     / `COL_CONVEX_*`   → "brushes" (any convex)
+///   `COL_CYL_*`       / `COL_CYLINDER_*` → "cylinders"
+///   `COL_SPHERE_*`                       → "spheres"
+///   `COL_MESH_*`      / `COL_TRIMESH_*`  → "meshes"
+///   `COL_PLATFORM_*`  / `COL_PLANE_*`    → "platforms" (thin AABB, PR-31)
+///   `COL_AUTO_*`                         → ""           (explicit auto)
+///
+/// Anything that doesn't match (e.g. `COL_Plane.014` where the second word
+/// is a source-object name, not a type word) returns "" (auto-detect)
+/// — preserves the pre-PR-31 behaviour where unprefixed `COL_*` flowed
+/// through the geometric classifier.
+std::string parseTypePrefix(const std::string& nodeName)
+{
+    if (nodeName.size() < 5)
+        return "";
+    if (!(nodeName[0] == 'C' || nodeName[0] == 'c') || !(nodeName[1] == 'O' || nodeName[1] == 'o') ||
+        !(nodeName[2] == 'L' || nodeName[2] == 'l') || nodeName[3] != '_')
+        return "";
+
+    const std::string rest = nodeName.substr(4);
+    const auto sep = rest.find('_');
+    if (sep == std::string::npos)
+        return "";
+
+    std::string word = rest.substr(0, sep);
+    for (char& c : word)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+    if (word == "BOX" || word == "AABB")
+        return "boxes";
+    if (word == "RAMP" || word == "WEDGE" || word == "BRUSH" || word == "CONVEX")
+        return "brushes";
+    if (word == "CYL" || word == "CYLINDER")
+        return "cylinders";
+    if (word == "SPHERE")
+        return "spheres";
+    if (word == "MESH" || word == "TRIMESH")
+        return "meshes";
+    if (word == "PLATFORM" || word == "PLANE")
+        return "platforms";
+    if (word == "AUTO")
+        return "";
+    return ""; // unrecognized type word — fall through to auto-detect
+}
+
+/// @brief Determine the collision sub-collection type from ancestor node names.
+/// Returns: "boxes", "brushes", "cylinders", "spheres", "meshes", "platforms",
+/// or "" (auto).
+///
+/// Three Blender authoring conventions are supported, in priority order:
+///   1. **Per-object type prefix (PR-31):** `COL_<TYPE>_<name>` on the
+///      collision object itself.  Highest priority — explicit user intent
+///      always wins.  See `parseTypePrefix` for the type vocabulary.
+///   2. **Sub-collection (plural):** wrap collision objects in a child
+///      collection named "Boxes", "Cylinders", "Spheres", "Brushes", or
+///      "Meshes".  The collection becomes a parent node in the GLB; we
+///      walk ancestors here.
+///   3. **Object name (singular):** name the collision object after its
+///      shape (the Blender default for primitive adds — "Cylinder",
+///      "Sphere", etc.).  Useful when collision is tagged by name prefix
+///      without nested sub-collections.
 ///
 /// The node's own name is checked first because it is the more specific signal:
 /// users who deliberately group meshes under a sub-collection are typically
@@ -103,7 +163,16 @@ bool isUnderCollectionNode(const aiNode* node, const std::string& collectionName
 /// auto-detection mis-fits as a sphere when the cylinder is rotated off-Y).
 std::string getCollectionType(const aiNode* node)
 {
-    // 1) Check the node's own name for Blender-style shape keywords.  Only
+    // 1) PR-31: explicit `COL_<TYPE>_<name>` prefix on the node's own name.
+    //    Wins over everything else — when the user has typed (or the
+    //    Blender script has emitted) a type word, honour it.
+    {
+        const std::string ownName(node->mName.C_Str());
+        if (auto explicitType = parseTypePrefix(ownName); !explicitType.empty())
+            return explicitType;
+    }
+
+    // 2) Check the node's own name for Blender-style shape keywords.  Only
     //    "cylinder" needs help today: the auto AABB / fitSphere paths already
     //    handle "Cube"/"Plane"/"Sphere"/"Icosphere" correctly, but a rotated
     //    cylinder has equidistant rim vertices and slips into fitSphere.
@@ -113,7 +182,7 @@ std::string getCollectionType(const aiNode* node)
             return "cylinders";
     }
 
-    // 2) Walk ancestors looking for sub-collection names (plural).
+    // 3) Walk ancestors looking for sub-collection names (plural).
     const aiNode* cur = node->mParent;
     while (cur != nullptr) {
         std::string name(cur->mName.C_Str());
@@ -127,6 +196,8 @@ std::string getCollectionType(const aiNode* node)
             return "spheres";
         if (containsCI(name, "meshes"))
             return "meshes";
+        if (containsCI(name, "platforms"))
+            return "platforms";
         cur = cur->mParent;
     }
     return ""; // auto-detect
@@ -329,13 +400,42 @@ bool fitCylinder(const std::vector<glm::vec3>& verts,
     return true;
 }
 
-/// @brief Check if the mesh is an axis-aligned box (all face normals align with world axes).
+/// @brief Check if the mesh is an axis-aligned box (all face normals align with
+/// world axes AND all vertices sit at the 8 corners of the AABB).
+///
+/// PR-30 — two false-positives the pre-PR-30 normals-only check produced:
+///
+/// 1. **Gentle ramps misclassified as cubes.**  The old normal-axis tolerance
+///    was 0.1, i.e. "within ~26° of an axis".  A 20° ramp's tilted face has
+///    `n.y ≈ 0.94`, `|0.94 - 1.0| = 0.06 < 0.1` → the check called the ramp
+///    axis-aligned and the loader produced a cube whose volume swallowed the
+///    slope.  The runtime experience: ramps acted as solid boxes the player
+///    couldn't walk up.  Tightening to `1e-3` (~0.06°) restricts the fast-
+///    path AABB to truly axis-aligned shapes; ramps now fall through to the
+///    convex-brush path, which represents the slope exactly.
+///
+/// 2. **L-shaped meshes swallowed by their bounding box.**  Consider a square
+///    plane with a small balcony at one corner — two disconnected square
+///    components in a single Blender mesh.  All face normals are still axis-
+///    aligned, so the old check accepted it; the loader then computed the
+///    AABB of *both* components and emplaced one big box covering the L
+///    *and the air gap inside the L*, creating phantom collision over empty
+///    space.  Rejecting the AABB here when any vertex sits off the 8 AABB
+///    corners forces the loader to fall through to convex-brush /
+///    triMesh — both of which represent the L footprint correctly.
 bool isAxisAlignedBox(const aiMesh* mesh, const glm::mat4& world)
 {
-    if (!mesh->HasNormals())
+    if (!mesh->HasNormals() || !mesh->HasPositions() || mesh->mNumVertices == 0)
         return false;
 
     const glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(world)));
+
+    // PR-30 (1): tight tolerance — gentle ramps (~5°+) must FAIL this check
+    // so they can be picked up by the convex-brush path instead of being
+    // swallowed by an axis-aligned cube.  `1e-3` corresponds to ~0.06° of
+    // slope tolerance, which only forgives floating-point quantisation
+    // from the FBX/GLB pipeline.
+    constexpr float k_normalAxisTolerance = 1e-3f;
 
     for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
         const glm::vec3 localN(mesh->mNormals[v].x, mesh->mNormals[v].y, mesh->mNormals[v].z);
@@ -344,13 +444,43 @@ bool isAxisAlignedBox(const aiMesh* mesh, const glm::mat4& world)
         // Check if normal aligns with one of the 6 axis directions
         bool aligned = false;
         for (int axis = 0; axis < 3; ++axis) {
-            if (std::abs(std::abs(wn[axis]) - 1.0f) < 0.1f) {
+            if (std::abs(std::abs(wn[axis]) - 1.0f) < k_normalAxisTolerance) {
                 aligned = true;
                 break;
             }
         }
         if (!aligned)
             return false;
+    }
+
+    // PR-30 (2): every vertex must be at one of the 8 AABB corner positions.
+    // Filters out L-shapes / disconnected-but-axis-aligned meshes whose
+    // bounding-box volume contains air.  Tolerance scales with the AABB
+    // diagonal so the test is invariant to map scale.
+    glm::vec3 bmin(1e30f);
+    glm::vec3 bmax(-1e30f);
+    for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
+        const glm::vec4 local(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
+        const glm::vec3 wp(world * local);
+        bmin = glm::min(bmin, wp);
+        bmax = glm::max(bmax, wp);
+    }
+    const glm::vec3 ext = bmax - bmin;
+    const float maxExt = std::max({ext.x, ext.y, ext.z});
+    // 0.1 % of the largest extent — enough to swallow float rounding from
+    // the GLB pipeline, tight enough to reject any vertex off the corners.
+    // Floor at 1e-4 so degenerate meshes (e.g. a single quad with zero
+    // thickness on one axis) still get a finite tolerance.
+    const float cornerTolerance = std::max(1e-4f, maxExt * 1e-3f);
+    for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
+        const glm::vec4 local(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
+        const glm::vec3 wp(world * local);
+        for (int axis = 0; axis < 3; ++axis) {
+            const bool onMin = std::abs(wp[axis] - bmin[axis]) <= cornerTolerance;
+            const bool onMax = std::abs(wp[axis] - bmax[axis]) <= cornerTolerance;
+            if (!onMin && !onMax)
+                return false; // off-corner vertex — not an AABB
+        }
     }
     return true;
 }
@@ -380,16 +510,29 @@ struct FacePlane
 /// Outward orientation is auto-detected from the mesh centroid: whichever side
 /// of each face the centroid is on is treated as the interior.  This means
 /// inverted-winding meshes are handled correctly without a manual flip.
-bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale, WorldBrush& outBrush)
+///
+/// PR-31: when @p diagNodeName is non-null, logs the specific reason the
+/// extraction failed (vertex-count, plane-count, concavity, etc.) — turns
+/// "ramps mysteriously become triMeshes" into a self-diagnosing pipeline.
+bool extractConvexBrush(
+    const aiMesh* mesh, const glm::mat4& world, float scale, WorldBrush& outBrush, const char* diagNodeName = nullptr)
 {
-    if (!mesh->HasPositions() || mesh->mNumFaces == 0)
+    if (!mesh->HasPositions() || mesh->mNumFaces == 0) {
+        if (diagNodeName)
+            SDL_Log("MapLoader: brush reject '%s' — no positions or no faces", diagNodeName);
         return false;
+    }
 
     // World-space vertex cache — we'll project every vertex against every
     // face plane below, so do the transform once.
     const std::vector<glm::vec3> verts = getWorldVertices(mesh, world, scale);
-    if (verts.size() < 4)
+    if (verts.size() < 4) {
+        if (diagNodeName)
+            SDL_Log("MapLoader: brush reject '%s' — only %zu vertices (need ≥ 4 for a closed convex volume)",
+                    diagNodeName,
+                    verts.size());
         return false; // a closed convex volume needs at least a tetrahedron
+    }
 
     // Mesh extent — used to scale a relative tolerance for "on the plane".
     glm::vec3 bmin, bmax;
@@ -397,8 +540,11 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
     const glm::vec3 centroid = (bmin + bmax) * 0.5f;
     const glm::vec3 ext = bmax - bmin;
     const float meshDiag = glm::length(ext);
-    if (meshDiag < 1e-6f)
+    if (meshDiag < 1e-6f) {
+        if (diagNodeName)
+            SDL_Log("MapLoader: brush reject '%s' — degenerate (zero-extent mesh)", diagNodeName);
         return false; // degenerate (zero-extent mesh)
+    }
 
     // 0.1% of the mesh diagonal — generous enough to absorb numerical noise
     // and Blender's typical export precision, tight enough to flag real
@@ -442,8 +588,23 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
         // surface).  Bail out so the caller falls through to triMesh.
         for (const auto& v : verts) {
             const float d = glm::dot(faceN, v) - dist;
-            if (d > tolerance)
+            if (d > tolerance) {
+                if (diagNodeName)
+                    SDL_Log("MapLoader: brush reject '%s' — concave (face %u plane n=(%.2f,%.2f,%.2f) d=%.2f, vertex "
+                            "(%.1f,%.1f,%.1f) is %.3f outside, tol=%.3f)",
+                            diagNodeName,
+                            fi,
+                            static_cast<double>(faceN.x),
+                            static_cast<double>(faceN.y),
+                            static_cast<double>(faceN.z),
+                            static_cast<double>(dist),
+                            static_cast<double>(v.x),
+                            static_cast<double>(v.y),
+                            static_cast<double>(v.z),
+                            static_cast<double>(d),
+                            static_cast<double>(tolerance));
                 return false;
+            }
         }
 
         // Deduplicate by normal direction (parallel coplanar tris share a plane).
@@ -460,8 +621,23 @@ bool extractConvexBrush(const aiMesh* mesh, const glm::mat4& world, float scale,
 
     // A closed convex volume needs at least 4 planes (tetrahedron); fewer means
     // an unbounded half-space.  And it must fit within the brush's plane budget.
-    if (static_cast<int>(uniquePlanes.size()) < 4 || static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes)
+    if (static_cast<int>(uniquePlanes.size()) < 4) {
+        if (diagNodeName)
+            SDL_Log("MapLoader: brush reject '%s' — only %zu unique plane(s) (need ≥ 4 for closed convex; this is "
+                    "typical for thin 2D quads — try `COL_PLATFORM_<name>` instead)",
+                    diagNodeName,
+                    uniquePlanes.size());
         return false;
+    }
+    if (static_cast<int>(uniquePlanes.size()) > WorldBrush::k_maxPlanes) {
+        if (diagNodeName)
+            SDL_Log("MapLoader: brush reject '%s' — %zu unique planes exceeds k_maxPlanes=%d (try `COL_MESH_<name>` or "
+                    "decimate the source object)",
+                    diagNodeName,
+                    uniquePlanes.size(),
+                    WorldBrush::k_maxPlanes);
+        return false;
+    }
 
     // Build the brush.
     outBrush.planeCount = static_cast<int>(uniquePlanes.size());
@@ -852,6 +1028,38 @@ void extractMeshCollision(const aiMesh* mesh,
         out.triMeshes.push_back(std::move(tm));
         return;
     }
+    if (forceType == "platforms") {
+        // PR-31: thin axis-aligned platform.  The Blender export is a
+        // 1-quad plane (2 triangles, 4 vertices, all coplanar).  We
+        // compute its AABB; if any axis has zero or near-zero extent
+        // (the plane's normal axis), we extrude it by a small thickness
+        // CENTRED on the original plane so the player can stand ON the
+        // plane and not fall halfway through.  Without the extrusion,
+        // the AABB has zero volume on one axis and behaves erratically
+        // under the swept-AABB collision (entry/exit tFirst values
+        // collapse to the same instant).
+        constexpr float k_minPlatformThickness = 1.0f;
+        glm::vec3 bmin, bmax;
+        computeAABB(verts, bmin, bmax);
+        for (int axis = 0; axis < 3; ++axis) {
+            const float extent = bmax[axis] - bmin[axis];
+            if (extent < k_minPlatformThickness) {
+                const float pad = (k_minPlatformThickness - extent) * 0.5f;
+                bmin[axis] -= pad;
+                bmax[axis] += pad;
+            }
+        }
+        out.boxes.push_back({bmin, bmax});
+        SDL_Log("MapLoader: Platform (forced) [%.1f,%.1f,%.1f]→[%.1f,%.1f,%.1f] '%s'",
+                static_cast<double>(bmin.x),
+                static_cast<double>(bmin.y),
+                static_cast<double>(bmin.z),
+                static_cast<double>(bmax.x),
+                static_cast<double>(bmax.y),
+                static_cast<double>(bmax.z),
+                nodeName);
+        return;
+    }
 
     // --- Auto-detection ---
     // Order: AABB → cylinder → sphere → brush → fallback.
@@ -911,9 +1119,13 @@ void extractMeshCollision(const aiMesh* mesh,
 
     // 4. Try a single convex brush (for genuinely-convex meshes that fit in
     //    one hull within k_maxPlanes — cheapest collision shape after AABB).
+    //    PR-31: pass `nodeName` for diagnostic logging on rejection — turns
+    //    "ramps mysteriously become triMeshes" into a self-explaining log
+    //    line that names the failing condition and suggests the right
+    //    `COL_<TYPE>_<name>` prefix.
     {
         WorldBrush brush{};
-        if (extractConvexBrush(mesh, world, scale, brush)) {
+        if (extractConvexBrush(mesh, world, scale, brush, nodeName)) {
             out.brushes.push_back(brush);
             SDL_Log("MapLoader: Brush (auto) %d planes '%s'", brush.planeCount, nodeName);
             return;

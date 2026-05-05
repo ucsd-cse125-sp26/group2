@@ -22,6 +22,9 @@
 #include "sfx/SfxSystem.hpp"
 #include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
+#include "util/WorkerPool.hpp"
+
+#include <memory>
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
 #else
@@ -99,7 +102,15 @@ public:
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
-    static constexpr int k_maxTicksPerFrame = 8; ///< Spiral-of-death guard: max physics ticks per iterate().
+    /// Spiral-of-death guard: max physics ticks per iterate().  Dropped from
+    /// 8 to 2 in Phase 3g — the bench profiler showed the slowest frames are
+    /// dominated by catch-up bursts (e.g. 8 ticks × ~2 ms = 16 ms in one
+    /// frame, dragging p1/p5).  Capping at 2 spreads the catch-up across
+    /// more render frames so any individual frame's worst case is ~4 ms
+    /// instead of ~16 ms.  Visual consequence on a stall: physics simulation
+    /// briefly runs 0.5× wall speed until the accumulator drains naturally;
+    /// human-imperceptible at 1000+ render Hz.
+    static constexpr int k_maxTicksPerFrame = 2;
     static constexpr int k_fpsHistorySize = 512; ///< Samples in the rolling FPS ring buffer.
 
     NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
@@ -107,8 +118,12 @@ private:
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
 #ifdef USE_HYBRID_RENDERER
     HybridRenderer renderer;                     ///< Routes each call to the legacy or new renderer.
+    /// @brief Direct access to the legacy renderer instance (perf Phase 1B
+    /// reaches into legacy-only API: setSkinnedRig / setSkinnedFrame).
+    Renderer& legacyRenderer() noexcept { return renderer.legacy(); }
 #else
     Renderer renderer; ///< Legacy renderer.
+    Renderer& legacyRenderer() noexcept { return renderer; }
 #endif
     Registry registry;             ///< The shared ECS registry.
     Client client;                 ///< UDP network client.
@@ -129,12 +144,31 @@ private:
     /// keys the input ring buffer by it.
     uint32_t clientPredictTick = 0;
 
+    /// @brief PR-20: tracks last frame's `input.shooting` so the
+    /// fire-rising-edge detector inside `iterate()` only captures
+    /// the FIRST tick of a click (a "trigger pull"), not every tick
+    /// the button is held.  Survives across frames as a member; is
+    /// naturally reset when the local player respawns because the
+    /// View<LocalPlayer> branch returns early during the dead-window
+    /// (no InputSnapshot present).  Implementation detail of the
+    /// shot-debug visualizer.
+    bool prevShootingForDebug_ = false;
+
     /// @brief Phase 5b: ring buffer of recent stamped inputs for replay-
     /// based reconciliation. Each entry is keyed by clientPredictTick so
     /// runReconciliation can look up the input that was sent for any
     /// recent tick and feed it back into runMovement during replay.
     InputRingBuffer inputRing_;
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
+
+    /// Persistent thread pool for parallel-for over per-frame loops
+    /// (currently the animation update; future: parallel frustum cull,
+    /// particle update, ECS transforms).  Initialised in Game::init with a
+    /// worker count derived from `std::thread::hardware_concurrency() / 2`
+    /// (or `GROUP2_WORKERS` if set), so we leave half the cores for the
+    /// rest of the system.  Gated behind a unique_ptr so it constructs
+    /// AFTER `init()` reads the env override.
+    std::unique_ptr<WorkerPool> workerPool_;
 
     // Runtime-tunable loop settings (exposed via ImGui)
     float mouseSensitivity = 0.001f;       ///< Radians per pixel of mouse movement.
@@ -297,6 +331,41 @@ private:
     float statsFPSMax = 0.0f;       ///< Maximum FPS in the ring buffer.
     float statsFPS1pLow = 0.0f;     ///< 1st-percentile FPS (1 % low).
     float statsFPS5pLow = 0.0f;     ///< 5th-percentile FPS (5 % low).
+
+    // Benchmark mode: when BENCH_SECONDS env var is set to a positive number,
+    // the client runs for that many seconds, prints a one-line FPS summary to
+    // stderr, then quits.  Powers `scripts/perf-100bots.sh`.
+    float benchSeconds_ = 0.0f;                         ///< Bench duration in seconds (0 = disabled).
+    Uint64 benchStartTime_ = 0;                         ///< Perf counter at first iterate() in bench mode.
+    bool benchActive_ = false;                          ///< True after BENCH_SECONDS read at init.
+    static constexpr float k_benchWarmupSeconds = 2.0f; ///< Skip the first N seconds (pipeline warmup).
+    std::vector<float> benchFrameTimesMs_;              ///< Per-frame ms after warmup; reservation in init().
+
+    /// Per-frame phase-time breakdown.  Captured every frame in bench mode,
+    /// then the slowest 10 frames' breakdowns are dumped at exit so we can
+    /// attribute p1/p5 spikes to specific subsystems (e.g. "the spike was a
+    /// drawFrame stall waiting for the swapchain" vs "an animation-update
+    /// burst hit several chars at once").
+    struct FrameSectionMs
+    {
+        float total = 0.0f;
+        float input = 0.0f;
+        float networkPoll = 0.0f;
+        float physics = 0.0f;
+        float animation = 0.0f;        ///< ozz pose + skin matrix + hitbox.
+        float skinPaletteBuild = 0.0f; ///< Frustum cull + palette + instance build.
+        float entityCmds = 0.0f;       ///< Renderable + 3p weapon list build.
+        float particles = 0.0f;
+        float imgui = 0.0f;
+        float drawFrame = 0.0f; ///< Renderer drawFrame (CPU + GPU acquire).
+        // Sub-breakdown of drawFrame, populated from Renderer::lastAcquire/Record/SubmitMs.
+        // The "acquire" ms specifically captures swapchain back-pressure stalls — when
+        // the GPU hasn't released a previous swap image, the CPU thread blocks here.
+        float drawAcquire = 0.0f;
+        float drawRecord = 0.0f;
+        float drawSubmit = 0.0f;
+    };
+    std::vector<FrameSectionMs> benchFrameStats_;
 
     /// @brief Attach a fresh `AnimatedCharacter` component to an entity.
     ///

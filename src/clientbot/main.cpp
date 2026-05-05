@@ -14,18 +14,25 @@
 /// + Registry; nothing else is shared.
 
 #include "Bot.hpp"
+#include "ecs/AssetCatalog.hpp"
+#include "ecs/MapConfig.hpp"
+#include "ecs/physics/MapLoader.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "network/NetworkConfig.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -82,8 +89,105 @@ void printUsage(const char* argv0)
                  "  numBots      Number of bots to launch concurrently (default: 1)\n"
                  "  host:port    Override the server address from config.toml\n"
                  "\n"
-                 "All bots are killed on Ctrl+C (SIGINT) or SIGTERM.\n",
+                 "All bots are killed on Ctrl+C (SIGINT) or SIGTERM.\n"
+                 "\n"
+                 "Fleet RTT aggregator:\n"
+                 "  GROUP2_BOT_FLEET_RTT=1     Log fleet-wide RTT p50/p99/max once per second.\n"
+                 "  GROUP2_BOT_FLEET_RTT_CSV=path  Also write CSV rows to `path`.\n",
                  argv0);
+}
+
+/// PR-1 (server-perf): once-per-second fleet RTT aggregator.
+///
+/// Walks every connected bot, samples its smoothed RTT from
+/// `Bot::getCurrentRttMs()`, computes p50/p99/max, and emits one
+/// log line. Optional CSV output keyed off `GROUP2_BOT_FLEET_RTT_CSV`.
+///
+/// We sample on the main thread via a sleep loop instead of spinning
+/// up a dedicated std::thread because the main thread is otherwise
+/// idle (just waiting on the stop flag) and the sampling cost is
+/// dominated by the SDL_Log syscall, not the per-bot read.
+void runFleetRttAggregator(const std::vector<std::unique_ptr<Bot>>& bots, const std::atomic<bool>& stopFlag)
+{
+    const char* csvPath = std::getenv("GROUP2_BOT_FLEET_RTT_CSV");
+    std::FILE* csv = nullptr;
+    if (csvPath != nullptr && csvPath[0] != '\0') {
+        csv = std::fopen(csvPath, "w");
+        if (csv != nullptr) {
+            std::fprintf(csv, "t_unix_ms,bot_count,bot_ready,p50_ms,p99_ms,max_ms,mean_ms\n");
+        } else {
+            SDL_Log("[fleet] WARNING: cannot open CSV at '%s'", csvPath);
+        }
+    }
+
+    std::vector<float> rtts;
+    rtts.reserve(bots.size());
+
+    while (!stopFlag.load(std::memory_order_relaxed)) {
+        // Sleep in short slices so SIGINT-triggered stop is observed
+        // within ~100 ms instead of waiting out a full 1-second slumber.
+        // Without this, the loadtest harness's `kill -INT` would block
+        // for up to a second per bot's outstanding sleep.
+        for (int i = 0; i < 10 && !stopFlag.load(std::memory_order_relaxed); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (stopFlag.load(std::memory_order_relaxed))
+            break;
+
+        rtts.clear();
+        for (const auto& bot : bots) {
+            if (!bot->isReady())
+                continue;
+            const float r = bot->getCurrentRttMs();
+            if (r > 0.0f && r < 10'000.0f) // filter pre-PONG sentinel + obvious outliers
+                rtts.push_back(r);
+        }
+
+        const auto now = std::chrono::system_clock::now().time_since_epoch();
+        const auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+
+        if (rtts.empty()) {
+            SDL_Log("[fleet rtt] N=%zu of %zu (warming up — waiting for first PONGs)", rtts.size(), bots.size());
+            if (csv != nullptr) {
+                std::fprintf(csv, "%lld,%zu,0,0,0,0,0\n", static_cast<long long>(ts), bots.size());
+                std::fflush(csv);
+            }
+            continue;
+        }
+
+        std::sort(rtts.begin(), rtts.end());
+        const std::size_t n = rtts.size();
+        const float p50 = rtts[n / 2];
+        const float p99 = rtts[std::min(n - 1, static_cast<std::size_t>(static_cast<double>(n) * 0.99))];
+        const float max = rtts.back();
+        float sum = 0.0f;
+        for (float r : rtts)
+            sum += r;
+        const float mean = sum / static_cast<float>(n);
+
+        SDL_Log("[fleet rtt] N=%zu of %zu  p50=%.2fms p99=%.2fms max=%.2fms mean=%.2fms",
+                n,
+                bots.size(),
+                static_cast<double>(p50),
+                static_cast<double>(p99),
+                static_cast<double>(max),
+                static_cast<double>(mean));
+
+        if (csv != nullptr) {
+            std::fprintf(csv,
+                         "%lld,%zu,%zu,%.4f,%.4f,%.4f,%.4f\n",
+                         static_cast<long long>(ts),
+                         bots.size(),
+                         n,
+                         static_cast<double>(p50),
+                         static_cast<double>(p99),
+                         static_cast<double>(max),
+                         static_cast<double>(mean));
+            std::fflush(csv);
+        }
+    }
+
+    if (csv != nullptr)
+        std::fclose(csv);
 }
 
 } // namespace
@@ -141,6 +245,40 @@ int main(int argc, char* argv[])
     const Uint16 port = portOverride != 0 ? portOverride : cfg.serverNetwork.port;
 
     SDL_Log("[clientbot] launching %d bot(s) → %s:%u", numBots, host.c_str(), port);
+
+    // ── PR-23: load map collision once for all bots ──────────────────────
+    //
+    // Client-side prediction needs world geometry — `runMovement` +
+    // `runCollision` raycast against `physics::activeWorld()`.  This is
+    // a Meyer's-singleton, so loading once here populates it for every
+    // bot in the process.
+    //
+    // PR-30 (post-merge): use the same `gamemap::loadConfiguredMap`
+    // helper the client and server now share (introduced in main's
+    // `ecs/MapConfig.hpp` refactor).  Prediction parity needs the bot
+    // to extract IDENTICAL collision primitives — going through the
+    // shared helper makes that automatic; any future change to map-
+    // load options propagates here unchanged.
+    //
+    // CRITICAL lifetime: `WorldGeometry` holds `std::span`s into the
+    // vectors inside `MapCollisionData`, NOT copies.  `setActiveWorld`
+    // stashes those spans verbatim in the singleton, so `mapCollision`
+    // MUST outlive every `physics::activeWorld()` access — which
+    // means it has to live for the whole process.  Hoist into `main`
+    // scope (not into a `{}` block) so it survives until process exit.
+    physics::MapCollisionData mapCollision;
+    {
+        gamemap::loadConfiguredMap(mapCollision, "clientbot");
+        // PR-30: V-HACD gated on `gamemap::k_useVhacd`.  See the comment
+        // in `MapConfig.hpp` for the rationale.
+        const std::string assetsDir = std::string(base ? base : "") + "assets/";
+        for (const AssetDefinition& def : kPropAssets) {
+            const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
+            physics::loadPropCollision(
+                assetsDir + def.filename, mapCollision, def.loadTranslation, def.loadScale, decompose);
+        }
+        physics::setActiveWorld(mapCollision.geometry());
+    }
 
     // Optional latency simulator hook for testing Phase 6 lag-comp under
     // bot-only load. Each bot applies `GROUP2_BOT_LATENCY_MS` ms of
@@ -214,9 +352,20 @@ int main(int argc, char* argv[])
         bot->start(g_stopFlag);
     }
 
-    // ── Wait for shutdown signal ─────────────────────────────────────────
-    while (!g_stopFlag.load(std::memory_order_relaxed)) {
-        SDL_Delay(100);
+    // ── Wait for shutdown signal (with optional fleet aggregator) ────────
+    //
+    // PR-1 (server-perf): when GROUP2_BOT_FLEET_RTT=1, the main thread
+    // doubles as the aggregator. Otherwise it just sleeps on the stop
+    // flag the way it always did.
+    const char* fleetEnv = std::getenv("GROUP2_BOT_FLEET_RTT");
+    const bool fleetOn = (fleetEnv != nullptr) && fleetEnv[0] != '\0' && fleetEnv[0] != '0';
+    if (fleetOn) {
+        SDL_Log("[clientbot] fleet RTT aggregator enabled (1 Hz)");
+        runFleetRttAggregator(bots, g_stopFlag);
+    } else {
+        while (!g_stopFlag.load(std::memory_order_relaxed)) {
+            SDL_Delay(100);
+        }
     }
 
     SDL_Log("[clientbot] shutdown signalled; waiting for %zu bots to finish", bots.size());

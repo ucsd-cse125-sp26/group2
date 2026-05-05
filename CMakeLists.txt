@@ -485,6 +485,8 @@ set(SHADER_SOURCES
     model.vert model.frag               # legacy model shaders (kept for reference)
     geometry.vert geometry.frag          # graphics team Lambertian shaders
     pbr.vert pbr.frag                   # PBR Cook-Torrance (Phase 1)
+    pbr_skinned.vert                    # GPU skinning + instancing (perf Phase 1B)
+    shadow_skinned.vert                 # GPU skinning + instancing for shadow pass
     shadow.vert shadow.frag             # shadow map depth-only (Phase 2)
     fullscreen.vert tonemap.frag        # HDR tone mapping (Phase 4)
     skybox.vert skybox.frag             # environment skybox (Phase 5)
@@ -585,6 +587,9 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    # PR-11 (server-perf): client-side render-delay interpolation
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.cpp"
@@ -601,6 +606,9 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    # Util
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.hpp"
     # Particle system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.hpp"
@@ -699,6 +707,7 @@ add_executable(group2
         src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/InterpolationBuffer.hpp
         src/ecs/components/LocalPlayer.hpp
         src/ecs/components/Renderable.hpp
         src/ecs/components/Projectile.hpp
@@ -908,6 +917,9 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    # PR-11 (server-perf): client-side render-delay interpolation
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
@@ -922,6 +934,9 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    # Util
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.hpp"
     # Particle system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.hpp"
@@ -1020,6 +1035,7 @@ add_executable(client
         src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/InterpolationBuffer.hpp
         src/ecs/components/LocalPlayer.hpp
         src/ecs/components/Renderable.hpp
         src/ecs/components/Projectile.hpp
@@ -1204,6 +1220,14 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
+    # PR-1 (server-perf): scoped profiler + 1 Hz aggregator.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.cpp"
+    # PR-3 (server-perf): parallel-STL fan-out helper.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Parallel.hpp"
+    # PR-18b (netsync): server-side shot-resolution log.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/ShotLog.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/ShotLog.cpp"
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/components/Position.hpp
@@ -1214,6 +1238,7 @@ add_executable(server
         src/ecs/components/PlayerSimState.hpp
         src/ecs/components/InputSnapshot.hpp
         src/ecs/components/PreviousPosition.hpp
+        src/ecs/components/InterpolationBuffer.hpp
         src/ecs/components/LocalPlayer.hpp
         src/ecs/physics/PhysicsConstants.hpp
         src/ecs/physics/Movement.hpp
@@ -1307,6 +1332,15 @@ target_include_directories(server PRIVATE
 )
 
 # ---- Server link libraries ----
+#
+# PR-3 (server-perf): TBB is required by libstdc++'s parallel STL
+# (<execution> + std::execution::par_unseq). On Linux it's installed
+# system-wide via setup-linux.sh / setup-archlinux.sh; we use
+# `find_package` so missing TBB produces a clear error rather than a
+# cryptic linker symbol miss. macOS / Windows builds with libc++ /
+# MSVC's stdlib don't need this — their parallel STL ships in stdlib.
+find_package(TBB QUIET)
+
 target_link_libraries(server PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
@@ -1319,6 +1353,13 @@ target_link_libraries(server PRIVATE
     ozz_animation
     ozz_base
 )
+if(TBB_FOUND)
+    target_link_libraries(server PRIVATE TBB::tbb)
+    target_compile_definitions(server PRIVATE GROUP2_HAVE_TBB=1)
+    message(STATUS "Server: TBB found; std::execution::par_unseq enabled.")
+else()
+    message(STATUS "Server: TBB not found; std::execution policies will be sequential.")
+endif()
 
 # ---- Server precompiled header ----
 target_precompile_headers(server PRIVATE
@@ -1396,13 +1437,26 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 endif()
 
 # ===========================================================================
-# Clientbot executable — headless network-only load-test bot.
+# Clientbot executable — headless behavior-accurate bot for hit-reg /
+# lag-comp testing AND server load-testing.
 #
-# Spawns N TCP client connections in one process (one std::thread each),
-# sends idle InputSnapshots at the server tick rate, and drains incoming
-# server snapshots like a real client. No window, no GPU, no animation, no
-# physics — just network traffic. Used to load-test the server past the
-# ~5-client GPU-context limit on a single machine.
+# PR-23 (netsync): the bot now extends the real client rather than just
+# pushing packets at the server.  It loads the same map collision data
+# (`physics::loadMapCollision` + `setActiveWorld`), runs the same
+# `runPrediction` (= `runMovement` + `runCollision`) every physics tick
+# on its local player, and reconciles via `runReconciliation` on each
+# snapshot apply — identical code paths to `client/game/Game.cpp`.
+#
+# Excluded vs the real client: rendering (no window, no GPU, no shaders),
+# audio (no SDL_audio), animation rigs (no ozz; bots don't drive bones,
+# the server still computes hitboxes server-side via the server target).
+# Added vs the real client: AI movement input generation, telemetry CSV
+# capture (PR-18 obs log, PR-21 shot intent log, PR-22 client raycast).
+#
+# Without this the bot's `Position` only moves when a server snapshot
+# applied → ray origin lagged the server's view by RTT/2 + interp_delay,
+# which polluted the PR-22 hit-reg-vs-RTT measurements with self-position
+# drift that doesn't exist in the real client.
 # ===========================================================================
 add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/main.cpp"
@@ -1410,6 +1464,11 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/clientbot/Bot.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    # PR-11 (server-perf): bot links Client.cpp so it carries the same
+    # interpolation-buffer code path; the bot never reads the buffer
+    # itself, but the helpers must be findable at link time.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
@@ -1422,6 +1481,39 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistryArchive.hpp"
+    # PR-23: physics + map-load + movement/collision systems.  These
+    # match the real client exactly so prediction is byte-for-byte the
+    # same.  Server's prediction-parity assumption (same world, same
+    # constants, same dt) carries over verbatim.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Movement.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Movement.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SweptCollision.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SweptCollision.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/MapLoader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/MapLoader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/VHACDImpl.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TitanfallConstants.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/MovementSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/MovementSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/CollisionSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/CollisionSystem.hpp"
+    # `runCollision` calls `queueExplosion` for projectile impacts even
+    # for the local player path; on the bot the explosion queue is
+    # drained by nothing (no rendering / damage source), but the symbol
+    # must link.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/ExplosionSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/ExplosionSystem.hpp"
+    # `ExplosionSystem` calls `applyDamage` (player status), which
+    # may call `processKill`.  None of these run their server-only
+    # side effects on the bot (no kill broadcast, no respawn timer
+    # broadcast); they're linked just so the predict / collide
+    # path resolves.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.hpp"
 )
 
 # Headers under src/ are referenced via "network/...", "ecs/components/...".
@@ -1430,13 +1522,17 @@ target_include_directories(clientbot PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
 )
 
-# Same library set as the server, minus assimp/ozz (no map/animation needed).
+# PR-23: bot now needs assimp (map glb load) + V-HACD (convex
+# decomposition for non-convex collision props).  Same set the
+# real client uses — no animation/render libs.
 target_link_libraries(clientbot PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
     EnTT::EnTT
     glm::glm
     tomlplusplus::tomlplusplus
+    assimp
+    vhacd
 )
 
 # Copy config.toml next to clientbot so it picks up the same server address

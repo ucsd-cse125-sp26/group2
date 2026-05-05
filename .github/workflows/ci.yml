@@ -118,14 +118,23 @@ jobs:
       # Cache the project build tree for incremental cmake reconfigure.
       # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja
       # tracks source deps, so stale objects are never used.
-      # ImageVersion (set by GHA runners) ensures PCH invalidation on
-      # runner-image updates that change system-header mtimes.
+      #
+      # Cache-key segments:
+      #   ImageVersion    bumps when GHA refreshes the runner image
+      #                   (clang/glibc/SDK churn).
+      #   VCToolsVersion  Windows only. Microsoft ships MSVC point
+      #                   releases (e.g. 19.44.35225 -> 19.44.35226)
+      #                   within the same image; PCH files reject the
+      #                   mismatch with "Microsoft Visual C/C++ Version
+      #                   differs in PCH file vs. current file". Set by
+      #                   ilammy/msvc-dev-cmd via GITHUB_ENV; empty
+      #                   (harmless) on non-Windows runners.
       - name: Cache build tree
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
         shell: bash
@@ -285,12 +294,15 @@ jobs:
           restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       # Cache the project build tree for incremental cmake reconfigure.
+      # See the matching comment in the `build:` job above for why
+      # VCToolsVersion is part of the key — short version: prevents
+      # PCH version-mismatch failures after MSVC point updates.
       - name: Cache build tree
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v2-${{ runner.os }}-${{ env.ImageVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Configure
         shell: bash

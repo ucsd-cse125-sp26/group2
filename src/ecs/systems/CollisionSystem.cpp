@@ -17,6 +17,19 @@
 
 #include <glm/geometric.hpp>
 
+// PR-7 (server-perf): optional parallel-STL hooks for the player loop.
+// Header-only on the server build path; client TUs compile this file
+// without the perf module on the include path, so we fall back to
+// sequential there.
+#if __has_include("perf/Parallel.hpp")
+#include "perf/Parallel.hpp"
+#define GROUP2_COLLISION_HAS_PARALLEL 1
+#else
+#define GROUP2_COLLISION_HAS_PARALLEL 0
+#endif
+
+#include <vector>
+
 namespace systems
 {
 
@@ -314,8 +327,27 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
     // groundNormal / grappleActive), so it takes PlayerVisState directly.
     // The simulation-only timer fields live in PlayerSimState and aren't
     // touched here.
-    registry.view<Position, Velocity, CollisionShape, PlayerVisState>().each(
-        [dt, &world](Position& pos, Velocity& vel, const CollisionShape& shape, PlayerVisState& state) {
+    //
+    // PR-7 (server-perf): the per-player swept-collision loop is
+    // embarrassingly parallel — each iteration reads only the
+    // shared (read-only) `WorldGeometry` and mutates only its own
+    // entity's Position/Velocity/PlayerVisState. With AI bots
+    // spreading across the map, this scope dominates the tick at
+    // 200+ N (was 6.29 ms p99 at N=200 sequential). Pre-collect
+    // entities, then parallelFor.
+
+    auto playerView = registry.view<Position, Velocity, CollisionShape, PlayerVisState>();
+    static thread_local std::vector<entt::entity> playerWork;
+    playerWork.clear();
+    for (auto e : playerView)
+        playerWork.push_back(e);
+
+    auto playerKernel = [&registry, dt, &world](entt::entity e) {
+        auto& pos = registry.get<Position>(e);
+        auto& vel = registry.get<Velocity>(e);
+        const auto& shape = registry.get<CollisionShape>(e);
+        auto& state = registry.get<PlayerVisState>(e);
+        {
             const bool k_wasGrounded = state.grounded;
             state.grounded = false;
 
@@ -378,7 +410,15 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     state.groundNormal = k_probe.normal;
                 }
             }
-        });
+        }
+    };
+
+#if GROUP2_COLLISION_HAS_PARALLEL
+    ::group2::perf::parallelFor(playerWork.begin(), playerWork.end(), playerKernel);
+#else
+    for (entt::entity e : playerWork)
+        playerKernel(e);
+#endif
 
     // Projectile entities
     registry.view<Position, Velocity, CollisionShape, Projectile>().each(

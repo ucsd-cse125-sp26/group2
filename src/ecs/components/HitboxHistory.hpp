@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/Hitbox.hpp"
 
 #include <array>
@@ -40,23 +41,35 @@ struct HitboxHistorySample
 {
     uint32_t tick = 0; ///< Server tick when the sample was recorded. 0 = unset.
     std::vector<WorldCapsule> capsules;
+
+    /// @brief PR-27: animation-state snapshot captured the same tick.
+    ///
+    /// Filled by `pushHitboxHistory` from the entity's live `AnimSnapshot`
+    /// component, which the server's animation pass updates each tick.
+    /// Used by the shot-resolution path to compare against the client's
+    /// claimed animation state of the target — when the delta is small,
+    /// the server can accept the client's view of the pose (PR-27b);
+    /// either way the delta is logged for telemetry (PR-27a).
+    AnimSnapshot anim{};
 };
 
 /// @brief Ring buffer of recent hitbox snapshots for one entity.
 ///
-/// Capacity 32 covers ~250 ms at 128 Hz, which dominates the worst-case
-/// one-way lag the server is willing to compensate for (cap is 200 ms in
-/// the plan). At ~12 capsules × 32 samples × ~24 B/capsule per entity
-/// ≈ 9 KB; with ~30 players the whole ring fits in ~270 KB — trivial
-/// against the server's ECS heap.
+/// PR-12 bumped capacity from 32 → 64 ticks (~500 ms @ 128 Hz) so the
+/// ring covers the new worst-case rewind: RTT/2 (capped 200 ms = 25 ticks)
+/// + client cl_interp (capped 8 snapshots × 4 ticks/snapshot = 32 ticks
+/// @ 32 Hz snapshot rate) = 57 ticks.  Rounded up to the next power of
+/// two (64) for cheap modulo arithmetic.  Still trivial space cost:
+/// at ~12 capsules × 64 samples × ~24 B/capsule per entity ≈ 18 KB,
+/// ~540 KB total at 30 players.
 struct HitboxHistory
 {
     /// @brief Number of past samples retained per entity.
     ///
-    /// Sized so that the highest-allowed compensated lag (200 ms) fits
-    /// inside the ring at the physics tick rate (128 Hz → 25.6 ticks).
-    /// Rounded up to the nearest power of two for cheap modulo.
-    static constexpr std::size_t k_capacity = 32;
+    /// PR-12: sized so that the highest-allowed compensated lag
+    /// (k_maxLagCompTicks = 64 ticks ≈ 500 ms @ 128 Hz) fits inside
+    /// the ring.  Power of two for cheap modulo.
+    static constexpr std::size_t k_capacity = 64;
 
     std::array<HitboxHistorySample, k_capacity> ring{};
 

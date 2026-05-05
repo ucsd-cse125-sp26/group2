@@ -15,15 +15,19 @@ port = 9999
 # physics requires a fixed dt); only the wire-rate of state replication
 # is affected.
 #
-# Lower values cut bandwidth and per-tick serialization cost on the
-# server proportionally:
-#   * 128 — same rate as physics (legacy behaviour, smoothest visuals)
-#   * 64  — half traffic, very smooth
-#   * 32  — quarter traffic; visually step-y for remote players until
-#           Phase 5's RemoteHistory + clientRenderTick interpolation
-#           lands. Recommended for bot/load tests; gameplay tests
-#           should bump this to 64 or 128 until then.
-snapshot-hz = 32
+# PR-13 default: 128 Hz — Valorant / CS2 / Apex tournament cadence.
+# PR-10 (snapshot delta encoding) cut wire bytes ~5×, so 128 Hz today
+# costs less than the pre-PR-10 32 Hz baseline.  Combined with PR-11
+# (entity interpolation buffer) and PR-12 (lag-comp + cl_interp), the
+# 2-snapshot render delay drops to ~16 ms — visually indistinguishable
+# from a fully un-delayed renderer for human reaction times.
+#
+# Override values:
+#   * 128 — default, AAA pro feel; render delay ≈ 16 ms.
+#   * 64  — half-rate; render delay ≈ 31 ms.  Cuts wire BW by ~50 %.
+#   * 32  — quarter-rate; legacy default.  Render delay ≈ 62 ms.
+#           Choose this if running on a constrained network.
+snapshot-hz = 128
 
 [graphics]
 # GPU backend selection.  Falls back to other available backends if the

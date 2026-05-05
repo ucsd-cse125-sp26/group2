@@ -6,7 +6,9 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
@@ -31,7 +33,12 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
+#include "network/PacketType.hpp"
+#include "network/ShotDebugReport.hpp"
 #include "network/ShotEvent.hpp"
+#include "perf/Parallel.hpp"
+#include "perf/Profiler.hpp"
+#include "perf/ShotLog.hpp"
 #include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
@@ -68,11 +75,18 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
         // so V-HACD turns each sub-mesh into a few `WorldBrush`es instead of a
         // `WorldTriMesh`.  Server pays a one-shot startup cost but runtime
         // collision is much smoother (no per-triangle jitter).
+        //
+        // PR-30: gated on `gamemap::k_useVhacd` so the team can flip the
+        // behaviour project-wide from `ecs/MapConfig.hpp` without editing
+        // per-call-site flags.  Must AND with the per-asset
+        // `decomposeCollision` flag — both must agree before V-HACD runs.
         const char* const base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
-        for (const AssetDefinition& def : kPropAssets)
+        for (const AssetDefinition& def : kPropAssets) {
+            const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
             physics::loadPropCollision(
-                assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision);
+                assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale, decompose);
+        }
 
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());
@@ -83,6 +97,15 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
 
     // ── Load animation subsystem for hitbox detection ──
     initAnimation();
+
+    // PR-18: open the server-side ground-truth log if requested.
+    openGroundTruthLog();
+    // PR-18b: open the server-side shot-resolution log if requested.
+    // Implemented as a free function in `perf::shotlog` rather than a
+    // ServerGame member because WeaponSystem.cpp (which calls it) is
+    // shared between server and client TUs and shouldn't depend on
+    // server-only types.
+    ::group2::perf::shotlog::openIfRequested();
 
     return true;
 }
@@ -164,6 +187,72 @@ void ServerGame::shutdown()
 {
     running = false;
     server.shutdown();
+    closeGroundTruthLog();
+    ::group2::perf::shotlog::close();
+}
+
+// ── PR-18: server-side ground-truth log ─────────────────────────────────
+
+void ServerGame::openGroundTruthLog()
+{
+    const char* path = std::getenv("GROUP2_SERVER_TRUTH_CSV");
+    if (path == nullptr || path[0] == '\0')
+        return;
+
+    truthCsv_ = std::fopen(path, "w");
+    if (truthCsv_ == nullptr) {
+        SDL_Log("[server] PR-18: failed to open ground-truth log at %s", path);
+        return;
+    }
+    std::fprintf(truthCsv_, "wallTimeNs,serverTick,clientId,posX,posY,posZ\n");
+    std::fflush(truthCsv_);
+
+    if (const char* div = std::getenv("GROUP2_SERVER_TRUTH_HZ_DIVIDER")) {
+        const int parsed = std::atoi(div);
+        if (parsed > 0)
+            truthHzDivider_ = parsed;
+    }
+    SDL_Log("[server] PR-18: writing ground-truth log to %s (every %d ticks)", path, truthHzDivider_);
+}
+
+void ServerGame::writeGroundTruthLogIfDue()
+{
+    if (truthCsv_ == nullptr)
+        return;
+    if ((tickCount % truthHzDivider_) != 0)
+        return;
+
+    // Wall-clock at sample time.  The offline analyzer assumes server
+    // and bot clocks are comparable — true on a single host (localhost
+    // load test).  If we ever do split-host testing the analyzer will
+    // need an explicit clock-skew estimator.
+    const Uint64 nowNs = SDL_GetTicksNS();
+
+    auto view = registry.view<const Position, const ClientId>();
+    for (const auto e : view) {
+        const auto& pos = view.get<const Position>(e);
+        const auto& cid = view.get<const ClientId>(e);
+        std::fprintf(truthCsv_,
+                     "%llu,%d,%u,%.4f,%.4f,%.4f\n",
+                     static_cast<unsigned long long>(nowNs),
+                     tickCount,
+                     static_cast<unsigned>(cid.value),
+                     static_cast<double>(pos.value.x),
+                     static_cast<double>(pos.value.y),
+                     static_cast<double>(pos.value.z));
+    }
+    // Per-second flushes would suffice but per-write keeps the file
+    // recoverable on a server crash.  At the throttled rate this is
+    // ~32 fwrite syscalls/sec — negligible.
+    std::fflush(truthCsv_);
+}
+
+void ServerGame::closeGroundTruthLog() noexcept
+{
+    if (truthCsv_ != nullptr) {
+        std::fclose(truthCsv_);
+        truthCsv_ = nullptr;
+    }
 }
 
 void ServerGame::eventHandler(Event event)
@@ -195,6 +284,25 @@ void ServerGame::eventHandler(Event event)
         input = event.movementIntent;
         break;
     }
+    case EventType::ShotIntent: {
+        // PR-27: stash the per-shot client assertion under
+        // `(shooterClientId, shotInputTick)` so the weapon-system path
+        // can pick it up when it processes that tick's INPUT.  The
+        // map is bounded — old keys age out (256 entries cap, ~2 s of
+        // shots at the 128 Hz fire-rate ceiling).
+        ShotIntentKey key{.shooterClientId = static_cast<std::uint16_t>(event.clientId.value),
+                          .shotInputTick = event.shotIntent.shotInputTick};
+        pendingShotIntents_[key] = event.shotIntent;
+        if (pendingShotIntents_.size() > k_pendingShotIntentsMax) {
+            // Evict the oldest entry — std::unordered_map iteration
+            // order isn't stable but we just need SOMETHING to drop.
+            // The intent isn't critical (server falls back to its own
+            // anim history); this keeps memory bounded under abnormal
+            // packet rates without requiring a separate LRU.
+            pendingShotIntents_.erase(pendingShotIntents_.begin());
+        }
+        break;
+    }
     default:
         break;
     }
@@ -202,49 +310,129 @@ void ServerGame::eventHandler(Event event)
 
 void ServerGame::tick(float dt, Uint64 nextTick)
 {
-    while (!server.isEmpty()) {
-        const Event event = server.dequeueEvent();
-        eventHandler(event);
+    // PR-1: per-tick wall clock. Recorded into the Profiler at end-of-tick
+    // so `[perf …]` log lines and CSV rows always reflect the tick budget
+    // including any work added by future PRs.
+    const Uint64 tickStartCounter = SDL_GetPerformanceCounter();
 
-        // Check tick time --> move to next if over
-        if (const Uint64 kNow = SDL_GetPerformanceCounter(); kNow >= nextTick) {
-            // TODO: Drop events in queue
-            SDL_Log("[server] Exceeded tick time for event handling.");
-            break;
+    {
+        GROUP2_PROF_SCOPE("eventDrain");
+        // PR-2b: bulk-drain the event queue in a single mutex acquisition
+        // instead of locking once per event. With ~5-input redundancy
+        // dedup'd at the receive boundary, a 128 Hz × 500 bot fleet
+        // pushes ~12 k unique inputs/sec. Pre-PR-2b that was 24 k mutex
+        // operations/sec on stateMutex_, which contended hard with the
+        // network thread's 1 kHz I/O cycle. Now: one lock per tick.
+        static thread_local std::vector<Event> events;
+        server.drainEvents(events);
+        for (const Event& event : events) {
+            eventHandler(event);
+            // Tick-time bail-out kept identical to pre-PR-2b: if event
+            // processing alone blows the tick budget we abort the rest
+            // of the events (lost — TODO upstream the drop reason).
+            if (const Uint64 kNow = SDL_GetPerformanceCounter(); kNow >= nextTick) {
+                SDL_Log("[server] Exceeded tick time for event handling.");
+                break;
+            }
         }
     }
 
-    // Update server-side animation and hitbox capsules before weapon raycasts.
-    updateAnimationAndHitboxes(dt);
+    {
+        GROUP2_PROF_SCOPE("animation");
+        // Update server-side animation and hitbox capsules before weapon raycasts.
+        updateAnimationAndHitboxes(dt);
+    }
 
-    // Phase 6: capture this tick's capsules into each entity's HitboxHistory
-    // ring. Has to run *after* updateHitboxes (so the capsules reflect this
-    // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
-    // consistent history snapshot from which rewindHitboxes can pick).
-    systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
+    {
+        GROUP2_PROF_SCOPE("hitboxHistoryPush");
+        // Phase 6: capture this tick's capsules into each entity's HitboxHistory
+        // ring. Has to run *after* updateHitboxes (so the capsules reflect this
+        // tick's pose) and *before* runWeapon (so the upcoming hitscans share a
+        // consistent history snapshot from which rewindHitboxes can pick).
+        systems::pushHitboxHistory(registry, static_cast<uint32_t>(tickCount));
+    }
 
-    // Phase 6: per-shooter lag-comp scheduler. For every player entity
-    // bound to a connected client, set `LagCompTarget.targetServerTick`
-    // to `currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
-    // The hitscan path inside runWeapon reads this off the shooter
-    // entity to size the rewind window for that shooter's shot.
-    //
-    // Capping at k_maxLagCompTicks (default ~25 ticks ≈ 200 ms at
-    // 128 Hz) prevents pathologically high-ping shooters from
-    // rewinding deep into the past, which would let them hit targets
-    // that have long since moved out of cover and produce
-    // "shot-around-the-corner" feel for the victims.
-    updateLagCompTargets();
+    {
+        GROUP2_PROF_SCOPE("lagcompTargets");
+        // Phase 6: per-shooter lag-comp scheduler. For every player entity
+        // bound to a connected client, set `LagCompTarget.targetServerTick`
+        // to `currentServerTick - clamp(rttMs/2 → ticks, 0, k_maxLagCompTicks)`.
+        // The hitscan path inside runWeapon reads this off the shooter
+        // entity to size the rewind window for that shooter's shot.
+        //
+        // Capping at k_maxLagCompTicks (default ~25 ticks ≈ 200 ms at
+        // 128 Hz) prevents pathologically high-ping shooters from
+        // rewinding deep into the past, which would let them hit targets
+        // that have long since moved out of cover and produce
+        // "shot-around-the-corner" feel for the victims.
+        updateLagCompTargets();
+    }
 
     std::vector<NetParticleEvent> particleEvents;
-    systems::runWeapon(registry, dt, particleEvents, pendingKillEvents);
-    systems::runMovement(registry, dt, physics::activeWorld());
-    systems::runCollision(registry, dt, physics::activeWorld());
-    systems::runExplosion(registry, particleEvents, pendingKillEvents);
-    systems::runPlayerStatus(registry, dt);
-    systems::runWeaponSpawners(registry, dt);
+    // PR-20: per-shot rewound state for the lag-comp debug visualiser.
+    // Populated only when the weapon system fires a hitscan; sent
+    // unicast to the shooter after the broadcast events block below.
+    std::vector<net::shotdebug::ShotDebugCapture> shotDebugReports;
+    {
+        // PR-27: stash pending SHOT_INTENTs onto each shooter as a
+        // transient `PendingShotIntent` component, keyed by the
+        // shooter's CURRENT input tick.  `WeaponSystem::handleFire`
+        // reads this when logging the shot to record the client-
+        // asserted target id + anim state delta in `server_shots.csv`.
+        // Anything left over after this loop runs is ageing out — the
+        // map is also bounded by `k_pendingShotIntentsMax` (256
+        // entries) on the enqueue side.
+        for (const auto& [clientId, entity] : clientEntities) {
+            if (!registry.valid(entity))
+                continue;
+            const auto* input = registry.try_get<InputSnapshot>(entity);
+            if (input == nullptr) {
+                registry.remove<PendingShotIntent>(entity);
+                continue;
+            }
+            ShotIntentKey key{.shooterClientId = static_cast<std::uint16_t>(clientId.value),
+                              .shotInputTick = input->tick};
+            auto it = pendingShotIntents_.find(key);
+            if (it != pendingShotIntents_.end()) {
+                registry.emplace_or_replace<PendingShotIntent>(
+                    entity,
+                    PendingShotIntent{.received = true,
+                                      .targetClientId = it->second.targetClientId,
+                                      .targetAnim = it->second.targetAnim});
+                pendingShotIntents_.erase(it);
+            } else {
+                // No matching intent — ensure no stale component lingers.
+                registry.remove<PendingShotIntent>(entity);
+            }
+        }
+        GROUP2_PROF_SCOPE("weapon");
+        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, &shotDebugReports);
+    }
+    {
+        GROUP2_PROF_SCOPE("movement");
+        systems::runMovement(registry, dt, physics::activeWorld());
+    }
+    {
+        GROUP2_PROF_SCOPE("collision");
+        systems::runCollision(registry, dt, physics::activeWorld());
+    }
+    {
+        GROUP2_PROF_SCOPE("explosion");
+        systems::runExplosion(registry, particleEvents, pendingKillEvents);
+    }
+    {
+        GROUP2_PROF_SCOPE("playerStatus");
+        systems::runPlayerStatus(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("weaponSpawners");
+        systems::runWeaponSpawners(registry, dt);
+    }
 
-    matchController.update(dt, registry, server);
+    {
+        GROUP2_PROF_SCOPE("match");
+        matchController.update(dt, registry, server);
+    }
 
     // Phase 4a: snapshot rate decoupled from tick rate. The registry
     // snapshot is the by far biggest piece of per-tick wire traffic, and
@@ -259,13 +447,110 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // client OutboundQueue to sockets at ~1 kHz, so the game-tick budget
     // no longer pays for the I/O syscalls.
     if ((tickCount % snapshotEveryNTicks) == 0) {
+        GROUP2_PROF_SCOPE("broadcastRegistry");
         server.broadcastRegistry(registry);
     }
-    server.broadcastParticleEvents(particleEvents);
-    server.broadcastKillEvents(pendingKillEvents);
+    {
+        GROUP2_PROF_SCOPE("broadcastEvents");
+        server.broadcastParticleEvents(particleEvents);
+        server.broadcastKillEvents(pendingKillEvents);
+    }
     pendingKillEvents.clear();
 
+    // PR-20: serialize each captured shot-debug report and send it
+    // unicast to the shooter that produced it.  Wire format defined in
+    // `network/ShotDebugReport.hpp`.  Layout:
+    //   [PacketType:1][ReportHeader:48][TargetHeader:4 + WireCapsule:32 × N] × numTargets
+    //
+    // Capped per-tick to avoid pathological cases (a player held LMB
+    // on a beam weapon for the whole tick → multiple captures all
+    // referencing nearly-identical state).  In practice we see 1-2
+    // entries per tick per shooting player.
+    if (!shotDebugReports.empty()) {
+        GROUP2_PROF_SCOPE("shotDebugSend");
+        for (const auto& cap : shotDebugReports) {
+            // Reserve worst-case so we only allocate once per shot.
+            std::size_t total = 1 /*PacketType*/ + sizeof(net::shotdebug::ReportHeader);
+            for (const auto& tgt : cap.targets)
+                total +=
+                    sizeof(net::shotdebug::TargetHeader) + tgt.capsules.size() * sizeof(net::shotdebug::WireCapsule);
+            std::vector<std::uint8_t> bytes;
+            bytes.reserve(total);
+            bytes.push_back(static_cast<std::uint8_t>(PacketType::SHOT_DEBUG_REPORT));
+
+            net::shotdebug::ReportHeader rh{};
+            rh.shotInputTick = cap.shotInputTick;
+            rh.hitTargetClientId = cap.hitTargetClientId;
+            rh.hitRegion = cap.hitRegion;
+            rh.numTargets = static_cast<std::uint8_t>(std::min<std::size_t>(cap.targets.size(), 255));
+            rh.originX = cap.origin.x;
+            rh.originY = cap.origin.y;
+            rh.originZ = cap.origin.z;
+            rh.dirX = cap.direction.x;
+            rh.dirY = cap.direction.y;
+            rh.dirZ = cap.direction.z;
+            rh.range = cap.range;
+            rh.hitX = cap.hitPoint.x;
+            rh.hitY = cap.hitPoint.y;
+            rh.hitZ = cap.hitPoint.z;
+            const auto* rhBytes = reinterpret_cast<const std::uint8_t*>(&rh);
+            bytes.insert(bytes.end(), rhBytes, rhBytes + sizeof(rh));
+
+            for (std::uint8_t i = 0; i < rh.numTargets; ++i) {
+                const auto& tgt = cap.targets[i];
+                net::shotdebug::TargetHeader th{};
+                th.targetClientId = tgt.clientId;
+                th.numCapsules = static_cast<std::uint8_t>(std::min<std::size_t>(tgt.capsules.size(), 255));
+                const auto* thBytes = reinterpret_cast<const std::uint8_t*>(&th);
+                bytes.insert(bytes.end(), thBytes, thBytes + sizeof(th));
+                for (std::uint8_t c = 0; c < th.numCapsules; ++c) {
+                    const auto& src = tgt.capsules[c];
+                    net::shotdebug::WireCapsule wc{};
+                    wc.pointAx = src.pointA.x;
+                    wc.pointAy = src.pointA.y;
+                    wc.pointAz = src.pointA.z;
+                    wc.pointBx = src.pointB.x;
+                    wc.pointBy = src.pointB.y;
+                    wc.pointBz = src.pointB.z;
+                    wc.radius = src.radius;
+                    wc.region = static_cast<std::uint8_t>(src.region);
+                    const auto* wcBytes = reinterpret_cast<const std::uint8_t*>(&wc);
+                    bytes.insert(bytes.end(), wcBytes, wcBytes + sizeof(wc));
+                }
+            }
+            // replaceKey 0 = always append, never drop on age.  These
+            // are diagnostic packets — losing one is fine, but if the
+            // queue happened to coalesce them by key the user would
+            // see only the most-recent shot in the ring buffer.
+            server.sendToClient(ClientId{cap.shooterClientId}, bytes.data(), static_cast<int>(bytes.size()));
+        }
+    }
+
     ++tickCount;
+
+    // PR-18: ground-truth log for offline desync analysis.  Throttled
+    // sample of the server-authoritative state per replicated player.
+    // Cheap (~150 KB/s at 100 bots × 32 Hz) and silent when the env
+    // var isn't set.  Lives outside the tick-end profiler scope below
+    // so its I/O isn't attributed to any single ECS scope.
+    writeGroundTruthLogIfDue();
+
+    // Record the tick's total wall time for the 1 Hz aggregator. Cheap:
+    // a single atomic increment + min/max + histogram bucket bump.
+    const Uint64 tickEndCounter = SDL_GetPerformanceCounter();
+    ::group2::perf::tickEnd(::group2::perf::ticksToNs(tickEndCounter - tickStartCounter));
+
+    // Log once per second so we can watch the test entity fall and land.
+
+    // if (tickCount % tickRateHz == 0) {
+    //     registry.view<Position>().each([this](const Position& pos) {
+    //         SDL_Log("[server] tick %d | pos (%.1f, %.1f, %.1f)",
+    //                 tickCount,
+    //                 static_cast<double>(pos.value.x),
+    //                 static_cast<double>(pos.value.y),
+    //                 static_cast<double>(pos.value.z));
+    //     });
+    // }
 }
 
 void ServerGame::initNewPlayerEntity(ClientId clientId)
@@ -401,32 +686,108 @@ void ServerGame::detachServerAnimator(entt::entity player)
 
 void ServerGame::updateLagCompTargets()
 {
-    // Server-side cap on rewind depth. 25 ticks at 128 Hz ≈ 195 ms,
-    // matching the plan's "server-capped at 200 ms" rule. Above this
-    // a high-ping shooter could rewind targets behind cover that the
-    // victim has long since ducked behind, producing the classic
-    // "I shot him around the corner" feel for the receiver.
-    static constexpr uint32_t k_maxLagCompTicks = 25;
+    // PR-20.7 (root-cause fix): rewind = RTT + cl_interp, NOT
+    // RTT/2 + cl_interp.
+    //
+    // Pre-PR-20.7 we used the Source-engine formula `RTT/2 + interp`,
+    // which is correct ONLY when the client predicts other players
+    // forward to its estimate of server-now (so the client renders
+    // enemies at `server_now − cl_interp`).  Our client does not do
+    // that prediction — it renders at `most_recent_snapshot_apply −
+    // cl_interp`.  The most-recent snapshot was generated at
+    // `server_now − inbound_RTT/2`, so our client actually renders
+    // enemies at `server_now − RTT/2 − cl_interp`.
+    //
+    // Concrete derivation (T = client clock time of fire, sync'd to
+    // server clock):
+    //   client renders enemy at server time   T − RTT/2 − cl_interp
+    //   server processes input at server time T + RTT/2  (outbound)
+    //   server should rewind to exactly       T − RTT/2 − cl_interp
+    //   rewind amount = (T + RTT/2) − (T − RTT/2 − cl_interp)
+    //                 = RTT + cl_interp
+    //
+    // Symptom of the under-rewind at 100 ms simulated RTT: red
+    // (server-rewound) capsule was ~50 ms (i.e. RTT/2) AHEAD of blue
+    // (client-rendered) capsule in the shot-debug visualizer.  At
+    // 400 u/s enemy speed that's ~20 units of visible separation —
+    // exactly what the user reported.  Bumping the rewind to
+    // `rttTicks + interpDelayTicks` collapses that gap to
+    // sub-tick / quantization noise.
+    //
+    // Cap on total rewind depth.  Worst case at the limits:
+    //   RTT 200 ms = 25.6 ticks  (PR-12 simulator cap)
+    //   interp 8 snapshots × 1 tick @ 128 Hz = 8 ticks
+    //   total = ~34 ticks (~265 ms).
+    // 64 ticks (500 ms) gives plenty of headroom.  HitboxHistory
+    // capacity is also 64; both cap and history match.
+    static constexpr uint32_t k_maxLagCompTicks = 64;
+
+    // PR-2b + PR-12: snapshot every client's net state (RTT + interp
+    // delay) in one mostly-lock-free operation, then drive the loop
+    // off the local copy.
+    static thread_local std::vector<Server::ClientNetState> netCache;
+    server.snapshotClientNetStates(netCache);
+
+    // Lookup map from cache for the inner loop. Reserve once, reuse
+    // the std::unordered_map across ticks — avoids per-tick alloc.
+    struct NetCacheEntry
+    {
+        uint16_t rttMs;
+        uint8_t interpDelaySnapshots;
+    };
+    static thread_local std::unordered_map<ClientId, NetCacheEntry> netById;
+    netById.clear();
+    netById.reserve(netCache.size());
+    for (const auto& s : netCache)
+        netById.emplace(s.id, NetCacheEntry{.rttMs = s.rttMs, .interpDelaySnapshots = s.interpDelaySnapshots});
+
+    // Snapshot interval in physics ticks — used to convert the
+    // client's interpDelaySnapshots into a tick count.  Read from
+    // ServerGame's runtime config so it tracks any future env-var
+    // adjustment (e.g. PR-13 dropping snapshotEveryNTicks 4 → 1).
+    const auto snapshotEveryNTicksLocal = static_cast<uint32_t>(std::max(1, snapshotEveryNTicks));
 
     const auto currentServerTick = static_cast<uint32_t>(tickCount);
     for (const auto& [clientId, entity] : clientEntities) {
         if (!registry.valid(entity))
             continue;
 
-        const uint16_t rttMs = server.getClientRttMs(clientId);
-        // Half-RTT in ticks. Round-to-nearest by adding half a tick
-        // before integer divide. (rttMs / 2 / 1000 * tickRateHz)
-        // reordered to keep the integer-only arithmetic exact at the
-        // cost of one extra add: rttHalfTicks = (rttMs * Hz + 1000) /
-        // 2000.
-        const uint32_t rttHalfTicks =
-            (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 1000u) / 2000u;
-        const uint32_t lagTicks = std::min<uint32_t>(rttHalfTicks, k_maxLagCompTicks);
+        const auto netIt = netById.find(clientId);
+        const uint16_t rttMs = (netIt != netById.end()) ? netIt->second.rttMs : 0;
+        const uint8_t interpDelaySnapshots = (netIt != netById.end()) ? netIt->second.interpDelaySnapshots : 0;
+        // PR-20.7: full-RTT (NOT half-RTT) in ticks.  Round-to-nearest
+        // via integer-only `(rttMs * Hz + 500) / 1000`.  See the long
+        // header comment on this function for the derivation; in
+        // short, our client renders remote players at
+        // `most_recent_snapshot_apply − cl_interp` rather than
+        // predicting them forward to estimated server-now, so the
+        // rewind has to absorb both the inbound and outbound legs of
+        // the RTT — not just the outbound half.
+        const uint32_t rttTicks = (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 500u) / 1000u;
+
+        // PR-12: client render-delay term.  The client renders remote
+        // entities at `most_recent_apply − interpDelaySnapshots ×
+        // snapshotInterval`; the rewind subtracts this on top of the
+        // full-RTT term so the server lands on exactly the historical
+        // capsule state the client SAW on screen at fire time.
+        const uint32_t interpDelayTicks = static_cast<uint32_t>(interpDelaySnapshots) * snapshotEveryNTicksLocal;
+
+        const uint32_t lagTicks = std::min<uint32_t>(rttTicks + interpDelayTicks, k_maxLagCompTicks);
         const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
                                         ? 0u // explicit "no rewind" sentinel
                                         : (currentServerTick - lagTicks);
 
-        registry.emplace_or_replace<LagCompTarget>(entity, LagCompTarget{.targetServerTick = targetTick});
+        // PR-22: stash `lagTicks` and `rttMs` alongside `targetServerTick`
+        // so the shot-log can record them per-shot without plumbing
+        // `tickCount` and `netById` into `WeaponSystem::handleFire`.
+        // The rewinder ignores these fields; they're informational.
+        registry.emplace_or_replace<LagCompTarget>(
+            entity,
+            LagCompTarget{
+                .targetServerTick = targetTick,
+                .lagTicks = static_cast<uint16_t>(std::min<uint32_t>(lagTicks, 0xFFFFu)),
+                .rttMs = rttMs,
+            });
 
         // Replicate this client's RTT to all clients via PlayerMatchStats.
         // Already in the Synced tuple, so ships in the next snapshot. Each
@@ -445,10 +806,41 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
     if (!animationLoaded_)
         return;
 
-    // Step 1: Update each server-side animator with current entity state.
+    // PR-3 (server-perf): split the per-animator update into a fan-out
+    // parallel kernel. The work is embarrassingly parallel across
+    // players — each animator reads only its own entity's components
+    // (read-only) and writes only its own JointMatrices slot. The
+    // single piece of shared state we have to handle is `entt::registry`
+    // itself: `get_or_emplace<JointMatrices>` may grow the underlying
+    // pool if the slot doesn't exist yet, and pool growth is NOT
+    // thread-safe.
+    //
+    // Pre-pass: ensure every valid animator entity has a JointMatrices
+    // component (sequential). Then the parallel pass only writes into
+    // already-allocated slots, which is safe — entt component pools
+    // tolerate concurrent writes to *distinct* entities once allocated.
+
+    // Phase 1a (sequential): pre-emplace JointMatrices and collect the
+    // work items. Reusing the static thread_local vector across ticks
+    // avoids per-tick allocation.
+    static thread_local std::vector<std::pair<entt::entity, CharacterAnimator*>> work;
+    work.clear();
+    work.reserve(serverAnimators_.size());
     for (auto& [entity, animator] : serverAnimators_) {
         if (!registry.valid(entity))
             continue;
+        // Alloc-if-needed, single-threaded. The return reference is
+        // intentionally discarded — we only care about the side-effect
+        // of guaranteeing the slot exists before the parallel pass.
+        (void)registry.get_or_emplace<JointMatrices>(entity);
+        work.emplace_back(entity, animator.get());
+    }
+
+    // Phase 1b (parallel): each animator updates and writes its own
+    // pre-emplaced JointMatrices slot.
+    ::group2::perf::parallelFor(work.begin(), work.end(), [&](const auto& item) {
+        const entt::entity entity = item.first;
+        CharacterAnimator* animator = item.second;
 
         // Build AnimationInputs from ECS components (same as client).
         AnimationInputs ai{};
@@ -468,12 +860,27 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
 
         animator->update(ai, dt);
 
-        // Write model-space joint matrices into the ECS component.
-        const auto& jointMats = animator->jointModelMatrices();
-        auto& jm = registry.get_or_emplace<JointMatrices>(entity);
-        jm.matrices = jointMats;
-    }
+        // Slot exists (Phase 1a); just write the matrices.
+        registry.get<JointMatrices>(entity).matrices = animator->jointModelMatrices();
+
+        // PR-27 (netsync): mirror the animator's sampler array into an
+        // `AnimSnapshot` ECS component.  HitboxHistorySystem reads it
+        // the same tick to seed each ring slot's `anim` field, so the
+        // shot-resolution path can compare client-claimed vs server-
+        // historical animation state.  Cheap copy: 5 slots × 9 bytes.
+        auto& snap = registry.get_or_emplace<AnimSnapshot>(entity);
+        const auto& samplers = animator->samplers();
+        for (std::size_t i = 0; i < AnimSnapshot::k_numSlots && i < samplers.size(); ++i) {
+            const auto& src = samplers[i];
+            const bool active = src.active && src.weight > 0.0f;
+            auto& dst = snap.slots[i];
+            dst.clipIdRaw = active ? static_cast<std::uint8_t>(src.id) : 0xFFu;
+            dst.timeRatio = active ? src.timeRatio : 0.0f;
+            dst.weight = active ? src.weight : 0.0f;
+        }
+    });
 
     // Step 2: Transform bone poses into world-space hitbox capsules.
+    // updateHitboxes itself was parallelized in PR-3; see HitboxSystem.cpp.
     systems::updateHitboxes(registry, hitboxRig_, rigScale_, rigMeshMinY_);
 }

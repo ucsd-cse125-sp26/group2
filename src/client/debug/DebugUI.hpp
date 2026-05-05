@@ -7,9 +7,12 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchStatus.hpp"
+#include "network/ShotDebugReport.hpp" // PR-20: ShotDebugCapture.
 
 #include <SDL3/SDL.h>
 
+#include <array>
+#include <cstdint>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <initializer_list>
@@ -153,6 +156,67 @@ public:
 
     bool showCollisionWindow = false;  ///< Show the Collision Debug ImGui window.
     bool drawCollisionOverlay = false; ///< Draw world collision wireframes (independent of window visibility).
+
+    // ── PR-20: Shot-debug visualizer (CSGO sv_showimpacts-style) ─────
+    //
+    // Holds a ring buffer of paired (client-side fire-time snapshot,
+    // server-side rewound snapshot) entries.  ImGui panel lets the
+    // user pick how many recent shots to keep (1-30) and which to
+    // highlight in the 3-D overlay.
+    //
+    // The two snapshots reuse the same `ShotDebugCapture` type:
+    //   - clientView is populated by `pushClientShot()` from Game.cpp
+    //     when the local player fires a shot (with the visible-on-
+    //     screen capsules of remote players at fire time).
+    //   - serverView is populated by `pushServerShot()` from the
+    //     `Client::onShotDebugReport` callback (with the historical
+    //     capsules the server raycast against).
+    //
+    // The two halves are paired by `shotInputTick`; either may
+    // arrive first.
+    struct ShotDebugPair
+    {
+        std::uint32_t shotInputTick = 0;
+        bool hasClient = false;
+        bool hasServer = false;
+        net::shotdebug::ShotDebugCapture clientView;
+        net::shotdebug::ShotDebugCapture serverView;
+    };
+    static constexpr int k_shotRingMax = 30;
+    std::array<ShotDebugPair, k_shotRingMax> shotRing{};
+    int shotRingHead = 0;  ///< Next-write slot.
+    int shotRingCount = 0; ///< Live entries; saturates at k_shotRingMax.
+
+    /// @brief Show the Shot Debug panel + 3D overlay (CSGO sv_showimpacts).
+    bool showShotDebugWindow = false;
+    bool drawShotDebugOverlay = false;
+    /// @brief Slider value: how many of the most-recent shots to render
+    /// (1-k_shotRingMax).  All older shots stay in the ring but are
+    /// hidden from the overlay.
+    int shotDebugVisibleCount = 5;
+    /// @brief 1-based index into the ring (1 = newest) to highlight.
+    /// 0 means "show all in the visible window".
+    int shotDebugSelectIdx = 0;
+
+    /// @brief Which side(s) to render in the 3D overlay.  Maps to a
+    /// dropdown in the UI panel: 0=Both, 1=Client only, 2=Server only.
+    /// The underlying data is always captured for both sides; this
+    /// only filters the render.
+    int shotDebugViewMode = 0;
+
+    /// @brief Append a fire-time snapshot the local client just took.
+    /// Pairs with any matching server view (by `shotInputTick`).
+    void pushClientShot(const net::shotdebug::ShotDebugCapture& cap);
+
+    /// @brief Append a server-reported rewind snapshot.  Pairs with
+    /// any matching client view (by `shotInputTick`).
+    void pushServerShot(const net::shotdebug::ShotDebugCapture& cap);
+
+    /// @brief Build the Shot Debug ImGui window + 3D overlay.
+    /// @param viewProj     Camera VP for the world→screen projection.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight);
 
     // Per-type visibility toggles (all default on when overlay is active).
     bool drawCollisionPlanes = true;

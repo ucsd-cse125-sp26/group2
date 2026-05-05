@@ -6,6 +6,7 @@
 #include "AnimationLibrary.hpp"
 #include "CharacterRig.hpp"
 #include "SkinningBackend.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 
 #include <array>
 #include <glm/glm.hpp>
@@ -75,6 +76,28 @@ public:
     /// @param dt      Frame time in seconds.
     void update(const AnimationInputs& inputs, float dt);
 
+    /// @brief PR-29: render the entity at server-authoritative animation state.
+    ///
+    /// Bypasses the per-instance state machine (steps 1-6 of `update()`)
+    /// — instead writes the supplied `AnimSnapshot` directly into the
+    /// internal samplers and runs the ozz sampling + blending +
+    /// LocalToModel pipeline on top.  Used by the client renderer for
+    /// REMOTE players whose animation state is replicated from the
+    /// server via the snapshot stream; eliminates the residual ~0.4-
+    /// median anim-state drift PR-27a's telemetry caught (server runs
+    /// animator at 128 Hz, client at 30 Hz; both at 1.0× speed but
+    /// per-clip start-time offsets persist for the lifetime of each
+    /// clip).
+    ///
+    /// The local player still uses `update()` — its prediction-driven
+    /// state machine is authoritative client-side.
+    ///
+    /// `inputs` is still consulted for per-frame post-processing that
+    /// has no analog in the snapshot (head-pitch transform, wallrun
+    /// mirror).  Pass the SAME interp-delayed inputs you would have
+    /// passed to `update()`.
+    void renderFromServer(const AnimSnapshot& serverState, const AnimationInputs& inputs);
+
     /// @brief Apply CPU skinning to every rig mesh, producing animated vertices.
     /// @param out  One output vector per rig mesh; internally resized.
     void computeSkinnedVertices(std::vector<std::vector<ModelVertex>>& out) const;
@@ -106,7 +129,23 @@ public:
     /// Valid after a call to update().  Size = numJoints().
     [[nodiscard]] const std::vector<glm::mat4>& jointModelMatrices() const noexcept;
 
+    /// @brief Per-joint LBS skin matrices: `procedural * modelMat * inverseBind`.
+    ///        Identical to what `computeSkinnedVertices()` uses internally.
+    ///        Used by GPU skinning (perf Phase 1B) — flatten across all visible
+    ///        characters into a single palette SSBO and consume by the vertex
+    ///        shader.  Valid after a call to update().  Size = numJoints().
+    [[nodiscard]] const std::vector<glm::mat4>& skinMatrices() const noexcept;
+
 private:
+    /// @brief PR-29: shared back end for `update()` and
+    /// `renderFromServer()`.  Reads `impl_->samplers` (already
+    /// populated by either the state machine or a server snapshot)
+    /// and runs the ozz sampling + blending + LocalToModel +
+    /// skin-matrix-compose pipeline (steps 7-10 of the original
+    /// `update()`).  Consumes `inputs` only for head-pitch and
+    /// wallrun-mirror post-processing.
+    void runSamplingAndSkinning(const AnimationInputs& inputs);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

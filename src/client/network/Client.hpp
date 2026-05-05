@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchStatus.hpp"
@@ -11,6 +12,7 @@
 #include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/ShotDebugReport.hpp" // PR-20: shared wire-format + runtime capture struct.
 #include "network/ShotEvent.hpp"
 #include "network/transport/FragmentReassembler.hpp"
 #include "network/transport/UdpEndpoint.hpp"
@@ -48,6 +50,12 @@ public:
     using ParticleEventCallback = std::function<void(const NetParticleEvent& evt, entt::entity localEntity)>;
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
+    /// @brief PR-20: callback for SHOT_DEBUG_REPORT.  Fired on the
+    /// game thread inside `dispatchMessage` after the bytes have been
+    /// parsed back into a `ShotDebugCapture`.  The DebugUI registers
+    /// this and pairs the report with its own client-side fire-time
+    /// snapshot by `shotInputTick`.
+    using ShotDebugCallback = std::function<void(const net::shotdebug::ShotDebugCapture&)>;
 
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr      Hostname or IP address of the server.
@@ -78,6 +86,15 @@ public:
     /// current `clientPredictTick` before calling.
     bool sendInputSnapshot(const InputSnapshot& snap);
 
+    /// @brief PR-27 (netsync): send a SHOT_INTENT packet describing the
+    /// client's view of the target's animation state at fire time.
+    /// Server pairs this with the corresponding INPUT (by
+    /// `(shooterClientId, shotInputTick)`) and computes the anim-state
+    /// delta against its own historical state at the rewound tick.
+    /// Sent once per rising-edge of `input.shooting`.  `targetClientId`
+    /// = `0xFFFF` when the client wasn't aiming at any specific target.
+    bool sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetClientId, const AnimSnapshot& targetAnim);
+
     /// @brief Send a PING packet to the server for RTT measurement.
     void sendPing();
 
@@ -88,6 +105,7 @@ public:
     void onParticleEvent(ParticleEventCallback fn) { particleEventFn_ = std::move(fn); }
     void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
+    void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
@@ -132,7 +150,91 @@ public:
     /// snapshot rate; freezes at 1.0 (entity at "current" pos, no extrapolation)
     /// when a snapshot is overdue. Returns 1.0 before two snapshots have
     /// arrived (no interpolation reference yet).
+    ///
+    /// @note PR-11 supersedes this for non-local entities.  When the
+    /// `InterpolationBuffer` path is in effect, the renderer uses
+    /// `getInterpolationRenderTimeNs()` to play back at `now − delay`
+    /// instead of lerping forward over the most recent interval.  The
+    /// alpha here remains the local-player / fallback path.
     [[nodiscard]] float getSnapshotAlpha() const;
+
+    /// @brief PR-21: server-assigned local-player entity (post-mapping).
+    /// Returns nullopt before the first snapshot containing the local
+    /// player has applied (i.e. before the `localPlayerReadyFn` callback
+    /// has fired).  After that, returns the LOCAL `entt::entity` (mapped
+    /// through `continuous_loader`) that the bot or game thread can use
+    /// to find its own player in the registry.
+    [[nodiscard]] std::optional<entt::entity> getLocalPlayerEntity() const
+    {
+        if (!localPlayerEntity.has_value() || !registryLoader.has_value())
+            return std::nullopt;
+        const entt::entity mapped = registryLoader->map(*localPlayerEntity);
+        if (mapped == entt::null)
+            return std::nullopt;
+        return mapped;
+    }
+
+    /// @brief Render time the renderer should display non-local entities at.
+    ///
+    /// PR-11 (server-perf): Valorant / Fortnite / Source-engine `cl_interp`
+    /// style render-delay interpolation.  Returns
+    ///   `SDL_GetTicksNS() − delayTicks × snapshotIntervalNs()`
+    /// where `delayTicks` is read from `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS`
+    /// (default 2) and `snapshotIntervalNs` is the EMA of the last two
+    /// snapshot apply times.
+    ///
+    /// Returns 0 until two snapshots have been applied — callers treat 0
+    /// as "no buffered playback yet, fall back to the Phase-5a alpha
+    /// path" (see `entity_interpolation::sample`).
+    ///
+    /// Why N=2?  At 32 Hz snapshot rate, 2 ticks ≈ 62.5 ms — enough that
+    /// the renderer always has at least one buffered "future" sample to
+    /// interpolate toward, so a single dropped snapshot is invisible.
+    /// Trade-off: visual feedback for remote players is delayed by 62.5 ms
+    /// from server truth, but lag-comp on the server already accounts
+    /// for the client's display-time-to-fire-time gap (Phase 6 lag comp).
+    [[nodiscard]] Uint64 getInterpolationRenderTimeNs() const;
+
+    /// @brief Approximate snapshot interval in nanoseconds.
+    ///
+    /// EMA over the last two snapshot apply times.  Falls back to the
+    /// default 32 Hz period (~31.25 ms) before two snapshots have arrived.
+    [[nodiscard]] Uint64 getSnapshotIntervalNs() const;
+
+    /// @brief PR-19: overwrite `Position.value` (and `InputSnapshot.yaw`)
+    /// for every non-local entity with an `InterpolationBuffer` to its
+    /// interpolated render-time value.  Runs once per frame, BEFORE any
+    /// renderer / particle / sfx / tracer code reads `pos.value` —
+    /// every visual consumer thereafter sees a single, consistent
+    /// interpolated source of truth.
+    ///
+    /// Pre-PR-19 the renderer interpolated at 3 specific call sites
+    /// while tracers, ribbon trails, smoke emitters, and beam endpoints
+    /// kept reading raw `pos.value`.  At 128 Hz × 2-snapshot delay
+    /// (~16 ms) that's ~6-unit visible separation between the body
+    /// and effects originating from "where the body really is right now".
+    ///
+    /// Why mutate `Position.value` in place rather than ship a separate
+    /// `RenderPosition` component?  Two reasons: (1) every consumer
+    /// already reads `pos.value`, no per-call-site touch-up needed; (2)
+    /// the next snapshot apply unconditionally overwrites `pos.value`
+    /// with the server-authoritative value (entt's continuous_loader),
+    /// so the mutation has no lasting effect on registry state — it's
+    /// effectively a per-frame derived view.  Concrete cycle:
+    ///
+    ///   1. Snapshot apply → pos.value = server's value at tick T.
+    ///   2. recordInterpolationSamples reads server value, appends.
+    ///   3. (this method) → pos.value = interp_sample(buffer, renderTime).
+    ///   4. Renderer + particles + tracers + sfx read pos.value.
+    ///   5. Next snapshot apply re-overwrites pos.value with new server
+    ///      value (step 1 again).
+    ///
+    /// No-op when render-delay interp is disabled (`interpDelaySnapshots_
+    /// == 0`) or no buffered playback yet (renderTimeNs == 0).
+    /// Excludes local player (which has no `InterpolationBuffer` because
+    /// `recordInterpolationSamples` filters local out, and which is
+    /// driven by client-side prediction anyway).
+    void applyInterpolatedTransforms(Registry& registry);
 
     /// @brief Number of recent inputs included in each INPUT packet for redundancy.
     ///
@@ -203,10 +305,37 @@ private:
     ParticleEventCallback particleEventFn_;        ///< Called for each replicated particle event from server.
     MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     KillEventCallback killEventFn_;                ///< Called for each replicated kill event from server.
+    ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     bool localPlayerReadyNotified = false;         ///< True if localPlayerReadyFn has been called.
 
-    NetworkStats stats;                            ///< Live network metrics.
+    // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
+    //
+    // `keyframePayload_` holds the most-recent FULL snapshot's raw
+    // entt-serialized bytes (no PacketType prefix, no tick), and
+    // `keyframeTick_` is the tick that snapshot was sent at.
+    //
+    // PR-14 (loss resilience): both fields update *only* on FULL
+    // arrival.  DELTA packets reconstruct the current frame's bytes
+    // by applying their patch on top of the keyframe and feed the
+    // reconstructed bytes into the Loader, but do NOT replace the
+    // saved keyframe.  Pre-PR-14, every DELTA replaced the saved
+    // baseline with the just-reconstructed bytes — which meant a
+    // single dropped DELTA cascaded into all subsequent DELTAs in the
+    // same keyframe window dropping silently (their `fromTick` no
+    // longer matched the client's stored `lastSnapshotTick_`).  Now
+    // every DELTA in a window is independently decodable against the
+    // shared keyframe, so individual packet drops only cost that one
+    // frame's state.
+    //
+    // If `fromTick` on a DELTA doesn't match `keyframeTick_` the
+    // packet is dropped — happens when a FULL keyframe was lost or
+    // hasn't arrived yet.  The next periodic full keyframe (every 8
+    // snapshots ≈ 62 ms at 128 Hz) re-syncs us.
+    std::vector<uint8_t> keyframePayload_;
+    std::uint32_t keyframeTick_ = 0;
+
+    NetworkStats stats; ///< Live network metrics.
 
     // Bandwidth tracking — accumulated between updateStats() calls.
     uint64_t bytesSentWindow = 0;
@@ -249,6 +378,53 @@ private:
     // 1.0 in that case so first frame draws the snapped position.
     Uint64 lastSnapshotApplyNs_ = 0;
     Uint64 prevSnapshotApplyNs_ = 0;
+
+    // ── PR-11: render-delay interpolation ────────────────────────────────
+    //
+    // `interpDelaySnapshots_` is read once at init() from the
+    // GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS env var (default 2).  0 disables
+    // the buffered render-delay path entirely; non-local entities
+    // fall back to the Phase-5a (prev, cur, alpha) lerp.  Higher values
+    // smooth more loss but make remote entities visibly behind server
+    // truth.  Source engine ships 2 (62.5 ms at 32 Hz) — that's our
+    // default and matches Valorant / Fortnite cadence.
+    //
+    // EMA of snapshot apply intervals.  `prevSnapshotApplyNs_` and
+    // `lastSnapshotApplyNs_` already give a single most-recent interval;
+    // the EMA smooths burst arrivals so the render-delay computation
+    // doesn't wobble when packets arrive bunched.  Snapshot rate doesn't
+    // change during a session, so a single-pole IIR with α=0.25 is
+    // ample.  Initial value matches the design's 32 Hz snapshot rate.
+    // PR-13: 128 Hz default snapshot rate (AAA-pro cadence).  EMA
+    // self-corrects once two snapshots have arrived if the actual
+    // rate differs (e.g. legacy server running at 32 Hz from a
+    // pre-PR-13 config.toml).  The two-snapshot warmup window is
+    // ~16 ms at 128 Hz — fast enough that the initial value barely
+    // matters in practice.
+    static constexpr Uint64 k_defaultSnapshotIntervalNs = 1'000'000'000ULL / 128ULL;
+
+    // PR-19: re-enabled default = 2 snapshots after `Client::
+    // applyInterpolatedTransforms` started overwriting Position +
+    // InputSnapshot.yaw in place every frame.  Now ALL visual
+    // consumers (renderer, tracers, ribbon trails, smoke emitters,
+    // beam endpoints, sfx) read from a single source of truth —
+    // `pos.value`, freshly written each frame to the interpolated
+    // value — so there's no more 6-unit body-vs-tracer separation
+    // that PR-16 was the emergency hotfix for.
+    //
+    // PR-16's history (kept for posterity): pre-PR-19, PR-11 wired
+    // `entity_interpolation::sample()` into 3 specific Game.cpp
+    // render sites only, missing TracerEffect / RibbonTrail /
+    // SmokeEffect / BeamState / sfx.  PR-16 default-flipped this to
+    // 0 to disable the misaligned interp until PR-19's unified
+    // approach landed.  PR-17 (FragmentReassembler stuck-state)
+    // turned out to be the bigger source of "models in wrong
+    // locations" — once that was fixed and PR-19 unifies the read
+    // path, default-on is safe again.
+    //
+    // To disable: set `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=0`.
+    int interpDelaySnapshots_ = 2;
+    Uint64 snapshotIntervalEmaNs_ = k_defaultSnapshotIntervalNs;
 
     // ── Phase 5b: prediction reconciliation hand-off ──────────────────────
     //
@@ -372,4 +548,17 @@ private:
     /// @brief Decode and dispatch a single complete framed message.
     /// Called by poll(registry) after pulling the bytes out of recvBuf.
     void dispatchMessage(const uint8_t* data, Uint32 size, Registry& registry);
+
+    /// @brief PR-11: append a sample to every replicated remote entity's
+    /// `InterpolationBuffer`, AFTER the loader has rewritten the registry
+    /// from the just-arrived snapshot.  Skips the local player (the
+    /// `LocalPlayer` tag is set by the `localPlayerReadyFn` callback,
+    /// which fires earlier in dispatchMessage's UPDATE_REGISTRY/_DELTA
+    /// path, so by the time this runs the exclude filter is correct).
+    /// No-op when `interpDelaySnapshots_` is 0 (kill switch).
+    ///
+    /// @param registry  Client registry post-Loader::apply.
+    /// @param captureNs Wall-clock timestamp to stamp on every sample —
+    ///                  same value for every entity in the same snapshot.
+    void recordInterpolationSamples(Registry& registry, Uint64 captureNs);
 };

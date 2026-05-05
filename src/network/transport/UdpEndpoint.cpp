@@ -77,17 +77,27 @@ bool UdpEndpoint::send(const UdpEndpointAddr& dest, PacketHeader hdr, const void
     return NET_SendDatagram(socket_, dest.addr, dest.port, buf, static_cast<int>(sizeof(hdr)) + payloadLen);
 }
 
-bool UdpEndpoint::sendFragmented(const UdpEndpointAddr& dest, PacketHeader hdr, const void* data, int dataLen)
+bool UdpEndpoint::sendFragmented(
+    const UdpEndpointAddr& dest, PacketHeader hdr, const void* data, int dataLen, int redundancy)
 {
     if (!socket_ || dataLen < 0)
         return false;
+    if (redundancy < 1)
+        redundancy = 1;
 
     // Single-datagram fast path. No fragmentation overhead when the
-    // payload already fits.
+    // payload already fits.  Redundancy still applies: at redundancy=2
+    // we send the lone datagram twice, doubling delivery probability
+    // for small but critical messages.
     if (dataLen <= k_maxPayloadBytes) {
         hdr.flags = 0;
         hdr.fragmentInfo = 0;
-        return send(dest, hdr, data, dataLen);
+        bool ok = true;
+        for (int copy = 0; copy < redundancy; ++copy) {
+            if (!send(dest, hdr, data, dataLen))
+                ok = false;
+        }
+        return ok;
     }
 
     // Fragment count = ceil(dataLen / k_maxPayloadBytes). 256-fragment
@@ -100,6 +110,23 @@ bool UdpEndpoint::sendFragmented(const UdpEndpointAddr& dest, PacketHeader hdr, 
         return false;
     }
 
+    // PR-15: outer loop is fragments, inner is redundancy.  Each
+    // fragment goes out `redundancy` times back-to-back with identical
+    // header bytes (same sequence, same fragmentInfo).  Receiver's
+    // FragmentReassembler treats duplicates idempotently — see line 103
+    // of FragmentReassembler.hpp — so the redundant copies just fill
+    // any slots the primary copies failed to deliver.
+    //
+    // Why fragment-major instead of copy-major?  Two reasons:
+    //   1. Cache locality: each fragment's bytes are touched twice
+    //      back-to-back rather than once-per-fragment-then-rewound.
+    //   2. Burst-loss correlation: if the network drops a few adjacent
+    //      datagrams together, fragment-major spreads the redundant
+    //      copies across the same correlated drop window, while
+    //      copy-major would put them in the same drop window only at
+    //      the seam between copies.  Fragment-major is more resilient
+    //      to bursty loss, which is the realistic case for kernel
+    //      send-buffer overflow.
     const auto* bytes = static_cast<const uint8_t*>(data);
     for (int i = 0; i < fragCount; ++i) {
         const int offset = i * k_maxPayloadBytes;
@@ -109,11 +136,13 @@ bool UdpEndpoint::sendFragmented(const UdpEndpointAddr& dest, PacketHeader hdr, 
         fragHdr.flags = 0x01; // bit 0 = fragmented
         fragHdr.fragmentInfo = static_cast<uint16_t>((i << 8) | fragCount);
 
-        if (!send(dest, fragHdr, bytes + offset, chunkLen)) {
-            // Stop early on send failure. Caller will get a partial set
-            // on the wire; the receiver's FragmentReassembler will time
-            // it out. UDP is best-effort; this matches the spec.
-            return false;
+        for (int copy = 0; copy < redundancy; ++copy) {
+            if (!send(dest, fragHdr, bytes + offset, chunkLen)) {
+                // Stop early on send failure.  Caller will get a partial
+                // set on the wire; the receiver's FragmentReassembler will
+                // time it out.  UDP is best-effort; this matches the spec.
+                return false;
+            }
         }
     }
     return true;
