@@ -23,7 +23,7 @@ constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s)
 // Jumping
 
 constexpr float k_jumpSpeed = 330.0f;       ///< Upward velocity on ground jump (u/s). Must mirror physics::k_jumpSpeed.
-constexpr float k_doubleJumpSpeed = 300.0f; ///< Upward velocity on air jump (u/s).
+constexpr float k_doubleJumpSpeed = 220.0f; ///< Upward velocity on air jump (u/s).
 constexpr float k_slidehopJumpSpeed = 250.0f; ///< Upward velocity when jumping during slide (u/s).
 constexpr float k_doubleJumpCooldown = 0.10f; ///< Min time after first jump before double jump is allowed (s).
 
@@ -48,14 +48,14 @@ constexpr float k_jumpLurchSpeedLoss = 0.125f;     ///< Fraction of speed lost o
 
 constexpr float k_slideMinStartSpeed = 300.0f;       ///< Min horizontal speed to enter slide (u/s).
 constexpr float k_slideMinSpeed = 100.0f;            ///< Slide cancels below this speed (u/s).
-constexpr float k_slideBoostMin = 120.0f;            ///< Min speed boost on slide entry (u/s).
-constexpr float k_slideBoostMax = 280.0f;            ///< Max speed boost on slide entry (u/s).
-constexpr float k_slideBoostCooldown = 2.5f;         ///< Cooldown between slide boosts (s).
+constexpr float k_slideBoostMin = 180.0f;            ///< Min speed boost on slide entry (u/s).
+constexpr float k_slideBoostMax = 380.0f;            ///< Max speed boost on slide entry (u/s).
+constexpr float k_slideBoostCooldown = 1.5f;         ///< Cooldown between slide boosts (s).
 constexpr float k_slideBrakingDecelMin = 200.0f;     ///< Initial braking deceleration (u/s^2).
 constexpr float k_slideBrakingDecelMax = 400.0f;     ///< Maximum braking deceleration (u/s^2).
 constexpr float k_slideBrakingRampTime = 3.0f;       ///< Time to ramp from min to max braking (s).
 constexpr float k_slideFloorInfluenceForce = 400.0f; ///< How much slope angle affects slide speed (u/s^2).
-constexpr int k_slideFatigueDecayTicks = 384;        ///< Ticks (at 128Hz = 3s) to reset one fatigue level.
+constexpr int k_slideFatigueDecayTicks = 200;        ///< Ticks (at 128Hz = 3s) to reset one fatigue level.
 constexpr int k_slideFatigueMax = 4;                 ///< Max fatigue levels (boost fully killed at this).
 
 // Wallrunning
@@ -63,21 +63,21 @@ constexpr int k_slideFatigueMax = 4;                 ///< Max fatigue levels (bo
 constexpr float k_wallrunCheckDist = 35.0f;        ///< Sphere-cast distance for side walls (u).
 constexpr float k_wallrunSphereRadius = 12.0f;     ///< Sphere-cast radius for wall detection (u).
 constexpr float k_wallrunMinGroundDist = 50.0f;    ///< Min height above ground to wallrun (u).
-constexpr float k_wallrunMaxSpeed = 560.0f;        ///< Max speed while wallrunning (u/s).
-constexpr float k_wallrunAccel = 800.0f;           ///< Forward acceleration along wall (u/s^2).
-constexpr float k_wallrunPushForce = 300.0f;       ///< Force pushing player toward wall (u/s^2).
+constexpr float k_wallrunMaxSpeed = 800.0f;        ///< Max speed while wallrunning (u/s).
+constexpr float k_wallrunAccel = 500.0f;           ///< Forward acceleration along wall (u/s^2).
+constexpr float k_wallrunPushForce = 800.0f;       ///< Force pushing player toward wall (u/s^2).
 constexpr float k_wallrunKickoffDuration = 1.75f;  ///< Max time on same wall before kickoff (s).
-constexpr float k_wallrunSpeedLossDelay = 0.1f;    ///< Delay before clamping speed on wall (s).
+constexpr float k_wallrunSpeedLossDelay = 0.2f;    ///< Delay before clamping speed on wall (s).
 constexpr float k_wallrunIntentThreshold = 0.1f;   ///< Min dot(wishDir, -wallNormal) to ENTER a wallrun.
                                                    ///< 0.1 ≈ 84° off-axis tolerance.
 constexpr float k_wallrunDetachThreshold = -0.26f; ///< Min dot(wishDir, -wallNormal) to STAY on the wall.
                                                    ///< Negative = 15° grace past the wall plane, so the
                                                    ///< player can start looking away before detaching.
                                                    ///< cos(105°) ≈ -0.26.
-constexpr float k_wallrunGripTime = 0.5f;          ///< Initial zero-gravity "grip" phase on a wall (s).
+constexpr float k_wallrunGripTime = 1.0f;          ///< Initial zero-gravity "grip" phase on a wall (s).
                                                    ///< During this window the player is pinned (vel.y = 0);
                                                    ///< after it, gravity leaks in gradually.
-constexpr float k_wallrunGravityRampTime = 1.0f;   ///< Time to ramp gravity 0 → full after grip ends (s).
+constexpr float k_wallrunGravityRampTime = 2.0f;   ///< Time to ramp gravity 0 → full after grip ends (s).
                                                    ///< Produces a natural slide-off so the player can't
                                                    ///< wallrun indefinitely even before the hard kickoff.
 constexpr float k_wallJumpUpForce = 320.0f;        ///< Upward velocity on wall jump (u/s).
@@ -92,7 +92,7 @@ constexpr float k_climbCheckDist = 35.0f;          ///< Forward sphere-cast dist
 constexpr float k_climbSphereRadius = 12.0f;       ///< Sphere-cast radius for climb detection (u).
 constexpr float k_climbMaxSpeed = 280.0f;          ///< Max upward climbing speed (u/s).
 constexpr float k_climbMinSpeed = 180.0f;          ///< Min climbing speed (after decay) (u/s).
-constexpr float k_climbKickoffDuration = 1.5f;     ///< Max climb time on same wall (s).
+constexpr float k_climbKickoffDuration = 2.0f;     ///< Max climb time on same wall (s).
 constexpr float k_climbMaxWallLookAngle = 30.0f;   ///< Max angle (degrees) between look dir and wall normal.
 constexpr float k_climbSidewaysMultiplier = 0.1f;  ///< Sideways movement reduction while climbing.
 constexpr float k_climbJumpUpForce = 320.0f;       ///< Upward velocity on climb jump (u/s).
@@ -109,7 +109,7 @@ constexpr float k_ledgeMaxGrabDist = 35.0f;    ///< Max distance from ledge surf
 constexpr float k_ledgeMinHoldTime = 0.5f;     ///< Min time frozen on ledge before release (s).
 constexpr float k_ledgeMoveAccel = 800.0f;     ///< Acceleration pulling player toward ledge (u/s^2).
 constexpr float k_ledgeMaxSpeed = 400.0f;      ///< Max speed of pull toward ledge (u/s).
-constexpr float k_ledgeJumpUpForce = 380.0f;   ///< Upward velocity on ledge jump / mantle (u/s).
+constexpr float k_ledgeJumpUpForce = 350.0f;   ///< Upward velocity on ledge jump / mantle (u/s).
 constexpr float k_ledgeJumpBackForce = 120.0f; ///< Backward velocity on ledge jump (u/s).
 constexpr float k_ledgeExitTime = 0.5f;        ///< Duration of "exiting ledge" flag (s).
 
@@ -124,11 +124,11 @@ constexpr float k_crouchingHalfHeight = 22.0f; ///< Crouching/sliding AABB half-
 
 // Grappling hook (Widowmaker-style: direct pull → look-biased launch)
 
-constexpr float k_grappleMaxRange = 800.0f;  ///< Max hook distance (~20 m in Quake units).
+constexpr float k_grappleMaxRange = 2000.0f; ///< Max hook distance (~20 m in Quake units).
 constexpr float k_grapplePullSpeed = 800.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive.
 constexpr float k_grappleDetachDist = 80.0f; ///< Auto-detach when this close to anchor (~2 m).
 constexpr float k_grappleMaxDuration = 5.0f; ///< Safety timeout (s).
-constexpr float k_grappleCooldown = 6.0f;    ///< Cooldown between grapples (s).
+constexpr float k_grappleCooldown = 5.0f;    ///< Cooldown between grapples (s).
 constexpr float k_grappleLaunchLookBias =
     0.6f; ///< Look-direction weight on detach launch (0 = pure grapple dir, 1 = pure look).
 constexpr float k_grappleLaunchSpeedMult = 1.15f; ///< Speed multiplier on launch (slight boost for momentum).
