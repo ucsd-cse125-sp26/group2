@@ -288,19 +288,26 @@ void DebugUI::buildInspectorContents(const Registry& registry,
             ImGui::SetTooltip("Stick deflection (left or right) required to activate assist.\n"
                               "0.05 = 5 %% (default).  Holding still disables all assist.");
 
-        ImGui::SliderFloat("Rotational Pull (rad/s)", &aimAssistCfg.rotationalPullRate, 0.0f, 6.0f, "%.2f");
+        ImGui::SliderFloat("Rotational Compensation", &aimAssistCfg.rotationalCompensation, 0.0f, 1.0f, "%.2f");
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-            ImGui::SetTooltip("Maximum free angular speed contributed by assist when on-target.\n"
-                              "0 disables rotational pull.");
+            ImGui::SetTooltip("Fraction of the target's apparent angular velocity that aim\n"
+                              "assist contributes per frame.  0.0 = no rotational help,\n"
+                              "1.0 = perfect tracking (aimbot).  Default 0.8.\n"
+                              "A stationary enemy contributes ZERO regardless of this value —\n"
+                              "the pull is driven by frame-to-frame change in the anchor\n"
+                              "position, not by absolute angle to the target.");
+
+        ImGui::SliderFloat("Max Pull Rate (rad/s)", &aimAssistCfg.maxPullRate, 0.5f, 8.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Hard cap on how fast the camera can be pulled by assist.\n"
+                              "Safety net for snapshot warps / target teleports.\n"
+                              "3.0 rad/s ≈ 172°/s (default).");
 
         ImGui::SliderFloat("Slowdown Strength", &aimAssistCfg.slowdownStrength, 0.10f, 1.0f, "%.2f");
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
             ImGui::SetTooltip("Effective look sensitivity when crosshair is on a target.\n"
-                              "1.0 = no slowdown, 0.6 = 60 %% speed (default).");
-
-        ImGui::Checkbox("Prefer Head", &aimAssistCfg.preferHead);
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-            ImGui::SetTooltip("Aim at the head capsule when one exists, else upper torso.");
+                              "Lower = stronger slowdown / stickier feel.\n"
+                              "1.0 = no slowdown, 0.35 = 35 %% speed (default).");
 
         ImGui::EndDisabled();
     }

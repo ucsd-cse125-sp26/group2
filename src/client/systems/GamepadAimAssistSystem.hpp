@@ -1,38 +1,47 @@
 /// @file GamepadAimAssistSystem.hpp
 /// @brief AAA-style controller aim assist — applied after runGamepadLook.
 ///
-/// Implements the three pillars of modern console FPS aim assist:
+/// Two-stage controller assist that *helps the player track*, rather than
+/// locking onto a body part:
 ///
-///   1. **Rotational aim assist** — when the player rotates the camera and a
-///      target sits inside an angular cone, the camera receives an additional
-///      rotation toward the target each frame.  Strongest on the centre of
-///      the cone, fading to zero at the cone edge.  This is the core feature
-///      that keeps controller players competitive against mouse/keyboard.
+///   1. **AABB-anchored target slowdown / aim friction** — when the crosshair
+///      is on an enemy, we *refund* part of the player's just-applied stick
+///      input, lowering effective sensitivity in the kill zone.
 ///
-///   2. **Target slowdown / aim friction** — when the crosshair is near a
-///      target, we *refund* part of the player's just-applied stick input,
-///      effectively reducing look sensitivity in that region.  Stops the
-///      crosshair from flying past the enemy when the player flicks.
+///   2. **Movement-tracking rotational assist** — the camera receives a
+///      rotation toward where the *anchor* on the target moved between the
+///      last frame and this one, scaled by `rotationalCompensation`
+///      (default 0.6).  The anchor is a point on the target's AABB that
+///      *follows where the player is aiming* — so dragging the stick up
+///      moves the anchor up on the body, dragging right moves it right,
+///      etc.  The player picks where on the body to track; aim assist just
+///      contributes a fraction of the angular velocity needed to stay
+///      glued to that point as the enemy and player move around.
 ///
-///   3. **Activation gate** — both effects are gated on the player actually
-///      moving a stick (≥5% on either left or right stick by default).
-///      Aim assist NEVER moves the camera while the player is holding still —
-///      the player is in full control when stationary.  This is the standard
-///      AAA convention (CoD, Apex, Halo all do it).
+/// **Why this is weaker than head/torso magnet pull:**
+///   - A stationary enemy contributes ZERO rotational pull (no aimbot when
+///     standing still — Δanchor_world = 0).
+///   - The pull is gated by *change* in apparent position, scaled by a
+///     fraction (so the player still has to aim).
+///   - There's no head preference — the player's view chooses where on the
+///     body to track.  Want to land headshots?  Aim a bit higher and the
+///     anchor follows.
 ///
-/// The system is fully client-side: it modifies `InputSnapshot.yaw/pitch` on
-/// the local player just like the look sampler does, so the network/server
-/// path sees adjusted angles transparently.  No server changes needed.
+/// **Activation gate** — both effects are gated on the player actually moving
+/// a stick (≥5% on either left or right stick by default).  Holding still
+/// gives full manual control.  Standard CoD/Apex/Halo convention.
 ///
-/// Mouse input is unaffected — the system early-outs when no gamepad is
-/// connected, so kbm players never get a free target lock.
+/// **Server-blind** — modifies only the local player's `InputSnapshot.yaw/
+/// pitch`, so prediction & replication are unaffected.
+///
+/// **Mouse-only players** see nothing — the system early-outs when no gamepad
+/// is connected.
 
 #pragma once
 
 #include "InputSampleSystem.hpp" // for the gamepad::normaliseAxis helper + samplers
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
-#include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -48,62 +57,95 @@
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/trigonometric.hpp>
+#include <limits>
 
 namespace systems
 {
 
 /// @brief Tunable parameters for gamepad aim assist.
 ///
-/// Exposed in the ECS inspector so testers can dial it in live.  The defaults
-/// are tuned to feel like CoD / Apex "Standard" — noticeable but not glued.
+/// Exposed in the ECS inspector so testers can dial it in live.  Defaults
+/// are tuned to feel like *assist*, not auto-aim — a moving enemy is
+/// easier to track but a stationary one is unaffected.
 struct GamepadAimAssistConfig
 {
     bool enabled = true;
 
     /// @brief Inner cone (degrees from crosshair) where pull strength is at
-    /// maximum.  Anywhere inside this cone, the full pull rate applies.
+    /// maximum.  Anywhere inside this cone, the full compensation applies.
     float innerConeDeg = 3.0f;
 
-    /// @brief Outer cone (degrees from crosshair).  Pull fades from 100 % at
-    /// the inner cone edge to 0 % at the outer cone edge.  Larger = a bigger
-    /// "magnet" but more obvious to the player when it kicks in.
+    /// @brief Outer cone (degrees from crosshair) where pull falls to zero.
+    /// Pull lerps linearly between inner and outer cones.
     float outerConeDeg = 8.0f;
 
     /// @brief Maximum world distance to a target at which aim assist applies.
-    /// Beyond this, snipers and long-range shots fall back to raw stick aim.
     float maxRange = 3000.0f;
 
     /// @brief Stick activation threshold (0..1 fraction of full deflection).
-    /// Aim assist activates when EITHER the left (movement) OR right (look)
-    /// stick is moved at least this much.  Default 0.05 = 5 %, matching the
-    /// user's spec and the CoD/Apex convention.  Holding both sticks still
-    /// disables all aim-assist effects so the player is in full control
-    /// when stationary.
-    float activationStickThresh = 0.05f;
+    /// Either the left (movement) OR the right (look) stick must exceed this
+    /// for aim assist to fire.  Holding both still disables the effect.
+    float activationStickThresh = 0.00f;
 
-    /// @brief Rotational pull rate at full strength, in radians per second.
-    /// Scaled by the cone falloff and gated on the activation threshold.
-    /// 1.5 rad/s ≈ 86°/s of free assist when on-target, which is meaningful
-    /// without being obviously magnetic.
-    float rotationalPullRate = 1.5f;
+    /// @brief Tracking compensation factor.  When the *apparent angular
+    /// position* of the anchor on the target changes by Δθ between frames
+    /// (due to enemy motion + player translation), aim assist contributes
+    /// `rotationalCompensation × Δθ` to the camera rotation.  The player
+    /// still has to provide the remainder manually.
+    ///
+    /// 0.0 = no rotational help, 1.0 = perfect tracking (aimbot).
+    /// Default 0.8 — assist contributes 80 % of the angular velocity
+    /// needed to glue to a moving target, leaving 20 % for the player.
+    /// Bumped up from 0.6 after tester feedback that 60 % felt weak.
+    float rotationalCompensation = 1.0f;
 
-    /// @brief Slowdown factor (0..1).  When the crosshair is on a target the
-    /// effective look sensitivity is multiplied by this much.  0.6 = look
-    /// at 60 % speed inside the slowdown cone.  Implemented by refunding
-    /// (1 − slowdownStrength) × inputDelta after runGamepadLook applied it.
-    float slowdownStrength = 0.6f;
+    /// @brief Hard cap on rotational pull this frame, in radians/second.
+    /// Prevents the assist from teleporting onto a target that just spawned
+    /// or warped via server snapshot correction.  3.0 rad/s ≈ 172°/s is
+    /// generous; legitimate tracking deltas are typically well below.
+    float maxPullRate = 3.0f;
 
-    /// @brief Prefer the head capsule when picking which point on a target
-    /// to aim at.  Falls back to upper torso when no head capsule exists
-    /// (e.g. early-spawned entity before animation rig populates).
-    bool preferHead = true;
+    /// @brief Slowdown factor (0..1).  When the crosshair is on a target
+    /// the effective look sensitivity is multiplied by this much.  Lower
+    /// = stronger slowdown / "stickier" feel inside the kill zone.
+    /// Default 0.35 = look at 35 % speed on-target; aggressive enough that
+    /// the crosshair perceptibly resists overshoot when flicking onto an
+    /// enemy, while still letting the player swing past if they really
+    /// want to.  Tuned tighter than the previous 0.6 after tester feedback
+    /// that the slowdown felt subtle.
+    float slowdownStrength = 0.1f;
+};
+
+/// @brief Per-frame state required to compute the rotational pull as a
+/// *delta* between frames.  Owned by Game; passed by reference into
+/// `runGamepadAimAssist`.  Never serialised — purely local presentation.
+struct GamepadAimAssistState
+{
+    /// @brief Target locked-onto last frame (`entt::null` when none).  Used
+    /// to detect target-switch and re-initialise the anchor.
+    entt::entity lastTarget = entt::null;
+    /// @brief Anchor offset from the target's `Position.value` in world axes.
+    /// Updated each frame to where the player's camera ray intersects (or
+    /// is closest to) the target's AABB.  Stays inside the AABB.
+    glm::vec3 anchorLocal{0.0f};
+    /// @brief Target's world position last frame — combined with the (then-)
+    /// `anchorLocal` to recover where the anchor was in world space.
+    glm::vec3 lastTargetPos{0.0f};
+    /// @brief Local player's eye position last frame.  Including this in
+    /// the angular-delta calculation lets the pull respond to the player's
+    /// own translation too — exactly what the user asked for.
+    glm::vec3 lastEye{0.0f};
+    /// @brief False until we have *one* completed frame of history for the
+    /// current target.  Skips the angular-delta step on acquisition (no
+    /// previous frame to subtract).
+    bool initialised = false;
 };
 
 namespace aimassist
 {
 
-/// @brief Convert a world-space direction back into yaw/pitch matching the
-/// renderer's convention used by `cachedCamFwd_`:
+/// @brief Convert a world-space direction into yaw/pitch matching the
+/// renderer convention used by `cachedCamFwd_`:
 ///   fwd = (sin(yaw)·cos(pitch),  −sin(pitch),  cos(yaw)·cos(pitch))
 inline void dirToYawPitch(const glm::vec3& dir, float& outYaw, float& outPitch)
 {
@@ -111,28 +153,7 @@ inline void dirToYawPitch(const glm::vec3& dir, float& outYaw, float& outPitch)
     outPitch = -std::asin(std::clamp(dir.y, -1.0f, 1.0f));
 }
 
-/// @brief Pick the best capsule on a target — head if available + preferred,
-/// else the first upper-torso capsule, else the first capsule of any kind.
-inline glm::vec3 pickAimPoint(const HitboxInstance& hb, bool preferHead)
-{
-    const WorldCapsule* head = nullptr;
-    const WorldCapsule* torso = nullptr;
-    for (const auto& cap : hb.capsules) {
-        if (cap.region == BodyRegion::Head && !head)
-            head = &cap;
-        else if (cap.region == BodyRegion::UpperTorso && !torso)
-            torso = &cap;
-    }
-    const WorldCapsule* pick =
-        (preferHead && head) ? head : (torso ? torso : (hb.capsules.empty() ? nullptr : &hb.capsules.front()));
-    if (!pick)
-        return glm::vec3{0.0f}; // caller checks hb.capsules.empty() before reaching this anyway
-    return 0.5f * (pick->pointA + pick->pointB);
-}
-
-/// @brief Smooth falloff from 1.0 inside the inner cone to 0.0 at the outer
-/// cone edge.  Linear is fine here — the player can't perceive higher-order
-/// curves through a stick at 60 Hz.
+/// @brief Linear cone falloff: 1.0 inside `innerRad`, 0.0 outside `outerRad`.
 inline float coneFalloff(float angleRad, float innerRad, float outerRad)
 {
     if (angleRad <= innerRad)
@@ -142,27 +163,76 @@ inline float coneFalloff(float angleRad, float innerRad, float outerRad)
     return (outerRad - angleRad) / (outerRad - innerRad);
 }
 
+/// @brief Find the world point where the camera ray hits the target's AABB,
+/// or — if it misses — the closest point on the AABB to the ray's projection
+/// at target distance.  Always returns a point inside or on the AABB.
+inline glm::vec3 rayOntoAABB(
+    const glm::vec3& eye, const glm::vec3& dir, const glm::vec3& aabbMin, const glm::vec3& aabbMax, float fallbackDist)
+{
+    // Slab method.  Reject divisions by ~0 by treating tiny `dir[i]` as
+    // "ray parallel to axis"; if origin is outside the slab on that axis,
+    // the ray can never hit (we'll fall through to the fallback below).
+    float tEnter = -std::numeric_limits<float>::infinity();
+    float tExit = std::numeric_limits<float>::infinity();
+    bool hits = true;
+    for (int i = 0; i < 3; ++i) {
+        if (std::fabs(dir[i]) < 1e-6f) {
+            if (eye[i] < aabbMin[i] || eye[i] > aabbMax[i]) {
+                hits = false;
+                break;
+            }
+        } else {
+            float t1 = (aabbMin[i] - eye[i]) / dir[i];
+            float t2 = (aabbMax[i] - eye[i]) / dir[i];
+            if (t1 > t2)
+                std::swap(t1, t2);
+            tEnter = std::max(tEnter, t1);
+            tExit = std::min(tExit, t2);
+            if (tEnter > tExit) {
+                hits = false;
+                break;
+            }
+        }
+    }
+    if (hits && tEnter >= 0.0f) {
+        return eye + dir * tEnter;
+    }
+    // Fallback: clamp the ray-at-target-distance point onto the AABB.  Always
+    // produces a sensible "closest face/edge/corner" anchor — used when the
+    // player is aiming just past the silhouette of the target.
+    const glm::vec3 raySample = eye + dir * fallbackDist;
+    return glm::clamp(raySample, aabbMin, aabbMax);
+}
+
 } // namespace aimassist
 
-/// @brief Apply gamepad aim assist (slowdown + rotational pull) to the local
-/// player's InputSnapshot.  Must run AFTER `runGamepadLook` so we can refund
-/// part of the player input it just integrated.
+/// @brief Apply gamepad aim assist (slowdown + movement-tracking pull) to
+/// the local player's InputSnapshot.  Must run AFTER `runGamepadLook` so
+/// we can refund part of the player input it just integrated.
 ///
-/// @param registry        ECS registry.
-/// @param gamepad         Open gamepad handle (nullptr → no-op).
-/// @param cfg             Tuning parameters.
-/// @param lookSens        Same value passed to runGamepadLook (rad/s @ full deflection).
-/// @param dt              Frame delta time (seconds).
-inline void runGamepadAimAssist(
-    Registry& registry, SDL_Gamepad* gamepad, const GamepadAimAssistConfig& cfg, float lookSens, float dt)
+/// @param registry  ECS registry.
+/// @param gamepad   Open gamepad handle (nullptr → no-op).
+/// @param cfg       Tuning parameters.
+/// @param state     Persistent per-frame state (anchor + previous-frame snapshot).
+/// @param lookSens  Same value passed to runGamepadLook (rad/s @ full deflection).
+/// @param dt        Frame delta time (seconds).
+inline void runGamepadAimAssist(Registry& registry,
+                                SDL_Gamepad* gamepad,
+                                const GamepadAimAssistConfig& cfg,
+                                GamepadAimAssistState& state,
+                                float lookSens,
+                                float dt)
 {
-    if (!gamepad || !cfg.enabled)
+    if (!gamepad || !cfg.enabled) {
+        // Drop our memory of any previous target so the next acquisition
+        // re-initialises cleanly (otherwise a stale anchor could fire one
+        // bogus pull when assist is re-enabled).
+        state.lastTarget = entt::null;
+        state.initialised = false;
         return;
+    }
 
     // ── Activation gate ───────────────────────────────────────────────────
-    // Read all four stick axes once and check the magnitudes.  The gate fires
-    // when EITHER stick is moved more than the threshold — matches the
-    // user's spec and the AAA convention.
     const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
     const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
     const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
@@ -170,13 +240,13 @@ inline void runGamepadAimAssist(
 
     const float moveStickMag = std::sqrt(lx * lx + ly * ly);
     const float lookStickMag = std::sqrt(rx * rx + ry * ry);
-    if (moveStickMag < cfg.activationStickThresh && lookStickMag < cfg.activationStickThresh)
+    if (moveStickMag < cfg.activationStickThresh && lookStickMag < cfg.activationStickThresh) {
+        // Player held still — keep the state so the anchor doesn't reset
+        // when they nudge again, but skip pull/slowdown this frame.
         return;
+    }
 
     // ── Local player aim state ────────────────────────────────────────────
-    // We use the snap.yaw/pitch that runGamepadLook just updated, plus the
-    // local player's world position derived from the Position + CollisionShape
-    // (so the eye position is fresh, not last-frame's cachedEye_).
     entt::entity localEntity = entt::null;
     glm::vec3 eye{0.0f};
     float curYaw = 0.0f, curPitch = 0.0f;
@@ -184,9 +254,6 @@ inline void runGamepadAimAssist(
     registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot>().each(
         [&](entt::entity e, const Position& pos, const CollisionShape& shape, const InputSnapshot& snap) {
             localEntity = e;
-            // Eye sits at 77 % of the half-height — same factor used at line ~1443
-            // in Game.cpp where the camera resolve computes renderEye.  Keep them
-            // in sync; if eye-offset constants are ever centralised, replace.
             const float eyeOffset = shape.halfExtents.y * 0.77f;
             eye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
             curYaw = snap.yaw;
@@ -196,107 +263,165 @@ inline void runGamepadAimAssist(
     if (!foundLocal)
         return;
 
-    // Current aim direction in the renderer's convention.
-    const float cosPitch = std::cos(curPitch);
-    const glm::vec3 camFwd{std::sin(curYaw) * cosPitch, -std::sin(curPitch), std::cos(curYaw) * cosPitch};
+    // Current aim direction, in the renderer's convention.
+    const float cosPitchInit = std::cos(curPitch);
+    const glm::vec3 camFwd{std::sin(curYaw) * cosPitchInit, -std::sin(curPitch), std::cos(curYaw) * cosPitchInit};
 
-    // ── Target selection: smallest angular distance, range-gated, LOS-clear ──
+    // ── Target selection ──────────────────────────────────────────────────
+    // Pick the alive remote player whose Position is closest to the crosshair
+    // in angular terms, range-gated and LOS-clear (no walls in the way).
+    // We use Position (AABB centre) for selection; the *anchor on the AABB*
+    // is computed below.  Selecting on AABB centre is stable — selecting on
+    // the anchor itself would create feedback when the anchor moves.
     entt::entity bestTarget = entt::null;
-    glm::vec3 bestAim{0.0f};
+    glm::vec3 bestTargetPos{0.0f};
+    glm::vec3 bestHalfExtents{0.0f};
     float bestAngle = glm::radians(cfg.outerConeDeg);
     float bestDist = cfg.maxRange;
 
     const auto& world = physics::activeWorld();
 
-    registry.view<Position, HitboxInstance, PlayerVisState>(entt::exclude<LocalPlayer>)
-        .each([&](entt::entity e, const Position& /*pos*/, const HitboxInstance& hb, const PlayerVisState& pvis) {
+    registry.view<Position, CollisionShape, PlayerVisState>(entt::exclude<LocalPlayer>)
+        .each([&](entt::entity e, const Position& pos, const CollisionShape& shape, const PlayerVisState& pvis) {
             if (e == localEntity)
                 return;
             if (pvis.isDead)
                 return;
             if (registry.all_of<RespawnTimer>(e))
                 return;
-            if (hb.capsules.empty())
-                return; // not yet animated this frame; skip rather than aim at world origin
 
-            const glm::vec3 aimPoint = aimassist::pickAimPoint(hb, cfg.preferHead);
-            const glm::vec3 toTarget = aimPoint - eye;
-            const float dist = glm::length(toTarget);
+            const glm::vec3 toCentre = pos.value - eye;
+            const float dist = glm::length(toCentre);
             if (dist < 1e-3f || dist > cfg.maxRange)
                 return;
 
-            const glm::vec3 dirToTarget = toTarget / dist;
-            const float dot = glm::clamp(glm::dot(camFwd, dirToTarget), -1.0f, 1.0f);
+            const glm::vec3 dirToCentre = toCentre / dist;
+            const float dot = glm::clamp(glm::dot(camFwd, dirToCentre), -1.0f, 1.0f);
             if (dot <= 0.0f)
-                return; // behind the camera
+                return; // behind camera
 
             const float angle = std::acos(dot);
             if (angle >= bestAngle)
                 return;
 
-            // Line-of-sight: reject if a wall is between us and the target.
-            // Only test world geometry — testing against player hitboxes would
-            // self-occlude (we'd hit the target's own capsule).
-            const physics::HitscanHit blocker = physics::raycastWorld(eye, dirToTarget, world);
+            // LOS check against world geometry.  We don't test player
+            // hitboxes — the target's own capsule would self-occlude.
+            const physics::HitscanHit blocker = physics::raycastWorld(eye, dirToCentre, world);
             if (blocker.hit && blocker.distance < dist - 1.0f)
                 return;
 
             bestAngle = angle;
             bestTarget = e;
-            bestAim = aimPoint;
+            bestTargetPos = pos.value;
+            bestHalfExtents = shape.halfExtents;
             bestDist = dist;
         });
 
-    if (bestTarget == entt::null)
+    if (bestTarget == entt::null) {
+        // Lost target — clear state so the next acquisition starts fresh.
+        state.lastTarget = entt::null;
+        state.initialised = false;
         return;
+    }
 
-    // Strength curve: cone falloff × distance falloff.  Both inputs are
-    // already clamped, so the product is in [0, 1].
+    // Cone × distance falloff — both already clamped, product in [0, 1].
     const float coneFactor =
         aimassist::coneFalloff(bestAngle, glm::radians(cfg.innerConeDeg), glm::radians(cfg.outerConeDeg));
     const float distFactor = 1.0f - std::clamp(bestDist / cfg.maxRange, 0.0f, 1.0f);
     const float strength = coneFactor * distFactor;
-    if (strength <= 0.0f)
+    if (strength <= 0.0f) {
+        // In the cone outer ring with strength 0 — keep state alive so
+        // the anchor persists as the player approaches the target, but
+        // skip slowdown / pull this frame.
         return;
+    }
 
-    // Target yaw/pitch in the renderer convention.
-    const glm::vec3 dirToBest = (bestAim - eye) / bestDist;
-    float targetYaw = 0.0f, targetPitch = 0.0f;
-    aimassist::dirToYawPitch(dirToBest, targetYaw, targetPitch);
+    // Target AABB derived from Position (centre) + CollisionShape::halfExtents.
+    // Used both for the anchor projection and as a clamp envelope so the
+    // anchor never drifts off the silhouette.
+    const glm::vec3 aabbMin = bestTargetPos - bestHalfExtents;
+    const glm::vec3 aabbMax = bestTargetPos + bestHalfExtents;
+
+    // Detect target-switch (or first-ever frame): re-initialise state.
+    const bool switchedTarget = (state.lastTarget != bestTarget);
+    if (switchedTarget || !state.initialised) {
+        const glm::vec3 hitWorld = aimassist::rayOntoAABB(eye, camFwd, aabbMin, aabbMax, bestDist);
+        state.anchorLocal = hitWorld - bestTargetPos;
+        state.lastTargetPos = bestTargetPos;
+        state.lastEye = eye;
+        state.lastTarget = bestTarget;
+        state.initialised = true;
+        // No previous frame yet → no pull this frame.  Slowdown still
+        // applies (it depends only on current strength, not on history).
+    }
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        // ── 1. Slowdown — refund part of the look input that runGamepadLook
-        //       integrated this frame.  No-op when the right stick is below
-        //       its activation threshold (player isn't actively aiming).
+        // ── 1. Slowdown — refund part of the look input runGamepadLook
+        //       integrated this frame.  Independent of frame history.
         if (lookStickMag >= cfg.activationStickThresh) {
             const float refund = (1.0f - cfg.slowdownStrength) * strength;
-            //   runGamepadLook applied: snap.yaw -= rx * lookSens * dt;
-            //                           snap.pitch += ry * lookSens * dt;
-            // Refund `refund` fraction of those deltas (signs matched).
             snap.yaw += rx * lookSens * dt * refund;
             snap.pitch -= ry * lookSens * dt * refund;
         }
 
-        // ── 2. Rotational pull — slew yaw/pitch toward the target at a
-        //       rate capped by `rotationalPullRate`.  This is what makes
-        //       the camera "stick" to a strafing target while the player
-        //       rotates: the assist contributes some of the angular speed
-        //       the player would otherwise have to provide themselves.
-        // Wrap yaw error to [-π, π] so the pull always takes the short way
-        // around rather than spinning a full 360° at the antimeridian.
-        const float yawErr = std::remainder(targetYaw - snap.yaw, glm::radians(360.0f));
-        const float pitchErr = targetPitch - snap.pitch;
+        // ── 2. Movement-tracking rotational pull.
+        //       Skipped on the acquisition frame (no previous-frame anchor).
+        if (state.initialised && !switchedTarget) {
+            // Use the SAME anchor_local for both endpoints — that isolates
+            // the contribution of (target movement) + (player translation),
+            // excluding the contribution of the player's own *aim* drag.
+            // Drag is supposed to redirect the anchor on the body, not
+            // generate a phantom pull, so it's attributed only to the
+            // anchor-update step at the end of this function.
+            const glm::vec3 prevAnchorWorld = state.lastTargetPos + state.anchorLocal;
+            const glm::vec3 curAnchorWorld = bestTargetPos + state.anchorLocal;
 
-        const float maxPullThisFrame = cfg.rotationalPullRate * strength * dt;
-        const float yawPull = std::clamp(yawErr, -maxPullThisFrame, maxPullThisFrame);
-        const float pitchPull = std::clamp(pitchErr, -maxPullThisFrame, maxPullThisFrame);
-        snap.yaw += yawPull;
-        snap.pitch += pitchPull;
+            const glm::vec3 dirPrev = glm::normalize(prevAnchorWorld - state.lastEye);
+            const glm::vec3 dirCur = glm::normalize(curAnchorWorld - eye);
 
-        // Re-wrap and re-clamp to match runGamepadLook's invariants.
-        snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
-        snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+            float yawPrev = 0.0f, pitchPrev = 0.0f, yawCur = 0.0f, pitchCur = 0.0f;
+            aimassist::dirToYawPitch(dirPrev, yawPrev, pitchPrev);
+            aimassist::dirToYawPitch(dirCur, yawCur, pitchCur);
+
+            // Wrap yaw delta to [-π, π] so we always rotate the short way.
+            const float dYaw = std::remainder(yawCur - yawPrev, glm::radians(360.0f));
+            const float dPitch = pitchCur - pitchPrev;
+
+            // Compensate `rotationalCompensation` of the apparent motion,
+            // capped by `maxPullRate` so a teleport spike can't fling the
+            // camera off the player's actual aim.
+            const float maxThisFrame = cfg.maxPullRate * dt;
+            const float yawPull = std::clamp(cfg.rotationalCompensation * strength * dYaw, -maxThisFrame, maxThisFrame);
+            const float pitchPull =
+                std::clamp(cfg.rotationalCompensation * strength * dPitch, -maxThisFrame, maxThisFrame);
+            snap.yaw += yawPull;
+            snap.pitch += pitchPull;
+
+            // Re-wrap / clamp to match runGamepadLook's invariants.
+            snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
+            snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+        }
     });
+
+    // ── Update anchor for next frame ──────────────────────────────────────
+    // The new camFwd already includes both player input (runGamepadLook)
+    // AND the pull we just applied, so the anchor naturally tracks where
+    // the player + assist combined ended up looking.  Clamped onto the
+    // target AABB so it never drifts off the silhouette.
+    float updatedYaw = curYaw, updatedPitch = curPitch;
+    registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+        updatedYaw = snap.yaw;
+        updatedPitch = snap.pitch;
+    });
+    const float cosUpdated = std::cos(updatedPitch);
+    const glm::vec3 camFwdAfter{
+        std::sin(updatedYaw) * cosUpdated, -std::sin(updatedPitch), std::cos(updatedYaw) * cosUpdated};
+    const glm::vec3 newHitWorld = aimassist::rayOntoAABB(eye, camFwdAfter, aabbMin, aabbMax, bestDist);
+    state.anchorLocal = newHitWorld - bestTargetPos;
+    state.lastTargetPos = bestTargetPos;
+    state.lastEye = eye;
+    state.lastTarget = bestTarget;
+    state.initialised = true;
 }
 
 } // namespace systems

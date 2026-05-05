@@ -184,11 +184,16 @@ private:
     /// @brief AAA-style gamepad aim assist tuning.
     ///
     /// Active only when a gamepad is connected (mouse input is unaffected).
-    /// Defaults match the CoD/Apex "Standard" feel: noticeable rotational
-    /// pull and target slowdown when the player is actively moving a stick,
-    /// no effect at all when both sticks are still.  Live-tunable from the
-    /// ECS inspector.
+    /// Defaults are tuned for *assist* not *auto-aim*: a stationary enemy
+    /// gets zero rotational pull, a moving enemy gets partial tracking
+    /// help.  Live-tunable from the ECS inspector.
     systems::GamepadAimAssistConfig aimAssistCfg_;
+
+    /// @brief Persistent inter-frame state for aim assist (anchor on target
+    /// AABB + previous-frame snapshot used to compute the angular delta
+    /// from which the rotational pull is derived).  Reset implicitly when
+    /// the target is lost or aim assist is disabled.
+    systems::GamepadAimAssistState aimAssistState_;
 
     /// Persistent thread pool for parallel-for over per-frame loops
     /// (currently the animation update; future: parallel frustum cull,

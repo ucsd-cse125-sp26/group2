@@ -1257,11 +1257,13 @@ SDL_AppResult Game::iterate()
         systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime);
         // AAA-style aim assist runs IMMEDIATELY after the look sampler so it
         // can refund part of the just-applied look delta (slowdown) and add
-        // a rotational pull toward the closest visible enemy.  Mouse-only
-        // players see no effect — `activeGamepad_` is nullptr and the
-        // function early-outs.  Both effects are gated on stick actuation
-        // ≥ 5 % so a player holding still keeps full manual control.
-        systems::runGamepadAimAssist(registry, activeGamepad_, aimAssistCfg_, gamepadLookSensitivity, frameTime);
+        // a rotational pull derived from the *change* in the target's
+        // angular position frame-to-frame.  Mouse-only players see no
+        // effect — `activeGamepad_` is nullptr and the function early-outs.
+        // Both effects are gated on stick actuation ≥ 5 % so a player
+        // holding still keeps full manual control.
+        systems::runGamepadAimAssist(
+            registry, activeGamepad_, aimAssistCfg_, aimAssistState_, gamepadLookSensitivity, frameTime);
         if (!inputSyncedWithPhysics)
             systems::runGamepadMovement(registry, activeGamepad_);
         systems::runGamepadWeapon(registry, activeGamepad_);
@@ -3120,6 +3122,53 @@ SDL_AppResult Game::iterate()
 
         // ── View-projection matrix for world→screen projection ──
         hudState.viewProj = renderer.getCamera().getViewProjection();
+
+        // ── Weapon pickup prompt ──
+        // Mirror WeaponSpawnerSystem's pickup-detection rule (range + look
+        // cone) so the "Press F to pick up <Weapon>" hint appears exactly
+        // when pressing F would actually grant the weapon. Cheap O(N) sweep
+        // across the handful of weapon spawners in the world.
+        {
+            static constexpr float k_pickupRange = 140.0f;
+            static constexpr float k_pickupMaxAngleDeg = 12.0f;
+            const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
+
+            glm::vec3 eye{0.f};
+            glm::vec3 viewFwd{0.f, 0.f, 1.f};
+            bool haveLocal = false;
+            registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot>().each(
+                [&](const Position& pos, const CollisionShape& shape, const InputSnapshot& input) {
+                    eye = pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.77f, 0.f};
+                    const float cp = std::cos(input.pitch);
+                    viewFwd = glm::normalize(glm::vec3{
+                        std::sin(input.yaw) * cp,
+                        -std::sin(input.pitch),
+                        std::cos(input.yaw) * cp,
+                    });
+                    haveLocal = true;
+                });
+
+            if (haveLocal && hudState.isAlive) {
+                float bestDistSq = k_pickupRange * k_pickupRange + 1.f;
+                registry.view<Position, WeaponSpawner>().each([&](const Position& spPos, const WeaponSpawner& sp) {
+                    if (!sp.hasWeapon)
+                        return;
+                    const glm::vec3 toW = spPos.value - eye;
+                    const float distSq = glm::dot(toW, toW);
+                    if (distSq > k_pickupRange * k_pickupRange || distSq <= 0.0001f)
+                        return;
+                    if (glm::dot(viewFwd, glm::normalize(toW)) < k_pickupMinDot)
+                        return;
+                    // Closest matching spawner wins (in case two pickups
+                    // overlap the look cone simultaneously).
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        hudState.pickupAvailable = true;
+                        hudState.pickupWeaponId = static_cast<int>(sp.type);
+                    }
+                });
+            }
+        }
 
         hud_.update(frameTime, hudState);
         hud_.render();
