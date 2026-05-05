@@ -22,4 +22,18 @@
 struct LagCompTarget
 {
     uint32_t targetServerTick = 0;
+
+    /// @brief PR-22: lag-compensation distance in ticks
+    /// (`currentServerTick − targetServerTick`).  Stored alongside the
+    /// target so the shot-log path can record it without plumbing the
+    /// per-tick `tickCount` into `WeaponSystem::handleFire`.  Zero
+    /// when no rewind requested.  Diagnostic only — `rewindHitboxes`
+    /// reads `targetServerTick` directly.
+    uint16_t lagTicks = 0;
+
+    /// @brief PR-22: shooter's most recent reported RTT in ms.  Used
+    /// by the netsync hit-reg analyzer to bucket shots by RTT without
+    /// having to join against the per-client net-stats stream.  Zero
+    /// before the first ping round-trip completes.
+    uint16_t rttMs = 0;
 };

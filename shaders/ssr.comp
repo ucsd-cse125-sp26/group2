@@ -126,7 +126,11 @@ void main()
 
     float screenPixelDist = max(abs(deltaScreen.x) * screenSize.x,
                                 abs(deltaScreen.y) * screenSize.y);
-    int numSteps = clamp(int(screenPixelDist * 0.5), 8, 300);
+    // Phase 3 perf: cap upper march length at 80 (was 300).  Long off-screen
+    // rays rarely hit and the temporal accumulator (when SSR is in stochastic
+    // mode) refines residual sparkle anyway.  Worst-case shader time drops by
+    // a factor of ~3.7 with no visible change on character-scale geometry.
+    int numSteps = clamp(int(screenPixelDist * 0.5), 8, 80);
     vec3 stepScreen = deltaScreen / float(numSteps);
 
     vec3 rayScreen = startScreen;

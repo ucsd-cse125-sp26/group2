@@ -34,6 +34,7 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
+#include "network/EntityInterpolation.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -53,11 +54,18 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
+#include <numeric>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 namespace
 {
@@ -214,6 +222,12 @@ bool Game::init()
         // so organic/detailed shapes (a bottle, a metallic pallet) end up as a
         // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
         // a few seconds of load time per prop but kills triMesh edge-jitter.
+        //
+        // PR-30: V-HACD is gated on `gamemap::k_useVhacd` (single source of
+        // truth in `ecs/MapConfig.hpp`) so the team can disable it for
+        // map-iteration runs without editing per-call-site flags.  When
+        // `k_useVhacd == false`, non-convex props fall back to triMesh —
+        // correct, just visibly jittery on curved contacts.
         auto loadProp = [&](const AssetDefinition& def) {
             const int id = addAssetDefinition(assets_, def);
             const int modelIdx = renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
@@ -224,9 +238,8 @@ bool Game::init()
 
             // Load collision at the same position/scale.
             const std::string fullPath = basePath + "assets/" + def.filename;
-            if (physics::loadPropCollision(
-                    fullPath, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision))
-            {
+            const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
+            if (physics::loadPropCollision(fullPath, mapCollision_, def.loadTranslation, def.loadScale, decompose)) {
                 assets_.setHasCollision(id);
             }
         };
@@ -446,6 +459,12 @@ bool Game::init()
         // TODO: Specific handling for local player deaths (display enemy health)
     });
 
+    // PR-20: hand each SHOT_DEBUG_REPORT off to the DebugUI's ring
+    // buffer.  Pairs with the client-side fire-time snapshot the
+    // game thread captures inside iterate() (see fire-detection
+    // block).  Always-on so the user can flip the overlay any time.
+    client.onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
+
     // Initialize runtime 3P weapon params from defaults
     for (int i = 0; i < 4; ++i)
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
@@ -516,6 +535,28 @@ bool Game::init()
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
             }
+
+            // Install the shared rig on the renderer's skinned-character path
+            // (perf Phase 1B).  All animated entities will draw via instanced
+            // GPU skinning against this single GPU model — no per-entity
+            // clones, no CPU LBS, no per-frame vertex re-uploads.
+            {
+                const auto& rigMeshes = charRig_.meshes();
+                std::vector<std::vector<Renderer::SkinVertex>> skinPerMesh(rigMeshes.size());
+                for (size_t m = 0; m < rigMeshes.size(); ++m) {
+                    const auto& src = rigMeshes[m].skinWeights;
+                    auto& dst = skinPerMesh[m];
+                    dst.resize(src.size());
+                    for (size_t v = 0; v < src.size(); ++v) {
+                        for (int k = 0; k < 4; ++k) {
+                            dst[v].boneIndices[k] = src[v].boneIndices[k];
+                            dst[v].boneWeights[k] = src[v].weights[k];
+                        }
+                    }
+                }
+                if (!legacyRenderer().setSkinnedRig(charRig_.templateLoadedModel(), skinPerMesh, charRig_.numJoints()))
+                    SDL_Log("[client] WARNING: setSkinnedRig failed — falling back to per-entity path");
+            }
         }
 
         // Build and resolve hitbox definitions (client-side, for debug visualization).
@@ -533,8 +574,153 @@ bool Game::init()
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
 
+    // Spin up the per-frame worker pool.  Default to half the host's logical
+    // cores so we leave headroom for the rest of the system; clamp to [0, 7]
+    // because parallel-for over ~30-character batches saturates well before
+    // 8 workers and over-subscribing just adds context-switch noise.
+    {
+        int hw = static_cast<int>(std::thread::hardware_concurrency());
+        if (hw <= 0)
+            hw = 4;
+        int workers = std::max(0, std::min(hw / 2, 7));
+        if (const char* p = SDL_getenv("GROUP2_WORKERS")) {
+            char* end = nullptr;
+            const long n = std::strtol(p, &end, 10);
+            if (*end == '\0' && n >= 0 && n <= 32)
+                workers = static_cast<int>(n);
+        }
+        workerPool_ = std::make_unique<WorkerPool>(workers);
+        SDL_Log("[client] WorkerPool: %d worker(s)", workers);
+    }
+
     // Apply the default frame-rate-limit setting now that the renderer is ready.
     applyFrameRateLimit();
+
+    // Bench mode: BENCH_SECONDS=N runs the client for N seconds, then prints a
+    // single-line FPS summary to stderr and quits.  Driven by
+    // `scripts/perf-100bots.sh` for baseline + post-change measurements.
+    if (const char* envBench = SDL_getenv("BENCH_SECONDS")) {
+        const float seconds = std::strtof(envBench, nullptr);
+        if (seconds > 0.0f) {
+            benchSeconds_ = seconds;
+            benchActive_ = true;
+            benchStartTime_ = prevTime;
+            // Reserve enough room for ~5000 fps × bench duration (worst case),
+            // so push_back never reallocates inside the hot path.
+            benchFrameTimesMs_.reserve(static_cast<size_t>(seconds * 5000.0f));
+            benchFrameStats_.reserve(static_cast<size_t>(seconds * 5000.0f));
+            // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
+            limitFPSToMonitor = false;
+            renderer.setVSync(false);
+            // Phase 3g — bench skips ImGui submission entirely (the ImGui
+            // context still exists for newFrame, but RenderDrawData and
+            // PrepareDrawData are short-circuited).  Removes ~0.04 ms / frame
+            // of fixed overhead on the median frame.
+            legacyRenderer().imguiEnabled = false;
+            SDL_Log("[bench] running for %.1fs then exiting (warmup %.1fs)",
+                    static_cast<double>(seconds),
+                    static_cast<double>(k_benchWarmupSeconds));
+        }
+    }
+
+    // BENCH_RENDER_SCALE=N — internal HDR + post-process resolution multiplier.
+    // 0.5 = quarter pixel count = ~4× fragment savings.  Tonemap reads HDR via
+    // linear sampler so the final swapchain image is bilinearly upscaled.
+    if (const char* p = SDL_getenv("BENCH_RENDER_SCALE")) {
+        const float s = std::strtof(p, nullptr);
+        if (s > 0.0f) {
+            legacyRenderer().renderScale = s;
+            SDL_Log("[client] BENCH_RENDER_SCALE=%.3f", static_cast<double>(s));
+        }
+    }
+
+    // GROUP2_NO_IMGUI=1 — release-build kill switch.  Skips ImGui submission
+    // unconditionally.  The CMake/release pipeline can pre-set this for
+    // shipping builds that never need a debug menu.  Independent of bench
+    // mode so it can be combined with normal play.
+    if (const char* p = SDL_getenv("GROUP2_NO_IMGUI"); p && *p && *p != '0') {
+        legacyRenderer().imguiEnabled = false;
+        SDL_Log("[client] GROUP2_NO_IMGUI=1 \u2014 ImGui submission disabled");
+    }
+
+    // GROUP2_CLIENT_CORES="0,1,2,3" — pin the main render thread to the
+    // listed CPU cores via pthread_setaffinity_np.  Stops the OS scheduler
+    // from migrating us onto a core where the colocated server / 100 bot
+    // threads are spinning, which is the dominant cause of p1/p5 stalls
+    // we observed in the phase profiler (acquire/record/submit phases
+    // randomly bloating to several ms).  Linux only.
+#if defined(__linux__)
+    if (const char* corestr = SDL_getenv("GROUP2_CLIENT_CORES")) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        const char* p = corestr;
+        int coreCount = 0;
+        while (*p) {
+            char* end = nullptr;
+            const long c = std::strtol(p, &end, 10);
+            if (end == p)
+                break;
+            if (c >= 0 && c < CPU_SETSIZE) {
+                CPU_SET(static_cast<int>(c), &cpuset);
+                ++coreCount;
+            }
+            p = end;
+            if (*p == ',')
+                ++p;
+        }
+        if (coreCount > 0) {
+            const int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+            if (rc == 0) {
+                SDL_Log("[client] pinned render thread to %d core(s) (%s)", coreCount, corestr);
+            } else {
+                SDL_Log("[client] pthread_setaffinity_np failed: %s", std::strerror(rc));
+            }
+        }
+    }
+#endif
+
+    // Bench-only kill switches for post-processing passes.  Lets a single
+    // bench script flag isolate per-pass cost without persisting changes.
+    //
+    //   BENCH_NO_POSTFX=1   — disable bloom + SSR + GTAO + volumetrics + TAA
+    //   BENCH_NO_SHADOWS=1  — disable cascaded shadow map pass
+    //   BENCH_NO_TAA=1      — disable TAA + motion vectors only
+    //   BENCH_NO_BLOOM=1    — disable bloom only
+    //   BENCH_NO_SSR=1      — disable SSR only
+    //   BENCH_NO_GTAO=1     — disable SSAO/GTAO only
+    //   BENCH_NO_VOL=1      — disable volumetric lighting only
+    if (const char* v = SDL_getenv("BENCH_NO_POSTFX"); v && *v && *v != '0') {
+        renderer.toggles.bloom = false;
+        renderer.toggles.ssr = false;
+        renderer.toggles.ssao = false;
+        renderer.toggles.volumetrics = false;
+        legacyRenderer().aaMode = AAMode::Off;
+        SDL_Log("[bench] post-FX disabled (bloom + ssr + gtao + volumetrics + AA)");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_SHADOWS"); v && *v && *v != '0') {
+        renderer.toggles.shadows = false;
+        SDL_Log("[bench] shadows disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_TAA"); v && *v && *v != '0') {
+        legacyRenderer().aaMode = AAMode::Off;
+        SDL_Log("[bench] TAA disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_BLOOM"); v && *v && *v != '0') {
+        renderer.toggles.bloom = false;
+        SDL_Log("[bench] bloom disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_SSR"); v && *v && *v != '0') {
+        renderer.toggles.ssr = false;
+        SDL_Log("[bench] SSR disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_GTAO"); v && *v && *v != '0') {
+        renderer.toggles.ssao = false;
+        SDL_Log("[bench] GTAO disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_VOL"); v && *v && *v != '0') {
+        renderer.toggles.volumetrics = false;
+        SDL_Log("[bench] volumetrics disabled");
+    }
 
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
@@ -764,6 +950,19 @@ SDL_AppResult Game::iterate()
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
+    // Per-frame phase timer state (only consumed in bench mode).  We track
+    // monotonic wall-clock per phase via a single "lastTick" cursor; phases
+    // are sequential in iterate() so a section's elapsed = current - last.
+    FrameSectionMs phaseStats{};
+    Uint64 phaseLastTick = k_now;
+    const auto phaseSnap = [&](float& outMs) {
+        if (!benchActive_)
+            return;
+        const Uint64 nowTick = SDL_GetPerformanceCounter();
+        outMs = static_cast<float>(nowTick - phaseLastTick) * 1000.0f / static_cast<float>(k_perfFreq);
+        phaseLastTick = nowTick;
+    };
+
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
 
     // If the game was suspended (backgrounded / minimized), the raw delta can
@@ -827,6 +1026,165 @@ SDL_AppResult Game::iterate()
         statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
     }
 
+    // Bench mode: collect per-frame timings (after warmup) then aggregate +
+    // print + quit when the duration is up.
+    if (benchActive_) {
+        const float benchElapsed = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
+        // Record this frame's wall-clock time once we're past the warmup window.
+        if (benchElapsed >= k_benchWarmupSeconds && frameTime > 0.0f && frameTime < 0.25f)
+            benchFrameTimesMs_.push_back(frameTime * 1000.0f);
+
+        if (benchElapsed >= benchSeconds_) {
+            const auto countSamples = benchFrameTimesMs_.size();
+            if (countSamples == 0) {
+                std::fprintf(stderr, "[bench] no samples collected (warmup window > duration?)\n");
+                return SDL_APP_SUCCESS;
+            }
+
+            // Sort ascending: low ms = fast frames, high ms = slow frames.
+            // We'll convert to FPS (=1000/ms) for the summary, so worst-frame
+            // FPS = 1000 / max-ms = the LOW percentiles.
+            auto frames = benchFrameTimesMs_;
+            std::sort(frames.begin(), frames.end());
+            auto pct = [&](float p) {
+                const auto idx = static_cast<size_t>(static_cast<float>(countSamples - 1) * p);
+                return frames[idx];
+            };
+            const float msMedian = pct(0.50f);
+            const float msAvg = std::accumulate(frames.begin(), frames.end(), 0.0f) / static_cast<float>(countSamples);
+            const float msP95 = pct(0.95f); // 95th-percentile slowest = 5% lows
+            const float msP99 = pct(0.99f); // 99th-percentile slowest = 1% lows
+            const float msFastest = frames.front();
+            const float msSlowest = frames.back();
+
+            auto fps = [](float ms) { return ms > 0.0f ? 1000.0f / ms : 0.0f; };
+
+            std::fprintf(stderr,
+                         "[bench] elapsed=%.1fs samples=%zu "
+                         "avg=%.1f median=%.1f p5=%.1f p1=%.1f min=%.1f max=%.1f\n",
+                         static_cast<double>(benchElapsed),
+                         countSamples,
+                         static_cast<double>(fps(msAvg)),
+                         static_cast<double>(fps(msMedian)),
+                         static_cast<double>(fps(msP95)),
+                         static_cast<double>(fps(msP99)),
+                         static_cast<double>(fps(msSlowest)),
+                         static_cast<double>(fps(msFastest)));
+
+            // Phase breakdown: split frames into "fast median band" (frames
+            // near the median) vs. "slowest 1%" (the p1 tail).  Average each
+            // phase across each band, plus dump a few representative slow
+            // frames so we can see the actual stalls.
+            if (!benchFrameStats_.empty()) {
+                auto sortedStats = benchFrameStats_;
+                std::sort(sortedStats.begin(), sortedStats.end(), [](const FrameSectionMs& a, const FrameSectionMs& b) {
+                    return a.total < b.total;
+                });
+
+                const size_t n = sortedStats.size();
+                const size_t medLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.45f);
+                const size_t medHi = static_cast<size_t>(static_cast<float>(n - 1) * 0.55f);
+                const size_t slowLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.99f);
+
+                FrameSectionMs medAvg{}, slowAvg{};
+                size_t medCount = 0, slowCount = 0;
+                for (size_t i = medLo; i <= medHi; ++i) {
+                    medAvg.total += sortedStats[i].total;
+                    medAvg.input += sortedStats[i].input;
+                    medAvg.physics += sortedStats[i].physics;
+                    medAvg.networkPoll += sortedStats[i].networkPoll;
+                    medAvg.particles += sortedStats[i].particles;
+                    medAvg.animation += sortedStats[i].animation;
+                    medAvg.entityCmds += sortedStats[i].entityCmds;
+                    medAvg.imgui += sortedStats[i].imgui;
+                    medAvg.drawFrame += sortedStats[i].drawFrame;
+                    ++medCount;
+                }
+                for (size_t i = slowLo; i < n; ++i) {
+                    slowAvg.total += sortedStats[i].total;
+                    slowAvg.input += sortedStats[i].input;
+                    slowAvg.physics += sortedStats[i].physics;
+                    slowAvg.networkPoll += sortedStats[i].networkPoll;
+                    slowAvg.particles += sortedStats[i].particles;
+                    slowAvg.animation += sortedStats[i].animation;
+                    slowAvg.entityCmds += sortedStats[i].entityCmds;
+                    slowAvg.imgui += sortedStats[i].imgui;
+                    slowAvg.drawFrame += sortedStats[i].drawFrame;
+                    ++slowCount;
+                }
+                auto avgRow = [&](FrameSectionMs& s, size_t c) {
+                    if (c == 0)
+                        return;
+                    s.total /= static_cast<float>(c);
+                    s.input /= static_cast<float>(c);
+                    s.physics /= static_cast<float>(c);
+                    s.networkPoll /= static_cast<float>(c);
+                    s.particles /= static_cast<float>(c);
+                    s.animation /= static_cast<float>(c);
+                    s.entityCmds /= static_cast<float>(c);
+                    s.imgui /= static_cast<float>(c);
+                    s.drawFrame /= static_cast<float>(c);
+                };
+                avgRow(medAvg, medCount);
+                avgRow(slowAvg, slowCount);
+
+                std::fprintf(stderr,
+                             "[bench] median-band  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
+                             static_cast<double>(medAvg.total),
+                             static_cast<double>(medAvg.physics),
+                             static_cast<double>(medAvg.networkPoll),
+                             static_cast<double>(medAvg.animation),
+                             static_cast<double>(medAvg.particles),
+                             static_cast<double>(medAvg.entityCmds),
+                             static_cast<double>(medAvg.imgui),
+                             static_cast<double>(medAvg.drawFrame));
+                std::fprintf(stderr,
+                             "[bench] slowest-1%%  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
+                             static_cast<double>(slowAvg.total),
+                             static_cast<double>(slowAvg.physics),
+                             static_cast<double>(slowAvg.networkPoll),
+                             static_cast<double>(slowAvg.animation),
+                             static_cast<double>(slowAvg.particles),
+                             static_cast<double>(slowAvg.entityCmds),
+                             static_cast<double>(slowAvg.imgui),
+                             static_cast<double>(slowAvg.drawFrame));
+
+                // Top 5 slowest frames, full breakdown — to spot one-off
+                // stalls (e.g. a single drawFrame=120ms in an otherwise
+                // tight set of slow frames means a true GPU stall, not a
+                // CPU section regressing).
+                std::fprintf(stderr, "[bench] top-5 slowest individual frames:\n");
+                for (size_t i = (n >= 5 ? n - 5 : 0); i < n; ++i) {
+                    const auto& s = sortedStats[i];
+                    std::fprintf(stderr,
+                                 "[bench]   total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
+                                 "ui=%4.2f draw=%5.2f (acq=%4.2f rec=%4.2f sub=%4.2f)\n",
+                                 static_cast<double>(s.total),
+                                 static_cast<double>(s.physics),
+                                 static_cast<double>(s.networkPoll),
+                                 static_cast<double>(s.animation),
+                                 static_cast<double>(s.particles),
+                                 static_cast<double>(s.entityCmds),
+                                 static_cast<double>(s.imgui),
+                                 static_cast<double>(s.drawFrame),
+                                 static_cast<double>(s.drawAcquire),
+                                 static_cast<double>(s.drawRecord),
+                                 static_cast<double>(s.drawSubmit));
+                }
+            }
+
+            std::fflush(stderr);
+            return SDL_APP_SUCCESS;
+        }
+    }
+
+    // Mark the start of the input phase for the bench profiler.  Anything
+    // before this (suspend handling, stats ring update, bench summary check)
+    // is bundled into the implicit "preamble" attributable to "total".
+    phaseLastTick = SDL_GetPerformanceCounter();
+
     // 3. Input
     //
     // Mouse look runs EVERY iterate() call — this keeps camera rotation
@@ -859,6 +1217,8 @@ SDL_AppResult Game::iterate()
     }
 
     // Network stats: send periodic pings and update bandwidth counters
+    phaseSnap(phaseStats.input);
+
     client.updateStats(frameTime);
     pingTimer += frameTime;
     if (pingTimer >= 1.0f) {
@@ -875,45 +1235,68 @@ SDL_AppResult Game::iterate()
         if (inputSyncedWithPhysics && mouseCaptured)
             systems::runMovementKeys(registry);
 
-        // Stamp the current InputSnapshot with the next predict tick BEFORE
-        // sending. The server uses this tick for dedup against
-        // lastAppliedInputTick, and Phase-5b prediction keys the input
-        // ring buffer by it. We bump once per tick *group* (not per inner
-        // tick) — multiple physics ticks in one frame share the same input,
-        // because we only sample input once per group.
-        ++clientPredictTick;
-        registry.view<InputSnapshot, LocalPlayer>().each(
-            [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
-
-        // Send the redundant input batch (last k_inputRedundancy ticks).
-        systems::runInputSend(registry, client);
-
-        // Phase 5b: push the just-stamped input into the ring buffer so
-        // reconciliation can replay it after a snapshot arrives.
-        registry.view<LocalPlayer, InputSnapshot>().each(
-            [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
-
+        // PR-24 (off-by-one + capsule staleness fix): the fire detection
+        // and capture block used to live HERE, before the physics while
+        // loop.  Two regressions:
+        //   1. snap.tick was the OLD value (pre-increment), but the
+        //      wire-format input (sent in `runInputSend` after the
+        //      while loop) carries the NEW value.  Server's debug
+        //      capture stamped the new value → tick mismatch → debug
+        //      UI showed two ring slots for the same shot.  PR-20.1
+        //      had originally fixed this by capturing AFTER the stamp;
+        //      PR-20.8's jitter fix moved the stamp into the while
+        //      loop but left the capture before it.
+        //   2. The captured capsules were from the PREVIOUS frame's
+        //      `updateHitboxes` (the current frame's `applyInterpolated
+        //      Transforms` + `updateHitboxes` haven't run yet).  At
+        //      60 fps that's ~16 ms staler than what the user sees on
+        //      screen — the BLUE capsules in the debug overlay didn't
+        //      reflect what the player was actually aiming at.
+        //
+        // Both fixed in PR-24 by moving the entire capture to right
+        // after `systems::updateHitboxes` (search for "PR-24 fire
+        // detection" further down).  We still need the rising-edge
+        // detector to advance `prevShootingForDebug_` here so it stays
+        // exactly once per iterate (the post-physics block reads the
+        // SAME `snap.shooting` we set in `runWeaponKeys` above).
         physicsRan = true;
 
-        // Phase 5a: PreviousPosition is updated by Client::dispatchMessage
-        // when a snapshot arrives, not every physics tick. The renderer
-        // interpolates over the snapshot interval via
-        // client.getSnapshotAlpha() so motion stays smooth at the much-
-        // coarser snapshot rate (e.g. 32 Hz vs 128 Hz physics).
+        // PR-20.8 (jitter root-cause): tick-stamp + ring-push + send
+        // moved INSIDE the per-physics-tick loop.  Each physics tick
+        // gets its own `clientPredictTick`, its own InputSnapshot
+        // tick stamp, and its own ring entry.  Reconciliation's 1:1
+        // replay (one `runMovement` per stored tick) now exactly
+        // matches prediction's 1:1 advance (one `runMovement` per
+        // physics tick).  Pre-PR-20.8 the increment was OUTSIDE the
+        // loop while runPrediction ran N times per iterate at
+        // 60 fps × 128 Hz physics, making replay always under-run
+        // by `(N-1) × dt × velocity` per stored tick.
         //
-        // Phase 5b: per physics tick we ALSO snapshot the local player's
-        // pos→prev BEFORE running prediction so the renderer can show a
-        // tick-rate-smooth interpolation of the local player even when
-        // server snapshots arrive far less frequently. The local player
-        // uses physics-tick alpha (in render code below); remote players
-        // use the snapshot alpha.
+        // Phase 5a/b: PreviousPosition is updated by Client::
+        // dispatchMessage when a snapshot arrives, not every physics
+        // tick.  The renderer interpolates over the snapshot interval
+        // via `client.getSnapshotAlpha()` so motion stays smooth at
+        // the much-coarser snapshot rate.  Per physics tick we ALSO
+        // snapshot the local player's pos→prev BEFORE running
+        // prediction so the renderer shows tick-rate-smooth
+        // interpolation of the local player.
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
 
-            // Phase 5b: capture local pos→prev for tick-rate interp,
-            // then run client-side prediction. PlayerSimState filter on
-            // runMovement narrows automatically to just the local player
-            // (remotes don't have PlayerSimState on the client).
+            // Per-physics-tick: increment + stamp + ring push.
+            // All physics ticks in this iterate see the same input
+            // sampled at runWeaponKeys/runMovementKeys time above —
+            // we just give each tick its own monotonic tick number.
+            ++clientPredictTick;
+            registry.view<InputSnapshot, LocalPlayer>().each(
+                [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+            registry.view<LocalPlayer, InputSnapshot>().each(
+                [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
+
+            // Capture local pos→prev for tick-rate interp, then run
+            // client-side prediction.  `PlayerSimState` filter on
+            // runMovement narrows to just the local player (remotes
+            // don't have `PlayerSimState` on the client).
             registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
             systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
@@ -922,6 +1305,16 @@ SDL_AppResult Game::iterate()
             ++ticksThisFrame;
             ++statsPhysTicks;
         }
+
+        // Send the redundant input batch ONCE per iterate.  After the
+        // physics loop has stamped the LATEST clientPredictTick into
+        // `snap.tick`, so the packet's most-recent input carries the
+        // last physics tick's number.  Prior k_inputRedundancy
+        // ticks are pulled from `Client::inputRing_` (which the
+        // sendInputSnapshot path appends to internally).
+        systems::runInputSend(registry, client);
+
+        phaseSnap(phaseStats.physics);
 
         if (!client.poll(registry)) {
             // TODO: Update so reset to menu or some other non-crash state
@@ -1055,11 +1448,16 @@ SDL_AppResult Game::iterate()
         }
     }
 
+    // The "physics" phase already captured at the top of the tick loop —
+    // here we close out the *post-tick* network/snapshot path separately.
+    phaseSnap(phaseStats.networkPoll);
+
     // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
+    phaseSnap(phaseStats.particles);
 
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
@@ -1209,51 +1607,427 @@ SDL_AppResult Game::iterate()
         cachedEye_ = renderEye;
     }
 
-    // Update skeletal animation (CPU skinning) — per animated entity.
+    // PR-19: unified pre-render interpolation pass.  Walks every
+    // non-local entity with an `InterpolationBuffer` and overwrites
+    // its `Position.value` + `InputSnapshot.yaw` with the buffer-
+    // sampled values at `now − N × snapshotInterval`.  Every
+    // downstream visual consumer (renderer, tracers, ribbon trails,
+    // smoke emitters, beam endpoints, sfx) reads `pos.value`
+    // directly, so they all align on a single interpolated
+    // source-of-truth — no body-vs-tracer mismatch.  No-op when
+    // `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=0`.
+    client.applyInterpolatedTransforms(registry);
+
+    // Update skeletal animation + build the renderer's per-frame skinned
+    // palette + instance arrays (perf Phase 1B).
     //
-    // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
-    // CPU-skins every rig mesh, and streams the resulting vertices into its
-    // per-entity renderer model instance.
+    // For each animated entity we:
+    //   1. sample + blend its animation,
+    //   2. populate JointMatrices for the hitbox system,
+    //   3. append `numJoints` skin matrices to the flat palette,
+    //   4. append one entry to the instance buffer (world transform +
+    //      paletteBase = instanceIdx * numJoints).
     //
-    // Also populates the JointMatrices ECS component with model-space bone transforms
-    // for skeleton-driven hitbox capsule placement.
+    // The renderer then issues one instanced draw per rig mesh per pass.  No
+    // CPU skinning, no per-entity vertex re-upload, no per-entity draws.
     {
-        std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerVisState, InputSnapshot>().each([&](entt::entity e,
-                                                                                             AnimatedCharacter& ac,
-                                                                                             const Velocity& vel,
-                                                                                             const PlayerVisState& ps,
-                                                                                             const InputSnapshot& inp) {
-            if (!ac.animator || ac.modelIndex < 0)
-                return;
+        const int numJoints = charRig_.numJoints();
+        const float snapshotAlpha = client.getSnapshotAlpha();
+        // PR-11: render-time = now − N × snapshotInterval (default 2 ticks
+        // ≈ 62.5 ms at 32 Hz).  0 means "no buffered playback yet" — the
+        // renderer falls back to the Phase-5a (prev, cur, alpha) lerp
+        // through `entity_interpolation::sample`'s fallback path.
+        const Uint64 interpRenderNs = client.getInterpolationRenderTimeNs();
+        constexpr float k_animationTick = 1.0f / 30.0f;
 
-            AnimationInputs ai{};
-            ai.velocityWorld = vel.value;
-            ai.yawRad = inp.yaw;
-            ai.pitchRad = inp.pitch;
-            ai.grounded = ps.grounded;
-            ai.sprinting = ps.sprinting;
-            ai.crouching = ps.crouching;
-            ai.moveMode = static_cast<int>(ps.moveMode);
-            ai.wallRunSide = static_cast<int>(ps.wallRunSide);
-            ac.animator->update(ai, frameTime);
+        // ─── Phase 1: sequential prepass ────────────────────────────────────
+        // Walk the registry view ONCE on the main thread (entt views aren't
+        // thread-safe to iterate concurrently).  For each animated character
+        // build an AnimCandidate that captures everything needed by the
+        // parallel pass below, including pre-built AnimationInputs and a
+        // pre-computed world transform.  Out-of-view characters with no
+        // shadow contribution are dropped here.
+        struct AnimCandidate
+        {
+            entt::entity entity{};
+            AnimatedCharacter* ac = nullptr;
+            AnimationInputs ai;
+            glm::mat4 worldTransform{1.0f};
+            bool sampleThisFrame = false; ///< call animator->update()
+            bool drawThisFrame = false;   ///< write to instance/palette slots
+            bool isLocal = false;
+            uint32_t slot = 0;            ///< index into skinnedInstances + base into bonePalette
+        };
+        // Plain function-local (NOT thread_local — workers must see the
+        // main thread's vector through the lambda capture).  Reserved up
+        // front to avoid reallocs across frames.
+        std::vector<AnimCandidate> candidates;
+        candidates.reserve(128);
 
-            // Store model-space joint matrices for hitbox system.
-            auto& jm = registry.get_or_emplace<JointMatrices>(e);
-            jm.matrices = ac.animator->jointModelMatrices();
+        // Frustum extraction (Gribb-Hartmann).
+        const glm::mat4 vp = renderer.getCamera().getViewProjection();
+        struct Plane
+        {
+            glm::vec3 n;
+            float d;
+        };
+        Plane frustum[6];
+        const glm::mat4 m = glm::transpose(vp);
+        const auto extract = [&](int idx, const glm::vec4& row) {
+            const glm::vec3 n(row.x, row.y, row.z);
+            const float len = glm::length(n);
+            frustum[idx].n = n / len;
+            frustum[idx].d = row.w / len;
+        };
+        extract(0, m[3] + m[0]);
+        extract(1, m[3] - m[0]);
+        extract(2, m[3] + m[1]);
+        extract(3, m[3] - m[1]);
+        extract(4, m[3] + m[2]);
+        extract(5, m[3] - m[2]);
 
-            ac.animator->computeSkinnedVertices(skinnedBuffer);
-            for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
-                const auto& sv = skinnedBuffer[m];
-                renderer.updateModelMeshVertices(
-                    ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
+        const float charRadius = 1.5f * kRigScale_ * (rigMeshMinY_ < 0.0f ? -rigMeshMinY_ : 100.0f);
+        auto inFrustum = [&](const glm::vec3& center, float radius) {
+            for (const auto& p : frustum)
+                if (glm::dot(p.n, center) + p.d < -radius)
+                    return false;
+            return true;
+        };
+
+        uint32_t drawSlot = 0;
+        registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
+            [&](entt::entity e,
+                AnimatedCharacter& ac,
+                const Position& pos,
+                const Velocity& vel,
+                const PlayerVisState& ps,
+                const InputSnapshot& inp) {
+                if (!ac.animator)
+                    return;
+                const bool isLocal = registry.all_of<LocalPlayer>(e);
+                const bool visible = isLocal || inFrustum(pos.value, charRadius);
+                if (!visible)
+                    return;
+
+                AnimCandidate c;
+                c.entity = e;
+                c.ac = &ac;
+                c.isLocal = isLocal;
+
+                // Animation tick decoupling: cap remote chars at 30 Hz.
+                ac.animationAccumulator += frameTime;
+                if (ac.animationAccumulator >= k_animationTick || isLocal) {
+                    ac.animationAccumulator = std::fmod(ac.animationAccumulator, k_animationTick);
+                    c.sampleThisFrame = true;
+                    c.ai.velocityWorld = vel.value;
+                    c.ai.yawRad = inp.yaw;
+                    c.ai.pitchRad = inp.pitch;
+                    c.ai.grounded = ps.grounded;
+                    c.ai.sprinting = ps.sprinting;
+                    c.ai.crouching = ps.crouching;
+                    c.ai.moveMode = static_cast<int>(ps.moveMode);
+                    c.ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+                }
+
+                // Skip drawing the local player's own body in first-person.
+                const bool drawBody = !(!animUI_.showLocalBody && isLocal);
+                if (drawBody && numJoints > 0) {
+                    c.drawThisFrame = true;
+                    c.slot = drawSlot++;
+
+                    // Build per-instance world transform.
+                    //
+                    // PR-19: when the buffered render-delay path is
+                    // active (interpRenderNs != 0), `Client::
+                    // applyInterpolatedTransforms` has ALREADY
+                    // overwritten `pos.value` and `inp.yaw` with the
+                    // interpolated render-time values for non-local
+                    // entities.  We just read them directly — same
+                    // source-of-truth as tracers / ribbon trails /
+                    // smoke / beams / sfx, so no body-vs-effect
+                    // misalignment.
+                    //
+                    // When the buffered path is OFF (env-disabled
+                    // cl_interp = 0), or for the local player (which
+                    // uses client-side prediction, not interp), fall
+                    // back to the Phase-5a (prev, cur, alpha) lerp
+                    // for snapshot-rate motion smoothness.
+                    glm::vec3 renderPos = pos.value;
+                    float renderYaw = inp.yaw;
+                    if (!isLocal && interpRenderNs != 0) {
+                        // pos.value already pre-interpolated by
+                        // applyInterpolatedTransforms; no work here.
+                    } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                        renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+                    }
+                    glm::vec3 translation(0.0f);
+                    glm::vec3 scale(kRigScale_);
+                    glm::quat orient = glm::angleAxis(renderYaw, glm::vec3{0, 1, 0});
+                    if (const auto* rend = registry.try_get<Renderable>(e)) {
+                        translation = rend->translation;
+                        scale = rend->scale;
+                        orient = rend->orientation;
+                    } else if (const auto* shape = registry.try_get<CollisionShape>(e)) {
+                        translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                    }
+                    glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + translation);
+                    world *= glm::mat4_cast(orient);
+                    world = glm::scale(world, scale);
+                    c.worldTransform = world;
+                }
+
+                candidates.push_back(c);
+            });
+
+        // Pre-allocate output buffers so the parallel pass can write to
+        // distinct slots without contention.
+        std::vector<glm::mat4> bonePalette;
+        std::vector<Renderer::SkinnedInstance> skinnedInstances;
+        skinnedInstances.resize(drawSlot);
+        bonePalette.resize(static_cast<size_t>(drawSlot) * static_cast<size_t>(numJoints));
+
+        // ─── Phase 2: parallel ozz-sample + slot fill ───────────────────────
+        // Each candidate's animator is private; each candidate writes to
+        // distinct skinnedInstances[slot] and bonePalette[slot*numJoints..]
+        // ranges.  No shared mutable state, no synchronisation needed.
+        if (workerPool_ && !candidates.empty()) {
+            workerPool_->parallelFor(static_cast<int>(candidates.size()), [&](int begin, int end) {
+                for (int i = begin; i < end; ++i) {
+                    auto& c = candidates[static_cast<size_t>(i)];
+                    if (c.sampleThisFrame) {
+                        // PR-29: REMOTE players render at server's
+                        // authoritative animation state (replicated via
+                        // the Synced tuple, interp-delayed to body-render-
+                        // time by `applyInterpolatedTransforms`'s
+                        // `AnimSnapshot` writeback above).  LOCAL player
+                        // continues to use `update()` — its prediction-
+                        // driven state machine is authoritative on the
+                        // client side.  Eliminates the ~0.4-median
+                        // anim-state drift PR-27a's telemetry caught:
+                        // server runs animator at 128 Hz, client at
+                        // 30 Hz; same total rate but per-clip start-
+                        // time offsets persisted for the lifetime of
+                        // each clip.
+                        if (c.isLocal) {
+                            c.ac->animator->update(c.ai, k_animationTick);
+                        } else {
+                            const auto* serverAnim = registry.try_get<AnimSnapshot>(c.entity);
+                            if (serverAnim != nullptr)
+                                c.ac->animator->renderFromServer(*serverAnim, c.ai);
+                            else
+                                c.ac->animator->update(c.ai, k_animationTick);
+                        }
+                    }
+                    if (c.drawThisFrame && numJoints > 0) {
+                        Renderer::SkinnedInstance inst{};
+                        inst.worldTransform = c.worldTransform;
+                        inst.paletteBase = c.slot * static_cast<uint32_t>(numJoints);
+                        inst.materialId = 0;
+                        skinnedInstances[c.slot] = inst;
+                        const auto& sm = c.ac->animator->skinMatrices();
+                        std::copy(sm.begin(),
+                                  sm.end(),
+                                  bonePalette.begin() +
+                                      static_cast<ptrdiff_t>(c.slot) * static_cast<ptrdiff_t>(numJoints));
+                    }
+                }
+            });
+        }
+
+        // ─── Phase 3: sequential registry writeback ─────────────────────────
+        // JointMatrices is an EnTT component; insert/update needs the main
+        // thread.  Cheap loop — just copies a per-char matrix array.
+        for (const auto& c : candidates) {
+            if (c.sampleThisFrame) {
+                auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
+                jm.matrices = c.ac->animator->jointModelMatrices();
+
+                // PR-27 (netsync): mirror the animator's sampler array
+                // into an `AnimSnapshot` ECS component, same pattern as
+                // the server.  The shot-debug fire-detection block (a
+                // few lines below) reads this off the target entity
+                // when sending `SHOT_INTENT`.  Server's history ring
+                // captures its OWN per-tick `AnimSnapshot`; the two
+                // get compared in the shot-resolution path.
+                auto& snap = registry.get_or_emplace<AnimSnapshot>(c.entity);
+                const auto& samplers = c.ac->animator->samplers();
+                for (std::size_t i = 0; i < AnimSnapshot::k_numSlots && i < samplers.size(); ++i) {
+                    const auto& src = samplers[i];
+                    const bool active = src.active && src.weight > 0.0f;
+                    auto& dst = snap.slots[i];
+                    dst.clipIdRaw = active ? static_cast<std::uint8_t>(src.id) : 0xFFu;
+                    dst.timeRatio = active ? src.timeRatio : 0.0f;
+                    dst.weight = active ? src.weight : 0.0f;
+                }
             }
-        });
+        }
+
+        // Phase 3f — front-to-back sort by camera distance.  The bone palette
+        // is keyed by paletteBase inside each SkinnedInstance, so we can
+        // permute the instance vector independently of the palette and the
+        // shader still finds each char's joints correctly.  Front-to-back
+        // ordering means closer-to-camera chars draw first, write the depth,
+        // and farther chars behind them get early-Z'd through the heavy
+        // PBR fragment shader.  Trivial cost: 30·log(30) compares.
+        if (!skinnedInstances.empty()) {
+            const glm::vec3 camPos = cachedEye_;
+            std::sort(skinnedInstances.begin(),
+                      skinnedInstances.end(),
+                      [&](const Renderer::SkinnedInstance& a, const Renderer::SkinnedInstance& b) {
+                          const glm::vec3 ap = glm::vec3(a.worldTransform[3]);
+                          const glm::vec3 bp = glm::vec3(b.worldTransform[3]);
+                          return glm::dot(ap - camPos, ap - camPos) < glm::dot(bp - camPos, bp - camPos);
+                      });
+        }
+
+        legacyRenderer().setSkinnedFrame(bonePalette, skinnedInstances);
 
         // Update hitbox capsules from bone transforms (client-side for debug visualization).
         if (charRig_.isLoaded())
             systems::updateHitboxes(registry, clientHitboxRig_, kRigScale_, rigMeshMinY_);
+
+        // ── PR-24 fire detection: capture client view of the shot the
+        // user just fired, paired against the server's `SHOT_DEBUG_REPORT`
+        // by `(shooterClientId, shotInputTick)`.
+        //
+        // Placed RIGHT AFTER `updateHitboxes` so the captured state matches
+        // exactly what the user sees on screen this frame:
+        //   * `Position.value` for the local player is the post-prediction
+        //     post-reconciliation value the renderer uses (LocalPlayer is
+        //     excluded from `applyInterpolatedTransforms`).
+        //   * `Position.value` for remote players is the PR-19 interp-
+        //     delayed value (`applyInterpolatedTransforms` already ran).
+        //   * `HitboxInstance.capsules` for every entity reflect the
+        //     just-recomputed bones at THIS frame's pose.
+        // And `snap.tick` carries the post-physics-loop value — the SAME
+        // value `runInputSend` put on the wire and the server stamps on
+        // its debug capture.  Pre-PR-24 the capture lived BEFORE the
+        // physics loop, reading old `snap.tick` and previous-frame
+        // capsules; both the off-by-one tick mismatch and the visible
+        // blue-capsule-vs-actual-aim-target staleness are gone.
+        bool firePulledThisFrame = false;
+        registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+            const bool wasShooting = prevShootingForDebug_;
+            const bool nowShooting = snap.shooting;
+            prevShootingForDebug_ = nowShooting;
+            if (nowShooting && !wasShooting)
+                firePulledThisFrame = true;
+        });
+        if (firePulledThisFrame) {
+            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
+                [&](entt::entity localEntity,
+                    const InputSnapshot& snap,
+                    const Position& pos,
+                    const CollisionShape& shape) {
+                    net::shotdebug::ShotDebugCapture cap;
+                    cap.shotInputTick = snap.tick; // PR-24: post-physics value, matches wire
+                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float cp = std::cos(snap.pitch);
+                    cap.direction = glm::normalize(
+                        glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
+                    cap.range = physics::k_hitscanRange;
+
+                    // PR-20.6 (root-cause fix): local raycast against
+                    // capsules + world.  `resolveHitscanHitbox`
+                    // unconditionally fills `hit.point` — either the
+                    // closest world geometry hit, the closest capsule
+                    // hit, or `origin + direction * k_hitscanRange`
+                    // when nothing was struck.  We ALWAYS forward
+                    // `hit.point` into `cap.hitPoint`; the rendering
+                    // path uses it directly so blue tracers always
+                    // terminate on whatever the client believed was
+                    // in the way (a wall, a capsule, or 5000 u of air).
+                    const physics::HitboxHit localHit =
+                        physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
+                    cap.hitPoint = localHit.point;
+                    cap.hitTargetClientId = net::shotdebug::k_missClientId;
+                    cap.hitRegion = 0;
+                    if (localHit.entity != entt::null && registry.valid(localHit.entity)) {
+                        if (const auto* tcid = registry.try_get<ClientId>(localHit.entity)) {
+                            cap.hitTargetClientId = static_cast<std::uint16_t>(tcid->value);
+                            cap.hitRegion = static_cast<std::uint8_t>(localHit.region);
+                        }
+                    }
+
+                    // PR-26 + PR-26.1: snapshot capsules for entities
+                    // whose capsule-derived AABB — DILATED by an
+                    // aim-margin — intersects the shot ray.  Goal is
+                    // "show the targets I was approximately aiming at",
+                    // not "show the targets the ray geometrically hit".
+                    // PR-26's tight filter dropped near-miss targets
+                    // (ray passed just outside the head capsule and the
+                    // wireframe vanished); the user wanted to keep
+                    // those visible so they can SEE why a miss
+                    // happened (lag-comp drift, animation pose, etc).
+                    // Distant unrelated enemies still skipped — they
+                    // never come close to the ray.  Server-side
+                    // `captureShotDebug` uses the same margin so the
+                    // overlay's blue/red sets line up.
+                    constexpr float shotDebugAimMargin = 50.0f;
+                    auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
+                    cap.targets.reserve(remoteView.size_hint());
+                    for (const auto e : remoteView) {
+                        if (e == localEntity)
+                            continue;
+                        const auto& hb = remoteView.get<HitboxInstance>(e);
+                        if (hb.capsules.empty())
+                            continue;
+
+                        glm::vec3 boundsMin{std::numeric_limits<float>::max()};
+                        glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
+                        for (const auto& c : hb.capsules) {
+                            const glm::vec3 capRadius{c.radius + shotDebugAimMargin};
+                            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - capRadius);
+                            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + capRadius);
+                        }
+                        const physics::WorldAABB bounds{.min = boundsMin, .max = boundsMax};
+                        float aabbDist = cap.range;
+                        glm::vec3 aabbNormal{0.0f};
+                        if (!physics::raycastAABB(cap.origin, cap.direction, bounds, cap.range, aabbDist, aabbNormal))
+                            continue;
+
+                        const auto& cid = remoteView.get<ClientId>(e);
+                        net::shotdebug::ShotDebugCapture::Target tgt;
+                        tgt.clientId = static_cast<std::uint16_t>(cid.value);
+                        tgt.capsules = hb.capsules;
+                        cap.targets.push_back(std::move(tgt));
+                    }
+                    debugUI.pushClientShot(cap);
+
+                    // ── PR-27a: SHOT_INTENT — send client's view of the
+                    // intended target's animation state at fire time.
+                    // Server pairs by `(shooterClientId, shotInputTick)`,
+                    // computes anim-state delta vs its own historical
+                    // snapshot, logs to `server_shots.csv`.  No-op for
+                    // shots that aren't aimed at anyone close.
+                    //
+                    // Target selection precedence:
+                    //   1. Local raycast hit → that's clearly the
+                    //      "intended target" (cap.hitTargetClientId).
+                    //   2. Otherwise, closest near-miss capsule-AABB
+                    //      candidate (first entry in `cap.targets`,
+                    //      already filtered by ray-vs-AABB).
+                    //   3. No candidates → 0xFFFF (no-target sentinel);
+                    //      the server logs a "no target" row.
+                    std::uint16_t intentTargetCid = cap.hitTargetClientId;
+                    AnimSnapshot intentAnim{};
+                    if (intentTargetCid == net::shotdebug::k_missClientId && !cap.targets.empty()) {
+                        intentTargetCid = cap.targets.front().clientId;
+                    }
+                    if (intentTargetCid != net::shotdebug::k_missClientId) {
+                        // Find the entity for this clientId and read its
+                        // current AnimSnapshot.  Same component the
+                        // animator-update loop above just refreshed.
+                        registry.view<ClientId, AnimSnapshot>().each([&](const ClientId& cid, const AnimSnapshot& a) {
+                            if (cid.value == intentTargetCid)
+                                intentAnim = a;
+                        });
+                    }
+                    client.sendShotIntent(snap.tick, intentTargetCid, intentAnim);
+                });
+        }
     }
+    phaseSnap(phaseStats.animation);
 
     // Build entity render list
     {
@@ -1261,6 +2035,47 @@ SDL_AppResult Game::iterate()
         // Read once per frame; applied to every entity below that has a
         // PreviousPosition (i.e. has received at least one snapshot).
         const float snapshotAlpha = client.getSnapshotAlpha();
+        // PR-11: render-delay timestamp for non-local entities.  See the
+        // animation-pass site above for the full rationale; in short,
+        // playing back at `now − N × snapshotInterval` lets the renderer
+        // always have a buffered "future" sample to lerp toward, hiding
+        // single-snapshot losses and smoothing jitter.  0 means
+        // "no buffered playback" — fall through to the Phase-5a lerp.
+        const Uint64 interpRenderNs = client.getInterpolationRenderTimeNs();
+
+        // Phase 3f: extract view frustum for culling entity render commands +
+        // third-person weapons.  Same Gribb-Hartmann decomposition we use for
+        // skinned chars, but reusable across both passes here.  Bounding-
+        // sphere check per entity is ~24 ops — negligible — but cuts the
+        // per-frame draw count by typically 50–80% on a 100-bot scene.
+        const glm::mat4 cullVP = renderer.getCamera().getViewProjection();
+        struct CullPlane
+        {
+            glm::vec3 n;
+            float d;
+        };
+        CullPlane cullPlanes[6];
+        {
+            const glm::mat4 m = glm::transpose(cullVP);
+            const auto extract = [&](int idx, const glm::vec4& row) {
+                const glm::vec3 n(row.x, row.y, row.z);
+                const float len = glm::length(n);
+                cullPlanes[idx].n = n / len;
+                cullPlanes[idx].d = row.w / len;
+            };
+            extract(0, m[3] + m[0]);
+            extract(1, m[3] - m[0]);
+            extract(2, m[3] + m[1]);
+            extract(3, m[3] - m[1]);
+            extract(4, m[3] + m[2]);
+            extract(5, m[3] - m[2]);
+        }
+        const auto entityVisible = [&](const glm::vec3& center, float radius) {
+            for (const auto& p : cullPlanes)
+                if (glm::dot(p.n, center) + p.d < -radius)
+                    return false;
+            return true;
+        };
 
         std::vector<EntityRenderCmd> entityCmds;
         registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
@@ -1273,16 +2088,25 @@ SDL_AppResult Game::iterate()
             if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
-            // Phase 5a: lerp from PreviousPosition (= last snapshot) to
-            // Position (= current snapshot) over the snapshot interval.
-            // Entities without PreviousPosition (e.g. just-spawned) fall
-            // back to the raw current position, but Client::dispatchMessage
-            // seeds PreviousPosition on first snapshot apply so this
-            // fallback should rarely fire in practice.
+            // PR-19: pos.value is already pre-interpolated by
+            // `Client::applyInterpolatedTransforms` for non-local
+            // entities when buffered render-delay is active.  When
+            // disabled, fall back to the Phase-5a (prev, cur, alpha)
+            // lerp for snapshot-rate smoothness.  Same dual-path
+            // pattern as the skinned-body site above.
             glm::vec3 renderPos = pos.value;
-            if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+            if (interpRenderNs != 0) {
+                // pos.value already pre-interpolated; no work here.
+            } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
                 renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
             }
+
+            // Frustum cull — generous radius covers any rend.scale up to ~5×
+            // the rig height.  Glow spheres / map props pass this trivially
+            // when in view.  Out-of-view entities skip the per-mesh draw loop.
+            const float entityRadius = 80.0f * std::max({rend.scale.x, rend.scale.y, rend.scale.z, 1.0f});
+            if (!entityVisible(renderPos, entityRadius))
+                return;
 
             glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + rend.translation);
             world *= glm::mat4_cast(rend.orientation);
@@ -1302,6 +2126,26 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<RespawnTimer>(e))
                 return;
 
+            // PR-11: pull the interpolated player transform so the
+            // weapon hangs off the same body the renderer just drew at
+            // line 1730.  Without this, the player skin animates at
+            // `now − N × snapshotInterval` while the weapon sticks to
+            // the most-recent server position, separating the two by
+            // ~62 ms of motion (visible "ghost gun").
+            // PR-19: pos.value + input.yaw are already pre-interpolated
+            // by `Client::applyInterpolatedTransforms` when buffered
+            // render-delay is active, so the weapon naturally hangs
+            // off the same body the skinned-character pass just drew.
+            // No explicit sample() call needed any more — single
+            // source of truth = pos.value (and InputSnapshot.yaw).
+            const glm::vec3 playerPos = pos.value;
+            const float yaw = input.yaw;
+            // Phase 3f: a remote third-person weapon ~50 world-units long;
+            // a 100-unit cull radius around the player position is a tight
+            // fit and skips the entire weapon draw when off-screen.
+            if (!entityVisible(playerPos, 100.0f))
+                return;
+
             const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
@@ -1310,13 +2154,12 @@ SDL_AppResult Game::iterate()
             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
 
             // Player orientation vectors (horizontal plane)
-            const float yaw = input.yaw;
             const glm::vec3 pFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
             const glm::vec3 pRight = glm::normalize(glm::cross(pFwd, glm::vec3{0, 1, 0}));
 
             // Weapon world position = player center + hand offset
             glm::vec3 wpnPos =
-                pos.value + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
+                playerPos + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
 
             // Build transform: translate -> yaw -> pitch -> roll -> scale
             glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);
@@ -1721,79 +2564,99 @@ SDL_AppResult Game::iterate()
     // call setVSync only when it actually flips (avoids per-frame API calls).
     const bool prevLimitFPS = limitFPSToMonitor;
 
+    phaseSnap(phaseStats.entityCmds);
+
     // 10. Render
     debugUI.newFrame();
 
-    // Unified debug menu — one window with toggles for every debug panel.
-    debugUI.buildDebugMenu({
-        {"HUD Tweaker", &showHudDebug_},
-        {"Viewmodel Tweaker", &showViewmodelUI},
-        {"3P Weapon Tweaker", &showTPWeaponUI_},
-        {"Dynamic Lighting", &showDynLightUI_},
-        {"Animation Tester", &animUI_.show},
-    });
+    // Bench mode skips the heavy debug panels; ImGui still draws but the
+    // per-frame Build*UI cost is the difference between a few thousand ALU
+    // ops and ~hundred-microsecond ImGui buffer construction at the high
+    // bench frame-rates.
+    if (!benchActive_) {
+        // Unified debug menu — one window with toggles for every debug panel.
+        debugUI.buildDebugMenu({
+            {"HUD Tweaker", &showHudDebug_},
+            {"Viewmodel Tweaker", &showViewmodelUI},
+            {"3P Weapon Tweaker", &showTPWeaponUI_},
+            {"Dynamic Lighting", &showDynLightUI_},
+            {"Animation Tester", &animUI_.show},
+        });
 
-    debugUI.buildUI(registry,
-                    tickCount,
-                    mouseSensitivity,
-                    renderSeparateFromPhysics,
-                    inputSyncedWithPhysics,
-                    limitFPSToMonitor,
-                    renderer.ssrMode,
-                    measuredPhysicsHz,
-                    statsFPSCurrent,
-                    statsFPSMin,
-                    statsFPSMax,
-                    statsFPS1pLow,
-                    statsFPS5pLow);
-    debugUI.buildNetworkUI(client.getNetStats());
-
-    // Phase 6 testing: network simulator window (latency + packet loss).
-    // Slider values flow from DebugUI → Client each frame; idempotent when
-    // unchanged (Client clamps and atomically stores). Latency is split
-    // half-and-half across outbound + inbound delay queues; loss is an
-    // independent Bernoulli drop applied per-datagram in each direction.
-    debugUI.buildNetworkSimUI();
-    client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
-    client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
-
-    // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
-
-    // Process ammo refill request — pulse refillAmmo on InputSnapshot for
-    // exactly one frame so the server handles it once then stops.
-    {
-        const bool wantRefill = debugUI.pendingAmmoRefill_;
-        debugUI.pendingAmmoRefill_ = false;
-        registry.view<LocalPlayer, InputSnapshot>().each(
-            [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
+        debugUI.buildUI(registry,
+                        tickCount,
+                        mouseSensitivity,
+                        renderSeparateFromPhysics,
+                        inputSyncedWithPhysics,
+                        limitFPSToMonitor,
+                        renderer.ssrMode,
+                        measuredPhysicsHz,
+                        statsFPSCurrent,
+                        statsFPSMin,
+                        statsFPSMax,
+                        statsFPS1pLow,
+                        statsFPS5pLow);
+        debugUI.buildNetworkUI(client.getNetStats());
     }
-    debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
-    buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 
-    // Hitbox debug visualization — project capsules into screen space.
-    {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSize(window, &winW, &winH);
-        const float winWf = static_cast<float>(winW);
-        const float winHf = static_cast<float>(winH);
-        const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
-        const glm::mat4 hbProj =
-            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
-        const glm::mat4 hbVP = hbProj * hbView;
-        debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
-        debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
-    }
+    // All of the optional debug panels below are skipped in bench mode — none
+    // of them are visible to the user during a 25 s perf run, and at 1000+ fps
+    // even sub-microsecond ImGui widget allocs add up.  The buildHitboxUI
+    // call in particular projects every capsule for every entity into screen
+    // space, which scales linearly with bot count.
+    if (!benchActive_) {
+        // Phase 6 testing: network simulator window (latency + packet loss).
+        // Slider values flow from DebugUI → Client each frame; idempotent when
+        // unchanged (Client clamps and atomically stores). Latency is split
+        // half-and-half across outbound + inbound delay queues; loss is an
+        // independent Bernoulli drop applied per-datagram in each direction.
+        debugUI.buildNetworkSimUI();
+        client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+        client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
+
+        // Process ammo refill request — pulse refillAmmo on InputSnapshot for
+        // exactly one frame so the server handles it once then stops.
+        {
+            const bool wantRefill = debugUI.pendingAmmoRefill_;
+            debugUI.pendingAmmoRefill_ = false;
+            registry.view<LocalPlayer, InputSnapshot>().each(
+                [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
+        }
+        debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
+        buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
+
+        // Hitbox debug visualization — project capsules into screen space.
+        {
+            int winW = 0, winH = 0;
+            SDL_GetWindowSize(window, &winW, &winH);
+            const float winWf = static_cast<float>(winW);
+            const float winHf = static_cast<float>(winH);
+            const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
+            const glm::mat4 hbProj =
+                glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+            const glm::mat4 hbVP = hbProj * hbView;
+            debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
+            debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+            // PR-20: CSGO sv_showimpacts-style shot debug.  Window
+            // toggles + ring-buffer slider + per-shot summary table;
+            // when `drawShotDebugOverlay` is checked we also render
+            // the blue (client) / red (server-rewound) capsule pairs
+            // in the 3D world via the same VP we just built for the
+            // hitbox overlay.
+            debugUI.buildShotDebugUI(hbVP, winWf, winHf);
+        }
 #ifdef USE_HYBRID_RENDERER
-    debugUI.buildRenderTogglesUI(renderer.legacy());
-    debugUI.buildLightingUI(renderer.legacy());
-    debugUI.buildSkyboxUI(renderer.legacy());
+        debugUI.buildRenderTogglesUI(renderer.legacy());
+        debugUI.buildLightingUI(renderer.legacy());
+        debugUI.buildSkyboxUI(renderer.legacy());
 #else
-    debugUI.buildRenderTogglesUI(renderer);
-    debugUI.buildLightingUI(renderer);
-    debugUI.buildSkyboxUI(renderer);
+        debugUI.buildRenderTogglesUI(renderer);
+        debugUI.buildLightingUI(renderer);
+        debugUI.buildSkyboxUI(renderer);
 #endif
 
-    HudDebugPanel::build(hud_, &showHudDebug_);
+        HudDebugPanel::build(hud_, &showHudDebug_);
+    }
 
     // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
     if (showViewmodelUI) {
@@ -2191,7 +3054,21 @@ SDL_AppResult Game::iterate()
         if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
             currentCameraRoll_ = 0.0f;
     }
+    phaseSnap(phaseStats.imgui);
     renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
+    phaseSnap(phaseStats.drawFrame);
+
+    if (benchActive_) {
+        phaseStats.drawAcquire = legacyRenderer().lastAcquireMs;
+        phaseStats.drawRecord = legacyRenderer().lastRecordMs;
+        phaseStats.drawSubmit = legacyRenderer().lastSubmitMs;
+        const Uint64 endTick = SDL_GetPerformanceCounter();
+        phaseStats.total = static_cast<float>(endTick - k_now) * 1000.0f / static_cast<float>(k_perfFreq);
+        // Only retain frames that match what benchFrameTimesMs_ collects (post-warmup).
+        const float benchElapsedNow = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
+        if (benchElapsedNow >= k_benchWarmupSeconds && phaseStats.total > 0.0f && phaseStats.total < 250.0f)
+            benchFrameStats_.push_back(phaseStats);
+    }
 
     if (limitFPSToMonitor != prevLimitFPS)
         applyFrameRateLimit();
@@ -2251,11 +3128,16 @@ void Game::refreshRemotePlayerRenderables()
             attachAnimatedCharacter(e);
 
         const auto& ac = registry.get<AnimatedCharacter>(e);
-        if (ac.modelIndex < 0)
+        if (!ac.animator)
             return; // rig unavailable — leave entity un-rendered rather than crash.
 
         auto& rend = registry.get_or_emplace<Renderable>(e);
-        rend.modelIndex = ac.modelIndex;
+        // Perf Phase 1B: animated chars are drawn by the renderer's instanced
+        // skinned-rig pipeline, NOT via the regular EntityRenderCmd path.
+        // Setting modelIndex = -1 keeps Renderable's translation/scale/orientation
+        // up-to-date (used to derive the per-instance world transform below)
+        // while preventing the entity-render loop from drawing a duplicate.
+        rend.modelIndex = -1;
         // Bottom-of-AABB reference: align model feet with the AABB bottom.
         rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
         rend.scale = glm::vec3(kRigScale_);
@@ -2335,11 +3217,12 @@ void Game::attachAnimatedCharacter(entt::entity e)
     ac.animator = std::make_unique<CharacterAnimator>(charRig_, animLibrary_);
     ac.animator->setSkinningBackend(&skinBackend_);
 
-    // Each animated entity gets its OWN renderer model instance (clone of the
-    // rig template) so CPU-skinned vertices can stream into a private vertex
-    // buffer without fighting other entities for slots.
-    if (charRig_.isLoaded())
-        ac.modelIndex = renderer.uploadSceneModel(charRig_.templateLoadedModel());
+    // Perf Phase 1B: animated chars draw via the renderer's shared skinned-rig
+    // path (one VB/IB/textures for all chars, GPU LBS in vertex shader, instanced
+    // draw).  No per-entity model clone, no CPU skinning, no per-frame vertex
+    // re-upload.  modelIndex stays -1 so the regular EntityRenderCmd path
+    // skips animated chars (they're drawn by the skinned pipeline instead).
+    ac.modelIndex = -1;
 
     registry.emplace<AnimatedCharacter>(e, std::move(ac));
 }

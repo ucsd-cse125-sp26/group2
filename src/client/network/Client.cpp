@@ -3,8 +3,13 @@
 
 #include "Client.hpp"
 
+#include "EntityInterpolation.hpp"
+#include "ecs/components/InterpolationBuffer.hpp"
+#include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Velocity.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
@@ -43,6 +48,20 @@ bool Client::init(const char* addr, Uint16 port, const TransportConfig& transpor
 
     msgStream.socket = sock;
     transportConfig_ = transport;
+
+    // PR-11: read GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS once at connect.
+    // Default 2 ticks (≈ 62.5 ms at 32 Hz snapshot rate) — Source-engine
+    // / Valorant / Fortnite cadence.  0 disables the buffered render-
+    // delay path entirely; remote-entity rendering falls back to the
+    // Phase-5a `(prev, cur, alpha)` lerp.  Clamp to a sane upper bound
+    // (8 ticks ≈ 250 ms at 32 Hz, the InterpolationBuffer capacity) so
+    // a typo in the env var can't push the renderer past the buffer's
+    // history depth, which would have it permanently snapped to oldest.
+    if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS")) {
+        const int parsed = SDL_atoi(envDelay);
+        interpDelaySnapshots_ = std::clamp(parsed, 0, static_cast<int>(InterpolationBuffer::k_capacity));
+        SDL_Log("Client: GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=%d", interpDelaySnapshots_);
+    }
 
     // Seed the loss simulator RNG once. random_device for fresh entropy
     // across runs; deterministic per-session so loss patterns are at
@@ -200,7 +219,8 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     if (inputRingCount_ < k_inputRedundancy)
         ++inputRingCount_;
 
-    // Pack [PacketType::INPUT (1B)] [count (1B)] [rttMs (2B)] [InputSnapshot * count].
+    // Pack [PacketType::INPUT (1B)] [count (1B)] [rttMs (2B)]
+    //      [interpDelaySnapshots (1B)] [InputSnapshot * count].
     //
     // Inputs are written oldest-first so the server can apply them in
     // tick order with a simple `tick > lastAppliedInputTick` check.
@@ -214,23 +234,37 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     // of waiting for a separate "ping update" packet to arrive on
     // its own channel. Rounded to the nearest ms; clamped to uint16
     // (0–65 s, far beyond the 200 ms cap the server applies).
+    //
+    // PR-12: the `interpDelaySnapshots` byte carries the client's
+    // render-delay value (PR-11 entity-interpolation). The server
+    // ADDS this term to RTT/2 in its lag-comp formula so the rewind
+    // target tick lines up with what the client *saw* on screen at
+    // input-sample time, not merely with what the server held at
+    // input-arrival time. Without this, players at higher cl_interp
+    // experience shots-behind-target — the server hits where the
+    // enemy was 50 ms ago (RTT/2) but the client aimed at where the
+    // enemy was 50 + 62.5 ms ago. One byte / packet — same
+    // negligible cost as rttMs.
     const auto count = static_cast<uint8_t>(inputRingCount_);
     const float rttClamped = std::clamp(stats.avgRttMs, 0.0f, 65535.0f);
     const auto rttMs = static_cast<uint16_t>(std::lround(rttClamped));
-    uint8_t buf[4 + k_inputRedundancy * sizeof(InputSnapshot)];
+    const auto interpDelaySnapshots =
+        static_cast<uint8_t>(std::clamp(interpDelaySnapshots_, 0, static_cast<int>(InterpolationBuffer::k_capacity)));
+    uint8_t buf[5 + k_inputRedundancy * sizeof(InputSnapshot)];
     buf[0] = static_cast<uint8_t>(PacketType::INPUT);
     buf[1] = count;
     std::memcpy(buf + 2, &rttMs, sizeof(uint16_t));
+    buf[4] = interpDelaySnapshots;
 
     // Oldest-first iteration: when ring is full, oldest is at head; otherwise
     // entries [0, count) are already in order.
     const size_t firstIdx = (inputRingCount_ == k_inputRedundancy) ? inputRingHead_ : 0;
     for (size_t i = 0; i < inputRingCount_; ++i) {
         const size_t srcIdx = (firstIdx + i) % k_inputRedundancy;
-        std::memcpy(buf + 4 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
+        std::memcpy(buf + 5 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
     }
 
-    const uint32_t totalLen = 4 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
+    const uint32_t totalLen = 5 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
 
     // ── Phase 3d-2: prefer UDP for INPUT once handshake completes ────────
     //
@@ -269,6 +303,52 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     }
 
     return send(buf, totalLen);
+}
+
+bool Client::sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetClientId, const AnimSnapshot& targetAnim)
+{
+    // PR-27 wire format:
+    //   [PacketType::SHOT_INTENT : u8]
+    //   [shotInputTick           : u32]
+    //   [targetClientId          : u16]
+    //   [AnimSnapshot 5×4-byte slots = 20B]
+    // Total payload = 27 bytes.  Sent on UDP unreliable channel
+    // alongside INPUT (PR-27 only fires on rising edge of shooting,
+    // ≤ ~10 Hz worst case → ~270 B/s/client).
+    constexpr std::size_t animBytes = anim_snapshot::k_wireSize;
+    constexpr std::size_t payloadLen = 1 + sizeof(uint32_t) + sizeof(uint16_t) + animBytes;
+    static_assert(payloadLen == 27, "SHOT_INTENT wire size must equal 27 bytes");
+
+    uint8_t buf[payloadLen];
+    buf[0] = static_cast<uint8_t>(PacketType::SHOT_INTENT);
+    std::memcpy(buf + 1, &shotInputTick, sizeof(uint32_t));
+    std::memcpy(buf + 1 + sizeof(uint32_t), &targetClientId, sizeof(uint16_t));
+    anim_snapshot::packSnapshot(targetAnim, buf + 1 + sizeof(uint32_t) + sizeof(uint16_t));
+
+    // SHOT_INTENT prefers UDP for the same reasons as INPUT — single-
+    // shot packets are loss-tolerant: a missed SHOT_INTENT just means
+    // the server falls back to its own historical anim state for that
+    // shot, which is the pre-PR-27 behaviour.  No retransmit, no
+    // bandwidth cost on TCP.
+    if (transportConfig_.inputsOverUdp && udpEndpoint_.isOpen() && connectionId_ != 0 && serverUdpAddr_.addr) {
+        net::PacketHeader hdr{};
+        hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+        hdr.connectionId = connectionId_;
+        hdr.sequence = udpInputSequence_++; // share INPUT's sequence space — both unreliable
+        hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
+
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        const int totalMs = simulatedLatencyMs_.load(std::memory_order_relaxed);
+        if (sendUdpDelayed(hdr, buf, static_cast<int>(payloadLen))) {
+            if (totalMs == 0) {
+                stats.bytesSentTotal += sizeof(net::PacketHeader) + payloadLen;
+                bytesSentWindow += sizeof(net::PacketHeader) + payloadLen;
+            }
+            return true;
+        }
+    }
+
+    return send(buf, payloadLen);
 }
 
 bool Client::acceptReliableSequence(uint16_t seq)
@@ -334,6 +414,159 @@ float Client::getSnapshotAlpha() const
     // banding when packets are late.
     const float a = static_cast<float>(elapsed) / static_cast<float>(interval);
     return std::clamp(a, 0.0f, 1.0f);
+}
+
+Uint64 Client::getSnapshotIntervalNs() const
+{
+    return snapshotIntervalEmaNs_;
+}
+
+void Client::applyInterpolatedTransforms(Registry& registry)
+{
+    // PR-19: opt-out semantics — disabled if cl_interp = 0 or no
+    // buffered playback yet.  In both cases the registry's `pos.value`
+    // already holds the server-authoritative state from the most
+    // recent snapshot apply, which is the right thing for consumers
+    // to see (Phase-5a behaviour).
+    if (interpDelaySnapshots_ <= 0)
+        return;
+    const Uint64 renderTimeNs = getInterpolationRenderTimeNs();
+    if (renderTimeNs == 0)
+        return;
+
+    // Walk every entity that has an InterpolationBuffer (created by
+    // recordInterpolationSamples for non-local entities only — see
+    // that function for the LocalPlayer exclude).  Sample each buffer
+    // at the shared render-time and overwrite Position + yaw in place.
+    //
+    // PR-20.7 (defensive): explicit `exclude<LocalPlayer>` here even
+    // though `recordInterpolationSamples` already filters local out.
+    // Belt-and-suspenders for the corner case where the local player
+    // somehow ended up with an InterpolationBuffer (server-side
+    // entity re-creation across respawn, packet ordering during the
+    // ASSIGN_CLIENT_ID → first-snapshot transition, etc.) — without
+    // this exclude the local player's `pos.value` would get
+    // overwritten with a 16 ms-stale interpolated value every frame,
+    // visibly fighting client-side prediction.  The user reported
+    // movement jitter at 30 ms simulated RTT; this guards against
+    // that path even if the original sample-side filter slipped.
+    auto view = registry.view<Position, InterpolationBuffer>(entt::exclude<LocalPlayer>);
+    for (const auto e : view) {
+        auto& pos = view.get<Position>(e);
+        // Yaw fallback comes from the entity's own InputSnapshot if
+        // present; otherwise 0.  The sample() helper internally
+        // returns the fallback when the buffer can't bracket the
+        // requested time, so unbuffered cases preserve current state.
+        float fallbackYaw = 0.0f;
+        InputSnapshot* snap = registry.try_get<InputSnapshot>(e);
+        if (snap != nullptr)
+            fallbackYaw = snap->yaw;
+
+        const auto sampled = entity_interpolation::sample(registry, e, renderTimeNs, pos.value, fallbackYaw);
+        pos.value = sampled.position;
+        if (snap != nullptr) {
+            snap->yaw = sampled.yaw;
+            // PR-28: also write back interp-delayed pitch.  Animator
+            // and renderer both read pitch from `InputSnapshot` for
+            // remote players (head/neck bone tilt).
+            if (sampled.fromBuffer)
+                snap->pitch = sampled.pitch;
+        }
+
+        // PR-28: also write back interp-delayed Velocity and the
+        // animator-relevant PlayerVisState bits.  Pre-PR-28 these
+        // were left at their LATEST-snapshot values, which preceded
+        // the body's interp-delayed Position by `cl_interp ×
+        // snapshotInterval`.  At 30+ ms that produced the locomotion-
+        // state mismatch PR-27a measured (0.41-median anim-state
+        // delta).  Lag-comp (server-side) is unaffected — the server
+        // continues to read its OWN live state, never these client-
+        // mutated values.
+        if (sampled.fromBuffer) {
+            if (auto* vel = registry.try_get<Velocity>(e))
+                vel->value = sampled.velocity;
+            if (auto* ps = registry.try_get<PlayerVisState>(e)) {
+                ps->moveMode = static_cast<MoveMode>(sampled.moveMode);
+                ps->wallRunSide = static_cast<WallSide>(sampled.wallRunSide);
+                ps->grounded = sampled.grounded;
+                ps->sprinting = sampled.sprinting;
+                ps->crouching = sampled.crouching;
+            }
+            // PR-29: write back interp-delayed `AnimSnapshot` so the
+            // renderer's `CharacterAnimator::renderFromServer(...)`
+            // call picks up server-authoritative animation state at
+            // the same body-render-time the position is at.  Without
+            // this, the buffered timeRatio would only be available on
+            // entity's "live" component (snapshot-latest) and the
+            // animator would render the body at "now" rather than
+            // "now - cl_interp", reintroducing the drift PR-29 is
+            // here to eliminate.
+            if (auto* anim = registry.try_get<AnimSnapshot>(e))
+                *anim = sampled.anim;
+        }
+    }
+}
+
+void Client::recordInterpolationSamples(Registry& registry, Uint64 captureNs)
+{
+    if (interpDelaySnapshots_ <= 0)
+        return;
+
+    // PR-28: capture position + animator inputs for every replicated
+    // non-local entity.  Pre-PR-28 only `(position, yaw)` were buffered;
+    // the animator continued to read LATEST-snapshot Velocity / pitch /
+    // PlayerVisState bits while the body rendered at `now − cl_interp`,
+    // so locomotion-state transitions visibly preceded the body motion.
+    // PR-27a's telemetry caught the resulting 0.41-median anim-state
+    // delta.  Buffering the animator inputs here lines body and pose up
+    // at the same logical instant.  Fields without a server source
+    // (e.g. yaw on a projectile) default to 0 — animator never reads
+    // those for non-player entities anyway.
+    auto view = registry.view<Position>(entt::exclude<LocalPlayer>);
+    for (const auto e : view) {
+        entity_interpolation::SampleInputs inputs;
+        inputs.position = view.get<Position>(e).value;
+        if (const auto* vel = registry.try_get<Velocity>(e))
+            inputs.velocity = vel->value;
+        if (const auto* inp = registry.try_get<InputSnapshot>(e)) {
+            inputs.yaw = inp->yaw;
+            inputs.pitch = inp->pitch;
+        }
+        if (const auto* ps = registry.try_get<PlayerVisState>(e)) {
+            inputs.moveMode = static_cast<std::uint8_t>(ps->moveMode);
+            inputs.wallRunSide = static_cast<std::uint8_t>(ps->wallRunSide);
+            inputs.grounded = ps->grounded;
+            inputs.sprinting = ps->sprinting;
+            inputs.crouching = ps->crouching;
+        }
+        // PR-29: server-authoritative animation state from the just-
+        // applied snapshot.  Replicated via the Synced tuple.
+        if (const auto* anim = registry.try_get<AnimSnapshot>(e))
+            inputs.anim = *anim;
+        entity_interpolation::appendSample(registry, e, captureNs, inputs);
+    }
+}
+
+Uint64 Client::getInterpolationRenderTimeNs() const
+{
+    // Disabled by env var, or no buffered playback yet — caller falls
+    // back to the Phase-5a (prev, cur, alpha) path.  We require two
+    // snapshots before publishing a render time so the EMA has been
+    // updated at least once with a real interval (otherwise we'd be
+    // playing back at the wrong delay against a stale assumed 32 Hz).
+    if (interpDelaySnapshots_ <= 0 || lastSnapshotApplyNs_ == 0 || prevSnapshotApplyNs_ == 0)
+        return 0;
+
+    const Uint64 now = SDL_GetTicksNS();
+    const Uint64 delayNs = static_cast<Uint64>(interpDelaySnapshots_) * snapshotIntervalEmaNs_;
+
+    // Guard against the (unlikely) case where the simulator is running
+    // a delay larger than the wall clock.  Returning 0 disables the
+    // path cleanly until enough time has accrued.
+    if (delayNs >= now)
+        return 0;
+
+    return now - delayNs;
 }
 
 void Client::setSimulatedLatencyMs(int totalMs) noexcept
@@ -597,14 +830,43 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         break;
     }
     case PacketType::UPDATE_REGISTRY: {
+        // PR-10: wire format gained a tick prefix —
+        //   payload = [tick:u32] [serializedBytes...]
+        // The serialized bytes are what we both apply and stash as the
+        // baseline for the next DELTA.
+        if (payloadSize < sizeof(std::uint32_t))
+            break;
+        std::uint32_t snapshotTick = 0;
+        std::memcpy(&snapshotTick, payload, sizeof(snapshotTick));
+        const uint8_t* serBytes = payload + sizeof(snapshotTick);
+        const Uint32 serSize = payloadSize - sizeof(snapshotTick);
+
         // Phase 5a: copy current Position into PreviousPosition BEFORE the
-        // continuous_loader rewrites Position from the snapshot. This gives
-        // the renderer a (prev, pos) pair that brackets the most-recent
-        // snapshot transition, lerped over the full ~31 ms snapshot
-        // interval (vs. the old per-physics-tick lerp which only spanned
-        // ~7.8 ms and produced visible step jitter at 32 Hz snapshot rate).
-        registry.view<Position, PreviousPosition>().each(
-            [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+        // continuous_loader rewrites Position from the snapshot.  This
+        // gives the renderer a (prev, pos) pair that brackets the
+        // most-recent snapshot transition for REMOTE players, lerped
+        // over the snapshot interval.
+        //
+        // PR-20.9 (root-cause local-jitter fix): exclude LocalPlayer.
+        // Phase 5b's design intent — per the comment in Game.cpp's
+        // physics loop — is "local player uses physics-tick alpha,
+        // remote players use snapshot alpha."  When this view
+        // included the local player, its `prev` got reset every
+        // snapshot apply (128 Hz post-PR-13) to the post-physics-
+        // tick `pos`.  Combined with reconciliation FP drift between
+        // client-side prediction and server's authoritative state
+        // at the acked tick, the renderer's `lerp(prev, pos,
+        // physics-tick-alpha)` then interpolated over the tiny
+        // drift each snapshot — visible as continuous backward
+        // jitter under any simulated RTT (replay span grows with
+        // RTT, so drift accumulates and the snap each snapshot is
+        // a few units instead of sub-pixel).  Excluding local here
+        // makes the per-physics-tick `prev = pos` in Game.cpp the
+        // SOLE writer of local's PreviousPosition, restoring
+        // tick-rate-smooth interpolation regardless of what
+        // reconciliation produces this frame.
+        registry.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
+            .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
         if (!registryLoader)
             registryLoader.emplace(registry);
@@ -615,10 +877,19 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         // getServerAckedClientTick() to know where to start replaying
         // stored inputs from for reconciliation.
         uint32_t ackedTick = 0;
-        registryLoader->apply(payload, payloadSize, localPlayerEntity, &ackedTick);
+        registryLoader->apply(serBytes, serSize, localPlayerEntity, &ackedTick);
         if (ackedTick != 0)
             serverAckedClientTick_ = ackedTick;
         snapshotAppliedFlag_ = true;
+
+        // PR-10 + PR-14: stash the raw serialized bytes as the
+        // *keyframe* baseline.  Every DELTA in this keyframe window
+        // will reference these same bytes; we do NOT update
+        // `keyframePayload_` on DELTA arrival, so individual DELTA
+        // drops don't cascade into baseline mismatches for the rest
+        // of the window.  The next FULL replaces the keyframe.
+        keyframePayload_.assign(serBytes, serBytes + serSize);
+        keyframeTick_ = snapshotTick;
 
         // Newly-spawned entities (created by the snapshot apply above) have
         // a default-constructed PreviousPosition (or none at all). Without
@@ -635,6 +906,17 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
         prevSnapshotApplyNs_ = lastSnapshotApplyNs_;
         lastSnapshotApplyNs_ = SDL_GetTicksNS();
 
+        // PR-11: refresh the snapshot-interval EMA from the most recent
+        // gap.  Single-pole IIR with α = 1/4 gives a ~4-sample (~125 ms
+        // at 32 Hz) time constant — fast enough to track real changes
+        // (e.g. server tick rate adjusting under load), slow enough to
+        // ride out one or two delayed snapshots without wobbling the
+        // render-delay timestamp.
+        if (prevSnapshotApplyNs_ != 0 && lastSnapshotApplyNs_ > prevSnapshotApplyNs_) {
+            const Uint64 interval = lastSnapshotApplyNs_ - prevSnapshotApplyNs_;
+            snapshotIntervalEmaNs_ = (3 * snapshotIntervalEmaNs_ + interval) / 4;
+        }
+
         stats.registryUpdateSize = payloadSize;
         ++registryUpdatesWindow;
 
@@ -646,6 +928,110 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
                 localPlayerReadyNotified = true;
             }
         }
+
+        // PR-11: capture interpolation samples AFTER the local-player
+        // callback fires, so the LocalPlayer tag is in place and the
+        // exclude filter inside `recordInterpolationSamples` skips the
+        // local entity correctly even on the very first snapshot.
+        recordInterpolationSamples(registry, lastSnapshotApplyNs_);
+        break;
+    }
+    case PacketType::UPDATE_REGISTRY_DELTA: {
+        // PR-10: wire format —
+        //   [tick:u32] [fromTick:u32] [baselineSize:u32] [rlePatch...]
+        // We reconstruct the full snapshot bytes by applying the patch
+        // on top of `lastSnapshotPayload_`, then run the existing
+        // Loader::apply on the reconstructed bytes — exactly as if a
+        // FULL had arrived.
+        constexpr Uint32 k_headerSize = 3 * sizeof(std::uint32_t);
+        if (payloadSize < k_headerSize)
+            break;
+        std::uint32_t snapshotTick = 0;
+        std::uint32_t fromTick = 0;
+        std::uint32_t baselineSize = 0;
+        std::memcpy(&snapshotTick, payload + 0 * sizeof(std::uint32_t), sizeof(std::uint32_t));
+        std::memcpy(&fromTick, payload + 1 * sizeof(std::uint32_t), sizeof(std::uint32_t));
+        std::memcpy(&baselineSize, payload + 2 * sizeof(std::uint32_t), sizeof(std::uint32_t));
+
+        // PR-14: every delta references the most recent KEYFRAME, not
+        // the immediately previous snapshot.  Drop if we haven't
+        // received the matching keyframe yet (e.g. it was lost on the
+        // wire or we just connected and haven't seen one).  The next
+        // periodic keyframe (every 8 snapshots ≈ 62 ms at 128 Hz)
+        // re-syncs us — much faster than the pre-PR-14 cascade where
+        // a single drop could blank out an entire keyframe window.
+        if (fromTick != keyframeTick_ || keyframePayload_.empty() || keyframePayload_.size() != baselineSize) {
+            // Silent drop is fine — receiver is allowed to discard
+            // packets it can't apply. SDL_Log here would spam at
+            // delta cadence on packet loss.
+            break;
+        }
+
+        const uint8_t* patchData = payload + k_headerSize;
+        const Uint32 patchSize = payloadSize - k_headerSize;
+        auto reconstructed = registry_serialization::applyDelta(keyframePayload_, patchData, patchSize, baselineSize);
+        if (reconstructed.empty())
+            break; // malformed patch — drop, wait for next FULL.
+
+        // PR-20.9 (mirrored from FULL path): exclude LocalPlayer from
+        // the snapshot-rate prev=pos so the per-physics-tick path in
+        // Game.cpp is the sole writer of local's PreviousPosition.
+        // See the long comment on the FULL path for the full
+        // jitter-under-simulated-RTT diagnosis.
+        registry.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
+            .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+        if (!registryLoader)
+            registryLoader.emplace(registry);
+
+        uint32_t ackedTick = 0;
+        registryLoader->apply(
+            reconstructed.data(), static_cast<size_t>(reconstructed.size()), localPlayerEntity, &ackedTick);
+        if (ackedTick != 0)
+            serverAckedClientTick_ = ackedTick;
+        snapshotAppliedFlag_ = true;
+
+        // Mirrored seed pass for newly-spawned entities.
+        registry.view<Position>(entt::exclude<PreviousPosition>).each([&registry](entt::entity e, const Position& pos) {
+            registry.emplace<PreviousPosition>(e, pos.value);
+        });
+
+        prevSnapshotApplyNs_ = lastSnapshotApplyNs_;
+        lastSnapshotApplyNs_ = SDL_GetTicksNS();
+
+        // PR-11: mirror the FULL path's EMA update on DELTA applies too.
+        // Both packet types advance the snapshot stream, so both should
+        // contribute to the interval estimate the render-delay
+        // computation reads.
+        if (prevSnapshotApplyNs_ != 0 && lastSnapshotApplyNs_ > prevSnapshotApplyNs_) {
+            const Uint64 interval = lastSnapshotApplyNs_ - prevSnapshotApplyNs_;
+            snapshotIntervalEmaNs_ = (3 * snapshotIntervalEmaNs_ + interval) / 4;
+        }
+
+        // PR-14: do NOT replace the keyframe.  All deltas in this
+        // keyframe window reference the same baseline; if we copied
+        // the reconstructed bytes here we'd be back to pre-PR-14
+        // cascade-on-loss.  The reconstructed bytes were already fed
+        // into the Loader above; the keyframe stays at the FULL we
+        // last saw.
+        (void)reconstructed;                    // intentional: reconstructed buffer goes out of scope
+
+        stats.registryUpdateSize = payloadSize; // wire size, not reconstructed size
+        ++registryUpdatesWindow;
+
+        if (!localPlayerReadyNotified && localPlayerEntity && localPlayerReadyFn) {
+            auto local = registryLoader->map(*localPlayerEntity);
+            if (local != entt::null) {
+                localPlayerReadyFn(local);
+                localPlayerReadyNotified = true;
+            }
+        }
+
+        // PR-11: capture interpolation samples after the local-player
+        // callback so the LocalPlayer tag is set before the exclude
+        // filter fires on the first snapshot.  Same pattern as the
+        // UPDATE_REGISTRY path above.
+        recordInterpolationSamples(registry, lastSnapshotApplyNs_);
         break;
     }
     case PacketType::PARTICLE_SPAWN: {
@@ -712,6 +1098,64 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size, Registry& registr
                 killEventFn_(evt);
             }
         }
+        break;
+    }
+    case PacketType::SHOT_DEBUG_REPORT: {
+        // PR-20: parse the wire format defined in
+        // `network/ShotDebugReport.hpp` back into a runtime
+        // ShotDebugCapture.  Strict size checks at every step —
+        // malformed packets get dropped silently rather than
+        // crashing the diagnostic UI.
+        using namespace net::shotdebug;
+        if (payloadSize < sizeof(ReportHeader))
+            break;
+        ReportHeader rh{};
+        std::memcpy(&rh, payload, sizeof(ReportHeader));
+
+        ShotDebugCapture cap;
+        cap.shooterClientId = 0; // server doesn't echo this back; not needed by UI
+        cap.shotInputTick = rh.shotInputTick;
+        cap.hitTargetClientId = rh.hitTargetClientId;
+        cap.hitRegion = rh.hitRegion;
+        cap.origin = {rh.originX, rh.originY, rh.originZ};
+        cap.direction = {rh.dirX, rh.dirY, rh.dirZ};
+        cap.range = rh.range;
+        cap.hitPoint = {rh.hitX, rh.hitY, rh.hitZ};
+        cap.targets.reserve(rh.numTargets);
+
+        std::size_t off = sizeof(ReportHeader);
+        bool malformed = false;
+        for (std::uint8_t t = 0; t < rh.numTargets; ++t) {
+            if (off + sizeof(TargetHeader) > payloadSize) {
+                malformed = true;
+                break;
+            }
+            TargetHeader th{};
+            std::memcpy(&th, payload + off, sizeof(TargetHeader));
+            off += sizeof(TargetHeader);
+            const std::size_t need = std::size_t{th.numCapsules} * sizeof(WireCapsule);
+            if (off + need > payloadSize) {
+                malformed = true;
+                break;
+            }
+            ShotDebugCapture::Target tgt;
+            tgt.clientId = th.targetClientId;
+            tgt.capsules.reserve(th.numCapsules);
+            for (std::uint8_t c = 0; c < th.numCapsules; ++c) {
+                WireCapsule wc{};
+                std::memcpy(&wc, payload + off, sizeof(WireCapsule));
+                off += sizeof(WireCapsule);
+                WorldCapsule rc{};
+                rc.pointA = {wc.pointAx, wc.pointAy, wc.pointAz};
+                rc.pointB = {wc.pointBx, wc.pointBy, wc.pointBz};
+                rc.radius = wc.radius;
+                rc.region = static_cast<BodyRegion>(wc.region);
+                tgt.capsules.push_back(rc);
+            }
+            cap.targets.push_back(std::move(tgt));
+        }
+        if (!malformed && shotDebugFn_)
+            shotDebugFn_(cap);
         break;
     }
     default:

@@ -4,11 +4,15 @@
 #include "ecs/systems/WeaponSystem.hpp"
 
 #include "PlayerStatusSystem.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
+#include "ecs/components/HitboxHistory.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
@@ -17,6 +21,18 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/LagCompensation.hpp"
+
+// PR-18b: server-side shot-resolution log.  Server-only — the
+// client TU compiles this same file but doesn't have `perf/ShotLog`
+// on its include path, so we conditionally include and stub the
+// call when missing.  Same `__has_include` pattern as
+// RegistrySerialization.cpp's parallel-STL hook.
+#if __has_include("perf/ShotLog.hpp")
+#include "perf/ShotLog.hpp"
+#define GROUP2_HAS_SHOTLOG 1
+#else
+#define GROUP2_HAS_SHOTLOG 0
+#endif
 
 #include <SDL3/SDL_log.h>
 
@@ -137,6 +153,232 @@ inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
     return eye + right * 15.0f - up * 8.0f + direction * 5.0f;
 }
 
+// PR-18b: log a single hitscan shot's resolution to the optional
+// server-side shot-resolution CSV.  Reads shooter's ClientId out of
+// the registry (the server stamps one on every replicated player at
+// connect-time).  Hit target's ClientId is resolved from `hit.entity`
+// or set to `k_missClientId` for misses.  No-op on client TUs (the
+// `#if GROUP2_HAS_SHOTLOG` guard collapses to a stubbed body).
+//
+// PR-22 (netsync): also records the shot ray (origin, direction), the
+// shooter's `LagCompTarget` (RTT + rewind ticks), and the hit target's
+// rewound vs current position.  Caller MUST have an active
+// `RewindHitboxesGuard` so reading the hit target's `HitboxInstance::
+// capsules` returns the historical (rewound) sample — exactly what
+// the raycast just hit.  `Position.value` is unchanged by the guard
+// and gives the live (current) foot position.
+inline void logShot(Registry& registry,
+                    entt::entity shooter,
+                    std::uint32_t shotInputTick,
+                    const glm::vec3& origin,
+                    const glm::vec3& direction,
+                    const physics::HitboxHit& hit)
+{
+#if GROUP2_HAS_SHOTLOG
+    group2::perf::shotlog::ShotResolution row;
+    row.shotInputTick = shotInputTick;
+
+    if (const auto* sid = registry.try_get<ClientId>(shooter))
+        row.shooterClientId = static_cast<std::uint16_t>(sid->value);
+
+    row.hitX = hit.point.x;
+    row.hitY = hit.point.y;
+    row.hitZ = hit.point.z;
+    row.hitRegion = static_cast<int>(hit.region);
+
+    row.originX = origin.x;
+    row.originY = origin.y;
+    row.originZ = origin.z;
+    row.dirX = direction.x;
+    row.dirY = direction.y;
+    row.dirZ = direction.z;
+
+    if (const auto* lagComp = registry.try_get<LagCompTarget>(shooter)) {
+        row.shooterRttMs = lagComp->rttMs;
+        row.lagCompTicks = lagComp->lagTicks;
+    }
+
+    if (hit.entity != entt::null && registry.valid(hit.entity)) {
+        if (const auto* tid = registry.try_get<ClientId>(hit.entity))
+            row.hitClientId = static_cast<std::uint16_t>(tid->value);
+
+        // Rewound centre: while the guard is active, `capsules[0]` is
+        // the historical sample.  Capsule index 0 is the body capsule
+        // for our rig (see Hitbox.hpp); its midpoint is a stable
+        // rewound-pose anchor.
+        if (const auto* hb = registry.try_get<HitboxInstance>(hit.entity); hb != nullptr && !hb->capsules.empty()) {
+            const auto& cap0 = hb->capsules[0];
+            const glm::vec3 centroid = (cap0.pointA + cap0.pointB) * 0.5f;
+            row.hitTargetRewoundX = centroid.x;
+            row.hitTargetRewoundY = centroid.y;
+            row.hitTargetRewoundZ = centroid.z;
+        }
+
+        // Current centre: `Position.value` is unchanged by the rewind
+        // guard.  This is the live foot position at server-now-tick;
+        // the analyzer subtracts capsule-midpoint vertical offset
+        // when computing drift.
+        if (const auto* tpos = registry.try_get<Position>(hit.entity)) {
+            row.hitTargetCurrentX = tpos->value.x;
+            row.hitTargetCurrentY = tpos->value.y;
+            row.hitTargetCurrentZ = tpos->value.z;
+        }
+    }
+
+    // PR-27: client-asserted animation-state telemetry.  ServerGame
+    // stashes paired SHOT_INTENTs on the shooter as `PendingShotIntent`
+    // before runWeapon; here we read it, find the matching anim
+    // history sample on the target at the rewound tick, and compute
+    // the delta.  Numbers go to `server_shots.csv` for telemetry only
+    // — PR-27b will use the delta to gate accepting the client's view.
+    if (const auto* intent = registry.try_get<PendingShotIntent>(shooter); intent != nullptr && intent->received) {
+        row.clientIntentReceived = 1;
+        row.clientIntentTargetClientId = intent->targetClientId;
+
+        // Compute delta only when both ids match — comparing client's
+        // anim of target X to server's anim of target Y is meaningless.
+        if (row.hitClientId == intent->targetClientId &&
+            intent->targetClientId != group2::perf::shotlog::k_missClientId)
+        {
+            // Look up server's HISTORICAL anim state for this target
+            // at the rewound tick.  `LagCompTarget.targetServerTick`
+            // tells us which historical sample to pull from the ring;
+            // 0 means "no rewind", in which case the LIVE anim state
+            // on the target is the right comparison.
+            AnimSnapshot serverAnim{};
+            bool serverAnimResolved = false;
+            if (const auto* hist = registry.try_get<HitboxHistory>(hit.entity)) {
+                std::uint32_t targetTick = 0;
+                if (const auto* lc = registry.try_get<LagCompTarget>(shooter))
+                    targetTick = lc->targetServerTick;
+                if (targetTick != 0) {
+                    const HitboxHistorySample* best = nullptr;
+                    for (std::size_t i = 0; i < hist->count; ++i) {
+                        const auto& s = hist->ring[i];
+                        if (s.tick == 0 || s.tick > targetTick)
+                            continue;
+                        if (best == nullptr || s.tick > best->tick)
+                            best = &s;
+                    }
+                    if (best != nullptr) {
+                        serverAnim = best->anim;
+                        serverAnimResolved = true;
+                    }
+                }
+            }
+            // Fallback to LIVE anim state when no historical sample
+            // exists (just-spawned target / no rewind requested).
+            if (!serverAnimResolved) {
+                if (const auto* live = registry.try_get<AnimSnapshot>(hit.entity))
+                    serverAnim = *live;
+            }
+            row.animStateDelta = anim_snapshot::delta(intent->targetAnim, serverAnim);
+        }
+    }
+
+    group2::perf::shotlog::recordShotResolution(row);
+#else
+    (void)registry;
+    (void)shooter;
+    (void)shotInputTick;
+    (void)origin;
+    (void)direction;
+    (void)hit;
+#endif
+}
+
+// PR-20: capture the post-rewind state for the lag-comp debug
+// visualizer.  Pushes one row into `*out` carrying:
+//   - the shooter's own ClientId (so ServerGame can address the
+//     unicast SHOT_DEBUG_REPORT packet),
+//   - shot ray (origin, dir, range),
+//   - hit target + hit point + region,
+//   - the REWOUND capsule list of every player entity in lag-comp
+//     range (the same capsules `resolveHitscanHitbox` just raycast).
+//
+// Caller MUST hold the `RewindHitboxesGuard` active around the call
+// — that's what makes `HitboxInstance::capsules` carry historical
+// data instead of live data.  No-op when `out == nullptr` (client
+// TU running WeaponSystem for prediction).
+inline void captureShotDebug(Registry& registry,
+                             entt::entity shooter,
+                             std::uint32_t shotInputTick,
+                             const glm::vec3& origin,
+                             const glm::vec3& direction,
+                             float range,
+                             const physics::HitboxHit& hit,
+                             std::vector<net::shotdebug::ShotDebugCapture>* out)
+{
+    if (out == nullptr)
+        return;
+
+    // Need a real ClientId on the shooter — bots / map entities
+    // without one can't be addressed for the unicast reply.
+    const auto* shooterCid = registry.try_get<ClientId>(shooter);
+    if (shooterCid == nullptr)
+        return;
+
+    net::shotdebug::ShotDebugCapture cap;
+    cap.shooterClientId = static_cast<std::uint16_t>(shooterCid->value);
+    cap.shotInputTick = shotInputTick;
+    cap.origin = origin;
+    cap.direction = direction;
+    cap.range = range;
+    cap.hitTargetClientId = net::shotdebug::k_missClientId;
+    cap.hitRegion = 0;
+    cap.hitPoint = hit.point;
+    if (hit.entity != entt::null && registry.valid(hit.entity)) {
+        if (const auto* tid = registry.try_get<ClientId>(hit.entity)) {
+            cap.hitTargetClientId = static_cast<std::uint16_t>(tid->value);
+            cap.hitRegion = static_cast<std::uint8_t>(hit.region);
+        }
+    }
+
+    // Snapshot the CURRENT (rewound) capsules of every player whose
+    // capsule-derived AABB — DILATED by `shotDebugAimMargin` on each
+    // axis — intersects the shot ray.  PR-26 originally used the
+    // exact capsule AABB (the same broad-phase as the raycast); user
+    // feedback was that misses dropped the target wireframe entirely,
+    // even when the shot was clearly aimed at them ("ray went 5 cm
+    // above the head and I lost the wireframe").  The aim margin
+    // turns the filter into "show whoever I was approximately
+    // shooting at" rather than "show whoever the ray geometrically
+    // hit" — clutter still gone (distant unrelated enemies skipped),
+    // but near-miss targets stay visible so the user can see WHY the
+    // shot missed (rewind lag-comp drift, animation pose, etc).
+    constexpr float shotDebugAimMargin = 50.0f;
+    auto view = registry.view<HitboxInstance, ClientId>();
+    cap.targets.reserve(view.size_hint());
+    for (const auto e : view) {
+        if (e == shooter)
+            continue;
+        const auto& hb = view.get<HitboxInstance>(e);
+        if (hb.capsules.empty())
+            continue;
+
+        glm::vec3 boundsMin{std::numeric_limits<float>::max()};
+        glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
+        for (const auto& c : hb.capsules) {
+            const glm::vec3 capRadius{c.radius + shotDebugAimMargin};
+            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - capRadius);
+            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + capRadius);
+        }
+        const physics::WorldAABB bounds{.min = boundsMin, .max = boundsMax};
+        float aabbDist = range;
+        glm::vec3 aabbNormal{0.0f};
+        if (!physics::raycastAABB(origin, direction, bounds, range, aabbDist, aabbNormal))
+            continue;
+
+        const auto& cid = view.get<ClientId>(e);
+        net::shotdebug::ShotDebugCapture::Target tgt;
+        tgt.clientId = static_cast<std::uint16_t>(cid.value);
+        tgt.capsules = hb.capsules; // copy while rewound
+        cap.targets.push_back(std::move(tgt));
+    }
+
+    out->push_back(std::move(cap));
+}
+
 /// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
 ///
 /// Handles three weapon archetypes:
@@ -156,6 +398,12 @@ inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
 /// @param dt            Fixed physics delta time in seconds.
 /// @param outParticles  Accumulates particle events for network broadcast.
 /// @param killEvents    Accumulates kill events for network broadcast.
+/// @param outShotDebug  PR-20: optional server-side debug capture sink.
+///                      When non-null, each hitscan-fire path pushes one
+///                      `ShotDebugCapture` row while `RewindHitboxesGuard`
+///                      is still active, so the captured `targets[*].
+///                      capsules` reflect the historical sample the
+///                      server actually raycast against.
 inline void handleFire(Registry& registry,
                        entt::entity shooter,
                        const InputSnapshot& input,
@@ -164,7 +412,8 @@ inline void handleFire(Registry& registry,
                        WeaponState& weapon,
                        float dt,
                        std::vector<NetParticleEvent>& outParticles,
-                       std::vector<NetKillEvent>& killEvents)
+                       std::vector<NetKillEvent>& killEvents,
+                       std::vector<net::shotdebug::ShotDebugCapture>* outShotDebug)
 {
     GunInstance& gun = getEquippedGun(weapon);
     const WeaponConfig& config = getWeaponConfig(gun.type);
@@ -198,8 +447,20 @@ inline void handleFire(Registry& registry,
         // shooters with no `LagCompTarget` (e.g. the client TU, where
         // this same WeaponSystem.cpp is compiled but no entity ever
         // gets the component).
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
+        //
+        // PR-5 (server-perf): pass the ray to skip rewind work for
+        // players whose AABB doesn't intersect the shot. Cuts O(N)
+        // per shot to O(candidates).
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+
+        // PR-18b: log to server-side shot-resolution CSV (no-op when
+        // env unset).  Beam path: every active-fire tick records.
+        logShot(registry, shooter, input.tick, eye, direction, hit);
+        // PR-20: capture rewound state for the live debug visualizer
+        // (no-op on client TU and when no shooter ClientId).  Must
+        // happen WHILE rewindGuard is still in scope.
+        captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 
         // Apply DPS-based damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
@@ -244,8 +505,15 @@ inline void handleFire(Registry& registry,
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
         // Phase 6 lag-compensated hitscan (see beam path for details).
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
+        // PR-5: ray-filtered rewind, see beam path.
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+
+        // PR-18b: log to server-side shot-resolution CSV.  Charge
+        // path: one log row per release-fire.
+        logShot(registry, shooter, input.tick, eye, direction, hit);
+        // PR-20: capture rewound state for the live debug visualizer.
+        captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 
         // Snapshot armor before damage for shield-break detection.
         float chargeArmorBefore = 0.f;
@@ -324,8 +592,15 @@ inline void handleFire(Registry& registry,
 
     if (config.hitscan) {
         // Phase 6 lag-compensated hitscan (see beam path for details).
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter);
+        // PR-5: ray-filtered rewind.
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
         const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+
+        // PR-18b: log to server-side shot-resolution CSV.  Discrete
+        // hitscan path: one log row per click-fire.
+        logShot(registry, shooter, input.tick, eye, direction, hit);
+        // PR-20: capture rewound state for the live debug visualizer.
+        captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
 
         // Snapshot armor before damage for shield-break detection.
         float armorBefore = 0.f;
@@ -408,7 +683,8 @@ inline void handleFire(Registry& registry,
 void runWeapon(Registry& registry,
                float dt,
                std::vector<NetParticleEvent>& outParticles,
-               std::vector<NetKillEvent>& killEvents)
+               std::vector<NetKillEvent>& killEvents,
+               std::vector<net::shotdebug::ShotDebugCapture>* outShotDebug)
 {
     auto view = registry.view<InputSnapshot, Position, CollisionShape, WeaponState>();
     view.each([&](entt::entity shooter,
@@ -427,7 +703,7 @@ void runWeapon(Registry& registry,
                 beam->active = false;
         }
 
-        handleFire(registry, shooter, input, pos, shape, weapon, dt, outParticles, killEvents);
+        handleFire(registry, shooter, input, pos, shape, weapon, dt, outParticles, killEvents, outShotDebug);
         if (input.reload) {
             GunInstance& gun = getEquippedGun(weapon);
             handleReload(gun);

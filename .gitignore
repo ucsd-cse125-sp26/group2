@@ -60,7 +60,24 @@ compile_commands.json
 .remember/
 .claude/
 docs/superpowers/
-blender/
+# PR-31: track the collision-mesh generator script (`blender/script.py`)
+# so its output format stays in sync with `src/ecs/physics/MapLoader.cpp`'s
+# type-prefix parser.  Ignore blender's binary artefacts (`.blend`, autosave,
+# backup files) instead of the whole directory — git's ignore rules don't
+# allow re-including files under an excluded directory, so we list the
+# binary patterns explicitly.
+blender/*.blend
+blender/*.blend1
+blender/*.blend2
+blender/*.blend3
+blender/*.blend4
+blender/*.blend5
+blender/*.blend6
+blender/*.blend7
+blender/*.blend8
+blender/*.blend9
+blender/*.blend@
+blender/*.blend~
 
 # Git worktrees
 .worktrees/
@@ -98,3 +115,4 @@ dist/
 # Local-only deployment scripts (personal server paths — not for the repo)
 scripts/deploy-*.sh
 aim_assist/
+loadtest-runs/

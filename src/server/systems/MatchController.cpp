@@ -5,6 +5,8 @@
 
 #include "ecs/systems/MatchSystem.hpp"
 
+#include <cmath>
+
 void MatchController::update(float deltaTime, Registry& registry, Server& server)
 {
     switch (currentPhase) {
@@ -66,10 +68,41 @@ int MatchController::getWinnerId()
 
 void MatchController::broadcastMatchState(Server& server)
 {
+    // PR-4 (server-perf): replicate-on-change. The full match packet
+    // is reliable-style (replaceKey set on the per-client queue, so
+    // a slow drainer always sees the freshest), and the countdown is
+    // smoothly interpolated client-side from a single anchor.
+    // Broadcasting it 128 Hz is overkill — for 200 bots it was the
+    // dominant tick-time spike in PR-3.
+    //
+    // Triggers for a broadcast:
+    //   - Phase changed (rare; warmup→countdown, etc.)
+    //   - Winner changed (≤ once per match)
+    //   - Countdown crossed a 1-second boundary (so client UI ticks)
+    //   - Heartbeat: at least every 64 ticks (~500 ms) so a fresh
+    //     client connecting at any point converges within half a
+    //     second.
+    constexpr int heartbeatTicks = 64;
+
+    const bool phaseChanged = currentPhase != lastBroadcastPhase;
+    const bool winnerChanged = winnerId != lastBroadcastWinnerId;
+    const bool countdownCrossedSecond = std::floor(countdownTimer) != std::floor(lastBroadcastCountdown);
+    const bool heartbeat = ticksSinceBroadcast >= heartbeatTicks;
+
+    if (!phaseChanged && !winnerChanged && !countdownCrossedSecond && !heartbeat) {
+        ++ticksSinceBroadcast;
+        return;
+    }
+
     MatchStatePacket packet;
     packet.phase = currentPhase;
     packet.countdownTimer = countdownTimer;
     packet.winnerId = winnerId;
 
     server.broadcastMatchStatus(packet);
+
+    lastBroadcastPhase = currentPhase;
+    lastBroadcastWinnerId = winnerId;
+    lastBroadcastCountdown = countdownTimer;
+    ticksSinceBroadcast = 0;
 }

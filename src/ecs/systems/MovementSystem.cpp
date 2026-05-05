@@ -21,6 +21,16 @@
 #include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
 
+// PR-7 (server-perf): optional parallel-STL hooks for the player loop.
+#if __has_include("perf/Parallel.hpp")
+#include "perf/Parallel.hpp"
+#define GROUP2_MOVEMENT_HAS_PARALLEL 1
+#else
+#define GROUP2_MOVEMENT_HAS_PARALLEL 0
+#endif
+
+#include <vector>
+
 namespace systems
 {
 
@@ -1159,16 +1169,29 @@ void applySpeedCap(glm::vec3& vel, const PlayerStateRef state)
 
 void runMovement(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
-    // Entities WITH InputSnapshot — full player movement
-    registry
-        .view<Position, Velocity, PlayerVisState, PlayerSimState, CollisionShape, InputSnapshot>(
-            entt::exclude<RespawnTimer>)
-        .each([dt, &world](Position& pos,
-                           Velocity& vel,
-                           PlayerVisState& vis,
-                           PlayerSimState& sim,
-                           CollisionShape& shape,
-                           const InputSnapshot& input) {
+    // Entities WITH InputSnapshot — full player movement.
+    //
+    // PR-7 (server-perf): per-player movement is independent — each
+    // iteration only reads `WorldGeometry` (read-only, shared) and
+    // mutates only its own entity's components. Pre-collect entity
+    // handles, then run the kernel via parallelFor on TBB-backed
+    // builds. With AI bots actually moving, this scope's CPU work
+    // grows linearly with N; at 500 it would dominate the tick.
+    auto playerView = registry.view<Position, Velocity, PlayerVisState, PlayerSimState, CollisionShape, InputSnapshot>(
+        entt::exclude<RespawnTimer>);
+    static thread_local std::vector<entt::entity> moveWork;
+    moveWork.clear();
+    for (auto e : playerView)
+        moveWork.push_back(e);
+
+    auto moveKernel = [&registry, dt, &world](entt::entity e) {
+        auto& pos = registry.get<Position>(e);
+        auto& vel = registry.get<Velocity>(e);
+        auto& vis = registry.get<PlayerVisState>(e);
+        auto& sim = registry.get<PlayerSimState>(e);
+        auto& shape = registry.get<CollisionShape>(e);
+        const auto& input = registry.get<InputSnapshot>(e);
+        {
             // Bundle the two halves into a single ref so the helper functions
             // below don't need a "(vis, sim)" pair on every call.
             PlayerStateRef state{vis, sim};
@@ -1357,7 +1380,15 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
             // 12. Track jump key state for edge detection
             state.sim.jumpHeldLastTick = input.jump;
-        });
+        }
+    };
+
+#if GROUP2_MOVEMENT_HAS_PARALLEL
+    ::group2::perf::parallelFor(moveWork.begin(), moveWork.end(), moveKernel);
+#else
+    for (entt::entity e : moveWork)
+        moveKernel(e);
+#endif
 
     // projectile entities
     // registry.view<Velocity, Projectile>(entt::exclude<InputSnapshot>)

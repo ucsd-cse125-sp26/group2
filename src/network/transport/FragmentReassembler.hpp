@@ -74,7 +74,29 @@ public:
 
         // Older sequence than what we're currently reassembling? Drop.
         // Glenn-Fiedler "more recent" comparison handles 16-bit wrap.
-        if (active_ && seqMoreRecent(active_->sequence, hdr.sequence))
+        //
+        // PR-17 (BUG FIX): pre-PR-17 the args were swapped — the call
+        // was `seqMoreRecent(active->sequence, hdr.sequence)` which
+        // asks "is hdr more recent than active" (per the docstring on
+        // `seqMoreRecent` below).  That made the receiver drop NEWER
+        // fragments and stay stuck on the OLDEST in-progress
+        // sequence forever — the moment a single fragment of the
+        // first multi-fragment snapshot was lost, all subsequent
+        // snapshot fragments returned Stale, freezing the client's
+        // ECS registry at whichever FULL last completed cleanly.
+        //
+        // Pre-PR-15 the bug was masked because each snapshot's
+        // fragments arrived back-to-back with no loss, completed
+        // cleanly, `active_.reset()` cleared state, and the next
+        // sequence started fresh in the `if (!active_)` path below.
+        // PR-15's per-fragment redundancy then exposed it: the
+        // duplicate copy of the LAST fragment arriving after Complete
+        // re-creates an active set at the just-finished sequence with
+        // 1/N fragments, locking out every newer sequence.
+        //
+        // Correct argument order: "is `active->sequence` more recent
+        // than `hdr.sequence`?" → if yes, hdr is older, drop.
+        if (active_ && seqMoreRecent(hdr.sequence, active_->sequence))
             return Result::Stale;
 
         // Newer sequence (or first fragment ever)? Reset the in-progress set.

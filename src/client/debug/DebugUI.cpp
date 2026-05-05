@@ -151,6 +151,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::SeparatorText("Physics");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+    ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
     // External panels (owned by Game)
     if (externalPanels.size() > 0) {
@@ -1856,6 +1857,319 @@ void DebugUI::buildCollisionUI(const physics::WorldGeometry& world,
         const ImU32 triColor = IM_COL32(200, 50, 255, 220);
         for (const auto& tm : world.triMeshes)
             drawTriMeshWireframe(dl, tm, viewProj, screenWidth, screenHeight, triColor);
+    }
+}
+
+// ── PR-20: Shot debug visualizer (CSGO sv_showimpacts) ──────────────────
+
+namespace
+{
+
+/// @brief Find the ring slot whose pair matches `tick`.  Returns -1 if
+/// no entry matches.  Linear scan; ring is small (≤ 30).
+int findShotPairByTick(const std::array<DebugUI::ShotDebugPair, DebugUI::k_shotRingMax>& ring,
+                       int liveCount,
+                       std::uint32_t tick)
+{
+    const int n = std::min(liveCount, DebugUI::k_shotRingMax);
+    for (int i = 0; i < n; ++i) {
+        if (ring[i].shotInputTick == tick && (ring[i].hasClient || ring[i].hasServer))
+            return i;
+    }
+    return -1;
+}
+
+/// @brief Solid-color ImU32 helper that lets the user override alpha.
+ImU32 col(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
+{
+    return IM_COL32(r, g, b, a);
+}
+
+/// @brief PR-20.5: line-draw with near-plane clipping in homogeneous
+/// clip space, so partially-visible lines still render their on-screen
+/// portion.  The plain `drawWorldLine` drops the entire line if either
+/// endpoint has clip.w ≤ ε (behind the camera or near plane), which
+/// makes the shot-debug ray vanish whenever the player walks toward
+/// its hit point.  Long rays straddle the near plane often enough
+/// that this is a daily issue.
+void drawWorldLineClipped(ImDrawList* dl,
+                          glm::vec3 a,
+                          glm::vec3 b,
+                          const glm::mat4& vp,
+                          float sw,
+                          float sh,
+                          ImU32 color,
+                          float thickness = 1.0f)
+{
+    constexpr float eps = 0.0001f;
+    glm::vec4 ca = vp * glm::vec4(a, 1.0f);
+    glm::vec4 cb = vp * glm::vec4(b, 1.0f);
+    const bool aFront = ca.w > eps;
+    const bool bFront = cb.w > eps;
+    if (!aFront && !bFront)
+        return;
+    if (!aFront) {
+        const float t = (eps - ca.w) / (cb.w - ca.w);
+        ca = ca + (cb - ca) * t;
+    }
+    if (!bFront) {
+        const float t = (eps - cb.w) / (ca.w - cb.w);
+        cb = cb + (ca - cb) * t;
+    }
+    const float invWa = 1.0f / ca.w;
+    const float invWb = 1.0f / cb.w;
+    const ImVec2 sa{(0.5f + 0.5f * ca.x * invWa) * sw, (0.5f - 0.5f * ca.y * invWa) * sh};
+    const ImVec2 sb{(0.5f + 0.5f * cb.x * invWb) * sw, (0.5f - 0.5f * cb.y * invWb) * sh};
+    dl->AddLine(sa, sb, color, thickness);
+}
+
+/// @brief Capsule wireframe variant that uses the near-plane-clipping
+/// line helper.  Otherwise identical to the existing
+/// `drawCapsuleWireframe`.  Necessary for the shot-debug overlay
+/// because rewound capsules are often near-camera (the player just
+/// shot at the enemy on their screen) and the unclipped wireframe
+/// drops segments that cross the near plane, producing visibly
+/// fragmented capsule wires.
+void drawCapsuleWireframeClipped(
+    ImDrawList* dl, glm::vec3 pA, glm::vec3 pB, float radius, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    glm::vec3 axis = pB - pA;
+    const float axisLen = glm::length(axis);
+    if (axisLen < 0.001f)
+        return;
+    axis /= axisLen;
+    glm::vec3 up = (std::abs(axis.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+    glm::vec3 right = glm::normalize(glm::cross(axis, up));
+    up = glm::normalize(glm::cross(right, axis));
+    constexpr int ringSegments = 12;
+    constexpr int arcSegments = 8;
+    constexpr float pi2 = 6.2831853f;
+    constexpr float halfPi = 1.5707963f;
+    for (int endIdx = 0; endIdx < 2; ++endIdx) {
+        const glm::vec3 center = (endIdx == 0) ? pA : pB;
+        glm::vec3 prev = center + right * radius;
+        for (int i = 1; i <= ringSegments; ++i) {
+            const float angle = pi2 * static_cast<float>(i) / static_cast<float>(ringSegments);
+            const glm::vec3 cur = center + (right * std::cos(angle) + up * std::sin(angle)) * radius;
+            drawWorldLineClipped(dl, prev, cur, vp, sw, sh, color, 1.0f);
+            prev = cur;
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        const float angle = pi2 * static_cast<float>(i) / 4.0f;
+        const glm::vec3 offset = (right * std::cos(angle) + up * std::sin(angle)) * radius;
+        drawWorldLineClipped(dl, pA + offset, pB + offset, vp, sw, sh, color, 1.0f);
+    }
+    for (int meridian = 0; meridian < 4; ++meridian) {
+        const float theta = pi2 * static_cast<float>(meridian) / 4.0f;
+        const glm::vec3 perpDir = right * std::cos(theta) + up * std::sin(theta);
+        {
+            glm::vec3 prev = pA + perpDir * radius;
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pA + perpDir * (radius * std::cos(phi)) - axis * (radius * std::sin(phi));
+                drawWorldLineClipped(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
+        {
+            glm::vec3 prev = pB + perpDir * radius;
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pB + perpDir * (radius * std::cos(phi)) + axis * (radius * std::sin(phi));
+                drawWorldLineClipped(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
+    }
+}
+
+/// @brief PR-20.4: chunky high-visibility hit marker — filled inner
+/// disc + outer ring + hairline cross.  Easy to spot against busy
+/// scene backgrounds without being so big it dominates the view.
+void drawHitMarker(ImDrawList* dl, glm::vec3 world, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    ImVec2 sp;
+    if (!worldToScreen(world, vp, sw, sh, sp))
+        return;
+    constexpr float k_outerRadius = 14.0f;
+    constexpr float k_innerRadius = 6.0f;
+    constexpr float k_crossLen = 18.0f;
+    dl->AddCircleFilled(sp, k_innerRadius, color);
+    dl->AddCircle(sp, k_outerRadius, color, 16, 2.0f);
+    dl->AddLine({sp.x - k_crossLen, sp.y}, {sp.x + k_crossLen, sp.y}, color, 1.0f);
+    dl->AddLine({sp.x, sp.y - k_crossLen}, {sp.x, sp.y + k_crossLen}, color, 1.0f);
+}
+
+} // namespace
+
+void DebugUI::pushClientShot(const net::shotdebug::ShotDebugCapture& cap)
+{
+    int idx = findShotPairByTick(shotRing, shotRingCount, cap.shotInputTick);
+    if (idx < 0) {
+        // New entry — claim the head slot, advance.
+        idx = shotRingHead;
+        shotRing[idx] = {};
+        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRingHead = (shotRingHead + 1) % k_shotRingMax;
+        if (shotRingCount < k_shotRingMax)
+            ++shotRingCount;
+    }
+    shotRing[idx].clientView = cap;
+    shotRing[idx].hasClient = true;
+}
+
+void DebugUI::pushServerShot(const net::shotdebug::ShotDebugCapture& cap)
+{
+    int idx = findShotPairByTick(shotRing, shotRingCount, cap.shotInputTick);
+    if (idx < 0) {
+        idx = shotRingHead;
+        shotRing[idx] = {};
+        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRingHead = (shotRingHead + 1) % k_shotRingMax;
+        if (shotRingCount < k_shotRingMax)
+            ++shotRingCount;
+    }
+    shotRing[idx].serverView = cap;
+    shotRing[idx].hasServer = true;
+}
+
+void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight)
+{
+    if (showShotDebugWindow) {
+        if (ImGui::Begin("Shot Debug (sv_showimpacts)", &showShotDebugWindow)) {
+            ImGui::Checkbox("Draw 3D overlay", &drawShotDebugOverlay);
+            ImGui::SliderInt("Visible last N", &shotDebugVisibleCount, 1, k_shotRingMax);
+            ImGui::SliderInt("Highlight (0=all)", &shotDebugSelectIdx, 0, shotDebugVisibleCount);
+            // PR-20.3: dropdown to filter the 3D overlay to only the
+            // client side or server side.  Useful when the two
+            // overlap closely and you want to inspect each in
+            // isolation, or to confirm "where exactly did the server
+            // resolve the hit" without the blue capsules in the way.
+            const char* kViewModes[] = {"Both (blue+red)", "Client only (blue)", "Server only (red)"};
+            ImGui::Combo("Show", &shotDebugViewMode, kViewModes, IM_ARRAYSIZE(kViewModes));
+            ImGui::Separator();
+            ImGui::TextDisabled("Blue = client view at fire time");
+            ImGui::TextDisabled("Red  = server's rewound state");
+            ImGui::TextDisabled("Bright = highlighted, dim = others in window");
+            ImGui::Separator();
+
+            // Per-shot summary table.  Walk newest-first by stepping
+            // backwards from head.
+            if (ImGui::BeginTable(
+                    "##shots", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingFixedFit))
+            {
+                ImGui::TableSetupColumn("# (newest=1)");
+                ImGui::TableSetupColumn("tick");
+                ImGui::TableSetupColumn("client");
+                ImGui::TableSetupColumn("server");
+                ImGui::TableSetupColumn("hit");
+                ImGui::TableHeadersRow();
+                const int show = std::min(shotRingCount, shotDebugVisibleCount);
+                for (int i = 0; i < show; ++i) {
+                    const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
+                    const auto& p = shotRing[idx];
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d", i + 1);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%u", p.shotInputTick);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%s", p.hasClient ? "Y" : "—");
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%s", p.hasServer ? "Y" : "—");
+                    ImGui::TableNextColumn();
+                    if (p.hasServer) {
+                        if (p.serverView.hitTargetClientId == net::shotdebug::k_missClientId)
+                            ImGui::TextDisabled("miss");
+                        else
+                            ImGui::Text("hit cid=%u r=%d",
+                                        static_cast<unsigned>(p.serverView.hitTargetClientId),
+                                        static_cast<int>(p.serverView.hitRegion));
+                    } else {
+                        ImGui::TextDisabled("…");
+                    }
+                }
+                ImGui::EndTable();
+            }
+        }
+        ImGui::End();
+    }
+
+    // 3D overlay — same VP/screen the hitbox debug overlay uses.  We
+    // draw on the foreground draw list so capsules render OVER the
+    // game (debug overlay is meant to be obvious, not subtle).
+    if (!drawShotDebugOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const int show = std::min(shotRingCount, shotDebugVisibleCount);
+    const bool showClient = (shotDebugViewMode == 0 || shotDebugViewMode == 1);
+    const bool showServer = (shotDebugViewMode == 0 || shotDebugViewMode == 2);
+    for (int i = 0; i < show; ++i) {
+        const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
+        const auto& p = shotRing[idx];
+
+        // Dim non-highlighted shots so the user can pick out the
+        // selected one without losing context of recent ones.
+        const bool isHighlighted = (shotDebugSelectIdx == 0) || (shotDebugSelectIdx == (i + 1));
+        const std::uint8_t alpha = isHighlighted ? 255 : 80;
+
+        // Blue = client view at fire-time.  PR-20.5: use the
+        // near-plane-clipping helpers so partially visible rays /
+        // capsules still render their on-screen portion.
+        if (showClient && p.hasClient) {
+            const auto& c = p.clientView;
+            // PR-20.6: use `c.hitPoint` directly.  Pre-PR-20.6 we
+            // fell back to `origin + dir * range` whenever
+            // `hitTargetClientId == k_missClientId`, which silently
+            // discarded WALL hits (those leave hitTargetClientId at
+            // the miss sentinel because no PLAYER was hit, even
+            // though `resolveHitscanHitbox` correctly resolved the
+            // wall geometry into `hit.point`).  The capture path
+            // now writes `cap.hitPoint = localHit.point`
+            // unconditionally, so here we simply use it.
+            const glm::vec3 endPt = c.hitPoint;
+            drawWorldLineClipped(
+                dl, c.origin, endPt, viewProj, screenWidth, screenHeight, col(80, 160, 255, alpha), 2.0f);
+            for (const auto& tgt : c.targets) {
+                for (const auto& cap : tgt.capsules) {
+                    drawCapsuleWireframeClipped(dl,
+                                                cap.pointA,
+                                                cap.pointB,
+                                                cap.radius,
+                                                viewProj,
+                                                screenWidth,
+                                                screenHeight,
+                                                col(80, 160, 255, alpha));
+                }
+            }
+            drawHitMarker(dl, endPt, viewProj, screenWidth, screenHeight, col(80, 160, 255, alpha));
+        }
+        // Red = server's rewound view of the same shot.
+        if (showServer && p.hasServer) {
+            const auto& s = p.serverView;
+            // PR-20.6: same fix on the server side — server-captured
+            // `s.hitPoint` is already the correct world-or-capsule
+            // hit point or full-range endpoint, regardless of
+            // whether a PLAYER was hit.
+            const glm::vec3 endPt = s.hitPoint;
+            drawWorldLineClipped(
+                dl, s.origin, endPt, viewProj, screenWidth, screenHeight, col(255, 80, 80, alpha), 2.0f);
+            for (const auto& tgt : s.targets) {
+                for (const auto& cap : tgt.capsules) {
+                    drawCapsuleWireframeClipped(dl,
+                                                cap.pointA,
+                                                cap.pointB,
+                                                cap.radius,
+                                                viewProj,
+                                                screenWidth,
+                                                screenHeight,
+                                                col(255, 80, 80, alpha));
+                }
+            }
+            drawHitMarker(dl, endPt, viewProj, screenWidth, screenHeight, col(255, 80, 80, alpha));
+        }
     }
 }
 

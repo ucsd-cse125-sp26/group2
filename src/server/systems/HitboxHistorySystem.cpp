@@ -4,6 +4,7 @@
 
 #include "server/systems/HitboxHistorySystem.hpp"
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/HitboxHistory.hpp"
 
@@ -29,6 +30,18 @@ void pushHitboxHistory(Registry& registry, uint32_t serverTick)
         // here. Capsules per entity are ~12 × 24 B ≈ 290 B, so a copy
         // every tick is cheap.
         slot.capsules = hb.capsules;
+
+        // PR-27: also capture the per-tick animation state.  The server
+        // animator pass writes `AnimSnapshot` into the registry just
+        // before this system runs.  Default-zeroed if the entity has
+        // no animator (e.g. unanimated test entities) — that's fine,
+        // an all-inactive snapshot will compare equal across both
+        // sides (and the shot path won't trigger animation reconcile
+        // for those entities anyway).
+        if (const auto* live = registry.try_get<AnimSnapshot>(entity))
+            slot.anim = *live;
+        else
+            slot.anim = {};
 
         hist.head = (hist.head + 1) % HitboxHistory::k_capacity;
         if (hist.count < HitboxHistory::k_capacity)

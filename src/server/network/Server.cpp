@@ -3,12 +3,15 @@
 
 #include "Server.hpp"
 
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
 #include "network/transport/PacketHeader.hpp"
+#include "perf/Parallel.hpp" // PR-9: parallelFor for per-client syscall fan-out.
+#include "perf/Profiler.hpp" // PR-1: NetworkCounters & scope timers.
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL.h>
@@ -16,7 +19,9 @@
 #include <SDL3_net/SDL_net.h>
 #include <cstring>
 #include <entt/entity/entity.hpp>
+#include <memory>
 #include <random>
+#include <utility>
 
 bool Server::init(const char* addr, Uint16 port, const TransportConfig& transport)
 {
@@ -34,7 +39,13 @@ bool Server::init(const char* addr, Uint16 port, const TransportConfig& transpor
         return false;
     }
 
-    eventQueue = EventQueue();
+    // PR-2c: EventQueue holds a mutex now; reset by draining instead of
+    // assignment (mutex is non-copyable / non-assignable). At init
+    // time the queue should already be empty, but draining is cheap.
+    {
+        std::vector<Event> drained;
+        eventQueue.drainAll(drained);
+    }
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
 
     nextClientId.value = 0;
@@ -77,7 +88,7 @@ void Server::shutdown()
         networkThread_.join();
     }
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    std::unique_lock<std::shared_mutex> lock(stateMutex_);
     if (server) {
         SDL_Log("Server: shutting down");
         NET_DestroyServer(server);
@@ -113,7 +124,10 @@ std::vector<uint8_t> frameMessage(const void* data, int len)
 
 bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void* data, int len)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — we only read the clients map structure
+    // (lookup) and write into the target's `outbound` queue, which
+    // self-locks (PR-5b).
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     auto it = clients.find(clientId);
     if (it == clients.end())
         return false;
@@ -124,14 +138,22 @@ bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void*
 
 void Server::enqueueBroadcast(uint8_t replaceKey, const void* data, int len)
 {
-    // Frame the message once outside the lock — the framing copy doesn't
-    // touch any shared state — then lock briefly only to push per-client
-    // copies into each queue.
-    auto framed = frameMessage(data, len);
+    // PR-4 (server-perf): build the framed bytes ONCE into a
+    // shared_ptr; per-client enqueue is a pointer copy. Pre-PR-4 this
+    // copied the framed `std::vector<uint8_t>` per client — fine at
+    // ~10 clients but quadratic-feeling at 200 clients × 128 Hz of
+    // matchController-driven broadcasts (the per-tick MATCH_STATE
+    // broadcast was the dominant contributor to the `match` scope's
+    // 100+ ms p99 spike at 200 bots).
+    auto framed = std::make_shared<const std::vector<uint8_t>>(frameMessage(data, len));
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — we read the clients map and write into each
+    // client's `outbound`, which self-locks (PR-5b). Multiple
+    // game-thread broadcasts can run concurrently with each other and
+    // with the network thread's `flushAllOutbound` phase 2.
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     for (auto& [_, conn] : clients) {
-        conn.outbound.enqueue(replaceKey, std::vector<uint8_t>(framed));
+        conn.outbound.enqueue(replaceKey, framed);
     }
 }
 
@@ -141,16 +163,119 @@ void Server::flushAllOutbound()
     // dropped before going on the wire — see OutboundQueue::flushTo.
     constexpr Uint32 k_maxAgeMs = 300;
 
-    // Caller (networkLoop or shutdown path) holds stateMutex_.
-    for (auto it = clients.begin(); it != clients.end();) {
-        auto& conn = it->second;
-        if (!conn.outbound.flushTo(conn.msgStream.socket, k_maxAgeMs)) {
-            // Socket error during flush — disconnect this client.
-            disconnectClient(conn);
-            it = clients.erase(it);
-            continue;
+    // PR-5b (server-perf): three-phase lock-light flush.
+    //
+    //  Phase 1 (under stateMutex_, brief): snapshot per-client
+    //          (ClientId, OutboundQueue*, socket) into a flat list.
+    //          Pointer stability holds because the network thread is
+    //          the sole writer to `clients` and we're on it; no
+    //          concurrent insert/erase can happen between phase 1
+    //          and phase 3.
+    //  Phase 2 (lock-free): iterate the list, calling
+    //          OutboundQueue::flushTo per client. The queue is
+    //          self-locked (PR-5b) so per-client enqueues from the
+    //          game thread proceed in parallel. The slow part — the
+    //          NET_WriteToStreamSocket syscall — runs without
+    //          stateMutex_, so game-thread broadcasts don't wait.
+    //  Phase 3 (under stateMutex_, brief): apply any disconnects
+    //          phase 2 collected, then republish the atomic
+    //          getClientCount / snapshotClientRtts snapshots.
+    //
+    // Pre-PR-5b this whole loop ran under a single stateMutex_ hold;
+    // at 300 clients the syscall fan-out alone took 25-50 ms p99 on
+    // the loadtest harness, blocking every game-thread broadcast for
+    // that duration.
+
+    struct Target
+    {
+        ClientId id;
+        OutboundQueue* queue;
+        NET_StreamSocket* socket;
+    };
+    static thread_local std::vector<Target> targets;
+    targets.clear();
+
+    {
+        // PR-6: shared lock — we only read the clients map.
+        // Pointers stay valid because the only writers are this
+        // thread (acceptClients / disconnect-application) and we're
+        // not running those concurrently with this snapshot.
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        targets.reserve(clients.size());
+        for (auto& [id, conn] : clients) {
+            targets.push_back(Target{id, &conn.outbound, conn.msgStream.socket});
         }
-        ++it;
+    }
+
+    // PR-9 (server-perf): parallelize the per-client flush. SDL_net's
+    // NET_WriteToStreamSocket is documented thread-safe per-socket,
+    // and we hold one socket per Target (each Target has its own
+    // OutboundQueue + its own NET_StreamSocket*), so multiple TBB
+    // workers each draining a different client's queue is safe.
+    //
+    // The shared writes here are:
+    //   - `failed`: per-thread-local accumulator merged at the end
+    //   - `maxDepth`: atomic max via cmpxchg loop
+    //   - perf counters inside flushTo: already std::atomic
+    std::atomic<std::uint32_t> maxDepthAtomic{0};
+    std::mutex failedMutex;
+    std::vector<ClientId> failed;
+
+    auto flushKernel = [&](const Target& t) {
+        const auto depth = static_cast<std::uint32_t>(t.queue->depth());
+        std::uint32_t cur = maxDepthAtomic.load(std::memory_order_relaxed);
+        while (depth > cur && !maxDepthAtomic.compare_exchange_weak(cur, depth, std::memory_order_relaxed)) {
+        }
+        if (!t.queue->flushTo(t.socket, k_maxAgeMs)) {
+            // Disconnects are rare; a brief mutex on the failure
+            // list is cheaper than a per-thread vector + merge.
+            std::lock_guard<std::mutex> fl(failedMutex);
+            failed.push_back(t.id);
+        }
+    };
+
+    ::group2::perf::parallelFor(targets.begin(), targets.end(), flushKernel);
+    const std::uint32_t maxDepth = maxDepthAtomic.load(std::memory_order_relaxed);
+
+    // Phase 3: apply failures + republish atomics. Take the lock once.
+    {
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
+        for (ClientId id : failed) {
+            if (auto it = clients.find(id); it != clients.end()) {
+                disconnectClient(it->second);
+                clients.erase(it);
+            }
+        }
+
+        auto& nc = ::group2::perf::net();
+        nc.clientCount.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+        std::uint32_t cur = nc.peakBacklog.load(std::memory_order_relaxed);
+        while (maxDepth > cur && !nc.peakBacklog.compare_exchange_weak(cur, maxDepth, std::memory_order_relaxed)) {
+        }
+
+        // PR-4: publish lock-free read snapshots.
+        clientCountAtomic_.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+        auto rttSnap = std::make_shared<ClientRttSnapshot>();
+        rttSnap->entries.reserve(clients.size());
+        for (const auto& [id, conn] : clients) {
+            rttSnap->entries.push_back(ClientNetState{
+                .id = id,
+                .rttMs = conn.lastReportedRttMs,
+                .interpDelaySnapshots = conn.lastReportedInterpDelaySnapshots,
+            });
+        }
+        // PR-30: free-function API for cross-platform atomic shared_ptr.
+        // See `Server.hpp`'s comment on `rttSnapshotAtomic_` for why.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        std::atomic_store_explicit(&rttSnapshotAtomic_,
+                                   std::shared_ptr<const ClientRttSnapshot>(std::move(rttSnap)),
+                                   std::memory_order_release);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     }
 }
 
@@ -162,25 +287,42 @@ void Server::enqueueReliableEvent(const void* data, int len)
     // times for resilience against UDP loss. If `eventsOverUdp` is
     // off, fall back to the existing TCP path.
     constexpr uint8_t k_reliableRedundancy = 3;
-    auto framed = std::vector<uint8_t>(static_cast<size_t>(len));
-    std::memcpy(framed.data(), data, static_cast<size_t>(len));
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-5a (server-perf): build the bytes ONCE into a shared_ptr.
+    // Every per-client enqueue (UDP reliable queue OR TCP fallback)
+    // is a pointer copy, not a vector copy. Pre-PR-5a:
+    //   - UDP path: `framed = framed` copied a vector per client
+    //   - TCP path: `frameMessage(data, len)` allocated a fresh
+    //     framed vector per client AND OutboundQueue::enqueue copied
+    //     it again into the deque entry
+    // Both contributed to the `broadcastEvents` p99 = 25-50 ms spike
+    // at 300 bots during fire-burst ticks.
+    {
+        // Raw payload (no length prefix) for the UDP reliable path.
+        auto rawPayload = std::vector<uint8_t>(static_cast<size_t>(len));
+        std::memcpy(rawPayload.data(), data, static_cast<size_t>(len));
+        auto sharedRaw = std::make_shared<const std::vector<uint8_t>>(std::move(rawPayload));
 
-    if (!transportConfig_.eventsOverUdp || !udpEndpoint_.isOpen()) {
-        // TCP fallback. replaceKey = 0 → never drop on age, always ship.
-        for (auto& [_, conn] : clients) {
-            conn.outbound.enqueue(0, frameMessage(data, len));
+        // 4-byte length-prefixed framed payload for the TCP fallback.
+        auto sharedFramed = std::make_shared<const std::vector<uint8_t>>(frameMessage(data, len));
+
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
+
+        if (!transportConfig_.eventsOverUdp || !udpEndpoint_.isOpen()) {
+            // TCP fallback. replaceKey = 0 → never drop on age, always ship.
+            for (auto& [_, conn] : clients) {
+                conn.outbound.enqueue(0, sharedFramed);
+            }
+            return;
         }
-        return;
-    }
 
-    for (auto& [_, conn] : clients) {
-        conn.reliableQueue.push_back(Connection::PendingReliableEvent{
-            .sequence = conn.reliableNextSequence++,
-            .remainingSends = k_reliableRedundancy,
-            .framed = framed,
-        });
+        for (auto& [_, conn] : clients) {
+            conn.reliableQueue.push_back(Connection::PendingReliableEvent{
+                .sequence = conn.reliableNextSequence++,
+                .remainingSends = k_reliableRedundancy,
+                .framed = sharedRaw,
+            });
+        }
     }
 }
 
@@ -219,15 +361,15 @@ void Server::handleUdpUnreliable(uint32_t connId,
 
     switch (type) {
     case PacketType::INPUT: {
-        // Same parser as the TCP INPUT case. Wire format:
-        //   [count u8] [rttMs u16] [InputSnapshot * count]
-        if (subLen < 3)
+        // Same parser as the TCP INPUT case. Wire format (PR-12):
+        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [InputSnapshot * count]
+        if (subLen < 4)
             return;
         const uint8_t count = sub[0];
         constexpr uint8_t k_maxInputsPerPacket = 16;
         if (count == 0 || count > k_maxInputsPerPacket)
             return;
-        const uint32_t expectedSize = 3u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 4u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (subLen != expectedSize)
             return;
 
@@ -237,7 +379,15 @@ void Server::handleUdpUnreliable(uint32_t connId,
         std::memcpy(&rttMs, sub + 1, sizeof(uint16_t));
         conn.lastReportedRttMs = rttMs;
 
-        const uint8_t* base = sub + 3;
+        // PR-12: client's render-delay (in snapshots) — see
+        // Connection::lastReportedInterpDelaySnapshots for the lag-comp
+        // formula that consumes this.  Clamped to the
+        // InterpolationBuffer capacity to defend against malformed
+        // values; well-behaved clients never exceed 8.
+        const uint8_t interpDelaySnapshots = std::min<uint8_t>(sub[3], 8);
+        conn.lastReportedInterpDelaySnapshots = interpDelaySnapshots;
+
+        const uint8_t* base = sub + 4;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
@@ -250,6 +400,25 @@ void Server::handleUdpUnreliable(uint32_t connId,
             eventQueue.enqueue(event);
             conn.lastAppliedInputTick = snap.tick;
         }
+        break;
+    }
+    case PacketType::SHOT_INTENT: {
+        // PR-27 wire format (mirrors `Client::sendShotIntent`):
+        //   [shotInputTick u32] [targetClientId u16] [AnimSnapshot 20B]
+        // → 26-byte payload after the type byte.  Loss-tolerant: if a
+        // SHOT_INTENT is dropped, the server falls back to its own
+        // historical anim state for that shot (pre-PR-27 behaviour).
+        constexpr std::size_t k_shotIntentPayloadLen = sizeof(uint32_t) + sizeof(uint16_t) + anim_snapshot::k_wireSize;
+        static_assert(k_shotIntentPayloadLen == 26, "SHOT_INTENT payload size mismatch");
+        if (subLen != k_shotIntentPayloadLen)
+            return;
+        Event event{};
+        event.type = EventType::ShotIntent;
+        event.clientId = conn.clientId;
+        std::memcpy(&event.shotIntent.shotInputTick, sub, sizeof(uint32_t));
+        std::memcpy(&event.shotIntent.targetClientId, sub + sizeof(uint32_t), sizeof(uint16_t));
+        event.shotIntent.targetAnim = anim_snapshot::unpackSnapshot(sub + sizeof(uint32_t) + sizeof(uint16_t));
+        eventQueue.enqueue(event);
         break;
     }
     case PacketType::PING: {
@@ -286,21 +455,23 @@ void Server::networkLoop()
     // having to wait for an entire I/O cycle to finish.
     while (!shouldStop_.load(std::memory_order_relaxed)) {
         {
-            std::lock_guard<std::mutex> lock(stateMutex_);
+            std::unique_lock<std::shared_mutex> lock(stateMutex_);
             acceptClients();
         }
-        {
-            std::lock_guard<std::mutex> lock(stateMutex_);
-            readClients();
-        }
+        // PR-6: readClients now manages its own shared/unique split.
+        readClients();
 
         // ── Phase 3d: UDP receive phase ──────────────────────────────
         //
-        // Drain all available datagrams in one batch. Held under the
-        // state mutex so handleUdpInput's enqueue path is serialized
-        // with the game thread's dequeueEvent.
+        // PR-6: shared lock. handleUdpUnreliable reads the clients map
+        // (lookup by connectionId), updates per-Connection state
+        // (lastReportedRttMs, udpAddr) — those are written only by
+        // the network thread (this code), so no race with concurrent
+        // shared lockers reading per-Conn state. eventQueue.enqueue
+        // is self-locked. PONG send (`udpEndpoint_.send`) doesn't
+        // touch shared state.
         if (udpEndpoint_.isOpen()) {
-            std::lock_guard<std::mutex> lock(stateMutex_);
+            std::shared_lock<std::shared_mutex> lock(stateMutex_);
             net::UdpReceivedMessage msg;
             int drained = 0;
             constexpr int k_maxDatagramsPerCycle = 512;
@@ -322,10 +493,140 @@ void Server::networkLoop()
             }
         }
 
+        // ── PR-2: deferred snapshot fanout (lock-light) ─────────────
+        //
+        // `broadcastRegistry` publishes shared_ptr buffers; this phase
+        // fans them out to clients. The fanout has two parts with
+        // different locking needs:
+        //   1. Snapshot the per-client UDP-destination + TCP-queue
+        //      addresses while the lock is held. O(N), microseconds.
+        //   2. Issue sendto() per UDP target, OR enqueue() into each
+        //      TCP queue. The UDP sends are syscalls that DO NOT
+        //      need stateMutex_; the TCP enqueue mutates per-client
+        //      OutboundQueue which currently lives behind the mutex.
+        //
+        // We split the lock so the game thread isn't blocked on
+        // hundreds of sendto() syscalls — exactly the symptom that
+        // tanked tick p99 to 50 ms at 100 bots in PR-2's first cut.
         {
-            std::lock_guard<std::mutex> lock(stateMutex_);
-            flushAllOutbound();
+            std::shared_ptr<const std::vector<uint8_t>> payload;
+            std::shared_ptr<const std::vector<uint8_t>> framed;
+            {
+                std::unique_lock<std::shared_mutex> lock(stateMutex_);
+                payload = std::exchange(pendingSnapshotPayload_, nullptr);
+                framed = std::exchange(pendingSnapshotFramed_, nullptr);
+            }
+
+            if (payload || framed) {
+                // Step 1: collect per-client send targets under lock.
+                // We only read the small fields — udpAddr, connectionId,
+                // sequence — and bump the per-client sequence counter
+                // here so the same client never gets duplicate
+                // sequences for two snapshots even if a fanout takes
+                // longer than a cycle.
+                struct UdpTarget
+                {
+                    net::UdpEndpointAddr addr; // ref-counted; we'll release
+                    uint32_t connectionId;
+                    uint16_t sequence;
+                };
+                static thread_local std::vector<UdpTarget> udpTargets;
+                static thread_local std::vector<ClientId> tcpTargets;
+                udpTargets.clear();
+                tcpTargets.clear();
+
+                {
+                    // PR-6: shared lock — we read the clients map and
+                    // bump per-Conn `udpSnapshotSequence`, which is
+                    // single-writer (this thread).
+                    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+                    const bool useUdp = transportConfig_.snapshotsOverUdp && udpEndpoint_.isOpen();
+                    for (auto& [id, conn] : clients) {
+                        const bool canUseUdp = useUdp && conn.udpAddr.addr != nullptr;
+                        if (canUseUdp && payload) {
+                            UdpTarget t;
+                            t.addr.addr = NET_RefAddress(conn.udpAddr.addr);
+                            t.addr.port = conn.udpAddr.port;
+                            t.connectionId = conn.connectionId;
+                            t.sequence = conn.udpSnapshotSequence++;
+                            udpTargets.push_back(t);
+                        } else if (framed) {
+                            // Defer TCP enqueue — that path mutates
+                            // per-client state that is mutex-protected.
+                            // We collect IDs here and re-acquire the
+                            // lock in step 3.
+                            tcpTargets.push_back(id);
+                        }
+                    }
+                }
+
+                // Step 2: UDP sends. Lock-free — sendto only touches the
+                // socket FD and the dest address. With 100 bots × ~5
+                // fragments per snapshot × 32 Hz, this is ~16k syscalls/s
+                // off the game thread's critical path.
+                //
+                // PR-9 (server-perf): parallelize the fan-out across
+                // TBB workers. NET_SendDatagram is documented thread-
+                // safe per-socket; multiple workers calling
+                // sendFragmented on the same UDP socket with different
+                // dest addresses race only on the socket FD's send
+                // buffer (kernel-side), which is the protocol stack's
+                // job to serialize. At 500 clients × 5 fragments × 32 Hz
+                // = 80k syscalls/sec — clearly worth fanning out.
+                if (payload && !udpTargets.empty()) {
+                    // PR-15: FULL keyframes get fragment-level redundancy
+                    // (each fragment sent twice).  Single fragment loss in
+                    // an unredundant FULL kills the whole keyframe — and
+                    // because of the PR-14 keyframe-baseline design, that
+                    // also blanks the next ~62 ms of DELTAs for the client
+                    // (no valid baseline to decode against).  At ~9
+                    // fragments per FULL and 5 % loss, P(FULL succeeds)
+                    // climbs from 63 % → 98 % with redundancy=2.  Bandwidth
+                    // hit is contained: FULLs are 1-of-8 snapshots so
+                    // doubling them costs ~12 % extra wire BW, well below
+                    // PR-10's 5× delta savings.
+                    //
+                    // DELTAs stay redundancy=1 — they're typically 1
+                    // fragment, drop independently, and the next
+                    // (independently-decodable!) DELTA arrives 7.8 ms
+                    // later.  No amplification to defeat.
+                    const bool isFullKeyframe =
+                        !payload->empty() && static_cast<PacketType>(payload->front()) == PacketType::UPDATE_REGISTRY;
+                    const int udpRedundancy = isFullKeyframe ? 2 : 1;
+
+                    auto udpKernel = [this, &payload, udpRedundancy](UdpTarget& t) {
+                        net::PacketHeader hdr{};
+                        hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
+                        hdr.connectionId = t.connectionId;
+                        hdr.sequence = t.sequence;
+                        hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
+                        udpEndpoint_.sendFragmented(
+                            t.addr, hdr, payload->data(), static_cast<int>(payload->size()), udpRedundancy);
+                        t.addr.release();
+                    };
+                    ::group2::perf::parallelFor(udpTargets.begin(), udpTargets.end(), udpKernel);
+                }
+
+                // Step 3: TCP enqueue. Brief lock; per-client work is a
+                // shared_ptr copy (PR-2) so the inner loop is O(N)
+                // pointer copies, not O(N) memcpys.
+                if (framed && !tcpTargets.empty()) {
+                    // PR-6: shared lock — per-Conn outbound is self-locked.
+                    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+                    for (const ClientId& id : tcpTargets) {
+                        if (auto it = clients.find(id); it != clients.end()) {
+                            it->second.outbound.enqueue(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY), framed);
+                        }
+                    }
+                }
+            }
         }
+
+        // PR-5b: flushAllOutbound now manages its own locking (brief
+        // snapshot + apply phases) so it can run the per-client
+        // syscall fan-out without `stateMutex_` held. The caller
+        // does NOT lock around it any more.
+        flushAllOutbound();
 
         // ── Phase 3d-5: drain reliable-event queues over UDP ────────
         //
@@ -336,7 +637,7 @@ void Server::networkLoop()
         // cycles so a single dropped datagram doesn't lose the event
         // (and the client's sequence-based dedup catches the dups).
         if (udpEndpoint_.isOpen()) {
-            std::lock_guard<std::mutex> lock(stateMutex_);
+            std::unique_lock<std::shared_mutex> lock(stateMutex_);
             for (auto& [_, conn] : clients) {
                 if (conn.udpAddr.addr == nullptr || conn.reliableQueue.empty())
                     continue;
@@ -346,7 +647,10 @@ void Server::networkLoop()
                     hdr.connectionId = conn.connectionId;
                     hdr.sequence = entry.sequence;
                     hdr.channel = static_cast<uint8_t>(net::ChannelId::ReliableOrdered);
-                    udpEndpoint_.send(conn.udpAddr, hdr, entry.framed.data(), static_cast<int>(entry.framed.size()));
+                    if (entry.framed) {
+                        udpEndpoint_.send(
+                            conn.udpAddr, hdr, entry.framed->data(), static_cast<int>(entry.framed->size()));
+                    }
                     if (entry.remainingSends > 0)
                         --entry.remainingSends;
                 }
@@ -385,17 +689,25 @@ void Server::acceptClients()
         std::uniform_int_distribution<uint32_t> dist{1, std::numeric_limits<uint32_t>::max()};
         const uint32_t connId = dist(rng);
 
-        clients.insert({clientId,
-                        Connection{.msgStream = MessageStream(socket),
-                                   .clientId = clientId,
-                                   .pendingInitialization = true,
-                                   .connectionId = connId}});
+        // PR-5b (server-perf): construct in place. `Connection` is no
+        // longer copyable (its `OutboundQueue` member now holds a
+        // `std::mutex`), so the previous `insert({key, Connection{...}})`
+        // form would synthesize a copy. `try_emplace` default-constructs
+        // the value and we fill in the fields after.
+        auto [it, inserted] = clients.try_emplace(clientId);
+        if (inserted) {
+            auto& conn = it->second;
+            conn.msgStream = MessageStream(socket);
+            conn.clientId = clientId;
+            conn.pendingInitialization = true;
+            conn.connectionId = connId;
+        }
         connIdToClient_[connId] = clientId;
         eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected, .movementIntent = {}});
     }
 }
 
-void Server::disconnectClient(Connection conn)
+void Server::disconnectClient(Connection& conn)
 {
     SDL_Log("Server: disconnecting client %d", conn.clientId.value);
     NET_DestroyStreamSocket(conn.msgStream.socket);
@@ -408,19 +720,59 @@ void Server::disconnectClient(Connection conn)
 void Server::readClients()
 {
     // packet format is 4 byte length prefix
-    for (auto it = clients.begin(); it != clients.end();) {
-        auto& conn = it->second;
+    //
+    // PR-1: count inbound bytes + packets at the dispatcher boundary.
+    // We observe `size` directly inside the callback — it's the
+    // length of the wire message without its 4-byte length prefix,
+    // which is the closest thing we have to "useful payload bytes
+    // received." Adding the 4-byte framing accounts for total wire
+    // bytes; we do that with a single per-message correction.
+    //
+    // PR-6 (server-perf): two-phase read with shared / unique split.
+    //
+    //   Phase 1 (shared lock): iterate clients, drive each socket's
+    //           msgStream.poll. Per-Connection state (`recvBuf`,
+    //           `lastAppliedInputTick`, `lastReportedRttMs`,
+    //           `udpAddr`) is single-writer (this thread), so other
+    //           shared-lock holders (game-thread `enqueueBroadcast`,
+    //           `notifyPlayerClientId`) don't race. Failed sockets
+    //           are collected for deferred disconnect.
+    //
+    //   Phase 2 (unique lock, only if any failed): apply disconnects.
+    //           Briefer than the read pass; runs after we've already
+    //           given every healthy client its read cycle.
+    //
+    // Pre-PR-6 this whole loop ran under a unique lock, blocking
+    // every game-thread broadcast / lookup for the full pass — at
+    // 300 clients that pass took 25-50 ms p99 wall time and starved
+    // the simulation thread.
+    auto& nc = ::group2::perf::net();
 
-        bool ok =
-            conn.msgStream.poll([this, &conn](const void* data, Uint32 size) { handleMessage(conn, data, size); });
+    static thread_local std::vector<ClientId> failed;
+    failed.clear();
 
-        if (!ok) {
-            disconnectClient(conn);
-            it = clients.erase(it);
-            continue;
+    {
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        for (auto& [_, conn] : clients) {
+            bool ok = conn.msgStream.poll([this, &conn, &nc](const void* data, Uint32 size) {
+                nc.bytesRecv.fetch_add(size + sizeof(Uint32), std::memory_order_relaxed);
+                nc.packetsRecv.fetch_add(1, std::memory_order_relaxed);
+                handleMessage(conn, data, size);
+            });
+            if (!ok) {
+                failed.push_back(conn.clientId);
+            }
         }
+    }
 
-        ++it;
+    if (!failed.empty()) {
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
+        for (ClientId id : failed) {
+            if (auto it = clients.find(id); it != clients.end()) {
+                disconnectClient(it->second);
+                clients.erase(it);
+            }
+        }
     }
 }
 
@@ -435,16 +787,16 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     switch (type) {
     case PacketType::INPUT: {
-        // Multi-input wire format:
-        //   [count u8] [rttMs u16] [InputSnapshot * count],
+        // Multi-input wire format (PR-12):
+        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [InputSnapshot * count]
         // oldest-first. Each client packet carries the last
         // Client::k_inputRedundancy inputs. We dedup against
         // conn.lastAppliedInputTick — most entries in any given packet are
         // duplicates of already-applied snapshots and get skipped cheaply.
         // The rttMs prefix is the client's smoothed RTT estimate; the
-        // server uses RTT/2 as the rewind window for lag-compensated
-        // hitscan (Phase 6).
-        if (payloadLen < 3) {
+        // interpDelaySnapshots byte is the client's render-delay (PR-11).
+        // Both feed the lag-comp formula in updateLagCompTargets.
+        if (payloadLen < 4) {
             SDL_Log("Server: received undersized INPUT packet from client %d", conn.clientId.value);
             return;
         }
@@ -461,7 +813,7 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
             return;
         }
 
-        const uint32_t expectedSize = 3u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 4u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (payloadLen != expectedSize) {
             SDL_Log("Server: received INPUT packet of invalid size %u (expected %u for count %u)",
                     payloadLen,
@@ -477,7 +829,15 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         std::memcpy(&rttMs, payload + 1, sizeof(uint16_t));
         conn.lastReportedRttMs = rttMs;
 
-        const uint8_t* base = payload + 3;
+        // PR-12: client's render-delay (in snapshots) — feeds the
+        // lag-comp formula alongside RTT/2 so the server rewinds to
+        // exactly the world state the client SAW when firing, not
+        // merely to RTT/2 ago.  Clamped to InterpolationBuffer capacity
+        // to defend against malformed packets.
+        const uint8_t interpDelaySnapshots = std::min<uint8_t>(payload[3], 8);
+        conn.lastReportedInterpDelaySnapshots = interpDelaySnapshots;
+
+        const uint8_t* base = payload + 4;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
@@ -530,20 +890,30 @@ ClientId Server::getNextClientId()
 
 bool Server::isEmpty()
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-2c: EventQueue self-locks. No outer stateMutex_ needed —
+    // draining events no longer competes with the network thread's
+    // long-running readClients/UDP-recv phases for the same lock.
     return eventQueue.isEmpty();
 }
 
 Event Server::dequeueEvent()
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
     return eventQueue.dequeue();
+}
+
+void Server::drainEvents(std::vector<Event>& out)
+{
+    eventQueue.drainAll(out);
 }
 
 // NOTE: playerEntity is the entity id of the player
 bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — we look up by clientId, set
+    // `pendingInitialization=false` (per-Conn write, single writer:
+    // this is only called once per client init from the game thread),
+    // and call per-Conn `outbound.enqueue` (self-locked).
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     auto it = clients.find(clientId);
     if (it == clients.end())
         return false;
@@ -567,40 +937,130 @@ bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 
 void Server::broadcastRegistry(const Registry& registry)
 {
-    auto buf = registry_serialization::serialize(registry);
-    buf.insert(buf.begin(), static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
+    // Two buffers because the two transports want different shapes:
+    //   - UDP: raw payload `[PacketType][...wire fields]`. The
+    //     PacketHeader is added per-fragment by `sendFragmented`.
+    //   - TCP: framed `[len:u32][PacketType][...wire fields]`. Goes
+    //     straight into OutboundQueue → NET_WriteToStreamSocket.
+    //
+    // Both are immutable post-publish. The shared_ptr lets N clients
+    // observe the same bytes via N pointer copies.
+    //
+    // PR-10 (server-perf): wire format gains a snapshot tick + an
+    // optional delta variant.
+    //
+    //   Full snapshot (UPDATE_REGISTRY):
+    //     [PacketType:u8] [tick:u32] [serializedBytes...]
+    //
+    //   Delta snapshot (UPDATE_REGISTRY_DELTA):
+    //     [PacketType:u8] [tick:u32] [fromTick:u32]
+    //     [baselineSize:u32] [rlePatch...]
+    //
+    // PR-14 (loss resilience): `fromTick` references the LAST FULL
+    // KEYFRAME, not the immediately previous snapshot.  Every delta
+    // within a keyframe window encodes against the same fixed
+    // baseline.  This eliminates the cascade-on-loss bug — pre-PR-14,
+    // a single dropped delta caused all subsequent deltas in the
+    // window to drop because their fromTick referenced bytes the
+    // client no longer held.  Post-PR-14, every delta is
+    // independently decodable against the keyframe, so individual
+    // packet drops only cost that one frame's worth of state — the
+    // next delta picks up where the lost one would have.
+    //
+    // Cost trade-off: deltas grow as we move further from the
+    // keyframe (more bytes have changed since the reference).  At
+    // PR-13's 128 Hz rate with k_keyframeInterval = 8 (~62 ms), the
+    // last delta in a window is ~2× the size of the first — still
+    // dramatically smaller than a full snapshot, and the loss-
+    // resilience win swamps the modest size growth.
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-14: 8 snapshots / keyframe at PR-13's 128 Hz = ~62 ms recovery
+    // window.  Pre-PR-14 was 16 snapshots (~125 ms at 128 Hz, ~500 ms
+    // at the legacy 32 Hz).  Tighter at 128 Hz because each keyframe
+    // is now full size; the wire-size extra is amortised across many
+    // smaller-than-pre-PR-14 deltas (which now grow with distance
+    // from keyframe but still beat full in most ticks).
+    constexpr std::uint32_t k_keyframeInterval = 8;
 
-    // Phase 3d-4: when the snapshots-over-UDP toggle is on, fragment
-    // the snapshot and ship it via UDP to every client whose udpAddr
-    // we know (i.e. that has sent us at least one UDP packet — see
-    // handleUdpUnreliable's address caching). Clients we haven't
-    // heard from over UDP yet fall back to the TCP path; they catch
-    // up to UDP within ~one snapshot interval after their first
-    // INPUT/PING goes through.
-    const bool useUdp = transportConfig_.snapshotsOverUdp && udpEndpoint_.isOpen();
+    auto raw = registry_serialization::serialize(registry);
+    const std::uint32_t thisTick = ++snapshotCounter_;
+    const bool forceFull = keyframeRaw_.empty() || keyframeTick_ == 0 || (snapshotCounter_ % k_keyframeInterval) == 0;
 
-    for (auto& [_, conn] : clients) {
-        const bool canUseUdp = useUdp && conn.udpAddr.addr != nullptr;
-        if (canUseUdp) {
-            net::PacketHeader hdr{};
-            hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
-            hdr.connectionId = conn.connectionId;
-            hdr.sequence = conn.udpSnapshotSequence++;
-            hdr.channel = static_cast<uint8_t>(net::ChannelId::Unreliable);
-            // sendFragmented handles both the single-datagram case
-            // (small registries, e.g. early in a match) and the multi-
-            // fragment case (~5 KB at 100 players → ~5 fragments). It
-            // sets flags.fragmented + fragmentInfo per fragment.
-            udpEndpoint_.sendFragmented(conn.udpAddr, hdr, buf.data(), static_cast<int>(buf.size()));
-        } else {
-            // TCP fallback path: the per-client OutboundQueue with
-            // replace-on-stale (Phase 3a) — same as before 3d-4.
-            conn.outbound.enqueue(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY),
-                                  frameMessage(buf.data(), static_cast<int>(buf.size())));
+    std::vector<uint8_t> wirePayload; // [PacketType][...] — UDP raw form
+    bool sentDelta = false;
+
+    if (!forceFull && raw.size() == keyframeRaw_.size()) {
+        auto patch = registry_serialization::encodeDelta(keyframeRaw_, raw);
+        // Only ship a delta if the patch beats the full by >25 %.
+        // Otherwise the per-client wire saving doesn't justify the
+        // extra encode/decode CPU. Threshold is pragmatic; revisit
+        // once we have a real-traffic profile.
+        const std::size_t deltaWireSize = 1 /*PacketType*/ + sizeof(std::uint32_t) /*tick*/ +
+                                          sizeof(std::uint32_t) /*fromTick*/ + sizeof(std::uint32_t) /*size*/ +
+                                          patch.size();
+        const std::size_t fullWireSize = 1 + sizeof(std::uint32_t) + raw.size();
+        if (deltaWireSize * 4 < fullWireSize * 3) {
+            // Build delta wire payload.
+            wirePayload.reserve(deltaWireSize);
+            wirePayload.push_back(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY_DELTA));
+            const auto t = thisTick;
+            const auto ft = keyframeTick_;
+            const auto sz = static_cast<std::uint32_t>(raw.size());
+            const auto* tp = reinterpret_cast<const uint8_t*>(&t);
+            const auto* fp = reinterpret_cast<const uint8_t*>(&ft);
+            const auto* sp = reinterpret_cast<const uint8_t*>(&sz);
+            wirePayload.insert(wirePayload.end(), tp, tp + sizeof(t));
+            wirePayload.insert(wirePayload.end(), fp, fp + sizeof(ft));
+            wirePayload.insert(wirePayload.end(), sp, sp + sizeof(sz));
+            wirePayload.insert(wirePayload.end(), patch.begin(), patch.end());
+            sentDelta = true;
         }
     }
+
+    if (!sentDelta) {
+        // Full snapshot path.  This becomes the new keyframe baseline
+        // — every delta until the next forced-full will reference these
+        // bytes, so we hold onto them past this function.
+        wirePayload.reserve(1 + sizeof(std::uint32_t) + raw.size());
+        wirePayload.push_back(static_cast<uint8_t>(PacketType::UPDATE_REGISTRY));
+        const auto t = thisTick;
+        const auto* tp = reinterpret_cast<const uint8_t*>(&t);
+        wirePayload.insert(wirePayload.end(), tp, tp + sizeof(t));
+        wirePayload.insert(wirePayload.end(), raw.begin(), raw.end());
+
+        // PR-14: only a FULL replaces the keyframe baseline.  Deltas do
+        // NOT update it — that's the whole point.  Without this guard
+        // we'd be back to the pre-PR-14 cascade-on-loss behaviour.
+        keyframeRaw_ = std::move(raw);
+        keyframeTick_ = thisTick;
+    }
+
+    const std::size_t wireBytes = wirePayload.size();
+
+    // Build the TCP-framed buffer once.
+    std::vector<uint8_t> framedBuf(sizeof(Uint32) + wireBytes);
+    {
+        const auto msgLen = static_cast<Uint32>(wireBytes);
+        std::memcpy(framedBuf.data(), &msgLen, sizeof(msgLen));
+        std::memcpy(framedBuf.data() + sizeof(msgLen), wirePayload.data(), wireBytes);
+    }
+
+    auto payload = std::make_shared<const std::vector<uint8_t>>(std::move(wirePayload));
+    auto framed = std::make_shared<const std::vector<uint8_t>>(std::move(framedBuf));
+
+    std::size_t fanout = 0;
+    {
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
+        // Replace any in-flight snapshot the network thread hasn't
+        // picked up yet — only the freshest is meaningful.
+        pendingSnapshotPayload_ = std::move(payload);
+        pendingSnapshotFramed_ = std::move(framed);
+        fanout = clients.size();
+    }
+
+    auto& nc = ::group2::perf::net();
+    nc.bytesSent.fetch_add(static_cast<std::uint64_t>(wireBytes) * fanout, std::memory_order_relaxed);
+    nc.snapshotsSent.fetch_add(fanout, std::memory_order_relaxed);
 }
 
 void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events)
@@ -622,17 +1082,72 @@ void Server::broadcastParticleEvents(const std::vector<NetParticleEvent>& events
 
 int Server::getClientCount()
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
-    return static_cast<int>(clients.size());
+    // PR-4 (server-perf): atomic gauge — published from
+    // flushAllOutbound on the network thread. Pre-PR-4 this acquired
+    // stateMutex_ and competed with the network thread's
+    // long-running readClients pass; at 200+ bots that put it on the
+    // matchController hot path's p99 spike list. Now lock-free.
+    return static_cast<int>(clientCountAtomic_.load(std::memory_order_relaxed));
 }
 
 uint16_t Server::getClientRttMs(ClientId clientId)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
+    // PR-6: shared lock — pure read. Modern callers should use
+    // snapshotClientRtts (lock-free) instead; this single-client
+    // form is kept for compat.
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
     const auto it = clients.find(clientId);
     if (it == clients.end())
         return 0;
     return it->second.lastReportedRttMs;
+}
+
+void Server::snapshotClientNetStates(std::vector<ClientNetState>& out)
+{
+    // PR-4 (server-perf): read the atomic-published RTT cache the
+    // network thread maintains.  PR-12 extended each entry from
+    // `(id, rttMs)` to `(id, rttMs, interpDelaySnapshots)` so the
+    // lag-comp scheduler reads both rewind terms in one fetch.
+    // Lock-free, at most one network-cycle (~1 ms) stale — well below
+    // the lag-comp scheduler's half-RTT-rounded-to-ticks resolution.
+    //
+    // Falls back to a freshly-built mutex-protected snapshot only on
+    // the very first call before the network thread has published
+    // anything. After that, every call is lock-free.
+    out.clear();
+    // PR-30: free-function API for cross-platform atomic shared_ptr.
+    // See `Server.hpp`'s comment on `rttSnapshotAtomic_` for why.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    auto cached = std::atomic_load_explicit(&rttSnapshotAtomic_, std::memory_order_acquire);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+    if (cached) {
+        out.reserve(cached->entries.size());
+        out.assign(cached->entries.begin(), cached->entries.end());
+        return;
+    }
+
+    // Cold path: no published snapshot yet. Take a shared lock so we
+    // don't race with concurrent inserts by acceptClients (which
+    // takes unique). Pure read.
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+    out.reserve(clients.size());
+    for (const auto& [id, conn] : clients) {
+        out.push_back(ClientNetState{
+            .id = id,
+            .rttMs = conn.lastReportedRttMs,
+            .interpDelaySnapshots = conn.lastReportedInterpDelaySnapshots,
+        });
+    }
+}
+
+bool Server::sendToClient(const ClientId& clientId, const void* data, int len)
+{
+    return enqueueTo(clientId, /*replaceKey*/ 0, data, len);
 }
 
 void Server::broadcastMatchStatus(MatchStatePacket packet)

@@ -132,21 +132,12 @@ float calcShadow(vec3 worldPos, vec3 N)
     }
     if (cascade < 0) return 1.0; // Beyond shadow distance.
 
-    float shadowVal = sampleCascade(cascade, offsetPos);
-
-    // Smooth blend in last 10% of each cascade to avoid visible seams.
-    float cascadeStart = (cascade > 0) ? shadow.cascadeSplits[cascade - 1] : 0.0;
-    float cascadeEnd   = shadow.cascadeSplits[cascade];
-    float blendZone    = (cascadeEnd - cascadeStart) * 0.1;
-    float blendStart   = cascadeEnd - blendZone;
-
-    if (viewZ > blendStart && cascade < 3) {
-        float nextVal     = sampleCascade(cascade + 1, offsetPos);
-        float blendFactor = (viewZ - blendStart) / blendZone;
-        shadowVal = mix(shadowVal, nextVal, blendFactor);
-    }
-
-    return shadowVal;
+    // Phase 3 perf: cascade-blend dropped.  Two PCF kernels per fragment in
+    // the blend zone (the slowest 10% of each cascade) double the shadow
+    // sampling cost; the seam is barely visible thanks to PCF softness alone,
+    // and the 4-cascade split already keeps texel ratios close enough that
+    // the residual contrast is below most users' perception threshold.
+    return sampleCascade(cascade, offsetPos);
 }
 
 // GGX Normal Distribution Function (Trowbridge-Reitz)
