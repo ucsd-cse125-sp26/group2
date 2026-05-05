@@ -422,8 +422,17 @@ private:
     // them lock-free. Trade-offs:
     //   - Snapshot is at most one network-thread cycle (~1 ms) stale.
     //     For lag-comp's RTT/2 rewind window that's negligible.
-    //   - The shared_ptr atomic is std::atomic<std::shared_ptr<T>>
-    //     (C++20). Available in libstdc++ from version 12+.
+    //   - PR-30 (cross-platform): we use the C++11 free-function API
+    //     `std::atomic_load_explicit(&shared_ptr, …)` /
+    //     `std::atomic_store_explicit(&shared_ptr, …)` rather than the
+    //     C++20 `std::atomic<std::shared_ptr<T>>` partial specialization.
+    //     Reason: libstdc++ 12+ ships the C++20 specialization, but
+    //     Apple's libc++ (through Xcode 16 / libc++ 19) does NOT.
+    //     The free-function API is deprecated in C++20 but remains
+    //     available through C++23 across all stdlibs we ship to, and
+    //     lowers to the same lock-free atomic ops on x86/ARM.  Local
+    //     pragma suppression in `Server.cpp` silences the deprecation
+    //     warnings at the call sites.
     /// @brief Atomic-published snapshot of every connected client's
     /// network state.  PR-12 extended this from `(id, rtt)` pairs to
     /// `(id, rtt, interpDelaySnapshots)` so a single tick of
@@ -433,6 +442,6 @@ private:
     {
         std::vector<ClientNetState> entries;
     };
-    std::atomic<std::shared_ptr<const ClientRttSnapshot>> rttSnapshotAtomic_;
+    std::shared_ptr<const ClientRttSnapshot> rttSnapshotAtomic_;
     std::atomic<std::uint32_t> clientCountAtomic_{0};
 };

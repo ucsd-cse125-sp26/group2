@@ -264,8 +264,18 @@ void Server::flushAllOutbound()
                 .interpDelaySnapshots = conn.lastReportedInterpDelaySnapshots,
             });
         }
-        rttSnapshotAtomic_.store(std::shared_ptr<const ClientRttSnapshot>(std::move(rttSnap)),
-                                 std::memory_order_release);
+        // PR-30: free-function API for cross-platform atomic shared_ptr.
+        // See `Server.hpp`'s comment on `rttSnapshotAtomic_` for why.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        std::atomic_store_explicit(&rttSnapshotAtomic_,
+                                   std::shared_ptr<const ClientRttSnapshot>(std::move(rttSnap)),
+                                   std::memory_order_release);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     }
 }
 
@@ -1105,7 +1115,16 @@ void Server::snapshotClientNetStates(std::vector<ClientNetState>& out)
     // the very first call before the network thread has published
     // anything. After that, every call is lock-free.
     out.clear();
-    auto cached = rttSnapshotAtomic_.load(std::memory_order_acquire);
+    // PR-30: free-function API for cross-platform atomic shared_ptr.
+    // See `Server.hpp`'s comment on `rttSnapshotAtomic_` for why.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    auto cached = std::atomic_load_explicit(&rttSnapshotAtomic_, std::memory_order_acquire);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     if (cached) {
         out.reserve(cached->entries.size());
         out.assign(cached->entries.begin(), cached->entries.end());
