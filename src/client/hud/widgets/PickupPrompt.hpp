@@ -15,11 +15,11 @@
 /// local player.
 struct PickupPrompt : HudWidget
 {
-    float fontSize = 26.f;     ///< Size of the descriptive text (logical px).
-    float keyFontSize = 28.f;  ///< Size of the "F" key glyph (logical px).
-    float keyBoxPadding = 8.f; ///< Padding inside the key glyph box.
-    float keyBoxRadius = 6.f;  ///< Corner radius of the key glyph box.
-    float spacing = 12.f;      ///< Gap between the key glyph box and the text.
+    float fontSize = 24.f;     ///< Size of the descriptive text (logical px).
+    float keyFontSize = 26.f;  ///< Size of the "F" key glyph (logical px).
+    float keyBoxPadding = 5.f; ///< Padding inside the key glyph box.
+    float keyBoxRadius = 4.f;  ///< Corner radius of the key glyph box.
+    float spacing = 10.f;      ///< Gap between the key glyph box and the text.
 
     PickupPrompt();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
