@@ -65,8 +65,9 @@ std::thread aggregatorThread;
 /// `[2^b, 2^(b+1))` ticks.
 inline std::size_t bucketOf(std::uint64_t v) noexcept
 {
-    if (v < 2)
+    if (v < 2) {
         return 0;
+    }
     // 63 - leading-zeros gives msb position; clamp to range.
 #if defined(__GNUC__) || defined(__clang__)
     const auto b = 63u - static_cast<unsigned>(__builtin_clzll(v));
