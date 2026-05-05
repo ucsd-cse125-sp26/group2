@@ -174,6 +174,8 @@ private:
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
     int weaponAssetIds_[4] = {-1, -1, -1, -1};
 
+    int rocketProjectileModelIdx_ = -1;
+
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
     bool showHudDebug_ = false;                          ///< Show the HUD Tweaker panel.

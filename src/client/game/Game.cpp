@@ -262,6 +262,19 @@ bool Game::init()
                     SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
             }
         }
+
+        // Load Rocket Projectile
+        {
+            const int id = addAssetDefinition(assets_, kRocketProjectile);
+            rocketProjectileModelIdx_ = renderer.loadSceneModel(kRocketProjectile.filename,
+                                                                 kRocketProjectile.loadTranslation,
+                                                                 kRocketProjectile.loadScale,
+                                                                 kRocketProjectile.flipUVs);
+            assets_.setModelIndex(id, rocketProjectileModelIdx_);
+
+            if (rocketProjectileModelIdx_ < 0)
+                SDL_Log("[client] WARNING: rocket projectile model '%s' failed to load", kRocketProjectile.filename);
+        }
     }
 
     // ── Procedural effects ──────────────────────────────────────────────
@@ -2274,12 +2287,12 @@ void Game::refreshRemoteProjectileRenderables()
     registry.view<Position, Projectile, Velocity, CollisionShape>().each(
         [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& shape) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            rend.modelIndex = 1;
+            rend.modelIndex = rocketProjectileModelIdx_;
+            rend.scale = glm::vec3(kRocketProjectile.loadScale);
+            rend.visible = true;
 
             // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            rend.scale = glm::vec3(10);
             // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-            rend.visible = true;
         });
 }
 

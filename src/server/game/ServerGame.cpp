@@ -266,18 +266,6 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     pendingKillEvents.clear();
 
     ++tickCount;
-
-    // Log once per second so we can watch the test entity fall and land.
-
-    // if (tickCount % tickRateHz == 0) {
-    //     registry.view<Position>().each([this](const Position& pos) {
-    //         SDL_Log("[server] tick %d | pos (%.1f, %.1f, %.1f)",
-    //                 tickCount,
-    //                 static_cast<double>(pos.value.x),
-    //                 static_cast<double>(pos.value.y),
-    //                 static_cast<double>(pos.value.z));
-    //     });
-    // }
 }
 
 void ServerGame::initNewPlayerEntity(ClientId clientId)

@@ -54,6 +54,13 @@ inline const AssetDefinition kWraithAsset{
     .loadScale = 8.0f,
 };
 
+inline const AssetDefinition kRocketProjectile{
+    .name = "rocket_projectile",
+    .filename = "bottle_a.glb", // update with rocket projectile asset
+    .role = AssetRole::Entity,
+    .loadScale = 20.0f,
+};
+
 inline const std::array<AssetDefinition, 4> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",
