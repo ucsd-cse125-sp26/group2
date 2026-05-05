@@ -28,7 +28,9 @@
 struct PlayerSimState
 {
     // ── Jump state ─────────────────────────────────────────────────────────
-    bool canDoubleJump{true};     ///< Reset on land / wallrun / climb.
+    bool canDoubleJump{true};     ///< Refreshed only after `k_doubleJumpGroundedRefreshTime` of continuous
+                                  ///< grounded OnFoot time. Wall jumps, climb jumps, slidehops, ledge mantles,
+                                  ///< and instant landings do NOT refresh it.
     bool jumpedThisTick{false};   ///< Set during the tick a jump occurs (for lurch setup).
     bool jumpHeldLastTick{false}; ///< Was jump key held on the previous tick (edge detection).
     float jumpCooldown{0.0f};     ///< Minimum time before double jump is available (s).

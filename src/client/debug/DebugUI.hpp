@@ -9,6 +9,13 @@
 #include "network/MatchStatus.hpp"
 #include "network/ShotDebugReport.hpp" // PR-20: ShotDebugCapture.
 
+// Forward-declared so DebugUI doesn't drag in raycast / hitbox headers via the
+// gamepad aim-assist system.  Full definition pulled in by DebugUI.cpp.
+namespace systems
+{
+struct GamepadAimAssistConfig;
+}
+
 #include <SDL3/SDL.h>
 
 #include <array>
@@ -55,6 +62,8 @@ public:
     /// @param registry                The ECS registry to inspect.
     /// @param tickCount               Total physics ticks elapsed.
     /// @param mouseSensitivity        Radians per pixel; slider (read/write).
+    /// @param gamepadLookSensitivity  Radians per second at full right-stick deflection; slider (read/write).
+    /// @param aimAssistCfg            Gamepad aim-assist config; sliders + toggle (read/write).
     /// @param renderSeparateFromPhysics Interpolated unlimited-fps mode toggle (read/write).
     /// @param inputSyncedWithPhysics  Sample input once per tick vs every frame (read/write).
     /// @param limitFPSToMonitor       VSync on/off toggle (read/write).
@@ -67,6 +76,8 @@ public:
     void buildUI(const Registry& registry,
                  int tickCount,
                  float& mouseSensitivity,
+                 float& gamepadLookSensitivity,
+                 systems::GamepadAimAssistConfig& aimAssistCfg,
                  bool& renderSeparateFromPhysics,
                  bool& inputSyncedWithPhysics,
                  bool& limitFPSToMonitor,
@@ -291,6 +302,8 @@ private:
     void buildInspectorContents(const Registry& registry,
                                 int tickCount,
                                 float& mouseSensitivity,
+                                float& gamepadLookSensitivity,
+                                systems::GamepadAimAssistConfig& aimAssistCfg,
                                 bool& renderSeparateFromPhysics,
                                 bool& inputSyncedWithPhysics,
                                 bool& limitFPSToMonitor,

@@ -20,6 +20,7 @@
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "sfx/SfxSystem.hpp"
+#include "systems/GamepadAimAssistSystem.hpp"
 #include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
 #include "util/WorkerPool.hpp"
@@ -175,8 +176,19 @@ private:
     /// controller when a second one disconnects.
     SDL_JoystickID activeGamepadId_ = 0;
     /// @brief Right-stick look speed in radians per second at full deflection.
-    /// Roughly equivalent to ~170°/s, a reasonable console FPS default.
-    float gamepadLookSensitivity = 3.0f;
+    /// 6.0 rad/s ≈ 343°/s — most testers found 3.0 too sluggish for tracking
+    /// players during firefights; this is in line with mainstream console FPS
+    /// defaults.  Tunable from the ECS inspector.
+    float gamepadLookSensitivity = 6.0f;
+
+    /// @brief AAA-style gamepad aim assist tuning.
+    ///
+    /// Active only when a gamepad is connected (mouse input is unaffected).
+    /// Defaults match the CoD/Apex "Standard" feel: noticeable rotational
+    /// pull and target slowdown when the player is actively moving a stick,
+    /// no effect at all when both sticks are still.  Live-tunable from the
+    /// ECS inspector.
+    systems::GamepadAimAssistConfig aimAssistCfg_;
 
     /// Persistent thread pool for parallel-for over per-frame loops
     /// (currently the animation update; future: parallel frustum cull,
@@ -188,7 +200,7 @@ private:
     std::unique_ptr<WorkerPool> workerPool_;
 
     // Runtime-tunable loop settings (exposed via ImGui)
-    float mouseSensitivity = 0.001f;       ///< Radians per pixel of mouse movement.
+    float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)

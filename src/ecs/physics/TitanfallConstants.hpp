@@ -24,8 +24,16 @@ constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s)
 
 constexpr float k_jumpSpeed = 330.0f;       ///< Upward velocity on ground jump (u/s). Must mirror physics::k_jumpSpeed.
 constexpr float k_doubleJumpSpeed = 270.0f; ///< Upward velocity on air jump (u/s).
-constexpr float k_slidehopJumpSpeed = 250.0f; ///< Upward velocity when jumping during slide (u/s).
-constexpr float k_doubleJumpCooldown = 0.10f; ///< Min time after first jump before double jump is allowed (s).
+constexpr float k_slidehopJumpSpeed = 250.0f;    ///< Upward velocity when jumping during slide (u/s).
+constexpr float k_doubleJumpCooldown = 0.10f;    ///< Min time after first jump before double jump is allowed (s).
+constexpr float k_doubleJumpHorizBoost = 300.0f; ///< Horizontal velocity (u/s) toward WASD wishDir on double jump.
+                                                 ///< Replaces horizontal velocity with wishDir * max(this, currentHs)
+                                                 ///< so the second jump becomes an air dash. If no WASD held,
+                                                 ///< horizontal momentum is preserved.
+constexpr float k_doubleJumpGroundedRefreshTime = 1.0f; ///< Continuous time grounded (s) needed to refresh DJ.
+                                                        ///< DJ does NOT refresh from wall jump, climb, ledge,
+                                                        ///< slidehop, or instant landing — only by being on the
+                                                        ///< ground (OnFoot) for this long. Counters DJ-dash spam.
 
 // Coyote time
 

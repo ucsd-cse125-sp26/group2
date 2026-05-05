@@ -49,6 +49,20 @@ glm::vec3 accelerate(glm::vec3 vel, glm::vec3 wishDir, float wishSpeed, float ac
     return vel + wishDir * k_accelSpeed;
 }
 
+float airWishSpeedForHorizSpeed(float currentHorizSpeed)
+{
+    if (currentHorizSpeed >= k_airWishCurveTop)
+        return k_airMaxSpeed;
+    if (currentHorizSpeed <= 0.0f)
+        return k_airMaxWishLowSpeed;
+
+    const float k_t = currentHorizSpeed / k_airWishCurveTop;
+    // Power curve with exponent < 1 produces a sharp early falloff:
+    // most of the high-wish region is concentrated near zero speed.
+    const float k_curve = std::pow(k_t, k_airWishCurveExponent);
+    return k_airMaxWishLowSpeed + (k_airMaxSpeed - k_airMaxWishLowSpeed) * k_curve;
+}
+
 glm::vec3 clipVelocity(glm::vec3 vel, glm::vec3 normal, float overbounce)
 {
     const float k_backoff = glm::dot(vel, normal) * overbounce;

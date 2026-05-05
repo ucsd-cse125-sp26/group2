@@ -1255,6 +1255,13 @@ SDL_AppResult Game::iterate()
         // delta) so the camera tracks whichever input is moving.  No-ops
         // cheaply when activeGamepad_ is nullptr.
         systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime);
+        // AAA-style aim assist runs IMMEDIATELY after the look sampler so it
+        // can refund part of the just-applied look delta (slowdown) and add
+        // a rotational pull toward the closest visible enemy.  Mouse-only
+        // players see no effect — `activeGamepad_` is nullptr and the
+        // function early-outs.  Both effects are gated on stick actuation
+        // ≥ 5 % so a player holding still keeps full manual control.
+        systems::runGamepadAimAssist(registry, activeGamepad_, aimAssistCfg_, gamepadLookSensitivity, frameTime);
         if (!inputSyncedWithPhysics)
             systems::runGamepadMovement(registry, activeGamepad_);
         systems::runGamepadWeapon(registry, activeGamepad_);
@@ -2659,6 +2666,8 @@ SDL_AppResult Game::iterate()
         debugUI.buildUI(registry,
                         tickCount,
                         mouseSensitivity,
+                        gamepadLookSensitivity,
+                        aimAssistCfg_,
                         renderSeparateFromPhysics,
                         inputSyncedWithPhysics,
                         limitFPSToMonitor,

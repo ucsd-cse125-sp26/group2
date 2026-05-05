@@ -267,7 +267,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
             state.sim.exitLedgeTimer = tms::k_ledgeExitTime;
             state.vis.grounded = false;
             state.vis.jumpCount = 1;
-            state.sim.canDoubleJump = true;
+            // DJ no longer refreshes from ledge mantle — only from ground time.
         }
         return;
     }
@@ -287,7 +287,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         state.sim.exitWallTimer = tms::k_wallrunExitTime;
         state.sim.wasWallRunning = true;
         state.vis.grounded = false;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from wall jump — only from ground time.
         state.vis.jumpCount = 1;
 
         // Blacklist this wall.
@@ -305,7 +305,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         state.sim.exitClimbTimer = tms::k_climbExitTime;
         state.sim.wasClimbing = true;
         state.vis.grounded = false;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from climb jump — only from ground time.
         state.vis.jumpCount = 1;
 
         state.sim.climbBlacklistActive = true;
@@ -325,7 +325,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         vel += state.sim.wallBlacklistNormal * tms::k_wallJumpSideForce;
         state.sim.coyoteTimer = 0.0f;
         state.sim.wasWallRunning = false;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from coyote wall jump — only from ground time.
         state.vis.jumpCount = 1;
         state.sim.jumpedThisTick = true;
         return;
@@ -338,7 +338,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         state.vis.crouching = false;
         state.vis.grounded = false;
         state.vis.jumpCount = 1;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from slidehop — only from ground time.
         state.sim.jumpedThisTick = true;
 
         // Restore standing shape — the slide had us crouched.
@@ -357,7 +357,8 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         state.vis.grounded = false;
         state.sim.coyoteTimer = 0.0f;
         state.vis.jumpCount = 1;
-        state.sim.canDoubleJump = true;
+        // DJ availability is whatever ground time accrued before this jump
+        // already granted (in step 9). Don't override here.
         state.sim.jumpedThisTick = true;
         state.sim.jumpCooldown = tms::k_doubleJumpCooldown;
 
@@ -385,6 +386,20 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         state.sim.canDoubleJump = false;
         state.vis.jumpCount = 2;
         state.sim.jumpedThisTick = true;
+
+        // Horizontal redirect: if any WASD is held, replace horizontal velocity with
+        // wishDir * max(boost, currentHorizSpeed). This turns the second jump into an
+        // air dash — letting players counter their own first-jump direction (e.g. jump
+        // right, then double-jump-left to reverse course). Momentum is preserved if
+        // already faster than the boost. With no WASD, horizontal velocity is untouched.
+        const glm::vec3 k_djWishDir =
+            physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+        if (glm::length(k_djWishDir) > 0.001f) {
+            const float k_djHs = horizSpeed(vel);
+            const float k_djSpeed = std::max(tms::k_doubleJumpHorizBoost, k_djHs);
+            vel.x = k_djWishDir.x * k_djSpeed;
+            vel.z = k_djWishDir.z * k_djSpeed;
+        }
 
         // Lurch resets on double jump too — but only if the preceding ground jump
         // was itself "fresh". Since double jump happens mid-air, groundedDuration
@@ -644,7 +659,7 @@ void tryEnterWallrun(glm::vec3& vel,
         state.sim.wallForward = wallFwd;
         state.sim.wallRunTimer = 0.0f;
         state.sim.wallRunSpeedTimer = 0.0f;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from entering wallrun — only from ground time.
         state.vis.jumpCount = 0;
 
         // Autobhop lock: if jump was held continuously from before entry (i.e.
@@ -875,7 +890,7 @@ void tryEnterClimb(glm::vec3& vel,
     state.vis.moveMode = MoveMode::Climbing;
     state.sim.climbWallNormal = walls.frontNormal;
     state.sim.climbTimer = 0.0f;
-    state.sim.canDoubleJump = true;
+    // DJ no longer refreshes from entering climb — only from ground time.
     state.vis.jumpCount = 0;
 
     // Reduce horizontal velocity immediately.
@@ -961,7 +976,7 @@ void tryEnterLedgeGrab(PlayerStateRef state, const physics::WallDetectionResult&
     state.sim.ledgePoint = walls.ledgePoint;
     state.sim.ledgeNormal = walls.ledgeNormal;
     state.sim.ledgeHoldTimer = 0.0f;
-    state.sim.canDoubleJump = true;
+    // DJ no longer refreshes from entering ledge grab — only from ground time.
     state.vis.jumpCount = 0;
 }
 
@@ -984,7 +999,7 @@ void handleLedgeGrab(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& 
         state.vis.moveMode = MoveMode::OnFoot;
         state.sim.exitingLedge = true;
         state.sim.exitLedgeTimer = tms::k_ledgeExitTime;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from auto-mantle — only from ground time.
         state.vis.jumpCount = 1;
     }
 
@@ -1349,9 +1364,12 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                         vel.value = physics::accelerate(vel.value, k_wishDir, k_wishSpeed, physics::k_groundAccel, dt);
                 } else {
                     vel.value = physics::applyGravity(vel.value, dt);
-                    if (glm::length(k_wishDir) > 0.001f)
-                        vel.value =
-                            physics::accelerate(vel.value, k_wishDir, physics::k_airMaxSpeed, physics::k_airAccel, dt);
+                    if (glm::length(k_wishDir) > 0.001f) {
+                        // Air wish-speed depends on current horizontal speed:
+                        // generous when stalled, classic Quake floor at speed.
+                        const float k_airWish = physics::airWishSpeedForHorizSpeed(horizSpeed(vel.value));
+                        vel.value = physics::accelerate(vel.value, k_wishDir, k_airWish, physics::k_airAccel, dt);
+                    }
                 }
 
                 // Camera tilt returns to zero.
@@ -1425,9 +1443,15 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // 9. Landing reset
             if (state.vis.grounded && state.vis.moveMode == MoveMode::OnFoot) {
                 state.vis.jumpCount = 0;
-                state.sim.canDoubleJump = true;
                 state.sim.canEnterSlide = true;
                 state.sim.jumpLurchEnabled = false;
+
+                // Double jump: refresh only after enough continuous OnFoot time
+                // on the ground. This is the *only* path that grants DJ — wall
+                // jumps, climb jumps, slidehops, and ledge mantles deliberately
+                // don't restore it.
+                if (state.sim.groundedDuration >= tms::k_doubleJumpGroundedRefreshTime)
+                    state.sim.canDoubleJump = true;
 
                 // Clear blacklists on landing.
                 state.sim.wallBlacklistActive = false;
