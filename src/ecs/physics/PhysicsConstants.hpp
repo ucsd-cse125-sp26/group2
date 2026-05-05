@@ -15,21 +15,21 @@ namespace physics
 
 // Gravity & jumping
 constexpr float k_gravity = 1000.0f;  ///< Downward acceleration (units/s^2). Faster than real-world for snappy arcs.
-constexpr float k_jumpSpeed = 380.0f; ///< Initial upward velocity on jump (units/s). Gives apex ~ 72 units (~6 ft).
+constexpr float k_jumpSpeed = 330.0f; ///< Initial upward velocity on jump (units/s). Gives apex ~ 54 units (~4.5 ft).
 
 // Ground movement
 // Ground wish speed is stance-dependent — see tms::k_walkSpeed / k_sprintSpeed / k_crouchSpeed
 // and systems::currentWishSpeed() which selects between them.
-constexpr float k_groundAccel = 15.0f; ///< Ground acceleration constant. Higher = reaches max speed faster.
+constexpr float k_groundAccel = 10.0f; ///< Ground acceleration constant. Higher = reaches max speed faster.
 
 // Air movement
 constexpr float k_airAccel =
-    2000.0f; ///< Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
+    700.0f; ///< Air acceleration constant. Higher than Quake (0.7) for Titanfall-style air control.
 constexpr float k_airMaxSpeed =
-    30.0f;   ///< Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
+    30.0f;  ///< Wish-speed cap in air (units/s). Does NOT cap total speed — existing momentum is preserved.
 
 // Friction
-constexpr float k_friction = 4.0f;    ///< Ground friction coefficient (Quake default).
+constexpr float k_friction = 7.5f; ///< Ground friction coefficient. Higher = crisper stops, easier-to-track movement.
 constexpr float k_stopSpeed = 150.0f; ///< Friction is amplified below this speed for a crisp stop.
 
 // Collision

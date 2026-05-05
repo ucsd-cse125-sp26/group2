@@ -210,16 +210,16 @@ namespace
 
 /// @brief Update the sprint flag based on input and current state.
 /// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-void updateSprint(PlayerStateRef state, const InputSnapshot& input)
+/// @param input  Current input snapshot (sprint input is now ignored).
+///
+/// Sprint has been removed from the game — base movement speed (tms::k_walkSpeed)
+/// is now high enough that a separate sprint state is unnecessary. This function
+/// is preserved so the sprinting flag in PlayerVisState (read by animation,
+/// networking, and debug UI) stays in a defined state. It is unconditionally
+/// false now.
+void updateSprint(PlayerStateRef state, const InputSnapshot& /*input*/)
 {
-    if (input.sprint && input.forward && !state.vis.crouching && state.vis.grounded &&
-        state.vis.moveMode == MoveMode::OnFoot)
-    {
-        state.vis.sprinting = true;
-    } else if (!input.sprint || !input.forward || state.vis.crouching || !state.vis.grounded) {
-        state.vis.sprinting = false;
-    }
+    state.vis.sprinting = false;
 }
 
 } // namespace
