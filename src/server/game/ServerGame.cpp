@@ -75,11 +75,18 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
         // so V-HACD turns each sub-mesh into a few `WorldBrush`es instead of a
         // `WorldTriMesh`.  Server pays a one-shot startup cost but runtime
         // collision is much smoother (no per-triangle jitter).
+        //
+        // PR-30: gated on `gamemap::k_useVhacd` so the team can flip the
+        // behaviour project-wide from `ecs/MapConfig.hpp` without editing
+        // per-call-site flags.  Must AND with the per-asset
+        // `decomposeCollision` flag — both must agree before V-HACD runs.
         const char* const base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
-        for (const AssetDefinition& def : kPropAssets)
+        for (const AssetDefinition& def : kPropAssets) {
+            const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
             physics::loadPropCollision(
-                assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision);
+                assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale, decompose);
+        }
 
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());

@@ -269,10 +269,13 @@ int main(int argc, char* argv[])
     physics::MapCollisionData mapCollision;
     {
         gamemap::loadConfiguredMap(mapCollision, "clientbot");
+        // PR-30: V-HACD gated on `gamemap::k_useVhacd`.  See the comment
+        // in `MapConfig.hpp` for the rationale.
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
         for (const AssetDefinition& def : kPropAssets) {
+            const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
             physics::loadPropCollision(
-                assetsDir + def.filename, mapCollision, def.loadTranslation, def.loadScale, def.decomposeCollision);
+                assetsDir + def.filename, mapCollision, def.loadTranslation, def.loadScale, decompose);
         }
         physics::setActiveWorld(mapCollision.geometry());
     }

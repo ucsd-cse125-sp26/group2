@@ -42,7 +42,7 @@ namespace gamemap
 ///
 /// IMPORTANT: this flag controls *how* the map is processed, not *which* map
 /// is loaded. The map filename comes solely from `kMapAsset` in `AssetCatalog.hpp`.
-inline constexpr bool k_separatedCollisionMap = false;
+inline constexpr bool k_separatedCollisionMap = true;
 
 /// @brief Substring that identifies collision-only nodes in separated mode.
 /// Matched case-insensitively against Assimp node names.
@@ -63,6 +63,30 @@ inline constexpr const char* k_collisionPattern = "COL_";
 /// be prohibitively expensive.
 inline constexpr bool k_guessShapesProcessed = true;
 
+/// @brief Run V-HACD convex decomposition on non-convex prop meshes?
+///
+/// When `true`, prop meshes flagged with `decomposeCollision = true` in
+/// `AssetCatalog.hpp` (currently the bottle and metallic pallet) are split
+/// into a small set of convex `WorldBrush`es by V-HACD.  Smoother runtime
+/// collision than triMesh (no per-triangle MTV jitter on curved surfaces)
+/// at the cost of a few seconds of map-load time per affected prop.
+///
+/// When `false` (default), V-HACD is bypassed and non-convex props fall
+/// back to triMesh.  Disable to:
+///   * skip the multi-second V-HACD step during map iteration,
+///   * sidestep V-HACD regressions on a particular asset, or
+///   * keep parity with bot/headless tooling that doesn't need smooth
+///     curved-contact collision.
+///
+/// `WorldTriMesh` collision is correct, just visibly jittery on curved
+/// contacts because the mover's MTV flips between adjacent triangle
+/// normals.  Acceptable for the placeholder bottle/pallet props.
+///
+/// Call sites that pass `decomposeCollision` to `physics::loadPropCollision`
+/// must AND that argument with this flag — see `client/game/Game.cpp`,
+/// `server/game/ServerGame.cpp`, and `clientbot/main.cpp`.
+inline constexpr bool k_useVhacd = false;
+
 /// @brief Build the `MapLoadOptions` used by both client and server.
 ///
 /// Centralised so the two sides cannot drift. The client also reads
@@ -76,7 +100,8 @@ inline constexpr bool k_guessShapesProcessed = true;
     if (k_separatedCollisionMap)
         opts.collisionCollection = k_collisionPattern;
     opts.guessShapesProcessed = k_guessShapesProcessed;
-    opts.addFloorPlane = false; // Map geometry provides its own floor.
+    opts.decomposeNonConvex = k_useVhacd; // PR-30: project-wide V-HACD gate.
+    opts.addFloorPlane = false;           // Map geometry provides its own floor.
     return opts;
 }
 

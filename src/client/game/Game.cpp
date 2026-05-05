@@ -222,6 +222,12 @@ bool Game::init()
         // so organic/detailed shapes (a bottle, a metallic pallet) end up as a
         // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
         // a few seconds of load time per prop but kills triMesh edge-jitter.
+        //
+        // PR-30: V-HACD is gated on `gamemap::k_useVhacd` (single source of
+        // truth in `ecs/MapConfig.hpp`) so the team can disable it for
+        // map-iteration runs without editing per-call-site flags.  When
+        // `k_useVhacd == false`, non-convex props fall back to triMesh —
+        // correct, just visibly jittery on curved contacts.
         auto loadProp = [&](const AssetDefinition& def) {
             const int id = addAssetDefinition(assets_, def);
             const int modelIdx = renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
@@ -232,9 +238,8 @@ bool Game::init()
 
             // Load collision at the same position/scale.
             const std::string fullPath = basePath + "assets/" + def.filename;
-            if (physics::loadPropCollision(
-                    fullPath, mapCollision_, def.loadTranslation, def.loadScale, def.decomposeCollision))
-            {
+            const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
+            if (physics::loadPropCollision(fullPath, mapCollision_, def.loadTranslation, def.loadScale, decompose)) {
                 assets_.setHasCollision(id);
             }
         };

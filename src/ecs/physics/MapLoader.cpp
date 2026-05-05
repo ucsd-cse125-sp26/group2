@@ -329,13 +329,42 @@ bool fitCylinder(const std::vector<glm::vec3>& verts,
     return true;
 }
 
-/// @brief Check if the mesh is an axis-aligned box (all face normals align with world axes).
+/// @brief Check if the mesh is an axis-aligned box (all face normals align with
+/// world axes AND all vertices sit at the 8 corners of the AABB).
+///
+/// PR-30 — two false-positives the pre-PR-30 normals-only check produced:
+///
+/// 1. **Gentle ramps misclassified as cubes.**  The old normal-axis tolerance
+///    was 0.1, i.e. "within ~26° of an axis".  A 20° ramp's tilted face has
+///    `n.y ≈ 0.94`, `|0.94 - 1.0| = 0.06 < 0.1` → the check called the ramp
+///    axis-aligned and the loader produced a cube whose volume swallowed the
+///    slope.  The runtime experience: ramps acted as solid boxes the player
+///    couldn't walk up.  Tightening to `1e-3` (~0.06°) restricts the fast-
+///    path AABB to truly axis-aligned shapes; ramps now fall through to the
+///    convex-brush path, which represents the slope exactly.
+///
+/// 2. **L-shaped meshes swallowed by their bounding box.**  Consider a square
+///    plane with a small balcony at one corner — two disconnected square
+///    components in a single Blender mesh.  All face normals are still axis-
+///    aligned, so the old check accepted it; the loader then computed the
+///    AABB of *both* components and emplaced one big box covering the L
+///    *and the air gap inside the L*, creating phantom collision over empty
+///    space.  Rejecting the AABB here when any vertex sits off the 8 AABB
+///    corners forces the loader to fall through to convex-brush /
+///    triMesh — both of which represent the L footprint correctly.
 bool isAxisAlignedBox(const aiMesh* mesh, const glm::mat4& world)
 {
-    if (!mesh->HasNormals())
+    if (!mesh->HasNormals() || !mesh->HasPositions() || mesh->mNumVertices == 0)
         return false;
 
     const glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(world)));
+
+    // PR-30 (1): tight tolerance — gentle ramps (~5°+) must FAIL this check
+    // so they can be picked up by the convex-brush path instead of being
+    // swallowed by an axis-aligned cube.  `1e-3` corresponds to ~0.06° of
+    // slope tolerance, which only forgives floating-point quantisation
+    // from the FBX/GLB pipeline.
+    constexpr float k_normalAxisTolerance = 1e-3f;
 
     for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
         const glm::vec3 localN(mesh->mNormals[v].x, mesh->mNormals[v].y, mesh->mNormals[v].z);
@@ -344,13 +373,43 @@ bool isAxisAlignedBox(const aiMesh* mesh, const glm::mat4& world)
         // Check if normal aligns with one of the 6 axis directions
         bool aligned = false;
         for (int axis = 0; axis < 3; ++axis) {
-            if (std::abs(std::abs(wn[axis]) - 1.0f) < 0.1f) {
+            if (std::abs(std::abs(wn[axis]) - 1.0f) < k_normalAxisTolerance) {
                 aligned = true;
                 break;
             }
         }
         if (!aligned)
             return false;
+    }
+
+    // PR-30 (2): every vertex must be at one of the 8 AABB corner positions.
+    // Filters out L-shapes / disconnected-but-axis-aligned meshes whose
+    // bounding-box volume contains air.  Tolerance scales with the AABB
+    // diagonal so the test is invariant to map scale.
+    glm::vec3 bmin(1e30f);
+    glm::vec3 bmax(-1e30f);
+    for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
+        const glm::vec4 local(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
+        const glm::vec3 wp(world * local);
+        bmin = glm::min(bmin, wp);
+        bmax = glm::max(bmax, wp);
+    }
+    const glm::vec3 ext = bmax - bmin;
+    const float maxExt = std::max({ext.x, ext.y, ext.z});
+    // 0.1 % of the largest extent — enough to swallow float rounding from
+    // the GLB pipeline, tight enough to reject any vertex off the corners.
+    // Floor at 1e-4 so degenerate meshes (e.g. a single quad with zero
+    // thickness on one axis) still get a finite tolerance.
+    const float cornerTolerance = std::max(1e-4f, maxExt * 1e-3f);
+    for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
+        const glm::vec4 local(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z, 1.0f);
+        const glm::vec3 wp(world * local);
+        for (int axis = 0; axis < 3; ++axis) {
+            const bool onMin = std::abs(wp[axis] - bmin[axis]) <= cornerTolerance;
+            const bool onMax = std::abs(wp[axis] - bmax[axis]) <= cornerTolerance;
+            if (!onMin && !onMax)
+                return false; // off-corner vertex — not an AABB
+        }
     }
     return true;
 }
