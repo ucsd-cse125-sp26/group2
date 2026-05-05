@@ -789,6 +789,8 @@ add_executable(group2
         src/ecs/components/RespawnPoint.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/client/app/App.hpp
+        src/client/app/App.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1112,6 +1114,8 @@ add_executable(client
         src/ecs/components/WeaponSpawner.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/client/app/App.hpp
+        src/client/app/App.cpp
 )
 
 target_include_directories(client PRIVATE

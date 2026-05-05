@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "IScreen.hpp"
 #include "animation/AnimationLibrary.hpp"
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
@@ -17,7 +18,6 @@
 #include "hud/Hud.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
-#include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "sfx/SfxSystem.hpp"
 #include "systems/InputRingBuffer.hpp"
@@ -25,10 +25,13 @@
 #include "util/WorkerPool.hpp"
 
 #include <memory>
+
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
+using ClientRenderer = HybridRenderer;
 #else
 #include "renderer/Renderer.hpp"
+using ClientRenderer = Renderer;
 #endif
 
 #include <SDL3/SDL.h>
@@ -38,19 +41,22 @@
 
 /// @brief Top-level client game object.
 ///
-/// Owns all subsystems: window, ECS registry, renderer, debug UI, and network client.
-/// Wired into SDL's application-callback API (SDL_AppInit / SDL_AppEvent / SDL_AppIterate / SDL_AppQuit).
-class Game
+/// Owns the active game screen subsystems and borrows App-owned window, renderer, and network client.
+/// Wired through App into SDL's application-callback API.
+class Game : public IScreen
 {
 public:
+    /// @brief Create the Game-owned ImGui context before App initialises the renderer backend.
+    bool initDebugUI(SDL_Window* windowPtr);
+
     /// @brief Initialise all subsystems and spawn the local player entity.
     /// @return False on any fatal initialisation error.
-    bool init();
+    bool init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
 
     /// @brief Forward an SDL event to ImGui and handle application-level keys.
     /// @param event  The SDL event to process.
     /// @return SDL_APP_SUCCESS to quit, SDL_APP_CONTINUE to keep running.
-    SDL_AppResult event(SDL_Event* event);
+    SDL_AppResult event(SDL_Event* event) override;
 
     /// @brief Advance one frame: sample input, step physics, render.
     ///
@@ -85,10 +91,13 @@ public:
     ///
     /// @return SDL_APP_CONTINUE normally; SDL_APP_SUCCESS on quit request.
     /// @see ServerGame::tick for the authoritative server-side equivalent.
-    SDL_AppResult iterate();
+    SDL_AppResult iterate() override;
 
     /// @brief Shut down all subsystems in reverse-init order.
-    void quit();
+    void quit() override;
+
+    /// @brief Destroy the Game-owned ImGui context after App shuts down the renderer backend.
+    void shutdownAfterRenderer() override;
 
     /// @brief Update Renderable components for remote players (model, scale, orientation from animation rig).
     void refreshRemotePlayerRenderables();
@@ -113,28 +122,20 @@ private:
     static constexpr int k_maxTicksPerFrame = 2;
     static constexpr int k_fpsHistorySize = 512; ///< Samples in the rolling FPS ring buffer.
 
-    NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-#ifdef USE_HYBRID_RENDERER
-    HybridRenderer renderer;                     ///< Routes each call to the legacy or new renderer.
-    /// @brief Direct access to the legacy renderer instance (perf Phase 1B
-    /// reaches into legacy-only API: setSkinnedRig / setSkinnedFrame).
-    Renderer& legacyRenderer() noexcept { return renderer.legacy(); }
-#else
-    Renderer renderer; ///< Legacy renderer.
-    Renderer& legacyRenderer() noexcept { return renderer; }
-#endif
-    Registry registry;             ///< The shared ECS registry.
-    Client client;                 ///< UDP network client.
-    ParticleSystem particleSystem; ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;           ///< Client-side sound effects system.
-    Hud hud_;                      ///< In-game HUD overlay system.
-    entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
+    ClientRenderer* renderer = nullptr;          ///< Borrowed renderer owned by App.
+    Renderer& legacyRenderer() noexcept;
+    Registry registry;                           ///< The shared ECS registry.
+    Client* client = nullptr;                    ///< Borrowed UDP network client owned by App.
+    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;                         ///< Client-side sound effects system.
+    Hud hud_;                                    ///< In-game HUD overlay system.
+    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
 
-    Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
-    float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
-    int tickCount = 0;             ///< Total physics ticks elapsed since start.
+    Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
+    float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
+    int tickCount = 0;                           ///< Total physics ticks elapsed since start.
     /// @brief Monotonic per-tick counter stamped onto outgoing InputSnapshots.
     ///
     /// Bumped once per physics tick group inside iterate() and copied into the
@@ -264,12 +265,12 @@ private:
     float prevArmor_ = 100.f;
 
     // Viewmodel tuning (live-adjustable via ImGui)
-    float vmScale = 1.0f;        ///< Weapon model scale (model is in mm).
-    float vmForward = 0.0f;      ///< Forward offset from eye (Quake units).
+    float vmScale = 1.0f;         ///< Weapon model scale (model is in mm).
+    float vmForward = 0.0f;       ///< Forward offset from eye (Quake units).
     float vmRight = 0.0f;         ///< Right offset from eye.
-    float vmDown = 0.0f;         ///< Downward offset from eye.
-    float vmYawOffset = 0.0f;    ///< Extra yaw (degrees) applied to the model before camera orient.
-    float vmPitchOffset = 0.0f;  ///< Extra pitch (degrees).
+    float vmDown = 0.0f;          ///< Downward offset from eye.
+    float vmYawOffset = 0.0f;     ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 0.0f;   ///< Extra pitch (degrees).
     float vmRollOffset = 0.0f;    ///< Extra roll (degrees).
     bool showViewmodelUI = false; ///< Show the Viewmodel Tweaker window.
 
