@@ -7,6 +7,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -46,12 +47,13 @@ inline glm::vec3 viewForward(float yaw, float pitch)
 inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner& spawner)
 {
-    auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState>();
+    auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState, PlayerVisState>();
     view.each([&](entt::entity player,
                   const Position& pos,
                   const CollisionShape& shape,
                   const InputSnapshot& input,
-                  WeaponState& weapon) {
+                  WeaponState& weapon,
+                  const PlayerVisState& pvis) {
         if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasWeapon)
         {
             const WeaponConfig config = getWeaponConfig(spawner.type);
@@ -72,7 +74,8 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
         static constexpr float k_pickupMaxAngleDeg = 12.0f;
         static const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
 
-        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.77f, 0.0f};
+        const float spawnEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.77f * spawnEyeDir, 0.0f};
         const glm::vec3 toWeapon = spawnerPos.value - eye;
         const float distSq = glm::dot(toWeapon, toWeapon);
 

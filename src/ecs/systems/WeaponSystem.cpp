@@ -13,6 +13,7 @@
 #include "ecs/components/HitboxHistory.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LagCompTarget.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -137,13 +138,14 @@ inline glm::vec3 viewForward(float yaw, float pitch)
 ///
 /// Shifts the origin right and down from eye, slightly forward, so tracers
 /// don't originate from the center of the screen.
-/// @param eye        Eye position (camera origin).
-/// @param direction  Normalized view direction.
+/// @param eye             Eye position (camera origin).
+/// @param direction       Normalized view direction.
+/// @param gravityFlipped  When true, "down" is +Y (ceiling walker).
 /// @return Offset muzzle position in world space.
-inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
+inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction, bool gravityFlipped = false)
 {
-    constexpr glm::vec3 k_worldUp{0.0f, 1.0f, 0.0f};
-    glm::vec3 right = glm::cross(direction, k_worldUp);
+    const glm::vec3 worldUp = gravityFlipped ? glm::vec3{0.0f, -1.0f, 0.0f} : glm::vec3{0.0f, 1.0f, 0.0f};
+    glm::vec3 right = glm::cross(direction, worldUp);
     if (glm::dot(right, right) < physics::k_parallelEpsilon) {
         right = glm::vec3{1.0f, 0.0f, 0.0f};
     } else {
@@ -390,27 +392,29 @@ inline void captureShotDebug(Registry& registry,
 /// Emits NetParticleEvent entries for tracer/impact effects and applies damage
 /// through applyDamage() which may trigger kill events.
 ///
-/// @param registry      The ECS registry.
-/// @param shooter       Entity that is firing.
-/// @param input         Current input snapshot.
-/// @param pos           Shooter position.
-/// @param shape         Shooter collision shape (for eye height).
-/// @param weapon        Shooter weapon state (modified in place).
-/// @param dt            Fixed physics delta time in seconds.
-/// @param outParticles  Accumulates particle events for network broadcast.
-/// @param killEvents    Accumulates kill events for network broadcast.
-/// @param outShotDebug  PR-20: optional server-side debug capture sink.
-///                      When non-null, each hitscan-fire path pushes one
-///                      `ShotDebugCapture` row while `RewindHitboxesGuard`
-///                      is still active, so the captured `targets[*].
-///                      capsules` reflect the historical sample the
-///                      server actually raycast against.
+/// @param registry        The ECS registry.
+/// @param shooter         Entity that is firing.
+/// @param input           Current input snapshot.
+/// @param pos             Shooter position.
+/// @param shape           Shooter collision shape (for eye height).
+/// @param weapon          Shooter weapon state (modified in place).
+/// @param gravityFlipped  True when the shooter's gravity is inverted.
+/// @param dt              Fixed physics delta time in seconds.
+/// @param outParticles    Accumulates particle events for network broadcast.
+/// @param killEvents      Accumulates kill events for network broadcast.
+/// @param outShotDebug    PR-20: optional server-side debug capture sink.
+///                        When non-null, each hitscan-fire path pushes one
+///                        `ShotDebugCapture` row while `RewindHitboxesGuard`
+///                        is still active, so the captured `targets[*].
+///                        capsules` reflect the historical sample the
+///                        server actually raycast against.
 inline void handleFire(Registry& registry,
                        entt::entity shooter,
                        const InputSnapshot& input,
                        const Position& pos,
                        const CollisionShape& shape,
                        WeaponState& weapon,
+                       bool gravityFlipped,
                        float dt,
                        std::vector<NetParticleEvent>& outParticles,
                        std::vector<NetKillEvent>& killEvents,
@@ -437,7 +441,8 @@ inline void handleFire(Registry& registry,
         }
 
         // Raycast to find beam endpoint.
-        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+        const float eyeDir = gravityFlipped ? -1.0f : 1.0f;
+        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDir, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
         // Phase 6 lag-compensated hitscan. The guard reads
         // `LagCompTarget` off `shooter` (set each tick by the server's
@@ -503,7 +508,8 @@ inline void handleFire(Registry& registry,
 
         gun.fireCooldown = config.fireCooldown;
 
-        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+        const float eyeDirCharge = gravityFlipped ? -1.0f : 1.0f;
+        const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDirCharge, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
         // Phase 6 lag-compensated hitscan (see beam path for details).
         // PR-5: ray-filtered rewind, see beam path.
@@ -587,9 +593,10 @@ inline void handleFire(Registry& registry,
 
     gun.fireCooldown = config.fireCooldown;
 
-    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+    const float eyeDirDiscrete = gravityFlipped ? -1.0f : 1.0f;
+    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDirDiscrete, 0.0f};
     const glm::vec3 direction = viewForward(input.yaw, input.pitch);
-    const glm::vec3 muzzle = muzzleOrigin(eye, direction);
+    const glm::vec3 muzzle = muzzleOrigin(eye, direction, gravityFlipped);
 
     if (config.hitscan) {
         // Phase 6 lag-compensated hitscan (see beam path for details).
@@ -687,12 +694,13 @@ void runWeapon(Registry& registry,
                std::vector<NetKillEvent>& killEvents,
                std::vector<net::shotdebug::ShotDebugCapture>* outShotDebug)
 {
-    auto view = registry.view<InputSnapshot, Position, CollisionShape, WeaponState>();
+    auto view = registry.view<InputSnapshot, Position, CollisionShape, WeaponState, PlayerVisState>();
     view.each([&](entt::entity shooter,
                   InputSnapshot& input,
                   const Position& pos,
                   const CollisionShape& shape,
-                  WeaponState& weapon) {
+                  WeaponState& weapon,
+                  const PlayerVisState& vis) {
         // Dead players cannot fire or interact with weapons.
         if (registry.all_of<RespawnTimer>(shooter))
             return;
@@ -708,7 +716,17 @@ void runWeapon(Registry& registry,
                 beam->active = false;
         }
 
-        handleFire(registry, shooter, input, pos, shape, weapon, dt, outParticles, killEvents, outShotDebug);
+        handleFire(registry,
+                   shooter,
+                   input,
+                   pos,
+                   shape,
+                   weapon,
+                   vis.gravityFlipped,
+                   dt,
+                   outParticles,
+                   killEvents,
+                   outShotDebug);
         if (input.reload) {
             GunInstance& gun = getEquippedGun(weapon);
             handleReload(gun);

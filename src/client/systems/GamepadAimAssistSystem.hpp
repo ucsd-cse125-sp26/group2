@@ -255,11 +255,16 @@ inline void runGamepadAimAssist(Registry& registry,
     glm::vec3 eye{0.0f};
     float curYaw = 0.0f, curPitch = 0.0f;
     bool foundLocal = false;
-    registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot>().each(
-        [&](entt::entity e, const Position& pos, const CollisionShape& shape, const InputSnapshot& snap) {
+    registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot, PlayerVisState>().each(
+        [&](entt::entity e,
+            const Position& pos,
+            const CollisionShape& shape,
+            const InputSnapshot& snap,
+            const PlayerVisState& pvis) {
             localEntity = e;
             const float eyeOffset = shape.halfExtents.y * 0.77f;
-            eye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
+            const float aaEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+            eye = pos.value + glm::vec3{0.0f, eyeOffset * aaEyeDir, 0.0f};
             curYaw = snap.yaw;
             curPitch = snap.pitch;
             foundLocal = true;

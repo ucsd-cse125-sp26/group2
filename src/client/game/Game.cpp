@@ -1584,13 +1584,15 @@ SDL_AppResult Game::iterate()
         // Note: Player component is not synced to clients, so we raycast against
         // HitboxInstance directly (skipping the local player entity).
         if (isBeamNow) {
-            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape>().each(
+            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
                 [&](entt::entity localE,
                     const BeamState&,
                     const InputSnapshot& inp,
                     const Position& pos,
-                    const CollisionShape& shape) {
-                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const CollisionShape& shape,
+                    const PlayerVisState& pvis) {
+                    const float beamEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * beamEyeDir, 0.0f};
                     const float cp = std::cos(inp.pitch);
                     const glm::vec3 dir{std::sin(inp.yaw) * cp, -std::sin(inp.pitch), std::cos(inp.yaw) * cp};
 
@@ -2015,14 +2017,16 @@ SDL_AppResult Game::iterate()
                 firePulledThisFrame = true;
         });
         if (firePulledThisFrame) {
-            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
+            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
                 [&](entt::entity localEntity,
                     const InputSnapshot& snap,
                     const Position& pos,
-                    const CollisionShape& shape) {
+                    const CollisionShape& shape,
+                    const PlayerVisState& pvis) {
                     net::shotdebug::ShotDebugCapture cap;
                     cap.shotInputTick = snap.tick; // PR-24: post-physics value, matches wire
-                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float debugEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * debugEyeDir, 0.0f};
                     const float cp = std::cos(snap.pitch);
                     cap.direction = glm::normalize(
                         glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
@@ -3172,9 +3176,13 @@ SDL_AppResult Game::iterate()
             glm::vec3 eye{0.f};
             glm::vec3 viewFwd{0.f, 0.f, 1.f};
             bool haveLocal = false;
-            registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot>().each(
-                [&](const Position& pos, const CollisionShape& shape, const InputSnapshot& input) {
-                    eye = pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.77f, 0.f};
+            registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot, PlayerVisState>().each(
+                [&](const Position& pos,
+                    const CollisionShape& shape,
+                    const InputSnapshot& input,
+                    const PlayerVisState& pvis) {
+                    const float pickupEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    eye = pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.77f * pickupEyeDir, 0.f};
                     const float cp = std::cos(input.pitch);
                     viewFwd = glm::normalize(glm::vec3{
                         std::sin(input.yaw) * cp,

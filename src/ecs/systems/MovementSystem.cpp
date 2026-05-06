@@ -1408,7 +1408,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // Jump detaches with a look-biased launch. Crouch cancels with drop.
             bool grapplePulling = false;
             {
-                const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f, 0);
+                const float grapEyeDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+                const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f * grapEyeDir, 0);
                 tryFireGrapple(state, input, k_eye, world);
                 state.sim.grappleInputLastTick = input.grapple;
 
