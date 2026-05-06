@@ -14,6 +14,7 @@
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
@@ -152,6 +153,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::SeparatorText("Physics");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+    ImGui::Checkbox("Weapon Spawners", &showWeaponSpawnerWindow);
     ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
     // External panels (owned by Game)
@@ -1927,6 +1929,153 @@ void DebugUI::buildCollisionUI(const physics::WorldGeometry& world,
         const ImU32 triColor = IM_COL32(200, 50, 255, 220);
         for (const auto& tm : world.triMeshes)
             drawTriMeshWireframe(dl, tm, viewProj, screenWidth, screenHeight, triColor);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildWeaponSpawnerUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildWeaponSpawnerUI(const Registry& registry,
+                                   const glm::mat4& viewProj,
+                                   float screenWidth,
+                                   float screenHeight)
+{
+    // ── ImGui window (only when showWeaponSpawnerWindow is true) ──
+    if (showWeaponSpawnerWindow) {
+        if (ImGui::Begin("Weapon Spawner Debug", &showWeaponSpawnerWindow)) {
+            ImGui::Checkbox("Draw Spawner Boxes", &drawWeaponSpawnerOverlay);
+            ImGui::Separator();
+
+            // Count spawners.
+            int totalSpawners = 0;
+            int activeSpawners = 0;
+            auto spawnerView = registry.view<WeaponSpawner, Position, CollisionShape>();
+            for (auto e : spawnerView) {
+                ++totalSpawners;
+                if (spawnerView.get<WeaponSpawner>(e).hasWeapon)
+                    ++activeSpawners;
+            }
+            ImGui::Text("Spawners: %d  |  Active: %d  |  On Cooldown: %d",
+                        totalSpawners,
+                        activeSpawners,
+                        totalSpawners - activeSpawners);
+            ImGui::Separator();
+
+            // Per-spawner details.
+            int idx = 0;
+            for (auto e : spawnerView) {
+                const auto& spawner = spawnerView.get<WeaponSpawner>(e);
+                const auto& pos = spawnerView.get<Position>(e);
+                const auto& shape = spawnerView.get<CollisionShape>(e);
+
+                const char* typeName = "Unknown";
+                switch (spawner.type) {
+                case WeaponType::Rifle:
+                    typeName = "Rifle";
+                    break;
+                case WeaponType::Rocket:
+                    typeName = "Rocket";
+                    break;
+                case WeaponType::RailGun:
+                    typeName = "RailGun";
+                    break;
+                case WeaponType::EnergyGun:
+                    typeName = "EnergyGun";
+                    break;
+                }
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Spawner #%d (%s)", idx, typeName);
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    ImGui::Text("Box half-extents: (%.0f, %.0f, %.0f)",
+                                shape.halfExtents.x,
+                                shape.halfExtents.y,
+                                shape.halfExtents.z);
+                    ImGui::Text("Has weapon: %s", spawner.hasWeapon ? "YES" : "no");
+                    if (!spawner.hasWeapon)
+                        ImGui::Text("Cooldown: %.1fs", spawner.spawnCooldown);
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Wireframe overlay (independent of window visibility) ──
+    if (!drawWeaponSpawnerOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    auto spawnerView = registry.view<WeaponSpawner, Position, CollisionShape>();
+    for (auto e : spawnerView) {
+        const auto& spawner = spawnerView.get<WeaponSpawner>(e);
+        const auto& pos = spawnerView.get<Position>(e);
+        const auto& shape = spawnerView.get<CollisionShape>(e);
+
+        // Green = weapon available, red/orange = on cooldown.
+        const ImU32 boxColor = spawner.hasWeapon ? IM_COL32(50, 255, 50, 200) : IM_COL32(255, 100, 50, 160);
+
+        // Draw AABB wireframe around the spawner's collision volume.
+        const glm::vec3 mn = pos.value - shape.halfExtents;
+        const glm::vec3 mx = pos.value + shape.halfExtents;
+        const glm::vec3 corners[8] = {
+            {mn.x, mn.y, mn.z},
+            {mx.x, mn.y, mn.z},
+            {mx.x, mn.y, mx.z},
+            {mn.x, mn.y, mx.z},
+            {mn.x, mx.y, mn.z},
+            {mx.x, mx.y, mn.z},
+            {mx.x, mx.y, mx.z},
+            {mn.x, mx.y, mx.z},
+        };
+        // 12 edges of the AABB.
+        static constexpr int edges[12][2] = {
+            {0, 1},
+            {1, 2},
+            {2, 3},
+            {3, 0}, // bottom
+            {4, 5},
+            {5, 6},
+            {6, 7},
+            {7, 4}, // top
+            {0, 4},
+            {1, 5},
+            {2, 6},
+            {3, 7}, // verticals
+        };
+        for (const auto& edge : edges)
+            drawWorldLine(dl, corners[edge[0]], corners[edge[1]], viewProj, screenWidth, screenHeight, boxColor, 2.0f);
+
+        // Draw a cross marker at the spawn position (center point).
+        ImVec2 sp;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, sp)) {
+            constexpr float k_crossLen = 10.0f;
+            const ImU32 markerColor = IM_COL32(255, 255, 0, 220);
+            dl->AddLine({sp.x - k_crossLen, sp.y}, {sp.x + k_crossLen, sp.y}, markerColor, 2.0f);
+            dl->AddLine({sp.x, sp.y - k_crossLen}, {sp.x, sp.y + k_crossLen}, markerColor, 2.0f);
+            dl->AddCircle(sp, k_crossLen, markerColor, 12, 1.5f);
+
+            // Label with weapon type name.
+            const char* typeName = "?";
+            switch (spawner.type) {
+            case WeaponType::Rifle:
+                typeName = "Rifle";
+                break;
+            case WeaponType::Rocket:
+                typeName = "Rocket";
+                break;
+            case WeaponType::RailGun:
+                typeName = "RailGun";
+                break;
+            case WeaponType::EnergyGun:
+                typeName = "EnergyGun";
+                break;
+            }
+            dl->AddText({sp.x + k_crossLen + 4.0f, sp.y - 6.0f}, markerColor, typeName);
+        }
     }
 }
 

@@ -138,6 +138,9 @@ inline void handleDeath(entt::entity& player,
         registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 5.0f});
         registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
 
+        // Clear input so dead players don't continue shooting/moving.
+        registry.emplace_or_replace<InputSnapshot>(player);
+
         // Award killer
         if (killer != player) {
             registry.get_or_emplace<PlayerMatchStats>(killer).kills++;
@@ -215,19 +218,34 @@ void runPlayerStatus(Registry& registry, float dt)
     registry.view<Player, InputSnapshot>().each([&registry, dt](entt::entity e, InputSnapshot& snap) {
         if (registry.all_of<RespawnTimer>(e)) {
             auto& respawnTimer = registry.get<RespawnTimer>(e);
+
+            // Allow skipping the respawn timer early by pressing space.
+            if (snap.skipRespawn) {
+                snap.skipRespawn = false;
+                respawnTimer.timeRemaining = 0.0f;
+            }
+
             respawnTimer.timeRemaining -= dt;
             if (respawnTimer.timeRemaining <= 0) {
                 handleRespawn(e, registry);
             }
+
+            // Consume killSelf while dead — prevent re-death on respawn.
+            snap.killSelf = false;
         } else {
+            // Clear stale skipRespawn from previous death cycle so it
+            // doesn't fire instantly if the player dies again.
+            snap.skipRespawn = false;
+
             Health& playerHealth = registry.get_or_emplace<Health>(e);
             handleHealing(playerHealth, dt);
-        }
 
-        if (snap.killSelf) {
-            snap.killSelf = false;
-            std::vector<NetKillEvent> kills;
-            applyDamage(999.0f, e, e, registry, kills, BodyRegion::Head);
+            // Only process killSelf when alive.
+            if (snap.killSelf) {
+                snap.killSelf = false;
+                std::vector<NetKillEvent> kills;
+                applyDamage(999.0f, e, e, registry, kills, BodyRegion::Head);
+            }
         }
     });
 }

@@ -51,6 +51,7 @@ struct PlayerVisState
     bool exitingWall{false};     ///< Brief grace window after leaving a wall.
     bool exitingClimb{false};    ///< Brief grace window after leaving a climb.
     bool grappleActive{false};   ///< True while being pulled toward the grapple anchor.
+    bool gravityFlipped{false};  ///< True when the player's gravity is inverted (walking on ceilings).
 
     // Spatial state needed by client renderer/animator.
     glm::vec3 groundNormal{0.0f, 1.0f, 0.0f}; ///< Normal of the floor surface for foot orientation.

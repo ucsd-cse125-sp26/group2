@@ -1243,8 +1243,16 @@ SDL_AppResult Game::iterate()
     // Movement keys run once per physics tick group (when inputSyncedWithPhysics
     // is true) so WASD movement calculations match the server.  When the
     // sync toggle is off, movement keys also run every frame.
+    // Dead input runs regardless of mouse capture — allows skip-respawn.
+    systems::runDeadInput(registry);
+
     if (mouseCaptured) {
-        systems::runMouseLook(registry, mouseSensitivity);
+        // Query local player's gravity flip state for mouse inversion.
+        bool localGravFlipped = false;
+        registry.view<PlayerVisState, LocalPlayer>().each(
+            [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
+
+        systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry);
         systems::runWeaponKeys(registry);
@@ -1254,7 +1262,7 @@ SDL_AppResult Game::iterate()
         // stomping the other.  Look additively composes (mouse delta + stick
         // delta) so the camera tracks whichever input is moving.  No-ops
         // cheaply when activeGamepad_ is nullptr.
-        systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime);
+        systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime, localGravFlipped);
         // AAA-style aim assist runs IMMEDIATELY after the look sampler so it
         // can refund part of the just-applied look delta (slowdown) and add
         // a rotational pull derived from the *change* in the target's
@@ -1437,10 +1445,14 @@ SDL_AppResult Game::iterate()
                 const PlayerVisState& pstate) {
                 const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
-                renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
+                // When gravity is flipped, the player's head is at the bottom
+                // of the AABB (near the ceiling they walk on).
+                const float eyeDir = pstate.gravityFlipped ? -1.0f : 1.0f;
+                renderEye = interpPos + glm::vec3{0.0f, eyeOffset * eyeDir, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
-                targetRoll = pstate.targetCameraTilt;
+                // Gravity flip adds 180° roll for the upside-down view.
+                targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
@@ -1450,10 +1462,11 @@ SDL_AppResult Game::iterate()
                 const CollisionShape& shape,
                 const PlayerVisState& pstate) {
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
-                renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
+                const float eyeDir = pstate.gravityFlipped ? -1.0f : 1.0f;
+                renderEye = pos.value + glm::vec3{0.0f, eyeOffset * eyeDir, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
-                targetRoll = pstate.targetCameraTilt;
+                targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     }
 
@@ -1786,6 +1799,11 @@ SDL_AppResult Game::iterate()
                 if (!ac.animator)
                     return;
                 const bool isLocal = registry.all_of<LocalPlayer>(e);
+
+                // Skip dead remote players — their mesh should not be visible.
+                if (!isLocal && ps.isDead)
+                    return;
+
                 const bool visible = isLocal || inFrustum(pos.value, charRadius);
                 if (!visible)
                     return;
@@ -2721,6 +2739,7 @@ SDL_AppResult Game::iterate()
             const glm::mat4 hbVP = hbProj * hbView;
             debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+            debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
             // toggles + ring-buffer slider + per-shot summary table;
             // when `drawShotDebugOverlay` is checked we also render
@@ -2816,7 +2835,7 @@ SDL_AppResult Game::iterate()
                 killerName = killerBuf;
             }
 
-            char line1[64], line2[64];
+            char line1[64], line2[96], line3[48];
             std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
             std::snprintf(line2,
                           sizeof(line2),
@@ -2824,6 +2843,7 @@ SDL_AppResult Game::iterate()
                           static_cast<double>(deathInfo.killerHealth.health),
                           static_cast<double>(deathInfo.killerHealth.armor),
                           std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
+            std::snprintf(line3, sizeof(line3), "Press SPACE to skip");
 
             int winW = 0, winH = 0;
             SDL_GetWindowSizeInPixels(window, &winW, &winH);
@@ -2837,7 +2857,7 @@ SDL_AppResult Game::iterate()
             static constexpr float k_marginB = 16.0f;
             static constexpr float k_lineGap = 4.0f;
 
-            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
+            const float boxH = fs * 3.0f + k_lineGap * 2.0f + k_padY * 2.0f;
             const float boxW = static_cast<float>(winW) * 0.4f;
             const float x = (static_cast<float>(winW) - boxW) * 0.5f;
             const float y = static_cast<float>(winH) - boxH - k_marginB;
@@ -2845,10 +2865,12 @@ SDL_AppResult Game::iterate()
             const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
             const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
             const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
+            const ImU32 fg3 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.6f, 0.9f, 0.6f, 0.9f));
 
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs * 2.0f + k_lineGap * 2.0f), fg3, line3);
         }
     }
 
@@ -3177,11 +3199,18 @@ SDL_AppResult Game::iterate()
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
+    // Uses shortest-path delta so that a 0→180° gravity flip rolls the
+    // correct direction instead of going the long way around.
     {
         const float k_targetRad = glm::radians(targetRoll);
-        const float k_speed = 10.0f; // interpolation speed (higher = snappier)
-        currentCameraRoll_ += (k_targetRad - currentCameraRoll_) * std::min(1.0f, k_speed * frameTime);
-        // Kill tiny residual to avoid permanent micro-tilt.
+        const float k_speed = 6.0f; // interpolation speed (lower = smoother gravity flip roll)
+        // Compute shortest-path delta, wrapping to [-π, π].
+        float delta = k_targetRad - currentCameraRoll_;
+        delta = std::remainder(delta, glm::two_pi<float>());
+        currentCameraRoll_ += delta * std::min(1.0f, k_speed * frameTime);
+        // Wrap current roll to [-π, π] to prevent drift.
+        currentCameraRoll_ = std::remainder(currentCameraRoll_, glm::two_pi<float>());
+        // Kill tiny residual to avoid permanent micro-tilt when near zero.
         if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
             currentCameraRoll_ = 0.0f;
     }
@@ -3275,13 +3304,25 @@ void Game::refreshRemotePlayerRenderables()
         // while preventing the entity-render loop from drawing a duplicate.
         rend.modelIndex = -1;
         // Bottom-of-AABB reference: align model feet with the AABB bottom.
-        rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        // When gravity is flipped, the player walks on ceilings — the model
+        // is rotated 180° around Z so "feet" point upward; translate the model
+        // so the (now-inverted) feet align with the AABB top.
+        if (state.gravityFlipped)
+            rend.translation = glm::vec3(0.0f, shape.halfExtents.y + rigMeshMinY_ * kRigScale_, 0.0f);
+        else
+            rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
         rend.scale = glm::vec3(kRigScale_);
         // No importFix quaternion here: rig is loaded with
         // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
-        rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        // Gravity-flipped players get an additional 180° roll so they
+        // appear upside-down to normally-oriented observers.
+        glm::quat orient = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        if (state.gravityFlipped) {
+            orient = orient * glm::angleAxis(glm::pi<float>(), glm::vec3{0, 0, 1});
+        }
+        rend.orientation = orient;
         rend.visible = !state.isDead;
     });
 }

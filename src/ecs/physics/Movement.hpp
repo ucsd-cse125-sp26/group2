@@ -12,12 +12,16 @@
 namespace physics
 {
 
-/// @brief Apply gravity for one tick: subtracts `k_gravity * dt` from the Y component.
-/// @param vel  Current velocity.
-/// @param dt   Delta time in seconds.
-/// @return     New velocity with gravity applied.
-/// @note       Call every tick when the entity is airborne (not grounded).
-glm::vec3 applyGravity(glm::vec3 vel, float dt);
+/// @brief Apply gravity for one tick.
+///
+/// In normal mode subtracts `k_gravity * dt` from Y; when flipped, adds it.
+///
+/// @param vel     Current velocity.
+/// @param dt      Delta time in seconds.
+/// @param flipped True when the player's gravity is inverted.
+/// @return        New velocity with gravity applied.
+/// @note          Call every tick when the entity is airborne (not grounded).
+glm::vec3 applyGravity(glm::vec3 vel, float dt, bool flipped = false);
 
 /// @brief Apply Quake-style ground friction to horizontal (XZ) velocity.
 ///

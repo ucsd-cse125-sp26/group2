@@ -199,6 +199,10 @@ void tickTimers(PlayerStateRef state, float dt)
         if (state.sim.grappleCooldownTimer <= 0.0f)
             state.sim.grappleCooldownActive = false;
     }
+
+    // Gravity flip cooldown.
+    if (state.sim.gravityFlipCooldown > 0.0f)
+        state.sim.gravityFlipCooldown -= dt;
 }
 
 } // namespace
@@ -242,11 +246,12 @@ namespace
 {
 
 /// @brief Handle all jump types: ground, double, coyote, wall, climb, ledge, slidehop.
-/// @param vel    Velocity (modified in place).
-/// @param input  Current input snapshot.
-/// @param state  Player state (modified in place).
-/// @param dt     Fixed physics delta time in seconds (unused).
-void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/)
+/// @param vel     Velocity (modified in place).
+/// @param input   Current input snapshot.
+/// @param state   Player state (modified in place).
+/// @param dt      Fixed physics delta time in seconds (unused).
+/// @param gravDir +1.0 for normal gravity, -1.0 for flipped (inverts all vertical impulses).
+void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/, float gravDir = 1.0f)
 {
     if (!input.jump) {
         // Key released — clear the wallrun autobhop lock so the next press
@@ -259,7 +264,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
     if (state.vis.moveMode == MoveMode::LedgeGrabbing) {
         if (state.sim.ledgeHoldTimer >= tms::k_ledgeMinHoldTime) {
             // Mantle: jump up onto the ledge.
-            vel.y = tms::k_ledgeJumpUpForce;
+            vel.y = tms::k_ledgeJumpUpForce * gravDir;
             // Push away from wall (which actually pushes over the ledge since normal points away from wall).
             vel += state.sim.ledgeNormal * tms::k_ledgeJumpBackForce;
             state.vis.moveMode = MoveMode::OnFoot;
@@ -280,7 +285,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         if (state.sim.wallJumpLocked)
             return;
 
-        vel.y = tms::k_wallJumpUpForce;
+        vel.y = tms::k_wallJumpUpForce * gravDir;
         vel += state.sim.wallNormal * tms::k_wallJumpSideForce;
         state.vis.moveMode = MoveMode::OnFoot;
         state.vis.exitingWall = true;
@@ -298,7 +303,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
 
     // Climb jump
     if (state.vis.moveMode == MoveMode::Climbing) {
-        vel.y = tms::k_climbJumpUpForce;
+        vel.y = tms::k_climbJumpUpForce * gravDir;
         vel += state.sim.climbWallNormal * tms::k_climbJumpBackForce;
         state.vis.moveMode = MoveMode::OnFoot;
         state.vis.exitingClimb = true;
@@ -321,7 +326,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         if (state.sim.wallJumpLocked)
             return;
 
-        vel.y = tms::k_wallJumpUpForce;
+        vel.y = tms::k_wallJumpUpForce * gravDir;
         vel += state.sim.wallBlacklistNormal * tms::k_wallJumpSideForce;
         state.sim.coyoteTimer = 0.0f;
         state.sim.wasWallRunning = false;
@@ -333,7 +338,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
 
     // Slidehop
     if (state.vis.moveMode == MoveMode::Sliding) {
-        vel.y = tms::k_slidehopJumpSpeed;
+        vel.y = tms::k_slidehopJumpSpeed * gravDir;
         state.vis.moveMode = MoveMode::OnFoot;
         state.vis.crouching = false;
         state.vis.grounded = false;
@@ -353,7 +358,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
 
     // Ground jump (or coyote ground jump)
     if (state.vis.grounded || state.sim.coyoteTimer > 0.0f) {
-        vel.y = tms::k_jumpSpeed;
+        vel.y = tms::k_jumpSpeed * gravDir;
         state.vis.grounded = false;
         state.sim.coyoteTimer = 0.0f;
         state.vis.jumpCount = 1;
@@ -380,9 +385,10 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
     const bool k_jumpRisingEdge = input.jump && !state.sim.jumpHeldLastTick;
     if (state.sim.canDoubleJump && state.vis.jumpCount < 2 && k_jumpRisingEdge && state.sim.jumpCooldown <= 0.0f) {
         // Reset vertical velocity before applying double jump (feels better than additive).
-        if (vel.y < 0.0f)
+        // When flipped, "falling" means vel.y > 0 so the check direction inverts.
+        if (vel.y * gravDir < 0.0f)
             vel.y = 0.0f;
-        vel.y += tms::k_doubleJumpSpeed;
+        vel.y += tms::k_doubleJumpSpeed * gravDir;
         state.sim.canDoubleJump = false;
         state.vis.jumpCount = 2;
         state.sim.jumpedThisTick = true;
@@ -831,7 +837,8 @@ void handleWallRunning(glm::vec3& pos,
     } else {
         const float k_rampT = (state.sim.wallRunTimer - tms::k_wallrunGripTime) / tms::k_wallrunGravityRampTime;
         const float k_gravFactor = std::clamp(k_rampT, 0.0f, 1.0f);
-        vel.y -= physics::k_gravity * k_gravFactor * dt;
+        const float k_gravDir = state.vis.gravityFlipped ? 1.0f : -1.0f;
+        vel.y += k_gravDir * physics::k_gravity * k_gravFactor * dt;
     }
 
     // Camera tilt.
@@ -1277,6 +1284,21 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // 0. Tick timers
             tickTimers(state, dt);
 
+            // 0b. Gravity flip toggle (rising edge of G key with cooldown).
+            {
+                const bool flipEdge = input.flipGravity && !state.sim.flipGravityHeldLastTick;
+                if (flipEdge && state.sim.gravityFlipCooldown <= 0.0f) {
+                    state.vis.gravityFlipped = !state.vis.gravityFlipped;
+                    state.sim.gravityFlipCooldown = physics::k_gravityFlipCooldown;
+                    // Clear grounded so the player doesn't stick to the old surface.
+                    state.vis.grounded = false;
+                }
+                state.sim.flipGravityHeldLastTick = input.flipGravity;
+            }
+
+            // Gravity direction multiplier: +1 normal, -1 flipped.
+            const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+
             // 1. Wall / climb / ledge detection
             // Pass the previous wall normal so the detector can trace toward
             // curved surfaces (cylinders, concave walls) whose normal rotates
@@ -1328,7 +1350,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             //     grapple-rising-edge + jump same-tick is a rare edge case and
             //     handleGrapple's velocity override wins anyway.
             if (!state.vis.grappleActive)
-                handleJump(vel.value, input, state, dt);
+                handleJump(vel.value, input, state, dt, gravDir);
 
             // 5. Mode-specific movement
             switch (state.vis.moveMode) {
@@ -1342,7 +1364,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                     if (glm::length(k_wishDir) > 0.001f)
                         vel.value = physics::accelerate(vel.value, k_wishDir, k_wishSpeed, physics::k_groundAccel, dt);
                 } else {
-                    vel.value = physics::applyGravity(vel.value, dt);
+                    vel.value = physics::applyGravity(vel.value, dt, state.vis.gravityFlipped);
                     if (glm::length(k_wishDir) > 0.001f) {
                         // Air wish-speed depends on current horizontal speed:
                         // generous when stalled, classic Quake floor at speed.

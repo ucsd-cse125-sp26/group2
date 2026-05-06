@@ -168,6 +168,19 @@ public:
     bool showCollisionWindow = false;  ///< Show the Collision Debug ImGui window.
     bool drawCollisionOverlay = false; ///< Draw world collision wireframes (independent of window visibility).
 
+    /// @brief Draw the Weapon Spawner Debug window and (optionally) wireframe overlay
+    /// for all weapon spawner entities, showing their bounding boxes and spawn positions.
+    ///
+    /// @param registry     ECS registry (reads WeaponSpawner, Position, CollisionShape).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void
+    buildWeaponSpawnerUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showWeaponSpawnerWindow = false;  ///< Show the Weapon Spawner Debug ImGui window.
+    bool drawWeaponSpawnerOverlay = false; ///< Draw weapon spawner wireframes (independent of window visibility).
+
     // ── PR-20: Shot-debug visualizer (CSGO sv_showimpacts-style) ─────
     //
     // Holds a ring buffer of paired (client-side fire-time snapshot,

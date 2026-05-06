@@ -14,6 +14,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
@@ -692,6 +693,10 @@ void runWeapon(Registry& registry,
                   const Position& pos,
                   const CollisionShape& shape,
                   WeaponState& weapon) {
+        // Dead players cannot fire or interact with weapons.
+        if (registry.all_of<RespawnTimer>(shooter))
+            return;
+
         handleSwitch(input, weapon);
         handleCooldown(weapon, dt);
 
