@@ -52,7 +52,11 @@ public:
     [[nodiscard]] const Camera& getCamera() const override { return legacyCameraStub_; }
 
     void setParticleSystem(ParticleSystem* /*ps*/) override {}
-    int loadSceneModel(const char* /*filename*/, glm::vec3 /*pos*/, float /*scale*/, bool /*flipUVs*/) override;
+    int loadSceneModel(const char* /*filename*/,
+                       glm::vec3 /*pos*/,
+                       float /*scale*/,
+                       bool /*flipUVs*/,
+                       const std::string& /*excludeNodesContaining*/ = "") override;
     int uploadSceneModel(const LoadedModel& /*model*/) override { return -1; }
     bool setVSync(bool /*enabled*/) override { return false; }
     void updateModelMeshVertices(int /*modelIndex*/,

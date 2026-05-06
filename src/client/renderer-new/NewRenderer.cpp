@@ -48,7 +48,6 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-
     SDL_Log("NewRenderer: GPU driver = %s", SDL_GetGPUDeviceDriver(device_));
 
     if (!SDL_ClaimWindowForGPUDevice(device_, window_)) {
@@ -103,7 +102,7 @@ bool NewRenderer::initCommon()
 
     camera_ = NewCamera();
 
-    //return loadSceneAssets();
+    // return loadSceneAssets();
     return true;
 }
 
@@ -236,12 +235,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
     //     }
     // }
 
-
     for (const auto& mInstance : Asset::modelInstances_) {
         glm::mat4 modelMatrix = glm::mat4(1.0f);
         modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
         modelMatrix = mInstance.transform_;
-        Asset::Model &model = Asset::models_.at(mInstance.modelId_);
+        Asset::Model& model = Asset::models_.at(mInstance.modelId_);
 
         for (auto& element : model.modelElements_) {
             glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;
@@ -258,8 +256,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
-
-void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass ,const Asset::Mesh& mesh) const
+void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
 {
     SDL_GPUBufferBinding vertexBufferBinding{};
     vertexBufferBinding.buffer = mesh.vBufferInfo_.gpuBuff;
@@ -359,28 +356,24 @@ void NewRenderer::createLegacyMeshBuffers(MeshIdInt meshId)
     mesh.iBufferInfo_.srcData = mesh.indexData_.data();
 }
 
-
-
-
-int NewRenderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs)
+int NewRenderer::loadSceneModel(
+    const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& /*excludeNodesContaining*/)
 {
-     ModelIdInt modelId = Asset::getIdFromString(filename);
-     bool flatten = false;
-     const std::vector<std::string> texFileNames;
+    ModelIdInt modelId = Asset::getIdFromString(filename);
+    bool flatten = false;
+    const std::vector<std::string> texFileNames;
 
-     auto modelTransform = glm::mat4(1.0f);
-     modelTransform = glm::scale(modelTransform,glm::vec3(scale));
-     modelTransform[3] = glm::vec4(pos,1.0f);
-
-
+    auto modelTransform = glm::mat4(1.0f);
+    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
+    modelTransform[3] = glm::vec4(pos, 1.0f);
 
     const char* const base = SDL_GetBasePath();
     std::filesystem::path fullPath = base ? base : "";
     fullPath /= ASSETS_DIR;
     fullPath /= filename;
 
-    AssetLoader::loadModel(modelId,fullPath.string() ,texFileNames,flatten,flipUVs);
-    Asset::Model &model = Asset::models_.at(modelId);
+    AssetLoader::loadModel(modelId, fullPath.string(), texFileNames, flatten, flipUVs);
+    Asset::Model& model = Asset::models_.at(modelId);
     // Asset::ModelNode &rootNode = model.modelNodes_.at(MODEL_ROOT_NODE_INDEX);
     // rootNode.transform_ = modelTransform * rootNode.transform_;
     AssetLoader::updateModelTransformCache(modelId);
@@ -389,8 +382,6 @@ int NewRenderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale
     sceneInstance.drawInScenePass = true;
     sceneInstance.modelId_ = modelId;
     sceneInstance.transform_ = modelTransform;
-
-
 
     Asset::modelInstances_.push_back(sceneInstance);
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -414,9 +405,7 @@ int NewRenderer::loadSceneModel(const char* filename, glm::vec3 pos, float scale
     SDL_WaitForGPUIdle(device_);
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
     return Asset::modelInstances_.size() - 1;
 };
 
-//int NewRenderer::uploadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs){}
-
+// int NewRenderer::uploadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs){}
