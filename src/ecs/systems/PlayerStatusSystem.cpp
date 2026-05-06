@@ -21,6 +21,7 @@
 #include "network/NetKillEvent.hpp"
 
 #include <ecs/components/RespawnPoint.hpp>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -48,25 +49,57 @@ void applyHeal(float amount, Health& playerHealth)
     }
 }
 
+/// @brief Cooldown duration set on a spawn point after a player spawns there.
+inline constexpr float k_spawnPointCooldown = 5.0f;
+
+/// @brief Choose a respawn point with cooldown-aware selection.
+///
+/// Prefers available (cooldown = 0) spawn points, picking randomly among them.
+/// If all spawn points are on cooldown, picks the one with the lowest remaining
+/// cooldown.  Sets a 3-second cooldown on the chosen point.
 inline glm::vec3 chooseRespawnPoint(Registry& registry)
 {
-    std::vector<glm::vec3> respawnPoints;
-
     auto view = registry.view<RespawnPoint, Position>();
 
+    // Collect available (off-cooldown) spawn points.
+    std::vector<entt::entity> available;
+    entt::entity lowestCooldownEntity = entt::null;
+    float lowestCooldown = std::numeric_limits<float>::max();
+
     for (entt::entity e : view) {
-        respawnPoints.push_back(view.get<Position>(e).value);
+        auto& sp = view.get<RespawnPoint>(e);
+        if (sp.available) {
+            available.push_back(e);
+        }
+        if (sp.cooldown < lowestCooldown) {
+            lowestCooldown = sp.cooldown;
+            lowestCooldownEntity = e;
+        }
     }
 
-    if (!respawnPoints.empty()) {
-        std::random_device rd;  // seed
-        std::mt19937 gen(rd()); // Mersenne Twister RNG
-        std::uniform_int_distribution<> dist(0, respawnPoints.size() - 1);
-        int idx = dist(gen);
-        return respawnPoints[idx];
-    } else {
-        return glm::vec3(0.0f, 200.0f, 0.0f);
+    entt::entity chosen = entt::null;
+
+    if (!available.empty()) {
+        // Pick randomly among available spawn points.
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<std::size_t> dist(0, available.size() - 1);
+        chosen = available[dist(gen)];
+    } else if (lowestCooldownEntity != entt::null) {
+        // All on cooldown — pick the one closest to being ready.
+        chosen = lowestCooldownEntity;
     }
+
+    if (chosen != entt::null) {
+        // Set cooldown on the chosen spawn point.
+        auto& sp = view.get<RespawnPoint>(chosen);
+        sp.cooldown = k_spawnPointCooldown;
+        sp.available = false;
+        return view.get<Position>(chosen).value;
+    }
+
+    // Fallback when no spawn points exist in the world.
+    return glm::vec3(0.0f, 200.0f, 0.0f);
 }
 
 /// @brief Reset a dead player to a fresh spawn state.
@@ -245,6 +278,19 @@ void runPlayerStatus(Registry& registry, float dt)
                 snap.killSelf = false;
                 std::vector<NetKillEvent> kills;
                 applyDamage(999.0f, e, e, registry, kills, BodyRegion::Head);
+            }
+        }
+    });
+}
+
+void runSpawnPointCooldowns(Registry& registry, float dt)
+{
+    registry.view<RespawnPoint>().each([dt](RespawnPoint& sp) {
+        if (!sp.available) {
+            sp.cooldown -= dt;
+            if (sp.cooldown <= 0.0f) {
+                sp.cooldown = 0.0f;
+                sp.available = true;
             }
         }
     });

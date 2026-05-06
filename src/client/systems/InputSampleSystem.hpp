@@ -74,8 +74,10 @@ inline bool prevFlipGravityKey = false;
 /// with physics (the default) so movement calculations match the server.
 /// Can also be called every iterate() when the sync toggle is off.
 ///
-/// @param registry  The ECS registry.
-inline void runMovementKeys(Registry& registry)
+/// @param registry        The ECS registry.
+/// @param gravityFlipped  When true, A/D are swapped so strafing feels
+///                        correct while the camera is rolled 180°.
+inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
 
@@ -93,8 +95,11 @@ inline void runMovementKeys(Registry& registry)
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.forward = kKeys[SDL_SCANCODE_W];
         snap.back = kKeys[SDL_SCANCODE_S];
-        snap.left = kKeys[SDL_SCANCODE_A];
-        snap.right = kKeys[SDL_SCANCODE_D];
+        // When gravity is flipped the camera is rolled 180°, which negates
+        // the screen-space right vector.  Swapping A/D compensates so
+        // pressing A still moves the player screen-left.
+        snap.left = gravityFlipped ? kKeys[SDL_SCANCODE_D] : kKeys[SDL_SCANCODE_A];
+        snap.right = gravityFlipped ? kKeys[SDL_SCANCODE_A] : kKeys[SDL_SCANCODE_D];
         snap.jump = kKeys[SDL_SCANCODE_SPACE];
         snap.crouch = kKeys[SDL_SCANCODE_LCTRL];
         snap.sprint = kKeys[SDL_SCANCODE_LSHIFT];
@@ -256,9 +261,11 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
 ///   L3 (LS click)  → sprint
 ///   LT             → grapple   (analog, threshold @ 0.5)
 ///
-/// @param registry  The ECS registry.
-/// @param gamepad   Open gamepad, or nullptr to no-op.
-inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad)
+/// @param registry        The ECS registry.
+/// @param gamepad          Open gamepad, or nullptr to no-op.
+/// @param gravityFlipped   When true, left/right stick are swapped to match
+///                         the 180° camera roll.
+inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gravityFlipped = false)
 {
     if (!gamepad)
         return;
@@ -272,8 +279,9 @@ inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad)
     constexpr float moveThresh = 0.3f;
     const bool padForward = ly < -moveThresh; // stick-up = -Y in SDL
     const bool padBack = ly > moveThresh;
-    const bool padLeft = lx < -moveThresh;
-    const bool padRight = lx > moveThresh;
+    // Swap left/right when gravity is flipped (same reasoning as keyboard).
+    const bool padLeft = gravityFlipped ? (lx > moveThresh) : (lx < -moveThresh);
+    const bool padRight = gravityFlipped ? (lx < -moveThresh) : (lx > moveThresh);
 
     const bool padJump = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
     const bool padCrouch = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST);

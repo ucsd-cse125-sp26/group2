@@ -1246,15 +1246,17 @@ SDL_AppResult Game::iterate()
     // Dead input runs regardless of mouse capture — allows skip-respawn.
     systems::runDeadInput(registry);
 
+    // Query local player's gravity flip state — used for mouse/stick
+    // inversion AND for swapping A-D / left-stick left-right.
+    bool localGravFlipped = false;
+    registry.view<PlayerVisState, LocalPlayer>().each(
+        [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
+
     if (mouseCaptured) {
-        // Query local player's gravity flip state for mouse inversion.
-        bool localGravFlipped = false;
-        registry.view<PlayerVisState, LocalPlayer>().each(
-            [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
-            systems::runMovementKeys(registry);
+            systems::runMovementKeys(registry, localGravFlipped);
         systems::runWeaponKeys(registry);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
@@ -1273,7 +1275,7 @@ SDL_AppResult Game::iterate()
         systems::runGamepadAimAssist(
             registry, activeGamepad_, aimAssistCfg_, aimAssistState_, gamepadLookSensitivity, frameTime);
         if (!inputSyncedWithPhysics)
-            systems::runGamepadMovement(registry, activeGamepad_);
+            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
         systems::runGamepadWeapon(registry, activeGamepad_);
 
         // Apply scroll-wheel weapon switch, constrained to primary/secondary.
@@ -1308,10 +1310,10 @@ SDL_AppResult Game::iterate()
     if (accumulator >= k_physicsDt) {
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured) {
-            systems::runMovementKeys(registry);
+            systems::runMovementKeys(registry, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
-            systems::runGamepadMovement(registry, activeGamepad_);
+            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
         }
 
         // PR-24 (off-by-one + capsule staleness fix): the fire detection
@@ -2467,8 +2469,19 @@ SDL_AppResult Game::iterate()
             const float cosPitch = std::cos(renderPitch);
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
-            const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
-            const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
+            glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+            // Apply camera roll to the viewmodel basis so the weapon follows
+            // the 180° flip (or any tilt) instead of staying upright.
+            if (std::abs(currentCameraRoll_) > 0.001f) {
+                const float cosR = std::cos(currentCameraRoll_);
+                const float sinR = std::sin(currentCameraRoll_);
+                const glm::vec3 rolledRight = right * cosR + up * sinR;
+                const glm::vec3 rolledUp = up * cosR - right * sinR;
+                right = rolledRight;
+                up = rolledUp;
+            }
 
             // --- Weapon sway (CoD-style barrel lead) ---
             {
@@ -2740,6 +2753,7 @@ SDL_AppResult Game::iterate()
             debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
             debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
+            debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
             // toggles + ring-buffer slider + per-shot summary table;
             // when `drawShotDebugOverlay` is checked we also render

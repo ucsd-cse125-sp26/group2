@@ -181,6 +181,18 @@ public:
     bool showWeaponSpawnerWindow = false;  ///< Show the Weapon Spawner Debug ImGui window.
     bool drawWeaponSpawnerOverlay = false; ///< Draw weapon spawner wireframes (independent of window visibility).
 
+    /// @brief Draw the Spawn Point Debug window and (optionally) overlay markers
+    /// for all player respawn point entities, showing position and cooldown state.
+    ///
+    /// @param registry     ECS registry (reads RespawnPoint, Position).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildSpawnPointUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showSpawnPointWindow = false;  ///< Show the Spawn Point Debug ImGui window.
+    bool drawSpawnPointOverlay = false; ///< Draw spawn point markers (independent of window visibility).
+
     // ── PR-20: Shot-debug visualizer (CSGO sv_showimpacts-style) ─────
     //
     // Holds a ring buffer of paired (client-side fire-time snapshot,

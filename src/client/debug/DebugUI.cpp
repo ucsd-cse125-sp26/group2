@@ -12,6 +12,7 @@
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -154,6 +155,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
     ImGui::Checkbox("Weapon Spawners", &showWeaponSpawnerWindow);
+    ImGui::Checkbox("Spawn Points", &showSpawnPointWindow);
     ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
     // External panels (owned by Game)
@@ -2076,6 +2078,110 @@ void DebugUI::buildWeaponSpawnerUI(const Registry& registry,
             }
             dl->AddText({sp.x + k_crossLen + 4.0f, sp.y - 6.0f}, markerColor, typeName);
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildSpawnPointUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildSpawnPointUI(const Registry& registry,
+                                const glm::mat4& viewProj,
+                                float screenWidth,
+                                float screenHeight)
+{
+    // ── ImGui window (only when showSpawnPointWindow is true) ──
+    if (showSpawnPointWindow) {
+        if (ImGui::Begin("Spawn Point Debug", &showSpawnPointWindow)) {
+            ImGui::Checkbox("Draw Spawn Markers", &drawSpawnPointOverlay);
+            ImGui::Separator();
+
+            // Count spawn points.
+            int totalSpawns = 0;
+            int availableSpawns = 0;
+            auto spawnView = registry.view<RespawnPoint, Position>();
+            for (auto e : spawnView) {
+                ++totalSpawns;
+                if (spawnView.get<RespawnPoint>(e).available)
+                    ++availableSpawns;
+            }
+            ImGui::Text("Spawn Points: %d  |  Available: %d  |  On Cooldown: %d",
+                        totalSpawns,
+                        availableSpawns,
+                        totalSpawns - availableSpawns);
+            ImGui::Separator();
+
+            // Per-spawn-point details.
+            int idx = 0;
+            for (auto e : spawnView) {
+                const auto& sp = spawnView.get<RespawnPoint>(e);
+                const auto& pos = spawnView.get<Position>(e);
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Spawn #%d", idx);
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    if (sp.available) {
+                        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Available");
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "Cooldown: %.1fs", sp.cooldown);
+                    }
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Marker overlay (independent of window visibility) ──
+    if (!drawSpawnPointOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    auto spawnView = registry.view<RespawnPoint, Position>();
+    int idx = 0;
+    for (auto e : spawnView) {
+        const auto& sp = spawnView.get<RespawnPoint>(e);
+        const auto& pos = spawnView.get<Position>(e);
+
+        // Green = available, orange = on cooldown.
+        const ImU32 markerColor = sp.available ? IM_COL32(50, 255, 50, 220) : IM_COL32(255, 140, 30, 200);
+
+        // Draw a diamond marker at the spawn position.
+        ImVec2 center;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, center)) {
+            constexpr float k_size = 12.0f;
+            // Diamond shape (rotated square)
+            dl->AddQuadFilled({center.x, center.y - k_size},
+                              {center.x + k_size, center.y},
+                              {center.x, center.y + k_size},
+                              {center.x - k_size, center.y},
+                              markerColor);
+            // Outline
+            dl->AddQuad({center.x, center.y - k_size},
+                        {center.x + k_size, center.y},
+                        {center.x, center.y + k_size},
+                        {center.x - k_size, center.y},
+                        IM_COL32(255, 255, 255, 200),
+                        2.0f);
+
+            // Label with spawn index and status.
+            char text[48];
+            if (sp.available) {
+                std::snprintf(text, sizeof(text), "Spawn #%d", idx);
+            } else {
+                std::snprintf(text, sizeof(text), "Spawn #%d (%.1fs)", idx, sp.cooldown);
+            }
+            dl->AddText({center.x + k_size + 4.0f, center.y - 6.0f}, IM_COL32(255, 255, 255, 220), text);
+        }
+
+        // Draw a vertical "pole" line from the ground (y=0) up to the spawn height
+        // so the spawn is easy to spot in 3D space.
+        const glm::vec3 groundPoint = {pos.value.x, 0.0f, pos.value.z};
+        drawWorldLine(dl, groundPoint, pos.value, viewProj, screenWidth, screenHeight, markerColor, 1.5f);
+
+        ++idx;
     }
 }
 
