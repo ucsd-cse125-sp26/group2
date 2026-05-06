@@ -14,6 +14,7 @@
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
+#include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -146,6 +147,7 @@ using Synced = std::tuple<entt::entity,
                           DeathInfo,
                           RespawnTimer,
                           WeaponSpawner,
+                          RespawnPoint,
                           AnimSnapshot>;
 
 // ── PR-10: snapshot delta encoding ──────────────────────────────────────

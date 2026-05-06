@@ -9,6 +9,13 @@
 #include "network/MatchStatus.hpp"
 #include "network/ShotDebugReport.hpp" // PR-20: ShotDebugCapture.
 
+// Forward-declared so DebugUI doesn't drag in raycast / hitbox headers via the
+// gamepad aim-assist system.  Full definition pulled in by DebugUI.cpp.
+namespace systems
+{
+struct GamepadAimAssistConfig;
+}
+
 #include <SDL3/SDL.h>
 
 #include <array>
@@ -55,6 +62,8 @@ public:
     /// @param registry                The ECS registry to inspect.
     /// @param tickCount               Total physics ticks elapsed.
     /// @param mouseSensitivity        Radians per pixel; slider (read/write).
+    /// @param gamepadLookSensitivity  Radians per second at full right-stick deflection; slider (read/write).
+    /// @param aimAssistCfg            Gamepad aim-assist config; sliders + toggle (read/write).
     /// @param renderSeparateFromPhysics Interpolated unlimited-fps mode toggle (read/write).
     /// @param inputSyncedWithPhysics  Sample input once per tick vs every frame (read/write).
     /// @param limitFPSToMonitor       VSync on/off toggle (read/write).
@@ -67,6 +76,8 @@ public:
     void buildUI(const Registry& registry,
                  int tickCount,
                  float& mouseSensitivity,
+                 float& gamepadLookSensitivity,
+                 systems::GamepadAimAssistConfig& aimAssistCfg,
                  bool& renderSeparateFromPhysics,
                  bool& inputSyncedWithPhysics,
                  bool& limitFPSToMonitor,
@@ -156,6 +167,31 @@ public:
 
     bool showCollisionWindow = false;  ///< Show the Collision Debug ImGui window.
     bool drawCollisionOverlay = false; ///< Draw world collision wireframes (independent of window visibility).
+
+    /// @brief Draw the Weapon Spawner Debug window and (optionally) wireframe overlay
+    /// for all weapon spawner entities, showing their bounding boxes and spawn positions.
+    ///
+    /// @param registry     ECS registry (reads WeaponSpawner, Position, CollisionShape).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void
+    buildWeaponSpawnerUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showWeaponSpawnerWindow = false;  ///< Show the Weapon Spawner Debug ImGui window.
+    bool drawWeaponSpawnerOverlay = false; ///< Draw weapon spawner wireframes (independent of window visibility).
+
+    /// @brief Draw the Spawn Point Debug window and (optionally) overlay markers
+    /// for all player respawn point entities, showing position and cooldown state.
+    ///
+    /// @param registry     ECS registry (reads RespawnPoint, Position).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildSpawnPointUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showSpawnPointWindow = false;  ///< Show the Spawn Point Debug ImGui window.
+    bool drawSpawnPointOverlay = false; ///< Draw spawn point markers (independent of window visibility).
 
     // ── PR-20: Shot-debug visualizer (CSGO sv_showimpacts-style) ─────
     //
@@ -291,6 +327,8 @@ private:
     void buildInspectorContents(const Registry& registry,
                                 int tickCount,
                                 float& mouseSensitivity,
+                                float& gamepadLookSensitivity,
+                                systems::GamepadAimAssistConfig& aimAssistCfg,
                                 bool& renderSeparateFromPhysics,
                                 bool& inputSyncedWithPhysics,
                                 bool& limitFPSToMonitor,

@@ -695,6 +695,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
@@ -1025,6 +1027,8 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp

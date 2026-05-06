@@ -199,6 +199,10 @@ void tickTimers(PlayerStateRef state, float dt)
         if (state.sim.grappleCooldownTimer <= 0.0f)
             state.sim.grappleCooldownActive = false;
     }
+
+    // Gravity flip cooldown.
+    if (state.sim.gravityFlipCooldown > 0.0f)
+        state.sim.gravityFlipCooldown -= dt;
 }
 
 } // namespace
@@ -210,16 +214,16 @@ namespace
 
 /// @brief Update the sprint flag based on input and current state.
 /// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-void updateSprint(PlayerStateRef state, const InputSnapshot& input)
+/// @param input  Current input snapshot (sprint input is now ignored).
+///
+/// Sprint has been removed from the game — base movement speed (tms::k_walkSpeed)
+/// is now high enough that a separate sprint state is unnecessary. This function
+/// is preserved so the sprinting flag in PlayerVisState (read by animation,
+/// networking, and debug UI) stays in a defined state. It is unconditionally
+/// false now.
+void updateSprint(PlayerStateRef state, const InputSnapshot& /*input*/)
 {
-    if (input.sprint && input.forward && !state.vis.crouching && state.vis.grounded &&
-        state.vis.moveMode == MoveMode::OnFoot)
-    {
-        state.vis.sprinting = true;
-    } else if (!input.sprint || !input.forward || state.vis.crouching || !state.vis.grounded) {
-        state.vis.sprinting = false;
-    }
+    state.vis.sprinting = false;
 }
 
 } // namespace
@@ -242,11 +246,12 @@ namespace
 {
 
 /// @brief Handle all jump types: ground, double, coyote, wall, climb, ledge, slidehop.
-/// @param vel    Velocity (modified in place).
-/// @param input  Current input snapshot.
-/// @param state  Player state (modified in place).
-/// @param dt     Fixed physics delta time in seconds (unused).
-void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/)
+/// @param vel     Velocity (modified in place).
+/// @param input   Current input snapshot.
+/// @param state   Player state (modified in place).
+/// @param dt      Fixed physics delta time in seconds (unused).
+/// @param gravDir +1.0 for normal gravity, -1.0 for flipped (inverts all vertical impulses).
+void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/, float gravDir = 1.0f)
 {
     if (!input.jump) {
         // Key released — clear the wallrun autobhop lock so the next press
@@ -259,7 +264,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
     if (state.vis.moveMode == MoveMode::LedgeGrabbing) {
         if (state.sim.ledgeHoldTimer >= tms::k_ledgeMinHoldTime) {
             // Mantle: jump up onto the ledge.
-            vel.y = tms::k_ledgeJumpUpForce;
+            vel.y = tms::k_ledgeJumpUpForce * gravDir;
             // Push away from wall (which actually pushes over the ledge since normal points away from wall).
             vel += state.sim.ledgeNormal * tms::k_ledgeJumpBackForce;
             state.vis.moveMode = MoveMode::OnFoot;
@@ -267,7 +272,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
             state.sim.exitLedgeTimer = tms::k_ledgeExitTime;
             state.vis.grounded = false;
             state.vis.jumpCount = 1;
-            state.sim.canDoubleJump = true;
+            // DJ no longer refreshes from ledge mantle — only from ground time.
         }
         return;
     }
@@ -280,14 +285,14 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         if (state.sim.wallJumpLocked)
             return;
 
-        vel.y = tms::k_wallJumpUpForce;
+        vel.y = tms::k_wallJumpUpForce * gravDir;
         vel += state.sim.wallNormal * tms::k_wallJumpSideForce;
         state.vis.moveMode = MoveMode::OnFoot;
         state.vis.exitingWall = true;
         state.sim.exitWallTimer = tms::k_wallrunExitTime;
         state.sim.wasWallRunning = true;
         state.vis.grounded = false;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from wall jump — only from ground time.
         state.vis.jumpCount = 1;
 
         // Blacklist this wall.
@@ -298,14 +303,14 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
 
     // Climb jump
     if (state.vis.moveMode == MoveMode::Climbing) {
-        vel.y = tms::k_climbJumpUpForce;
+        vel.y = tms::k_climbJumpUpForce * gravDir;
         vel += state.sim.climbWallNormal * tms::k_climbJumpBackForce;
         state.vis.moveMode = MoveMode::OnFoot;
         state.vis.exitingClimb = true;
         state.sim.exitClimbTimer = tms::k_climbExitTime;
         state.sim.wasClimbing = true;
         state.vis.grounded = false;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from climb jump — only from ground time.
         state.vis.jumpCount = 1;
 
         state.sim.climbBlacklistActive = true;
@@ -321,11 +326,11 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         if (state.sim.wallJumpLocked)
             return;
 
-        vel.y = tms::k_wallJumpUpForce;
+        vel.y = tms::k_wallJumpUpForce * gravDir;
         vel += state.sim.wallBlacklistNormal * tms::k_wallJumpSideForce;
         state.sim.coyoteTimer = 0.0f;
         state.sim.wasWallRunning = false;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from coyote wall jump — only from ground time.
         state.vis.jumpCount = 1;
         state.sim.jumpedThisTick = true;
         return;
@@ -333,12 +338,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
 
     // Slidehop
     if (state.vis.moveMode == MoveMode::Sliding) {
-        vel.y = tms::k_slidehopJumpSpeed;
+        vel.y = tms::k_slidehopJumpSpeed * gravDir;
         state.vis.moveMode = MoveMode::OnFoot;
         state.vis.crouching = false;
         state.vis.grounded = false;
         state.vis.jumpCount = 1;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from slidehop — only from ground time.
         state.sim.jumpedThisTick = true;
 
         // Restore standing shape — the slide had us crouched.
@@ -353,11 +358,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
 
     // Ground jump (or coyote ground jump)
     if (state.vis.grounded || state.sim.coyoteTimer > 0.0f) {
-        vel.y = tms::k_jumpSpeed;
+        vel.y = tms::k_jumpSpeed * gravDir;
         state.vis.grounded = false;
         state.sim.coyoteTimer = 0.0f;
         state.vis.jumpCount = 1;
-        state.sim.canDoubleJump = true;
+        // DJ availability is whatever ground time accrued before this jump
+        // already granted (in step 9). Don't override here.
         state.sim.jumpedThisTick = true;
         state.sim.jumpCooldown = tms::k_doubleJumpCooldown;
 
@@ -379,12 +385,27 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
     const bool k_jumpRisingEdge = input.jump && !state.sim.jumpHeldLastTick;
     if (state.sim.canDoubleJump && state.vis.jumpCount < 2 && k_jumpRisingEdge && state.sim.jumpCooldown <= 0.0f) {
         // Reset vertical velocity before applying double jump (feels better than additive).
-        if (vel.y < 0.0f)
+        // When flipped, "falling" means vel.y > 0 so the check direction inverts.
+        if (vel.y * gravDir < 0.0f)
             vel.y = 0.0f;
-        vel.y += tms::k_doubleJumpSpeed;
+        vel.y += tms::k_doubleJumpSpeed * gravDir;
         state.sim.canDoubleJump = false;
         state.vis.jumpCount = 2;
         state.sim.jumpedThisTick = true;
+
+        // Horizontal redirect: if any WASD is held, replace horizontal velocity with
+        // wishDir * max(boost, currentHorizSpeed). This turns the second jump into an
+        // air dash — letting players counter their own first-jump direction (e.g. jump
+        // right, then double-jump-left to reverse course). Momentum is preserved if
+        // already faster than the boost. With no WASD, horizontal velocity is untouched.
+        const glm::vec3 k_djWishDir =
+            physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+        if (glm::length(k_djWishDir) > 0.001f) {
+            const float k_djHs = horizSpeed(vel);
+            const float k_djSpeed = std::max(tms::k_doubleJumpHorizBoost, k_djHs);
+            vel.x = k_djWishDir.x * k_djSpeed;
+            vel.z = k_djWishDir.z * k_djSpeed;
+        }
 
         // Lurch resets on double jump too — but only if the preceding ground jump
         // was itself "fresh". Since double jump happens mid-air, groundedDuration
@@ -644,7 +665,7 @@ void tryEnterWallrun(glm::vec3& vel,
         state.sim.wallForward = wallFwd;
         state.sim.wallRunTimer = 0.0f;
         state.sim.wallRunSpeedTimer = 0.0f;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from entering wallrun — only from ground time.
         state.vis.jumpCount = 0;
 
         // Autobhop lock: if jump was held continuously from before entry (i.e.
@@ -816,7 +837,8 @@ void handleWallRunning(glm::vec3& pos,
     } else {
         const float k_rampT = (state.sim.wallRunTimer - tms::k_wallrunGripTime) / tms::k_wallrunGravityRampTime;
         const float k_gravFactor = std::clamp(k_rampT, 0.0f, 1.0f);
-        vel.y -= physics::k_gravity * k_gravFactor * dt;
+        const float k_gravDir = state.vis.gravityFlipped ? 1.0f : -1.0f;
+        vel.y += k_gravDir * physics::k_gravity * k_gravFactor * dt;
     }
 
     // Camera tilt.
@@ -875,7 +897,7 @@ void tryEnterClimb(glm::vec3& vel,
     state.vis.moveMode = MoveMode::Climbing;
     state.sim.climbWallNormal = walls.frontNormal;
     state.sim.climbTimer = 0.0f;
-    state.sim.canDoubleJump = true;
+    // DJ no longer refreshes from entering climb — only from ground time.
     state.vis.jumpCount = 0;
 
     // Reduce horizontal velocity immediately.
@@ -961,7 +983,7 @@ void tryEnterLedgeGrab(PlayerStateRef state, const physics::WallDetectionResult&
     state.sim.ledgePoint = walls.ledgePoint;
     state.sim.ledgeNormal = walls.ledgeNormal;
     state.sim.ledgeHoldTimer = 0.0f;
-    state.sim.canDoubleJump = true;
+    // DJ no longer refreshes from entering ledge grab — only from ground time.
     state.vis.jumpCount = 0;
 }
 
@@ -984,7 +1006,7 @@ void handleLedgeGrab(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& 
         state.vis.moveMode = MoveMode::OnFoot;
         state.sim.exitingLedge = true;
         state.sim.exitLedgeTimer = tms::k_ledgeExitTime;
-        state.sim.canDoubleJump = true;
+        // DJ no longer refreshes from auto-mantle — only from ground time.
         state.vis.jumpCount = 1;
     }
 
@@ -1033,6 +1055,16 @@ glm::vec3 lookDirFromInput(const InputSnapshot& input)
 {
     const float k_cosPitch = std::cos(input.pitch);
     return {std::sin(input.yaw) * k_cosPitch, -std::sin(input.pitch), std::cos(input.yaw) * k_cosPitch};
+}
+
+/// @brief End-point of the perch arc for a given hook + player half-height.
+///
+/// Sits `k_grapplePerchFeetOffset + halfExtentY` directly above the hook
+/// point, so the player's feet land `k_grapplePerchFeetOffset` above the
+/// hook (typically on top of the platform that owns the hooked corner).
+glm::vec3 perchEndPoint(glm::vec3 hookPoint, float halfExtentY)
+{
+    return hookPoint + glm::vec3(0.0f, tms::k_grapplePerchFeetOffset + halfExtentY, 0.0f);
 }
 
 /// @brief Detach the grapple and apply the look-biased launch impulse.
@@ -1098,19 +1130,87 @@ void tryFireGrapple(PlayerStateRef state,
     state.vis.grounded = false;
 }
 
-/// @brief Pull the player directly toward the anchor.  No air control, no gravity.
+/// @brief Pull the player toward the anchor, or arc-perch above it if jump is held.
 ///
-/// Velocity is overridden each tick (not additive). The player flies in a
-/// straight line toward the anchor point at k_grapplePullSpeed.
-void handleGrapple(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& input, glm::vec3 pos, float /*dt*/)
+/// Two modes:
+/// - **Default (jump not held):** velocity is overridden each tick to point
+///   directly at the anchor at `k_grapplePullSpeed`. Pure linear flight,
+///   no gravity, no air control. Crouch cancels (drop). Arrival or timeout
+///   triggers a look-biased launch.
+/// - **Perch (jump held):** the end-point shifts to `perchEndPoint` (above
+///   the hook by `k_grapplePerchFeetOffset + halfExtentY`) and the player
+///   follows a quadratic Bezier whose control point sits at the end-point's
+///   vertical level, midway horizontally. Result: an upward arc that lands
+///   you on top of the platform whose corner you hooked. No launch on
+///   arrival — you drop the last few units onto the surface.
+void handleGrapple(glm::vec3& vel,
+                   PlayerStateRef state,
+                   const InputSnapshot& input,
+                   glm::vec3 pos,
+                   const CollisionShape& shape,
+                   float /*dt*/)
 {
     if (!state.vis.grappleActive)
         return;
 
+    // Crouch always cancels — no-launch drop. Same in both modes.
+    if (input.crouch) {
+        state.vis.grappleActive = false;
+        state.sim.grappleCooldownActive = true;
+        state.sim.grappleCooldownTimer = tms::k_grappleCooldown;
+        return;
+    }
+
+    // ── Perch mode: held jump → stateless rise-then-traverse arc ───────
+    //
+    // The trajectory is computed each tick from current pos + replicated
+    // grapplePoint only. No per-tick accumulator (elapsed time, saved
+    // start position, bezier `t` parameter) — those would live in
+    // PlayerSimState which is server-only, drift on every reconciliation
+    // replay, and cause visible position jitter.
+    //
+    // Shape: vertical pull is a P-controller toward perchEnd.y, capped at
+    // pullSpeed; horizontal speed is reduced while still significantly
+    // below the target so the player rises before traversing — gives the
+    // perceived "arc up and over" feel of the original bezier without
+    // needing any state.
+    if (input.jump) {
+        const glm::vec3 k_perchEnd = perchEndPoint(state.vis.grapplePoint, shape.halfExtents.y);
+        const glm::vec3 k_toTarget = k_perchEnd - pos;
+        const glm::vec2 k_horizDelta{k_toTarget.x, k_toTarget.z};
+        const float k_horizDist = glm::length(k_horizDelta);
+
+        // Below-target XZ throttle: full pullSpeed at/above target altitude,
+        // dropping to k_minHorizFactor when k_grapplePerchRiseRange below it.
+        const float k_belowness = std::max(0.0f, k_toTarget.y) / tms::k_grapplePerchRiseRange;
+        const float k_horizFactor = std::clamp(1.0f - k_belowness, tms::k_grapplePerchMinHorizFactor, 1.0f);
+
+        glm::vec3 k_v{0.0f, 0.0f, 0.0f};
+        if (k_horizDist > 0.001f) {
+            const float k_hSpeed = tms::k_grapplePullSpeed * k_horizFactor;
+            k_v.x = (k_horizDelta.x / k_horizDist) * k_hSpeed;
+            k_v.z = (k_horizDelta.y / k_horizDist) * k_hSpeed;
+        }
+        // Vertical P-controller, capped at pullSpeed.
+        k_v.y = std::clamp(
+            k_toTarget.y * tms::k_grapplePerchVerticalGain, -tms::k_grapplePullSpeed, tms::k_grapplePullSpeed);
+
+        vel = k_v;
+
+        // Arrival: close enough to perch end → land (no launch).
+        if (glm::length(k_toTarget) < tms::k_grappleDetachDist) {
+            state.vis.grappleActive = false;
+            state.sim.grappleCooldownActive = true;
+            state.sim.grappleCooldownTimer = tms::k_grappleCooldown;
+            state.vis.grounded = false;
+        }
+        return;
+    }
+
     const glm::vec3 k_toHook = state.vis.grapplePoint - pos;
     const float k_dist = glm::length(k_toHook);
 
-    // ── Detach conditions ───────────────────────────────────────────────
+    // ── Detach conditions (default linear-pull mode) ────────────────────
 
     // Arrived at anchor — auto-detach with launch.
     if (k_dist < tms::k_grappleDetachDist) {
@@ -1118,23 +1218,9 @@ void handleGrapple(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& in
         return;
     }
 
-    // Jump to cancel early — detach with launch (the skill expression).
-    if (input.jump) {
-        grappleDetachWithLaunch(vel, state, input, pos);
-        return;
-    }
-
     // Safety timeout.
     if (state.sim.grapplePullTimer > tms::k_grappleMaxDuration) {
         grappleDetachWithLaunch(vel, state, input, pos);
-        return;
-    }
-
-    // Crouch to cancel without launch (just drop).
-    if (input.crouch) {
-        state.vis.grappleActive = false;
-        state.sim.grappleCooldownActive = true;
-        state.sim.grappleCooldownTimer = tms::k_grappleCooldown;
         return;
     }
 
@@ -1198,6 +1284,21 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // 0. Tick timers
             tickTimers(state, dt);
 
+            // 0b. Gravity flip toggle (rising edge of G key with cooldown).
+            {
+                const bool flipEdge = input.flipGravity && !state.sim.flipGravityHeldLastTick;
+                if (flipEdge && state.sim.gravityFlipCooldown <= 0.0f) {
+                    state.vis.gravityFlipped = !state.vis.gravityFlipped;
+                    state.sim.gravityFlipCooldown = physics::k_gravityFlipCooldown;
+                    // Clear grounded so the player doesn't stick to the old surface.
+                    state.vis.grounded = false;
+                }
+                state.sim.flipGravityHeldLastTick = input.flipGravity;
+            }
+
+            // Gravity direction multiplier: +1 normal, -1 flipped.
+            const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+
             // 1. Wall / climb / ledge detection
             // Pass the previous wall normal so the detector can trace toward
             // curved surfaces (cylinders, concave walls) whose normal rotates
@@ -1249,7 +1350,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             //     grapple-rising-edge + jump same-tick is a rare edge case and
             //     handleGrapple's velocity override wins anyway.
             if (!state.vis.grappleActive)
-                handleJump(vel.value, input, state, dt);
+                handleJump(vel.value, input, state, dt, gravDir);
 
             // 5. Mode-specific movement
             switch (state.vis.moveMode) {
@@ -1263,10 +1364,13 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                     if (glm::length(k_wishDir) > 0.001f)
                         vel.value = physics::accelerate(vel.value, k_wishDir, k_wishSpeed, physics::k_groundAccel, dt);
                 } else {
-                    vel.value = physics::applyGravity(vel.value, dt);
-                    if (glm::length(k_wishDir) > 0.001f)
-                        vel.value =
-                            physics::accelerate(vel.value, k_wishDir, physics::k_airMaxSpeed, physics::k_airAccel, dt);
+                    vel.value = physics::applyGravity(vel.value, dt, state.vis.gravityFlipped);
+                    if (glm::length(k_wishDir) > 0.001f) {
+                        // Air wish-speed depends on current horizontal speed:
+                        // generous when stalled, classic Quake floor at speed.
+                        const float k_airWish = physics::airWishSpeedForHorizSpeed(horizSpeed(vel.value));
+                        vel.value = physics::accelerate(vel.value, k_wishDir, k_airWish, physics::k_airAccel, dt);
+                    }
                 }
 
                 // Camera tilt returns to zero.
@@ -1304,7 +1408,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // Jump detaches with a look-biased launch. Crouch cancels with drop.
             bool grapplePulling = false;
             {
-                const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f, 0);
+                const float grapEyeDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+                const glm::vec3 k_eye = pos.value + glm::vec3(0, shape.halfExtents.y * 0.77f * grapEyeDir, 0);
                 tryFireGrapple(state, input, k_eye, world);
                 state.sim.grappleInputLastTick = input.grapple;
 
@@ -1316,8 +1421,9 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                             state.vis.pendingUncrouch = true;
                     }
 
-                    // Pull overrides velocity. Jump/crouch detach is handled inside.
-                    handleGrapple(vel.value, state, input, pos.value, dt);
+                    // Pull overrides velocity. Jump = perch arc, crouch = drop, both
+                    // handled inside handleGrapple.
+                    handleGrapple(vel.value, state, input, pos.value, shape, dt);
 
                     // If still active after handleGrapple, mark as pulling
                     // to skip all remaining movement this tick.
@@ -1339,9 +1445,15 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // 9. Landing reset
             if (state.vis.grounded && state.vis.moveMode == MoveMode::OnFoot) {
                 state.vis.jumpCount = 0;
-                state.sim.canDoubleJump = true;
                 state.sim.canEnterSlide = true;
                 state.sim.jumpLurchEnabled = false;
+
+                // Double jump: refresh only after enough continuous OnFoot time
+                // on the ground. This is the *only* path that grants DJ — wall
+                // jumps, climb jumps, slidehops, and ledge mantles deliberately
+                // don't restore it.
+                if (state.sim.groundedDuration >= tms::k_doubleJumpGroundedRefreshTime)
+                    state.sim.canDoubleJump = true;
 
                 // Clear blacklists on landing.
                 state.sim.wallBlacklistActive = false;

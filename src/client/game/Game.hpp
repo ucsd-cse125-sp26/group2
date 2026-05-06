@@ -20,6 +20,7 @@
 #include "network/MatchStatus.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "sfx/SfxSystem.hpp"
+#include "systems/GamepadAimAssistSystem.hpp"
 #include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
 #include "util/WorkerPool.hpp"
@@ -162,6 +163,39 @@ private:
     InputRingBuffer inputRing_;
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
 
+    /// @brief Currently-bound gamepad, or nullptr if none is plugged in.
+    ///
+    /// Opened on SDL_EVENT_GAMEPAD_ADDED (first device wins — extra controllers
+    /// are ignored until the active one disconnects), closed on
+    /// SDL_EVENT_GAMEPAD_REMOVED.  SDL3's gamepad mapping database normalises
+    /// every supported controller (Xbox 360 / One, DualShock, Switch Pro, ...)
+    /// onto the same logical buttons + axes, so the input mapping in
+    /// InputSampleSystem.hpp works uniformly across devices.
+    SDL_Gamepad* activeGamepad_ = nullptr;
+    /// @brief SDL_JoystickID of the active gamepad — needed to identify the
+    /// device on SDL_EVENT_GAMEPAD_REMOVED so we don't tear down a different
+    /// controller when a second one disconnects.
+    SDL_JoystickID activeGamepadId_ = 0;
+    /// @brief Right-stick look speed in radians per second at full deflection.
+    /// 6.0 rad/s ≈ 343°/s — most testers found 3.0 too sluggish for tracking
+    /// players during firefights; this is in line with mainstream console FPS
+    /// defaults.  Tunable from the ECS inspector.
+    float gamepadLookSensitivity = 6.0f;
+
+    /// @brief AAA-style gamepad aim assist tuning.
+    ///
+    /// Active only when a gamepad is connected (mouse input is unaffected).
+    /// Defaults are tuned for *assist* not *auto-aim*: a stationary enemy
+    /// gets zero rotational pull, a moving enemy gets partial tracking
+    /// help.  Live-tunable from the ECS inspector.
+    systems::GamepadAimAssistConfig aimAssistCfg_;
+
+    /// @brief Persistent inter-frame state for aim assist (anchor on target
+    /// AABB + previous-frame snapshot used to compute the angular delta
+    /// from which the rotational pull is derived).  Reset implicitly when
+    /// the target is lost or aim assist is disabled.
+    systems::GamepadAimAssistState aimAssistState_;
+
     /// Persistent thread pool for parallel-for over per-frame loops
     /// (currently the animation update; future: parallel frustum cull,
     /// particle update, ECS transforms).  Initialised in Game::init with a
@@ -172,7 +206,7 @@ private:
     std::unique_ptr<WorkerPool> workerPool_;
 
     // Runtime-tunable loop settings (exposed via ImGui)
-    float mouseSensitivity = 0.001f;       ///< Radians per pixel of mouse movement.
+    float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
@@ -193,6 +227,7 @@ private:
     // Cached camera state — updated each iterate(), used by event() key shortcuts.
     glm::vec3 cachedEye_{0.f, 100.f, 0.f};
     glm::vec3 cachedCamFwd_{0.f, 0.f, 1.f};
+    bool cachedGravFlipped_{false}; ///< Local player gravity-flip state, updated each iterate().
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().

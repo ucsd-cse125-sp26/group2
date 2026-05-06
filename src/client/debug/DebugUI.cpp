@@ -3,6 +3,7 @@
 
 #include "debug/DebugUI.hpp"
 
+#include "client/systems/GamepadAimAssistSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -11,8 +12,10 @@
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
@@ -151,6 +154,8 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::SeparatorText("Physics");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+    ImGui::Checkbox("Weapon Spawners", &showWeaponSpawnerWindow);
+    ImGui::Checkbox("Spawn Points", &showSpawnPointWindow);
     ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
     // External panels (owned by Game)
@@ -168,6 +173,8 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
 void DebugUI::buildUI(const Registry& registry,
                       const int tickCount,
                       float& mouseSensitivity,
+                      float& gamepadLookSensitivity,
+                      systems::GamepadAimAssistConfig& aimAssistCfg,
                       bool& renderSeparateFromPhysics,
                       bool& inputSyncedWithPhysics,
                       bool& limitFPSToMonitor,
@@ -192,6 +199,8 @@ void DebugUI::buildUI(const Registry& registry,
             buildInspectorContents(registry,
                                    tickCount,
                                    mouseSensitivity,
+                                   gamepadLookSensitivity,
+                                   aimAssistCfg,
                                    renderSeparateFromPhysics,
                                    inputSyncedWithPhysics,
                                    limitFPSToMonitor,
@@ -221,6 +230,8 @@ void DebugUI::buildUI(const Registry& registry,
 void DebugUI::buildInspectorContents(const Registry& registry,
                                      const int tickCount,
                                      float& mouseSensitivity,
+                                     float& gamepadLookSensitivity,
+                                     systems::GamepadAimAssistConfig& aimAssistCfg,
                                      bool& renderSeparateFromPhysics,
                                      bool& inputSyncedWithPhysics,
                                      bool& limitFPSToMonitor,
@@ -241,6 +252,69 @@ void DebugUI::buildInspectorContents(const Registry& registry,
 
     // Logarithmic slider so both ends of the range are equally reachable.
     ImGui::SliderFloat("Mouse Sensitivity", &mouseSensitivity, 0.0001f, 0.0200f, "%.4f", ImGuiSliderFlags_Logarithmic);
+
+    // Gamepad right-stick look speed in radians/second at full deflection.
+    // Linear feels right here — the useful range is much narrower than mouse
+    // sensitivity (1..15 rad/s covers everything from "console aim assist"
+    // to "very twitchy"), and a linear slider preserves intuitive doubling.
+    ImGui::SliderFloat("Gamepad Look Sensitivity", &gamepadLookSensitivity, 1.0f, 15.0f, "%.2f rad/s");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("Right-stick angular speed at full deflection.\n"
+                          "6.0 rad/s ≈ 343°/s (default).\n"
+                          "Affects only the gamepad — mouse uses its own slider above.");
+
+    // ── Gamepad aim assist (collapsible) ──────────────────────────────────
+    // Tucked behind a header so the inspector stays clean for kbm players.
+    // All sliders live-edit the active config struct on the Game class, so
+    // tuning is immediate.  Default-open while we iterate on the feel.
+    if (ImGui::CollapsingHeader("Gamepad Aim Assist", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Enabled", &aimAssistCfg.enabled);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Master toggle.  No effect when no gamepad is connected.");
+
+        ImGui::BeginDisabled(!aimAssistCfg.enabled);
+
+        ImGui::SliderFloat("Inner Cone (deg)", &aimAssistCfg.innerConeDeg, 0.0f, 15.0f, "%.1f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Crosshair-to-target angle below which assist is at full strength.");
+
+        ImGui::SliderFloat("Outer Cone (deg)", &aimAssistCfg.outerConeDeg, 0.0f, 30.0f, "%.1f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Angle at which assist fades to zero.\n"
+                              "Larger = bigger \"magnet\" but more obvious.");
+
+        ImGui::SliderFloat("Max Range (units)", &aimAssistCfg.maxRange, 200.0f, 8000.0f, "%.0f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Targets beyond this distance get no aim assist.");
+
+        ImGui::SliderFloat("Activation Stick %", &aimAssistCfg.activationStickThresh, 0.0f, 0.30f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Stick deflection (left or right) required to activate assist.\n"
+                              "0.05 = 5 %% (default).  Holding still disables all assist.");
+
+        ImGui::SliderFloat("Rotational Compensation", &aimAssistCfg.rotationalCompensation, 0.0f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Fraction of the target's apparent angular velocity that aim\n"
+                              "assist contributes per frame.  0.0 = no rotational help,\n"
+                              "1.0 = perfect tracking (aimbot).  Default 0.8.\n"
+                              "A stationary enemy contributes ZERO regardless of this value —\n"
+                              "the pull is driven by frame-to-frame change in the anchor\n"
+                              "position, not by absolute angle to the target.");
+
+        ImGui::SliderFloat("Max Pull Rate (rad/s)", &aimAssistCfg.maxPullRate, 0.5f, 8.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Hard cap on how fast the camera can be pulled by assist.\n"
+                              "Safety net for snapshot warps / target teleports.\n"
+                              "3.0 rad/s ≈ 172°/s (default).");
+
+        ImGui::SliderFloat("Slowdown Strength", &aimAssistCfg.slowdownStrength, 0.10f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Effective look sensitivity when crosshair is on a target.\n"
+                              "Lower = stronger slowdown / stickier feel.\n"
+                              "1.0 = no slowdown, 0.35 = 35 %% speed (default).");
+
+        ImGui::EndDisabled();
+    }
 
     ImGui::Checkbox("Render Separately from Physics", &renderSeparateFromPhysics);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
@@ -1857,6 +1931,257 @@ void DebugUI::buildCollisionUI(const physics::WorldGeometry& world,
         const ImU32 triColor = IM_COL32(200, 50, 255, 220);
         for (const auto& tm : world.triMeshes)
             drawTriMeshWireframe(dl, tm, viewProj, screenWidth, screenHeight, triColor);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildWeaponSpawnerUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildWeaponSpawnerUI(const Registry& registry,
+                                   const glm::mat4& viewProj,
+                                   float screenWidth,
+                                   float screenHeight)
+{
+    // ── ImGui window (only when showWeaponSpawnerWindow is true) ──
+    if (showWeaponSpawnerWindow) {
+        if (ImGui::Begin("Weapon Spawner Debug", &showWeaponSpawnerWindow)) {
+            ImGui::Checkbox("Draw Spawner Boxes", &drawWeaponSpawnerOverlay);
+            ImGui::Separator();
+
+            // Count spawners.
+            int totalSpawners = 0;
+            int activeSpawners = 0;
+            auto spawnerView = registry.view<WeaponSpawner, Position, CollisionShape>();
+            for (auto e : spawnerView) {
+                ++totalSpawners;
+                if (spawnerView.get<WeaponSpawner>(e).hasWeapon)
+                    ++activeSpawners;
+            }
+            ImGui::Text("Spawners: %d  |  Active: %d  |  On Cooldown: %d",
+                        totalSpawners,
+                        activeSpawners,
+                        totalSpawners - activeSpawners);
+            ImGui::Separator();
+
+            // Per-spawner details.
+            int idx = 0;
+            for (auto e : spawnerView) {
+                const auto& spawner = spawnerView.get<WeaponSpawner>(e);
+                const auto& pos = spawnerView.get<Position>(e);
+                const auto& shape = spawnerView.get<CollisionShape>(e);
+
+                const char* typeName = "Unknown";
+                switch (spawner.type) {
+                case WeaponType::Rifle:
+                    typeName = "Rifle";
+                    break;
+                case WeaponType::Rocket:
+                    typeName = "Rocket";
+                    break;
+                case WeaponType::RailGun:
+                    typeName = "RailGun";
+                    break;
+                case WeaponType::EnergyGun:
+                    typeName = "EnergyGun";
+                    break;
+                }
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Spawner #%d (%s)", idx, typeName);
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    ImGui::Text("Box half-extents: (%.0f, %.0f, %.0f)",
+                                shape.halfExtents.x,
+                                shape.halfExtents.y,
+                                shape.halfExtents.z);
+                    ImGui::Text("Has weapon: %s", spawner.hasWeapon ? "YES" : "no");
+                    if (!spawner.hasWeapon)
+                        ImGui::Text("Cooldown: %.1fs", spawner.spawnCooldown);
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Wireframe overlay (independent of window visibility) ──
+    if (!drawWeaponSpawnerOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    auto spawnerView = registry.view<WeaponSpawner, Position, CollisionShape>();
+    for (auto e : spawnerView) {
+        const auto& spawner = spawnerView.get<WeaponSpawner>(e);
+        const auto& pos = spawnerView.get<Position>(e);
+        const auto& shape = spawnerView.get<CollisionShape>(e);
+
+        // Green = weapon available, red/orange = on cooldown.
+        const ImU32 boxColor = spawner.hasWeapon ? IM_COL32(50, 255, 50, 200) : IM_COL32(255, 100, 50, 160);
+
+        // Draw AABB wireframe around the spawner's collision volume.
+        const glm::vec3 mn = pos.value - shape.halfExtents;
+        const glm::vec3 mx = pos.value + shape.halfExtents;
+        const glm::vec3 corners[8] = {
+            {mn.x, mn.y, mn.z},
+            {mx.x, mn.y, mn.z},
+            {mx.x, mn.y, mx.z},
+            {mn.x, mn.y, mx.z},
+            {mn.x, mx.y, mn.z},
+            {mx.x, mx.y, mn.z},
+            {mx.x, mx.y, mx.z},
+            {mn.x, mx.y, mx.z},
+        };
+        // 12 edges of the AABB.
+        static constexpr int edges[12][2] = {
+            {0, 1},
+            {1, 2},
+            {2, 3},
+            {3, 0}, // bottom
+            {4, 5},
+            {5, 6},
+            {6, 7},
+            {7, 4}, // top
+            {0, 4},
+            {1, 5},
+            {2, 6},
+            {3, 7}, // verticals
+        };
+        for (const auto& edge : edges)
+            drawWorldLine(dl, corners[edge[0]], corners[edge[1]], viewProj, screenWidth, screenHeight, boxColor, 2.0f);
+
+        // Draw a cross marker at the spawn position (center point).
+        ImVec2 sp;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, sp)) {
+            constexpr float k_crossLen = 10.0f;
+            const ImU32 markerColor = IM_COL32(255, 255, 0, 220);
+            dl->AddLine({sp.x - k_crossLen, sp.y}, {sp.x + k_crossLen, sp.y}, markerColor, 2.0f);
+            dl->AddLine({sp.x, sp.y - k_crossLen}, {sp.x, sp.y + k_crossLen}, markerColor, 2.0f);
+            dl->AddCircle(sp, k_crossLen, markerColor, 12, 1.5f);
+
+            // Label with weapon type name.
+            const char* typeName = "?";
+            switch (spawner.type) {
+            case WeaponType::Rifle:
+                typeName = "Rifle";
+                break;
+            case WeaponType::Rocket:
+                typeName = "Rocket";
+                break;
+            case WeaponType::RailGun:
+                typeName = "RailGun";
+                break;
+            case WeaponType::EnergyGun:
+                typeName = "EnergyGun";
+                break;
+            }
+            dl->AddText({sp.x + k_crossLen + 4.0f, sp.y - 6.0f}, markerColor, typeName);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildSpawnPointUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildSpawnPointUI(const Registry& registry,
+                                const glm::mat4& viewProj,
+                                float screenWidth,
+                                float screenHeight)
+{
+    // ── ImGui window (only when showSpawnPointWindow is true) ──
+    if (showSpawnPointWindow) {
+        if (ImGui::Begin("Spawn Point Debug", &showSpawnPointWindow)) {
+            ImGui::Checkbox("Draw Spawn Markers", &drawSpawnPointOverlay);
+            ImGui::Separator();
+
+            // Count spawn points.
+            int totalSpawns = 0;
+            int availableSpawns = 0;
+            auto spawnView = registry.view<RespawnPoint, Position>();
+            for (auto e : spawnView) {
+                ++totalSpawns;
+                if (spawnView.get<RespawnPoint>(e).available)
+                    ++availableSpawns;
+            }
+            ImGui::Text("Spawn Points: %d  |  Available: %d  |  On Cooldown: %d",
+                        totalSpawns,
+                        availableSpawns,
+                        totalSpawns - availableSpawns);
+            ImGui::Separator();
+
+            // Per-spawn-point details.
+            int idx = 0;
+            for (auto e : spawnView) {
+                const auto& sp = spawnView.get<RespawnPoint>(e);
+                const auto& pos = spawnView.get<Position>(e);
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Spawn #%d", idx);
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    if (sp.available) {
+                        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Available");
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "Cooldown: %.1fs", sp.cooldown);
+                    }
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Marker overlay (independent of window visibility) ──
+    if (!drawSpawnPointOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    auto spawnView = registry.view<RespawnPoint, Position>();
+    int idx = 0;
+    for (auto e : spawnView) {
+        const auto& sp = spawnView.get<RespawnPoint>(e);
+        const auto& pos = spawnView.get<Position>(e);
+
+        // Green = available, orange = on cooldown.
+        const ImU32 markerColor = sp.available ? IM_COL32(50, 255, 50, 220) : IM_COL32(255, 140, 30, 200);
+
+        // Draw a diamond marker at the spawn position.
+        ImVec2 center;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, center)) {
+            constexpr float k_size = 12.0f;
+            // Diamond shape (rotated square)
+            dl->AddQuadFilled({center.x, center.y - k_size},
+                              {center.x + k_size, center.y},
+                              {center.x, center.y + k_size},
+                              {center.x - k_size, center.y},
+                              markerColor);
+            // Outline
+            dl->AddQuad({center.x, center.y - k_size},
+                        {center.x + k_size, center.y},
+                        {center.x, center.y + k_size},
+                        {center.x - k_size, center.y},
+                        IM_COL32(255, 255, 255, 200),
+                        2.0f);
+
+            // Label with spawn index and status.
+            char text[48];
+            if (sp.available) {
+                std::snprintf(text, sizeof(text), "Spawn #%d", idx);
+            } else {
+                std::snprintf(text, sizeof(text), "Spawn #%d (%.1fs)", idx, sp.cooldown);
+            }
+            dl->AddText({center.x + k_size + 4.0f, center.y - 6.0f}, IM_COL32(255, 255, 255, 220), text);
+        }
+
+        // Draw a vertical "pole" line from the ground (y=0) up to the spawn height
+        // so the spawn is easy to spot in 3D space.
+        const glm::vec3 groundPoint = {pos.value.x, 0.0f, pos.value.z};
+        drawWorldLine(dl, groundPoint, pos.value, viewProj, screenWidth, screenHeight, markerColor, 1.5f);
+
+        ++idx;
     }
 }
 

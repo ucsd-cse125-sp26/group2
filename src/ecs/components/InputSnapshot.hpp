@@ -32,7 +32,9 @@ struct InputSnapshot
     bool switchToPrimary{false};   ///< Switch to gun in primary slot.
     bool switchToSecondary{false}; ///< Switch to gun in secondary slot.
     bool refillAmmo{false};        ///< Debug: refill all weapons to full ammo.
-    bool killSelf{false};          ///< Debug: kill self
+    bool killSelf{false};          ///< Debug: kill self (rising-edge only).
+    bool skipRespawn{false};       ///< Skip respawn timer (space while dead).
+    bool flipGravity{false};       ///< Gravity flip toggle (G key, rising-edge only).
 
     float yaw{0.0f};               ///< Horizontal look angle in radians (accumulated from mouse X deltas).
     float pitch{0.0f};             ///< Vertical look angle in radians, clamped to [-89°, +89°] by InputSampleSystem.

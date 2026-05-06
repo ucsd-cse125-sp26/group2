@@ -13,9 +13,10 @@
 namespace physics
 {
 
-glm::vec3 applyGravity(glm::vec3 vel, float dt)
+glm::vec3 applyGravity(glm::vec3 vel, float dt, bool flipped)
 {
-    vel.y -= k_gravity * dt;
+    const float dir = flipped ? 1.0f : -1.0f;
+    vel.y += dir * k_gravity * dt;
     return vel;
 }
 
@@ -47,6 +48,20 @@ glm::vec3 accelerate(glm::vec3 vel, glm::vec3 wishDir, float wishSpeed, float ac
     // Accelerate, but never overshoot wishSpeed in the wish direction.
     const float k_accelSpeed = std::min(accel * dt * wishSpeed, k_addSpeed);
     return vel + wishDir * k_accelSpeed;
+}
+
+float airWishSpeedForHorizSpeed(float currentHorizSpeed)
+{
+    if (currentHorizSpeed >= k_airWishCurveTop)
+        return k_airMaxSpeed;
+    if (currentHorizSpeed <= 0.0f)
+        return k_airMaxWishLowSpeed;
+
+    const float k_t = currentHorizSpeed / k_airWishCurveTop;
+    // Power curve with exponent < 1 produces a sharp early falloff:
+    // most of the high-wish region is concentrated near zero speed.
+    const float k_curve = std::pow(k_t, k_airWishCurveExponent);
+    return k_airMaxWishLowSpeed + (k_airMaxSpeed - k_airMaxWishLowSpeed) * k_curve;
 }
 
 glm::vec3 clipVelocity(glm::vec3 vel, glm::vec3 normal, float overbounce)
