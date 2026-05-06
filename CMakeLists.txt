@@ -720,8 +720,8 @@ add_executable(group2
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
         src/ecs/components/ClientId.hpp
-        src/client/renderer-new/Renderer.cpp
-        src/client/renderer-new/Renderer.hpp
+        src/client/renderer-new/NewRenderer.cpp
+        src/client/renderer-new/NewRenderer.hpp
         src/client/renderer-new/Camera.cpp
         src/client/renderer-new/Camera.hpp
         src/client/renderer-new/Asset.hpp

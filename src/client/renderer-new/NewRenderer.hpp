@@ -52,10 +52,7 @@ public:
     [[nodiscard]] const Camera& getCamera() const override { return legacyCameraStub_; }
 
     void setParticleSystem(ParticleSystem* /*ps*/) override {}
-    int loadSceneModel(const char* /*filename*/, glm::vec3 /*pos*/, float /*scale*/, bool /*flipUVs*/) override
-    {
-        return -1;
-    }
+    int loadSceneModel(const char* /*filename*/, glm::vec3 /*pos*/, float /*scale*/, bool /*flipUVs*/) override;
     int uploadSceneModel(const LoadedModel& /*model*/) override { return -1; }
     bool setVSync(bool /*enabled*/) override { return false; }
     void updateModelMeshVertices(int /*modelIndex*/,
@@ -114,6 +111,8 @@ private:
     /// @brief Allocate GPU vertex and index buffers for the given mesh.
     /// @param meshId Key into Asset::meshes_.
     void createMeshBuffers(MeshIdInt meshId);
+
+    void createLegacyMeshBuffers(MeshIdInt meshId);
 
     /// @brief Bind a mesh's buffers and issue an indexed draw call.
     /// @param renderPass The active render pass.

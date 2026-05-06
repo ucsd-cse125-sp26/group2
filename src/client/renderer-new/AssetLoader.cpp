@@ -8,11 +8,13 @@
 #include <stack>
 #include <vector>
 
-const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::string& fileName)
+const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::string& fileName,const bool flipUVs)
 {
     SDL_Log("Working dir: %s", std::filesystem::current_path().string().c_str());
-    const aiScene* scene =
-        importer.ReadFile(fileName, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_FlipUVs);
+    unsigned int flags = aiProcess_Triangulate | aiProcess_GenNormals ;
+    if (flipUVs) flags |= aiProcess_FlipUVs;
+
+    const aiScene* scene = importer.ReadFile(fileName, flags);
     SDL_Log("Assimp error: %s", importer.GetErrorString());
 
     return scene;
@@ -26,7 +28,8 @@ bool AssetLoader::loadModelsList()
     const std::vector<std::string> texFileNames;
 
     std::cout << "loading model" << std::endl;
-    bool res = loadModel(id, modelFileName,texFileNames,false);
+    //bool res = loadModel(id, modelFileName,texFileNames,false);
+    bool res = loadModel(id, modelFileName,texFileNames,false,true);
     std::cout << "loaded model" << std::endl;
     if (!res) {
         std::cout << "MODEL NOT FOUND!!" << std::endl;
@@ -49,13 +52,19 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
 
         aiVector3D& aiV_i = asimpMeshResult.mVertices[i];
         aiVector3D& aiN_i = asimpMeshResult.mNormals[i];
-        aiVector3D& aiT0_i = asimpMeshResult.mTextureCoords[0][i];
+        //aiVector3D& aiT0_i = asimpMeshResult.mTextureCoords[0][i];
 
         v.position = glm::vec3(aiV_i.x, aiV_i.y, aiV_i.z);
 
         v.normal = glm::vec3(aiN_i.x, aiN_i.y, aiN_i.z);
 
-        v.texUV = glm::vec2(aiT0_i.x, aiT0_i.y);
+        //v.texUV = glm::vec2(aiT0_i.x, aiT0_i.y);
+        if (asimpMeshResult.mTextureCoords[0]) {
+            v.texUV = glm::vec2(asimpMeshResult.mTextureCoords[0][i].x, asimpMeshResult.mTextureCoords[0][i].y);
+        } else {
+            v.texUV = glm::vec2(0.0f, 0.0f);
+        }
+
 
         mesh.vertexData_.push_back(v);
     }
@@ -76,10 +85,7 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
     return true;
 }
 
-bool AssetLoader::loadModel(const ModelIdInt id,
-                            const std::string& modelFileName,
-                            const std::vector<std::string>& texFileNames,
-                            const bool k_flatten)
+bool AssetLoader::loadModel(const ModelIdInt id, const std::string& modelFileName, const std::vector<std::string>& texFileNames, const bool k_flatten,const bool flipUVs)
 {
     Assimp::Importer importer;
     std::string debugPrefix = "Static Model Loading: ";
@@ -90,7 +96,7 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     // std::cout << "loadAsset" << std::endl;
-    const aiScene* asimpSceneStructurePtr = loadAsset(importer, modelFileName);
+    const aiScene* asimpSceneStructurePtr = loadAsset(importer, modelFileName,flipUVs);
 
     if (asimpSceneStructurePtr == nullptr) {
         std::cout << debugPrefix << "scene is null" << std::endl;
