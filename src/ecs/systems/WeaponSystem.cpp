@@ -137,15 +137,17 @@ inline glm::vec3 viewForward(float yaw, float pitch)
 /// @brief Offset the muzzle origin from the eye position for tracer visuals.
 ///
 /// Shifts the origin right and down from eye, slightly forward, so tracers
-/// don't originate from the center of the screen.  The "right" side of the
-/// screen is the same regardless of gravity flip (the 180° camera roll
-/// negates both the right AND up vectors, so the screen-right direction in
-/// world space is unchanged).  Only the eye position itself changes when
-/// flipped — and the caller already handles that.
-/// @param eye        Eye position (camera origin).
-/// @param direction  Normalized view direction.
+/// don't originate from the center of the screen.
+/// @param eye             Eye position (camera origin).
+/// @param direction       Normalized view direction.
+/// @param gravityFlipped  When true, negate the horizontal offset so the
+///                        tracer originates from the viewmodel side.  The
+///                        viewmodel stays on screen-right, but the 180°
+///                        camera roll reverses world-left/right — so
+///                        world-right (the normal offset) appears on the
+///                        wrong side of the screen.
 /// @return Offset muzzle position in world space.
-inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
+inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction, bool gravityFlipped = false)
 {
     constexpr glm::vec3 k_worldUp{0.0f, 1.0f, 0.0f};
     glm::vec3 right = glm::cross(direction, k_worldUp);
@@ -154,6 +156,13 @@ inline glm::vec3 muzzleOrigin(glm::vec3 eye, glm::vec3 direction)
     } else {
         right = glm::normalize(right);
     }
+
+    // Flip only the horizontal offset — the viewmodel is still on
+    // screen-right but the 180° roll maps that to the opposite
+    // world-space direction.  The vertical ("down from eye") stays
+    // the same because the viewmodel rendering already compensates.
+    if (gravityFlipped)
+        right = -right;
 
     const glm::vec3 up = glm::normalize(glm::cross(right, direction));
     return eye + right * 15.0f - up * 8.0f + direction * 5.0f;
@@ -599,7 +608,7 @@ inline void handleFire(Registry& registry,
     const float eyeDirDiscrete = gravityFlipped ? -1.0f : 1.0f;
     const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDirDiscrete, 0.0f};
     const glm::vec3 direction = viewForward(input.yaw, input.pitch);
-    const glm::vec3 muzzle = muzzleOrigin(eye, direction);
+    const glm::vec3 muzzle = muzzleOrigin(eye, direction, gravityFlipped);
 
     if (config.hitscan) {
         // Phase 6 lag-compensated hitscan (see beam path for details).

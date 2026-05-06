@@ -433,7 +433,8 @@ bool Game::init()
         glm::vec3 evtOrigin = evt.pos1;
         if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            evtOrigin = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float cs = cachedGravFlipped_ ? -1.0f : 1.0f;
+            evtOrigin = cachedEye_ + right * (cs * 15.f) - glm::vec3{0, 1, 0} * (cs * 8.f) + cachedCamFwd_ * 5.f;
         }
 
         switch (evt.effectType) {
@@ -803,7 +804,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_T: {
             // Energy beam — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float ts = cachedGravFlipped_ ? -1.0f : 1.0f;
+            const glm::vec3 hip =
+                cachedEye_ + right * (ts * 15.f) - glm::vec3{0, 1, 0} * (ts * 8.f) + cachedCamFwd_ * 5.f;
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -821,7 +824,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_Y: {
             // Bullet tracer — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float ds = cachedGravFlipped_ ? -1.0f : 1.0f;
+            const glm::vec3 hip =
+                cachedEye_ + right * (ds * 15.f) - glm::vec3{0, 1, 0} * (ds * 8.f) + cachedCamFwd_ * 5.f;
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -1509,7 +1514,13 @@ SDL_AppResult Game::iterate()
                 localFireCooldown_ = wpnCfg.fireCooldown;
 
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-                const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+                // When gravity-flipped the 180° camera roll swaps screen-
+                // left/right and screen-up/down in world space.  Negate both
+                // offsets so the tracer still originates at screen bottom-right
+                // (where the viewmodel muzzle is).
+                const float hSign = localGravFlipped ? -1.0f : 1.0f;
+                const glm::vec3 hip =
+                    cachedEye_ + right * (hSign * 15.f) - glm::vec3{0, 1, 0} * (hSign * 8.f) + cachedCamFwd_ * 5.f;
 
                 // Raycast world geometry for tracer endpoint.  Impact effects
                 // (sparks / blood / bullet holes) are NOT spawned here — they
@@ -1692,7 +1703,8 @@ SDL_AppResult Game::iterate()
             const float cosPi = std::cos(renderPitch);
             const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
             const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
-            const glm::vec3 hand = renderEye + right * 15.f - glm::vec3{0, 1, 0} * 8.f + fwd * 5.f;
+            const float gSign = pstate.gravityFlipped ? -1.0f : 1.0f;
+            const glm::vec3 hand = renderEye + right * (gSign * 15.f) - glm::vec3{0, 1, 0} * (gSign * 8.f) + fwd * 5.f;
             // particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
         }
     });
@@ -1703,6 +1715,7 @@ SDL_AppResult Game::iterate()
         cachedCamFwd_ =
             glm::vec3{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
         cachedEye_ = renderEye;
+        cachedGravFlipped_ = localGravFlipped;
     }
 
     // PR-19: unified pre-render interpolation pass.  Walks every
