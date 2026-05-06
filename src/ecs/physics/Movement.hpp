@@ -12,12 +12,16 @@
 namespace physics
 {
 
-/// @brief Apply gravity for one tick: subtracts `k_gravity * dt` from the Y component.
-/// @param vel  Current velocity.
-/// @param dt   Delta time in seconds.
-/// @return     New velocity with gravity applied.
-/// @note       Call every tick when the entity is airborne (not grounded).
-glm::vec3 applyGravity(glm::vec3 vel, float dt);
+/// @brief Apply gravity for one tick.
+///
+/// In normal mode subtracts `k_gravity * dt` from Y; when flipped, adds it.
+///
+/// @param vel     Current velocity.
+/// @param dt      Delta time in seconds.
+/// @param flipped True when the player's gravity is inverted.
+/// @return        New velocity with gravity applied.
+/// @note          Call every tick when the entity is airborne (not grounded).
+glm::vec3 applyGravity(glm::vec3 vel, float dt, bool flipped = false);
 
 /// @brief Apply Quake-style ground friction to horizontal (XZ) velocity.
 ///
@@ -38,11 +42,23 @@ glm::vec3 applyGroundFriction(glm::vec3 vel, float dt);
 ///
 /// @param vel        Current velocity.
 /// @param wishDir    Normalised desired movement direction (from InputSnapshot + yaw).
-/// @param wishSpeed  Target speed (systems::currentWishSpeed on ground, k_airMaxSpeed in air).
+/// @param wishSpeed  Target speed (systems::currentWishSpeed on ground, airWishSpeedForHorizSpeed in air).
 /// @param accel      Acceleration constant (k_groundAccel or k_airAccel).
 /// @param dt         Delta time in seconds.
 /// @return           New velocity with acceleration applied.
 glm::vec3 accelerate(glm::vec3 vel, glm::vec3 wishDir, float wishSpeed, float accel, float dt);
+
+/// @brief Compute the air wish-speed for the player's current horizontal speed.
+///
+/// Returns a value that interpolates from `k_airMaxWishLowSpeed` (when stationary)
+/// down to `k_airMaxSpeed` (the floor, once horizontal speed reaches
+/// `k_airWishCurveTop`). Uses a power curve `pow(t, k_airWishCurveExponent)` with
+/// exponent < 1 so the high-wish region is concentrated near zero speed —
+/// gentle on classic strafe-jump physics, generous on stall recovery.
+///
+/// @param currentHorizSpeed  Current horizontal speed (sqrt(vx² + vz²)).
+/// @return                   Wish speed to feed into `accelerate()` for the air branch.
+float airWishSpeedForHorizSpeed(float currentHorizSpeed);
 
 /// @brief Project velocity onto a collision surface to slide along it.
 /// @param vel         Current velocity.

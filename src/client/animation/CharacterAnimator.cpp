@@ -68,7 +68,7 @@ enum class Mode : uint8_t
 };
 
 /// @brief Values of `MoveMode` as stored in AnimationInputs::moveMode.
-/// Kept in lockstep with the enum in src/ecs/components/PlayerState.hpp.
+/// Kept in lockstep with the enum in src/ecs/components/PlayerStateEnums.hpp.
 enum MoveModeValue
 {
     MoveModeOnFoot = 0,
@@ -228,6 +228,11 @@ int CharacterAnimator::numJoints() const noexcept
 const std::vector<glm::mat4>& CharacterAnimator::jointModelMatrices() const noexcept
 {
     return impl_->jointModelMats;
+}
+
+const std::vector<glm::mat4>& CharacterAnimator::skinMatrices() const noexcept
+{
+    return impl_->skinMats;
 }
 
 namespace
@@ -552,6 +557,54 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         (impl_->currentMode == Mode::WallRun && inputs.wallRunSide == WallSideLeft) ||
         (impl_->previousMode == Mode::WallRun && tBlend < 1.0f && inputs.wallRunSide == WallSideLeft);
 
+    // PR-29: steps 7-10 (ozz sampling → blending → local-to-model →
+    // skin matrices) are factored into the lambda below so that
+    // `renderFromServer()` can share the same pipeline after
+    // overwriting `impl_->samplers` from a server-replicated
+    // `AnimSnapshot`.  Body identical to the original lines 7-10
+    // of update; only the entry point differs.
+    runSamplingAndSkinning(inputs);
+}
+
+namespace
+{
+} // namespace
+
+void CharacterAnimator::renderFromServer(const AnimSnapshot& serverState, const AnimationInputs& inputs)
+{
+    if (!impl_->rig || !impl_->rig->isLoaded() || !impl_->library)
+        return;
+
+    // Override the per-slot sampler state directly from the server's
+    // snapshot.  Server's animator is authoritative for clipId,
+    // timeRatio, and weight; the client renders that exact state
+    // rather than re-running its own state machine and accumulating
+    // drift.  `playbackSpeed` stays at the default 1.0 — server's
+    // timeRatio increment already bakes in any speed multiplier on
+    // its side, and we're snapping to that result.
+    constexpr std::uint8_t k_inactiveClip = static_cast<std::uint8_t>(ClipId::_Count);
+    for (std::size_t i = 0; i < impl_->samplers.size() && i < serverState.slots.size(); ++i) {
+        const auto& src = serverState.slots[i];
+        auto& dst = impl_->samplers[i];
+        dst.active = (src.weight > 0.0f) && (src.clipIdRaw < k_inactiveClip);
+        dst.id = dst.active ? static_cast<ClipId>(src.clipIdRaw) : ClipId::Idle;
+        dst.timeRatio = src.timeRatio;
+        dst.weight = src.weight;
+    }
+
+    // Wallrun mirror: server's PlayerVisState carries `wallRunSide`
+    // (replicated, interp-delayed by PR-28).  When wallrun-on-left,
+    // we mirror the pose along X.  Simpler than update()'s
+    // mode-transition logic since the server has already picked the
+    // right clip set in its samplers.
+    impl_->wallRunMirror = (inputs.wallRunSide == WallSideLeft);
+
+    // Run the shared ozz sampling + blending + skinning pipeline.
+    runSamplingAndSkinning(inputs);
+}
+
+void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
+{
     // --- 7. Run SamplingJob for each active slot. ---
     int activeCount = 0;
     for (size_t i = 0; i < impl_->samplers.size(); ++i) {

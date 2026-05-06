@@ -6,12 +6,15 @@
 #include "client/animation/AnimationLibrary.hpp"
 #include "client/animation/CharacterAnimator.hpp"
 #include "client/animation/CharacterRig.hpp"
+#include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
+#include "systems/Event.hpp" // PR-27: ShotIntentPayload
 #include "systems/MatchController.hpp"
 
 #include <SDL3/SDL.h>
@@ -28,11 +31,22 @@ class ServerGame
 {
 public:
     /// @brief Bind to the given address and port, spawn test entities.
-    /// @param addr       Hostname or IP to bind to (e.g. "127.0.0.1").
-    /// @param port       TCP port to listen on.
-    /// @param tickRateHz Physics tick rate in Hz (default 128).
+    /// @param addr        Hostname or IP to bind to (e.g. "127.0.0.1").
+    /// @param port        TCP port to listen on.
+    /// @param tickRateHz  Physics tick rate in Hz (default 128).
+    /// @param snapshotHz  Registry snapshot send rate in Hz (default 32).
+    ///                    Must be ≤ tickRateHz; clamped if not. Phase 4
+    ///                    decouples snapshot rate from tick rate so the
+    ///                    server can keep deterministic 128 Hz physics
+    ///                    while only paying the serialization+broadcast
+    ///                    cost a fraction as often.
+    /// @param transport   Phase 3d: UDP sidecar feature toggles.
     /// @return True on success, false on network or initialisation failure.
-    bool init(const char* addr, Uint16 port, int tickRateHz = 128);
+    bool init(const char* addr,
+              Uint16 port,
+              int tickRateHz = 128,
+              int snapshotHz = 32,
+              const TransportConfig& transport = {});
 
     /// @brief Block on the game loop until shutdown() is called.
     ///
@@ -105,6 +119,22 @@ private:
     /// Called once per tick before weapon/damage systems.
     void updateAnimationAndHitboxes(float dt);
 
+    /// @brief Phase 6: write `LagCompTarget` onto each connected
+    /// player's entity from their connection's last-reported RTT.
+    ///
+    /// Translates `Connection::lastReportedRttMs` (ms) into a
+    /// `targetServerTick = max(0, currentServerTick - rewindTicks)`,
+    /// where `rewindTicks = clamp(rttMs * tickRateHz / 2000, 0,
+    /// k_maxLagCompTicks)`. Players with no client connection (e.g.
+    /// AI bots in a future expansion) keep their previous target,
+    /// which on the next pushHitboxHistory will become a valid
+    /// rewind anchor — but for now, only entities bound through
+    /// `clientEntities` get a target.
+    ///
+    /// Called once per tick between `pushHitboxHistory` and
+    /// `runWeapon`.
+    void updateLagCompTargets();
+
     physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
 
     Server server;                           ///< Owns the TCP socket and network I/O.
@@ -115,6 +145,13 @@ private:
     bool running = false;                        ///< Loop continues while true.
     int tickRateHz = 128;                        ///< Physics ticks per second.
     int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
+
+    /// @brief Send a registry snapshot every Nth tick. Computed in init() as
+    /// `max(1, tickRateHz / snapshotHz)` so the snapshot rate is roughly
+    /// `tickRateHz / snapshotEveryNTicks` Hz. With the default 128 / 32 = 4
+    /// the server snapshots every 4th tick — 4× less serialization +
+    /// broadcast work than pre-Phase-4.
+    int snapshotEveryNTicks = 4;
 
     // ── Server-side animation subsystem ──
     CharacterRig serverRig_;             ///< Shared skeleton (loaded from same FBX as client).
@@ -127,4 +164,72 @@ private:
     /// Per-entity server animators (not ECS components to avoid pulling animation
     /// headers into the component registry).
     std::unordered_map<entt::entity, std::unique_ptr<CharacterAnimator>> serverAnimators_;
+
+    // ── PR-18: server-side ground-truth log ──────────────────────────────
+    //
+    // Opened from `GROUP2_SERVER_TRUTH_CSV` env var if set.  One global
+    // CSV file containing one row per replicated player per logged tick:
+    //
+    //     wallTimeNs,serverTick,clientId,posX,posY,posZ
+    //
+    // Throttled to every Nth tick (default 4 = 32 Hz at the 128 Hz tick
+    // rate; tunable via `GROUP2_SERVER_TRUTH_HZ_DIVIDER`).  Log rate is
+    // chosen to be high enough that linear interpolation between
+    // adjacent samples is a good approximation of "the server's
+    // position at any wall-clock time T", which is what the offline
+    // analyzer compares against bot-side observations.  At 32 Hz × 100
+    // bots × ~50 B/row = ~160 KB/s — trivial disk I/O cost on any
+    // reasonable test rig.
+    //
+    // No mutex needed: this runs on the game thread, on the same path
+    // as the existing tick logic, after the per-tick physics + lag-comp
+    // updates have settled.
+    std::FILE* truthCsv_ = nullptr;
+    int truthHzDivider_ = 4;
+
+    /// @brief Open the ground-truth CSV from env var if set.  No-op when
+    /// the env var is missing; load tests stay fast by default.
+    void openGroundTruthLog();
+
+    /// @brief Write one row per replicated player entity if the current
+    /// `tickCount` aligns with `truthHzDivider_`.  Called at the end of
+    /// each tick after the per-tick physics + broadcast settles.
+    void writeGroundTruthLogIfDue();
+
+    /// @brief Flush + close the CSV if open.  Safe to call from dtor.
+    void closeGroundTruthLog() noexcept;
+
+    // ── PR-27: pending client SHOT_INTENTs ───────────────────────────────
+    //
+    // The network thread enqueues `EventType::ShotIntent` events into
+    // `eventQueue`; the game thread's `processEvent` drains them and
+    // stashes the payload here, keyed by `(shooterClientId,
+    // shotInputTick)`.  When the weapon-system path resolves a shot
+    // for the same shooter at the same input tick, it looks up the
+    // intent here, computes the anim-state delta vs the historical
+    // sample, and emits the result to `server_shots.csv`.
+    //
+    // Bounded at `k_pendingShotIntentsMax = 256` entries (~2 s of
+    // shots at the 128 Hz fire-rate ceiling).  The map is single-
+    // threaded read/write on the game thread.
+    struct ShotIntentKey
+    {
+        std::uint16_t shooterClientId = 0;
+        std::uint32_t shotInputTick = 0;
+        bool operator==(const ShotIntentKey& o) const noexcept
+        {
+            return shooterClientId == o.shooterClientId && shotInputTick == o.shotInputTick;
+        }
+    };
+    struct ShotIntentKeyHash
+    {
+        std::size_t operator()(const ShotIntentKey& k) const noexcept
+        {
+            // Mix shooter into the high bits so two shots from the
+            // same shooter at adjacent ticks aren't bucket-adjacent.
+            return (static_cast<std::size_t>(k.shooterClientId) << 32) ^ k.shotInputTick;
+        }
+    };
+    static constexpr std::size_t k_pendingShotIntentsMax = 256;
+    std::unordered_map<ShotIntentKey, ShotIntentPayload, ShotIntentKeyHash> pendingShotIntents_;
 };

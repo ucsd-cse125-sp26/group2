@@ -7,9 +7,19 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchStatus.hpp"
+#include "network/ShotDebugReport.hpp" // PR-20: ShotDebugCapture.
+
+// Forward-declared so DebugUI doesn't drag in raycast / hitbox headers via the
+// gamepad aim-assist system.  Full definition pulled in by DebugUI.cpp.
+namespace systems
+{
+struct GamepadAimAssistConfig;
+}
 
 #include <SDL3/SDL.h>
 
+#include <array>
+#include <cstdint>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <initializer_list>
@@ -52,6 +62,8 @@ public:
     /// @param registry                The ECS registry to inspect.
     /// @param tickCount               Total physics ticks elapsed.
     /// @param mouseSensitivity        Radians per pixel; slider (read/write).
+    /// @param gamepadLookSensitivity  Radians per second at full right-stick deflection; slider (read/write).
+    /// @param aimAssistCfg            Gamepad aim-assist config; sliders + toggle (read/write).
     /// @param renderSeparateFromPhysics Interpolated unlimited-fps mode toggle (read/write).
     /// @param inputSyncedWithPhysics  Sample input once per tick vs every frame (read/write).
     /// @param limitFPSToMonitor       VSync on/off toggle (read/write).
@@ -64,6 +76,8 @@ public:
     void buildUI(const Registry& registry,
                  int tickCount,
                  float& mouseSensitivity,
+                 float& gamepadLookSensitivity,
+                 systems::GamepadAimAssistConfig& aimAssistCfg,
                  bool& renderSeparateFromPhysics,
                  bool& inputSyncedWithPhysics,
                  bool& limitFPSToMonitor,
@@ -93,6 +107,31 @@ public:
 
     /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
     void buildNetworkUI(const NetworkStats& stats);
+
+    /// @brief Build the Network Simulator window with sliders to add
+    /// fake round-trip latency and packet loss. Useful for testing
+    /// Phase 6 lag compensation and Phase 5b reconciliation under
+    /// non-LAN conditions without setting up `tc qdisc`.
+    ///
+    /// Latency slider value (0–200 ms) is written into
+    /// `simulatedLatencyMs_` and read by Game::iterate which forwards
+    /// it to `Client::setSimulatedLatencyMs`. Half the value is added
+    /// to outbound packets and half to inbound, modelling a symmetric
+    /// network with the slider's RTT.
+    ///
+    /// Packet-loss slider value (0–50 %) is written into
+    /// `simulatedLossPct_`, forwarded to `Client::setSimulatedLossPercent`,
+    /// and applied as an independent Bernoulli drop in each direction.
+    void buildNetworkSimUI();
+
+    /// @brief The current latency-simulator setting in milliseconds (0–200).
+    /// Read by Game::iterate each frame to push to `Client::setSimulatedLatencyMs`.
+    [[nodiscard]] int getSimulatedLatencyMs() const noexcept { return simulatedLatencyMs_; }
+
+    /// @brief The current packet-loss setting (0–50 %).
+    /// Read by Game::iterate each frame to push to `Client::setSimulatedLossPercent`.
+    [[nodiscard]] int getSimulatedLossPercent() const noexcept { return simulatedLossPct_; }
+
     void buildWeaponUI(const Registry& registry);
 
     /// @brief Draw the Hitbox Debug window and (optionally) capsule wireframe overlay.
@@ -128,6 +167,92 @@ public:
 
     bool showCollisionWindow = false;  ///< Show the Collision Debug ImGui window.
     bool drawCollisionOverlay = false; ///< Draw world collision wireframes (independent of window visibility).
+
+    /// @brief Draw the Weapon Spawner Debug window and (optionally) wireframe overlay
+    /// for all weapon spawner entities, showing their bounding boxes and spawn positions.
+    ///
+    /// @param registry     ECS registry (reads WeaponSpawner, Position, CollisionShape).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void
+    buildWeaponSpawnerUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showWeaponSpawnerWindow = false;  ///< Show the Weapon Spawner Debug ImGui window.
+    bool drawWeaponSpawnerOverlay = false; ///< Draw weapon spawner wireframes (independent of window visibility).
+
+    /// @brief Draw the Spawn Point Debug window and (optionally) overlay markers
+    /// for all player respawn point entities, showing position and cooldown state.
+    ///
+    /// @param registry     ECS registry (reads RespawnPoint, Position).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildSpawnPointUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showSpawnPointWindow = false;  ///< Show the Spawn Point Debug ImGui window.
+    bool drawSpawnPointOverlay = false; ///< Draw spawn point markers (independent of window visibility).
+
+    // ── PR-20: Shot-debug visualizer (CSGO sv_showimpacts-style) ─────
+    //
+    // Holds a ring buffer of paired (client-side fire-time snapshot,
+    // server-side rewound snapshot) entries.  ImGui panel lets the
+    // user pick how many recent shots to keep (1-30) and which to
+    // highlight in the 3-D overlay.
+    //
+    // The two snapshots reuse the same `ShotDebugCapture` type:
+    //   - clientView is populated by `pushClientShot()` from Game.cpp
+    //     when the local player fires a shot (with the visible-on-
+    //     screen capsules of remote players at fire time).
+    //   - serverView is populated by `pushServerShot()` from the
+    //     `Client::onShotDebugReport` callback (with the historical
+    //     capsules the server raycast against).
+    //
+    // The two halves are paired by `shotInputTick`; either may
+    // arrive first.
+    struct ShotDebugPair
+    {
+        std::uint32_t shotInputTick = 0;
+        bool hasClient = false;
+        bool hasServer = false;
+        net::shotdebug::ShotDebugCapture clientView;
+        net::shotdebug::ShotDebugCapture serverView;
+    };
+    static constexpr int k_shotRingMax = 30;
+    std::array<ShotDebugPair, k_shotRingMax> shotRing{};
+    int shotRingHead = 0;  ///< Next-write slot.
+    int shotRingCount = 0; ///< Live entries; saturates at k_shotRingMax.
+
+    /// @brief Show the Shot Debug panel + 3D overlay (CSGO sv_showimpacts).
+    bool showShotDebugWindow = false;
+    bool drawShotDebugOverlay = false;
+    /// @brief Slider value: how many of the most-recent shots to render
+    /// (1-k_shotRingMax).  All older shots stay in the ring but are
+    /// hidden from the overlay.
+    int shotDebugVisibleCount = 5;
+    /// @brief 1-based index into the ring (1 = newest) to highlight.
+    /// 0 means "show all in the visible window".
+    int shotDebugSelectIdx = 0;
+
+    /// @brief Which side(s) to render in the 3D overlay.  Maps to a
+    /// dropdown in the UI panel: 0=Both, 1=Client only, 2=Server only.
+    /// The underlying data is always captured for both sides; this
+    /// only filters the render.
+    int shotDebugViewMode = 0;
+
+    /// @brief Append a fire-time snapshot the local client just took.
+    /// Pairs with any matching server view (by `shotInputTick`).
+    void pushClientShot(const net::shotdebug::ShotDebugCapture& cap);
+
+    /// @brief Append a server-reported rewind snapshot.  Pairs with
+    /// any matching client view (by `shotInputTick`).
+    void pushServerShot(const net::shotdebug::ShotDebugCapture& cap);
+
+    /// @brief Build the Shot Debug ImGui window + 3D overlay.
+    /// @param viewProj     Camera VP for the world→screen projection.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight);
 
     // Per-type visibility toggles (all default on when overlay is active).
     bool drawCollisionPlanes = true;
@@ -171,7 +296,17 @@ private:
     bool showLightingControls = false; ///< Show the Lighting Controls window.
     bool showSkybox = false;           ///< Show the Skybox window.
     bool showNetworkStats = false;     ///< Show the Network Stats window.
+    bool showNetworkSim = false;       ///< Show the Network Simulator (latency + loss) window.
     bool showWeaponHud = false;        ///< Show the Weapon HUD debug window (disabled by default).
+
+    /// @brief Phase 6 testing: simulated round-trip latency in ms.
+    /// Written by the Network Simulator window's slider, read by
+    /// Game::iterate to push to Client. Zero = simulator off.
+    int simulatedLatencyMs_ = 0;
+
+    /// @brief Phase 6 testing: simulated UDP packet loss in percent.
+    /// Applied independently to each direction. Zero = simulator off.
+    int simulatedLossPct_ = 0;
 
     /// Per-component visibility toggles — persistent across frames.
     bool showPosition = true;       ///< Show Position component row.
@@ -192,6 +327,8 @@ private:
     void buildInspectorContents(const Registry& registry,
                                 int tickCount,
                                 float& mouseSensitivity,
+                                float& gamepadLookSensitivity,
+                                systems::GamepadAimAssistConfig& aimAssistCfg,
                                 bool& renderSeparateFromPhysics,
                                 bool& inputSyncedWithPhysics,
                                 bool& limitFPSToMonitor,

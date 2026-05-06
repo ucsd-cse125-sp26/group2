@@ -3,16 +3,19 @@
 
 #include "debug/DebugUI.hpp"
 
+#include "client/systems/GamepadAimAssistSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
@@ -144,12 +147,16 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
 
     ImGui::SeparatorText("Gameplay");
     ImGui::Checkbox("Network Stats", &showNetworkStats);
+    ImGui::Checkbox("Network Sim", &showNetworkSim);
     ImGui::Checkbox("Weapon HUD", &showWeaponHud);
     ImGui::Checkbox("Particle System", &showParticleWindow_);
 
     ImGui::SeparatorText("Physics");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+    ImGui::Checkbox("Weapon Spawners", &showWeaponSpawnerWindow);
+    ImGui::Checkbox("Spawn Points", &showSpawnPointWindow);
+    ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
     // External panels (owned by Game)
     if (externalPanels.size() > 0) {
@@ -166,6 +173,8 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
 void DebugUI::buildUI(const Registry& registry,
                       const int tickCount,
                       float& mouseSensitivity,
+                      float& gamepadLookSensitivity,
+                      systems::GamepadAimAssistConfig& aimAssistCfg,
                       bool& renderSeparateFromPhysics,
                       bool& inputSyncedWithPhysics,
                       bool& limitFPSToMonitor,
@@ -190,6 +199,8 @@ void DebugUI::buildUI(const Registry& registry,
             buildInspectorContents(registry,
                                    tickCount,
                                    mouseSensitivity,
+                                   gamepadLookSensitivity,
+                                   aimAssistCfg,
                                    renderSeparateFromPhysics,
                                    inputSyncedWithPhysics,
                                    limitFPSToMonitor,
@@ -219,6 +230,8 @@ void DebugUI::buildUI(const Registry& registry,
 void DebugUI::buildInspectorContents(const Registry& registry,
                                      const int tickCount,
                                      float& mouseSensitivity,
+                                     float& gamepadLookSensitivity,
+                                     systems::GamepadAimAssistConfig& aimAssistCfg,
                                      bool& renderSeparateFromPhysics,
                                      bool& inputSyncedWithPhysics,
                                      bool& limitFPSToMonitor,
@@ -239,6 +252,69 @@ void DebugUI::buildInspectorContents(const Registry& registry,
 
     // Logarithmic slider so both ends of the range are equally reachable.
     ImGui::SliderFloat("Mouse Sensitivity", &mouseSensitivity, 0.0001f, 0.0200f, "%.4f", ImGuiSliderFlags_Logarithmic);
+
+    // Gamepad right-stick look speed in radians/second at full deflection.
+    // Linear feels right here — the useful range is much narrower than mouse
+    // sensitivity (1..15 rad/s covers everything from "console aim assist"
+    // to "very twitchy"), and a linear slider preserves intuitive doubling.
+    ImGui::SliderFloat("Gamepad Look Sensitivity", &gamepadLookSensitivity, 1.0f, 15.0f, "%.2f rad/s");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("Right-stick angular speed at full deflection.\n"
+                          "6.0 rad/s ≈ 343°/s (default).\n"
+                          "Affects only the gamepad — mouse uses its own slider above.");
+
+    // ── Gamepad aim assist (collapsible) ──────────────────────────────────
+    // Tucked behind a header so the inspector stays clean for kbm players.
+    // All sliders live-edit the active config struct on the Game class, so
+    // tuning is immediate.  Default-open while we iterate on the feel.
+    if (ImGui::CollapsingHeader("Gamepad Aim Assist", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Enabled", &aimAssistCfg.enabled);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Master toggle.  No effect when no gamepad is connected.");
+
+        ImGui::BeginDisabled(!aimAssistCfg.enabled);
+
+        ImGui::SliderFloat("Inner Cone (deg)", &aimAssistCfg.innerConeDeg, 0.0f, 15.0f, "%.1f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Crosshair-to-target angle below which assist is at full strength.");
+
+        ImGui::SliderFloat("Outer Cone (deg)", &aimAssistCfg.outerConeDeg, 0.0f, 30.0f, "%.1f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Angle at which assist fades to zero.\n"
+                              "Larger = bigger \"magnet\" but more obvious.");
+
+        ImGui::SliderFloat("Max Range (units)", &aimAssistCfg.maxRange, 200.0f, 8000.0f, "%.0f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Targets beyond this distance get no aim assist.");
+
+        ImGui::SliderFloat("Activation Stick %", &aimAssistCfg.activationStickThresh, 0.0f, 0.30f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Stick deflection (left or right) required to activate assist.\n"
+                              "0.05 = 5 %% (default).  Holding still disables all assist.");
+
+        ImGui::SliderFloat("Rotational Compensation", &aimAssistCfg.rotationalCompensation, 0.0f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Fraction of the target's apparent angular velocity that aim\n"
+                              "assist contributes per frame.  0.0 = no rotational help,\n"
+                              "1.0 = perfect tracking (aimbot).  Default 0.8.\n"
+                              "A stationary enemy contributes ZERO regardless of this value —\n"
+                              "the pull is driven by frame-to-frame change in the anchor\n"
+                              "position, not by absolute angle to the target.");
+
+        ImGui::SliderFloat("Max Pull Rate (rad/s)", &aimAssistCfg.maxPullRate, 0.5f, 8.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Hard cap on how fast the camera can be pulled by assist.\n"
+                              "Safety net for snapshot warps / target teleports.\n"
+                              "3.0 rad/s ≈ 172°/s (default).");
+
+        ImGui::SliderFloat("Slowdown Strength", &aimAssistCfg.slowdownStrength, 0.10f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Effective look sensitivity when crosshair is on a target.\n"
+                              "Lower = stronger slowdown / stickier feel.\n"
+                              "1.0 = no slowdown, 0.35 = 35 %% speed (default).");
+
+        ImGui::EndDisabled();
+    }
 
     ImGui::Checkbox("Render Separately from Physics", &renderSeparateFromPhysics);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
@@ -371,8 +447,8 @@ void DebugUI::buildInspectorContents(const Registry& registry,
             }
 
             // PlayerState
-            if (showPlayerState && registry.all_of<PlayerState>(entity)) {
-                const auto& c = registry.get<PlayerState>(entity);
+            if (showPlayerState && registry.all_of<PlayerVisState>(entity)) {
+                const auto& c = registry.get<PlayerVisState>(entity);
                 static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun", "Climbing", "LedgeGrab"};
                 const int k_modeIdx = static_cast<int>(c.moveMode);
                 ImGui::Text("PlayerState   mode:%s  grounded:%-3s  crouching:%-3s  sprint:%-3s",
@@ -474,13 +550,13 @@ void DebugUI::buildMovementChart(const Registry& registry)
 
     // Player
     const bool k_hasPlayer =
-        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerVisState>(localPlayer);
 
     if (k_hasPlayer) {
         const auto& pos = registry.get<Position>(localPlayer).value;
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const auto& playerState = registry.get<PlayerVisState>(localPlayer);
         const bool grounded = playerState.grounded;
 
         const ImVec2 k_pScreen = worldToScreen(pos.x, pos.z);
@@ -542,7 +618,7 @@ void DebugUI::buildMovementChart(const Registry& registry)
     if (k_hasPlayer) {
         const auto& vel = registry.get<Velocity>(localPlayer).value;
         const auto& input = registry.get<InputSnapshot>(localPlayer);
-        const auto& playerState = registry.get<PlayerState>(localPlayer);
+        const auto& playerState = registry.get<PlayerVisState>(localPlayer);
         const bool grounded = playerState.grounded;
         const float hSpeed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
         const glm::vec3 wishDir =
@@ -604,7 +680,7 @@ void DebugUI::buildBhopAnalyzer(const Registry& registry)
     }
 
     const bool k_hasPlayer =
-        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerState>(localPlayer);
+        localPlayer != entt::null && registry.all_of<Position, Velocity, InputSnapshot, PlayerVisState>(localPlayer);
 
     if (!k_hasPlayer) {
         ImGui::TextDisabled("No local player.");
@@ -614,7 +690,7 @@ void DebugUI::buildBhopAnalyzer(const Registry& registry)
 
     const auto& vel = registry.get<Velocity>(localPlayer).value;
     const auto& input = registry.get<InputSnapshot>(localPlayer);
-    const auto& playerState = registry.get<PlayerState>(localPlayer);
+    const auto& playerState = registry.get<PlayerVisState>(localPlayer);
     const bool grounded = playerState.grounded;
     const float yaw = input.yaw;
 
@@ -1125,6 +1201,101 @@ void DebugUI::buildNetworkUI(const NetworkStats& stats)
     ImGui::End();
 }
 
+void DebugUI::buildNetworkSimUI()
+{
+    if (!showNetworkSim)
+        return;
+
+    ImGui::SetNextWindowPos({500.0f, 700.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({340.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    constexpr ImGuiWindowFlags k_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize;
+    if (!ImGui::Begin("Network Sim", &showNetworkSim, k_flags)) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Latency ────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Latency");
+    ImGui::TextWrapped("Adds artificial round-trip latency. Half is applied to "
+                       "outbound, half to inbound, modelling a symmetric one-way delay.");
+    ImGui::Spacing();
+    ImGui::SliderInt("Sim. RTT (ms)", &simulatedLatencyMs_, 0, 200, "%d ms");
+
+    // Quick presets — common latency tiers for testing lag-comp /
+    // reconciliation behaviour at "LAN", "good WAN", "bad WAN", "edge".
+    if (ImGui::SmallButton("0##lat"))
+        simulatedLatencyMs_ = 0;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("30##lat"))
+        simulatedLatencyMs_ = 30;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("60##lat"))
+        simulatedLatencyMs_ = 60;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("100##lat"))
+        simulatedLatencyMs_ = 100;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("150##lat"))
+        simulatedLatencyMs_ = 150;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("200##lat"))
+        simulatedLatencyMs_ = 200;
+
+    if (simulatedLatencyMs_ == 0) {
+        ImGui::TextDisabled("Latency: off — packets take the fast path.");
+    } else {
+        ImGui::Text(
+            "Out %d ms / In %d ms / RTT +%d ms", simulatedLatencyMs_ / 2, simulatedLatencyMs_ / 2, simulatedLatencyMs_);
+    }
+
+    // ── Packet loss ────────────────────────────────────────────────────
+    ImGui::Spacing();
+    ImGui::SeparatorText("Packet Loss");
+    ImGui::TextWrapped("Independent Bernoulli drop on each direction. Slider value "
+                       "is per-datagram drop probability — fragmented snapshots and "
+                       "redundant inputs/events lose effective bandwidth at the "
+                       "compounded rate.");
+    ImGui::Spacing();
+    ImGui::SliderInt("Sim. Loss (%)", &simulatedLossPct_, 0, 50, "%d %%");
+
+    if (ImGui::SmallButton("0##loss"))
+        simulatedLossPct_ = 0;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("1##loss"))
+        simulatedLossPct_ = 1;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("5##loss"))
+        simulatedLossPct_ = 5;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("10##loss"))
+        simulatedLossPct_ = 10;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("25##loss"))
+        simulatedLossPct_ = 25;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("50##loss"))
+        simulatedLossPct_ = 50;
+
+    if (simulatedLossPct_ == 0) {
+        ImGui::TextDisabled("Loss: off — every UDP datagram delivered.");
+    } else {
+        // Compounded effective loss across redundancy layers, for
+        // playtester intuition.  Closed-form for an N-fragment / N-copy
+        // unit: 1 − (1 − p)^N if a single drop kills it (snapshots), or
+        // p^N if all copies must be dropped (reliable events).
+        const double p = static_cast<double>(simulatedLossPct_) / 100.0;
+        const double snapLoss = 1.0 - std::pow(1.0 - p, 5.0); // 5-fragment example
+        const double reliable = std::pow(p, 3.0);             // 3-copy redundancy
+        const double inputs = std::pow(p, 5.0);               // 5-tick redundancy
+        ImGui::Text("Per-datagram drop: %d %%", simulatedLossPct_);
+        ImGui::Text("≈ snapshot loss (5 frags): %.1f %%", snapLoss * 100.0);
+        ImGui::Text("≈ reliable-event loss:    %.2f %%", reliable * 100.0);
+        ImGui::Text("≈ input-tick loss:        %.3f %%", inputs * 100.0);
+    }
+
+    ImGui::End();
+}
+
 void DebugUI::buildWeaponUI(const Registry& registry)
 {
     entt::entity localPlayer = entt::null;
@@ -1160,10 +1331,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     }
 
     const WeaponState& weapon = registry.get<WeaponState>(localPlayer);
-    const GunInstance& gun = (weapon.current == WeaponSlot::QUATERNARY)  ? weapon.quaternary
-                             : (weapon.current == WeaponSlot::TERTIARY)  ? weapon.tertiary
-                             : (weapon.current == WeaponSlot::SECONDARY) ? weapon.secondary
-                                                                         : weapon.primary;
+    const GunInstance& gun = (weapon.current == WeaponSlot::SECONDARY) ? weapon.secondary : weapon.primary;
 
     const char* currentGunName = "?";
     switch (gun.type) {
@@ -1763,6 +1931,570 @@ void DebugUI::buildCollisionUI(const physics::WorldGeometry& world,
         const ImU32 triColor = IM_COL32(200, 50, 255, 220);
         for (const auto& tm : world.triMeshes)
             drawTriMeshWireframe(dl, tm, viewProj, screenWidth, screenHeight, triColor);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildWeaponSpawnerUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildWeaponSpawnerUI(const Registry& registry,
+                                   const glm::mat4& viewProj,
+                                   float screenWidth,
+                                   float screenHeight)
+{
+    // ── ImGui window (only when showWeaponSpawnerWindow is true) ──
+    if (showWeaponSpawnerWindow) {
+        if (ImGui::Begin("Weapon Spawner Debug", &showWeaponSpawnerWindow)) {
+            ImGui::Checkbox("Draw Spawner Boxes", &drawWeaponSpawnerOverlay);
+            ImGui::Separator();
+
+            // Count spawners.
+            int totalSpawners = 0;
+            int activeSpawners = 0;
+            auto spawnerView = registry.view<WeaponSpawner, Position, CollisionShape>();
+            for (auto e : spawnerView) {
+                ++totalSpawners;
+                if (spawnerView.get<WeaponSpawner>(e).hasWeapon)
+                    ++activeSpawners;
+            }
+            ImGui::Text("Spawners: %d  |  Active: %d  |  On Cooldown: %d",
+                        totalSpawners,
+                        activeSpawners,
+                        totalSpawners - activeSpawners);
+            ImGui::Separator();
+
+            // Per-spawner details.
+            int idx = 0;
+            for (auto e : spawnerView) {
+                const auto& spawner = spawnerView.get<WeaponSpawner>(e);
+                const auto& pos = spawnerView.get<Position>(e);
+                const auto& shape = spawnerView.get<CollisionShape>(e);
+
+                const char* typeName = "Unknown";
+                switch (spawner.type) {
+                case WeaponType::Rifle:
+                    typeName = "Rifle";
+                    break;
+                case WeaponType::Rocket:
+                    typeName = "Rocket";
+                    break;
+                case WeaponType::RailGun:
+                    typeName = "RailGun";
+                    break;
+                case WeaponType::EnergyGun:
+                    typeName = "EnergyGun";
+                    break;
+                }
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Spawner #%d (%s)", idx, typeName);
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    ImGui::Text("Box half-extents: (%.0f, %.0f, %.0f)",
+                                shape.halfExtents.x,
+                                shape.halfExtents.y,
+                                shape.halfExtents.z);
+                    ImGui::Text("Has weapon: %s", spawner.hasWeapon ? "YES" : "no");
+                    if (!spawner.hasWeapon)
+                        ImGui::Text("Cooldown: %.1fs", spawner.spawnCooldown);
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Wireframe overlay (independent of window visibility) ──
+    if (!drawWeaponSpawnerOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    auto spawnerView = registry.view<WeaponSpawner, Position, CollisionShape>();
+    for (auto e : spawnerView) {
+        const auto& spawner = spawnerView.get<WeaponSpawner>(e);
+        const auto& pos = spawnerView.get<Position>(e);
+        const auto& shape = spawnerView.get<CollisionShape>(e);
+
+        // Green = weapon available, red/orange = on cooldown.
+        const ImU32 boxColor = spawner.hasWeapon ? IM_COL32(50, 255, 50, 200) : IM_COL32(255, 100, 50, 160);
+
+        // Draw AABB wireframe around the spawner's collision volume.
+        const glm::vec3 mn = pos.value - shape.halfExtents;
+        const glm::vec3 mx = pos.value + shape.halfExtents;
+        const glm::vec3 corners[8] = {
+            {mn.x, mn.y, mn.z},
+            {mx.x, mn.y, mn.z},
+            {mx.x, mn.y, mx.z},
+            {mn.x, mn.y, mx.z},
+            {mn.x, mx.y, mn.z},
+            {mx.x, mx.y, mn.z},
+            {mx.x, mx.y, mx.z},
+            {mn.x, mx.y, mx.z},
+        };
+        // 12 edges of the AABB.
+        static constexpr int edges[12][2] = {
+            {0, 1},
+            {1, 2},
+            {2, 3},
+            {3, 0}, // bottom
+            {4, 5},
+            {5, 6},
+            {6, 7},
+            {7, 4}, // top
+            {0, 4},
+            {1, 5},
+            {2, 6},
+            {3, 7}, // verticals
+        };
+        for (const auto& edge : edges)
+            drawWorldLine(dl, corners[edge[0]], corners[edge[1]], viewProj, screenWidth, screenHeight, boxColor, 2.0f);
+
+        // Draw a cross marker at the spawn position (center point).
+        ImVec2 sp;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, sp)) {
+            constexpr float k_crossLen = 10.0f;
+            const ImU32 markerColor = IM_COL32(255, 255, 0, 220);
+            dl->AddLine({sp.x - k_crossLen, sp.y}, {sp.x + k_crossLen, sp.y}, markerColor, 2.0f);
+            dl->AddLine({sp.x, sp.y - k_crossLen}, {sp.x, sp.y + k_crossLen}, markerColor, 2.0f);
+            dl->AddCircle(sp, k_crossLen, markerColor, 12, 1.5f);
+
+            // Label with weapon type name.
+            const char* typeName = "?";
+            switch (spawner.type) {
+            case WeaponType::Rifle:
+                typeName = "Rifle";
+                break;
+            case WeaponType::Rocket:
+                typeName = "Rocket";
+                break;
+            case WeaponType::RailGun:
+                typeName = "RailGun";
+                break;
+            case WeaponType::EnergyGun:
+                typeName = "EnergyGun";
+                break;
+            }
+            dl->AddText({sp.x + k_crossLen + 4.0f, sp.y - 6.0f}, markerColor, typeName);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildSpawnPointUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildSpawnPointUI(const Registry& registry,
+                                const glm::mat4& viewProj,
+                                float screenWidth,
+                                float screenHeight)
+{
+    // ── ImGui window (only when showSpawnPointWindow is true) ──
+    if (showSpawnPointWindow) {
+        if (ImGui::Begin("Spawn Point Debug", &showSpawnPointWindow)) {
+            ImGui::Checkbox("Draw Spawn Markers", &drawSpawnPointOverlay);
+            ImGui::Separator();
+
+            // Count spawn points.
+            int totalSpawns = 0;
+            int availableSpawns = 0;
+            auto spawnView = registry.view<RespawnPoint, Position>();
+            for (auto e : spawnView) {
+                ++totalSpawns;
+                if (spawnView.get<RespawnPoint>(e).available)
+                    ++availableSpawns;
+            }
+            ImGui::Text("Spawn Points: %d  |  Available: %d  |  On Cooldown: %d",
+                        totalSpawns,
+                        availableSpawns,
+                        totalSpawns - availableSpawns);
+            ImGui::Separator();
+
+            // Per-spawn-point details.
+            int idx = 0;
+            for (auto e : spawnView) {
+                const auto& sp = spawnView.get<RespawnPoint>(e);
+                const auto& pos = spawnView.get<Position>(e);
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Spawn #%d", idx);
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    if (sp.available) {
+                        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Available");
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "Cooldown: %.1fs", sp.cooldown);
+                    }
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Marker overlay (independent of window visibility) ──
+    if (!drawSpawnPointOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    auto spawnView = registry.view<RespawnPoint, Position>();
+    int idx = 0;
+    for (auto e : spawnView) {
+        const auto& sp = spawnView.get<RespawnPoint>(e);
+        const auto& pos = spawnView.get<Position>(e);
+
+        // Green = available, orange = on cooldown.
+        const ImU32 markerColor = sp.available ? IM_COL32(50, 255, 50, 220) : IM_COL32(255, 140, 30, 200);
+
+        // Draw a diamond marker at the spawn position.
+        ImVec2 center;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, center)) {
+            constexpr float k_size = 12.0f;
+            // Diamond shape (rotated square)
+            dl->AddQuadFilled({center.x, center.y - k_size},
+                              {center.x + k_size, center.y},
+                              {center.x, center.y + k_size},
+                              {center.x - k_size, center.y},
+                              markerColor);
+            // Outline
+            dl->AddQuad({center.x, center.y - k_size},
+                        {center.x + k_size, center.y},
+                        {center.x, center.y + k_size},
+                        {center.x - k_size, center.y},
+                        IM_COL32(255, 255, 255, 200),
+                        2.0f);
+
+            // Label with spawn index and status.
+            char text[48];
+            if (sp.available) {
+                std::snprintf(text, sizeof(text), "Spawn #%d", idx);
+            } else {
+                std::snprintf(text, sizeof(text), "Spawn #%d (%.1fs)", idx, sp.cooldown);
+            }
+            dl->AddText({center.x + k_size + 4.0f, center.y - 6.0f}, IM_COL32(255, 255, 255, 220), text);
+        }
+
+        // Draw a vertical "pole" line from the ground (y=0) up to the spawn height
+        // so the spawn is easy to spot in 3D space.
+        const glm::vec3 groundPoint = {pos.value.x, 0.0f, pos.value.z};
+        drawWorldLine(dl, groundPoint, pos.value, viewProj, screenWidth, screenHeight, markerColor, 1.5f);
+
+        ++idx;
+    }
+}
+
+// ── PR-20: Shot debug visualizer (CSGO sv_showimpacts) ──────────────────
+
+namespace
+{
+
+/// @brief Find the ring slot whose pair matches `tick`.  Returns -1 if
+/// no entry matches.  Linear scan; ring is small (≤ 30).
+int findShotPairByTick(const std::array<DebugUI::ShotDebugPair, DebugUI::k_shotRingMax>& ring,
+                       int liveCount,
+                       std::uint32_t tick)
+{
+    const int n = std::min(liveCount, DebugUI::k_shotRingMax);
+    for (int i = 0; i < n; ++i) {
+        if (ring[i].shotInputTick == tick && (ring[i].hasClient || ring[i].hasServer))
+            return i;
+    }
+    return -1;
+}
+
+/// @brief Solid-color ImU32 helper that lets the user override alpha.
+ImU32 col(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
+{
+    return IM_COL32(r, g, b, a);
+}
+
+/// @brief PR-20.5: line-draw with near-plane clipping in homogeneous
+/// clip space, so partially-visible lines still render their on-screen
+/// portion.  The plain `drawWorldLine` drops the entire line if either
+/// endpoint has clip.w ≤ ε (behind the camera or near plane), which
+/// makes the shot-debug ray vanish whenever the player walks toward
+/// its hit point.  Long rays straddle the near plane often enough
+/// that this is a daily issue.
+void drawWorldLineClipped(ImDrawList* dl,
+                          glm::vec3 a,
+                          glm::vec3 b,
+                          const glm::mat4& vp,
+                          float sw,
+                          float sh,
+                          ImU32 color,
+                          float thickness = 1.0f)
+{
+    constexpr float eps = 0.0001f;
+    glm::vec4 ca = vp * glm::vec4(a, 1.0f);
+    glm::vec4 cb = vp * glm::vec4(b, 1.0f);
+    const bool aFront = ca.w > eps;
+    const bool bFront = cb.w > eps;
+    if (!aFront && !bFront)
+        return;
+    if (!aFront) {
+        const float t = (eps - ca.w) / (cb.w - ca.w);
+        ca = ca + (cb - ca) * t;
+    }
+    if (!bFront) {
+        const float t = (eps - cb.w) / (ca.w - cb.w);
+        cb = cb + (ca - cb) * t;
+    }
+    const float invWa = 1.0f / ca.w;
+    const float invWb = 1.0f / cb.w;
+    const ImVec2 sa{(0.5f + 0.5f * ca.x * invWa) * sw, (0.5f - 0.5f * ca.y * invWa) * sh};
+    const ImVec2 sb{(0.5f + 0.5f * cb.x * invWb) * sw, (0.5f - 0.5f * cb.y * invWb) * sh};
+    dl->AddLine(sa, sb, color, thickness);
+}
+
+/// @brief Capsule wireframe variant that uses the near-plane-clipping
+/// line helper.  Otherwise identical to the existing
+/// `drawCapsuleWireframe`.  Necessary for the shot-debug overlay
+/// because rewound capsules are often near-camera (the player just
+/// shot at the enemy on their screen) and the unclipped wireframe
+/// drops segments that cross the near plane, producing visibly
+/// fragmented capsule wires.
+void drawCapsuleWireframeClipped(
+    ImDrawList* dl, glm::vec3 pA, glm::vec3 pB, float radius, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    glm::vec3 axis = pB - pA;
+    const float axisLen = glm::length(axis);
+    if (axisLen < 0.001f)
+        return;
+    axis /= axisLen;
+    glm::vec3 up = (std::abs(axis.y) < 0.99f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+    glm::vec3 right = glm::normalize(glm::cross(axis, up));
+    up = glm::normalize(glm::cross(right, axis));
+    constexpr int ringSegments = 12;
+    constexpr int arcSegments = 8;
+    constexpr float pi2 = 6.2831853f;
+    constexpr float halfPi = 1.5707963f;
+    for (int endIdx = 0; endIdx < 2; ++endIdx) {
+        const glm::vec3 center = (endIdx == 0) ? pA : pB;
+        glm::vec3 prev = center + right * radius;
+        for (int i = 1; i <= ringSegments; ++i) {
+            const float angle = pi2 * static_cast<float>(i) / static_cast<float>(ringSegments);
+            const glm::vec3 cur = center + (right * std::cos(angle) + up * std::sin(angle)) * radius;
+            drawWorldLineClipped(dl, prev, cur, vp, sw, sh, color, 1.0f);
+            prev = cur;
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        const float angle = pi2 * static_cast<float>(i) / 4.0f;
+        const glm::vec3 offset = (right * std::cos(angle) + up * std::sin(angle)) * radius;
+        drawWorldLineClipped(dl, pA + offset, pB + offset, vp, sw, sh, color, 1.0f);
+    }
+    for (int meridian = 0; meridian < 4; ++meridian) {
+        const float theta = pi2 * static_cast<float>(meridian) / 4.0f;
+        const glm::vec3 perpDir = right * std::cos(theta) + up * std::sin(theta);
+        {
+            glm::vec3 prev = pA + perpDir * radius;
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pA + perpDir * (radius * std::cos(phi)) - axis * (radius * std::sin(phi));
+                drawWorldLineClipped(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
+        {
+            glm::vec3 prev = pB + perpDir * radius;
+            for (int i = 1; i <= arcSegments; ++i) {
+                const float phi = halfPi * static_cast<float>(i) / static_cast<float>(arcSegments);
+                const glm::vec3 cur = pB + perpDir * (radius * std::cos(phi)) + axis * (radius * std::sin(phi));
+                drawWorldLineClipped(dl, prev, cur, vp, sw, sh, color, 1.0f);
+                prev = cur;
+            }
+        }
+    }
+}
+
+/// @brief PR-20.4: chunky high-visibility hit marker — filled inner
+/// disc + outer ring + hairline cross.  Easy to spot against busy
+/// scene backgrounds without being so big it dominates the view.
+void drawHitMarker(ImDrawList* dl, glm::vec3 world, const glm::mat4& vp, float sw, float sh, ImU32 color)
+{
+    ImVec2 sp;
+    if (!worldToScreen(world, vp, sw, sh, sp))
+        return;
+    constexpr float k_outerRadius = 14.0f;
+    constexpr float k_innerRadius = 6.0f;
+    constexpr float k_crossLen = 18.0f;
+    dl->AddCircleFilled(sp, k_innerRadius, color);
+    dl->AddCircle(sp, k_outerRadius, color, 16, 2.0f);
+    dl->AddLine({sp.x - k_crossLen, sp.y}, {sp.x + k_crossLen, sp.y}, color, 1.0f);
+    dl->AddLine({sp.x, sp.y - k_crossLen}, {sp.x, sp.y + k_crossLen}, color, 1.0f);
+}
+
+} // namespace
+
+void DebugUI::pushClientShot(const net::shotdebug::ShotDebugCapture& cap)
+{
+    int idx = findShotPairByTick(shotRing, shotRingCount, cap.shotInputTick);
+    if (idx < 0) {
+        // New entry — claim the head slot, advance.
+        idx = shotRingHead;
+        shotRing[idx] = {};
+        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRingHead = (shotRingHead + 1) % k_shotRingMax;
+        if (shotRingCount < k_shotRingMax)
+            ++shotRingCount;
+    }
+    shotRing[idx].clientView = cap;
+    shotRing[idx].hasClient = true;
+}
+
+void DebugUI::pushServerShot(const net::shotdebug::ShotDebugCapture& cap)
+{
+    int idx = findShotPairByTick(shotRing, shotRingCount, cap.shotInputTick);
+    if (idx < 0) {
+        idx = shotRingHead;
+        shotRing[idx] = {};
+        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRingHead = (shotRingHead + 1) % k_shotRingMax;
+        if (shotRingCount < k_shotRingMax)
+            ++shotRingCount;
+    }
+    shotRing[idx].serverView = cap;
+    shotRing[idx].hasServer = true;
+}
+
+void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight)
+{
+    if (showShotDebugWindow) {
+        if (ImGui::Begin("Shot Debug (sv_showimpacts)", &showShotDebugWindow)) {
+            ImGui::Checkbox("Draw 3D overlay", &drawShotDebugOverlay);
+            ImGui::SliderInt("Visible last N", &shotDebugVisibleCount, 1, k_shotRingMax);
+            ImGui::SliderInt("Highlight (0=all)", &shotDebugSelectIdx, 0, shotDebugVisibleCount);
+            // PR-20.3: dropdown to filter the 3D overlay to only the
+            // client side or server side.  Useful when the two
+            // overlap closely and you want to inspect each in
+            // isolation, or to confirm "where exactly did the server
+            // resolve the hit" without the blue capsules in the way.
+            const char* kViewModes[] = {"Both (blue+red)", "Client only (blue)", "Server only (red)"};
+            ImGui::Combo("Show", &shotDebugViewMode, kViewModes, IM_ARRAYSIZE(kViewModes));
+            ImGui::Separator();
+            ImGui::TextDisabled("Blue = client view at fire time");
+            ImGui::TextDisabled("Red  = server's rewound state");
+            ImGui::TextDisabled("Bright = highlighted, dim = others in window");
+            ImGui::Separator();
+
+            // Per-shot summary table.  Walk newest-first by stepping
+            // backwards from head.
+            if (ImGui::BeginTable(
+                    "##shots", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingFixedFit))
+            {
+                ImGui::TableSetupColumn("# (newest=1)");
+                ImGui::TableSetupColumn("tick");
+                ImGui::TableSetupColumn("client");
+                ImGui::TableSetupColumn("server");
+                ImGui::TableSetupColumn("hit");
+                ImGui::TableHeadersRow();
+                const int show = std::min(shotRingCount, shotDebugVisibleCount);
+                for (int i = 0; i < show; ++i) {
+                    const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
+                    const auto& p = shotRing[idx];
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d", i + 1);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%u", p.shotInputTick);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%s", p.hasClient ? "Y" : "—");
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%s", p.hasServer ? "Y" : "—");
+                    ImGui::TableNextColumn();
+                    if (p.hasServer) {
+                        if (p.serverView.hitTargetClientId == net::shotdebug::k_missClientId)
+                            ImGui::TextDisabled("miss");
+                        else
+                            ImGui::Text("hit cid=%u r=%d",
+                                        static_cast<unsigned>(p.serverView.hitTargetClientId),
+                                        static_cast<int>(p.serverView.hitRegion));
+                    } else {
+                        ImGui::TextDisabled("…");
+                    }
+                }
+                ImGui::EndTable();
+            }
+        }
+        ImGui::End();
+    }
+
+    // 3D overlay — same VP/screen the hitbox debug overlay uses.  We
+    // draw on the foreground draw list so capsules render OVER the
+    // game (debug overlay is meant to be obvious, not subtle).
+    if (!drawShotDebugOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const int show = std::min(shotRingCount, shotDebugVisibleCount);
+    const bool showClient = (shotDebugViewMode == 0 || shotDebugViewMode == 1);
+    const bool showServer = (shotDebugViewMode == 0 || shotDebugViewMode == 2);
+    for (int i = 0; i < show; ++i) {
+        const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
+        const auto& p = shotRing[idx];
+
+        // Dim non-highlighted shots so the user can pick out the
+        // selected one without losing context of recent ones.
+        const bool isHighlighted = (shotDebugSelectIdx == 0) || (shotDebugSelectIdx == (i + 1));
+        const std::uint8_t alpha = isHighlighted ? 255 : 80;
+
+        // Blue = client view at fire-time.  PR-20.5: use the
+        // near-plane-clipping helpers so partially visible rays /
+        // capsules still render their on-screen portion.
+        if (showClient && p.hasClient) {
+            const auto& c = p.clientView;
+            // PR-20.6: use `c.hitPoint` directly.  Pre-PR-20.6 we
+            // fell back to `origin + dir * range` whenever
+            // `hitTargetClientId == k_missClientId`, which silently
+            // discarded WALL hits (those leave hitTargetClientId at
+            // the miss sentinel because no PLAYER was hit, even
+            // though `resolveHitscanHitbox` correctly resolved the
+            // wall geometry into `hit.point`).  The capture path
+            // now writes `cap.hitPoint = localHit.point`
+            // unconditionally, so here we simply use it.
+            const glm::vec3 endPt = c.hitPoint;
+            drawWorldLineClipped(
+                dl, c.origin, endPt, viewProj, screenWidth, screenHeight, col(80, 160, 255, alpha), 2.0f);
+            for (const auto& tgt : c.targets) {
+                for (const auto& cap : tgt.capsules) {
+                    drawCapsuleWireframeClipped(dl,
+                                                cap.pointA,
+                                                cap.pointB,
+                                                cap.radius,
+                                                viewProj,
+                                                screenWidth,
+                                                screenHeight,
+                                                col(80, 160, 255, alpha));
+                }
+            }
+            drawHitMarker(dl, endPt, viewProj, screenWidth, screenHeight, col(80, 160, 255, alpha));
+        }
+        // Red = server's rewound view of the same shot.
+        if (showServer && p.hasServer) {
+            const auto& s = p.serverView;
+            // PR-20.6: same fix on the server side — server-captured
+            // `s.hitPoint` is already the correct world-or-capsule
+            // hit point or full-range endpoint, regardless of
+            // whether a PLAYER was hit.
+            const glm::vec3 endPt = s.hitPoint;
+            drawWorldLineClipped(
+                dl, s.origin, endPt, viewProj, screenWidth, screenHeight, col(255, 80, 80, alpha), 2.0f);
+            for (const auto& tgt : s.targets) {
+                for (const auto& cap : tgt.capsules) {
+                    drawCapsuleWireframeClipped(dl,
+                                                cap.pointA,
+                                                cap.pointB,
+                                                cap.radius,
+                                                viewProj,
+                                                screenWidth,
+                                                screenHeight,
+                                                col(255, 80, 80, alpha));
+                }
+            }
+            drawHitMarker(dl, endPt, viewProj, screenWidth, screenHeight, col(255, 80, 80, alpha));
+        }
     }
 }
 

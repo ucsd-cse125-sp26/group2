@@ -38,9 +38,17 @@ struct WorldAABB
 ///
 /// The solid interior is the intersection of all half-spaces: `dot(normal, p) < distance`.
 /// Normals point outward (into free space), same as the Plane convention.
+///
+/// `k_maxPlanes` is sized to fit the typical output of V-HACD convex
+/// decomposition: each output hull has up to ~64 vertices (the V-HACD
+/// `m_maxNumVerticesPerCH` parameter we pass), and a triangulated convex
+/// polytope's face-plane count is bounded by ~2V-4 for V vertices but in
+/// practice (after coplanar-triangle deduplication) much lower.  64 planes
+/// is comfortable headroom and keeps each `WorldBrush` at 1KB — well within
+/// L1 cache for the per-frame collision loop.
 struct WorldBrush
 {
-    static constexpr int k_maxPlanes = 8;
+    static constexpr int k_maxPlanes = 64;
     Plane planes[k_maxPlanes];
     int planeCount{0};
 };

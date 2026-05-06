@@ -88,5 +88,13 @@ struct LoadedModel
 /// @param outModel    Filled on success.
 /// @param flipUVs     Flip V texture coordinates (V = 1 − V).  Set true for
 ///                    models from tools that use V=0 at bottom (Blender, OBJ).
+/// @param excludeNodesContaining  Skip any node (and its descendants) whose
+///                    name contains this substring (case-insensitive).  Used
+///                    to omit collision-only meshes from a map's visual model
+///                    (e.g. "COL_" to skip Blender collision-prefixed nodes).
+///                    Empty string disables filtering.
 /// @return True on success; false on failure (error logged via SDL_Log).
-bool loadModel(const std::string& path, LoadedModel& outModel, bool flipUVs = false);
+bool loadModel(const std::string& path,
+               LoadedModel& outModel,
+               bool flipUVs = false,
+               const std::string& excludeNodesContaining = "");

@@ -22,4 +22,16 @@ struct AnimatedCharacter
 {
     std::unique_ptr<CharacterAnimator> animator; ///< Per-entity sampling/blending/skinning state.
     int modelIndex = -1;                         ///< Renderer model index for this entity's skinned vertex buffer.
+
+    // Animation tick decoupling (perf Phase 3c).
+    //
+    // ozz pose sampling + skin-matrix flatten costs ~10-20 µs per character.
+    // Running it every render frame (potentially 1000+ FPS) is pure waste —
+    // human eyes can't tell the difference between 30 Hz and 1000 Hz pose
+    // updates as long as the world transform interpolates smoothly between
+    // samples.  We accumulate render-thread frame time per character and
+    // only call animator->update() when enough time has passed for a fresh
+    // sample (default cadence in Game.cpp).  Initialised to a large value so
+    // the very first frame always samples.
+    float animationAccumulator = 1.0f; ///< Seconds since last animator->update().
 };

@@ -9,6 +9,26 @@ port = 9999
 host = "127.0.0.1"
 port = 9999
 
+[server-replication]
+# How often the server emits a full registry snapshot to each client.
+# The simulation tick rate stays at 128 Hz regardless (deterministic
+# physics requires a fixed dt); only the wire-rate of state replication
+# is affected.
+#
+# PR-13 default: 128 Hz — Valorant / CS2 / Apex tournament cadence.
+# PR-10 (snapshot delta encoding) cut wire bytes ~5×, so 128 Hz today
+# costs less than the pre-PR-10 32 Hz baseline.  Combined with PR-11
+# (entity interpolation buffer) and PR-12 (lag-comp + cl_interp), the
+# 2-snapshot render delay drops to ~16 ms — visually indistinguishable
+# from a fully un-delayed renderer for human reaction times.
+#
+# Override values:
+#   * 128 — default, AAA pro feel; render delay ≈ 16 ms.
+#   * 64  — half-rate; render delay ≈ 31 ms.  Cuts wire BW by ~50 %.
+#   * 32  — quarter-rate; legacy default.  Render delay ≈ 62 ms.
+#           Choose this if running on a constrained network.
+snapshot-hz = 128
+
 [graphics]
 # GPU backend selection.  Falls back to other available backends if the
 # requested one is unavailable on this machine.

@@ -82,6 +82,53 @@ struct MapLoadOptions
     /// found across all collision geometry.  Prevents players from falling
     /// through the world even if the map mesh has tiny cracks.
     bool addFloorPlane = false;
+
+    /// In separated mode (`allMeshesAreCollision = false`), should the loader
+    /// auto-detect/guess each collision mesh's best-fitting primitive
+    /// (AABB / cylinder / sphere / convex brush), or load it raw?
+    ///
+    ///   true (default)  — run the auto-detection pipeline
+    ///                     (AABB → cylinder → sphere → convex brush → triMesh)
+    ///                     plus sub-collection / name forcing.  Convex shapes
+    ///                     end up as cheap primitives or brushes; only truly
+    ///                     non-convex meshes fall back to triMesh.  Convex
+    ///                     primitives are dramatically cheaper at runtime and
+    ///                     don't suffer triMesh edge-jitter on contact.
+    ///   false           — preserve exactly what Blender's collision section
+    ///                     contains: every collision mesh becomes a triangle
+    ///                     mesh, vertex-for-vertex.  Sub-collection name
+    ///                     overrides ("Boxes/", "Cylinders/", …) and Blender
+    ///                     primitive-name hints ("Cylinder") are ignored.
+    ///                     Use this when the artist has authored exact
+    ///                     collision hulls and the loader must not second-
+    ///                     guess them.
+    ///
+    /// Has no effect in prototype mode (`allMeshesAreCollision = true`):
+    /// every mesh is collision there, and forcing all of them to triMesh
+    /// would be prohibitively expensive.
+    bool guessShapesProcessed = true;
+
+    /// In separated mode with shape-guessing on, when a collision mesh is
+    /// non-convex (so it can't be a single `WorldBrush`), should the loader
+    /// run V-HACD convex decomposition to split it into multiple brushes?
+    ///
+    ///   true  (default) — non-convex meshes go through V-HACD; the resulting
+    ///                     hulls are appended as `WorldBrush`es.  Smoother
+    ///                     collision than triMesh (no per-triangle MTV
+    ///                     jitter) and cheaper at runtime.  Costs a few
+    ///                     hundred milliseconds to a few seconds at *load*
+    ///                     time per non-convex mesh, depending on size.
+    ///   false           — skip decomposition; non-convex meshes fall through
+    ///                     to `WorldTriMesh`.
+    ///
+    /// V-HACD tries `FLOOD_FILL` first (closed solid meshes), falling back
+    /// to `RAYCAST_FILL` and finally `SURFACE_ONLY` (hollow shells like a
+    /// tube without thickness) — so it works for both solid non-convex
+    /// objects and walkable hollow shells.
+    ///
+    /// Has no effect when `guessShapesProcessed = false` or when
+    /// `allMeshesAreCollision = true`.
+    bool decomposeNonConvex = true;
 };
 
 /// API
@@ -113,7 +160,16 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
 /// @param out      Existing collision data to append to.
 /// @param position World-space position of the prop.
 /// @param scale    Uniform scale factor.
+/// @param decomposeNonConvex
+///                 When true, non-convex meshes inside the prop are run through
+///                 V-HACD convex decomposition (each becomes a small set of
+///                 `WorldBrush`es) instead of falling back to `WorldTriMesh`.
+///                 Smoother runtime collision on irregular shapes (a bottle, a
+///                 bent metal pallet) at the cost of seconds-per-mesh load time.
+///                 Default false because a prop GLB can hold dozens of sub-
+///                 meshes and decomposing every one of them blows up startup.
 /// @return True on success.
-bool loadPropCollision(const std::string& path, MapCollisionData& out, glm::vec3 position, float scale);
+bool loadPropCollision(
+    const std::string& path, MapCollisionData& out, glm::vec3 position, float scale, bool decomposeNonConvex = false);
 
 } // namespace physics

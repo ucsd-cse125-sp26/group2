@@ -14,7 +14,7 @@ namespace systems
 
 /// @brief Run one tick of swept-AABB collision for all physics entities.
 ///
-/// For every entity with `[Position, Velocity, CollisionShape, PlayerState]`:
+/// For every entity with `[Position, Velocity, CollisionShape, PlayerVisState]`:
 /// 1. Clears the `grounded` flag.
 /// 2. Sweeps the AABB from current position toward `pos + vel * dt`.
 /// 3. On hit: moves to the contact point, clips velocity, repeats up to 4 times

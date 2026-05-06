@@ -5,6 +5,8 @@
 
 #include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
+#include "ecs/AssetCatalog.hpp"
+#include "ecs/MapConfig.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
@@ -16,7 +18,8 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -31,6 +34,7 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
+#include "network/EntityInterpolation.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -39,19 +43,45 @@
 #include "renderer/GraphicsConfig.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
+#include "systems/PredictionSystem.hpp"
+#include "systems/ReconciliationSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
+#include <numeric>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
+
+namespace
+{
+int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
+{
+    return assets.add(
+        def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
+}
+
+glm::quat assetRotation(const AssetEntry& asset)
+{
+    const glm::vec3 r = glm::radians(asset.renderRotationDegrees);
+    return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
+           glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
+}
+} // namespace
 
 bool Game::init()
 {
@@ -62,7 +92,12 @@ bool Game::init()
 #endif
     SDL_SetAppMetadata(k_appName, "0.1.0", "com.cse125.group2");
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    // SDL_INIT_GAMEPAD pulls in the gamepad subsystem so we receive
+    // SDL_EVENT_GAMEPAD_ADDED / _REMOVED and can call SDL_OpenGamepad.  It also
+    // implicitly initialises the joystick subsystem.  Already-connected pads
+    // fire SDL_EVENT_GAMEPAD_ADDED automatically once SDL pumps events, so the
+    // event handler is the single point that opens devices.
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return false;
     }
@@ -155,34 +190,26 @@ bool Game::init()
     // ── Load map ──────────────────────────────────────────────────────────
     // Scale: the map was authored in meters; the game uses Quake units (inches).
     // 1 m = 39.3701 in.
+    //
+    // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
+    // client and server load the exact same primitives (a prerequisite for
+    // prediction parity).  To switch maps, edit `kMapAsset` in AssetCatalog.hpp.
+    // To change *how* the map is loaded, edit the constants in MapConfig.hpp.
     {
-        static constexpr float k_metersToInches = 39.3701f;
-
-        const char* base = SDL_GetBasePath();
-        const std::string mapPath = std::string(base ? base : "") + "assets/maps/map1.glb";
-
-        // 1) Extract collision geometry (prototype mode: all meshes → collision).
-        physics::MapLoadOptions opts;
-        opts.scale = k_metersToInches;
-        opts.allMeshesAreCollision = true; // Prototype map — every mesh is both visual and collision.
-        opts.addFloorPlane = false;        // Map geometry provides its own floor.
-
-        if (physics::loadMapCollision(mapPath, mapCollision_, opts)) {
-            SDL_Log("[client] map collision loaded: %zu planes, %zu boxes, %zu brushes",
-                    mapCollision_.planes.size(),
-                    mapCollision_.boxes.size(),
-                    mapCollision_.brushes.size());
-        } else {
-            SDL_Log("[client] WARNING: map collision load failed — falling back to testWorld()");
-        }
+        // 1) Extract collision geometry (shared with server).
+        gamemap::loadConfiguredMap(mapCollision_, "client");
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
-        const int mapId = assets_.add("map1", "maps/map1.glb", AssetRole::Map);
-        const int mapModelIdx = renderer.loadSceneModel("maps/map1.glb", glm::vec3(0.0f), k_metersToInches);
+        // In separated mode, exclude collision-only nodes so they aren't rendered.
+        const std::string visualExclude =
+            gamemap::k_separatedCollisionMap ? std::string(gamemap::k_collisionPattern) : std::string();
+        const int mapId = addAssetDefinition(assets_, kMapAsset);
+        const int mapModelIdx = renderer.loadSceneModel(
+            kMapAsset.filename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs, visualExclude);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
             renderer.setModelScenePass(mapModelIdx, true);
-            SDL_Log("[client] map visual loaded (model index %d)", mapModelIdx);
+            SDL_Log("[client] map visual loaded (model index %d, exclude='%s')", mapModelIdx, visualExclude.c_str());
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
         }
@@ -196,24 +223,34 @@ bool Game::init()
         const std::string basePath = base ? base : "";
 
         // Helper: load a prop with render + collision in one call.
-        auto loadProp = [&](const char* name, const char* filename, glm::vec3 pos, float scale, bool flipUVs = false) {
-            const int id = assets_.add(name, filename, AssetRole::Prop);
-            const int modelIdx = renderer.loadSceneModel(filename, pos, scale, flipUVs);
+        // `def.decomposeCollision = true` runs V-HACD on each non-convex sub-mesh
+        // so organic/detailed shapes (a bottle, a metallic pallet) end up as a
+        // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
+        // a few seconds of load time per prop but kills triMesh edge-jitter.
+        //
+        // PR-30: V-HACD is gated on `gamemap::k_useVhacd` (single source of
+        // truth in `ecs/MapConfig.hpp`) so the team can disable it for
+        // map-iteration runs without editing per-call-site flags.  When
+        // `k_useVhacd == false`, non-convex props fall back to triMesh —
+        // correct, just visibly jittery on curved contacts.
+        auto loadProp = [&](const AssetDefinition& def) {
+            const int id = addAssetDefinition(assets_, def);
+            const int modelIdx = renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
             assets_.setModelIndex(id, modelIdx);
             if (modelIdx >= 0) {
                 renderer.setModelScenePass(modelIdx, true);
             }
 
             // Load collision at the same position/scale.
-            const std::string fullPath = basePath + "assets/" + filename;
-            if (physics::loadPropCollision(fullPath, mapCollision_, pos, scale)) {
+            const std::string fullPath = basePath + "assets/" + def.filename;
+            const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
+            if (physics::loadPropCollision(fullPath, mapCollision_, def.loadTranslation, def.loadScale, decompose)) {
                 assets_.setHasCollision(id);
             }
         };
 
-        loadProp("porsche", "free_1975_porsche_911_930_turbo.glb", glm::vec3(-200.0f, 1.3f, 400.0f), 40.0f, true);
-        loadProp("pallet", "metallic_pallet_factory_store.glb", glm::vec3(0.0f, 0.0f, 600.0f), 0.25f, true);
-        loadProp("bottle", "bottle_a.glb", glm::vec3(100.0f, 0.0f, 400.0f), 20.0f);
+        for (const AssetDefinition& def : kPropAssets)
+            loadProp(def);
 
         // Update the active world with the new collision data (map + all props).
         physics::setActiveWorld(mapCollision_.geometry());
@@ -221,8 +258,9 @@ bool Game::init()
 
     // ── Load entity models (render only, drawn via EntityRenderCmd) ──────
     {
-        const int id = assets_.add("wraith", "Apex_Legend_Wraith.glb", AssetRole::Entity);
-        wraithModelIdx = renderer.loadSceneModel("Apex_Legend_Wraith.glb", glm::vec3(0.0f), 8.0f);
+        const int id = addAssetDefinition(assets_, kWraithAsset);
+        wraithModelIdx = renderer.loadSceneModel(
+            kWraithAsset.filename, kWraithAsset.loadTranslation, kWraithAsset.loadScale, kWraithAsset.flipUVs);
         assets_.setModelIndex(id, wraithModelIdx);
         if (wraithModelIdx < 0)
             SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
@@ -230,35 +268,49 @@ bool Game::init()
 
     // Load all weapon models (per WeaponType)
     {
-        static const char* k_weaponNames[] = {"weapon_rifle", "weapon_rocket", "weapon_railgun", "weapon_energy"};
-        for (int i = 0; i < 4; ++i) {
-            const auto info = getWeaponModelInfo(static_cast<WeaponType>(i));
-            if (info.filename) {
-                const int id = assets_.add(k_weaponNames[i], info.filename, AssetRole::Entity);
-                weaponModelIndices_[i] = renderer.loadSceneModel(info.filename, glm::vec3(0.0f), 1.0f, info.flipUVs);
+        for (std::size_t i = 0; i < kWeaponAssets.size(); ++i) {
+            const AssetDefinition& def = kWeaponAssets[i];
+            if (def.filename) {
+                const int id = addAssetDefinition(assets_, def);
+                weaponAssetIds_[i] = id;
+                weaponModelIndices_[i] =
+                    renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
                 assets_.setModelIndex(id, weaponModelIndices_[i]);
                 if (weaponModelIndices_[i] < 0)
-                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", info.filename);
+                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
             }
+        }
+
+        // Load Rocket Projectile
+        {
+            const int id = addAssetDefinition(assets_, kRocketProjectile);
+            rocketProjectileModelIdx_ = renderer.loadSceneModel(kRocketProjectile.filename,
+                                                                kRocketProjectile.loadTranslation,
+                                                                kRocketProjectile.loadScale,
+                                                                kRocketProjectile.flipUVs);
+            assets_.setModelIndex(id, rocketProjectileModelIdx_);
+
+            if (rocketProjectileModelIdx_ < 0)
+                SDL_Log("[client] WARNING: rocket projectile model '%s' failed to load", kRocketProjectile.filename);
         }
     }
 
     // ── Procedural effects ──────────────────────────────────────────────
     {
         LoadedModel sphereModel = createGlowSphere(32, 32, 30.0f, glm::vec3(10.0f, 6.0f, 2.0f));
-        const int id = assets_.add("glow_sphere", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[0]);
         glowSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
         assets_.setModelIndex(id, glowSphereModelIdx_);
     }
     {
         LoadedModel sphereModel = createGlowSphere(24, 24, 15.0f, glm::vec3(4.0f, 8.0f, 12.0f));
-        const int id = assets_.add("glow_sphere_movable", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[1]);
         movableSphereModelIdx_ = renderer.uploadSceneModel(sphereModel);
         assets_.setModelIndex(id, movableSphereModelIdx_);
     }
     {
         LoadedModel cylModel = createGlowCylinder(24, 1, glm::vec3(8.0f, 2.0f, 10.0f));
-        const int id = assets_.add("glow_cylinder", "", AssetRole::Effect);
+        const int id = addAssetDefinition(assets_, kEffectAssets[2]);
         glowCylinderModelIdx_ = renderer.uploadSceneModel(cylModel);
         assets_.setModelIndex(id, glowCylinderModelIdx_);
     }
@@ -286,7 +338,22 @@ bool Game::init()
     client.onLocalPlayerReady([this](entt::entity local) {
         registry.emplace<LocalPlayer>(local);
         registry.emplace<InputSnapshot>(local);
-        registry.emplace<PreviousPosition>(local, registry.get<Position>(local).value);
+        // Phase 5a: PreviousPosition is now seeded by Client::dispatchMessage
+        // for ALL entities with Position on first snapshot, including the
+        // local player. Use emplace_or_replace here so this callback stays
+        // idempotent regardless of whether the seed pass got there first.
+        registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
+
+        // Phase 5b: emplace PlayerSimState on the local player so runMovement
+        // (which iterates `<..., PlayerSimState, ...>`) will process it
+        // during client-side prediction. PlayerSimState is a server-only
+        // component — remote players don't have it on the client, so the
+        // view filter naturally narrows to just the local player.
+        // Server's snapshots don't replicate PlayerSimState so this stays
+        // entirely client-side; that means subtle timer fields can drift
+        // between client/server — fixed by Phase 4b's owner-only stream
+        // when it lands.
+        registry.emplace_or_replace<PlayerSimState>(local);
 
         // Only add Controllable if the player is not already dead (edge case:
         // joining while mid-death on a long-running server).
@@ -366,7 +433,8 @@ bool Game::init()
         glm::vec3 evtOrigin = evt.pos1;
         if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            evtOrigin = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float cs = cachedGravFlipped_ ? -1.0f : 1.0f;
+            evtOrigin = cachedEye_ + right * (cs * 15.f) - glm::vec3{0, 1, 0} * (cs * 8.f) + cachedCamFwd_ * 5.f;
         }
 
         switch (evt.effectType) {
@@ -410,12 +478,18 @@ bool Game::init()
         // TODO: Specific handling for local player deaths (display enemy health)
     });
 
+    // PR-20: hand each SHOT_DEBUG_REPORT off to the DebugUI's ring
+    // buffer.  Pairs with the client-side fire-time snapshot the
+    // game thread captures inside iterate() (see fire-detection
+    // block).  Always-on so the user can flip the overlay any time.
+    client.onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
+
     // Initialize runtime 3P weapon params from defaults
     for (int i = 0; i < 4; ++i)
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
 
     const NetworkAddress clientNet = netCfg.clientNetwork;
-    if (!client.init(clientNet.host.c_str(), clientNet.port)) {
+    if (!client.init(clientNet.host.c_str(), clientNet.port, netCfg.transport)) {
         SDL_Log("Failed to connect to server");
         particleSystem.quit();
         renderer.quit();
@@ -480,6 +554,28 @@ bool Game::init()
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
             }
+
+            // Install the shared rig on the renderer's skinned-character path
+            // (perf Phase 1B).  All animated entities will draw via instanced
+            // GPU skinning against this single GPU model — no per-entity
+            // clones, no CPU LBS, no per-frame vertex re-uploads.
+            {
+                const auto& rigMeshes = charRig_.meshes();
+                std::vector<std::vector<Renderer::SkinVertex>> skinPerMesh(rigMeshes.size());
+                for (size_t m = 0; m < rigMeshes.size(); ++m) {
+                    const auto& src = rigMeshes[m].skinWeights;
+                    auto& dst = skinPerMesh[m];
+                    dst.resize(src.size());
+                    for (size_t v = 0; v < src.size(); ++v) {
+                        for (int k = 0; k < 4; ++k) {
+                            dst[v].boneIndices[k] = src[v].boneIndices[k];
+                            dst[v].boneWeights[k] = src[v].weights[k];
+                        }
+                    }
+                }
+                if (!legacyRenderer().setSkinnedRig(charRig_.templateLoadedModel(), skinPerMesh, charRig_.numJoints()))
+                    SDL_Log("[client] WARNING: setSkinnedRig failed — falling back to per-entity path");
+            }
         }
 
         // Build and resolve hitbox definitions (client-side, for debug visualization).
@@ -497,8 +593,153 @@ bool Game::init()
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
 
+    // Spin up the per-frame worker pool.  Default to half the host's logical
+    // cores so we leave headroom for the rest of the system; clamp to [0, 7]
+    // because parallel-for over ~30-character batches saturates well before
+    // 8 workers and over-subscribing just adds context-switch noise.
+    {
+        int hw = static_cast<int>(std::thread::hardware_concurrency());
+        if (hw <= 0)
+            hw = 4;
+        int workers = std::max(0, std::min(hw / 2, 7));
+        if (const char* p = SDL_getenv("GROUP2_WORKERS")) {
+            char* end = nullptr;
+            const long n = std::strtol(p, &end, 10);
+            if (*end == '\0' && n >= 0 && n <= 32)
+                workers = static_cast<int>(n);
+        }
+        workerPool_ = std::make_unique<WorkerPool>(workers);
+        SDL_Log("[client] WorkerPool: %d worker(s)", workers);
+    }
+
     // Apply the default frame-rate-limit setting now that the renderer is ready.
     applyFrameRateLimit();
+
+    // Bench mode: BENCH_SECONDS=N runs the client for N seconds, then prints a
+    // single-line FPS summary to stderr and quits.  Driven by
+    // `scripts/perf-100bots.sh` for baseline + post-change measurements.
+    if (const char* envBench = SDL_getenv("BENCH_SECONDS")) {
+        const float seconds = std::strtof(envBench, nullptr);
+        if (seconds > 0.0f) {
+            benchSeconds_ = seconds;
+            benchActive_ = true;
+            benchStartTime_ = prevTime;
+            // Reserve enough room for ~5000 fps × bench duration (worst case),
+            // so push_back never reallocates inside the hot path.
+            benchFrameTimesMs_.reserve(static_cast<size_t>(seconds * 5000.0f));
+            benchFrameStats_.reserve(static_cast<size_t>(seconds * 5000.0f));
+            // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
+            limitFPSToMonitor = false;
+            renderer.setVSync(false);
+            // Phase 3g — bench skips ImGui submission entirely (the ImGui
+            // context still exists for newFrame, but RenderDrawData and
+            // PrepareDrawData are short-circuited).  Removes ~0.04 ms / frame
+            // of fixed overhead on the median frame.
+            legacyRenderer().imguiEnabled = false;
+            SDL_Log("[bench] running for %.1fs then exiting (warmup %.1fs)",
+                    static_cast<double>(seconds),
+                    static_cast<double>(k_benchWarmupSeconds));
+        }
+    }
+
+    // BENCH_RENDER_SCALE=N — internal HDR + post-process resolution multiplier.
+    // 0.5 = quarter pixel count = ~4× fragment savings.  Tonemap reads HDR via
+    // linear sampler so the final swapchain image is bilinearly upscaled.
+    if (const char* p = SDL_getenv("BENCH_RENDER_SCALE")) {
+        const float s = std::strtof(p, nullptr);
+        if (s > 0.0f) {
+            legacyRenderer().renderScale = s;
+            SDL_Log("[client] BENCH_RENDER_SCALE=%.3f", static_cast<double>(s));
+        }
+    }
+
+    // GROUP2_NO_IMGUI=1 — release-build kill switch.  Skips ImGui submission
+    // unconditionally.  The CMake/release pipeline can pre-set this for
+    // shipping builds that never need a debug menu.  Independent of bench
+    // mode so it can be combined with normal play.
+    if (const char* p = SDL_getenv("GROUP2_NO_IMGUI"); p && *p && *p != '0') {
+        legacyRenderer().imguiEnabled = false;
+        SDL_Log("[client] GROUP2_NO_IMGUI=1 \u2014 ImGui submission disabled");
+    }
+
+    // GROUP2_CLIENT_CORES="0,1,2,3" — pin the main render thread to the
+    // listed CPU cores via pthread_setaffinity_np.  Stops the OS scheduler
+    // from migrating us onto a core where the colocated server / 100 bot
+    // threads are spinning, which is the dominant cause of p1/p5 stalls
+    // we observed in the phase profiler (acquire/record/submit phases
+    // randomly bloating to several ms).  Linux only.
+#if defined(__linux__)
+    if (const char* corestr = SDL_getenv("GROUP2_CLIENT_CORES")) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        const char* p = corestr;
+        int coreCount = 0;
+        while (*p) {
+            char* end = nullptr;
+            const long c = std::strtol(p, &end, 10);
+            if (end == p)
+                break;
+            if (c >= 0 && c < CPU_SETSIZE) {
+                CPU_SET(static_cast<int>(c), &cpuset);
+                ++coreCount;
+            }
+            p = end;
+            if (*p == ',')
+                ++p;
+        }
+        if (coreCount > 0) {
+            const int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+            if (rc == 0) {
+                SDL_Log("[client] pinned render thread to %d core(s) (%s)", coreCount, corestr);
+            } else {
+                SDL_Log("[client] pthread_setaffinity_np failed: %s", std::strerror(rc));
+            }
+        }
+    }
+#endif
+
+    // Bench-only kill switches for post-processing passes.  Lets a single
+    // bench script flag isolate per-pass cost without persisting changes.
+    //
+    //   BENCH_NO_POSTFX=1   — disable bloom + SSR + GTAO + volumetrics + TAA
+    //   BENCH_NO_SHADOWS=1  — disable cascaded shadow map pass
+    //   BENCH_NO_TAA=1      — disable TAA + motion vectors only
+    //   BENCH_NO_BLOOM=1    — disable bloom only
+    //   BENCH_NO_SSR=1      — disable SSR only
+    //   BENCH_NO_GTAO=1     — disable SSAO/GTAO only
+    //   BENCH_NO_VOL=1      — disable volumetric lighting only
+    if (const char* v = SDL_getenv("BENCH_NO_POSTFX"); v && *v && *v != '0') {
+        renderer.toggles.bloom = false;
+        renderer.toggles.ssr = false;
+        renderer.toggles.ssao = false;
+        renderer.toggles.volumetrics = false;
+        legacyRenderer().aaMode = AAMode::Off;
+        SDL_Log("[bench] post-FX disabled (bloom + ssr + gtao + volumetrics + AA)");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_SHADOWS"); v && *v && *v != '0') {
+        renderer.toggles.shadows = false;
+        SDL_Log("[bench] shadows disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_TAA"); v && *v && *v != '0') {
+        legacyRenderer().aaMode = AAMode::Off;
+        SDL_Log("[bench] TAA disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_BLOOM"); v && *v && *v != '0') {
+        renderer.toggles.bloom = false;
+        SDL_Log("[bench] bloom disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_SSR"); v && *v && *v != '0') {
+        renderer.toggles.ssr = false;
+        SDL_Log("[bench] SSR disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_GTAO"); v && *v && *v != '0') {
+        renderer.toggles.ssao = false;
+        SDL_Log("[bench] GTAO disabled");
+    }
+    if (const char* v = SDL_getenv("BENCH_NO_VOL"); v && *v && *v != '0') {
+        renderer.toggles.volumetrics = false;
+        SDL_Log("[bench] volumetrics disabled");
+    }
 
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
     return true;
@@ -563,7 +804,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_T: {
             // Energy beam — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float ts = cachedGravFlipped_ ? -1.0f : 1.0f;
+            const glm::vec3 hip =
+                cachedEye_ + right * (ts * 15.f) - glm::vec3{0, 1, 0} * (ts * 8.f) + cachedCamFwd_ * 5.f;
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -581,7 +824,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_Y: {
             // Bullet tracer — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float ds = cachedGravFlipped_ ? -1.0f : 1.0f;
+            const glm::vec3 hip =
+                cachedEye_ + right * (ds * 15.f) - glm::vec3{0, 1, 0} * (ds * 8.f) + cachedCamFwd_ * 5.f;
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -625,12 +870,42 @@ SDL_AppResult Game::event(SDL_Event* event)
         sfxSystem.handleEvent(*event);
     }
 
-    // Scroll wheel cycles weapon slots
+    // ── Gamepad hot-plug ──────────────────────────────────────────────────
+    // SDL fires _ADDED for already-connected pads at startup once events are
+    // pumped, so this single handler covers both runtime hot-plug AND the
+    // initial bind.  We accept the first pad to arrive and ignore additional
+    // ones — multi-controller support (split-screen / co-op) would need an
+    // entity-per-controller scheme in the ECS, out of scope for this change.
+    if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
+        if (!activeGamepad_) {
+            const SDL_JoystickID id = event->gdevice.which;
+            activeGamepad_ = SDL_OpenGamepad(id);
+            if (activeGamepad_) {
+                activeGamepadId_ = id;
+                const char* name = SDL_GetGamepadName(activeGamepad_);
+                SDL_Log("[input] gamepad connected: %s (id=%u)", name ? name : "unknown", id);
+            } else {
+                SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
+            }
+        }
+    } else if (event->type == SDL_EVENT_GAMEPAD_REMOVED) {
+        // Only tear down if the disconnected device is the one we're using —
+        // otherwise an unrelated unplug (e.g. a second pad we never opened)
+        // would leave us with a dangling-but-non-null handle.
+        if (activeGamepad_ && event->gdevice.which == activeGamepadId_) {
+            SDL_Log("[input] gamepad disconnected (id=%u)", activeGamepadId_);
+            SDL_CloseGamepad(activeGamepad_);
+            activeGamepad_ = nullptr;
+            activeGamepadId_ = 0;
+        }
+    }
+
+    // Scroll wheel toggles between primary and secondary weapon slots.
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
         if (event->wheel.y > 0)
-            pendingScrollSwitch_ = -1; // scroll up → previous slot
+            pendingScrollSwitch_ = -1;
         else if (event->wheel.y < 0)
-            pendingScrollSwitch_ = 1;  // scroll down → next slot
+            pendingScrollSwitch_ = 1;
     }
 
     // Re-capture mouse on window click while uncaptured (standard FPS behaviour).
@@ -728,6 +1003,19 @@ SDL_AppResult Game::iterate()
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
+    // Per-frame phase timer state (only consumed in bench mode).  We track
+    // monotonic wall-clock per phase via a single "lastTick" cursor; phases
+    // are sequential in iterate() so a section's elapsed = current - last.
+    FrameSectionMs phaseStats{};
+    Uint64 phaseLastTick = k_now;
+    const auto phaseSnap = [&](float& outMs) {
+        if (!benchActive_)
+            return;
+        const Uint64 nowTick = SDL_GetPerformanceCounter();
+        outMs = static_cast<float>(nowTick - phaseLastTick) * 1000.0f / static_cast<float>(k_perfFreq);
+        phaseLastTick = nowTick;
+    };
+
     float frameTime = static_cast<float>(k_now - prevTime) / static_cast<float>(k_perfFreq);
 
     // If the game was suspended (backgrounded / minimized), the raw delta can
@@ -791,6 +1079,165 @@ SDL_AppResult Game::iterate()
         statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
     }
 
+    // Bench mode: collect per-frame timings (after warmup) then aggregate +
+    // print + quit when the duration is up.
+    if (benchActive_) {
+        const float benchElapsed = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
+        // Record this frame's wall-clock time once we're past the warmup window.
+        if (benchElapsed >= k_benchWarmupSeconds && frameTime > 0.0f && frameTime < 0.25f)
+            benchFrameTimesMs_.push_back(frameTime * 1000.0f);
+
+        if (benchElapsed >= benchSeconds_) {
+            const auto countSamples = benchFrameTimesMs_.size();
+            if (countSamples == 0) {
+                std::fprintf(stderr, "[bench] no samples collected (warmup window > duration?)\n");
+                return SDL_APP_SUCCESS;
+            }
+
+            // Sort ascending: low ms = fast frames, high ms = slow frames.
+            // We'll convert to FPS (=1000/ms) for the summary, so worst-frame
+            // FPS = 1000 / max-ms = the LOW percentiles.
+            auto frames = benchFrameTimesMs_;
+            std::sort(frames.begin(), frames.end());
+            auto pct = [&](float p) {
+                const auto idx = static_cast<size_t>(static_cast<float>(countSamples - 1) * p);
+                return frames[idx];
+            };
+            const float msMedian = pct(0.50f);
+            const float msAvg = std::accumulate(frames.begin(), frames.end(), 0.0f) / static_cast<float>(countSamples);
+            const float msP95 = pct(0.95f); // 95th-percentile slowest = 5% lows
+            const float msP99 = pct(0.99f); // 99th-percentile slowest = 1% lows
+            const float msFastest = frames.front();
+            const float msSlowest = frames.back();
+
+            auto fps = [](float ms) { return ms > 0.0f ? 1000.0f / ms : 0.0f; };
+
+            std::fprintf(stderr,
+                         "[bench] elapsed=%.1fs samples=%zu "
+                         "avg=%.1f median=%.1f p5=%.1f p1=%.1f min=%.1f max=%.1f\n",
+                         static_cast<double>(benchElapsed),
+                         countSamples,
+                         static_cast<double>(fps(msAvg)),
+                         static_cast<double>(fps(msMedian)),
+                         static_cast<double>(fps(msP95)),
+                         static_cast<double>(fps(msP99)),
+                         static_cast<double>(fps(msSlowest)),
+                         static_cast<double>(fps(msFastest)));
+
+            // Phase breakdown: split frames into "fast median band" (frames
+            // near the median) vs. "slowest 1%" (the p1 tail).  Average each
+            // phase across each band, plus dump a few representative slow
+            // frames so we can see the actual stalls.
+            if (!benchFrameStats_.empty()) {
+                auto sortedStats = benchFrameStats_;
+                std::sort(sortedStats.begin(), sortedStats.end(), [](const FrameSectionMs& a, const FrameSectionMs& b) {
+                    return a.total < b.total;
+                });
+
+                const size_t n = sortedStats.size();
+                const size_t medLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.45f);
+                const size_t medHi = static_cast<size_t>(static_cast<float>(n - 1) * 0.55f);
+                const size_t slowLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.99f);
+
+                FrameSectionMs medAvg{}, slowAvg{};
+                size_t medCount = 0, slowCount = 0;
+                for (size_t i = medLo; i <= medHi; ++i) {
+                    medAvg.total += sortedStats[i].total;
+                    medAvg.input += sortedStats[i].input;
+                    medAvg.physics += sortedStats[i].physics;
+                    medAvg.networkPoll += sortedStats[i].networkPoll;
+                    medAvg.particles += sortedStats[i].particles;
+                    medAvg.animation += sortedStats[i].animation;
+                    medAvg.entityCmds += sortedStats[i].entityCmds;
+                    medAvg.imgui += sortedStats[i].imgui;
+                    medAvg.drawFrame += sortedStats[i].drawFrame;
+                    ++medCount;
+                }
+                for (size_t i = slowLo; i < n; ++i) {
+                    slowAvg.total += sortedStats[i].total;
+                    slowAvg.input += sortedStats[i].input;
+                    slowAvg.physics += sortedStats[i].physics;
+                    slowAvg.networkPoll += sortedStats[i].networkPoll;
+                    slowAvg.particles += sortedStats[i].particles;
+                    slowAvg.animation += sortedStats[i].animation;
+                    slowAvg.entityCmds += sortedStats[i].entityCmds;
+                    slowAvg.imgui += sortedStats[i].imgui;
+                    slowAvg.drawFrame += sortedStats[i].drawFrame;
+                    ++slowCount;
+                }
+                auto avgRow = [&](FrameSectionMs& s, size_t c) {
+                    if (c == 0)
+                        return;
+                    s.total /= static_cast<float>(c);
+                    s.input /= static_cast<float>(c);
+                    s.physics /= static_cast<float>(c);
+                    s.networkPoll /= static_cast<float>(c);
+                    s.particles /= static_cast<float>(c);
+                    s.animation /= static_cast<float>(c);
+                    s.entityCmds /= static_cast<float>(c);
+                    s.imgui /= static_cast<float>(c);
+                    s.drawFrame /= static_cast<float>(c);
+                };
+                avgRow(medAvg, medCount);
+                avgRow(slowAvg, slowCount);
+
+                std::fprintf(stderr,
+                             "[bench] median-band  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
+                             static_cast<double>(medAvg.total),
+                             static_cast<double>(medAvg.physics),
+                             static_cast<double>(medAvg.networkPoll),
+                             static_cast<double>(medAvg.animation),
+                             static_cast<double>(medAvg.particles),
+                             static_cast<double>(medAvg.entityCmds),
+                             static_cast<double>(medAvg.imgui),
+                             static_cast<double>(medAvg.drawFrame));
+                std::fprintf(stderr,
+                             "[bench] slowest-1%%  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
+                             static_cast<double>(slowAvg.total),
+                             static_cast<double>(slowAvg.physics),
+                             static_cast<double>(slowAvg.networkPoll),
+                             static_cast<double>(slowAvg.animation),
+                             static_cast<double>(slowAvg.particles),
+                             static_cast<double>(slowAvg.entityCmds),
+                             static_cast<double>(slowAvg.imgui),
+                             static_cast<double>(slowAvg.drawFrame));
+
+                // Top 5 slowest frames, full breakdown — to spot one-off
+                // stalls (e.g. a single drawFrame=120ms in an otherwise
+                // tight set of slow frames means a true GPU stall, not a
+                // CPU section regressing).
+                std::fprintf(stderr, "[bench] top-5 slowest individual frames:\n");
+                for (size_t i = (n >= 5 ? n - 5 : 0); i < n; ++i) {
+                    const auto& s = sortedStats[i];
+                    std::fprintf(stderr,
+                                 "[bench]   total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
+                                 "ui=%4.2f draw=%5.2f (acq=%4.2f rec=%4.2f sub=%4.2f)\n",
+                                 static_cast<double>(s.total),
+                                 static_cast<double>(s.physics),
+                                 static_cast<double>(s.networkPoll),
+                                 static_cast<double>(s.animation),
+                                 static_cast<double>(s.particles),
+                                 static_cast<double>(s.entityCmds),
+                                 static_cast<double>(s.imgui),
+                                 static_cast<double>(s.drawFrame),
+                                 static_cast<double>(s.drawAcquire),
+                                 static_cast<double>(s.drawRecord),
+                                 static_cast<double>(s.drawSubmit));
+                }
+            }
+
+            std::fflush(stderr);
+            return SDL_APP_SUCCESS;
+        }
+    }
+
+    // Mark the start of the input phase for the bench profiler.  Anything
+    // before this (suspend handling, stats ring update, bench summary check)
+    // is bundled into the implicit "preamble" attributable to "total".
+    phaseLastTick = SDL_GetPerformanceCounter();
+
     // 3. Input
     //
     // Mouse look runs EVERY iterate() call — this keeps camera rotation
@@ -801,35 +1248,59 @@ SDL_AppResult Game::iterate()
     // Movement keys run once per physics tick group (when inputSyncedWithPhysics
     // is true) so WASD movement calculations match the server.  When the
     // sync toggle is off, movement keys also run every frame.
+    // Dead input runs regardless of mouse capture — allows skip-respawn.
+    systems::runDeadInput(registry);
+
+    // Query local player's gravity flip state — used for mouse/stick
+    // inversion AND for swapping A-D / left-stick left-right.
+    bool localGravFlipped = false;
+    registry.view<PlayerVisState, LocalPlayer>().each(
+        [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
+
     if (mouseCaptured) {
-        systems::runMouseLook(registry, mouseSensitivity);
+
+        systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
-            systems::runMovementKeys(registry);
+            systems::runMovementKeys(registry, localGravFlipped);
         systems::runWeaponKeys(registry);
 
-        // Apply scroll-wheel weapon switch (overrides key-based switch for this frame)
+        // Gamepad samplers run AFTER kbm so they OR into the same flags —
+        // a player can use kbm and pad simultaneously without either source
+        // stomping the other.  Look additively composes (mouse delta + stick
+        // delta) so the camera tracks whichever input is moving.  No-ops
+        // cheaply when activeGamepad_ is nullptr.
+        systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime, localGravFlipped);
+        // AAA-style aim assist runs IMMEDIATELY after the look sampler so it
+        // can refund part of the just-applied look delta (slowdown) and add
+        // a rotational pull derived from the *change* in the target's
+        // angular position frame-to-frame.  Mouse-only players see no
+        // effect — `activeGamepad_` is nullptr and the function early-outs.
+        // Both effects are gated on stick actuation ≥ 5 % so a player
+        // holding still keeps full manual control.
+        systems::runGamepadAimAssist(
+            registry, activeGamepad_, aimAssistCfg_, aimAssistState_, gamepadLookSensitivity, frameTime);
+        if (!inputSyncedWithPhysics)
+            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
+        systems::runGamepadWeapon(registry, activeGamepad_);
+
+        // Apply scroll-wheel weapon switch, constrained to primary/secondary.
         if (pendingScrollSwitch_ != 0) {
             registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
-                // Determine current slot from WeaponState
-                int slotIdx = 0; // PRIMARY=0, SECONDARY=1, TERTIARY=2, QUATERNARY=3
+                int slotIdx = 0;
                 registry.view<LocalPlayer, WeaponState>().each(
                     [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
 
-                // Cycle: add direction, wrap around 4 slots
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 4) % 4;
-
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 2) % 2;
                 snap.switchToPrimary = (slotIdx == 0);
                 snap.switchToSecondary = (slotIdx == 1);
-                snap.switchToTertiary = (slotIdx == 2);
-                snap.switchToQuaternary = (slotIdx == 3);
             });
             pendingScrollSwitch_ = 0;
         }
     }
 
-    systems::runInputSend(registry, client);
-
     // Network stats: send periodic pings and update bandwidth counters
+    phaseSnap(phaseStats.input);
+
     client.updateStats(frameTime);
     pingTimer += frameTime;
     if (pingTimer >= 1.0f) {
@@ -843,28 +1314,111 @@ SDL_AppResult Game::iterate()
 
     if (accumulator >= k_physicsDt) {
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured)
-            systems::runMovementKeys(registry);
+        if (inputSyncedWithPhysics && mouseCaptured) {
+            systems::runMovementKeys(registry, localGravFlipped);
+            // Gamepad movement is sampled on the same cadence and ORs into
+            // the same flags so kbm + pad stay coherent under physics-sync.
+            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
+        }
 
+        // PR-24 (off-by-one + capsule staleness fix): the fire detection
+        // and capture block used to live HERE, before the physics while
+        // loop.  Two regressions:
+        //   1. snap.tick was the OLD value (pre-increment), but the
+        //      wire-format input (sent in `runInputSend` after the
+        //      while loop) carries the NEW value.  Server's debug
+        //      capture stamped the new value → tick mismatch → debug
+        //      UI showed two ring slots for the same shot.  PR-20.1
+        //      had originally fixed this by capturing AFTER the stamp;
+        //      PR-20.8's jitter fix moved the stamp into the while
+        //      loop but left the capture before it.
+        //   2. The captured capsules were from the PREVIOUS frame's
+        //      `updateHitboxes` (the current frame's `applyInterpolated
+        //      Transforms` + `updateHitboxes` haven't run yet).  At
+        //      60 fps that's ~16 ms staler than what the user sees on
+        //      screen — the BLUE capsules in the debug overlay didn't
+        //      reflect what the player was actually aiming at.
+        //
+        // Both fixed in PR-24 by moving the entire capture to right
+        // after `systems::updateHitboxes` (search for "PR-24 fire
+        // detection" further down).  We still need the rising-edge
+        // detector to advance `prevShootingForDebug_` here so it stays
+        // exactly once per iterate (the post-physics block reads the
+        // SAME `snap.shooting` we set in `runWeaponKeys` above).
         physicsRan = true;
 
-        // Interpolate position between last two server updates
+        // PR-20.8 (jitter root-cause): tick-stamp + ring-push + send
+        // moved INSIDE the per-physics-tick loop.  Each physics tick
+        // gets its own `clientPredictTick`, its own InputSnapshot
+        // tick stamp, and its own ring entry.  Reconciliation's 1:1
+        // replay (one `runMovement` per stored tick) now exactly
+        // matches prediction's 1:1 advance (one `runMovement` per
+        // physics tick).  Pre-PR-20.8 the increment was OUTSIDE the
+        // loop while runPrediction ran N times per iterate at
+        // 60 fps × 128 Hz physics, making replay always under-run
+        // by `(N-1) × dt × velocity` per stored tick.
+        //
+        // Phase 5a/b: PreviousPosition is updated by Client::
+        // dispatchMessage when a snapshot arrives, not every physics
+        // tick.  The renderer interpolates over the snapshot interval
+        // via `client.getSnapshotAlpha()` so motion stays smooth at
+        // the much-coarser snapshot rate.  Per physics tick we ALSO
+        // snapshot the local player's pos→prev BEFORE running
+        // prediction so the renderer shows tick-rate-smooth
+        // interpolation of the local player.
         while (accumulator >= k_physicsDt && ticksThisFrame < k_maxTicksPerFrame) {
             accumulator -= k_physicsDt;
 
-            // Snapshot position before each tick so the last tick's delta is
-            // available for interpolation (prevPos → pos over alpha ∈ [0,1]).
-            registry.view<Position, PreviousPosition>().each(
+            // Per-physics-tick: increment + stamp + ring push.
+            // All physics ticks in this iterate see the same input
+            // sampled at runWeaponKeys/runMovementKeys time above —
+            // we just give each tick its own monotonic tick number.
+            ++clientPredictTick;
+            registry.view<InputSnapshot, LocalPlayer>().each(
+                [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+            registry.view<LocalPlayer, InputSnapshot>().each(
+                [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
+
+            // Capture local pos→prev for tick-rate interp, then run
+            // client-side prediction.  `PlayerSimState` filter on
+            // runMovement narrows to just the local player (remotes
+            // don't have `PlayerSimState` on the client).
+            registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+            systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
 
             ++tickCount;
             ++ticksThisFrame;
             ++statsPhysTicks;
         }
 
+        // Send the redundant input batch ONCE per iterate.  After the
+        // physics loop has stamped the LATEST clientPredictTick into
+        // `snap.tick`, so the packet's most-recent input carries the
+        // last physics tick's number.  Prior k_inputRedundancy
+        // ticks are pulled from `Client::inputRing_` (which the
+        // sendInputSnapshot path appends to internally).
+        systems::runInputSend(registry, client);
+
+        phaseSnap(phaseStats.physics);
+
         if (!client.poll(registry)) {
             // TODO: Update so reset to menu or some other non-crash state
             return SDL_APP_SUCCESS;
+        }
+
+        // Phase 5b: a snapshot just applied (overwriting the local
+        // player's Position with the server's authoritative value at the
+        // server-acked client tick). Replay the inputs we sent since
+        // then to restore the predicted state at the *current* predict
+        // tick — net effect is "server-side correction folded in,
+        // client-side immediate response preserved".
+        if (client.consumeSnapshotApplied()) {
+            const uint32_t ackedTick = client.getServerAckedClientTick();
+            if (ackedTick != 0 && clientPredictTick > ackedTick) {
+                systems::runReconciliation(
+                    registry, inputRing_, ackedTick, clientPredictTick, k_physicsDt, physics::activeWorld());
+            }
         }
 
         refreshRemotePlayerRenderables();
@@ -880,43 +1434,52 @@ SDL_AppResult Game::iterate()
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
     float renderYaw = 0.0f;
     float renderPitch = 0.0f;
-    float targetRoll = 0.0f; // degrees, from PlayerState
+    float targetRoll = 0.0f; // degrees, from PlayerVisState
 
     if (renderSeparateFromPhysics) {
-        // Interpolation alpha: 0 = just ran a tick, approaching 1 as next tick nears.
+        // Phase 5b: local player uses physics-tick alpha — its Position
+        // updates every 7.8 ms (128 Hz) via client-side prediction, so
+        // the lerp window matches that interval. Phase 5a's snapshot
+        // alpha is used for *remote* entities (in the render-list loop
+        // below) where Position only updates on snapshot arrival.
         const float alpha = std::clamp(accumulator / k_physicsDt, 0.0f, 1.0f);
 
-        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerState>().each(
+        registry.view<LocalPlayer, Position, PreviousPosition, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,
                 const PreviousPosition& prev,
                 const InputSnapshot& input,
                 const CollisionShape& shape,
-                const PlayerState& pstate) {
+                const PlayerVisState& pstate) {
                 const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
-                renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
+                // When gravity is flipped, the player's head is at the bottom
+                // of the AABB (near the ceiling they walk on).
+                const float eyeDir = pstate.gravityFlipped ? -1.0f : 1.0f;
+                renderEye = interpPos + glm::vec3{0.0f, eyeOffset * eyeDir, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
-                targetRoll = pstate.targetCameraTilt;
+                // Gravity flip adds 180° roll for the upside-down view.
+                targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
-        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerState>().each(
+        registry.view<LocalPlayer, Position, InputSnapshot, CollisionShape, PlayerVisState>().each(
             [&](const Position& pos,
                 const InputSnapshot& input,
                 const CollisionShape& shape,
-                const PlayerState& pstate) {
+                const PlayerVisState& pstate) {
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
-                renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
+                const float eyeDir = pstate.gravityFlipped ? -1.0f : 1.0f;
+                renderEye = pos.value + glm::vec3{0.0f, eyeOffset * eyeDir, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
-                targetRoll = pstate.targetCameraTilt;
+                targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     }
 
-    // Local weapon VFX — fires continuously while LMB is held, respecting cooldown.
-    // This mirrors the server's fire rate so the local player sees tracers/impacts
-    // at the same cadence as the server processes shots.
+    // Local weapon VFX — fires continuously while the fire input is held,
+    // respecting cooldown.  Mirrors the server's fire rate so the local
+    // player sees tracers/impacts at the same cadence as the server.
     // Beam weapons (EnergyGun) are driven by BeamState from the registry,
     // so they skip per-shot VFX here.
     {
@@ -927,15 +1490,23 @@ SDL_AppResult Game::iterate()
         if (!wpnCfg.isBeam && !wpnCfg.isCharge) {
             localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
-            const SDL_MouseButtonFlags mouseState = SDL_GetMouseState(nullptr, nullptr);
-            const bool shooting = mouseCaptured && (mouseState & SDL_BUTTON_LMASK) != 0;
+            // Read fire intent from the local player's InputSnapshot rather
+            // than polling the mouse directly: snap.shooting is the merged
+            // bus that the input samplers (kbm + gamepad) all OR into, so
+            // every fire source — LMB, gamepad RT, future bindings — drives
+            // local VFX/SFX uniformly.  Still gate on mouseCaptured so a
+            // stale flag (player held trigger when alt-tabbing into the
+            // debug menu) doesn't keep firing while no input is being sampled.
+            bool shooting = false;
+            if (mouseCaptured) {
+                registry.view<LocalPlayer, InputSnapshot>().each(
+                    [&](const InputSnapshot& snap) { shooting = snap.shooting; });
+            }
 
             // Check ammo — don't spawn VFX if the magazine is empty.
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-                const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
-                                         : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                                 : ws.primary;
+                const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
                 hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
             });
 
@@ -943,7 +1514,13 @@ SDL_AppResult Game::iterate()
                 localFireCooldown_ = wpnCfg.fireCooldown;
 
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-                const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+                // When gravity-flipped the 180° camera roll swaps screen-
+                // left/right and screen-up/down in world space.  Negate both
+                // offsets so the tracer still originates at screen bottom-right
+                // (where the viewmodel muzzle is).
+                const float hSign = localGravFlipped ? -1.0f : 1.0f;
+                const glm::vec3 hip =
+                    cachedEye_ + right * (hSign * 15.f) - glm::vec3{0, 1, 0} * (hSign * 8.f) + cachedCamFwd_ * 5.f;
 
                 // Raycast world geometry for tracer endpoint.  Impact effects
                 // (sparks / blood / bullet holes) are NOT spawned here — they
@@ -978,11 +1555,16 @@ SDL_AppResult Game::iterate()
         }
     }
 
+    // The "physics" phase already captured at the top of the tick loop —
+    // here we close out the *post-tick* network/snapshot path separately.
+    phaseSnap(phaseStats.networkPoll);
+
     // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
+    phaseSnap(phaseStats.particles);
 
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
@@ -992,9 +1574,7 @@ SDL_AppResult Game::iterate()
         // Charge rifle: play load sound once when charging starts.
         bool isChargingNow = false;
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-            const GunInstance& gun = (ws.current == WeaponSlot::TERTIARY)    ? ws.tertiary
-                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                             : ws.primary;
+            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
             if (getWeaponConfig(gun.type).isCharge && gun.chargeTime > 0.0f)
                 isChargingNow = true;
         });
@@ -1015,13 +1595,15 @@ SDL_AppResult Game::iterate()
         // Note: Player component is not synced to clients, so we raycast against
         // HitboxInstance directly (skipping the local player entity).
         if (isBeamNow) {
-            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape>().each(
+            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
                 [&](entt::entity localE,
                     const BeamState&,
                     const InputSnapshot& inp,
                     const Position& pos,
-                    const CollisionShape& shape) {
-                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const CollisionShape& shape,
+                    const PlayerVisState& pvis) {
+                    const float beamEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * beamEyeDir, 0.0f};
                     const float cp = std::cos(inp.pitch);
                     const glm::vec3 dir{std::sin(inp.yaw) * cp, -std::sin(inp.pitch), std::cos(inp.yaw) * cp};
 
@@ -1115,13 +1697,14 @@ SDL_AppResult Game::iterate()
     }
 
     // Grapple cable visual
-    registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& pstate) {
+    registry.view<LocalPlayer, PlayerVisState>().each([&](const PlayerVisState& pstate) {
         if (pstate.grappleActive) {
             // Draw cable from player hand to hook point every frame.
             const float cosPi = std::cos(renderPitch);
             const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
             const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
-            const glm::vec3 hand = renderEye + right * 15.f - glm::vec3{0, 1, 0} * 8.f + fwd * 5.f;
+            const float gSign = pstate.gravityFlipped ? -1.0f : 1.0f;
+            const glm::vec3 hand = renderEye + right * (gSign * 15.f) - glm::vec3{0, 1, 0} * (gSign * 8.f) + fwd * 5.f;
             // particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
         }
     });
@@ -1132,56 +1715,486 @@ SDL_AppResult Game::iterate()
         cachedCamFwd_ =
             glm::vec3{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
         cachedEye_ = renderEye;
+        cachedGravFlipped_ = localGravFlipped;
     }
 
-    // Update skeletal animation (CPU skinning) — per animated entity.
+    // PR-19: unified pre-render interpolation pass.  Walks every
+    // non-local entity with an `InterpolationBuffer` and overwrites
+    // its `Position.value` + `InputSnapshot.yaw` with the buffer-
+    // sampled values at `now − N × snapshotInterval`.  Every
+    // downstream visual consumer (renderer, tracers, ribbon trails,
+    // smoke emitters, beam endpoints, sfx) reads `pos.value`
+    // directly, so they all align on a single interpolated
+    // source-of-truth — no body-vs-tracer mismatch.  No-op when
+    // `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=0`.
+    client.applyInterpolatedTransforms(registry);
+
+    // Update skeletal animation + build the renderer's per-frame skinned
+    // palette + instance arrays (perf Phase 1B).
     //
-    // Each AnimatedCharacter runs its own sampling/blending/LocalToMatrix pipeline,
-    // CPU-skins every rig mesh, and streams the resulting vertices into its
-    // per-entity renderer model instance.
+    // For each animated entity we:
+    //   1. sample + blend its animation,
+    //   2. populate JointMatrices for the hitbox system,
+    //   3. append `numJoints` skin matrices to the flat palette,
+    //   4. append one entry to the instance buffer (world transform +
+    //      paletteBase = instanceIdx * numJoints).
     //
-    // Also populates the JointMatrices ECS component with model-space bone transforms
-    // for skeleton-driven hitbox capsule placement.
+    // The renderer then issues one instanced draw per rig mesh per pass.  No
+    // CPU skinning, no per-entity vertex re-upload, no per-entity draws.
     {
-        std::vector<std::vector<ModelVertex>> skinnedBuffer;
-        registry.view<AnimatedCharacter, Velocity, PlayerState, InputSnapshot>().each([&](entt::entity e,
-                                                                                          AnimatedCharacter& ac,
-                                                                                          const Velocity& vel,
-                                                                                          const PlayerState& ps,
-                                                                                          const InputSnapshot& inp) {
-            if (!ac.animator || ac.modelIndex < 0)
-                return;
+        const int numJoints = charRig_.numJoints();
+        const float snapshotAlpha = client.getSnapshotAlpha();
+        // PR-11: render-time = now − N × snapshotInterval (default 2 ticks
+        // ≈ 62.5 ms at 32 Hz).  0 means "no buffered playback yet" — the
+        // renderer falls back to the Phase-5a (prev, cur, alpha) lerp
+        // through `entity_interpolation::sample`'s fallback path.
+        const Uint64 interpRenderNs = client.getInterpolationRenderTimeNs();
+        constexpr float k_animationTick = 1.0f / 30.0f;
 
-            AnimationInputs ai{};
-            ai.velocityWorld = vel.value;
-            ai.yawRad = inp.yaw;
-            ai.pitchRad = inp.pitch;
-            ai.grounded = ps.grounded;
-            ai.sprinting = ps.sprinting;
-            ai.crouching = ps.crouching;
-            ai.moveMode = static_cast<int>(ps.moveMode);
-            ai.wallRunSide = static_cast<int>(ps.wallRunSide);
-            ac.animator->update(ai, frameTime);
+        // ─── Phase 1: sequential prepass ────────────────────────────────────
+        // Walk the registry view ONCE on the main thread (entt views aren't
+        // thread-safe to iterate concurrently).  For each animated character
+        // build an AnimCandidate that captures everything needed by the
+        // parallel pass below, including pre-built AnimationInputs and a
+        // pre-computed world transform.  Out-of-view characters with no
+        // shadow contribution are dropped here.
+        struct AnimCandidate
+        {
+            entt::entity entity{};
+            AnimatedCharacter* ac = nullptr;
+            AnimationInputs ai;
+            glm::mat4 worldTransform{1.0f};
+            bool sampleThisFrame = false; ///< call animator->update()
+            bool drawThisFrame = false;   ///< write to instance/palette slots
+            bool isLocal = false;
+            uint32_t slot = 0;            ///< index into skinnedInstances + base into bonePalette
+        };
+        // Plain function-local (NOT thread_local — workers must see the
+        // main thread's vector through the lambda capture).  Reserved up
+        // front to avoid reallocs across frames.
+        std::vector<AnimCandidate> candidates;
+        candidates.reserve(128);
 
-            // Store model-space joint matrices for hitbox system.
-            auto& jm = registry.get_or_emplace<JointMatrices>(e);
-            jm.matrices = ac.animator->jointModelMatrices();
+        // Frustum extraction (Gribb-Hartmann).
+        const glm::mat4 vp = renderer.getCamera().getViewProjection();
+        struct Plane
+        {
+            glm::vec3 n;
+            float d;
+        };
+        Plane frustum[6];
+        const glm::mat4 m = glm::transpose(vp);
+        const auto extract = [&](int idx, const glm::vec4& row) {
+            const glm::vec3 n(row.x, row.y, row.z);
+            const float len = glm::length(n);
+            frustum[idx].n = n / len;
+            frustum[idx].d = row.w / len;
+        };
+        extract(0, m[3] + m[0]);
+        extract(1, m[3] - m[0]);
+        extract(2, m[3] + m[1]);
+        extract(3, m[3] - m[1]);
+        extract(4, m[3] + m[2]);
+        extract(5, m[3] - m[2]);
 
-            ac.animator->computeSkinnedVertices(skinnedBuffer);
-            for (size_t m = 0; m < skinnedBuffer.size(); ++m) {
-                const auto& sv = skinnedBuffer[m];
-                renderer.updateModelMeshVertices(
-                    ac.modelIndex, static_cast<int>(m), sv.data(), static_cast<Uint32>(sv.size()));
+        const float charRadius = 1.5f * kRigScale_ * (rigMeshMinY_ < 0.0f ? -rigMeshMinY_ : 100.0f);
+        auto inFrustum = [&](const glm::vec3& center, float radius) {
+            for (const auto& p : frustum)
+                if (glm::dot(p.n, center) + p.d < -radius)
+                    return false;
+            return true;
+        };
+
+        uint32_t drawSlot = 0;
+        registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
+            [&](entt::entity e,
+                AnimatedCharacter& ac,
+                const Position& pos,
+                const Velocity& vel,
+                const PlayerVisState& ps,
+                const InputSnapshot& inp) {
+                if (!ac.animator)
+                    return;
+                const bool isLocal = registry.all_of<LocalPlayer>(e);
+
+                // Skip dead remote players — their mesh should not be visible.
+                if (!isLocal && ps.isDead)
+                    return;
+
+                const bool visible = isLocal || inFrustum(pos.value, charRadius);
+                if (!visible)
+                    return;
+
+                AnimCandidate c;
+                c.entity = e;
+                c.ac = &ac;
+                c.isLocal = isLocal;
+
+                // Animation tick decoupling: cap remote chars at 30 Hz.
+                ac.animationAccumulator += frameTime;
+                if (ac.animationAccumulator >= k_animationTick || isLocal) {
+                    ac.animationAccumulator = std::fmod(ac.animationAccumulator, k_animationTick);
+                    c.sampleThisFrame = true;
+                    c.ai.velocityWorld = vel.value;
+                    c.ai.yawRad = inp.yaw;
+                    c.ai.pitchRad = inp.pitch;
+                    c.ai.grounded = ps.grounded;
+                    c.ai.sprinting = ps.sprinting;
+                    c.ai.crouching = ps.crouching;
+                    c.ai.moveMode = static_cast<int>(ps.moveMode);
+                    c.ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+                }
+
+                // Skip drawing the local player's own body in first-person.
+                const bool drawBody = !(!animUI_.showLocalBody && isLocal);
+                if (drawBody && numJoints > 0) {
+                    c.drawThisFrame = true;
+                    c.slot = drawSlot++;
+
+                    // Build per-instance world transform.
+                    //
+                    // PR-19: when the buffered render-delay path is
+                    // active (interpRenderNs != 0), `Client::
+                    // applyInterpolatedTransforms` has ALREADY
+                    // overwritten `pos.value` and `inp.yaw` with the
+                    // interpolated render-time values for non-local
+                    // entities.  We just read them directly — same
+                    // source-of-truth as tracers / ribbon trails /
+                    // smoke / beams / sfx, so no body-vs-effect
+                    // misalignment.
+                    //
+                    // When the buffered path is OFF (env-disabled
+                    // cl_interp = 0), or for the local player (which
+                    // uses client-side prediction, not interp), fall
+                    // back to the Phase-5a (prev, cur, alpha) lerp
+                    // for snapshot-rate motion smoothness.
+                    glm::vec3 renderPos = pos.value;
+                    float renderYaw = inp.yaw;
+                    if (!isLocal && interpRenderNs != 0) {
+                        // pos.value already pre-interpolated by
+                        // applyInterpolatedTransforms; no work here.
+                    } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                        renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+                    }
+                    glm::vec3 translation(0.0f);
+                    glm::vec3 scale(kRigScale_);
+                    glm::quat orient = glm::angleAxis(renderYaw, glm::vec3{0, 1, 0});
+                    if (const auto* rend = registry.try_get<Renderable>(e)) {
+                        translation = rend->translation;
+                        scale = rend->scale;
+                        orient = rend->orientation;
+                    } else if (const auto* shape = registry.try_get<CollisionShape>(e)) {
+                        translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                    }
+                    glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + translation);
+                    world *= glm::mat4_cast(orient);
+                    world = glm::scale(world, scale);
+                    c.worldTransform = world;
+                }
+
+                candidates.push_back(c);
+            });
+
+        // Pre-allocate output buffers so the parallel pass can write to
+        // distinct slots without contention.
+        std::vector<glm::mat4> bonePalette;
+        std::vector<Renderer::SkinnedInstance> skinnedInstances;
+        skinnedInstances.resize(drawSlot);
+        bonePalette.resize(static_cast<size_t>(drawSlot) * static_cast<size_t>(numJoints));
+
+        // ─── Phase 2: parallel ozz-sample + slot fill ───────────────────────
+        // Each candidate's animator is private; each candidate writes to
+        // distinct skinnedInstances[slot] and bonePalette[slot*numJoints..]
+        // ranges.  No shared mutable state, no synchronisation needed.
+        if (workerPool_ && !candidates.empty()) {
+            workerPool_->parallelFor(static_cast<int>(candidates.size()), [&](int begin, int end) {
+                for (int i = begin; i < end; ++i) {
+                    auto& c = candidates[static_cast<size_t>(i)];
+                    if (c.sampleThisFrame) {
+                        // PR-29: REMOTE players render at server's
+                        // authoritative animation state (replicated via
+                        // the Synced tuple, interp-delayed to body-render-
+                        // time by `applyInterpolatedTransforms`'s
+                        // `AnimSnapshot` writeback above).  LOCAL player
+                        // continues to use `update()` — its prediction-
+                        // driven state machine is authoritative on the
+                        // client side.  Eliminates the ~0.4-median
+                        // anim-state drift PR-27a's telemetry caught:
+                        // server runs animator at 128 Hz, client at
+                        // 30 Hz; same total rate but per-clip start-
+                        // time offsets persisted for the lifetime of
+                        // each clip.
+                        if (c.isLocal) {
+                            c.ac->animator->update(c.ai, k_animationTick);
+                        } else {
+                            const auto* serverAnim = registry.try_get<AnimSnapshot>(c.entity);
+                            if (serverAnim != nullptr)
+                                c.ac->animator->renderFromServer(*serverAnim, c.ai);
+                            else
+                                c.ac->animator->update(c.ai, k_animationTick);
+                        }
+                    }
+                    if (c.drawThisFrame && numJoints > 0) {
+                        Renderer::SkinnedInstance inst{};
+                        inst.worldTransform = c.worldTransform;
+                        inst.paletteBase = c.slot * static_cast<uint32_t>(numJoints);
+                        inst.materialId = 0;
+                        skinnedInstances[c.slot] = inst;
+                        const auto& sm = c.ac->animator->skinMatrices();
+                        std::copy(sm.begin(),
+                                  sm.end(),
+                                  bonePalette.begin() +
+                                      static_cast<ptrdiff_t>(c.slot) * static_cast<ptrdiff_t>(numJoints));
+                    }
+                }
+            });
+        }
+
+        // ─── Phase 3: sequential registry writeback ─────────────────────────
+        // JointMatrices is an EnTT component; insert/update needs the main
+        // thread.  Cheap loop — just copies a per-char matrix array.
+        for (const auto& c : candidates) {
+            if (c.sampleThisFrame) {
+                auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
+                jm.matrices = c.ac->animator->jointModelMatrices();
+
+                // PR-27 (netsync): mirror the animator's sampler array
+                // into an `AnimSnapshot` ECS component, same pattern as
+                // the server.  The shot-debug fire-detection block (a
+                // few lines below) reads this off the target entity
+                // when sending `SHOT_INTENT`.  Server's history ring
+                // captures its OWN per-tick `AnimSnapshot`; the two
+                // get compared in the shot-resolution path.
+                auto& snap = registry.get_or_emplace<AnimSnapshot>(c.entity);
+                const auto& samplers = c.ac->animator->samplers();
+                for (std::size_t i = 0; i < AnimSnapshot::k_numSlots && i < samplers.size(); ++i) {
+                    const auto& src = samplers[i];
+                    const bool active = src.active && src.weight > 0.0f;
+                    auto& dst = snap.slots[i];
+                    dst.clipIdRaw = active ? static_cast<std::uint8_t>(src.id) : 0xFFu;
+                    dst.timeRatio = active ? src.timeRatio : 0.0f;
+                    dst.weight = active ? src.weight : 0.0f;
+                }
             }
-        });
+        }
+
+        // Phase 3f — front-to-back sort by camera distance.  The bone palette
+        // is keyed by paletteBase inside each SkinnedInstance, so we can
+        // permute the instance vector independently of the palette and the
+        // shader still finds each char's joints correctly.  Front-to-back
+        // ordering means closer-to-camera chars draw first, write the depth,
+        // and farther chars behind them get early-Z'd through the heavy
+        // PBR fragment shader.  Trivial cost: 30·log(30) compares.
+        if (!skinnedInstances.empty()) {
+            const glm::vec3 camPos = cachedEye_;
+            std::sort(skinnedInstances.begin(),
+                      skinnedInstances.end(),
+                      [&](const Renderer::SkinnedInstance& a, const Renderer::SkinnedInstance& b) {
+                          const glm::vec3 ap = glm::vec3(a.worldTransform[3]);
+                          const glm::vec3 bp = glm::vec3(b.worldTransform[3]);
+                          return glm::dot(ap - camPos, ap - camPos) < glm::dot(bp - camPos, bp - camPos);
+                      });
+        }
+
+        legacyRenderer().setSkinnedFrame(bonePalette, skinnedInstances);
 
         // Update hitbox capsules from bone transforms (client-side for debug visualization).
         if (charRig_.isLoaded())
             systems::updateHitboxes(registry, clientHitboxRig_, kRigScale_, rigMeshMinY_);
+
+        // ── PR-24 fire detection: capture client view of the shot the
+        // user just fired, paired against the server's `SHOT_DEBUG_REPORT`
+        // by `(shooterClientId, shotInputTick)`.
+        //
+        // Placed RIGHT AFTER `updateHitboxes` so the captured state matches
+        // exactly what the user sees on screen this frame:
+        //   * `Position.value` for the local player is the post-prediction
+        //     post-reconciliation value the renderer uses (LocalPlayer is
+        //     excluded from `applyInterpolatedTransforms`).
+        //   * `Position.value` for remote players is the PR-19 interp-
+        //     delayed value (`applyInterpolatedTransforms` already ran).
+        //   * `HitboxInstance.capsules` for every entity reflect the
+        //     just-recomputed bones at THIS frame's pose.
+        // And `snap.tick` carries the post-physics-loop value — the SAME
+        // value `runInputSend` put on the wire and the server stamps on
+        // its debug capture.  Pre-PR-24 the capture lived BEFORE the
+        // physics loop, reading old `snap.tick` and previous-frame
+        // capsules; both the off-by-one tick mismatch and the visible
+        // blue-capsule-vs-actual-aim-target staleness are gone.
+        bool firePulledThisFrame = false;
+        registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+            const bool wasShooting = prevShootingForDebug_;
+            const bool nowShooting = snap.shooting;
+            prevShootingForDebug_ = nowShooting;
+            if (nowShooting && !wasShooting)
+                firePulledThisFrame = true;
+        });
+        if (firePulledThisFrame) {
+            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
+                [&](entt::entity localEntity,
+                    const InputSnapshot& snap,
+                    const Position& pos,
+                    const CollisionShape& shape,
+                    const PlayerVisState& pvis) {
+                    net::shotdebug::ShotDebugCapture cap;
+                    cap.shotInputTick = snap.tick; // PR-24: post-physics value, matches wire
+                    const float debugEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * debugEyeDir, 0.0f};
+                    const float cp = std::cos(snap.pitch);
+                    cap.direction = glm::normalize(
+                        glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
+                    cap.range = physics::k_hitscanRange;
+
+                    // PR-20.6 (root-cause fix): local raycast against
+                    // capsules + world.  `resolveHitscanHitbox`
+                    // unconditionally fills `hit.point` — either the
+                    // closest world geometry hit, the closest capsule
+                    // hit, or `origin + direction * k_hitscanRange`
+                    // when nothing was struck.  We ALWAYS forward
+                    // `hit.point` into `cap.hitPoint`; the rendering
+                    // path uses it directly so blue tracers always
+                    // terminate on whatever the client believed was
+                    // in the way (a wall, a capsule, or 5000 u of air).
+                    const physics::HitboxHit localHit =
+                        physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
+                    cap.hitPoint = localHit.point;
+                    cap.hitTargetClientId = net::shotdebug::k_missClientId;
+                    cap.hitRegion = 0;
+                    if (localHit.entity != entt::null && registry.valid(localHit.entity)) {
+                        if (const auto* tcid = registry.try_get<ClientId>(localHit.entity)) {
+                            cap.hitTargetClientId = static_cast<std::uint16_t>(tcid->value);
+                            cap.hitRegion = static_cast<std::uint8_t>(localHit.region);
+                        }
+                    }
+
+                    // PR-26 + PR-26.1: snapshot capsules for entities
+                    // whose capsule-derived AABB — DILATED by an
+                    // aim-margin — intersects the shot ray.  Goal is
+                    // "show the targets I was approximately aiming at",
+                    // not "show the targets the ray geometrically hit".
+                    // PR-26's tight filter dropped near-miss targets
+                    // (ray passed just outside the head capsule and the
+                    // wireframe vanished); the user wanted to keep
+                    // those visible so they can SEE why a miss
+                    // happened (lag-comp drift, animation pose, etc).
+                    // Distant unrelated enemies still skipped — they
+                    // never come close to the ray.  Server-side
+                    // `captureShotDebug` uses the same margin so the
+                    // overlay's blue/red sets line up.
+                    constexpr float shotDebugAimMargin = 50.0f;
+                    auto remoteView = registry.view<HitboxInstance, ClientId>(entt::exclude<LocalPlayer>);
+                    cap.targets.reserve(remoteView.size_hint());
+                    for (const auto e : remoteView) {
+                        if (e == localEntity)
+                            continue;
+                        const auto& hb = remoteView.get<HitboxInstance>(e);
+                        if (hb.capsules.empty())
+                            continue;
+
+                        glm::vec3 boundsMin{std::numeric_limits<float>::max()};
+                        glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
+                        for (const auto& c : hb.capsules) {
+                            const glm::vec3 capRadius{c.radius + shotDebugAimMargin};
+                            boundsMin = glm::min(boundsMin, glm::min(c.pointA, c.pointB) - capRadius);
+                            boundsMax = glm::max(boundsMax, glm::max(c.pointA, c.pointB) + capRadius);
+                        }
+                        const physics::WorldAABB bounds{.min = boundsMin, .max = boundsMax};
+                        float aabbDist = cap.range;
+                        glm::vec3 aabbNormal{0.0f};
+                        if (!physics::raycastAABB(cap.origin, cap.direction, bounds, cap.range, aabbDist, aabbNormal))
+                            continue;
+
+                        const auto& cid = remoteView.get<ClientId>(e);
+                        net::shotdebug::ShotDebugCapture::Target tgt;
+                        tgt.clientId = static_cast<std::uint16_t>(cid.value);
+                        tgt.capsules = hb.capsules;
+                        cap.targets.push_back(std::move(tgt));
+                    }
+                    debugUI.pushClientShot(cap);
+
+                    // ── PR-27a: SHOT_INTENT — send client's view of the
+                    // intended target's animation state at fire time.
+                    // Server pairs by `(shooterClientId, shotInputTick)`,
+                    // computes anim-state delta vs its own historical
+                    // snapshot, logs to `server_shots.csv`.  No-op for
+                    // shots that aren't aimed at anyone close.
+                    //
+                    // Target selection precedence:
+                    //   1. Local raycast hit → that's clearly the
+                    //      "intended target" (cap.hitTargetClientId).
+                    //   2. Otherwise, closest near-miss capsule-AABB
+                    //      candidate (first entry in `cap.targets`,
+                    //      already filtered by ray-vs-AABB).
+                    //   3. No candidates → 0xFFFF (no-target sentinel);
+                    //      the server logs a "no target" row.
+                    std::uint16_t intentTargetCid = cap.hitTargetClientId;
+                    AnimSnapshot intentAnim{};
+                    if (intentTargetCid == net::shotdebug::k_missClientId && !cap.targets.empty()) {
+                        intentTargetCid = cap.targets.front().clientId;
+                    }
+                    if (intentTargetCid != net::shotdebug::k_missClientId) {
+                        // Find the entity for this clientId and read its
+                        // current AnimSnapshot.  Same component the
+                        // animator-update loop above just refreshed.
+                        registry.view<ClientId, AnimSnapshot>().each([&](const ClientId& cid, const AnimSnapshot& a) {
+                            if (cid.value == intentTargetCid)
+                                intentAnim = a;
+                        });
+                    }
+                    client.sendShotIntent(snap.tick, intentTargetCid, intentAnim);
+                });
+        }
     }
+    phaseSnap(phaseStats.animation);
 
     // Build entity render list
     {
+        // Phase 5a: snapshot-rate alpha for remote-entity position lerp.
+        // Read once per frame; applied to every entity below that has a
+        // PreviousPosition (i.e. has received at least one snapshot).
+        const float snapshotAlpha = client.getSnapshotAlpha();
+        // PR-11: render-delay timestamp for non-local entities.  See the
+        // animation-pass site above for the full rationale; in short,
+        // playing back at `now − N × snapshotInterval` lets the renderer
+        // always have a buffered "future" sample to lerp toward, hiding
+        // single-snapshot losses and smoothing jitter.  0 means
+        // "no buffered playback" — fall through to the Phase-5a lerp.
+        const Uint64 interpRenderNs = client.getInterpolationRenderTimeNs();
+
+        // Phase 3f: extract view frustum for culling entity render commands +
+        // third-person weapons.  Same Gribb-Hartmann decomposition we use for
+        // skinned chars, but reusable across both passes here.  Bounding-
+        // sphere check per entity is ~24 ops — negligible — but cuts the
+        // per-frame draw count by typically 50–80% on a 100-bot scene.
+        const glm::mat4 cullVP = renderer.getCamera().getViewProjection();
+        struct CullPlane
+        {
+            glm::vec3 n;
+            float d;
+        };
+        CullPlane cullPlanes[6];
+        {
+            const glm::mat4 m = glm::transpose(cullVP);
+            const auto extract = [&](int idx, const glm::vec4& row) {
+                const glm::vec3 n(row.x, row.y, row.z);
+                const float len = glm::length(n);
+                cullPlanes[idx].n = n / len;
+                cullPlanes[idx].d = row.w / len;
+            };
+            extract(0, m[3] + m[0]);
+            extract(1, m[3] - m[0]);
+            extract(2, m[3] + m[1]);
+            extract(3, m[3] - m[1]);
+            extract(4, m[3] + m[2]);
+            extract(5, m[3] - m[2]);
+        }
+        const auto entityVisible = [&](const glm::vec3& center, float radius) {
+            for (const auto& p : cullPlanes)
+                if (glm::dot(p.n, center) + p.d < -radius)
+                    return false;
+            return true;
+        };
+
         std::vector<EntityRenderCmd> entityCmds;
         registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
             if (!rend.visible || rend.modelIndex < 0)
@@ -1193,7 +2206,27 @@ SDL_AppResult Game::iterate()
             if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
                 return;
 
-            glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + rend.translation);
+            // PR-19: pos.value is already pre-interpolated by
+            // `Client::applyInterpolatedTransforms` for non-local
+            // entities when buffered render-delay is active.  When
+            // disabled, fall back to the Phase-5a (prev, cur, alpha)
+            // lerp for snapshot-rate smoothness.  Same dual-path
+            // pattern as the skinned-body site above.
+            glm::vec3 renderPos = pos.value;
+            if (interpRenderNs != 0) {
+                // pos.value already pre-interpolated; no work here.
+            } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+            }
+
+            // Frustum cull — generous radius covers any rend.scale up to ~5×
+            // the rig height.  Glow spheres / map props pass this trivially
+            // when in view.  Out-of-view entities skip the per-mesh draw loop.
+            const float entityRadius = 80.0f * std::max({rend.scale.x, rend.scale.y, rend.scale.z, 1.0f});
+            if (!entityVisible(renderPos, entityRadius))
+                return;
+
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + rend.translation);
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
@@ -1211,10 +2244,27 @@ SDL_AppResult Game::iterate()
             if (registry.all_of<RespawnTimer>(e))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
-                                     : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
-                                     : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                             : ws.primary;
+            // PR-11: pull the interpolated player transform so the
+            // weapon hangs off the same body the renderer just drew at
+            // line 1730.  Without this, the player skin animates at
+            // `now − N × snapshotInterval` while the weapon sticks to
+            // the most-recent server position, separating the two by
+            // ~62 ms of motion (visible "ghost gun").
+            // PR-19: pos.value + input.yaw are already pre-interpolated
+            // by `Client::applyInterpolatedTransforms` when buffered
+            // render-delay is active, so the weapon naturally hangs
+            // off the same body the skinned-character pass just drew.
+            // No explicit sample() call needed any more — single
+            // source of truth = pos.value (and InputSnapshot.yaw).
+            const glm::vec3 playerPos = pos.value;
+            const float yaw = input.yaw;
+            // Phase 3f: a remote third-person weapon ~50 world-units long;
+            // a 100-unit cull radius around the player position is a tight
+            // fit and skips the entire weapon draw when off-screen.
+            if (!entityVisible(playerPos, 100.0f))
+                return;
+
+            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
                 return;
@@ -1222,13 +2272,12 @@ SDL_AppResult Game::iterate()
             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
 
             // Player orientation vectors (horizontal plane)
-            const float yaw = input.yaw;
             const glm::vec3 pFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
             const glm::vec3 pRight = glm::normalize(glm::cross(pFwd, glm::vec3{0, 1, 0}));
 
             // Weapon world position = player center + hand offset
             glm::vec3 wpnPos =
-                pos.value + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
+                playerPos + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
 
             // Build transform: translate -> yaw -> pitch -> roll -> scale
             glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);
@@ -1406,15 +2455,12 @@ SDL_AppResult Game::iterate()
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::QUATERNARY)  ? ws.quaternary
-                                 : (ws.current == WeaponSlot::TERTIARY)  ? ws.tertiary
-                                 : (ws.current == WeaponSlot::SECONDARY) ? ws.secondary
-                                                                         : ws.primary;
+        const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
         currentEquippedType_ = gun.type;
     });
 
     // Auto-apply per-weapon viewmodel defaults when weapon changes
-    if (currentEquippedType_ != lastEquippedType_) {
+    if (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_) {
         const auto& vp = getViewmodelParams(currentEquippedType_);
         vmScale = vp.scale;
         vmForward = vp.forward;
@@ -1424,6 +2470,7 @@ SDL_AppResult Game::iterate()
         vmPitchOffset = vp.pitchOffset;
         vmRollOffset = vp.rollOffset;
         lastEquippedType_ = currentEquippedType_;
+        viewmodelDefaultsApplied_ = true;
     }
 
     const int currentWeaponModelIdx = weaponModelIndices_[static_cast<int>(currentEquippedType_)];
@@ -1439,8 +2486,19 @@ SDL_AppResult Game::iterate()
             const float cosPitch = std::cos(renderPitch);
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
-            const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
-            const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
+            glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+            // Apply camera roll to the viewmodel basis so the weapon follows
+            // the 180° flip (or any tilt) instead of staying upright.
+            if (std::abs(currentCameraRoll_) > 0.001f) {
+                const float cosR = std::cos(currentCameraRoll_);
+                const float sinR = std::sin(currentCameraRoll_);
+                const glm::vec3 rolledRight = right * cosR + up * sinR;
+                const glm::vec3 rolledUp = up * cosR - right * sinR;
+                right = rolledRight;
+                up = rolledUp;
+            }
 
             // --- Weapon sway (CoD-style barrel lead) ---
             {
@@ -1636,70 +2694,103 @@ SDL_AppResult Game::iterate()
     // call setVSync only when it actually flips (avoids per-frame API calls).
     const bool prevLimitFPS = limitFPSToMonitor;
 
+    phaseSnap(phaseStats.entityCmds);
+
     // 10. Render
     debugUI.newFrame();
 
-    // Unified debug menu — one window with toggles for every debug panel.
-    debugUI.buildDebugMenu({
-        {"HUD Tweaker", &showHudDebug_},
-        {"Viewmodel Tweaker", &showViewmodelUI},
-        {"3P Weapon Tweaker", &showTPWeaponUI_},
-        {"Dynamic Lighting", &showDynLightUI_},
-        {"Animation Tester", &animUI_.show},
-    });
+    // Bench mode skips the heavy debug panels; ImGui still draws but the
+    // per-frame Build*UI cost is the difference between a few thousand ALU
+    // ops and ~hundred-microsecond ImGui buffer construction at the high
+    // bench frame-rates.
+    if (!benchActive_) {
+        // Unified debug menu — one window with toggles for every debug panel.
+        debugUI.buildDebugMenu({
+            {"HUD Tweaker", &showHudDebug_},
+            {"Viewmodel Tweaker", &showViewmodelUI},
+            {"3P Weapon Tweaker", &showTPWeaponUI_},
+            {"Dynamic Lighting", &showDynLightUI_},
+            {"Animation Tester", &animUI_.show},
+        });
 
-    debugUI.buildUI(registry,
-                    tickCount,
-                    mouseSensitivity,
-                    renderSeparateFromPhysics,
-                    inputSyncedWithPhysics,
-                    limitFPSToMonitor,
-                    renderer.ssrMode,
-                    measuredPhysicsHz,
-                    statsFPSCurrent,
-                    statsFPSMin,
-                    statsFPSMax,
-                    statsFPS1pLow,
-                    statsFPS5pLow);
-    debugUI.buildNetworkUI(client.getNetStats());
-
-    // Scoreboard — now handled by the HUD Scoreboard widget (Tab key detected there).
-
-    // Process ammo refill request — pulse refillAmmo on InputSnapshot for
-    // exactly one frame so the server handles it once then stops.
-    {
-        const bool wantRefill = debugUI.pendingAmmoRefill_;
-        debugUI.pendingAmmoRefill_ = false;
-        registry.view<LocalPlayer, InputSnapshot>().each(
-            [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
+        debugUI.buildUI(registry,
+                        tickCount,
+                        mouseSensitivity,
+                        gamepadLookSensitivity,
+                        aimAssistCfg_,
+                        renderSeparateFromPhysics,
+                        inputSyncedWithPhysics,
+                        limitFPSToMonitor,
+                        renderer.ssrMode,
+                        measuredPhysicsHz,
+                        statsFPSCurrent,
+                        statsFPSMin,
+                        statsFPSMax,
+                        statsFPS1pLow,
+                        statsFPS5pLow);
+        debugUI.buildNetworkUI(client.getNetStats());
     }
-    debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
-    buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 
-    // Hitbox debug visualization — project capsules into screen space.
-    {
-        int winW = 0, winH = 0;
-        SDL_GetWindowSize(window, &winW, &winH);
-        const float winWf = static_cast<float>(winW);
-        const float winHf = static_cast<float>(winH);
-        const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
-        const glm::mat4 hbProj =
-            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
-        const glm::mat4 hbVP = hbProj * hbView;
-        debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
-        debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
-    }
+    // All of the optional debug panels below are skipped in bench mode — none
+    // of them are visible to the user during a 25 s perf run, and at 1000+ fps
+    // even sub-microsecond ImGui widget allocs add up.  The buildHitboxUI
+    // call in particular projects every capsule for every entity into screen
+    // space, which scales linearly with bot count.
+    if (!benchActive_) {
+        // Phase 6 testing: network simulator window (latency + packet loss).
+        // Slider values flow from DebugUI → Client each frame; idempotent when
+        // unchanged (Client clamps and atomically stores). Latency is split
+        // half-and-half across outbound + inbound delay queues; loss is an
+        // independent Bernoulli drop applied per-datagram in each direction.
+        debugUI.buildNetworkSimUI();
+        client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+        client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
+
+        // Process ammo refill request — pulse refillAmmo on InputSnapshot for
+        // exactly one frame so the server handles it once then stops.
+        {
+            const bool wantRefill = debugUI.pendingAmmoRefill_;
+            debugUI.pendingAmmoRefill_ = false;
+            registry.view<LocalPlayer, InputSnapshot>().each(
+                [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
+        }
+        debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
+        buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
+
+        // Hitbox debug visualization — project capsules into screen space.
+        {
+            int winW = 0, winH = 0;
+            SDL_GetWindowSize(window, &winW, &winH);
+            const float winWf = static_cast<float>(winW);
+            const float winHf = static_cast<float>(winH);
+            const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
+            const glm::mat4 hbProj =
+                glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+            const glm::mat4 hbVP = hbProj * hbView;
+            debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
+            debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+            debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
+            debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
+            // PR-20: CSGO sv_showimpacts-style shot debug.  Window
+            // toggles + ring-buffer slider + per-shot summary table;
+            // when `drawShotDebugOverlay` is checked we also render
+            // the blue (client) / red (server-rewound) capsule pairs
+            // in the 3D world via the same VP we just built for the
+            // hitbox overlay.
+            debugUI.buildShotDebugUI(hbVP, winWf, winHf);
+        }
 #ifdef USE_HYBRID_RENDERER
-    debugUI.buildRenderTogglesUI(renderer.legacy());
-    debugUI.buildLightingUI(renderer.legacy());
-    debugUI.buildSkyboxUI(renderer.legacy());
+        debugUI.buildRenderTogglesUI(renderer.legacy());
+        debugUI.buildLightingUI(renderer.legacy());
+        debugUI.buildSkyboxUI(renderer.legacy());
 #else
-    debugUI.buildRenderTogglesUI(renderer);
-    debugUI.buildLightingUI(renderer);
-    debugUI.buildSkyboxUI(renderer);
+        debugUI.buildRenderTogglesUI(renderer);
+        debugUI.buildLightingUI(renderer);
+        debugUI.buildSkyboxUI(renderer);
 #endif
 
-    HudDebugPanel::build(hud_, &showHudDebug_);
+        HudDebugPanel::build(hud_, &showHudDebug_);
+    }
 
     // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
     if (showViewmodelUI) {
@@ -1775,7 +2866,7 @@ SDL_AppResult Game::iterate()
                 killerName = killerBuf;
             }
 
-            char line1[64], line2[64];
+            char line1[64], line2[96], line3[48];
             std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
             std::snprintf(line2,
                           sizeof(line2),
@@ -1783,6 +2874,7 @@ SDL_AppResult Game::iterate()
                           static_cast<double>(deathInfo.killerHealth.health),
                           static_cast<double>(deathInfo.killerHealth.armor),
                           std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
+            std::snprintf(line3, sizeof(line3), "Press SPACE to skip");
 
             int winW = 0, winH = 0;
             SDL_GetWindowSizeInPixels(window, &winW, &winH);
@@ -1796,7 +2888,7 @@ SDL_AppResult Game::iterate()
             static constexpr float k_marginB = 16.0f;
             static constexpr float k_lineGap = 4.0f;
 
-            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
+            const float boxH = fs * 3.0f + k_lineGap * 2.0f + k_padY * 2.0f;
             const float boxW = static_cast<float>(winW) * 0.4f;
             const float x = (static_cast<float>(winW) - boxW) * 0.5f;
             const float y = static_cast<float>(winH) - boxH - k_marginB;
@@ -1804,10 +2896,12 @@ SDL_AppResult Game::iterate()
             const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
             const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
             const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
+            const ImU32 fg3 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.6f, 0.9f, 0.6f, 0.9f));
 
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs * 2.0f + k_lineGap * 2.0f), fg3, line3);
         }
     }
 
@@ -1905,23 +2999,14 @@ SDL_AppResult Game::iterate()
             hudState.armor = static_cast<int>(hp.armor);
             hudState.maxArmor = 100;
         });
-        registry.view<LocalPlayer, PlayerState>().each([&](const PlayerState& ps) { hudState.isAlive = !ps.IsDead; });
+        registry.view<LocalPlayer, PlayerVisState>().each(
+            [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });
 
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
             const GunInstance* gun = &ws.primary;
-            switch (ws.current) {
-            case WeaponSlot::SECONDARY:
+            if (ws.current == WeaponSlot::SECONDARY) {
                 gun = &ws.secondary;
-                break;
-            case WeaponSlot::TERTIARY:
-                gun = &ws.tertiary;
-                break;
-            case WeaponSlot::QUATERNARY:
-                gun = &ws.quaternary;
-                break;
-            default:
-                break;
             }
             hudState.ammoClip = gun->currentMagAmmo;
             hudState.ammoReserve = gun->totalAmmo;
@@ -1998,8 +3083,8 @@ SDL_AppResult Game::iterate()
         // ── Scoreboard: all players ──
         thread_local std::vector<HudTeamMemberStatus> hudAllPlayers;
         hudAllPlayers.clear();
-        registry.view<ClientId, Health, PlayerState>().each(
-            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerState& ps) {
+        registry.view<ClientId, Health, PlayerVisState>().each(
+            [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerVisState& ps) {
                 HudTeamMemberStatus status;
                 if (localClientId.value != -1 && cid == localClientId)
                     status.name = "You";
@@ -2009,12 +3094,21 @@ SDL_AppResult Game::iterate()
                     status.name = buf;
                 }
                 status.health = static_cast<int>(hp.health);
-                status.isAlive = !ps.IsDead;
+                status.isAlive = !ps.isDead;
                 if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
                     status.kills = pms->kills;
                     status.deaths = pms->deaths;
+                    // Per-player ping: the server stamps each client's
+                    // self-reported RTT onto their PlayerMatchStats.rttMs
+                    // every tick (see ServerGame::updateLagCompTargets),
+                    // which then rides the existing snapshot stream to
+                    // every connected client. Reading from this row's
+                    // own component instead of `client.getNetStats()`
+                    // means every scoreboard row shows the right
+                    // player's ping — not the local viewer's ping
+                    // duplicated across every line.
+                    status.ping = static_cast<int>(pms->rttMs);
                 }
-                status.ping = static_cast<int>(client.getNetStats().rttMs);
                 hudAllPlayers.push_back(status);
             });
         // For now all players go into allies (no team system exists).
@@ -2032,9 +3126,9 @@ SDL_AppResult Game::iterate()
 
         thread_local std::vector<HudMinimapDot> hudMinimapDots;
         hudMinimapDots.clear();
-        registry.view<ClientId, Position, PlayerState>().each(
-            [&](const ClientId& cid, const Position& pos, const PlayerState& ps) {
-                if (ps.IsDead)
+        registry.view<ClientId, Position, PlayerVisState>().each(
+            [&](const ClientId& cid, const Position& pos, const PlayerVisState& ps) {
+                if (ps.isDead)
                     return;
                 if (localClientId.value != -1 && cid == localClientId)
                     return; // Skip local player (always drawn at center).
@@ -2082,6 +3176,57 @@ SDL_AppResult Game::iterate()
         // ── View-projection matrix for world→screen projection ──
         hudState.viewProj = renderer.getCamera().getViewProjection();
 
+        // ── Weapon pickup prompt ──
+        // Mirror WeaponSpawnerSystem's pickup-detection rule (range + look
+        // cone) so the "Press F to pick up <Weapon>" hint appears exactly
+        // when pressing F would actually grant the weapon. Cheap O(N) sweep
+        // across the handful of weapon spawners in the world.
+        {
+            static constexpr float k_pickupRange = 140.0f;
+            static constexpr float k_pickupMaxAngleDeg = 12.0f;
+            const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
+
+            glm::vec3 eye{0.f};
+            glm::vec3 viewFwd{0.f, 0.f, 1.f};
+            bool haveLocal = false;
+            registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot, PlayerVisState>().each(
+                [&](const Position& pos,
+                    const CollisionShape& shape,
+                    const InputSnapshot& input,
+                    const PlayerVisState& pvis) {
+                    const float pickupEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    eye = pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.77f * pickupEyeDir, 0.f};
+                    const float cp = std::cos(input.pitch);
+                    viewFwd = glm::normalize(glm::vec3{
+                        std::sin(input.yaw) * cp,
+                        -std::sin(input.pitch),
+                        std::cos(input.yaw) * cp,
+                    });
+                    haveLocal = true;
+                });
+
+            if (haveLocal && hudState.isAlive) {
+                float bestDistSq = k_pickupRange * k_pickupRange + 1.f;
+                registry.view<Position, WeaponSpawner>().each([&](const Position& spPos, const WeaponSpawner& sp) {
+                    if (!sp.hasWeapon)
+                        return;
+                    const glm::vec3 toW = spPos.value - eye;
+                    const float distSq = glm::dot(toW, toW);
+                    if (distSq > k_pickupRange * k_pickupRange || distSq <= 0.0001f)
+                        return;
+                    if (glm::dot(viewFwd, glm::normalize(toW)) < k_pickupMinDot)
+                        return;
+                    // Closest matching spawner wins (in case two pickups
+                    // overlap the look cone simultaneously).
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        hudState.pickupAvailable = true;
+                        hudState.pickupWeaponId = static_cast<int>(sp.type);
+                    }
+                });
+            }
+        }
+
         hud_.update(frameTime, hudState);
         hud_.render();
     }
@@ -2089,15 +3234,36 @@ SDL_AppResult Game::iterate()
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
+    // Uses shortest-path delta so that a 0→180° gravity flip rolls the
+    // correct direction instead of going the long way around.
     {
         const float k_targetRad = glm::radians(targetRoll);
-        const float k_speed = 10.0f; // interpolation speed (higher = snappier)
-        currentCameraRoll_ += (k_targetRad - currentCameraRoll_) * std::min(1.0f, k_speed * frameTime);
-        // Kill tiny residual to avoid permanent micro-tilt.
+        const float k_speed = 6.0f; // interpolation speed (lower = smoother gravity flip roll)
+        // Compute shortest-path delta, wrapping to [-π, π].
+        float delta = k_targetRad - currentCameraRoll_;
+        delta = std::remainder(delta, glm::two_pi<float>());
+        currentCameraRoll_ += delta * std::min(1.0f, k_speed * frameTime);
+        // Wrap current roll to [-π, π] to prevent drift.
+        currentCameraRoll_ = std::remainder(currentCameraRoll_, glm::two_pi<float>());
+        // Kill tiny residual to avoid permanent micro-tilt when near zero.
         if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
             currentCameraRoll_ = 0.0f;
     }
+    phaseSnap(phaseStats.imgui);
     renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
+    phaseSnap(phaseStats.drawFrame);
+
+    if (benchActive_) {
+        phaseStats.drawAcquire = legacyRenderer().lastAcquireMs;
+        phaseStats.drawRecord = legacyRenderer().lastRecordMs;
+        phaseStats.drawSubmit = legacyRenderer().lastSubmitMs;
+        const Uint64 endTick = SDL_GetPerformanceCounter();
+        phaseStats.total = static_cast<float>(endTick - k_now) * 1000.0f / static_cast<float>(k_perfFreq);
+        // Only retain frames that match what benchFrameTimesMs_ collects (post-warmup).
+        const float benchElapsedNow = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
+        if (benchElapsedNow >= k_benchWarmupSeconds && phaseStats.total > 0.0f && phaseStats.total < 250.0f)
+            benchFrameStats_.push_back(phaseStats);
+    }
 
     if (limitFPSToMonitor != prevLimitFPS)
         applyFrameRateLimit();
@@ -2130,6 +3296,11 @@ void Game::quit()
     renderer.quit();
     debugUI.shutdown();
     client.shutdown();
+    if (activeGamepad_) {
+        SDL_CloseGamepad(activeGamepad_);
+        activeGamepad_ = nullptr;
+        activeGamepadId_ = 0;
+    }
     SDL_DestroyWindow(window);
     NET_Quit();
     SDL_Quit();
@@ -2145,11 +3316,11 @@ void Game::refreshRemotePlayerRenderables()
     // collision AABB: translation.y = -halfExtents.y - meshMinY * scale.
     // This ensures the model tracks the AABB bottom automatically when
     // crouching changes the half-height — no manual offset update needed.
-    registry.view<Position, PlayerState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
-                                                                                   const Position&,
-                                                                                   const PlayerState& state,
-                                                                                   const InputSnapshot& input,
-                                                                                   const CollisionShape& shape) {
+    registry.view<Position, PlayerVisState, InputSnapshot, CollisionShape>().each([&](entt::entity e,
+                                                                                      const Position&,
+                                                                                      const PlayerVisState& state,
+                                                                                      const InputSnapshot& input,
+                                                                                      const CollisionShape& shape) {
         if (registry.all_of<LocalPlayer>(e))
             return;
 
@@ -2157,20 +3328,37 @@ void Game::refreshRemotePlayerRenderables()
             attachAnimatedCharacter(e);
 
         const auto& ac = registry.get<AnimatedCharacter>(e);
-        if (ac.modelIndex < 0)
+        if (!ac.animator)
             return; // rig unavailable — leave entity un-rendered rather than crash.
 
         auto& rend = registry.get_or_emplace<Renderable>(e);
-        rend.modelIndex = ac.modelIndex;
+        // Perf Phase 1B: animated chars are drawn by the renderer's instanced
+        // skinned-rig pipeline, NOT via the regular EntityRenderCmd path.
+        // Setting modelIndex = -1 keeps Renderable's translation/scale/orientation
+        // up-to-date (used to derive the per-instance world transform below)
+        // while preventing the entity-render loop from drawing a duplicate.
+        rend.modelIndex = -1;
         // Bottom-of-AABB reference: align model feet with the AABB bottom.
-        rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        // When gravity is flipped, the player walks on ceilings — the model
+        // is rotated 180° around Z so "feet" point upward; translate the model
+        // so the (now-inverted) feet align with the AABB top.
+        if (state.gravityFlipped)
+            rend.translation = glm::vec3(0.0f, shape.halfExtents.y + rigMeshMinY_ * kRigScale_, 0.0f);
+        else
+            rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
         rend.scale = glm::vec3(kRigScale_);
         // No importFix quaternion here: rig is loaded with
         // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
-        rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        rend.visible = !state.IsDead;
+        // Gravity-flipped players get an additional 180° roll so they
+        // appear upside-down to normally-oriented observers.
+        glm::quat orient = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        if (state.gravityFlipped) {
+            orient = orient * glm::angleAxis(glm::pi<float>(), glm::vec3{0, 0, 1});
+        }
+        rend.orientation = orient;
+        rend.visible = !state.isDead;
     });
 }
 
@@ -2179,12 +3367,12 @@ void Game::refreshRemoteProjectileRenderables()
     registry.view<Position, Projectile, Velocity, CollisionShape>().each(
         [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& shape) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            rend.modelIndex = 1;
+            rend.modelIndex = rocketProjectileModelIdx_;
+            rend.scale = glm::vec3(kRocketProjectile.loadScale);
+            rend.visible = true;
 
             // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            rend.scale = glm::vec3(10);
             // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-            rend.visible = true;
         });
 }
 
@@ -2193,37 +3381,42 @@ void Game::refreshRemoteRespawnRenderables()
     registry.view<Position, WeaponSpawner, CollisionShape>().each(
         [&](entt::entity e, const Position&, const WeaponSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            rend.modelIndex = 1;
-
-            switch (spawner.type) {
-            case WeaponType::Rifle:
-                rend.modelIndex = 6;
-                rend.scale = glm::vec3(0.025f);
-                break;
-            case WeaponType::RailGun:
-                rend.modelIndex = 7;
-                rend.scale = glm::vec3(1.0f);
-                break;
-            case WeaponType::Rocket:
-                rend.modelIndex = 8;
-                rend.scale = glm::vec3(0.025f);
-                break;
-            case WeaponType::EnergyGun:
-                rend.modelIndex = 9;
-                rend.scale = glm::vec3(1.0f);
-                break;
-            default:
-                rend.modelIndex = 1;
-                rend.scale = glm::vec3(1.0f);
+            const int weaponIndex = static_cast<int>(spawner.type);
+            if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
+                weaponAssetIds_[weaponIndex] < 0)
+            {
+                rend.modelIndex = -1;
+                rend.visible = false;
+                return;
             }
 
-            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            // rend.scale = glm::vec3(1);
-            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-            rend.visible = true;
-            // if (spawner.hasWeapon) {
-            //     rend.visible = true;
-            // }
+            const int assetId = weaponAssetIds_[weaponIndex];
+            const AssetEntry& asset = assets_.entry(assetId);
+
+            rend.modelIndex = asset.modelIndex;
+            rend.scale = asset.renderScale;
+
+            // Weapon bob and rotate
+            static constexpr float k_spawnerSpinRadiansPerSec = glm::radians(45.0f);
+            static constexpr float k_spawnerBobAmplitude = 6.0f;
+            static constexpr float k_spawnerBobHz = 0.6f;
+            static constexpr float k_twoPi = 6.28318530718f;
+
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.visible = spawner.hasWeapon;
+
+            if (spawner.hasWeapon) {
+                rend.orientation =
+                    glm::angleAxis(t * k_spawnerSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
+
+                rend.translation =
+                    asset.renderTranslation +
+                    glm::vec3{0.0f, std::sin(t * k_twoPi * k_spawnerBobHz) * k_spawnerBobAmplitude, 0.0f};
+            } else {
+                rend.orientation = assetRotation(asset);
+                rend.translation = asset.renderTranslation;
+            }
         });
 }
 
@@ -2236,11 +3429,12 @@ void Game::attachAnimatedCharacter(entt::entity e)
     ac.animator = std::make_unique<CharacterAnimator>(charRig_, animLibrary_);
     ac.animator->setSkinningBackend(&skinBackend_);
 
-    // Each animated entity gets its OWN renderer model instance (clone of the
-    // rig template) so CPU-skinned vertices can stream into a private vertex
-    // buffer without fighting other entities for slots.
-    if (charRig_.isLoaded())
-        ac.modelIndex = renderer.uploadSceneModel(charRig_.templateLoadedModel());
+    // Perf Phase 1B: animated chars draw via the renderer's shared skinned-rig
+    // path (one VB/IB/textures for all chars, GPU LBS in vertex shader, instanced
+    // draw).  No per-entity model clone, no CPU skinning, no per-frame vertex
+    // re-upload.  modelIndex stays -1 so the regular EntityRenderCmd path
+    // skips animated chars (they're drawn by the skinned pipeline instead).
+    ac.modelIndex = -1;
 
     registry.emplace<AnimatedCharacter>(e, std::move(ac));
 }

@@ -4,7 +4,7 @@
 #include "ecs/systems/CollisionSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
-#include "ecs/components/PlayerState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -16,6 +16,19 @@
 #include "ecs/systems/ExplosionSystem.hpp"
 
 #include <glm/geometric.hpp>
+
+// PR-7 (server-perf): optional parallel-STL hooks for the player loop.
+// Header-only on the server build path; client TUs compile this file
+// without the perf module on the include path, so we fall back to
+// sequential there.
+#if __has_include("perf/Parallel.hpp")
+#include "perf/Parallel.hpp"
+#define GROUP2_COLLISION_HAS_PARALLEL 1
+#else
+#define GROUP2_COLLISION_HAS_PARALLEL 0
+#endif
+
+#include <vector>
 
 namespace systems
 {
@@ -210,51 +223,17 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
 
 /// @brief Push the entity out of a triangle mesh it currently overlaps.
 ///
-/// Instead of depenetrating against individual triangles (which jitters at
-/// edges where adjacent normals fight), this uses the BVH leaf AABBs as
-/// proxy collision volumes.  Each leaf AABB is a tight box around 1-4
-/// triangles.  AABB depenetration has stable, consistent face normals —
-/// the same algorithm that works perfectly for WorldAABB.
-///
-/// The swept collision still uses precise per-triangle tests, so sliding and
-/// surface normals are accurate.  This depenetration is only a safety net.
+/// Delegates to `physics::depenetrateAABBvsTriMesh`, which uses per-triangle
+/// SAT MTV — accurate enough that curved surfaces (cylinders, spheres) feel
+/// curved instead of cubical.  Trade-off: at sharp triangle edges where
+/// adjacent normals fight, per-triangle pushes can briefly disagree.  In
+/// practice the pushback bias keeps the entity off the surface and the swept
+/// collision (which still does precise per-triangle hits) is the primary path
+/// for normal motion; this depenetration is only a safety net.
 static void
 depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
 {
-    // Quick reject: AABB overlap with mesh bounds.
-    if (pos.x + halfExtents.x < mesh.boundsMin.x || pos.x - halfExtents.x > mesh.boundsMax.x ||
-        pos.y + halfExtents.y < mesh.boundsMin.y || pos.y - halfExtents.y > mesh.boundsMax.y ||
-        pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
-        return;
-
-    // BVH traversal: find leaf nodes whose AABBs overlap the entity and
-    // depenetrate against each leaf AABB using the standard box push-out.
-    int stack[64];
-    int stackPtr = 0;
-    stack[0] = 0;
-
-    while (stackPtr >= 0) {
-        const int nodeIdx = stack[stackPtr--];
-        const auto& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
-
-        // Expand node bounds by entity halfExtents (Minkowski sum).
-        const glm::vec3 expMin = node.boundsMin - halfExtents;
-        const glm::vec3 expMax = node.boundsMax + halfExtents;
-
-        // Not overlapping this node?
-        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
-            pos.z > expMax.z)
-            continue;
-
-        if (node.count > 0) {
-            // Leaf node — depenetrate against its AABB (same logic as depenetrateBox).
-            const physics::WorldAABB leafBox{node.boundsMin, node.boundsMax};
-            depenetrateBox(pos, vel, halfExtents, leafBox);
-        } else {
-            stack[++stackPtr] = node.leftFirst;
-            stack[++stackPtr] = node.leftFirst + 1;
-        }
-    }
+    physics::depenetrateAABBvsTriMesh(pos, vel, halfExtents, mesh, k_pushback);
 }
 
 /// @brief Run all depenetration passes (planes, boxes, brushes, cylinders, spheres).
@@ -344,10 +323,36 @@ snapToGround(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const
 
 void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
-    registry.view<Position, Velocity, CollisionShape, PlayerState>().each(
-        [dt, &world](Position& pos, Velocity& vel, const CollisionShape& shape, PlayerState& state) {
+    // CollisionSystem only reads/writes the replicated half (grounded /
+    // groundNormal / grappleActive), so it takes PlayerVisState directly.
+    // The simulation-only timer fields live in PlayerSimState and aren't
+    // touched here.
+    //
+    // PR-7 (server-perf): the per-player swept-collision loop is
+    // embarrassingly parallel — each iteration reads only the
+    // shared (read-only) `WorldGeometry` and mutates only its own
+    // entity's Position/Velocity/PlayerVisState. With AI bots
+    // spreading across the map, this scope dominates the tick at
+    // 200+ N (was 6.29 ms p99 at N=200 sequential). Pre-collect
+    // entities, then parallelFor.
+
+    auto playerView = registry.view<Position, Velocity, CollisionShape, PlayerVisState>();
+    static thread_local std::vector<entt::entity> playerWork;
+    playerWork.clear();
+    for (auto e : playerView)
+        playerWork.push_back(e);
+
+    auto playerKernel = [&registry, dt, &world](entt::entity e) {
+        auto& pos = registry.get<Position>(e);
+        auto& vel = registry.get<Velocity>(e);
+        const auto& shape = registry.get<CollisionShape>(e);
+        auto& state = registry.get<PlayerVisState>(e);
+        {
             const bool k_wasGrounded = state.grounded;
             state.grounded = false;
+
+            // Gravity-flip direction: +1 normal (floors below), -1 flipped (ceilings as floors).
+            const float gravDir = state.gravityFlipped ? -1.0f : 1.0f;
 
             // Phase 0 — Depenetration
             depenetrate(pos.value, vel.value, shape.halfExtents, world);
@@ -367,7 +372,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
-                const bool k_isFloor = k_hit.normal.y > 0.7f;
+                // Floor detection: normal.y > 0.7 for normal gravity,
+                // normal.y < -0.7 for flipped (ceilings become floors).
+                const bool k_isFloor = state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
 
                 if (k_isFloor) {
                     pos.value += k_hit.normal * k_pushback;
@@ -381,7 +388,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                         state.groundNormal = k_hit.normal;
                     }
                 } else {
-                    if (k_wasGrounded && tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world)) {
+                    if (k_wasGrounded && !state.gravityFlipped &&
+                        tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world))
+                    {
                         state.grounded = true;
                         break;
                     }
@@ -391,24 +400,49 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             }
 
             // Phase 2 — Slope sticking (skip during grapple — player must fly freely)
+            // When gravity is flipped, snap toward ceiling instead of floor.
             if (k_wasGrounded && !state.grappleActive) {
                 const float k_horizSpeed = glm::length(glm::vec3{vel.value.x, 0.0f, vel.value.z});
-                if (k_horizSpeed > 0.001f)
-                    snapToGround(pos.value, vel.value, shape.halfExtents, world);
+                if (k_horizSpeed > 0.001f) {
+                    if (state.gravityFlipped) {
+                        // Snap upward toward ceiling.
+                        const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
+                        const physics::HitResult k_snap =
+                            physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
+                        if (k_snap.hit && k_snap.normal.y < -0.7f) {
+                            pos.value = pos.value + glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
+                            pos.value += k_snap.normal * k_pushback;
+                            vel.value.y = 0.0f;
+                        }
+                    } else {
+                        snapToGround(pos.value, vel.value, shape.halfExtents, world);
+                    }
+                }
             }
 
             // Phase 3 — Ground probe (skip during grapple)
             if (!state.grappleActive) {
-                const glm::vec3 k_probeTarget = pos.value - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
+                // Probe in the direction of gravity: downward normally, upward when flipped.
+                const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, -gravDir * k_groundProbeDistance, 0.0f};
                 const physics::HitResult k_probe =
                     physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
 
-                if (k_probe.hit && k_probe.normal.y > 0.7f) {
+                const bool k_isGroundProbe =
+                    state.gravityFlipped ? (k_probe.normal.y < -0.7f) : (k_probe.normal.y > 0.7f);
+                if (k_probe.hit && k_isGroundProbe) {
                     state.grounded = true;
                     state.groundNormal = k_probe.normal;
                 }
             }
-        });
+        }
+    };
+
+#if GROUP2_COLLISION_HAS_PARALLEL
+    ::group2::perf::parallelFor(playerWork.begin(), playerWork.end(), playerKernel);
+#else
+    for (entt::entity e : playerWork)
+        playerKernel(e);
+#endif
 
     // Projectile entities
     registry.view<Position, Velocity, CollisionShape, Projectile>().each(

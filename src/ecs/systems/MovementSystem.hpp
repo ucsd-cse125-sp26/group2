@@ -6,7 +6,9 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/registry/Registry.hpp"
 
-struct PlayerState;
+struct PlayerVisState;
+struct PlayerSimState;
+struct ConstPlayerStateRef;
 
 /// @brief Shared movement system — compiled identically on client and server.
 ///
@@ -33,8 +35,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 /// `tms::k_crouchSpeed` / `k_sprintSpeed` / `k_walkSpeed`, or `0` during a slide.
 /// For air movement use `physics::k_airMaxSpeed` directly.
 ///
-/// @param state  Player locomotion state.
+/// @param vis  Replicated player vis state (for moveMode + crouching + sprinting).
 /// @return Target ground wish speed (u/s).
-float currentWishSpeed(const PlayerState& state);
+float currentWishSpeed(const PlayerVisState& vis);
 
 } // namespace systems

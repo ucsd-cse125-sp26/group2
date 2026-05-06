@@ -20,7 +20,12 @@
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "sfx/SfxSystem.hpp"
+#include "systems/GamepadAimAssistSystem.hpp"
+#include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
+#include "util/WorkerPool.hpp"
+
+#include <memory>
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
 #else
@@ -98,7 +103,15 @@ public:
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
-    static constexpr int k_maxTicksPerFrame = 8; ///< Spiral-of-death guard: max physics ticks per iterate().
+    /// Spiral-of-death guard: max physics ticks per iterate().  Dropped from
+    /// 8 to 2 in Phase 3g — the bench profiler showed the slowest frames are
+    /// dominated by catch-up bursts (e.g. 8 ticks × ~2 ms = 16 ms in one
+    /// frame, dragging p1/p5).  Capping at 2 spreads the catch-up across
+    /// more render frames so any individual frame's worst case is ~4 ms
+    /// instead of ~16 ms.  Visual consequence on a stall: physics simulation
+    /// briefly runs 0.5× wall speed until the accumulator drains naturally;
+    /// human-imperceptible at 1000+ render Hz.
+    static constexpr int k_maxTicksPerFrame = 2;
     static constexpr int k_fpsHistorySize = 512; ///< Samples in the rolling FPS ring buffer.
 
     NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
@@ -106,8 +119,12 @@ private:
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
 #ifdef USE_HYBRID_RENDERER
     HybridRenderer renderer;                     ///< Routes each call to the legacy or new renderer.
+    /// @brief Direct access to the legacy renderer instance (perf Phase 1B
+    /// reaches into legacy-only API: setSkinnedRig / setSkinnedFrame).
+    Renderer& legacyRenderer() noexcept { return renderer.legacy(); }
 #else
     Renderer renderer; ///< Legacy renderer.
+    Renderer& legacyRenderer() noexcept { return renderer; }
 #endif
     Registry registry;             ///< The shared ECS registry.
     Client client;                 ///< UDP network client.
@@ -119,10 +136,76 @@ private:
     Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
     float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
     int tickCount = 0;             ///< Total physics ticks elapsed since start.
-    bool mouseCaptured = true;     ///< True when relative mouse mode is active.
+    /// @brief Monotonic per-tick counter stamped onto outgoing InputSnapshots.
+    ///
+    /// Bumped once per physics tick group inside iterate() and copied into the
+    /// local player's InputSnapshot.tick before each send. The server uses
+    /// this to dedup re-sent inputs (multi-input redundancy) and apply only
+    /// inputs newer than its lastAppliedInputTick. Phase-5 prediction also
+    /// keys the input ring buffer by it.
+    uint32_t clientPredictTick = 0;
+
+    /// @brief PR-20: tracks last frame's `input.shooting` so the
+    /// fire-rising-edge detector inside `iterate()` only captures
+    /// the FIRST tick of a click (a "trigger pull"), not every tick
+    /// the button is held.  Survives across frames as a member; is
+    /// naturally reset when the local player respawns because the
+    /// View<LocalPlayer> branch returns early during the dead-window
+    /// (no InputSnapshot present).  Implementation detail of the
+    /// shot-debug visualizer.
+    bool prevShootingForDebug_ = false;
+
+    /// @brief Phase 5b: ring buffer of recent stamped inputs for replay-
+    /// based reconciliation. Each entry is keyed by clientPredictTick so
+    /// runReconciliation can look up the input that was sent for any
+    /// recent tick and feed it back into runMovement during replay.
+    InputRingBuffer inputRing_;
+    bool mouseCaptured = true; ///< True when relative mouse mode is active.
+
+    /// @brief Currently-bound gamepad, or nullptr if none is plugged in.
+    ///
+    /// Opened on SDL_EVENT_GAMEPAD_ADDED (first device wins — extra controllers
+    /// are ignored until the active one disconnects), closed on
+    /// SDL_EVENT_GAMEPAD_REMOVED.  SDL3's gamepad mapping database normalises
+    /// every supported controller (Xbox 360 / One, DualShock, Switch Pro, ...)
+    /// onto the same logical buttons + axes, so the input mapping in
+    /// InputSampleSystem.hpp works uniformly across devices.
+    SDL_Gamepad* activeGamepad_ = nullptr;
+    /// @brief SDL_JoystickID of the active gamepad — needed to identify the
+    /// device on SDL_EVENT_GAMEPAD_REMOVED so we don't tear down a different
+    /// controller when a second one disconnects.
+    SDL_JoystickID activeGamepadId_ = 0;
+    /// @brief Right-stick look speed in radians per second at full deflection.
+    /// 6.0 rad/s ≈ 343°/s — most testers found 3.0 too sluggish for tracking
+    /// players during firefights; this is in line with mainstream console FPS
+    /// defaults.  Tunable from the ECS inspector.
+    float gamepadLookSensitivity = 6.0f;
+
+    /// @brief AAA-style gamepad aim assist tuning.
+    ///
+    /// Active only when a gamepad is connected (mouse input is unaffected).
+    /// Defaults are tuned for *assist* not *auto-aim*: a stationary enemy
+    /// gets zero rotational pull, a moving enemy gets partial tracking
+    /// help.  Live-tunable from the ECS inspector.
+    systems::GamepadAimAssistConfig aimAssistCfg_;
+
+    /// @brief Persistent inter-frame state for aim assist (anchor on target
+    /// AABB + previous-frame snapshot used to compute the angular delta
+    /// from which the rotational pull is derived).  Reset implicitly when
+    /// the target is lost or aim assist is disabled.
+    systems::GamepadAimAssistState aimAssistState_;
+
+    /// Persistent thread pool for parallel-for over per-frame loops
+    /// (currently the animation update; future: parallel frustum cull,
+    /// particle update, ECS transforms).  Initialised in Game::init with a
+    /// worker count derived from `std::thread::hardware_concurrency() / 2`
+    /// (or `GROUP2_WORKERS` if set), so we leave half the cores for the
+    /// rest of the system.  Gated behind a unique_ptr so it constructs
+    /// AFTER `init()` reads the env override.
+    std::unique_ptr<WorkerPool> workerPool_;
 
     // Runtime-tunable loop settings (exposed via ImGui)
-    float mouseSensitivity = 0.001f;       ///< Radians per pixel of mouse movement.
+    float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
@@ -143,6 +226,7 @@ private:
     // Cached camera state — updated each iterate(), used by event() key shortcuts.
     glm::vec3 cachedEye_{0.f, 100.f, 0.f};
     glm::vec3 cachedCamFwd_{0.f, 0.f, 1.f};
+    bool cachedGravFlipped_{false}; ///< Local player gravity-flip state, updated each iterate().
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
@@ -157,6 +241,9 @@ private:
     int glowSphereModelIdx_ = -1;
     int movableSphereModelIdx_ = -1;
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
+    int weaponAssetIds_[4] = {-1, -1, -1, -1};
+
+    int rocketProjectileModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
@@ -180,6 +267,7 @@ private:
     float beamLightSpacing_ = 60.0f;                     ///< Distance between point lights along beam.
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
+    bool viewmodelDefaultsApplied_ = false;
 
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
@@ -211,13 +299,13 @@ private:
     float prevArmor_ = 100.f;
 
     // Viewmodel tuning (live-adjustable via ImGui)
-    float vmScale = 0.03f;        ///< Weapon model scale (model is in mm).
-    float vmForward = 21.0f;      ///< Forward offset from eye (Quake units).
-    float vmRight = 5.5f;         ///< Right offset from eye.
-    float vmDown = 22.5f;         ///< Downward offset from eye.
-    float vmYawOffset = 58.0f;    ///< Extra yaw (degrees) applied to the model before camera orient.
-    float vmPitchOffset = 12.0f;  ///< Extra pitch (degrees).
-    float vmRollOffset = 2.0f;    ///< Extra roll (degrees).
+    float vmScale = 1.0f;         ///< Weapon model scale (model is in mm).
+    float vmForward = 0.0f;       ///< Forward offset from eye (Quake units).
+    float vmRight = 0.0f;         ///< Right offset from eye.
+    float vmDown = 0.0f;          ///< Downward offset from eye.
+    float vmYawOffset = 0.0f;     ///< Extra yaw (degrees) applied to the model before camera orient.
+    float vmPitchOffset = 0.0f;   ///< Extra pitch (degrees).
+    float vmRollOffset = 0.0f;    ///< Extra roll (degrees).
     bool showViewmodelUI = false; ///< Show the Viewmodel Tweaker window.
 
     // Weapon sway state (CoD-style barrel lead)
@@ -241,8 +329,7 @@ private:
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
 
-    // Scroll-wheel weapon switching
-    int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = prev slot, consumed each frame.
+    int pendingScrollSwitch_ = 0;    ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
@@ -279,6 +366,41 @@ private:
     float statsFPSMax = 0.0f;       ///< Maximum FPS in the ring buffer.
     float statsFPS1pLow = 0.0f;     ///< 1st-percentile FPS (1 % low).
     float statsFPS5pLow = 0.0f;     ///< 5th-percentile FPS (5 % low).
+
+    // Benchmark mode: when BENCH_SECONDS env var is set to a positive number,
+    // the client runs for that many seconds, prints a one-line FPS summary to
+    // stderr, then quits.  Powers `scripts/perf-100bots.sh`.
+    float benchSeconds_ = 0.0f;                         ///< Bench duration in seconds (0 = disabled).
+    Uint64 benchStartTime_ = 0;                         ///< Perf counter at first iterate() in bench mode.
+    bool benchActive_ = false;                          ///< True after BENCH_SECONDS read at init.
+    static constexpr float k_benchWarmupSeconds = 2.0f; ///< Skip the first N seconds (pipeline warmup).
+    std::vector<float> benchFrameTimesMs_;              ///< Per-frame ms after warmup; reservation in init().
+
+    /// Per-frame phase-time breakdown.  Captured every frame in bench mode,
+    /// then the slowest 10 frames' breakdowns are dumped at exit so we can
+    /// attribute p1/p5 spikes to specific subsystems (e.g. "the spike was a
+    /// drawFrame stall waiting for the swapchain" vs "an animation-update
+    /// burst hit several chars at once").
+    struct FrameSectionMs
+    {
+        float total = 0.0f;
+        float input = 0.0f;
+        float networkPoll = 0.0f;
+        float physics = 0.0f;
+        float animation = 0.0f;        ///< ozz pose + skin matrix + hitbox.
+        float skinPaletteBuild = 0.0f; ///< Frustum cull + palette + instance build.
+        float entityCmds = 0.0f;       ///< Renderable + 3p weapon list build.
+        float particles = 0.0f;
+        float imgui = 0.0f;
+        float drawFrame = 0.0f; ///< Renderer drawFrame (CPU + GPU acquire).
+        // Sub-breakdown of drawFrame, populated from Renderer::lastAcquire/Record/SubmitMs.
+        // The "acquire" ms specifically captures swapchain back-pressure stalls — when
+        // the GPU hasn't released a previous swap image, the CPU thread blocks here.
+        float drawAcquire = 0.0f;
+        float drawRecord = 0.0f;
+        float drawSubmit = 0.0f;
+    };
+    std::vector<FrameSectionMs> benchFrameStats_;
 
     /// @brief Attach a fresh `AnimatedCharacter` component to an entity.
     ///

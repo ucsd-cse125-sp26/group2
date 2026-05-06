@@ -293,6 +293,79 @@ inline bool raycastTriMesh(glm::vec3 origin,
     return anyHit;
 }
 
+/// @brief Ray vs convex brush intersection (generalised slab method).
+///
+/// A `WorldBrush` is the intersection of half-spaces defined by planes with
+/// **outward** normals; the solid interior satisfies `dot(n, p) <= distance`
+/// for every plane.  A ray hits the brush at the *latest* plane it enters
+/// from outside, provided that t doesn't exceed the *earliest* plane it
+/// exits.  Mirrors the logic in `sweepAABBvsBrush` but for a point-ray
+/// instead of a swept AABB.
+inline bool raycastBrush(glm::vec3 origin,
+                         glm::vec3 direction,
+                         const WorldBrush& brush,
+                         float maxDistance,
+                         float& outDistance,
+                         glm::vec3& outNormal)
+{
+    float tEntry = 0.0f;
+    float tExit = maxDistance;
+    glm::vec3 entryNormal{0.0f, 1.0f, 0.0f};
+    bool startsOutside = false;
+
+    for (int i = 0; i < brush.planeCount; ++i) {
+        const Plane& plane = brush.planes[i];
+
+        // Signed distance from origin to plane (outward normal):
+        //   > 0 → outside (free space)
+        //   < 0 → inside  (solid)
+        const float dist = glm::dot(plane.normal, origin) - plane.distance;
+        const float denom = glm::dot(plane.normal, direction);
+
+        if (dist > 0.0f)
+            startsOutside = true;
+
+        if (std::abs(denom) < k_parallelEpsilon) {
+            // Ray parallel to this plane: if origin is outside, the ray is
+            // entirely outside this plane's solid half-space → can't be in
+            // the brush at any t.  If inside, this plane doesn't constrain
+            // the [tEntry, tExit] interval.
+            if (dist > 0.0f)
+                return false;
+            continue;
+        }
+
+        // t at which the ray crosses the plane.
+        const float t = -dist / denom;
+
+        if (denom < 0.0f) {
+            // Ray heading from outside (dist > 0) toward inside (dist < 0):
+            // entering this plane's solid half-space.  Track the latest
+            // entry across all planes.
+            if (t > tEntry) {
+                tEntry = t;
+                entryNormal = plane.normal;
+            }
+        } else {
+            // Ray heading from inside toward outside: exiting.  Track the
+            // earliest exit.
+            if (t < tExit)
+                tExit = t;
+        }
+    }
+
+    // Origin must be outside the brush; depenetration handles the inside case.
+    if (!startsOutside)
+        return false;
+    // Need a non-empty intersection window of [tEntry, tExit] within [0, maxDistance].
+    if (tEntry >= tExit || tEntry < 0.0f || tEntry >= maxDistance)
+        return false;
+
+    outDistance = tEntry;
+    outNormal = entryNormal;
+    return true;
+}
+
 /// @brief Raycast against all static world geometry (planes + boxes + cylinders + spheres).
 inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const WorldGeometry& world)
 {
@@ -323,6 +396,18 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
             continue;
         }
 
+        bestHit.hit = true;
+        bestHit.distance = distance;
+        bestHit.point = origin + direction * distance;
+        bestHit.normal = normal;
+        bestHit.surface = SurfaceType::Concrete;
+    }
+
+    for (const WorldBrush& brush : world.brushes) {
+        float distance = bestHit.distance;
+        glm::vec3 normal{0.0f};
+        if (!raycastBrush(origin, direction, brush, bestHit.distance, distance, normal))
+            continue;
         bestHit.hit = true;
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
@@ -535,44 +620,83 @@ inline bool raycastCapsule(glm::vec3 origin,
 ///
 /// Uses a broad-phase AABB check (CollisionShape) before testing individual
 /// capsules, so only nearby players pay the narrow-phase cost.
+///
+/// PR-20.6 (root-cause fix): pre-PR-20.6 the view required the `Player`
+/// tag.  That worked on the server (which emplaces `Player` per
+/// connected client), but not on the CLIENT — `Player` is not in
+/// the replicated `Synced` tuple (`network/RegistrySerialization.cpp`)
+/// and the client never emplaces it locally.  Result: client-side
+/// `resolveHitscanHitbox` walked an empty view, no capsule hits
+/// ever registered, and the shot-debug visualizer's blue tracer
+/// flew straight through every enemy.  `HitboxInstance` is only
+/// added by `systems::updateHitboxes` to entities with
+/// `JointMatrices` — i.e. animated characters — so it's a stronger
+/// gate than `Player` anyway and the filter is now strictly more
+/// permissive without picking up any non-character entities.
 inline HitboxHit raycastPlayerHitboxes(
     Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction, float maxDistance)
 {
     HitboxHit bestHit;
     bestHit.distance = maxDistance;
 
-    registry.view<Position, Player, CollisionShape, HitboxInstance>().each([&](const entt::entity entity,
-                                                                               const Position& pos,
-                                                                               const CollisionShape& shape,
-                                                                               const HitboxInstance& hitboxes) {
-        if (entity == shooter)
-            return;
+    // PR-25: keep `Position, CollisionShape` as required components on
+    // the view to preserve the pre-PR-25 entity-set semantics (only
+    // animated PLAYER characters have all three) — but the broad-phase
+    // AABB is now computed from `hitboxes.capsules`, not from
+    // `Position + CollisionShape.halfExtents`.  See the long comment
+    // below for why.
+    registry.view<Position, CollisionShape, HitboxInstance>().each(
+        [&](const entt::entity entity, const Position&, const CollisionShape&, const HitboxInstance& hitboxes) {
+            if (entity == shooter)
+                return;
+            if (hitboxes.capsules.empty())
+                return;
 
-        // Broad-phase: AABB check (same as old raycastPlayers).
-        const WorldAABB bounds{
-            .min = pos.value - shape.halfExtents,
-            .max = pos.value + shape.halfExtents,
-        };
-        float aabbDist = bestHit.distance;
-        glm::vec3 aabbNormal{0.0f};
-        if (!raycastAABB(origin, direction, bounds, bestHit.distance, aabbDist, aabbNormal))
-            return;
+            // PR-25: broad-phase AABB derived from the CAPSULES, not from
+            // `Position + CollisionShape.halfExtents`.  Pre-PR-25 the
+            // broad-phase used the entity's live foot position + live
+            // halfExtents — fine when capsules tracked the live position,
+            // wrong after `rewindHitboxes` swapped capsules to a historical
+            // sample.  At sprint speed (~700 u/s) and 200 ms RTT the
+            // historical capsules sit ~140 u away from the live AABB,
+            // outside the 32 u X/Z width of the standing player AABB →
+            // broad-phase rejected fast-moving rewound targets even though
+            // PR-24c had correctly placed historical capsules in the
+            // entity's `HitboxInstance`.  Result: server reported miss
+            // even though the shot-debug visualizer showed the ray
+            // visibly crossing through the (rewound) capsule wireframe.
+            // Computing the AABB from the capsules makes the broad-phase
+            // always match the actual hit shape regardless of rewind state.
+            glm::vec3 boundsMin{std::numeric_limits<float>::max()};
+            glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
+            for (const WorldCapsule& cap : hitboxes.capsules) {
+                const glm::vec3 capMin = glm::min(cap.pointA, cap.pointB) - glm::vec3{cap.radius};
+                const glm::vec3 capMax = glm::max(cap.pointA, cap.pointB) + glm::vec3{cap.radius};
+                boundsMin = glm::min(boundsMin, capMin);
+                boundsMax = glm::max(boundsMax, capMax);
+            }
+            const WorldAABB bounds{.min = boundsMin, .max = boundsMax};
+            float aabbDist = bestHit.distance;
+            glm::vec3 aabbNormal{0.0f};
+            if (!raycastAABB(origin, direction, bounds, bestHit.distance, aabbDist, aabbNormal))
+                return;
 
-        // Narrow-phase: test each capsule.
-        for (const WorldCapsule& cap : hitboxes.capsules) {
-            float dist = bestHit.distance;
-            glm::vec3 normal{0.0f};
-            if (!raycastCapsule(origin, direction, cap.pointA, cap.pointB, cap.radius, bestHit.distance, dist, normal))
-                continue;
+            // Narrow-phase: test each capsule.
+            for (const WorldCapsule& cap : hitboxes.capsules) {
+                float dist = bestHit.distance;
+                glm::vec3 normal{0.0f};
+                if (!raycastCapsule(
+                        origin, direction, cap.pointA, cap.pointB, cap.radius, bestHit.distance, dist, normal))
+                    continue;
 
-            bestHit.hit = true;
-            bestHit.distance = dist;
-            bestHit.point = origin + direction * dist;
-            bestHit.normal = normal;
-            bestHit.region = cap.region;
-            bestHit.entity = entity;
-        }
-    });
+                bestHit.hit = true;
+                bestHit.distance = dist;
+                bestHit.point = origin + direction * dist;
+                bestHit.normal = normal;
+                bestHit.region = cap.region;
+                bestHit.entity = entity;
+            }
+        });
 
     return bestHit;
 }
