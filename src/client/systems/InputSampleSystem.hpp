@@ -6,6 +6,7 @@
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/registry/Registry.hpp"
 
 #include <SDL3/SDL.h>
@@ -30,11 +31,22 @@ namespace systems
 ///
 /// @param registry          The ECS registry.
 /// @param mouseSensitivity  Radians per pixel of mouse movement.
-inline void runMouseLook(Registry& registry, float mouseSensitivity)
+/// @param gravityFlipped    When true, both mouse axes are inverted so
+///                          controls feel natural while the camera is
+///                          rolled 180° for upside-down gravity.
+inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravityFlipped = false)
 {
     float mdx = 0.0f;
     float mdy = 0.0f;
     SDL_GetRelativeMouseState(&mdx, &mdy);
+
+    // When gravity is flipped the camera is rolled 180°, which swaps
+    // both screen-left/right and screen-up/down relative to world space.
+    // Negating both deltas keeps controls feeling natural.
+    if (gravityFlipped) {
+        mdx = -mdx;
+        mdy = -mdy;
+    }
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         // Negate: SDL mdx is positive when moving right, but positive yaw
@@ -51,28 +63,65 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity)
     });
 }
 
+/// @brief Tracks previous-frame key state for edge detection.
+inline bool prevKillSelfKey = false;
+/// @brief Tracks previous-frame G key state for gravity flip edge detection.
+inline bool prevFlipGravityKey = false;
+
 /// @brief Sample keyboard state into the movement flags.
 ///
 /// Should be called **once per physics tick group** when input is synced
 /// with physics (the default) so movement calculations match the server.
 /// Can also be called every iterate() when the sync toggle is off.
 ///
-/// @param registry  The ECS registry.
-inline void runMovementKeys(Registry& registry)
+/// @param registry        The ECS registry.
+/// @param gravityFlipped  When true, A/D are swapped so strafing feels
+///                        correct while the camera is rolled 180°.
+inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+
+    // Edge-detect K key: only fire killSelf on the rising edge (key-down),
+    // not while held.  Prevents respawn → immediate re-death loop.
+    const bool killKeyNow = kKeys[SDL_SCANCODE_K];
+    const bool killEdge = killKeyNow && !prevKillSelfKey;
+    prevKillSelfKey = killKeyNow;
+
+    // Edge-detect G key: gravity flip is a toggle, fire on rising edge only.
+    const bool flipKeyNow = kKeys[SDL_SCANCODE_G];
+    const bool flipEdge = flipKeyNow && !prevFlipGravityKey;
+    prevFlipGravityKey = flipKeyNow;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.forward = kKeys[SDL_SCANCODE_W];
         snap.back = kKeys[SDL_SCANCODE_S];
-        snap.left = kKeys[SDL_SCANCODE_A];
-        snap.right = kKeys[SDL_SCANCODE_D];
+        // When gravity is flipped the camera is rolled 180°, which negates
+        // the screen-space right vector.  Swapping A/D compensates so
+        // pressing A still moves the player screen-left.
+        snap.left = gravityFlipped ? kKeys[SDL_SCANCODE_D] : kKeys[SDL_SCANCODE_A];
+        snap.right = gravityFlipped ? kKeys[SDL_SCANCODE_A] : kKeys[SDL_SCANCODE_D];
         snap.jump = kKeys[SDL_SCANCODE_SPACE];
         snap.crouch = kKeys[SDL_SCANCODE_LCTRL];
         snap.sprint = kKeys[SDL_SCANCODE_LSHIFT];
         snap.grapple = kKeys[SDL_SCANCODE_E];
-        snap.killSelf = kKeys[SDL_SCANCODE_K];
+        snap.killSelf = killEdge;
+        snap.flipGravity = flipEdge;
+        snap.skipRespawn = false; // Clear stale flag from previous death.
     });
+}
+
+/// @brief Sample skip-respawn input while the local player is dead.
+///
+/// Runs independently of Controllable — dead players can press Space to
+/// skip the remaining respawn timer and respawn immediately.
+///
+/// @param registry  The ECS registry.
+inline void runDeadInput(Registry& registry)
+{
+    const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+
+    registry.view<InputSnapshot, LocalPlayer, RespawnTimer>().each(
+        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn = kKeys[SDL_SCANCODE_SPACE]; });
 }
 
 /// @brief Sample keyboard state into the weapon flags.
@@ -168,16 +217,23 @@ inline float normaliseAxis(Sint16 raw)
 /// @param gamepad           Open gamepad, or nullptr to no-op.
 /// @param lookSensitivity   Radians per second at full stick deflection.
 /// @param dt                Frame delta time in seconds.
-inline void runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, float dt)
+/// @param gravityFlipped    When true, both axes are inverted for 180° camera roll.
+inline void
+runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, float dt, bool gravityFlipped = false)
 {
     if (!gamepad)
         return;
 
-    const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-    const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
+    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
 
     if (rx == 0.0f && ry == 0.0f)
         return;
+
+    if (gravityFlipped) {
+        rx = -rx;
+        ry = -ry;
+    }
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         // Sign convention matches runMouseLook: stick-right (positive rx)
@@ -205,9 +261,11 @@ inline void runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookS
 ///   L3 (LS click)  → sprint
 ///   LT             → grapple   (analog, threshold @ 0.5)
 ///
-/// @param registry  The ECS registry.
-/// @param gamepad   Open gamepad, or nullptr to no-op.
-inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad)
+/// @param registry        The ECS registry.
+/// @param gamepad          Open gamepad, or nullptr to no-op.
+/// @param gravityFlipped   When true, left/right stick are swapped to match
+///                         the 180° camera roll.
+inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gravityFlipped = false)
 {
     if (!gamepad)
         return;
@@ -221,8 +279,9 @@ inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad)
     constexpr float moveThresh = 0.3f;
     const bool padForward = ly < -moveThresh; // stick-up = -Y in SDL
     const bool padBack = ly > moveThresh;
-    const bool padLeft = lx < -moveThresh;
-    const bool padRight = lx > moveThresh;
+    // Swap left/right when gravity is flipped (same reasoning as keyboard).
+    const bool padLeft = gravityFlipped ? (lx > moveThresh) : (lx < -moveThresh);
+    const bool padRight = gravityFlipped ? (lx < -moveThresh) : (lx > moveThresh);
 
     const bool padJump = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
     const bool padCrouch = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST);

@@ -226,6 +226,7 @@ private:
     // Cached camera state — updated each iterate(), used by event() key shortcuts.
     glm::vec3 cachedEye_{0.f, 100.f, 0.f};
     glm::vec3 cachedCamFwd_{0.f, 0.f, 1.f};
+    bool cachedGravFlipped_{false}; ///< Local player gravity-flip state, updated each iterate().
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().

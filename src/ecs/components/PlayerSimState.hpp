@@ -102,6 +102,10 @@ struct PlayerSimState
     glm::vec3 grapplePullDir{0.0f};    ///< Cached pull direction (toward anchor at fire time).
     bool grappleInputLastTick{false};  ///< Edge detection on the grapple key.
 
+    // ── Gravity flip ───────────────────────────────────────────────────────
+    bool flipGravityHeldLastTick{false}; ///< Edge detection on the gravity flip key.
+    float gravityFlipCooldown{0.0f};     ///< Remaining cooldown before next flip (s).
+
     // ── Grapple perch mode (hold jump while grappling → arc above hook) ─
     // No state needed: the trajectory is computed each tick purely from
     // current Position + replicated grapplePoint, so it stays in sync

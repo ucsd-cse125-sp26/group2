@@ -13,9 +13,10 @@
 namespace physics
 {
 
-glm::vec3 applyGravity(glm::vec3 vel, float dt)
+glm::vec3 applyGravity(glm::vec3 vel, float dt, bool flipped)
 {
-    vel.y -= k_gravity * dt;
+    const float dir = flipped ? 1.0f : -1.0f;
+    vel.y += dir * k_gravity * dt;
     return vel;
 }
 

@@ -50,4 +50,7 @@ constexpr float k_overbounceFloor = 1.0f;  ///< Floor overbounce — exactly 1.0
 // Geometry
 constexpr float k_stepHeight = 18.0f; ///< Maximum obstacle height auto-stepped over without jumping (units).
 
+// Gravity flip
+constexpr float k_gravityFlipCooldown = 0.5f; ///< Minimum time between gravity flips (s).
+
 } // namespace physics

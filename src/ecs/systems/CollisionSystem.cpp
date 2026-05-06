@@ -351,6 +351,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             const bool k_wasGrounded = state.grounded;
             state.grounded = false;
 
+            // Gravity-flip direction: +1 normal (floors below), -1 flipped (ceilings as floors).
+            const float gravDir = state.gravityFlipped ? -1.0f : 1.0f;
+
             // Phase 0 — Depenetration
             depenetrate(pos.value, vel.value, shape.halfExtents, world);
 
@@ -369,7 +372,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
-                const bool k_isFloor = k_hit.normal.y > 0.7f;
+                // Floor detection: normal.y > 0.7 for normal gravity,
+                // normal.y < -0.7 for flipped (ceilings become floors).
+                const bool k_isFloor = state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
 
                 if (k_isFloor) {
                     pos.value += k_hit.normal * k_pushback;
@@ -383,7 +388,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                         state.groundNormal = k_hit.normal;
                     }
                 } else {
-                    if (k_wasGrounded && tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world)) {
+                    if (k_wasGrounded && !state.gravityFlipped &&
+                        tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world))
+                    {
                         state.grounded = true;
                         break;
                     }
@@ -393,19 +400,36 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             }
 
             // Phase 2 — Slope sticking (skip during grapple — player must fly freely)
+            // When gravity is flipped, snap toward ceiling instead of floor.
             if (k_wasGrounded && !state.grappleActive) {
                 const float k_horizSpeed = glm::length(glm::vec3{vel.value.x, 0.0f, vel.value.z});
-                if (k_horizSpeed > 0.001f)
-                    snapToGround(pos.value, vel.value, shape.halfExtents, world);
+                if (k_horizSpeed > 0.001f) {
+                    if (state.gravityFlipped) {
+                        // Snap upward toward ceiling.
+                        const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
+                        const physics::HitResult k_snap =
+                            physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
+                        if (k_snap.hit && k_snap.normal.y < -0.7f) {
+                            pos.value = pos.value + glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
+                            pos.value += k_snap.normal * k_pushback;
+                            vel.value.y = 0.0f;
+                        }
+                    } else {
+                        snapToGround(pos.value, vel.value, shape.halfExtents, world);
+                    }
+                }
             }
 
             // Phase 3 — Ground probe (skip during grapple)
             if (!state.grappleActive) {
-                const glm::vec3 k_probeTarget = pos.value - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
+                // Probe in the direction of gravity: downward normally, upward when flipped.
+                const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, -gravDir * k_groundProbeDistance, 0.0f};
                 const physics::HitResult k_probe =
                     physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
 
-                if (k_probe.hit && k_probe.normal.y > 0.7f) {
+                const bool k_isGroundProbe =
+                    state.gravityFlipped ? (k_probe.normal.y < -0.7f) : (k_probe.normal.y > 0.7f);
+                if (k_probe.hit && k_isGroundProbe) {
                     state.grounded = true;
                     state.groundNormal = k_probe.normal;
                 }

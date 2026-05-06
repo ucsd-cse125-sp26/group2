@@ -6,6 +6,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 
@@ -71,21 +72,43 @@ void updateHitboxes(Registry& registry, const HitboxRig& hitboxRig, float rigSca
         if (const auto* shape = registry.try_get<CollisionShape>(entity))
             halfHeight = shape->halfExtents.y;
 
-        // Vertical offset aligns the model's feet (meshMinY) with the bottom
-        // of the collision AABB.  Matches the renderer's rend.translation.y.
-        const float verticalOffset = -halfHeight - rigMeshMinY * rigScale;
+        // Check whether this entity's gravity is inverted.
+        bool gravFlipped = false;
+        if (const auto* vis = registry.try_get<PlayerVisState>(entity))
+            gravFlipped = vis->gravityFlipped;
 
-        // Build entity world transform:
-        //   translate(entityPos) * translate(0, verticalOffset, 0) * rotateY(yaw) * scale(rigScale)
+        // Vertical offset aligns the model's feet with the collision AABB.
+        // Normal gravity: feet at AABB bottom  →  offset = -(halfHeight + meshMinY * scale)
+        // Flipped gravity: feet at AABB top    →  offset = +(halfHeight + meshMinY * scale)
+        // Must match the renderer's Renderable.translation.y.
+        const float verticalOffset =
+            gravFlipped ? (halfHeight + rigMeshMinY * rigScale) : (-halfHeight - rigMeshMinY * rigScale);
+
+        // Build entity world transform.  Must match the renderer's transform:
+        //   translate * mat4_cast(orient) * scale
+        //
+        // Normal:  translate(pos + voff) * rotateY(yaw) * scale(s)
+        // Flipped: translate(pos + voff) * rotateY(yaw) * rotateZ(π) * scale(s)
+        //
+        // The extra rotateZ(π) flips the skeleton upside-down so hitbox
+        // capsules (head, torso, legs) land where the visual model is drawn.
         const float cosY = std::cos(yaw);
         const float sinY = std::sin(yaw);
 
-        // Compose manually for efficiency (single 4x4).
-        // Must match the renderer's transform: translate * mat4_cast(angleAxis(yaw, Y)) * scale.
         glm::mat4 worldTransform(1.0f);
-        worldTransform[0] = glm::vec4(cosY * rigScale, 0.0f, -sinY * rigScale, 0.0f);
-        worldTransform[1] = glm::vec4(0.0f, rigScale, 0.0f, 0.0f);
-        worldTransform[2] = glm::vec4(sinY * rigScale, 0.0f, cosY * rigScale, 0.0f);
+        if (gravFlipped) {
+            // rotateY(yaw) * rotateZ(π) * scale(s)
+            // rotateZ(π) = diag(-1, -1, 1), so:
+            //   col0 negated, col1 negated, col2 unchanged vs. normal.
+            worldTransform[0] = glm::vec4(-cosY * rigScale, 0.0f, sinY * rigScale, 0.0f);
+            worldTransform[1] = glm::vec4(0.0f, -rigScale, 0.0f, 0.0f);
+            worldTransform[2] = glm::vec4(sinY * rigScale, 0.0f, cosY * rigScale, 0.0f);
+        } else {
+            // rotateY(yaw) * scale(s)
+            worldTransform[0] = glm::vec4(cosY * rigScale, 0.0f, -sinY * rigScale, 0.0f);
+            worldTransform[1] = glm::vec4(0.0f, rigScale, 0.0f, 0.0f);
+            worldTransform[2] = glm::vec4(sinY * rigScale, 0.0f, cosY * rigScale, 0.0f);
+        }
         worldTransform[3] = glm::vec4(pos.value.x, pos.value.y + verticalOffset, pos.value.z, 1.0f);
 
         for (size_t i = 0; i < hitboxRig.definitions.size(); ++i) {

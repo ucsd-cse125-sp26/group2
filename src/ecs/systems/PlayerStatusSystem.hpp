@@ -44,4 +44,10 @@ void applyDamage(float damage,
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
 void runPlayerStatus(Registry& registry, float dt);
+
+/// @brief Tick spawn point cooldowns.  Each spawn point's cooldown decrements
+/// by dt and becomes available again when it reaches zero.
+/// @param registry  The ECS registry.
+/// @param dt        Fixed physics delta time in seconds.
+void runSpawnPointCooldowns(Registry& registry, float dt);
 } // namespace systems

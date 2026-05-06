@@ -433,7 +433,8 @@ bool Game::init()
         glm::vec3 evtOrigin = evt.pos1;
         if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            evtOrigin = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float cs = cachedGravFlipped_ ? -1.0f : 1.0f;
+            evtOrigin = cachedEye_ + right * (cs * 15.f) - glm::vec3{0, 1, 0} * (cs * 8.f) + cachedCamFwd_ * 5.f;
         }
 
         switch (evt.effectType) {
@@ -803,7 +804,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_T: {
             // Energy beam — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float ts = cachedGravFlipped_ ? -1.0f : 1.0f;
+            const glm::vec3 hip =
+                cachedEye_ + right * (ts * 15.f) - glm::vec3{0, 1, 0} * (ts * 8.f) + cachedCamFwd_ * 5.f;
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -821,7 +824,9 @@ SDL_AppResult Game::event(SDL_Event* event)
         case SDLK_Y: {
             // Bullet tracer — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-            const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+            const float ds = cachedGravFlipped_ ? -1.0f : 1.0f;
+            const glm::vec3 hip =
+                cachedEye_ + right * (ds * 15.f) - glm::vec3{0, 1, 0} * (ds * 8.f) + cachedCamFwd_ * 5.f;
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -1243,10 +1248,20 @@ SDL_AppResult Game::iterate()
     // Movement keys run once per physics tick group (when inputSyncedWithPhysics
     // is true) so WASD movement calculations match the server.  When the
     // sync toggle is off, movement keys also run every frame.
+    // Dead input runs regardless of mouse capture — allows skip-respawn.
+    systems::runDeadInput(registry);
+
+    // Query local player's gravity flip state — used for mouse/stick
+    // inversion AND for swapping A-D / left-stick left-right.
+    bool localGravFlipped = false;
+    registry.view<PlayerVisState, LocalPlayer>().each(
+        [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
+
     if (mouseCaptured) {
-        systems::runMouseLook(registry, mouseSensitivity);
+
+        systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
-            systems::runMovementKeys(registry);
+            systems::runMovementKeys(registry, localGravFlipped);
         systems::runWeaponKeys(registry);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
@@ -1254,7 +1269,7 @@ SDL_AppResult Game::iterate()
         // stomping the other.  Look additively composes (mouse delta + stick
         // delta) so the camera tracks whichever input is moving.  No-ops
         // cheaply when activeGamepad_ is nullptr.
-        systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime);
+        systems::runGamepadLook(registry, activeGamepad_, gamepadLookSensitivity, frameTime, localGravFlipped);
         // AAA-style aim assist runs IMMEDIATELY after the look sampler so it
         // can refund part of the just-applied look delta (slowdown) and add
         // a rotational pull derived from the *change* in the target's
@@ -1265,7 +1280,7 @@ SDL_AppResult Game::iterate()
         systems::runGamepadAimAssist(
             registry, activeGamepad_, aimAssistCfg_, aimAssistState_, gamepadLookSensitivity, frameTime);
         if (!inputSyncedWithPhysics)
-            systems::runGamepadMovement(registry, activeGamepad_);
+            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
         systems::runGamepadWeapon(registry, activeGamepad_);
 
         // Apply scroll-wheel weapon switch, constrained to primary/secondary.
@@ -1300,10 +1315,10 @@ SDL_AppResult Game::iterate()
     if (accumulator >= k_physicsDt) {
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured) {
-            systems::runMovementKeys(registry);
+            systems::runMovementKeys(registry, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
-            systems::runGamepadMovement(registry, activeGamepad_);
+            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
         }
 
         // PR-24 (off-by-one + capsule staleness fix): the fire detection
@@ -1437,10 +1452,14 @@ SDL_AppResult Game::iterate()
                 const PlayerVisState& pstate) {
                 const glm::vec3 interpPos = glm::mix(prev.value, pos.value, alpha);
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
-                renderEye = interpPos + glm::vec3{0.0f, eyeOffset, 0.0f};
+                // When gravity is flipped, the player's head is at the bottom
+                // of the AABB (near the ceiling they walk on).
+                const float eyeDir = pstate.gravityFlipped ? -1.0f : 1.0f;
+                renderEye = interpPos + glm::vec3{0.0f, eyeOffset * eyeDir, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
-                targetRoll = pstate.targetCameraTilt;
+                // Gravity flip adds 180° roll for the upside-down view.
+                targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     } else {
         // Sequential mode: use post-tick state directly (no interpolation).
@@ -1450,10 +1469,11 @@ SDL_AppResult Game::iterate()
                 const CollisionShape& shape,
                 const PlayerVisState& pstate) {
                 const float eyeOffset = shape.halfExtents.y * 0.77f;
-                renderEye = pos.value + glm::vec3{0.0f, eyeOffset, 0.0f};
+                const float eyeDir = pstate.gravityFlipped ? -1.0f : 1.0f;
+                renderEye = pos.value + glm::vec3{0.0f, eyeOffset * eyeDir, 0.0f};
                 renderYaw = input.yaw;
                 renderPitch = input.pitch;
-                targetRoll = pstate.targetCameraTilt;
+                targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     }
 
@@ -1494,7 +1514,13 @@ SDL_AppResult Game::iterate()
                 localFireCooldown_ = wpnCfg.fireCooldown;
 
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-                const glm::vec3 hip = cachedEye_ + right * 15.f - glm::vec3{0, 1, 0} * 8.f + cachedCamFwd_ * 5.f;
+                // When gravity-flipped the 180° camera roll swaps screen-
+                // left/right and screen-up/down in world space.  Negate both
+                // offsets so the tracer still originates at screen bottom-right
+                // (where the viewmodel muzzle is).
+                const float hSign = localGravFlipped ? -1.0f : 1.0f;
+                const glm::vec3 hip =
+                    cachedEye_ + right * (hSign * 15.f) - glm::vec3{0, 1, 0} * (hSign * 8.f) + cachedCamFwd_ * 5.f;
 
                 // Raycast world geometry for tracer endpoint.  Impact effects
                 // (sparks / blood / bullet holes) are NOT spawned here — they
@@ -1569,13 +1595,15 @@ SDL_AppResult Game::iterate()
         // Note: Player component is not synced to clients, so we raycast against
         // HitboxInstance directly (skipping the local player entity).
         if (isBeamNow) {
-            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape>().each(
+            registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
                 [&](entt::entity localE,
                     const BeamState&,
                     const InputSnapshot& inp,
                     const Position& pos,
-                    const CollisionShape& shape) {
-                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const CollisionShape& shape,
+                    const PlayerVisState& pvis) {
+                    const float beamEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * beamEyeDir, 0.0f};
                     const float cp = std::cos(inp.pitch);
                     const glm::vec3 dir{std::sin(inp.yaw) * cp, -std::sin(inp.pitch), std::cos(inp.yaw) * cp};
 
@@ -1675,7 +1703,8 @@ SDL_AppResult Game::iterate()
             const float cosPi = std::cos(renderPitch);
             const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
             const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
-            const glm::vec3 hand = renderEye + right * 15.f - glm::vec3{0, 1, 0} * 8.f + fwd * 5.f;
+            const float gSign = pstate.gravityFlipped ? -1.0f : 1.0f;
+            const glm::vec3 hand = renderEye + right * (gSign * 15.f) - glm::vec3{0, 1, 0} * (gSign * 8.f) + fwd * 5.f;
             // particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
         }
     });
@@ -1686,6 +1715,7 @@ SDL_AppResult Game::iterate()
         cachedCamFwd_ =
             glm::vec3{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
         cachedEye_ = renderEye;
+        cachedGravFlipped_ = localGravFlipped;
     }
 
     // PR-19: unified pre-render interpolation pass.  Walks every
@@ -1786,6 +1816,11 @@ SDL_AppResult Game::iterate()
                 if (!ac.animator)
                     return;
                 const bool isLocal = registry.all_of<LocalPlayer>(e);
+
+                // Skip dead remote players — their mesh should not be visible.
+                if (!isLocal && ps.isDead)
+                    return;
+
                 const bool visible = isLocal || inFrustum(pos.value, charRadius);
                 if (!visible)
                     return;
@@ -1995,14 +2030,16 @@ SDL_AppResult Game::iterate()
                 firePulledThisFrame = true;
         });
         if (firePulledThisFrame) {
-            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape>().each(
+            registry.view<LocalPlayer, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
                 [&](entt::entity localEntity,
                     const InputSnapshot& snap,
                     const Position& pos,
-                    const CollisionShape& shape) {
+                    const CollisionShape& shape,
+                    const PlayerVisState& pvis) {
                     net::shotdebug::ShotDebugCapture cap;
                     cap.shotInputTick = snap.tick; // PR-24: post-physics value, matches wire
-                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+                    const float debugEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    cap.origin = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * debugEyeDir, 0.0f};
                     const float cp = std::cos(snap.pitch);
                     cap.direction = glm::normalize(
                         glm::vec3{std::sin(snap.yaw) * cp, -std::sin(snap.pitch), std::cos(snap.yaw) * cp});
@@ -2449,8 +2486,19 @@ SDL_AppResult Game::iterate()
             const float cosPitch = std::cos(renderPitch);
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
-            const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
-            const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
+            glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+            // Apply camera roll to the viewmodel basis so the weapon follows
+            // the 180° flip (or any tilt) instead of staying upright.
+            if (std::abs(currentCameraRoll_) > 0.001f) {
+                const float cosR = std::cos(currentCameraRoll_);
+                const float sinR = std::sin(currentCameraRoll_);
+                const glm::vec3 rolledRight = right * cosR + up * sinR;
+                const glm::vec3 rolledUp = up * cosR - right * sinR;
+                right = rolledRight;
+                up = rolledUp;
+            }
 
             // --- Weapon sway (CoD-style barrel lead) ---
             {
@@ -2721,6 +2769,8 @@ SDL_AppResult Game::iterate()
             const glm::mat4 hbVP = hbProj * hbView;
             debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+            debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
+            debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
             // toggles + ring-buffer slider + per-shot summary table;
             // when `drawShotDebugOverlay` is checked we also render
@@ -2816,7 +2866,7 @@ SDL_AppResult Game::iterate()
                 killerName = killerBuf;
             }
 
-            char line1[64], line2[64];
+            char line1[64], line2[96], line3[48];
             std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
             std::snprintf(line2,
                           sizeof(line2),
@@ -2824,6 +2874,7 @@ SDL_AppResult Game::iterate()
                           static_cast<double>(deathInfo.killerHealth.health),
                           static_cast<double>(deathInfo.killerHealth.armor),
                           std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
+            std::snprintf(line3, sizeof(line3), "Press SPACE to skip");
 
             int winW = 0, winH = 0;
             SDL_GetWindowSizeInPixels(window, &winW, &winH);
@@ -2837,7 +2888,7 @@ SDL_AppResult Game::iterate()
             static constexpr float k_marginB = 16.0f;
             static constexpr float k_lineGap = 4.0f;
 
-            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
+            const float boxH = fs * 3.0f + k_lineGap * 2.0f + k_padY * 2.0f;
             const float boxW = static_cast<float>(winW) * 0.4f;
             const float x = (static_cast<float>(winW) - boxW) * 0.5f;
             const float y = static_cast<float>(winH) - boxH - k_marginB;
@@ -2845,10 +2896,12 @@ SDL_AppResult Game::iterate()
             const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
             const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
             const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
+            const ImU32 fg3 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.6f, 0.9f, 0.6f, 0.9f));
 
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
+            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs * 2.0f + k_lineGap * 2.0f), fg3, line3);
         }
     }
 
@@ -3136,9 +3189,13 @@ SDL_AppResult Game::iterate()
             glm::vec3 eye{0.f};
             glm::vec3 viewFwd{0.f, 0.f, 1.f};
             bool haveLocal = false;
-            registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot>().each(
-                [&](const Position& pos, const CollisionShape& shape, const InputSnapshot& input) {
-                    eye = pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.77f, 0.f};
+            registry.view<LocalPlayer, Position, CollisionShape, InputSnapshot, PlayerVisState>().each(
+                [&](const Position& pos,
+                    const CollisionShape& shape,
+                    const InputSnapshot& input,
+                    const PlayerVisState& pvis) {
+                    const float pickupEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                    eye = pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.77f * pickupEyeDir, 0.f};
                     const float cp = std::cos(input.pitch);
                     viewFwd = glm::normalize(glm::vec3{
                         std::sin(input.yaw) * cp,
@@ -3177,11 +3234,18 @@ SDL_AppResult Game::iterate()
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
+    // Uses shortest-path delta so that a 0→180° gravity flip rolls the
+    // correct direction instead of going the long way around.
     {
         const float k_targetRad = glm::radians(targetRoll);
-        const float k_speed = 10.0f; // interpolation speed (higher = snappier)
-        currentCameraRoll_ += (k_targetRad - currentCameraRoll_) * std::min(1.0f, k_speed * frameTime);
-        // Kill tiny residual to avoid permanent micro-tilt.
+        const float k_speed = 6.0f; // interpolation speed (lower = smoother gravity flip roll)
+        // Compute shortest-path delta, wrapping to [-π, π].
+        float delta = k_targetRad - currentCameraRoll_;
+        delta = std::remainder(delta, glm::two_pi<float>());
+        currentCameraRoll_ += delta * std::min(1.0f, k_speed * frameTime);
+        // Wrap current roll to [-π, π] to prevent drift.
+        currentCameraRoll_ = std::remainder(currentCameraRoll_, glm::two_pi<float>());
+        // Kill tiny residual to avoid permanent micro-tilt when near zero.
         if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
             currentCameraRoll_ = 0.0f;
     }
@@ -3275,13 +3339,25 @@ void Game::refreshRemotePlayerRenderables()
         // while preventing the entity-render loop from drawing a duplicate.
         rend.modelIndex = -1;
         // Bottom-of-AABB reference: align model feet with the AABB bottom.
-        rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        // When gravity is flipped, the player walks on ceilings — the model
+        // is rotated 180° around Z so "feet" point upward; translate the model
+        // so the (now-inverted) feet align with the AABB top.
+        if (state.gravityFlipped)
+            rend.translation = glm::vec3(0.0f, shape.halfExtents.y + rigMeshMinY_ * kRigScale_, 0.0f);
+        else
+            rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
         rend.scale = glm::vec3(kRigScale_);
         // No importFix quaternion here: rig is loaded with
         // AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS=false which collapses the
         // FBX pre-rotation.  Add a rig-local fix here if the rig ends up
         // facing the wrong axis after a visual check.
-        rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        // Gravity-flipped players get an additional 180° roll so they
+        // appear upside-down to normally-oriented observers.
+        glm::quat orient = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        if (state.gravityFlipped) {
+            orient = orient * glm::angleAxis(glm::pi<float>(), glm::vec3{0, 0, 1});
+        }
+        rend.orientation = orient;
         rend.visible = !state.isDead;
     });
 }
