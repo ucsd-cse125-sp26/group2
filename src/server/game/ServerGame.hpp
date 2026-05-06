@@ -25,28 +25,18 @@
 
 /// @brief Top-level server game loop.
 ///
-/// Owns the ECS registry and the network Server. Each tick it drains
-/// incoming messages, runs all ECS systems, and broadcasts state.
+/// Borrows an already-bound Server from the caller (main owns the socket).
+/// Each tick it drains incoming messages, runs all ECS systems, and broadcasts state.
 class ServerGame
 {
 public:
-    /// @brief Bind to the given address and port, spawn test entities.
-    /// @param addr        Hostname or IP to bind to (e.g. "127.0.0.1").
-    /// @param port        TCP port to listen on.
+    /// @brief Attach to an already-bound Server and initialise game state.
+    /// @param server      Externally-owned, already-initialised Server.
     /// @param tickRateHz  Physics tick rate in Hz (default 128).
     /// @param snapshotHz  Registry snapshot send rate in Hz (default 32).
-    ///                    Must be ≤ tickRateHz; clamped if not. Phase 4
-    ///                    decouples snapshot rate from tick rate so the
-    ///                    server can keep deterministic 128 Hz physics
-    ///                    while only paying the serialization+broadcast
-    ///                    cost a fraction as often.
-    /// @param transport   Phase 3d: UDP sidecar feature toggles.
-    /// @return True on success, false on network or initialisation failure.
-    bool init(const char* addr,
-              Uint16 port,
-              int tickRateHz = 128,
-              int snapshotHz = 32,
-              const TransportConfig& transport = {});
+    ///                    Must be ≤ tickRateHz; clamped if not.
+    /// @return True on success, false on initialisation failure.
+    bool init(Server& server, int tickRateHz = 128, int snapshotHz = 32);
 
     /// @brief Block on the game loop until shutdown() is called.
     ///
@@ -137,7 +127,7 @@ private:
 
     physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
 
-    Server server;                           ///< Owns the TCP socket and network I/O.
+    Server* server = nullptr;                ///< Non-owning pointer; main() owns and shuts down the socket.
     Registry registry;                       ///< ECS entity/component store.
     MatchController matchController;         ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.

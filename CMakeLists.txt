@@ -1116,6 +1116,7 @@ add_executable(client
         src/ecs/systems/WeaponSpawnerSystem.cpp
         src/client/app/App.hpp
         src/client/app/App.cpp
+        src/client/lobby/Lobby.cpp
 )
 
 target_include_directories(client PRIVATE

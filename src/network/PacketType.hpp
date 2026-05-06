@@ -58,4 +58,9 @@ enum class PacketType : uint8_t
     /// → 27 bytes per shot.  Sent on UDP alongside INPUT (rising-edge
     /// only; ~10 Hz worst case → ~270 B/s/client).
     SHOT_INTENT,
+
+    JOIN_LOBBY,   ///< Client -> Server: request to join the lobby (carries player name).
+    LOBBY_UPDATE, ///< Server -> All clients: lobby state update (player list, match start countdown).
+    PLAYER_READY, ///< Client -> Server: player signals ready for match start.
+    START_MATCH, ///< Server -> All clients: match start signal (carries match start time for client-server clock sync).
 };
