@@ -156,10 +156,6 @@ void ServerGame::run()
     registry.emplace<RespawnPoint>(playerSpawner2, RespawnPoint{});
     registry.emplace<Position>(playerSpawner2, glm::vec3{800.0f, 40.0f, 800.0f});
 
-    const entt::entity playerSpawner3 = registry.create();
-    registry.emplace<RespawnPoint>(playerSpawner3, RespawnPoint{});
-    registry.emplace<Position>(playerSpawner3, glm::vec3{800.0f, 430.0f, -800.0f});
-
     const entt::entity playerSpawner4 = registry.create();
     registry.emplace<RespawnPoint>(playerSpawner4, RespawnPoint{});
     registry.emplace<Position>(playerSpawner4, glm::vec3{0.0f, 200.0f, 0.0f});
