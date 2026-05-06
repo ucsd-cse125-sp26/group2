@@ -56,10 +56,7 @@ public:
                        glm::vec3 /*pos*/,
                        float /*scale*/,
                        bool /*flipUVs*/,
-                       const std::string& /*excludeNodesContaining*/ = "") override
-    {
-        return -1;
-    }
+                       const std::string& /*excludeNodesContaining*/ = "") override;
     int uploadSceneModel(const LoadedModel& /*model*/) override { return -1; }
     bool setVSync(bool /*enabled*/) override { return false; }
     void updateModelMeshVertices(int /*modelIndex*/,
@@ -118,6 +115,8 @@ private:
     /// @brief Allocate GPU vertex and index buffers for the given mesh.
     /// @param meshId Key into Asset::meshes_.
     void createMeshBuffers(MeshIdInt meshId);
+
+    void createLegacyMeshBuffers(MeshIdInt meshId);
 
     /// @brief Bind a mesh's buffers and issue an indexed draw call.
     /// @param renderPass The active render pass.

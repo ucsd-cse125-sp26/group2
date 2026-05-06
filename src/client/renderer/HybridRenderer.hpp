@@ -12,7 +12,7 @@
 
 #include "IRenderer.hpp"
 #include "Renderer.hpp"
-#include "renderer-new/Renderer.hpp"
+#include "renderer-new/NewRenderer.hpp"
 
 class HybridRenderer : public IRenderer
 {

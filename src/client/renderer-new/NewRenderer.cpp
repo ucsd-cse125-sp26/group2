@@ -1,7 +1,7 @@
-/// @file Renderer.cpp
+/// @file NewRenderer.cpp
 /// @brief Implementation of the work-in-progress NewRenderer.
 
-#include "Renderer.hpp"
+#include "NewRenderer.hpp"
 
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
@@ -9,6 +9,7 @@
 
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cstddef>
+#include <filesystem>
 #include <glm/ext/matrix_transform.hpp>
 #include <imgui.h>
 #include <iostream>
@@ -16,13 +17,15 @@
 
 bool NewRenderer::supports(RendererFeature feature) const
 {
-    // Temporarily disabled while the legacy renderer is the perf-optimization
-    // target.  The new renderer's init() expects a texture file that isn't in
-    // the repo, so claiming DrawFrame support trips HybridRenderer's
-    // no-silent-fallback guard.  Re-enable once the new renderer is wired to
-    // assets that ship with the build.
-    (void)feature;
-    return false;
+    switch (feature) {
+    case RendererFeature::Init:
+    case RendererFeature::DrawFrame:
+    case RendererFeature::Quit:
+    case RendererFeature::LoadSceneModel:
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool NewRenderer::init(SDL_Window* window)
@@ -99,7 +102,8 @@ bool NewRenderer::initCommon()
 
     camera_ = NewCamera();
 
-    return loadSceneAssets();
+    // return loadSceneAssets();
+    return true;
 }
 
 bool NewRenderer::createGeometryPipeline()
@@ -219,11 +223,25 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
     SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture_, sampler_);
     SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
 
-    for (const auto& modelPair : Asset::models_) {
+    // for (const auto& modelPair : Asset::models_) {
+    //     glm::mat4 modelMatrix = glm::mat4(1.0f);
+    //     modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
+    //
+    //     for (auto& element : modelPair.second.modelElements_) {
+    //         glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;
+    //         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
+    //         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+    //         drawMesh(pass, mesh);
+    //     }
+    // }
+
+    for (const auto& mInstance : Asset::modelInstances_) {
         glm::mat4 modelMatrix = glm::mat4(1.0f);
         modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
+        modelMatrix = mInstance.transform_;
+        Asset::Model& model = Asset::models_.at(mInstance.modelId_);
 
-        for (auto& element : modelPair.second.modelElements_) {
+        for (auto& element : model.modelElements_) {
             glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;
             SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
             Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
@@ -321,3 +339,73 @@ void NewRenderer::quit()
     depthWidth_ = 0;
     depthHeight_ = 0;
 }
+
+void NewRenderer::createLegacyMeshBuffers(MeshIdInt meshId)
+{
+    Asset::Mesh& mesh = Asset::meshes_.at(meshId);
+
+    const size_t vertexBufferSize = mesh.vertexData_.size() * sizeof(Vertex);
+    const size_t indexBufferSize = mesh.indexData_.size() * sizeof(Uint32);
+
+    mesh.vBufferInfo_.bufferSize = vertexBufferSize;
+    mesh.vBufferInfo_.gpuBuff = Boilerplate::createBuffer(device_, vertexBufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
+    mesh.vBufferInfo_.srcData = mesh.vertexData_.data();
+
+    mesh.iBufferInfo_.bufferSize = indexBufferSize;
+    mesh.iBufferInfo_.gpuBuff = Boilerplate::createBuffer(device_, indexBufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
+    mesh.iBufferInfo_.srcData = mesh.indexData_.data();
+}
+
+int NewRenderer::loadSceneModel(
+    const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& /*excludeNodesContaining*/)
+{
+    ModelIdInt modelId = Asset::getIdFromString(filename);
+    bool flatten = false;
+    const std::vector<std::string> texFileNames;
+
+    auto modelTransform = glm::mat4(1.0f);
+    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
+    modelTransform[3] = glm::vec4(pos, 1.0f);
+
+    const char* const base = SDL_GetBasePath();
+    std::filesystem::path fullPath = base ? base : "";
+    fullPath /= ASSETS_DIR;
+    fullPath /= filename;
+
+    AssetLoader::loadModel(modelId, fullPath.string(), texFileNames, flatten, flipUVs);
+    Asset::Model& model = Asset::models_.at(modelId);
+    // Asset::ModelNode &rootNode = model.modelNodes_.at(MODEL_ROOT_NODE_INDEX);
+    // rootNode.transform_ = modelTransform * rootNode.transform_;
+    AssetLoader::updateModelTransformCache(modelId);
+
+    Asset::ModelInstance sceneInstance{};
+    sceneInstance.drawInScenePass = true;
+    sceneInstance.modelId_ = modelId;
+    sceneInstance.transform_ = modelTransform;
+
+    Asset::modelInstances_.push_back(sceneInstance);
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    std::vector<Boilerplate::BufferUpload> uploads;
+
+    for (auto& element : model.modelElements_) {
+        createMeshBuffers(element.meshId_);
+        Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
+        uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
+        uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
+    }
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
+    if (!cmd) {
+        SDL_Log("NewRenderer: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
+        return -1;
+    }
+
+    Boilerplate::uploadBuffers(device_, cmd, uploads);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_WaitForGPUIdle(device_);
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    return Asset::modelInstances_.size() - 1;
+};
+
+// int NewRenderer::uploadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs){}
