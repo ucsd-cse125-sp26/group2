@@ -1507,7 +1507,7 @@ SDL_AppResult Game::iterate()
             // Check ammo — don't spawn VFX if the magazine is empty.
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-                const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
+                const GunInstance& gun = getEquippedGun(ws);
                 hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
             });
 
@@ -1575,7 +1575,7 @@ SDL_AppResult Game::iterate()
         // Charge rifle: play load sound once when charging starts.
         bool isChargingNow = false;
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
+            const GunInstance& gun = getEquippedGun(ws);
             if (getWeaponConfig(gun.type).isCharge && gun.chargeTime > 0.0f)
                 isChargingNow = true;
         });
@@ -2265,7 +2265,7 @@ SDL_AppResult Game::iterate()
             if (!entityVisible(playerPos, 100.0f))
                 return;
 
-            const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
+            const GunInstance& gun = getEquippedGun(ws);
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
                 return;
@@ -2456,7 +2456,7 @@ SDL_AppResult Game::iterate()
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-        const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
+        const GunInstance& gun = getEquippedGun(ws);
         currentEquippedType_ = gun.type;
     });
 
@@ -3005,13 +3005,14 @@ SDL_AppResult Game::iterate()
 
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-            const GunInstance* gun = &ws.primary;
-            if (ws.current == WeaponSlot::SECONDARY) {
-                gun = &ws.secondary;
-            }
-            hudState.ammoClip = gun->currentMagAmmo;
-            hudState.ammoReserve = gun->totalAmmo;
-            hudState.weaponId = static_cast<int>(gun->type);
+            const GunInstance& gun = getEquippedGun(ws);
+            hudState.ammoClip = gun.currentMagAmmo;
+            hudState.ammoReserve = gun.totalAmmo;
+            hudState.weaponId = static_cast<int>(gun.type);
+            // Mag capacity comes straight from the static WeaponConfig table,
+            // so the "47/30" rifle bug (HUD hardcoded /30 vs. real /50) is
+            // gone — the HUD reads exactly what gameplay says.
+            hudState.magCapacity = getWeaponConfig(gun.type).magazineSize;
         });
 
         // ── Round timer / buy phase ──
@@ -3331,7 +3332,9 @@ SDL_AppResult Game::iterate()
 
         // ── Voidfall HUD: secondary weapon snapshot ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-            const GunInstance& secGun = (ws.current == WeaponSlot::SECONDARY) ? ws.primary : ws.secondary;
+            const WeaponSlot otherSlot =
+                (ws.current == WeaponSlot::SECONDARY) ? WeaponSlot::PRIMARY : WeaponSlot::SECONDARY;
+            const GunInstance& secGun = getSlot(ws, otherSlot);
             if (static_cast<int>(secGun.type) >= 0) {
                 hudState.secondaryWeaponId = static_cast<int>(secGun.type);
                 hudState.secondaryClip = secGun.currentMagAmmo;
@@ -3342,16 +3345,16 @@ SDL_AppResult Game::iterate()
         // ── Voidfall HUD: pickup notifications (slide-in) ──
         // Detect new weapons or ammo growth on the local player vs. the
         // previous frame's snapshot.  This means picking up a Rifle from a
-        // spawner — or any other source that grows ws.primary/secondary —
+        // spawner — or any other source that mutates a WeaponState slot —
         // surfaces in the right-side feed.
         {
             int curPrim = -1;
             int curSec = -1;
             int curReserve = 0;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-                curPrim = static_cast<int>(ws.primary.type);
-                curSec = static_cast<int>(ws.secondary.type);
-                const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
+                curPrim = static_cast<int>(getSlot(ws, WeaponSlot::PRIMARY).type);
+                curSec = static_cast<int>(getSlot(ws, WeaponSlot::SECONDARY).type);
+                const GunInstance& gun = getEquippedGun(ws);
                 curReserve = gun.currentMagAmmo + gun.totalAmmo;
             });
 

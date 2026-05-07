@@ -124,24 +124,21 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     registry.emplace_or_replace<PlayerVisState>(player);
     registry.emplace_or_replace<PlayerSimState>(player);
     registry.emplace_or_replace<Health>(player, Health{});
-    registry.emplace_or_replace<WeaponState>(player,
-                                             WeaponState{
-                                                 .primary =
-                                                     GunInstance{
-                                                         .type = WeaponType::Rifle,
-                                                         .totalAmmo = rifleConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = rifleConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .secondary =
-                                                     GunInstance{
-                                                         .type = WeaponType::RailGun,
-                                                         .totalAmmo = railConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = railConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .current = WeaponSlot::PRIMARY,
-                                             });
+    WeaponState weaponState{};
+    weaponState.current = WeaponSlot::PRIMARY;
+    getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
+        .type = WeaponType::Rifle,
+        .totalAmmo = rifleConfig.defaultAmmoCapacity,
+        .currentMagAmmo = rifleConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
+        .type = WeaponType::RailGun,
+        .totalAmmo = railConfig.defaultAmmoCapacity,
+        .currentMagAmmo = railConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    registry.emplace_or_replace<WeaponState>(player, weaponState);
 }
 
 /// @brief Transition a player to the dead state if health has reached zero.

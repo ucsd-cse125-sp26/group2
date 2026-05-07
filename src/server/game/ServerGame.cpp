@@ -574,24 +574,21 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    registry.emplace<WeaponState>(player,
-                                  WeaponState{
-                                      .primary =
-                                          GunInstance{
-                                              .type = WeaponType::Rifle,
-                                              .totalAmmo = rifleConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = rifleConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .secondary =
-                                          GunInstance{
-                                              .type = WeaponType::RailGun,
-                                              .totalAmmo = railConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = railConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .current = WeaponSlot::PRIMARY,
-                                  });
+    WeaponState weaponState{};
+    weaponState.current = WeaponSlot::PRIMARY;
+    getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
+        .type = WeaponType::Rifle,
+        .totalAmmo = rifleConfig.defaultAmmoCapacity,
+        .currentMagAmmo = rifleConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
+        .type = WeaponType::RailGun,
+        .totalAmmo = railConfig.defaultAmmoCapacity,
+        .currentMagAmmo = railConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    registry.emplace<WeaponState>(player, weaponState);
     registry.emplace<GrenadeInventory>(player, GrenadeInventory{});
 
     // Attach server-side animator for skeleton-driven hitboxes.

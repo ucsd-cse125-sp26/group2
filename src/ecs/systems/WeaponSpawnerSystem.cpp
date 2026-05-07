@@ -57,14 +57,16 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
         if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasWeapon)
         {
             const WeaponConfig config = getWeaponConfig(spawner.type);
-            if (weapon.primary.type == spawner.type) {
-                weapon.primary.totalAmmo = config.defaultAmmoCapacity;
-                weapon.primary.currentMagAmmo = config.magazineSize;
+            GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
+            GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
+            if (primary.type == spawner.type) {
+                primary.totalAmmo = config.defaultAmmoCapacity;
+                primary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
-            } else if (weapon.secondary.type == spawner.type) {
-                weapon.secondary.totalAmmo = config.defaultAmmoCapacity;
-                weapon.secondary.currentMagAmmo = config.magazineSize;
+            } else if (secondary.type == spawner.type) {
+                secondary.totalAmmo = config.defaultAmmoCapacity;
+                secondary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             }
@@ -88,21 +90,12 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
             spawner.hasWeapon = false;
             spawner.spawnCooldown = weaponCooldownTime;
             const WeaponConfig& config = getWeaponConfig(spawner.type);
-            if (weapon.current == WeaponSlot::PRIMARY) {
-                weapon.primary = GunInstance{
-                    .type = spawner.type,
-                    .totalAmmo = config.defaultAmmoCapacity,
-                    .currentMagAmmo = config.magazineSize,
-                    .fireCooldown = 0.0f,
-                };
-            } else {
-                weapon.secondary = GunInstance{
-                    .type = spawner.type,
-                    .totalAmmo = config.defaultAmmoCapacity,
-                    .currentMagAmmo = config.magazineSize,
-                    .fireCooldown = 0.0f,
-                };
-            }
+            getEquippedGun(weapon) = GunInstance{
+                .type = spawner.type,
+                .totalAmmo = config.defaultAmmoCapacity,
+                .currentMagAmmo = config.magazineSize,
+                .fireCooldown = 0.0f,
+            };
         }
     });
 }

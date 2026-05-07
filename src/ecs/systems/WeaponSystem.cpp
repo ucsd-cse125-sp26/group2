@@ -50,17 +50,6 @@ using physics::resolveHitscanHitbox;
 namespace systems
 {
 
-/// @brief Return the GunInstance for the currently selected weapon slot.
-/// @param weapon  Weapon state to query.
-/// @return Reference to the equipped gun.
-inline GunInstance& getEquippedGun(WeaponState& weapon)
-{
-    if (weapon.current == WeaponSlot::PRIMARY) {
-        return weapon.primary;
-    }
-    return weapon.secondary;
-}
-
 /// @brief Apply weapon slot switch from player input.
 /// @param input   Current input snapshot.
 /// @param weapon  Weapon state (modified in place).
@@ -80,8 +69,9 @@ inline void handleCooldown(WeaponState& weapon, float dt)
 {
     auto reduce = [dt](GunInstance& gun) { gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt); };
 
-    reduce(weapon.primary);
-    reduce(weapon.secondary);
+    for (auto& gun : weapon.slots) {
+        reduce(gun);
+    }
 }
 
 /// @brief Reload the gun's magazine from reserve ammo.
@@ -751,8 +741,9 @@ void runWeapon(Registry& registry,
                 g.currentMagAmmo = c.magazineSize;
                 g.totalAmmo = c.defaultAmmoCapacity;
             };
-            refill(weapon.primary);
-            refill(weapon.secondary);
+            for (auto& g : weapon.slots) {
+                refill(g);
+            }
             input.refillAmmo = false; // consume the flag
         }
     });
