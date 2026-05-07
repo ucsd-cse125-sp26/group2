@@ -11,6 +11,7 @@
 #include "WeaponState.hpp"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <glm/vec3.hpp>
@@ -55,10 +56,39 @@ struct GrenadeConfig
     glm::vec3 tint = {1.0f, 1.0f, 1.0f}; ///< RGB multiplier for projectile rendering.
 };
 
+/// @brief True if `type` is a grenade (covered by getGrenadeConfig).
+inline bool isGrenadeType(WeaponType type)
+{
+    return type == WeaponType::HEGrenade || type == WeaponType::Molotov || type == WeaponType::Impulse;
+}
+
+/// @brief Cycle to the next grenade type. HE → Molotov → Impulse → HE.
+inline WeaponType nextGrenadeType(WeaponType type)
+{
+    switch (type) {
+    case WeaponType::HEGrenade:
+        return WeaponType::Molotov;
+    case WeaponType::Molotov:
+        return WeaponType::Impulse;
+    case WeaponType::Impulse:
+        return WeaponType::HEGrenade;
+    default:
+        break;
+    }
+    assert(false && "nextGrenadeType called on non-grenade WeaponType");
+    return WeaponType::HEGrenade;
+}
+
 /// @brief Returns the config for a grenade WeaponType.
 /// @note Behavior is undefined if `type` is not a grenade type.
 inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
 {
+    assert(isGrenadeType(type) && "getGrenadeConfig requires a grenade WeaponType");
+    // Pin the index calc below (type - HEGrenade) to the WeaponType ordering.
+    // If a future edit reorders WeaponType, this fires at compile time instead of
+    // silently miswiring the table.
+    static_assert(static_cast<std::size_t>(WeaponType::Molotov) == static_cast<std::size_t>(WeaponType::HEGrenade) + 1);
+    static_assert(static_cast<std::size_t>(WeaponType::Impulse) == static_cast<std::size_t>(WeaponType::HEGrenade) + 2);
     static constexpr std::array<GrenadeConfig, 3> k_grenadeConfigs{{
         // HEGrenade
         GrenadeConfig{
@@ -118,25 +148,4 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
 
     const std::size_t k_idx = static_cast<std::size_t>(type) - static_cast<std::size_t>(WeaponType::HEGrenade);
     return k_grenadeConfigs[k_idx];
-}
-
-/// @brief True if `type` is a grenade (covered by getGrenadeConfig).
-inline bool isGrenadeType(WeaponType type)
-{
-    return type == WeaponType::HEGrenade || type == WeaponType::Molotov || type == WeaponType::Impulse;
-}
-
-/// @brief Cycle to the next grenade type. HE → Molotov → Impulse → HE.
-inline WeaponType nextGrenadeType(WeaponType type)
-{
-    switch (type) {
-    case WeaponType::HEGrenade:
-        return WeaponType::Molotov;
-    case WeaponType::Molotov:
-        return WeaponType::Impulse;
-    case WeaponType::Impulse:
-        return WeaponType::HEGrenade;
-    default:
-        return WeaponType::HEGrenade; // safe fallback
-    }
 }
