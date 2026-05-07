@@ -23,7 +23,11 @@ public:
     /// @param k_flatten If true, flatten the scene hierarchy via Assimp pre-transform.
     /// @param flipUVs
     /// @return True on success.
-    static bool loadModel(const ModelIdInt id, const std::string& modelFileName, const std::vector<std::string>& texFileNames, const bool k_flatten,const bool flipUVs);
+    static bool loadModel(const ModelIdInt id,
+                          const std::string& modelFileName,
+                          const std::vector<std::string>& texFileNames,
+                          const bool k_flatten,
+                          const bool flipUVs);
 
     /// @brief Load the hard-coded default models list.
     /// @return True on success.
@@ -42,7 +46,7 @@ private:
     /// @param fileName Path to the asset file.
     /// @param flipUVs
     /// @return Pointer to the loaded scene, or nullptr on failure.
-    static const aiScene* loadAsset(Assimp::Importer& importer, const std::string& fileName,const bool flipUVs);
+    static const aiScene* loadAsset(Assimp::Importer& importer, const std::string& fileName, const bool flipUVs);
 
     /// @brief Convert an Assimp 4x4 matrix to a glm::mat4.
     /// @param transformAi The Assimp transform matrix.
@@ -55,5 +59,9 @@ private:
     /// @param sceneAi The full Assimp scene.
     /// @param k_modelId The model ID to attach extracted elements to.
     /// @param modelIndexNode
-    static void pushAiNodeMeshesToModelElements(const std::string &meshNameSpace,const aiNode &nodeAi,const aiScene &sceneAi,const ModelIdInt k_modelId,const uint32_t modelIndexNode);
+    static void pushAiNodeMeshesToModelElements(const std::string& meshNameSpace,
+                                                const aiNode& nodeAi,
+                                                const aiScene& sceneAi,
+                                                const ModelIdInt k_modelId,
+                                                const uint32_t modelIndexNode);
 };

@@ -104,7 +104,6 @@ inline std::unordered_map<MaterialIdInt, Material> materials_;
 
 inline std::vector<ModelInstance> modelInstances_;
 
-
 /// @brief Compute a 32-bit FNV-1a hash of the given string.
 /// @param str The input string to hash.
 /// @return The 32-bit FNV-1a hash value.
