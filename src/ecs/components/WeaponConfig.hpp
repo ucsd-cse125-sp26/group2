@@ -38,6 +38,16 @@ struct ProjectileConfig
     /// 1.0 = linear (uniform falloff); 2.0 = quadratic; 3.0 = cubic (sharp falloff —
     /// direct hits lethal, near misses chip damage).
     float explosionFalloffExponent = 1.0f;
+    /// @brief Damage scale applied when the rocket's owner is the victim (self-damage).
+    /// 1.0 = full damage to self; 0.4 = rocket-jump friendly (40% self-damage).
+    float selfDamageMultiplier = 1.0f;
+    /// @brief Peak knockback velocity (u/s) imparted at the epicenter. 0 = no knockback.
+    /// Applied additively to victim's Velocity, in the direction away from the blast.
+    float maxKnockback = 0.0f;
+    /// @brief Knockback falloff exponent (same form as `explosionFalloffExponent`).
+    /// Typically gentler than damage falloff so the push reaches slightly further than
+    /// the lethal zone — rewards near misses for movement plays.
+    float knockbackFalloffExponent = 1.0f;
 };
 
 /// @brief Returns the gameplay config for a weapon type.
@@ -103,6 +113,9 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .maxLifeTime = 5.0f,
             .explosionRadius = 250.0f,
             .explosionFalloffExponent = 3.0f, // Cubic: direct hits 1-shot, ~2m away ≈ 65 dmg, ~3m ≈ chip.
+            .selfDamageMultiplier = 0.4f,     // 40% self-damage so rocket jumps don't suicide.
+            .maxKnockback = 800.0f,           // Feet-rocket pop ≈ 2.4× normal jump (k_jumpSpeed=330).
+            .knockbackFalloffExponent = 2.0f, // Quadratic: push reaches further than damage.
         },                                    // Rocket
         ProjectileConfig{},                   // RailGun
         ProjectileConfig{},                   // EnergyGun

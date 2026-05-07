@@ -456,7 +456,10 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                                    projConfig.explosionRadius,
                                    projectile.damage,
                                    projectile.owner,
-                                   projConfig.explosionFalloffExponent);
+                                   projConfig.explosionFalloffExponent,
+                                   projConfig.selfDamageMultiplier,
+                                   projConfig.maxKnockback,
+                                   projConfig.knockbackFalloffExponent);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);
@@ -489,7 +492,10 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                                    projConfig.explosionRadius,
                                    projectile.damage,
                                    projectile.owner,
-                                   projConfig.explosionFalloffExponent);
+                                   projConfig.explosionFalloffExponent,
+                                   projConfig.selfDamageMultiplier,
+                                   projConfig.maxKnockback,
+                                   projConfig.knockbackFalloffExponent);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);

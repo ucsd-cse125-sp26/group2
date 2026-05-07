@@ -18,18 +18,24 @@ namespace systems
 ///
 /// The explosion is processed on the next call to runExplosion().
 ///
-/// @param registry          The ECS registry.
-/// @param position          World-space center of the explosion.
-/// @param radius            Blast radius (damage falls off to zero at edge).
-/// @param maxDamage         Maximum damage at the epicenter.
-/// @param owner             Entity that caused the explosion (for self-damage / kill credit).
-/// @param falloffExponent   Damage curve exponent (1 = linear, 3 = cubic/sharp). Defaults to linear.
+/// @param registry                 The ECS registry.
+/// @param position                 World-space center of the explosion.
+/// @param radius                   Blast radius (damage falls off to zero at edge).
+/// @param maxDamage                Maximum damage at the epicenter.
+/// @param owner                    Entity that caused the explosion (for self-damage / kill credit).
+/// @param falloffExponent          Damage curve exponent (1 = linear, 3 = cubic/sharp).
+/// @param selfDamageMultiplier     Damage scale when victim == owner (e.g. 0.4 for rocket jumps).
+/// @param maxKnockback             Peak knockback velocity (u/s) imparted at the epicenter.
+/// @param knockbackFalloffExponent Knockback curve exponent (same form as damage falloff).
 void queueExplosion(Registry& registry,
                     glm::vec3 position,
                     float radius,
                     float maxDamage,
                     entt::entity owner,
-                    float falloffExponent = 1.0f);
+                    float falloffExponent = 1.0f,
+                    float selfDamageMultiplier = 1.0f,
+                    float maxKnockback = 0.0f,
+                    float knockbackFalloffExponent = 1.0f);
 
 /// @brief Process all pending explosions: apply radial damage and emit particle events.
 ///
