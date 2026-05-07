@@ -1502,16 +1502,9 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
         moveKernel(e);
 #endif
 
-    // projectile entities
-    // registry.view<Velocity, Projectile>(entt::exclude<InputSnapshot>)
-    //     .each([dt,
-    //      &world](Position& pos, Velocity& vel, Projectile& projectile, CollisionShape& shape) {
-    //          // vel.value = physics::accelerate(vel.value, k_wishDir, k_wishSpeed, physics::k_groundAccel, dt);
-    //          WeaponConfig& config = getWeaponConfig(projectile.type);
-    //          vel.value = ;
-    //
-    //
-    //     });
+    // Projectile integration (gravity, drag, etc.) is handled inside CollisionSystem's
+    // projectile loop so it stays interleaved with the swept-AABB bump loop. See
+    // CollisionSystem.cpp for the gravity application gated on isGrenadeType().
 }
 
 } // namespace systems

@@ -15,6 +15,8 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Player.hpp"
+#include "ecs/components/PlayerColor.hpp"
+#include "ecs/components/PlayerColors.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
@@ -574,6 +576,19 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
+
+    if constexpr (player_colors::k_enabled) {
+        // Pick the least-used palette slot; ties broken by lowest index
+        // for deterministic assignment across reconnects within a match.
+        const auto minIt = std::min_element(colorSlotUseCounts_.begin(), colorSlotUseCounts_.end());
+        const int slot = static_cast<int>(std::distance(colorSlotUseCounts_.begin(), minIt));
+        ++colorSlotUseCounts_[static_cast<size_t>(slot)];
+        registry.emplace<PlayerColor>(player,
+                                      PlayerColor{
+                                          .rgb = player_colors::k_palette[static_cast<size_t>(slot)],
+                                          .paletteIdx = slot,
+                                      });
+    }
     registry.emplace<BeamState>(player);
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
@@ -594,9 +609,14 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     };
     // Grenade slot is exclusive to grenade types — initialize the type so the
     // single source of truth for "which grenade is selected" is the slot
-    // itself (no separate GrenadeInventory component). Other GunInstance
-    // fields default-initialize fine; we don't track ammo for grenades in v1.
-    getSlot(weaponState, WeaponSlot::GRENADE).type = WeaponType::HEGrenade;
+    // itself (no separate GrenadeInventory component). Mag + reserve must be
+    // populated from the WeaponConfig so handleAmmo() in WeaponSystem succeeds
+    // when the player throws a grenade.
+    GunInstance& grenade = getSlot(weaponState, WeaponSlot::GRENADE);
+    grenade.type = WeaponType::HEGrenade;
+    const WeaponConfig& grenadeCfg = getWeaponConfig(WeaponType::HEGrenade);
+    grenade.currentMagAmmo = grenadeCfg.magazineSize;
+    grenade.totalAmmo = grenadeCfg.defaultAmmoCapacity;
     registry.emplace<WeaponState>(player, weaponState);
 
     // Attach server-side animator for skeleton-driven hitboxes.
@@ -611,6 +631,15 @@ void ServerGame::deletePlayerEntity(ClientId clientId)
         const entt::entity player = it->second;
         detachServerAnimator(player);
         if (registry.valid(player)) {
+            // Release this player's palette slot so the next joiner can reuse it.
+            if (const auto* color = registry.try_get<PlayerColor>(player);
+                color != nullptr && color->paletteIdx >= 0 && color->paletteIdx < player_colors::k_paletteSize)
+            {
+                auto& useCount = colorSlotUseCounts_[static_cast<size_t>(color->paletteIdx)];
+                if (useCount > 0) {
+                    --useCount;
+                }
+            }
             registry.destroy(player);
         }
         clientEntities.erase(it);

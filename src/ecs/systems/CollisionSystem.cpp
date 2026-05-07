@@ -519,6 +519,14 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
 
             projectile.currentLifeTime += dt;
 
+            // Apply gravity to grenade projectiles only. Rockets (and other non-grenade
+            // projectiles) remain ballistic-straight so existing tuning (e.g. rocket
+            // initialProjectileSpeed = 3000 u/s) is unchanged. Match the player's
+            // gravity constant; tune later via GrenadeConfig if too floaty.
+            if (isGrenadeType(projectile.type)) {
+                vel.value.y -= physics::k_gravity * dt;
+            }
+
             // Phase 0 — Depenetration
             depenetrate(pos.value, vel.value, shape.halfExtents, world);
 
