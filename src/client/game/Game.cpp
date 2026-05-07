@@ -34,6 +34,7 @@
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "ecs/systems/PickupGeometry.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
 #include "network/EntityInterpolation.hpp"
 #include "network/NetworkConfig.hpp"
@@ -3185,10 +3186,6 @@ SDL_AppResult Game::iterate()
         // when pressing F would actually grant the weapon. Cheap O(N) sweep
         // across the handful of weapon spawners in the world.
         {
-            static constexpr float k_pickupRange = 140.0f;
-            static constexpr float k_pickupMaxAngleDeg = 12.0f;
-            const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
-
             glm::vec3 eye{0.f};
             glm::vec3 viewFwd{0.f, 0.f, 1.f};
             bool haveLocal = false;
@@ -3209,23 +3206,25 @@ SDL_AppResult Game::iterate()
                 });
 
             if (haveLocal && hudState.isAlive) {
-                float bestDistSq = k_pickupRange * k_pickupRange + 1.f;
-                registry.view<Position, WeaponSpawner>().each([&](const Position& spPos, const WeaponSpawner& sp) {
-                    if (!sp.hasWeapon)
+                float bestDistSq = systems::k_pickupRange * systems::k_pickupRange + 1.f;
+                auto consider = [&](const glm::vec3& itemPos, int weaponId) {
+                    if (!systems::isPlayerLookingAtPickup(eye, viewFwd, itemPos))
                         return;
-                    const glm::vec3 toW = spPos.value - eye;
+                    const glm::vec3 toW = itemPos - eye;
                     const float distSq = glm::dot(toW, toW);
-                    if (distSq > k_pickupRange * k_pickupRange || distSq <= 0.0001f)
-                        return;
-                    if (glm::dot(viewFwd, glm::normalize(toW)) < k_pickupMinDot)
-                        return;
-                    // Closest matching spawner wins (in case two pickups
-                    // overlap the look cone simultaneously).
                     if (distSq < bestDistSq) {
                         bestDistSq = distSq;
                         hudState.pickupAvailable = true;
-                        hudState.pickupWeaponId = static_cast<int>(sp.type);
+                        hudState.pickupWeaponId = weaponId;
                     }
+                };
+                registry.view<Position, WeaponSpawner>().each([&](const Position& spPos, const WeaponSpawner& sp) {
+                    if (!sp.hasWeapon)
+                        return;
+                    consider(spPos.value, static_cast<int>(sp.type));
+                });
+                registry.view<Position, DroppedWeapon>().each([&](const Position& dpPos, const DroppedWeapon& dw) {
+                    consider(dpPos.value, static_cast<int>(dw.type));
                 });
             }
         }
