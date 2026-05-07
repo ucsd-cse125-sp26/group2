@@ -114,9 +114,13 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
     const float fireBoxX = x + pw - padX - fireBoxW;
     const float fireBoxY = bodyY + padY + (nameFs - fireBoxH) * 0.5f;
     ctx.rectOutline(fireBoxX, fireBoxY, fireBoxW, fireBoxH, 1.f, typeC);
+    // text() takes the *top* of the glyph quad; the visible cap-height
+    // region of an SDF glyph spans (y + 0.28·size) to (y + 1.0·size),
+    // i.e. its visible center sits at (y + 0.64·size).  Centering inside
+    // a box of height H therefore needs `y = boxY + H/2 - 0.64·size`.
     ctx.text(fireLabel,
              fireBoxX + fireBoxW * 0.5f,
-             fireBoxY + fireBoxH * 0.5f - fireFs * 0.64f + fireFs * 0.5f,
+             fireBoxY + fireBoxH * 0.5f - fireFs * 0.64f,
              fireFs,
              typeC,
              HudAlign::Center);
@@ -198,12 +202,8 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
         // Index label in dark plate color so it reads "inverse" against
         // the accent fill.
         const HudColor idxC{0.06f, 0.055f, 0.05f, 1.f};
-        ctx.text(idxStr,
-                 pillX + pillW * 0.5f,
-                 pillY + pillH * 0.5f - pillFs * 0.64f + pillFs * 0.5f,
-                 pillFs,
-                 idxC,
-                 HudAlign::Center);
+        // Same cap-height centering rule as the fire-mode tag above.
+        ctx.text(idxStr, pillX + pillW * 0.5f, pillY + pillH * 0.5f - pillFs * 0.64f, pillFs, idxC, HudAlign::Center);
 
         // Weapon name (mid).
         const float slotFs = slotFontSize * s;
