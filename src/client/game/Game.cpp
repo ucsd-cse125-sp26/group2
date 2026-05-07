@@ -13,7 +13,6 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
-#include "ecs/components/GrenadeInventory.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -3276,13 +3275,12 @@ SDL_AppResult Game::iterate()
                 grappleCharge = std::clamp(s_grappleSinceRelease / tms::k_grappleCooldown, 0.f, 1.f);
             hudState.equipment.grappleCharge = grappleCharge;
 
-            // Grenade: count from GrenadeInventory.  v1 has no cooldown
-            // (unlimited grenades for testing), so charge stays 1.0.
-            int grenadeCount = 2; // sensible default while inventory is unimplemented
-            registry.view<LocalPlayer, GrenadeInventory>().each([&](const GrenadeInventory& /*gi*/) {
-                // No `count` field on GrenadeInventory yet — show "∞" as 9.
-                grenadeCount = 9;
-            });
+            // Grenade: v1 has no cooldown and unlimited grenades for testing,
+            // so charge stays 1.0. The grenade slot lives on WeaponState now
+            // (single source of truth — see Task 6b); we still surface "∞" as
+            // 9 if the local player exists.
+            int grenadeCount = 2; // sensible default if no local WeaponState yet
+            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& /*ws*/) { grenadeCount = 9; });
             hudState.equipment.grenadeCount = grenadeCount;
             hudState.equipment.grenadeCharge = 1.f;
 
@@ -3339,6 +3337,7 @@ SDL_AppResult Game::iterate()
                 hudState.secondaryWeaponId = static_cast<int>(secGun.type);
                 hudState.secondaryClip = secGun.currentMagAmmo;
                 hudState.secondaryReserve = secGun.totalAmmo;
+                hudState.secondaryMagCapacity = getWeaponConfig(secGun.type).magazineSize;
             }
         });
 

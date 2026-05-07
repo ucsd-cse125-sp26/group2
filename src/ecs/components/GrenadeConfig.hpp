@@ -62,6 +62,19 @@ inline bool isGrenadeType(WeaponType type)
     return type == WeaponType::HEGrenade || type == WeaponType::Molotov || type == WeaponType::Impulse;
 }
 
+/// @brief Slot/type compatibility predicate for pickups.
+///
+/// The grenade slot only accepts grenade types; non-grenade slots only accept
+/// non-grenade types. WeaponSpawnerSystem calls this before assigning any
+/// picked-up gun to a slot, so a rifle pickup never overwrites the player's
+/// grenade and a hypothetical world-spawned grenade never overwrites a real gun.
+inline bool canAcceptType(WeaponSlot slot, WeaponType type)
+{
+    const bool slotIsGrenade = (slot == WeaponSlot::GRENADE);
+    const bool typeIsGrenade = isGrenadeType(type);
+    return slotIsGrenade == typeIsGrenade;
+}
+
 /// @brief Cycle to the next grenade type. HE → Molotov → Impulse → HE.
 inline WeaponType nextGrenadeType(WeaponType type)
 {

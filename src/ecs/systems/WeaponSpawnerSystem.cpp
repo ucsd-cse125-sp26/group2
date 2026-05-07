@@ -5,6 +5,7 @@
 #include "WeaponSpawnerSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -86,11 +87,25 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
                                                                   glm::normalize(toWeapon)) >= k_pickupMinDot;
 
         if (spawner.hasWeapon && input.pickup && inRange && lookingAtWeapon) {
-            // pickup
+            // Resolve the destination slot under the type-compatibility guard.
+            // The currently-equipped slot is preferred so picking up a rifle
+            // while holding a rifle replaces it in-place; otherwise we fall
+            // back to PRIMARY. The grenade slot is exclusive to grenade types
+            // (canAcceptType enforces this), so a rifle pickup can never land
+            // there even if the player happens to have grenade equipped.
+            const WeaponSlot k_target =
+                canAcceptType(weapon.current, spawner.type) ? weapon.current : WeaponSlot::PRIMARY;
+            if (!canAcceptType(k_target, spawner.type)) {
+                // Fallback slot can't accept this type either (e.g. a
+                // hypothetical world-spawned grenade hitting this path).
+                // Reject the pickup rather than silently dropping it into
+                // the wrong slot.
+                return;
+            }
             spawner.hasWeapon = false;
             spawner.spawnCooldown = weaponCooldownTime;
             const WeaponConfig& config = getWeaponConfig(spawner.type);
-            getEquippedGun(weapon) = GunInstance{
+            getSlot(weapon, k_target) = GunInstance{
                 .type = spawner.type,
                 .totalAmmo = config.defaultAmmoCapacity,
                 .currentMagAmmo = config.magazineSize,

@@ -10,7 +10,6 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
-#include "ecs/components/GrenadeInventory.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -588,8 +587,12 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
         .currentMagAmmo = railConfig.magazineSize,
         .fireCooldown = 0.0f,
     };
+    // Grenade slot is exclusive to grenade types — initialize the type so the
+    // single source of truth for "which grenade is selected" is the slot
+    // itself (no separate GrenadeInventory component). Other GunInstance
+    // fields default-initialize fine; we don't track ammo for grenades in v1.
+    getSlot(weaponState, WeaponSlot::GRENADE).type = WeaponType::HEGrenade;
     registry.emplace<WeaponState>(player, weaponState);
-    registry.emplace<GrenadeInventory>(player, GrenadeInventory{});
 
     // Attach server-side animator for skeleton-driven hitboxes.
     attachServerAnimator(player);

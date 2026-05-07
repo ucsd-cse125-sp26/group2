@@ -138,6 +138,11 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
         .currentMagAmmo = railConfig.magazineSize,
         .fireCooldown = 0.0f,
     };
+    // Re-initialize the grenade slot to HEGrenade on respawn, mirroring
+    // initNewPlayerEntity (ServerGame.cpp). Keeps the GRENADE slot's
+    // GunInstance.type as the single source of truth for "which grenade
+    // is currently selected."
+    getSlot(weaponState, WeaponSlot::GRENADE).type = WeaponType::HEGrenade;
     registry.emplace_or_replace<WeaponState>(player, weaponState);
 }
 
