@@ -3331,15 +3331,10 @@ SDL_AppResult Game::iterate()
 
         // ── Voidfall HUD: secondary weapon snapshot ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-            WeaponSlot otherSlot;
-            if (ws.current == WeaponSlot::PRIMARY) {
-                otherSlot = WeaponSlot::SECONDARY;
-            } else if (ws.current == WeaponSlot::SECONDARY) {
-                otherSlot = WeaponSlot::PRIMARY;
-            } else {
-                // GRENADE (or any future non-gun slot): show PRIMARY as the "other" — it's the player's main weapon.
-                otherSlot = WeaponSlot::PRIMARY;
-            }
+            // On PRIMARY → show SECONDARY in the panel; on anything else (SECONDARY or
+            // a non-gun slot like GRENADE) → show PRIMARY, the player's main weapon.
+            const WeaponSlot otherSlot =
+                (ws.current == WeaponSlot::PRIMARY) ? WeaponSlot::SECONDARY : WeaponSlot::PRIMARY;
             const GunInstance& secGun = getSlot(ws, otherSlot);
             if (static_cast<int>(secGun.type) >= 0) {
                 hudState.secondaryWeaponId = static_cast<int>(secGun.type);
