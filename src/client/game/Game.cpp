@@ -19,6 +19,8 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/ParticleEmitterTag.hpp"
+#include "ecs/components/PlayerColor.hpp"
+#include "ecs/components/PlayerColors.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/PlayerVisState.hpp"
@@ -1787,10 +1789,11 @@ SDL_AppResult Game::iterate()
             AnimatedCharacter* ac = nullptr;
             AnimationInputs ai;
             glm::mat4 worldTransform{1.0f};
-            bool sampleThisFrame = false; ///< call animator->update()
-            bool drawThisFrame = false;   ///< write to instance/palette slots
+            glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< rgb=color, a=blend factor (0=no tint).
+            bool sampleThisFrame = false;           ///< call animator->update()
+            bool drawThisFrame = false;             ///< write to instance/palette slots
             bool isLocal = false;
-            uint32_t slot = 0;            ///< index into skinnedInstances + base into bonePalette
+            uint32_t slot = 0;                      ///< index into skinnedInstances + base into bonePalette
         };
         // Plain function-local (NOT thread_local — workers must see the
         // main thread's vector through the lambda capture).  Reserved up
@@ -1852,6 +1855,12 @@ SDL_AppResult Game::iterate()
                 c.entity = e;
                 c.ac = &ac;
                 c.isLocal = isLocal;
+
+                if constexpr (player_colors::k_enabled) {
+                    if (const auto* pc = registry.try_get<PlayerColor>(e); pc != nullptr) {
+                        c.tint = glm::vec4(pc->rgb, player_colors::k_blendFactor);
+                    }
+                }
 
                 // Animation tick decoupling: cap remote chars at 30 Hz.
                 ac.animationAccumulator += frameTime;
@@ -1962,6 +1971,7 @@ SDL_AppResult Game::iterate()
                         inst.worldTransform = c.worldTransform;
                         inst.paletteBase = c.slot * static_cast<uint32_t>(numJoints);
                         inst.materialId = 0;
+                        inst.tint = c.tint;
                         skinnedInstances[c.slot] = inst;
                         const auto& sm = c.ac->animator->skinMatrices();
                         std::copy(sm.begin(),

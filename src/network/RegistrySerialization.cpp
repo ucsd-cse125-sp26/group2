@@ -11,6 +11,7 @@
 #include "ecs/components/FireField.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/PlayerColor.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
@@ -150,7 +151,8 @@ using Synced = std::tuple<entt::entity,
                           WeaponSpawner,
                           RespawnPoint,
                           AnimSnapshot,
-                          FireField>;
+                          FireField,
+                          PlayerColor>;
 
 // ── PR-10: snapshot delta encoding ──────────────────────────────────────
 

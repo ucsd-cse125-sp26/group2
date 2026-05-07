@@ -162,6 +162,7 @@ public:
         uint32_t materialId = 0;  ///< Reserved for Phase 3 (bindless materials).
         uint32_t _pad0 = 0;
         uint32_t _pad1 = 0;
+        glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< Per-player tint. rgb=color, a=blend factor (0=no-op).
     };
 
     /// @brief Install the shared rig.  Uploads the bind-pose VB/IB + per-vertex
