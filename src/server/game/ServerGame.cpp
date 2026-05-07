@@ -18,6 +18,8 @@
 #include "ecs/components/PlayerColor.hpp"
 #include "ecs/components/PlayerColors.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
+#include "ecs/components/PlayerName.hpp"
+#include "ecs/components/PlayerNicknames.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -47,6 +49,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cstring>
 
 bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, const TransportConfig& transport)
 {
@@ -589,6 +592,20 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                           .paletteIdx = slot,
                                       });
     }
+
+    // Assign an animal nickname using the same least-used scheme.  When
+    // the future custom-nickname flow lands, it'll set `PlayerName.isCustom`
+    // and the auto-assigner here can simply skip that player.  Right now
+    // every joiner gets an animal handle.
+    {
+        const auto minNickIt = std::min_element(nicknameSlotUseCounts_.begin(), nicknameSlotUseCounts_.end());
+        const int nickSlot = static_cast<int>(std::distance(nicknameSlotUseCounts_.begin(), minNickIt));
+        ++nicknameSlotUseCounts_[static_cast<size_t>(nickSlot)];
+        PlayerName pn;
+        pn.set(player_nicknames::k_nicknames[static_cast<std::size_t>(nickSlot)]);
+        pn.isCustom = false;
+        registry.emplace<PlayerName>(player, pn);
+    }
     registry.emplace<BeamState>(player);
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
@@ -638,6 +655,20 @@ void ServerGame::deletePlayerEntity(ClientId clientId)
                 auto& useCount = colorSlotUseCounts_[static_cast<size_t>(color->paletteIdx)];
                 if (useCount > 0) {
                     --useCount;
+                }
+            }
+
+            // Release the auto-assigned nickname slot too — same scheme.
+            // Custom names (PlayerName::isCustom == true) don't reserve a
+            // slot, so leave the use-counts alone in that case.
+            if (const auto* pn = registry.try_get<PlayerName>(player); pn != nullptr && !pn->isCustom) {
+                for (std::size_t i = 0; i < player_nicknames::k_nicknames.size(); ++i) {
+                    if (std::strcmp(player_nicknames::k_nicknames[i], pn->c_str()) == 0) {
+                        auto& nickUseCount = nicknameSlotUseCounts_[i];
+                        if (nickUseCount > 0)
+                            --nickUseCount;
+                        break;
+                    }
                 }
             }
             registry.destroy(player);

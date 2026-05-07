@@ -22,6 +22,7 @@
 #include "ecs/components/PlayerColor.hpp"
 #include "ecs/components/PlayerColors.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
+#include "ecs/components/PlayerName.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
@@ -85,6 +86,29 @@ glm::quat assetRotation(const AssetEntry& asset)
     const glm::vec3 r = glm::radians(asset.renderRotationDegrees);
     return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
            glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
+}
+
+/// @brief Resolve a `ClientId` to its display nickname.
+///
+/// Reads the replicated `PlayerName` component (set server-side from the
+/// `player_nicknames::k_nicknames` pool) and returns it.  When the
+/// component hasn't replicated yet — or the entity simply doesn't exist
+/// (e.g. a kill-feed entry referencing a player who already disconnected)
+/// — falls back to a `Player #N` placeholder written into the caller's
+/// `outBuf` so the returned `const char*` always has stable storage for
+/// the lifetime of `outBuf`.
+const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBuf, std::size_t bufSize)
+{
+    const auto v = registry.view<const ClientId>();
+    for (auto entity : v) {
+        if (v.get<const ClientId>(entity) == cid) {
+            if (const auto* pn = registry.try_get<PlayerName>(entity); pn != nullptr && !pn->empty())
+                return pn->c_str();
+            break;
+        }
+    }
+    SDL_snprintf(outBuf, bufSize, "Player #%d", cid.value);
+    return outBuf;
 }
 } // namespace
 
@@ -2903,10 +2927,8 @@ SDL_AppResult Game::iterate()
             const char* killerName;
             if (localClientId.value != -1 && deathInfo.killerId == localClientId)
                 killerName = "yourself";
-            else {
-                std::snprintf(killerBuf, sizeof(killerBuf), "Player #%d", deathInfo.killerId.value);
-                killerName = killerBuf;
-            }
+            else
+                killerName = lookupPlayerName(registry, deathInfo.killerId, killerBuf, sizeof(killerBuf));
 
             char line1[64], line2[96], line3[48];
             std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
@@ -3071,20 +3093,15 @@ SDL_AppResult Game::iterate()
             if (!evt.sentToHud) {
                 evt.sentToHud = true;
                 HudKillFeedEntry entry;
+                char nameBuf[32];
                 if (localClientId.value != -1 && evt.killerId == localClientId)
                     entry.killerName = "You";
-                else {
-                    char buf[16];
-                    SDL_snprintf(buf, sizeof(buf), "Player #%d", evt.killerId.value);
-                    entry.killerName = buf;
-                }
+                else
+                    entry.killerName = lookupPlayerName(registry, evt.killerId, nameBuf, sizeof(nameBuf));
                 if (localClientId.value != -1 && evt.victimId == localClientId)
                     entry.victimName = "You";
-                else {
-                    char buf[16];
-                    SDL_snprintf(buf, sizeof(buf), "Player #%d", evt.victimId.value);
-                    entry.victimName = buf;
-                }
+                else
+                    entry.victimName = lookupPlayerName(registry, evt.victimId, nameBuf, sizeof(nameBuf));
                 hudKillEntries.push_back(entry);
             }
         }
@@ -3129,9 +3146,11 @@ SDL_AppResult Game::iterate()
         registry.view<ClientId, Health, PlayerVisState>().each(
             [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerVisState& ps) {
                 HudTeamMemberStatus status;
-                if (localClientId.value != -1 && cid == localClientId)
+                if (localClientId.value != -1 && cid == localClientId) {
                     status.name = "You";
-                else {
+                } else if (const auto* pn = registry.try_get<PlayerName>(ent); pn != nullptr && !pn->empty()) {
+                    status.name = pn->c_str();
+                } else {
                     char buf[16];
                     SDL_snprintf(buf, sizeof(buf), "Player #%d", cid.value);
                     status.name = buf;
@@ -3343,7 +3362,8 @@ SDL_AppResult Game::iterate()
         // strings, but the reservation also avoids reallocation jitter).
         hudWorldEnemyNames.reserve(16);
         registry.view<ClientId, Position, CollisionShape, Health, PlayerVisState>().each(
-            [&](const ClientId& cid,
+            [&](entt::entity ent,
+                const ClientId& cid,
                 const Position& pos,
                 const CollisionShape& shape,
                 const Health& hp,
@@ -3358,9 +3378,13 @@ SDL_AppResult Game::iterate()
                 we.worldX = pos.value.x;
                 we.worldY = pos.value.y + (shape.halfExtents.y + 18.f) * headDir;
                 we.worldZ = pos.value.z;
-                char buf[24];
-                SDL_snprintf(buf, sizeof(buf), "PLR-%02d", cid.value);
-                hudWorldEnemyNames.emplace_back(buf);
+                if (const auto* pn = registry.try_get<PlayerName>(ent); pn != nullptr && !pn->empty()) {
+                    hudWorldEnemyNames.emplace_back(pn->c_str());
+                } else {
+                    char buf[24];
+                    SDL_snprintf(buf, sizeof(buf), "PLR-%02d", cid.value);
+                    hudWorldEnemyNames.emplace_back(buf);
+                }
                 we.name = hudWorldEnemyNames.back();
                 we.health = static_cast<int>(hp.health);
                 we.maxHealth = 100;
