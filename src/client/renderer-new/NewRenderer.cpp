@@ -15,24 +15,9 @@
 #include <iostream>
 #include <vector>
 
-bool NewRenderer::supports(RendererFeature feature) const
-{
-    switch (feature) {
-    case RendererFeature::Init:
-    case RendererFeature::DrawFrame:
-    case RendererFeature::Quit:
-    case RendererFeature::LoadSceneModel:
-        return true;
-    default:
-        return false;
-    }
-}
-
 bool NewRenderer::init(SDL_Window* window)
 {
     window_ = window;
-    ownsDevice_ = true;
-    ownsWindowClaim_ = true;
 
     constexpr SDL_GPUShaderFormat k_wantedFormats = SDL_GPU_SHADERFORMAT_SPIRV
 #ifdef HAVE_MSL_SHADERS
@@ -61,21 +46,6 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    return initCommon();
-}
-
-bool NewRenderer::init(SDL_Window* window, SDL_GPUDevice* sharedDevice)
-{
-    window_ = window;
-    device_ = sharedDevice;
-    ownsDevice_ = false;
-    ownsWindowClaim_ = false;
-
-    return initCommon();
-}
-
-bool NewRenderer::initCommon()
-{
     shaderFormat_ = Boilerplate::selectShaderFormat(device_);
     if (shaderFormat_ == SDL_GPU_SHADERFORMAT_INVALID) {
         SDL_Log("NewRenderer: no supported shader format (got 0x%x)",
@@ -102,7 +72,6 @@ bool NewRenderer::initCommon()
 
     camera_ = NewCamera();
 
-    // return loadSceneAssets();
     return true;
 }
 
@@ -223,18 +192,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
     SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture_, sampler_);
     SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
 
-    // for (const auto& modelPair : Asset::models_) {
-    //     glm::mat4 modelMatrix = glm::mat4(1.0f);
-    //     modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
-    //
-    //     for (auto& element : modelPair.second.modelElements_) {
-    //         glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;
-    //         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
-    //         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
-    //         drawMesh(pass, mesh);
-    //     }
-    // }
-
     for (const auto& mInstance : Asset::modelInstances_) {
         glm::mat4 modelMatrix = glm::mat4(1.0f);
         modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
@@ -318,19 +275,14 @@ void NewRenderer::quit()
         if (texture_)
             SDL_ReleaseGPUTexture(device_, texture_);
 
-        if (ownsDevice_) {
-            ImGui_ImplSDLGPU3_Shutdown();
-            if (ownsWindowClaim_)
-                SDL_ReleaseWindowFromGPUDevice(device_, window_);
-            SDL_DestroyGPUDevice(device_);
-        }
+        ImGui_ImplSDLGPU3_Shutdown();
+        SDL_ReleaseWindowFromGPUDevice(device_, window_);
+        SDL_DestroyGPUDevice(device_);
     }
 
     window_ = nullptr;
     device_ = nullptr;
     shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
-    ownsDevice_ = false;
-    ownsWindowClaim_ = false;
 
     geometryPipeline_ = nullptr;
     depthTexture_ = nullptr;
@@ -338,22 +290,6 @@ void NewRenderer::quit()
     sampler_ = nullptr;
     depthWidth_ = 0;
     depthHeight_ = 0;
-}
-
-void NewRenderer::createLegacyMeshBuffers(MeshIdInt meshId)
-{
-    Asset::Mesh& mesh = Asset::meshes_.at(meshId);
-
-    const size_t vertexBufferSize = mesh.vertexData_.size() * sizeof(Vertex);
-    const size_t indexBufferSize = mesh.indexData_.size() * sizeof(Uint32);
-
-    mesh.vBufferInfo_.bufferSize = vertexBufferSize;
-    mesh.vBufferInfo_.gpuBuff = Boilerplate::createBuffer(device_, vertexBufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
-    mesh.vBufferInfo_.srcData = mesh.vertexData_.data();
-
-    mesh.iBufferInfo_.bufferSize = indexBufferSize;
-    mesh.iBufferInfo_.gpuBuff = Boilerplate::createBuffer(device_, indexBufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
-    mesh.iBufferInfo_.srcData = mesh.indexData_.data();
 }
 
 int NewRenderer::loadSceneModel(
@@ -372,10 +308,12 @@ int NewRenderer::loadSceneModel(
     fullPath /= ASSETS_DIR;
     fullPath /= filename;
 
-    AssetLoader::loadModel(modelId, fullPath.string(), texFileNames, flatten, flipUVs);
+    if (!AssetLoader::loadModel(modelId, fullPath.string(), texFileNames, flatten, flipUVs)) {
+        SDL_Log("NewRenderer::loadSceneModel: AssetLoader::loadModel('%s') failed", fullPath.string().c_str());
+        Asset::models_.erase(modelId);
+        return -1;
+    }
     Asset::Model& model = Asset::models_.at(modelId);
-    // Asset::ModelNode &rootNode = model.modelNodes_.at(MODEL_ROOT_NODE_INDEX);
-    // rootNode.transform_ = modelTransform * rootNode.transform_;
     AssetLoader::updateModelTransformCache(modelId);
 
     Asset::ModelInstance sceneInstance{};
@@ -384,7 +322,7 @@ int NewRenderer::loadSceneModel(
     sceneInstance.transform_ = modelTransform;
 
     Asset::modelInstances_.push_back(sceneInstance);
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
     std::vector<Boilerplate::BufferUpload> uploads;
 
     for (auto& element : model.modelElements_) {
@@ -403,9 +341,6 @@ int NewRenderer::loadSceneModel(
     Boilerplate::uploadBuffers(device_, cmd, uploads);
     SDL_SubmitGPUCommandBuffer(cmd);
     SDL_WaitForGPUIdle(device_);
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     return Asset::modelInstances_.size() - 1;
-};
-
-// int NewRenderer::uploadSceneModel(const char* filename, glm::vec3 pos, float scale, bool flipUVs){}
+}

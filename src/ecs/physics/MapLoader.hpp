@@ -22,8 +22,6 @@
 #include <string>
 #include <vector>
 
-struct LoadedModel; // Forward-declared; defined in client/renderer/ModelLoader.hpp.
-
 namespace physics
 {
 

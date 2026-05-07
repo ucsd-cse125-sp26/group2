@@ -19,23 +19,18 @@
 #include "network/MatchStatus.hpp"
 #include "network/NetworkConfig.hpp"
 #include "particles/ParticleSystem.hpp"
+#include "renderer-new/NewRenderer.hpp"
 #include "sfx/SfxSystem.hpp"
 #include "systems/GamepadAimAssistSystem.hpp"
 #include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
 #include "util/WorkerPool.hpp"
 
-#include <memory>
-#ifdef USE_HYBRID_RENDERER
-#include "renderer/HybridRenderer.hpp"
-#else
-#include "renderer/Renderer.hpp"
-#endif
-
 #include <SDL3/SDL.h>
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
+#include <memory>
 
 /// @brief Top-level client game object.
 ///
@@ -120,25 +115,17 @@ private:
     NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-#ifdef USE_HYBRID_RENDERER
-    HybridRenderer renderer;                     ///< Routes each call to the legacy or new renderer.
-    /// @brief Direct access to the legacy renderer instance (perf Phase 1B
-    /// reaches into legacy-only API: setSkinnedRig / setSkinnedFrame).
-    Renderer& legacyRenderer() noexcept { return renderer.legacy(); }
-#else
-    Renderer renderer; ///< Legacy renderer.
-    Renderer& legacyRenderer() noexcept { return renderer; }
-#endif
-    Registry registry;             ///< The shared ECS registry.
-    Client client;                 ///< UDP network client.
-    ParticleSystem particleSystem; ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;           ///< Client-side sound effects system.
-    Hud hud_;                      ///< In-game HUD overlay system.
-    entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
+    NewRenderer renderer;                        ///< Graphics-team SDL3 GPU renderer.
+    Registry registry;                           ///< The shared ECS registry.
+    Client client;                               ///< UDP network client.
+    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;                         ///< Client-side sound effects system.
+    Hud hud_;                                    ///< In-game HUD overlay system.
+    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
 
-    Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
-    float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
-    int tickCount = 0;             ///< Total physics ticks elapsed since start.
+    Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
+    float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
+    int tickCount = 0;                           ///< Total physics ticks elapsed since start.
     /// @brief Monotonic per-tick counter stamped onto outgoing InputSnapshots.
     ///
     /// Bumped once per physics tick group inside iterate() and copied into the

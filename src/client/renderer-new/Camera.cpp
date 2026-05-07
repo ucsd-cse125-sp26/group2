@@ -59,3 +59,13 @@ void NewCamera::computeViewProjectionMatrix()
     glm::mat4 projection = glm::perspective(fovy_, aspect_, zNear_, zFar_);
     view_projection_ = projection * view;
 }
+
+glm::vec3 NewCamera::getForward() const
+{
+    return glm::normalize(target_ - eye_);
+}
+
+glm::vec3 NewCamera::getRight() const
+{
+    return glm::normalize(glm::cross(getForward(), up_));
+}

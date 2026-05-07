@@ -81,7 +81,6 @@ public:
                  bool& renderSeparateFromPhysics,
                  bool& inputSyncedWithPhysics,
                  bool& limitFPSToMonitor,
-                 int& ssrMode,
                  float physicsHz,
                  float fpsCurrent,
                  float fpsMin,
@@ -94,16 +93,6 @@ public:
     /// @param eyePos   Camera eye position (used to compute spawn position).
     /// @param forward  Camera forward unit vector.
     void buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 forward);
-
-    /// @brief Build the Render Toggles window for live performance profiling.
-    /// @param renderer  The renderer (for toggles, AA mode).
-    void buildRenderTogglesUI(class Renderer& renderer);
-
-    /// @brief Build the Skybox selector window for live HDR skybox swapping.
-    void buildSkyboxUI(class Renderer& renderer);
-
-    /// @brief Build the Lighting Controls window for live parameter tuning.
-    void buildLightingUI(class Renderer& renderer);
 
     /// @brief Build the Network Stats window showing ping, bandwidth, and update rate.
     void buildNetworkUI(const NetworkStats& stats);
@@ -291,13 +280,10 @@ public:
 
 private:
     /// Per-window visibility toggles — persistent across frames.
-    bool showInspector = false;        ///< Show the main ECS Inspector window.
-    bool showRenderToggles = false;    ///< Show the Render Toggles window.
-    bool showLightingControls = false; ///< Show the Lighting Controls window.
-    bool showSkybox = false;           ///< Show the Skybox window.
-    bool showNetworkStats = false;     ///< Show the Network Stats window.
-    bool showNetworkSim = false;       ///< Show the Network Simulator (latency + loss) window.
-    bool showWeaponHud = false;        ///< Show the Weapon HUD debug window (disabled by default).
+    bool showInspector = false;    ///< Show the main ECS Inspector window.
+    bool showNetworkStats = false; ///< Show the Network Stats window.
+    bool showNetworkSim = false;   ///< Show the Network Simulator (latency + loss) window.
+    bool showWeaponHud = false;    ///< Show the Weapon HUD debug window (disabled by default).
 
     /// @brief Phase 6 testing: simulated round-trip latency in ms.
     /// Written by the Network Simulator window's slider, read by
@@ -332,7 +318,6 @@ private:
                                 bool& renderSeparateFromPhysics,
                                 bool& inputSyncedWithPhysics,
                                 bool& limitFPSToMonitor,
-                                int& ssrMode,
                                 float physicsHz,
                                 float fpsCurrent,
                                 float fpsMin,

@@ -4,7 +4,7 @@
 #include "HudRenderer.hpp"
 
 #include "particles/sdf/SdfAtlas.hpp"
-#include "renderer/ShaderUtils.hpp"
+#include "renderer-new/ShaderUtils.hpp"
 
 #include <SDL3/SDL.h>
 

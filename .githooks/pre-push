@@ -13,22 +13,24 @@ fi
 # clang-format — blocks the push on any violation
 # ---------------------------------------------------------------------------
 
-if command -v clang-format-18 &>/dev/null; then
-    CF=clang-format-18
-elif command -v clang-format &>/dev/null; then
-    CF=clang-format
-else
-    echo "[pre-push] WARNING: clang-format not found — skipping format gate." >&2
-    echo "           Run scripts/setup-linux.sh (or setup-macos.sh) to install it." >&2
+# Only gate on clang-format-18 (the version pinned in CI / ubuntu-24.04
+# default).  Other versions disagree on trailing-comment alignment so a
+# generic `clang-format` check would either pass code that CI rejects or
+# block code that CI accepts.  Skip with a clear hint when -18 isn't
+# installed; CI is the authoritative gate.
+if ! command -v clang-format-18 &>/dev/null; then
+    echo "[pre-push] clang-format-18 not found — skipping format gate." >&2
+    echo "           Install it (scripts/setup-linux.sh / setup-macos.sh) so" >&2
+    echo "           local format gating matches CI." >&2
     exit 0
 fi
 
-CF_VER=$("$CF" --version 2>&1 | head -1)
+CF_VER=$(clang-format-18 --version 2>&1 | head -1)
 echo "[pre-push] Format check ($CF_VER) ..."
 
 FORMAT_FAILED=0
 while IFS= read -r f; do
-    if ! "$CF" --dry-run --Werror "$f" 2>/dev/null; then
+    if ! clang-format-18 --dry-run --Werror "$f" 2>/dev/null; then
         echo "    ✗ $f" >&2
         FORMAT_FAILED=1
     fi
