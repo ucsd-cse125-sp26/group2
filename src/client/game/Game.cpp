@@ -13,6 +13,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -1034,6 +1035,7 @@ SDL_AppResult Game::iterate()
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
+        refreshDroppedWeaponRenderables();
         // Fall through to render the current frame normally.
     } else {
         frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
@@ -1424,6 +1426,7 @@ SDL_AppResult Game::iterate()
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
+        refreshDroppedWeaponRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -3417,6 +3420,43 @@ void Game::refreshRemoteRespawnRenderables()
                 rend.orientation = assetRotation(asset);
                 rend.translation = asset.renderTranslation;
             }
+        });
+}
+
+void Game::refreshDroppedWeaponRenderables()
+{
+    registry.view<Position, DroppedWeapon, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const DroppedWeapon& dw, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            const int weaponIndex = static_cast<int>(dw.type);
+            if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
+                weaponAssetIds_[weaponIndex] < 0)
+            {
+                rend.modelIndex = -1;
+                rend.visible = false;
+                return;
+            }
+
+            const int assetId = weaponAssetIds_[weaponIndex];
+            const AssetEntry& asset = assets_.entry(assetId);
+
+            rend.modelIndex = asset.modelIndex;
+            rend.scale = asset.renderScale;
+
+            // Same spin + bob treatment the spawners use, so dropped weapons
+            // read as pickups at a glance.
+            static constexpr float k_dropSpinRadiansPerSec = glm::radians(45.0f);
+            static constexpr float k_dropBobAmplitude = 6.0f;
+            static constexpr float k_dropBobHz = 0.6f;
+            static constexpr float k_twoPi = 6.28318530718f;
+
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.visible = true;
+            rend.orientation =
+                glm::angleAxis(t * k_dropSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
+            rend.translation = asset.renderTranslation +
+                               glm::vec3{0.0f, std::sin(t * k_twoPi * k_dropBobHz) * k_dropBobAmplitude, 0.0f};
         });
 }
 
