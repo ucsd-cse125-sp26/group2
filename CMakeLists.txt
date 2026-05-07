@@ -592,8 +592,6 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/GraphicsConfig.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/GraphicsConfig.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ModelLoader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ModelLoader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ShaderUtils.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
@@ -644,6 +642,7 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinVertex.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
@@ -1030,7 +1029,7 @@ add_executable(server
         src/client/animation/FbxImportUtils.cpp
         src/client/animation/SkinningBackend.hpp
         src/client/animation/SkinningBackend.cpp
-        src/client/renderer-new/ModelLoader.hpp
+        src/client/animation/SkinVertex.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "FbxImportUtils.hpp"
-#include "renderer-new/ModelLoader.hpp"
+#include "SkinVertex.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -30,7 +30,6 @@ struct RigMeshData
     std::vector<ModelVertex> baseVertices; ///< Bind-pose vertices (never mutated).
     std::vector<SkinWeight> skinWeights;   ///< Parallel to baseVertices.
     std::vector<uint32_t> indices;         ///< Triangle indices.
-    MaterialData material;                 ///< Default PBR scalars (grey matte).
 };
 
 /// @brief Shared skinned rig — skeleton + bind-pose meshes + joint map.
@@ -82,14 +81,6 @@ public:
     /// maximum Y coordinates.  Used to auto-calculate the rig scale so the
     /// animated model matches the player's collision AABB height.
     void verticalBounds(float& outMinY, float& outMaxY) const;
-
-    /// @brief A LoadedModel built from the rig's bind-pose meshes, suitable
-    /// for cloning into a renderer model instance per animated entity.
-    ///
-    /// Each call to `Renderer::uploadSceneModel(rig.templateLoadedModel())`
-    /// creates a new GPU model with its own vertex buffer — animators can
-    /// then stream skinned vertices into their private instance.
-    [[nodiscard]] const LoadedModel& templateLoadedModel() const noexcept;
 
 private:
     struct Impl;
