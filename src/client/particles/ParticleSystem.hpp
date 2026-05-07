@@ -14,7 +14,7 @@
 #include "effects/RibbonTrail.hpp"
 #include "effects/SmokeEffect.hpp"
 #include "effects/TracerEffect.hpp"
-#include "renderer/Camera.hpp"
+#include "renderer-new/Camera.hpp"
 #include "sdf/SdfRenderer.hpp"
 
 #include <entt/entt.hpp>
@@ -102,7 +102,7 @@ public:
     }
 
     /// @brief Simulate all effects. Called once per render frame (not per physics tick).
-    void update(float dt, const Camera& cam, Registry& reg);
+    void update(float dt, const NewCamera& cam, Registry& reg);
 
     /// @brief Upload all particle data to GPU. Must be called BEFORE render pass.
     void uploadToGpu(SDL_GPUCommandBuffer* cmd);

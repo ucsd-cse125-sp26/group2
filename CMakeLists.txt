@@ -590,20 +590,12 @@ add_executable(group2
     # PR-11 (server-perf): client-side render-delay interpolation
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/HybridRenderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/GraphicsConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/GraphicsConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ModelLoader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ModelLoader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ShaderUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
     # Util
@@ -871,9 +863,6 @@ endif()
 # and fragments in the near half of the frustum are clipped on Metal.
 target_compile_definitions(group2 PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
-# group2 uses the HybridRenderer which routes between legacy and new renderers.
-target_compile_definitions(group2 PRIVATE USE_HYBRID_RENDERER)
-
 # ---- Client link libraries ----
 target_link_libraries(group2 PRIVATE
     SDL3::SDL3-static
@@ -926,333 +915,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
     )
 else()
     message(STATUS "assets/ directory not found — skipping asset copy (install Git LFS and run 'git lfs pull')")
-endif()
-
-# ===========================================================================
-# Client executable (legacy renderer only)
-# ===========================================================================
-# Same as group2 but uses the legacy Renderer directly — no HybridRenderer,
-# no renderer-new/ code, no shaders-new/.
-add_executable(client
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/main/main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
-    # PR-11 (server-perf): client-side render-delay interpolation
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/IRenderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/RendererTypes.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Renderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/GraphicsConfig.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/Camera.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ModelLoader.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer/ShaderUtils.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
-    # Util
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.hpp"
-    # Particle system
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleSystem.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleRenderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleRenderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleTypes.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticlePool.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/ParticleEvents.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/GpuParticleBuffer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/GpuParticleBuffer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ImpactEffect.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ImpactEffect.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/RibbonTrail.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/RibbonTrail.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
-    # Sound effects system
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxEvents.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxTypes.hpp"
-    # Skeletal animation
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
-    # HUD system
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/VoidfallStyle.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudIcons.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudIcons.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RoundTimer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/TeamStatusBar.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/BuyMenu.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageNumberWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
-        src/ecs/systems/MovementSystem.hpp
-        src/ecs/systems/CollisionSystem.hpp
-        src/ecs/components/Position.hpp
-        src/ecs/components/Velocity.hpp
-        src/ecs/components/CollisionShape.hpp
-        src/ecs/components/PlayerStateEnums.hpp
-        src/ecs/components/PlayerVisState.hpp
-        src/ecs/components/PlayerSimState.hpp
-        src/ecs/components/InputSnapshot.hpp
-        src/ecs/components/PreviousPosition.hpp
-        src/ecs/components/InterpolationBuffer.hpp
-        src/ecs/components/LocalPlayer.hpp
-        src/ecs/components/Renderable.hpp
-        src/ecs/components/Projectile.hpp
-        src/ecs/components/WeaponState.hpp
-        src/ecs/components/TracerEmitter.hpp
-        src/ecs/components/RibbonEmitter.hpp
-        src/ecs/components/ParticleEmitterTag.hpp
-        src/ecs/components/AnimatedCharacter.hpp
-        src/ecs/physics/PhysicsConstants.hpp
-        src/ecs/physics/Movement.hpp
-        src/ecs/physics/Movement.cpp
-        src/ecs/physics/SweptCollision.hpp
-        src/ecs/physics/SweptCollision.cpp
-        src/ecs/physics/MapLoader.hpp
-        src/ecs/physics/MapLoader.cpp
-        src/ecs/physics/TriMeshCollision.hpp
-        src/ecs/physics/TriMeshCollision.cpp
-        src/ecs/physics/VHACDImpl.cpp
-        src/ecs/physics/WallDetection.hpp
-        src/ecs/physics/WallDetection.cpp
-        src/ecs/physics/TitanfallConstants.hpp
-        src/ecs/systems/MovementSystem.hpp
-        src/ecs/systems/MovementSystem.cpp
-        src/ecs/systems/CollisionSystem.hpp
-        src/ecs/systems/CollisionSystem.cpp
-        src/client/systems/InputSampleSystem.hpp
-        src/client/systems/PredictionSystem.hpp
-        src/client/systems/InputSendSystem.hpp
-        src/client/systems/ReconciliationSystem.hpp
-        src/client/debug/DebugUI.hpp
-        src/client/debug/DebugUI.cpp
-        src/network/MessageStream.hpp
-        src/network/MessageStream.cpp
-        src/network/NetworkConfig.hpp
-        src/network/NetworkConfig.cpp
-        src/network/OutboundQueue.hpp
-        src/network/OutboundQueue.cpp
-        src/network/transport/FragmentReassembler.hpp
-        src/network/transport/PacketHeader.hpp
-        src/network/transport/UdpEndpoint.hpp
-        src/network/transport/UdpEndpoint.cpp
-        src/network/RegistryArchive.hpp
-        src/network/RegistrySerialization.hpp
-        src/network/RegistrySerialization.cpp
-        src/ecs/components/ClientId.hpp
-        src/client/renderer-new/Asset.hpp
-        src/client/renderer-new/AssetLoader.cpp
-        src/client/renderer-new/AssetLoader.hpp
-        src/ecs/systems/WeaponSystem.hpp
-        src/ecs/systems/WeaponSystem.hpp
-        src/ecs/systems/WeaponSystem.cpp
-        src/ecs/systems/WeaponSystem.cpp
-        src/ecs/components/WeaponConfig.hpp
-        src/ecs/components/WeaponConfig.hpp
-        src/ecs/components/ViewmodelConfig.hpp
-        src/ecs/components/Health.hpp
-        src/ecs/systems/WeaponSystem.cpp
-        src/network/ShotEvent.hpp
-        src/ecs/components/Explosion.hpp
-        src/ecs/systems/ExplosionSystem.hpp
-        src/ecs/systems/ExplosionSystem.cpp
-        src/ecs/components/FireField.hpp
-        src/ecs/systems/FireSystem.hpp
-        src/ecs/systems/FireSystem.cpp
-        src/ecs/systems/PlayerStatusSystem.hpp
-        src/ecs/systems/PlayerStatusSystem.cpp
-        src/ecs/components/Hitbox.hpp
-        src/ecs/systems/HitboxSystem.hpp
-        src/ecs/systems/HitboxSystem.cpp
-        src/ecs/systems/LagCompensation.hpp
-        src/ecs/components/LagCompTarget.hpp
-        src/ecs/components/Player.hpp
-        src/network/MatchStatus.hpp
-        src/client/systems/KillFeedEvent.hpp
-        src/ecs/components/RespawnTimer.hpp
-        src/ecs/components/DeathInfo.hpp
-        src/ecs/components/WeaponSpawner.hpp
-        src/ecs/systems/WeaponSpawnerSystem.hpp
-        src/ecs/systems/WeaponSpawnerSystem.cpp
-        src/ecs/systems/DroppedWeaponSystem.hpp
-        src/ecs/systems/DroppedWeaponSystem.cpp
-)
-
-target_include_directories(client PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
-)
-
-# Compile shaders before linking the binary (legacy shaders only).
-add_dependencies(client shaders)
-
-# Copy compiled SPIR-V shaders (legacy only) next to the binary.
-add_custom_command(TARGET client POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${SHADER_OUT_DIR}"
-            "$<TARGET_FILE_DIR:client>/shaders"
-    COMMENT "Copying legacy shaders to client binary directory"
-    VERBATIM
-)
-
-# Copy config.toml next to the client binary.
-add_custom_command(TARGET client POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CONFIG_TOML_SOURCE}"
-            "$<TARGET_FILE_DIR:client>/config.toml"
-    COMMENT "Copying config.toml to client binary directory"
-    VERBATIM
-)
-
-# Copy config.toml next to the group2 binary when it changes.
-add_custom_command(
-    OUTPUT "${CMAKE_BINARY_DIR}/config_client.stamp"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CONFIG_TOML_SOURCE}"
-            "$<TARGET_FILE_DIR:group2>/config.toml"
-    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_client.stamp"
-    DEPENDS "${CONFIG_TOML_SOURCE}"
-    COMMENT "Copying config.toml to group2 binary directory"
-    VERBATIM
-)
-add_custom_target(copy_client_config DEPENDS "${CMAKE_BINARY_DIR}/config_client.stamp")
-add_dependencies(group2 copy_client_config)
-
-# No USE_HYBRID_RENDERER — Game.cpp / Game.hpp use the legacy Renderer directly.
-if(SHADER_BUILD_MSL)
-    target_compile_definitions(client PRIVATE HAVE_MSL_SHADERS)
-endif()
-if(SHADER_BUILD_DXIL)
-    target_compile_definitions(client PRIVATE HAVE_DXIL_SHADERS)
-endif()
-target_compile_definitions(client PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
-
-target_link_libraries(client PRIVATE
-    SDL3::SDL3-static
-    glm::glm
-    SDL3_net::SDL3_net
-    EnTT::EnTT
-    vhacd
-    imgui_lib
-    assimp
-    stb_image
-    minimp3
-    ozz_animation_offline
-    ozz_animation
-    ozz_base
-    tomlplusplus::tomlplusplus
-)
-
-target_precompile_headers(client PRIVATE
-    <string>
-    <vector>
-    <array>
-    <memory>
-    <cstdint>
-    <unordered_map>
-    <functional>
-    <algorithm>
-    <cmath>
-    <glm/glm.hpp>
-    <glm/gtc/matrix_transform.hpp>
-    <glm/gtc/quaternion.hpp>
-    <entt/entt.hpp>
-    <SDL3/SDL.h>
-)
-# PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
-if(PCH_NO_TIMESTAMP_FLAG)
-    target_compile_options(client PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
-endif()
-
-# Copy assets next to the binary (same as group2).
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
-    add_custom_command(TARGET client POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets"
-                "$<TARGET_FILE_DIR:client>/assets"
-        COMMENT "Copying assets to client binary directory"
-        VERBATIM
-    )
 endif()
 
 # ===========================================================================
@@ -1368,7 +1030,7 @@ add_executable(server
         src/client/animation/FbxImportUtils.cpp
         src/client/animation/SkinningBackend.hpp
         src/client/animation/SkinningBackend.cpp
-        src/client/renderer/ModelLoader.hpp
+        src/client/renderer-new/ModelLoader.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1603,13 +1265,11 @@ add_dependencies(clientbot copy_clientbot_config)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
-set_compiler_warnings(client)
 set_compiler_warnings(server)
 set_compiler_warnings(clientbot)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
-enable_sanitizers(client)
 enable_sanitizers(server)
 enable_sanitizers(clientbot)
 
@@ -1627,13 +1287,6 @@ if(WIN32 AND ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
             COMMENT "Copying MSVC ASan runtime DLL to group2 output directory"
             VERBATIM
         )
-        add_custom_command(TARGET client POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_asan_dll}"
-                    "$<TARGET_FILE_DIR:client>/clang_rt.asan_dynamic-x86_64.dll"
-            COMMENT "Copying MSVC ASan runtime DLL to client output directory"
-            VERBATIM
-        )
     else()
         message(WARNING
             "MSVC ASan DLL not found: ${_asan_dll} — "
@@ -1644,7 +1297,6 @@ endif()
 # ---- Windows: suppress min/max macros from <windows.h> ----
 if(WIN32)
     target_compile_definitions(group2 PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_compile_definitions(client PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 # ---- Symlink compile_commands.json to project root for clang-tidy / LSP ----

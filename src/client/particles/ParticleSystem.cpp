@@ -51,7 +51,7 @@ void ParticleSystem::quit()
 
 // update
 
-void ParticleSystem::update(float dt, const Camera& cam, Registry& reg)
+void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
 {
     frameDt_ = dt;
     camPos_ = cam.getEye();

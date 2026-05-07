@@ -52,6 +52,14 @@ public:
     /// @brief Return the combined view-projection matrix.
     [[nodiscard]] glm::mat4 getViewProjectionMatrix() const { return view_projection_; }
 
+    /// @brief Alias for `getViewProjectionMatrix()` — kept short for callsite ergonomics.
+    [[nodiscard]] glm::mat4 getViewProjection() const { return view_projection_; }
+
+    [[nodiscard]] const glm::vec3& getEye() const { return eye_; }
+    [[nodiscard]] glm::vec3 getForward() const;
+    [[nodiscard]] glm::vec3 getRight() const;
+    [[nodiscard]] const glm::vec3& getUp() const { return up_; }
+
 private:
     glm::vec3 eye_{0.0f, 0.0f, 3.0f};
     glm::vec3 target_{0.0f, 0.0f, 0.0f};

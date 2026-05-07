@@ -4,7 +4,7 @@
 #pragma once
 
 #include "FbxImportUtils.hpp"
-#include "renderer/ModelLoader.hpp"
+#include "renderer-new/ModelLoader.hpp"
 
 #include <cstdint>
 #include <memory>

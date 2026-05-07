@@ -23,15 +23,13 @@
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
-#include "network/Client.hpp"    // for NetworkStats
+#include "network/Client.hpp" // for NetworkStats
 #include "particles/ParticleSystem.hpp"
-#include "renderer/Renderer.hpp" // for RenderToggles
 
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cfloat>
 #include <cmath>
-#include <filesystem>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
@@ -140,11 +138,6 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::Checkbox("Movement Chart", &showMovementChart);
     ImGui::Checkbox("Bhop Analyzer", &showBhopAnalyzer);
 
-    ImGui::SeparatorText("Rendering");
-    ImGui::Checkbox("Render Toggles", &showRenderToggles);
-    ImGui::Checkbox("Lighting Controls", &showLightingControls);
-    ImGui::Checkbox("Skybox Selector", &showSkybox);
-
     ImGui::SeparatorText("Gameplay");
     ImGui::Checkbox("Network Stats", &showNetworkStats);
     ImGui::Checkbox("Network Sim", &showNetworkSim);
@@ -178,7 +171,6 @@ void DebugUI::buildUI(const Registry& registry,
                       bool& renderSeparateFromPhysics,
                       bool& inputSyncedWithPhysics,
                       bool& limitFPSToMonitor,
-                      int& ssrMode,
                       const float physicsHz,
                       const float fpsCurrent,
                       const float fpsMin,
@@ -204,7 +196,6 @@ void DebugUI::buildUI(const Registry& registry,
                                    renderSeparateFromPhysics,
                                    inputSyncedWithPhysics,
                                    limitFPSToMonitor,
-                                   ssrMode,
                                    physicsHz,
                                    fpsCurrent,
                                    fpsMin,
@@ -235,7 +226,6 @@ void DebugUI::buildInspectorContents(const Registry& registry,
                                      bool& renderSeparateFromPhysics,
                                      bool& inputSyncedWithPhysics,
                                      bool& limitFPSToMonitor,
-                                     int& ssrMode,
                                      const float physicsHz,
                                      const float fpsCurrent,
                                      const float fpsMin,
@@ -335,16 +325,6 @@ void DebugUI::buildInspectorContents(const Registry& registry,
                           "OFF + monitor <  physics Hz: software limiter at physics Hz\n"
                           "  (sub-physics-Hz monitors always cap at physics Hz for\n"
                           "   smooth frame pacing — the monitor can't display faster)");
-
-    // SSR mode selector.
-    {
-        const char* ssrModes[] = {"Sharp (proximity fade)", "Stochastic (temporal)", "Masked (world-space fade)"};
-        ImGui::Combo("SSR Mode", &ssrMode, ssrModes, 3);
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-            ImGui::SetTooltip("Sharp: deterministic rays, proximity fade near objects\n"
-                              "Stochastic: jittered rays + temporal accumulation (softer)\n"
-                              "Masked: deterministic rays, world-space distance fade (IBL fills contact zone)");
-    }
 
     ImGui::Separator();
 
@@ -961,200 +941,6 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
     ImGui::TextDisabled("T: Hitscan beam    Y: Metal impact");
     ImGui::TextDisabled("U: Smoke cloud     I: Explosion");
     ImGui::TextDisabled("Left-click: Fire weapon");
-
-    ImGui::End();
-}
-
-// Render Toggles window
-
-void DebugUI::buildRenderTogglesUI(Renderer& renderer)
-{
-    if (!showRenderToggles)
-        return;
-
-    RenderToggles& t = renderer.toggles;
-
-    ImGui::SetNextWindowPos({940.f, 10.f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({280.f, 460.f}, ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Render Toggles", &showRenderToggles)) {
-        ImGui::End();
-        return;
-    }
-
-    ImGui::TextDisabled("Toggle systems to profile FPS impact.");
-    ImGui::TextDisabled("Unchecked = skipped entirely (zero cost).");
-    ImGui::Separator();
-
-    // Count enabled systems for the "all on / all off" buttons.
-    bool* allFlags[] = {&t.pbrModels,
-                        &t.entityModels,
-                        &t.weaponViewmodel,
-                        &t.skybox,
-                        &t.shadows,
-                        &t.ssao,
-                        &t.bloom,
-                        &t.ssr,
-                        &t.volumetrics,
-                        &t.tonemap,
-                        &t.particles,
-                        &t.sdfText};
-    constexpr int k_flagCount = 12;
-
-    if (ImGui::Button("All ON")) {
-        for (int i = 0; i < k_flagCount; ++i)
-            *allFlags[i] = true;
-        renderer.aaMode = AAMode::SMAA_T2x;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("All OFF")) {
-        for (int i = 0; i < k_flagCount; ++i)
-            *allFlags[i] = false;
-        renderer.aaMode = AAMode::Off;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Only Post-FX OFF")) {
-        t.ssao = false;
-        t.bloom = false;
-        t.ssr = false;
-        t.volumetrics = false;
-        renderer.aaMode = AAMode::Off;
-    }
-    ImGui::Separator();
-
-    // Geometry
-    ImGui::SeparatorText("Geometry");
-    ImGui::Checkbox("PBR Models (map + scene models)", &t.pbrModels);
-    ImGui::Checkbox("Entity Models (ECS Renderable)", &t.entityModels);
-    ImGui::Checkbox("Weapon Viewmodel (R-301)", &t.weaponViewmodel);
-    ImGui::Checkbox("Skybox", &t.skybox);
-
-    // Lighting
-    ImGui::SeparatorText("Lighting / Shadows");
-    ImGui::Checkbox("Shadow Map", &t.shadows);
-
-    // Post-processing
-    ImGui::SeparatorText("Post-Processing");
-    ImGui::Checkbox("SSAO", &t.ssao);
-    ImGui::Checkbox("Bloom", &t.bloom);
-    ImGui::Checkbox("SSR (Screen-Space Reflections)", &t.ssr);
-    ImGui::Checkbox("Volumetric Lighting", &t.volumetrics);
-
-    // Anti-aliasing mode selection
-    const char* aaModes[] = {"Off", "SMAA 1x", "SMAA T2x"};
-    ImGui::Combo("Anti-Aliasing", reinterpret_cast<int*>(&renderer.aaMode), aaModes, 3);
-
-    // CAS sharpening
-    ImGui::Checkbox("CAS Sharpening", &renderer.casEnabled);
-    if (renderer.casEnabled)
-        ImGui::SliderFloat("CAS Strength", &renderer.casStrength, 0.0f, 1.0f, "%.2f");
-
-    ImGui::Checkbox("Tone Mapping (HDR->LDR)", &t.tonemap);
-
-    // Effects
-    ImGui::SeparatorText("Effects");
-    ImGui::Checkbox("Particle System", &t.particles);
-    ImGui::Checkbox("SDF Text (HUD + World)", &t.sdfText);
-
-    ImGui::End();
-}
-
-void DebugUI::buildLightingUI(Renderer& renderer)
-{
-    if (!showLightingControls)
-        return;
-
-    ImGui::SetNextWindowPos({1230.f, 10.f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({300.f, 520.f}, ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Lighting Controls", &showLightingControls)) {
-        ImGui::End();
-        return;
-    }
-
-    // Sun position
-    ImGui::SeparatorText("Sun Position");
-    ImGui::SliderFloat("Azimuth", &renderer.sunAzimuth, 0.0f, 360.0f, "%.0f deg");
-    ImGui::SliderFloat("Elevation", &renderer.sunElevation, 5.0f, 90.0f, "%.0f deg");
-
-    // Light intensities
-    ImGui::SeparatorText("Light Intensity");
-    ImGui::SliderFloat("Sun", &renderer.sunIntensity, 0.0f, 10.0f, "%.1f");
-    ImGui::SliderFloat("Fill", &renderer.fillIntensity, 0.0f, 3.0f, "%.2f");
-
-    // Ambient
-    ImGui::SeparatorText("Ambient");
-    float amb[3] = {renderer.ambientR, renderer.ambientG, renderer.ambientB};
-    if (ImGui::ColorEdit3("Ambient Color", amb)) {
-        renderer.ambientR = amb[0];
-        renderer.ambientG = amb[1];
-        renderer.ambientB = amb[2];
-    }
-
-    // IBL intensity
-    // Dial IBL Specular below 1.0 if dielectric surfaces (plastic, cloth,
-    // skin) look like polished metal -- real-world HDR environments make
-    // smooth dielectrics look artificially reflective.
-    ImGui::SeparatorText("IBL Intensity");
-    ImGui::SliderFloat("IBL Diffuse", &renderer.iblDiffuseIntensity, 0.0f, 2.0f, "%.2f");
-    ImGui::SliderFloat("IBL Specular", &renderer.iblSpecularIntensity, 0.0f, 2.0f, "%.2f");
-
-    // Post-processing
-    ImGui::SeparatorText("Post-Processing");
-    ImGui::SliderFloat("Bloom", &renderer.bloomStr, 0.0f, 1.0f, "%.3f");
-    ImGui::SliderFloat("SSAO", &renderer.ssaoStr, 0.0f, 2.0f, "%.2f");
-    ImGui::SliderFloat("AO Radius", &renderer.ssaoRadius, 0.1f, 5.0f, "%.2f");
-    ImGui::SliderFloat("AO Falloff", &renderer.ssaoFalloff, 0.5f, 4.0f, "%.1f");
-    ImGui::SliderFloat("AO Power", &renderer.ssaoPower, 0.5f, 3.0f, "%.1f");
-    ImGui::SliderFloat("SSR", &renderer.ssrStr, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Volumetric", &renderer.volStr, 0.0f, 1.0f, "%.3f");
-    ImGui::SliderFloat("Sharpen", &renderer.sharpenStr, 0.0f, 2.0f, "%.2f");
-
-    // Cascaded Shadow Maps
-    ImGui::SeparatorText("Cascaded Shadows");
-    ImGui::SliderFloat("Depth Bias", &renderer.shadowBiasVal, 0.0f, 0.01f, "%.5f");
-    ImGui::SliderFloat("Normal Bias", &renderer.shadowNormalBiasVal, 0.0f, 5.0f, "%.2f");
-    ImGui::SliderFloat("Shadow Distance", &renderer.shadowDistance, 500.0f, 10000.0f, "%.0f");
-    ImGui::SliderFloat("Cascade Lambda", &renderer.cascadeLambda, 0.0f, 1.0f, "%.2f");
-
-    ImGui::End();
-}
-
-void DebugUI::buildSkyboxUI(Renderer& renderer)
-{
-    if (!showSkybox)
-        return;
-
-    ImGui::SetNextWindowPos({940.f, 480.f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({280.f, 300.f}, ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Skybox", &showSkybox)) {
-        ImGui::End();
-        return;
-    }
-
-    ImGui::Text("Current: %s", renderer.currentHDRName.c_str());
-    ImGui::Separator();
-
-    if (ImGui::Button("Procedural Sky")) {
-        renderer.useHDRSkybox = false;
-        renderer.currentHDRName = "(procedural)";
-    }
-    ImGui::Separator();
-
-    ImGui::Text("HDR Environments:");
-    for (const auto& path : renderer.availableHDRFiles) {
-        // Extract filename stem for display.
-        auto stem = std::filesystem::path(path).stem().string();
-        bool isCurrent = (renderer.useHDRSkybox && stem == renderer.currentHDRName);
-
-        if (isCurrent)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
-
-        if (ImGui::Button(stem.c_str(), ImVec2(-1, 0))) {
-            renderer.loadHDRSkybox(path);
-        }
-
-        if (isCurrent)
-            ImGui::PopStyleColor();
-    }
 
     ImGui::End();
 }
