@@ -32,6 +32,8 @@ inline bool tryPickup(Registry& registry, Position dropPos, CollisionShape dropS
                   const PlayerVisState& pvis) {
         if (consumed)
             return;
+        if (pvis.isDead) // dead players still have Position+WeaponState; don't let
+            return;      // them self-consume drops created at their death point.
 
         // Overlap-grab refill: walking through a dropped weapon of a type the
         // player already holds tops that slot up using the snapshot ammo.
