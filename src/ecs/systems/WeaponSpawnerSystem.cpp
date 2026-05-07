@@ -93,19 +93,21 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
             // back to PRIMARY. The grenade slot is exclusive to grenade types
             // (canAcceptType enforces this), so a rifle pickup can never land
             // there even if the player happens to have grenade equipped.
-            const WeaponSlot k_target =
+            const WeaponSlot targetSlot =
                 canAcceptType(weapon.current, spawner.type) ? weapon.current : WeaponSlot::PRIMARY;
-            if (!canAcceptType(k_target, spawner.type)) {
+            if (!canAcceptType(targetSlot, spawner.type)) {
                 // Fallback slot can't accept this type either (e.g. a
                 // hypothetical world-spawned grenade hitting this path).
                 // Reject the pickup rather than silently dropping it into
                 // the wrong slot.
+                // TODO: when world-spawned grenade pickups exist, route them to the GRENADE slot
+                // instead of silently dropping. (Stub policy for v1: WeaponSpawner only emits guns.)
                 return;
             }
             spawner.hasWeapon = false;
             spawner.spawnCooldown = weaponCooldownTime;
             const WeaponConfig& config = getWeaponConfig(spawner.type);
-            getSlot(weapon, k_target) = GunInstance{
+            getSlot(weapon, targetSlot) = GunInstance{
                 .type = spawner.type,
                 .totalAmmo = config.defaultAmmoCapacity,
                 .currentMagAmmo = config.magazineSize,

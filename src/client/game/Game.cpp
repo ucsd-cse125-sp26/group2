@@ -3280,6 +3280,7 @@ SDL_AppResult Game::iterate()
             // (single source of truth — see Task 6b); we still surface "∞" as
             // 9 if the local player exists.
             int grenadeCount = 2; // sensible default if no local WeaponState yet
+            // TODO: read getSlot(ws, WeaponSlot::GRENADE).totalAmmo once finite carry counts land (deferred from v1).
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& /*ws*/) { grenadeCount = 9; });
             hudState.equipment.grenadeCount = grenadeCount;
             hudState.equipment.grenadeCharge = 1.f;

@@ -68,6 +68,9 @@ inline bool isGrenadeType(WeaponType type)
 /// non-grenade types. WeaponSpawnerSystem calls this before assigning any
 /// picked-up gun to a slot, so a rifle pickup never overwrites the player's
 /// grenade and a hypothetical world-spawned grenade never overwrites a real gun.
+/// @note XNOR works for the current 2-family partition (grenade vs everything else).
+///       Adding a 3rd family (e.g. melee) will require a slot-keyed table — see
+///       WeaponSlot doc.
 inline bool canAcceptType(WeaponSlot slot, WeaponType type)
 {
     const bool slotIsGrenade = (slot == WeaponSlot::GRENADE);
