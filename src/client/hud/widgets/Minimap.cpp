@@ -4,6 +4,7 @@
 #include "Minimap.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
 
 #include <SDL3/SDL.h>
@@ -58,32 +59,37 @@ void Minimap::draw(HudContext& ctx, float x, float y)
     const float cx = x + ms * 0.5f;
     const float cy = y + ms * 0.5f;
 
-    // Local player chevron — amber upward-pointing arrow at center.
-    {
-        const float arrow = 8.f * s;
-        // Body line.
-        ctx.rect(cx - 0.75f * s, cy - arrow * 0.5f, 1.5f * s, arrow, k_amber);
-        // Head: two short legs forming an arrow tip.
-        ctx.rotatedRect(cx - arrow * 0.45f, cy - arrow * 0.30f, 1.5f * s, arrow * 0.7f, -45.f, k_amber);
-        ctx.rotatedRect(cx + arrow * 0.45f, cy - arrow * 0.30f, 1.5f * s, arrow * 0.7f, 45.f, k_amber);
-    }
+    // Local player chevron — shared notched-arrow glyph from the icon module.
+    icons::playerArrow(ctx, std::round(cx), std::round(cy), 14.f * s, k_amber);
 
-    // Enemy dots (red), rotated by yaw so player-forward is up.
+    // Enemy dots (red), rotated by yaw so player-forward is up. Dots beyond
+    // the radar's range are clamped (max-norm projection) to the nearest edge
+    // so the player still gets a directional cue instead of a hard cull.
     const float worldToPixel = ms / (worldRange_ * 2.f);
     const float sinYaw = std::sin(localYaw_);
     const float cosYaw = std::cos(localYaw_);
     const float dotPx = dotSize * s;
+    const float halfMs = ms * 0.5f;
+    const float edgeMargin = (dotPx * 0.5f) + 1.f;
+    const float maxAbs = halfMs - edgeMargin;
     for (const auto& e : enemies_) {
         const float wdx = (e.worldX - localX_) * worldToPixel;
         const float wdz = (e.worldZ - localZ_) * worldToPixel;
-        const float dx = wdx * cosYaw - wdz * sinYaw;
-        const float dz = wdx * sinYaw + wdz * cosYaw;
+        float dx = wdx * cosYaw - wdz * sinYaw;
+        float dz = wdx * sinYaw + wdz * cosYaw;
+        const float absDx = std::abs(dx);
+        const float absDz = std::abs(dz);
+        if (absDx > maxAbs || absDz > maxAbs) {
+            // Scale the longer axis to the edge; the other follows along the
+            // same radial direction so the dot lands on the radar border.
+            const float scale = maxAbs / std::max(absDx, absDz);
+            dx *= scale;
+            dz *= scale;
+        }
         const float ex = cx - dx;
         const float ey = cy - dz;
-        if (ex > x + 1.f && ex < x + ms - 1.f && ey > y + 1.f && ey < y + ms - 1.f) {
-            // Square dot for the mil-spec feel (rotated 45° = diamond).
-            ctx.rotatedRect(ex, ey, dotPx, dotPx, 45.f, k_red);
-        }
+        // Square dot for the mil-spec feel (rotated 45° = diamond).
+        ctx.rotatedRect(ex, ey, dotPx, dotPx, 45.f, k_red);
     }
 
     (void)borderThickness; // border thickness handled by drawPanel.

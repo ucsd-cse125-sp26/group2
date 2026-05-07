@@ -43,14 +43,22 @@ void MatchHeader::draw(HudContext& ctx, float cx, float y)
     char timeBuf[16];
     SDL_snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", seconds_ / 60, seconds_ % 60);
     char subBuf[24];
-    SDL_snprintf(subBuf, sizeof(subBuf), "FRAG %s %d", useElapsed_ ? "·" : "←", fragTarget_);
+    // ":" instead of "·" / "←" — both UTF-8 chars are missing from the SDF
+    // atlas and would render as gaps that further destabilise the panel
+    // width.  A plain ASCII separator keeps the readout in-font.
+    SDL_snprintf(subBuf, sizeof(subBuf), "FRAG : %d", fragTarget_);
 
-    const float timeW = ctx.measureText(timeBuf, bigFs);
-    const float subW = ctx.measureText(subBuf, subFs);
-    const float panelW = std::max(timeW, subW) + padX * 2.f;
+    // Lock the panel width to a stable reference string so the box doesn't
+    // breathe in/out as digit shapes change ("00:36" → "00:37" had different
+    // widths because the SDF font isn't strictly tabular). Use the widest
+    // possible time string ("99:59") plus the fixed-format sub-string as
+    // the basis, and pad to the larger of the two.
+    const float refTimeW = ctx.measureText("99:59", bigFs);
+    const float refSubW = ctx.measureText(subBuf, subFs);
+    const float panelW = std::max(refTimeW, refSubW) + padX * 2.f;
     const float panelH = bigFs + subFs + padY * 2.f + 4.f * s;
-    const float px = cx - panelW * 0.5f;
-    const float py = y;
+    const float px = std::round(cx - panelW * 0.5f);
+    const float py = std::round(y);
 
     drawPanel(ctx, px, py, panelW, panelH, k_bgPanel, k_line, 1.f);
     drawCornerBrackets(ctx, px, py, panelW, panelH, 12.f * s, 1.f * s, 3.f * s, k_amber);

@@ -217,7 +217,7 @@ struct HudGameState
     float localPlayerX = 0.f, localPlayerZ = 0.f;
     float localPlayerYaw = 0.f;       ///< Player facing direction (radians, 0 = +Z, CW).
     std::span<const HudMinimapDot> enemyDots;
-    float minimapWorldRange = 1000.f; ///< World units visible in each direction from center.
+    float minimapWorldRange = 4000.f; ///< World units visible in each direction from center.
 
     // Vignette events (set by Game each frame based on health/armor deltas).
     bool tookDamage = false;     ///< True the frame health or armor decreased.

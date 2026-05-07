@@ -4,6 +4,7 @@
 #include "HealthArmorBar.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/HudIcons.hpp"
 #include "hud/HudTween.hpp"
 #include "hud/VoidfallStyle.hpp"
 
@@ -107,13 +108,10 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
                  std::clamp(trailHealth_, 0.f, 1.f),
                  k_red,
                  HudColor{0.95f, 0.95f, 0.95f, 0.45f});
-    // HP icon: blocky cross matching the prototype's `Glyph.hp` plus shape.
+    // HP icon: medical-cross glyph from the shared icon module.
     const float ix = x;
     const float iy = hpIconY;
-    const float u = iconW / 14.f;                           // Map the SVG 14-px grid onto current icon size.
-    ctx.rect(ix + 2 * u, iy + 5 * u, 3 * u, 4 * u, k_red);  // left arm
-    ctx.rect(ix + 9 * u, iy + 5 * u, 3 * u, 4 * u, k_red);  // right arm
-    ctx.rect(ix + 5 * u, iy + 2 * u, 4 * u, 10 * u, k_red); // vertical body
+    icons::hp(ctx, ix, iy, iconW, k_red);
 
     // Health numeral (right-aligned).
     char hpText[16];
@@ -132,23 +130,8 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
                  std::clamp(trailArmor_, 0.f, 1.f),
                  k_cyan,
                  HudColor{0.95f, 0.95f, 0.95f, 0.45f});
-    // Shield icon: stroked shield outline.  Approximated with three short
-    // rect strokes (top + two diagonals) since HudContext lacks vector paths.
-    {
-        const float six = ix;
-        const float siy = shIconY - 1.f * s;
-        const float sw = iconW;
-        const float sh = iconW;
-        // Top hairline.
-        ctx.rect(six + sw * 0.18f, siy + sh * 0.10f, sw * 0.64f, 1.4f * s, k_cyan);
-        // Side hairlines.
-        ctx.rect(six + sw * 0.14f, siy + sh * 0.10f, 1.4f * s, sh * 0.55f, k_cyan);
-        ctx.rect(six + sw * 0.84f - 1.4f * s, siy + sh * 0.10f, 1.4f * s, sh * 0.55f, k_cyan);
-        // Bottom V.
-        ctx.rect(six + sw * 0.20f, siy + sh * 0.62f, sw * 0.30f, 1.4f * s, k_cyan);
-        ctx.rect(six + sw * 0.50f, siy + sh * 0.62f, sw * 0.30f, 1.4f * s, k_cyan);
-        ctx.rect(six + sw * 0.42f, siy + sh * 0.78f, sw * 0.16f, 1.4f * s, k_cyan);
-    }
+    // Shield icon: heater-shield outline from the shared icon module.
+    icons::shield(ctx, ix, shIconY - 1.f * s, iconW, k_cyan);
 
     // Shield numeral.
     char shText[16];

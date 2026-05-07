@@ -30,6 +30,16 @@ public:
     void roundedRect(float x, float y, float w, float h, float radius, HudColor color);
     void rotatedRect(float cx, float cy, float w, float h, float angleDeg, HudColor color);
 
+    /// @brief Emit a single solid-colored triangle (3 vertices).
+    void triangle(float x0, float y0, float x1, float y1, float x2, float y2, HudColor color);
+
+    /// @brief Stroke a polyline with sharp-mitred corners using rotated rects.
+    /// @param points 2*N pairs (x0,y0,x1,y1,...) — N >= 2.
+    /// @param numPoints Number of (x,y) points.
+    /// @param thickness Line width in pixels.
+    /// @param color    Stroke color.
+    void polyline(const float* points, int numPoints, float thickness, HudColor color);
+
     // ── Bars ────────────────────────────────────────────────────────────
 
     void bar(float x, float y, float w, float h, float fill01, HudColor fg, HudColor bg);

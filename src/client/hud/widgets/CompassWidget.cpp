@@ -46,10 +46,17 @@ void CompassWidget::draw(HudContext& ctx, float cx, float y)
     drawPanel(ctx, x, y, w, h, HudColor{0.10f, 0.09f, 0.08f, 0.85f}, k_lineDim, 1.f);
 
     // Ticks every 5° across the visible FOV.
+    //
+    // The previous direction was inverted: turning right scrolled labels the
+    // wrong way because the project's yaw convention has +yaw = CCW (left
+    // turn), not CW like the comment claimed. We compensate by negating the
+    // visual offset so labels move in the player-intuitive direction (turn
+    // right → labels scroll left, exposing east when previously facing
+    // north).
     for (int d = -static_cast<int>(halfFov); d <= static_cast<int>(halfFov); d += 5) {
         const float relX = (static_cast<float>(d) / halfFov) * (w * 0.5f);
         const float tx = cx + relX;
-        const float actual = std::fmod(headingDeg_ + static_cast<float>(d) + 360.f, 360.f);
+        const float actual = std::fmod(headingDeg_ - static_cast<float>(d) + 720.f, 360.f);
 
         const bool isCardinal = std::fmod(actual + 1.5f, 90.f) < 3.f;
         const bool isMajor = std::fmod(actual + 2.5f, 45.f) < 5.f;

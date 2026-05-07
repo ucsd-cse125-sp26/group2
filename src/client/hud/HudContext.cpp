@@ -143,6 +143,38 @@ void HudContext::rectOutline(float x, float y, float w, float h, float thickness
     rect(x + w - thickness, y + thickness, thickness, h - 2 * thickness, color); // right
 }
 
+void HudContext::triangle(float x0, float y0, float x1, float y1, float x2, float y2, HudColor c)
+{
+    spanDirty_ = true;
+    auto v = [&](float px, float py) -> HudVertex {
+        return HudVertex{{px, py}, {0.f, 0.f}, {c.r, c.g, c.b, c.a}, 0.f, {0, 0, 0}};
+    };
+    vertices_.push_back(v(x0, y0));
+    vertices_.push_back(v(x1, y1));
+    vertices_.push_back(v(x2, y2));
+}
+
+void HudContext::polyline(const float* points, int numPoints, float thickness, HudColor color)
+{
+    if (!points || numPoints < 2)
+        return;
+    for (int i = 0; i < numPoints - 1; ++i) {
+        const float x0 = points[i * 2 + 0];
+        const float y0 = points[i * 2 + 1];
+        const float x1 = points[i * 2 + 2];
+        const float y1 = points[i * 2 + 3];
+        const float dx = x1 - x0;
+        const float dy = y1 - y0;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len < 1e-3f)
+            continue;
+        const float angDeg = std::atan2(dy, dx) * 180.f / 3.14159265f + 90.f;
+        const float cx = (x0 + x1) * 0.5f;
+        const float cy = (y0 + y1) * 0.5f;
+        rotatedRect(cx, cy, thickness, len, angDeg, color);
+    }
+}
+
 void HudContext::roundedRect(float x, float y, float w, float h, float radius, HudColor color)
 {
     const float halfW = w * 0.5f;
@@ -192,20 +224,27 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
     else if (align == HudAlign::Right)
         startX = x - totalWidth;
 
-    // Snap the starting cursor to whole pixels so every glyph in the string
-    // lands on the same subpixel grid.  Without this, identical characters
-    // (e.g. the two zeros in "100") get different bilinear sampling patterns
-    // and appear to have different widths.
+    // Pixel-snap the starting cursor and the baseline so glyphs land on a
+    // consistent subpixel grid (eliminates the "100" / "111" sampling drift
+    // where identical zero-glyphs render at slightly different widths).
     float cursorX = std::round(startX);
-    const float baselineY = std::round(y + size); // baseline, pixel-snapped
+    const float baselineY = std::round(y + size);
 
+    // Per-glyph cursor accumulation is the source of the inter-glyph jitter
+    // in the original implementation: a fractional `advance * scale` would
+    // compound, and rounding *only* the position made some glyphs land at
+    // an 8-px gap and others at 9-px, even when the source glyphs were
+    // identical.  We track the cursor in float for sub-pixel accuracy of
+    // the whole string but compute each glyph's quad anchor as the
+    // round-to-nearest of `cursorX + bearing*scale`, then advance the
+    // cursor by an integer-rounded delta so identical successor glyphs
+    // step by exactly the same number of pixels.
     for (const char* p = str; *p; ++p) {
         const uint32_t cp = static_cast<uint8_t>(*p);
         const GlyphInfo* gi = sdfAtlas_->glyph(cp);
         if (!gi)
             continue;
 
-        // Advance the cursor even for whitespace glyphs (which have width/height 0).
         const float gw = gi->width * scale;
         const float gh = gi->height * scale;
         if (gw > 0.f && gh > 0.f) {
@@ -214,7 +253,9 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
             emitQuad(gx, gy, gw, gh, gi->uvMin.x, gi->uvMin.y, gi->uvMax.x, gi->uvMax.y, color, 1.f);
         }
 
-        cursorX += gi->advance * scale;
+        // Round the per-glyph advance so successive identical glyphs step
+        // by the same integer number of pixels, killing the spacing jitter.
+        cursorX += std::round(gi->advance * scale);
     }
 }
 

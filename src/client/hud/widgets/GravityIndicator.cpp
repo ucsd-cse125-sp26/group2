@@ -4,6 +4,7 @@
 #include "GravityIndicator.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
 
 #include <cmath>
@@ -34,64 +35,27 @@ void GravityIndicator::draw(HudContext& ctx, float anchorX, float anchorY)
 
     drawPanel(ctx, x, y, ds, ds, k_bgPanel, k_line, 1.f);
 
-    // Outer dotted ring (dashed circle outline).
+    // Outer dotted ring (every-other tick missing for the dashed effect).
     {
         const float r = ds * 0.36f;
         const int dashes = 24;
         const float t = 1.0f * s;
         for (int i = 0; i < dashes; ++i) {
-            // Skip every other tick to give a dashed effect.
             if (i % 2 == 0)
                 continue;
-            const float a = static_cast<float>(i) / dashes * (2.f * std::numbers::pi_v<float>);
+            const float a = static_cast<float>(i) / static_cast<float>(dashes) * (2.f * std::numbers::pi_v<float>);
             const float bx = cx + std::cos(a) * r;
             const float by = cy + std::sin(a) * r;
             ctx.rotatedRect(bx, by, t, 4.f * s, (a * 180.f / std::numbers::pi_v<float>)+90.f, k_lineDim);
         }
     }
 
-    // Inner faint ring.
-    {
-        const float r = ds * 0.25f;
-        const int segs = 24;
-        const float t = 0.7f * s;
-        for (int i = 0; i < segs; ++i) {
-            const float a = static_cast<float>(i) / segs * (2.f * std::numbers::pi_v<float>);
-            const float bx = cx + std::cos(a) * r;
-            const float by = cy + std::sin(a) * r;
-            ctx.rotatedRect(bx, by, t, 2.f * s, (a * 180.f / std::numbers::pi_v<float>)+90.f, k_lineDim);
-        }
-    }
+    // Inner faint ring drawn via the icon module's stroked-circle helper for
+    // consistency with the rest of the HUD's circular geometry.
+    icons::strokedCircle(ctx, cx, cy, ds * 0.25f, 0.7f * s, 24, k_lineDim);
 
-    // Amber arrow pointing in the gravity direction.
-    const float angleDeg = static_cast<float>(direction_) * 90.f; // 0=down, 1=left, 2=up, 3=right
-    const float arrowLen = ds * 0.45f;
-    const float arrowThk = 1.8f * s;
-    // Body.
-    ctx.rotatedRect(cx, cy, arrowThk, arrowLen, angleDeg, k_amber);
-    // Head: two short rotated rects forming a chevron tip pointing in the
-    // arrow direction.  We rotate by (angle ± 45°) and offset the chevron
-    // tip toward the head end of the body.
-    const float radLeg = (angleDeg + 90.f) * std::numbers::pi_v<float> / 180.f;
-    const float dxL = std::cos(radLeg);
-    const float dyL = std::sin(radLeg);
-    (void)dxL;
-    (void)dyL;
-    // Compute the head endpoint along the body direction.
-    const float bodyRad = angleDeg * std::numbers::pi_v<float> / 180.f;
-    const float headX = cx + std::sin(bodyRad) * arrowLen * 0.5f;
-    const float headY = cy + std::cos(bodyRad) * arrowLen * 0.5f;
-    const float legLen = arrowLen * 0.40f;
-    ctx.rotatedRect(headX - std::sin(bodyRad) * legLen * 0.30f,
-                    headY - std::cos(bodyRad) * legLen * 0.30f,
-                    arrowThk,
-                    legLen,
-                    angleDeg + 45.f,
-                    k_amber);
-    ctx.rotatedRect(headX - std::sin(bodyRad) * legLen * 0.30f,
-                    headY - std::cos(bodyRad) * legLen * 0.30f,
-                    arrowThk,
-                    legLen,
-                    angleDeg - 45.f,
-                    k_amber);
+    // Amber arrow pointing in the gravity direction.  Routed through the
+    // shared icon module so this glyph stays consistent with anywhere else
+    // a directional arrow shows up.
+    icons::gravityArrow(ctx, x, y, ds, direction_, k_amber);
 }

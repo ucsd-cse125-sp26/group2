@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="12" height="12">
+  <!-- Down-arrow (default; widgets rotate to point in current gravity direction) -->
+  <path d="M6 2 v6 M3.5 5.5 L6 8 L8.5 5.5"
+        fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+</svg>

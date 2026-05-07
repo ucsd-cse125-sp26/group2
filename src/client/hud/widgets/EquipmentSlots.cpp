@@ -4,6 +4,7 @@
 #include "EquipmentSlots.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
 
 #include <SDL3/SDL.h>
@@ -24,56 +25,8 @@ void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPoo
     visible = state.isAlive;
 }
 
-namespace
-{
-
-/// @brief Draw the simple grapple-hook silhouette (chevron + line).
-void drawGrappleIcon(HudContext& ctx, float x, float y, float size, HudColor c)
-{
-    const float u = size / 14.f;
-    // Diagonal rope.
-    ctx.rotatedRect(x + 4.5f * u, y + 9.5f * u, 1.4f * u, 8.f * u, -45.f, c);
-    // Hook head: small T at the top.
-    ctx.rect(x + 4.f * u, y + 4.f * u, 6.f * u, 1.4f * u, c);
-    ctx.rect(x + 6.5f * u, y + 4.f * u, 1.4f * u, 3.f * u, c);
-    // Hook prongs.
-    ctx.rotatedRect(x + 5.5f * u, y + 6.0f * u, 1.4f * u, 2.5f * u, -30.f, c);
-    ctx.rotatedRect(x + 8.5f * u, y + 6.0f * u, 1.4f * u, 2.5f * u, 30.f, c);
-}
-
-/// @brief Draw the grenade silhouette (round body + collar + lever).
-void drawGrenadeIcon(HudContext& ctx, float x, float y, float size, HudColor c)
-{
-    const float u = size / 14.f;
-    // Body — approximate a circle with a rotated square for now.
-    ctx.rotatedRect(x + 7.f * u, y + 9.f * u, 7.f * u, 7.f * u, 0.f, c);
-    // Collar + lever.
-    ctx.rect(x + 5.5f * u, y + 3.f * u, 3.f * u, 2.5f * u, c);
-    ctx.rotatedRect(x + 9.5f * u, y + 2.5f * u, 1.4f * u, 2.f * u, 30.f, c);
-}
-
-/// @brief Tactical: simple iris (outer ring + center pip).
-void drawTacticalIcon(HudContext& ctx, float x, float y, float size, HudColor c)
-{
-    const float u = size / 14.f;
-    const float cx = x + 7.f * u;
-    const float cy = y + 7.f * u;
-    const float r = 5.f * u;
-    const float t = 1.4f * u;
-    // 16-segment ring.
-    const int segs = 16;
-    for (int i = 0; i < segs; ++i) {
-        const float a = static_cast<float>(i) / segs * 6.28318f;
-        const float bx = cx + std::cos(a) * r;
-        const float by = cy + std::sin(a) * r;
-        const float segLen = (6.28318f * r) / segs + 0.6f * u;
-        ctx.rotatedRect(bx, by, t * 0.7f, segLen, (a * 180.f / std::numbers::pi_v<float>)+90.f, c);
-    }
-    // Center pip.
-    ctx.rect(cx - 1.f * u, cy - 1.f * u, 2.f * u, 2.f * u, c);
-}
-
-} // namespace
+// Icon shapes are now centralised in `hud/HudIcons` so every widget reaches
+// the same shield/grapple/grenade silhouettes.
 
 void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
 {
@@ -121,11 +74,11 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
         const float ix = x + pad;
         const float iy = y + pad;
         if (sl.isGrapple)
-            drawGrappleIcon(ctx, ix, iy, iconSize, iconC);
+            icons::grapple(ctx, ix, iy, iconSize, iconC);
         else if (sl.isGrenade)
-            drawGrenadeIcon(ctx, ix, iy, iconSize, iconC);
+            icons::grenade(ctx, ix, iy, iconSize, iconC);
         else if (sl.isTactical)
-            drawTacticalIcon(ctx, ix, iy, iconSize, iconC);
+            icons::tactical(ctx, ix, iy, iconSize, iconC);
 
         // Key tab (top-right).
         const float keyFs = keyFontSize * s;

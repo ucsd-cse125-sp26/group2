@@ -39,6 +39,16 @@ void EnemyWorldHealthBar::update(float dt, const HudGameState& state, HudTweenPo
         const int newHp = we.health;
         const int newSh = we.armor;
 
+        // First time we've seen this enemy — seed the cache silently, no
+        // visibility window.  Otherwise: refresh the show timer whenever the
+        // enemy's HP or shield drops, so the bar pops into view exactly when
+        // they're being shot at and lingers for `showAfterDamageSecs` after
+        // the last hit before fading.
+        const bool tookDamage = e.initialized && (newHp < e.displayHp || newSh < e.displaySh);
+        if (tookDamage)
+            e.showTimer = showAfterDamageSecs + fadeOutSecs;
+        e.initialized = true;
+
         if (newHp < e.displayHp) {
             e.trailHp = static_cast<float>(e.displayHp) / static_cast<float>(e.maxHp);
             e.trailHpHold = 0.4f;
@@ -64,7 +74,7 @@ void EnemyWorldHealthBar::update(float dt, const HudGameState& state, HudTweenPo
         e.liveSh += (targetSh - e.liveSh) * lerp;
     }
 
-    // Decay trail holds, then drain trails.
+    // Decay trail holds, drain trails, decay show timer.
     for (auto& [_, e] : enemies_) {
         if (e.trailHpHold > 0.f)
             e.trailHpHold = std::max(0.f, e.trailHpHold - dt);
@@ -74,17 +84,17 @@ void EnemyWorldHealthBar::update(float dt, const HudGameState& state, HudTweenPo
             e.trailHp = std::max(e.liveHp, e.trailHp - dt / 0.6f);
         if (e.trailShHold <= 0.f && e.trailSh > e.liveSh)
             e.trailSh = std::max(e.liveSh, e.trailSh - dt / 0.6f);
+
+        if (e.showTimer > 0.f)
+            e.showTimer = std::max(0.f, e.showTimer - dt);
     }
 
-    // Garbage-collect stale entries (enemy left the visible set & trails finished).
+    // Garbage-collect stale entries (enemy left the world).
     for (auto it = enemies_.begin(); it != enemies_.end();) {
-        if (!it->second.alive && it->second.trailHpHold <= 0.f && it->second.trailShHold <= 0.f &&
-            it->second.trailHp <= it->second.liveHp + 0.001f && it->second.trailSh <= it->second.liveSh + 0.001f)
-        {
+        if (!it->second.alive)
             it = enemies_.erase(it);
-        } else {
+        else
             ++it;
-        }
     }
 }
 
@@ -101,35 +111,38 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
     for (const auto& [_, e] : enemies_) {
         if (!e.alive)
             continue;
+        // Hide entirely until this enemy has been damaged recently.
+        if (e.showTimer <= 0.f)
+            continue;
 
         // Project world point to clip space.
         const glm::vec4 clip = viewProj_ * glm::vec4(e.worldX, e.worldY, e.worldZ, 1.f);
         if (clip.w <= 0.f)
-            continue;
+            continue; // behind camera
         const float ndcX = clip.x / clip.w;
         const float ndcY = clip.y / clip.w;
         if (std::abs(ndcX) > 1.2f || std::abs(ndcY) > 1.2f)
             continue;
-        float sx = (ndcX * 0.5f + 0.5f) * screenW_;
-        float sy = (ndcY * 0.5f + 0.5f) * screenH_;
+        float sx = std::round((ndcX * 0.5f + 0.5f) * screenW_);
+        float sy = std::round((ndcY * 0.5f + 0.5f) * screenH_);
         sy -= yOffsetPx * s;
 
-        // Header: name + raw HP value.
-        char hpText[16];
-        SDL_snprintf(hpText, sizeof(hpText), "%d", e.hp);
-        const float nameW = ctx.measureText(e.name.c_str(), fs);
-        const float numW = ctx.measureText(hpText, fs * 0.85f);
-        const float headerW = nameW + numW + 8.f * s;
-        const float headerY = sy - fs - 6.f * s;
+        // Fade alpha during the last `fadeOutSecs` of the visibility window.
+        const float alpha = std::clamp(e.showTimer / fadeOutSecs, 0.f, 1.f);
 
-        ctx.text(e.name.c_str(), sx - headerW * 0.5f, headerY, fs, k_red, HudAlign::Left);
-        ctx.text(hpText, sx + headerW * 0.5f, headerY + fs * 0.15f, fs * 0.85f, k_textDim, HudAlign::Right);
+        // Layout (top-down): [name]  [shield bar]  [hp bar].  No HP number,
+        // shorter bars, name pixel-snapped so it doesn't shimmer.
+        const float barX = std::round(sx - bw * 0.5f);
+
+        // Name baseline above the bars — design feedback wanted the
+        // nickname *in front* of the bars, not behind.
+        const float nameTop = std::round(sy - hpH - (e.maxSh > 0 ? shH + 2.f * s : 0.f) - 4.f * s - fs);
+        ctx.text(e.name.c_str(), sx, nameTop, fs, withAlpha(k_red, alpha), HudAlign::Center);
 
         // Shield bar (above HP) — only when target has any shield max.
-        const float barX = sx - bw * 0.5f;
-        float barY = sy - hpH;
+        float barY = std::round(sy - hpH);
         if (e.maxSh > 0 && (e.liveSh > 0.001f || e.trailSh > 0.001f)) {
-            const float bgY = barY - shH - 2.f * s;
+            const float bgY = std::round(barY - shH - 2.f * s);
             drawTrailBar(ctx,
                          barX,
                          bgY,
@@ -137,10 +150,10 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
                          shH,
                          std::clamp(e.liveSh, 0.f, 1.f),
                          std::clamp(e.trailSh, 0.f, 1.f),
-                         k_cyan,
-                         HudColor{0.95f, 0.95f, 0.95f, 0.45f},
-                         HudColor{0.04f, 0.04f, 0.04f, 0.7f},
-                         k_lineDim);
+                         withAlpha(k_cyan, alpha),
+                         HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
+                         HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
+                         withAlpha(k_lineDim, alpha));
         }
 
         // HP bar.
@@ -151,9 +164,9 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
                      hpH,
                      std::clamp(e.liveHp, 0.f, 1.f),
                      std::clamp(e.trailHp, 0.f, 1.f),
-                     k_red,
-                     HudColor{0.95f, 0.95f, 0.95f, 0.45f},
-                     HudColor{0.04f, 0.04f, 0.04f, 0.7f},
-                     k_lineDim);
+                     withAlpha(k_red, alpha),
+                     HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
+                     HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
+                     withAlpha(k_lineDim, alpha));
     }
 }
