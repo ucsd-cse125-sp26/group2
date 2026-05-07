@@ -15,6 +15,7 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
+#include "ecs/systems/FireSystem.hpp"
 
 #include <glm/geometric.hpp>
 
@@ -40,9 +41,7 @@ namespace
 /// @brief Detonate a grenade at its current position based on its GrenadeConfig.
 ///
 /// For Explosion-kind: queues a damage+knockback explosion.
-/// For FireField-kind: spawns a FireField entity (Task 10 implements the system).
-///   Until Task 10 lands, this branch is a no-op stub — Molotov visibly destroys
-///   without leaving fire. Easy to grep for the TODO when Task 10 lands.
+/// For FireField-kind: spawns a FireField entity that applies DoT damage over time.
 void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3 position)
 {
     if (!isGrenadeType(projectile.type)) {
@@ -62,9 +61,7 @@ void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3
                        cfg.knockbackFalloffExp);
         break;
     case GrenadeDetonationKind::FireField:
-        // TODO(task 10): replace with spawnFireField(registry, position,
-        //                cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner);
-        (void)position; // silence unused-parameter warning until Task 10
+        spawnFireField(registry, position, cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner);
         break;
     }
 }
