@@ -132,7 +132,7 @@ inline void drawPanel(HudContext& ctx,
     ctx.rectOutline(x, y, w, h, thickness, border);
 }
 
-/// @brief Draw a horizontal stat bar with a damage-trail ghost.
+/// @brief Draw a horizontal stat bar with a damage-trail ghost (solid fill).
 ///
 /// Background fill, then a translucent ghost-trail rectangle (where the bar
 /// was before the latest damage tick), then the live fill on top.  This is the
@@ -158,6 +158,53 @@ inline void drawTrailBar(HudContext& ctx,
     if (fill01 > 0.f)
         ctx.rect(x, y, w * fill01, h, fillColor);
     // Hairline border.
+    ctx.rectOutline(x, y, w, h, 1.f, borderColor);
+}
+
+/// @brief Lerp between two `HudColor`s — used to compute the *visible*
+/// gradient endpoint when the bar is partially filled (so the fill always
+/// represents the same slice of the underlying full-bar gradient instead of
+/// stretching to the right end).
+constexpr HudColor lerpColor(HudColor a, HudColor b, float t)
+{
+    return HudColor{
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+        a.a + (b.a - a.a) * t,
+    };
+}
+
+/// @brief Draw a horizontal stat bar whose live fill is a left→right
+/// gradient (e.g. health: deep red → orange-red, shield: dim cyan → cyan).
+///
+/// `fillLeft` and `fillRight` describe the colors for a *full* (100%) bar.
+/// At partial fills the right endpoint of the visible portion is interpolated
+/// to `fill01` along that gradient — which keeps the warm/bright tail at
+/// 100% and the cool/dim head as the bar drains, matching the prototype's
+/// `linear-gradient(90deg, red, orange-red)` CSS behavior.
+inline void drawGradientTrailBar(HudContext& ctx,
+                                 float x,
+                                 float y,
+                                 float w,
+                                 float h,
+                                 float fill01,
+                                 float trail01,
+                                 HudColor fillLeft,
+                                 HudColor fillRight,
+                                 HudColor trailColor = HudColor{0.95f, 0.95f, 0.95f, 0.45f},
+                                 HudColor bgColor = k_bgInset,
+                                 HudColor borderColor = k_lineDim)
+{
+    ctx.rect(x, y, w, h, bgColor);
+    if (trail01 > fill01)
+        ctx.rect(x, y, w * trail01, h, trailColor);
+    if (fill01 > 0.f) {
+        // Right endpoint of the visible fill = same point in the underlying
+        // gradient, so the bar drains cleanly without color compression.
+        const HudColor visibleRight = lerpColor(fillLeft, fillRight, fill01);
+        ctx.gradientRect(x, y, w * fill01, h, fillLeft, visibleRight);
+    }
     ctx.rectOutline(x, y, w, h, 1.f, borderColor);
 }
 

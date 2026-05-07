@@ -142,33 +142,36 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
         ctx.text(e.name.c_str(), sx, nameTop, fs, withAlpha(k_red, alpha), HudAlign::Center, /*outlined=*/true);
 
         // Shield bar (above HP) — only when target has any shield max.
+        // Gradient cyanDim → cyan to match player vitals + design CSS.
         float barY = std::round(sy - hpH);
         if (e.maxSh > 0 && (e.liveSh > 0.001f || e.trailSh > 0.001f)) {
             const float bgY = std::round(barY - shH - 2.f * s);
-            drawTrailBar(ctx,
-                         barX,
-                         bgY,
-                         bw,
-                         shH,
-                         std::clamp(e.liveSh, 0.f, 1.f),
-                         std::clamp(e.trailSh, 0.f, 1.f),
-                         withAlpha(k_cyan, alpha),
-                         HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
-                         HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
-                         withAlpha(k_lineDim, alpha));
+            drawGradientTrailBar(ctx,
+                                 barX,
+                                 bgY,
+                                 bw,
+                                 shH,
+                                 std::clamp(e.liveSh, 0.f, 1.f),
+                                 std::clamp(e.trailSh, 0.f, 1.f),
+                                 withAlpha(k_cyanDim, alpha),
+                                 withAlpha(k_cyan, alpha),
+                                 HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
+                                 HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
+                                 withAlpha(k_lineDim, alpha));
         }
 
-        // HP bar.
-        drawTrailBar(ctx,
-                     barX,
-                     barY,
-                     bw,
-                     hpH,
-                     std::clamp(e.liveHp, 0.f, 1.f),
-                     std::clamp(e.trailHp, 0.f, 1.f),
-                     withAlpha(k_red, alpha),
-                     HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
-                     HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
-                     withAlpha(k_lineDim, alpha));
+        // HP bar — gradient red → red-bright (same as player vitals).
+        drawGradientTrailBar(ctx,
+                             barX,
+                             barY,
+                             bw,
+                             hpH,
+                             std::clamp(e.liveHp, 0.f, 1.f),
+                             std::clamp(e.trailHp, 0.f, 1.f),
+                             withAlpha(k_red, alpha),
+                             withAlpha(k_redBright, alpha),
+                             HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
+                             HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
+                             withAlpha(k_lineDim, alpha));
     }
 }

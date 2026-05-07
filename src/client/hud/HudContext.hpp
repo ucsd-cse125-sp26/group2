@@ -30,6 +30,15 @@ public:
     void roundedRect(float x, float y, float w, float h, float radius, HudColor color);
     void rotatedRect(float cx, float cy, float w, float h, float angleDeg, HudColor color);
 
+    /// @brief Filled rect with a horizontal color gradient.
+    ///
+    /// `leftColor` is at the left edge, `rightColor` at the right.  The
+    /// rasteriser perspective-correct-interpolates per-vertex colors across
+    /// the quad, so the gradient is exact at any size and any rotation
+    /// (though we only emit axis-aligned gradients here — the design's
+    /// HP / shield bars are horizontal).
+    void gradientRect(float x, float y, float w, float h, HudColor leftColor, HudColor rightColor);
+
     /// @brief Emit a single solid-colored triangle (3 vertices).
     void triangle(float x0, float y0, float x1, float y1, float x2, float y2, HudColor color);
 

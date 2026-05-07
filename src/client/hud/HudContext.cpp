@@ -143,6 +143,28 @@ void HudContext::rectOutline(float x, float y, float w, float h, float thickness
     rect(x + w - thickness, y + thickness, thickness, h - 2 * thickness, color); // right
 }
 
+void HudContext::gradientRect(float x, float y, float w, float h, HudColor leftColor, HudColor rightColor)
+{
+    spanDirty_ = true;
+    auto v = [](float px, float py, HudColor c) -> HudVertex {
+        return HudVertex{
+            {px, py},
+            {0.f, 0.f},
+            {c.r, c.g, c.b, c.a},
+            0.f, // texMode = 0 (solid; the rasteriser interpolates the per-vertex color)
+            {0.f, 0.f, 0.f},
+        };
+    };
+    // TL-TR-BL, TR-BR-BL — top + bottom corners share the same color so
+    // the gradient runs purely along the X axis.
+    vertices_.push_back(v(x, y, leftColor));
+    vertices_.push_back(v(x + w, y, rightColor));
+    vertices_.push_back(v(x, y + h, leftColor));
+    vertices_.push_back(v(x + w, y, rightColor));
+    vertices_.push_back(v(x + w, y + h, rightColor));
+    vertices_.push_back(v(x, y + h, leftColor));
+}
+
 void HudContext::triangle(float x0, float y0, float x1, float y1, float x2, float y2, HudColor c)
 {
     spanDirty_ = true;

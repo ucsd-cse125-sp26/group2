@@ -96,18 +96,20 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float valueX = x + pw - 4.f * s;
     const float barW = (valueX - valueG - reservedValW) - barX;
 
-    // Health row (bottom — main, larger).
+    // Health row (bottom — main, larger).  Gradient deep-red → orange-red,
+    // matches `linear-gradient(90deg, var(--red), oklch(0.72 0.18 35))`
+    // from the original CSS.
     const float hpRowY = y - hpH;
     const float hpIconY = hpRowY + (hpH - iconW) * 0.5f;
-    drawTrailBar(ctx,
-                 barX,
-                 hpRowY,
-                 barW,
-                 hpH,
-                 std::clamp(liveHealth_, 0.f, 1.f),
-                 std::clamp(trailHealth_, 0.f, 1.f),
-                 k_red,
-                 HudColor{0.95f, 0.95f, 0.95f, 0.45f});
+    drawGradientTrailBar(ctx,
+                         barX,
+                         hpRowY,
+                         barW,
+                         hpH,
+                         std::clamp(liveHealth_, 0.f, 1.f),
+                         std::clamp(trailHealth_, 0.f, 1.f),
+                         k_red,
+                         k_redBright);
     // HP icon: medical-cross glyph from the shared icon module.
     const float ix = x;
     const float iy = hpIconY;
@@ -118,18 +120,19 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     SDL_snprintf(hpText, sizeof(hpText), "%d", displayHealth_);
     ctx.text(hpText, valueX, hpRowY + (hpH - hpFs) * 0.5f - hpFs * 0.16f, hpFs, k_textBright, HudAlign::Right);
 
-    // Shield row (above HP — thinner, cyan).
+    // Shield row (above HP — thinner, cyan).  Gradient cyanDim → cyan,
+    // matches `linear-gradient(90deg, var(--cyan-dim), var(--cyan))`.
     const float shRowY = hpRowY - gap - shH;
     const float shIconY = shRowY + (shH - iconW) * 0.5f - 1.f * s;
-    drawTrailBar(ctx,
-                 barX,
-                 shRowY,
-                 barW,
-                 shH,
-                 std::clamp(liveArmor_, 0.f, 1.f),
-                 std::clamp(trailArmor_, 0.f, 1.f),
-                 k_cyan,
-                 HudColor{0.95f, 0.95f, 0.95f, 0.45f});
+    drawGradientTrailBar(ctx,
+                         barX,
+                         shRowY,
+                         barW,
+                         shH,
+                         std::clamp(liveArmor_, 0.f, 1.f),
+                         std::clamp(trailArmor_, 0.f, 1.f),
+                         k_cyanDim,
+                         k_cyan);
     // Shield icon: heater-shield outline from the shared icon module.
     icons::shield(ctx, ix, shIconY - 1.f * s, iconW, k_cyan);
 
