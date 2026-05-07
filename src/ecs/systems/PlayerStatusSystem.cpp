@@ -4,6 +4,8 @@
 #include "PlayerStatusSystem.hpp"
 
 #include "SDL3/SDL_log.h"
+#include "ecs/components/AbilityConfig.hpp"
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
@@ -237,6 +239,20 @@ inline void handleDeath(entt::entity& player,
     }
 }
 
+inline void updateAbilityLevel(Registry& registry, entt::entity player, float dmg)
+{
+    if (dmg < 0) return;
+
+    AbilityState& abilityState = registry.get<AbilityState>(player);
+    abilityState.accumDamage += dmg;
+    if (abilityState.accumDamage >= systems::dmgThreshold) {
+        abilityState.accumDamage = abilityState.accumDamage - systems::dmgThreshold;
+        if (abilityState.level < systems::maxLevel) {
+            abilityState.level += 1;
+        }
+    }
+}
+
 void applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
@@ -252,6 +268,8 @@ void applyDamage(float damage,
 
     // Reset heal cooldown on every damage tick
     playerHealth.healTimer = systems::healCooldown;
+
+    updateAbilityLevel(registry, killer, damage);
 
     if (playerHealth.armor >= damage) {
         playerHealth.armor -= damage;

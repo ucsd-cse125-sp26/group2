@@ -6,7 +6,7 @@
 struct AbilityState
 {
     int level = 0;
-    int accumDamage = 0;
+    float accumDamage = 0;
     // abilityOne
     // abilityTwo
 };
