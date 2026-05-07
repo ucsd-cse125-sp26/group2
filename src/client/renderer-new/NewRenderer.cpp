@@ -146,7 +146,7 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId)
     mesh.iBufferInfo_.srcData = mesh.indexData_.data();
 }
 
-void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*/)
+void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
@@ -170,7 +170,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float /*roll*
     }
 
     camera_.setEye(eye);
-    camera_.setTarget(pitch, yaw, 0.0f);
+    camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
     camera_.computeViewProjectionMatrix();
 

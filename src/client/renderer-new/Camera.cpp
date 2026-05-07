@@ -37,13 +37,19 @@ void NewCamera::setEye(glm::vec3 eye)
     eye_ = eye;
 }
 
+
 void NewCamera::setTarget(float pitch, float yaw, float roll)
 {
     const float cosPitch = std::cos(pitch);
 
+    glm::vec3 y_axis{0.0f,1.0f,0.0f};
     // Forward vector from yaw (horizontal) and pitch (vertical).
     // Convention matches InputSnapshot: yaw=0 → +Z, pitch>0 → looking down.
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
+    const glm::vec3 right = glm::normalize(glm::cross(forward, y_axis));
+    const glm::vec3 preRollUp = glm::normalize(glm::cross(right, forward));
+
+    up_ = preRollUp * glm::cos(roll) + right * glm::sin(roll);
 
     target_ = eye_ + forward;
 }
