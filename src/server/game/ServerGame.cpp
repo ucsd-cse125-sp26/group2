@@ -6,6 +6,7 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
@@ -584,6 +585,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
+    registry.emplace<AbilityState>(player, AbilityState{}); // Defaults to level 0 with 0 accum damage
 
     if constexpr (player_colors::k_enabled) {
         // Pick the least-used palette slot; ties broken by lowest index
