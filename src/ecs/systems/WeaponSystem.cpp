@@ -8,6 +8,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/HitboxHistory.hpp"
@@ -59,6 +60,21 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary) {
         weapon.current = WeaponSlot::SECONDARY;
+    }
+
+    // Grenade slot: press 3 to switch to grenade; press again while on grenade to cycle type.
+    // Primary/Secondary slots are untouched — the player keeps their gun.
+    if (input.cycleGrenade) {
+        if (weapon.current == WeaponSlot::GRENADE) {
+            // Already on grenade — advance the type stored in the grenade slot.
+            GunInstance& grenade = getSlot(weapon, WeaponSlot::GRENADE);
+            grenade.type = nextGrenadeType(grenade.type);
+        } else {
+            // Switch to grenade slot. The slot's GunInstance.type is already populated.
+            weapon.current = WeaponSlot::GRENADE;
+        }
+        // Reset firing state so a held LMB doesn't throw immediately on switch/cycle.
+        getEquippedGun(weapon).fireCooldown = 0.0f;
     }
 }
 
