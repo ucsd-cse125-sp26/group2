@@ -5,11 +5,14 @@
 
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
+#include "lobby/Lobby.hpp"
 #include "renderer/GraphicsConfig.hpp"
 
 #include <SDL3/SDL_video.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <backends/imgui_impl_sdl3.h>
+#include <imgui.h>
 #include <string>
 
 bool App::init()
@@ -57,16 +60,23 @@ bool App::init()
         networkConfig = loadNetworkConfig(cfgPath.c_str());
     }
 
-    auto game = std::make_unique<Game>();
-    if (!game->initDebugUI(window)) {
-        game->quit();
+    // ImGui context must exist before Renderer::init, which sets up the
+    // SDL_GPU ImGui backend.  App owns the context lifetime so it survives
+    // screen transitions (Lobby has no ImGui, Game uses it for DebugUI).
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    imguiContextOwned = true;
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    }
+    ImGui::StyleColorsDark();
+    if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
+        SDL_Log("ImGui_ImplSDL3_InitForSDLGPU failed");
         cleanup();
         return false;
     }
-    Game* gameScreen = game.get();
-    screen_ = std::move(game);
 
-    // Create renderer after the Game-owned ImGui context exists.
     if (!renderer.init(window)) {
         SDL_Log("Renderer initialization failed");
         cleanup();
@@ -81,11 +91,14 @@ bool App::init()
         return false;
     }
 
-    if (!gameScreen->init(&renderer, window, &client)) {
+    auto lobbyScreen = std::make_unique<Lobby>();
+    if (!lobbyScreen->init(&renderer, window, &client)) {
+        lobbyScreen->quit();
         cleanup();
         return false;
     }
-    current = Screen::InGame;
+    screen_ = std::move(lobbyScreen);
+    current = Screen::Lobby;
 
     return true;
 }
@@ -114,6 +127,11 @@ void App::transitionTo(Screen next)
     if (screen_ && next == current)
         return;
 
+    if (screen_) {
+        screen_->quit();
+        screen_.reset();
+    }
+
     switch (next) {
     case Screen::InGame: {
         auto game = std::make_unique<Game>();
@@ -125,9 +143,16 @@ void App::transitionTo(Screen next)
         }
         break;
     }
-    case Screen::Lobby:
-        SDL_Log("Lobby screen transition requested, but Lobby is not implemented");
+    case Screen::Lobby: {
+        auto lobby = std::make_unique<Lobby>();
+        if (lobby->init(&renderer, window, &client)) {
+            screen_ = std::move(lobby);
+            current = next;
+        } else {
+            lobby->quit();
+        }
         break;
+    }
     }
 }
 
@@ -141,6 +166,11 @@ void App::cleanup()
     if (screen_) {
         screen_->shutdownAfterRenderer();
         screen_.reset();
+    }
+    if (imguiContextOwned) {
+        ImGui_ImplSDL3_Shutdown();
+        ImGui::DestroyContext();
+        imguiContextOwned = false;
     }
     if (window) {
         SDL_DestroyWindow(window);

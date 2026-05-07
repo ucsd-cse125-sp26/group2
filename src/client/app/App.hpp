@@ -36,8 +36,9 @@ private:
     NetworkConfig networkConfig;
     Client client;
 
-    Screen current = Screen::InGame;
+    Screen current = Screen::Lobby;
     std::unique_ptr<IScreen> screen_;
+    bool imguiContextOwned = false;
 
     void cleanup();
 };
