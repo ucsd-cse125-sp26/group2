@@ -4,7 +4,9 @@
 #include "PlayerStatusSystem.hpp"
 
 #include "SDL3/SDL_log.h"
+#include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -18,6 +20,7 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "ecs/systems/DroppedWeaponSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
 #include <ecs/components/RespawnPoint.hpp>
@@ -170,6 +173,32 @@ inline void handleDeath(entt::entity& player,
                         BodyRegion hitRegion)
 {
     if (playerHealth.health <= 0) {
+        // Drop the player's two weapons at their current position.
+        // Both slots always carry a GunInstance, so both always drop —
+        // including the default Rifle/RailGun loadout. Pickup preserves
+        // the at-death ammo state.  The two drops are offset along the
+        // player's facing-right axis so the picker can comfortably aim
+        // at one without grabbing both.
+        const Position deathPos = registry.get<Position>(player);
+        const WeaponState& deathWeapons = registry.get<WeaponState>(player);
+        const float yawAtDeath = registry.get<InputSnapshot>(player).yaw;
+        const glm::vec3 rightAxis{std::cos(yawAtDeath), 0.0f, -std::sin(yawAtDeath)};
+        constexpr float k_dropSideOffset = 32.0f; // ~AABB width — clear gap between the two drops
+        auto spawnDrop = [&](const GunInstance& g, float side) {
+            const entt::entity e = registry.create();
+            registry.emplace<Position>(e, deathPos.value + rightAxis * (side * k_dropSideOffset));
+            registry.emplace<CollisionShape>(e);
+            registry.emplace<DroppedWeapon>(e,
+                                            DroppedWeapon{
+                                                .type = g.type,
+                                                .totalAmmo = g.totalAmmo,
+                                                .currentMagAmmo = g.currentMagAmmo,
+                                                .despawnTimer = systems::k_droppedWeaponLifetime,
+                                            });
+        };
+        spawnDrop(getSlot(deathWeapons, WeaponSlot::PRIMARY), -1.0f);
+        spawnDrop(getSlot(deathWeapons, WeaponSlot::SECONDARY), +1.0f);
+
         // Update death
         registry.get_or_emplace<PlayerVisState>(player).isDead = true;
         registry.get_or_emplace<Velocity>(player) = Velocity{};

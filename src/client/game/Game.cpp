@@ -13,6 +13,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
@@ -39,6 +40,7 @@
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "ecs/systems/PickupGeometry.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
 #include "network/EntityInterpolation.hpp"
 #include "network/NetworkConfig.hpp"
@@ -1070,6 +1072,7 @@ SDL_AppResult Game::iterate()
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
+        refreshDroppedWeaponRenderables();
         // Fall through to render the current frame normally.
     } else {
         frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
@@ -1460,6 +1463,7 @@ SDL_AppResult Game::iterate()
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
+        refreshDroppedWeaponRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -3240,15 +3244,11 @@ SDL_AppResult Game::iterate()
         hudState.viewProj = renderer.getCamera().getViewProjection();
 
         // ── Weapon pickup prompt ──
-        // Mirror WeaponSpawnerSystem's pickup-detection rule (range + look
-        // cone) so the "Press F to pick up <Weapon>" hint appears exactly
-        // when pressing F would actually grant the weapon. Cheap O(N) sweep
-        // across the handful of weapon spawners in the world.
+        // Mirror the server pickup-detection rule (range + look cone via
+        // PickupGeometry) so the "Press F to pick up <Weapon>" hint appears
+        // exactly when pressing F would actually grant the weapon. Cheap
+        // O(N) sweep across world weapon spawners and dropped weapons.
         {
-            static constexpr float k_pickupRange = 140.0f;
-            static constexpr float k_pickupMaxAngleDeg = 12.0f;
-            const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
-
             glm::vec3 eye{0.f};
             glm::vec3 viewFwd{0.f, 0.f, 1.f};
             bool haveLocal = false;
@@ -3269,23 +3269,25 @@ SDL_AppResult Game::iterate()
                 });
 
             if (haveLocal && hudState.isAlive) {
-                float bestDistSq = k_pickupRange * k_pickupRange + 1.f;
-                registry.view<Position, WeaponSpawner>().each([&](const Position& spPos, const WeaponSpawner& sp) {
-                    if (!sp.hasWeapon)
+                float bestDistSq = systems::k_pickupRange * systems::k_pickupRange + 1.f;
+                auto consider = [&](const glm::vec3& itemPos, int weaponId) {
+                    if (!systems::isPlayerLookingAtPickup(eye, viewFwd, itemPos))
                         return;
-                    const glm::vec3 toW = spPos.value - eye;
+                    const glm::vec3 toW = itemPos - eye;
                     const float distSq = glm::dot(toW, toW);
-                    if (distSq > k_pickupRange * k_pickupRange || distSq <= 0.0001f)
-                        return;
-                    if (glm::dot(viewFwd, glm::normalize(toW)) < k_pickupMinDot)
-                        return;
-                    // Closest matching spawner wins (in case two pickups
-                    // overlap the look cone simultaneously).
                     if (distSq < bestDistSq) {
                         bestDistSq = distSq;
                         hudState.pickupAvailable = true;
-                        hudState.pickupWeaponId = static_cast<int>(sp.type);
+                        hudState.pickupWeaponId = weaponId;
                     }
+                };
+                registry.view<Position, WeaponSpawner>().each([&](const Position& spPos, const WeaponSpawner& sp) {
+                    if (!sp.hasWeapon)
+                        return;
+                    consider(spPos.value, static_cast<int>(sp.type));
+                });
+                registry.view<Position, DroppedWeapon>().each([&](const Position& dpPos, const DroppedWeapon& dw) {
+                    consider(dpPos.value, static_cast<int>(dw.type));
                 });
             }
         }
@@ -3668,6 +3670,43 @@ void Game::refreshRemoteRespawnRenderables()
                 rend.orientation = assetRotation(asset);
                 rend.translation = asset.renderTranslation;
             }
+        });
+}
+
+void Game::refreshDroppedWeaponRenderables()
+{
+    registry.view<Position, DroppedWeapon, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const DroppedWeapon& dw, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            const int weaponIndex = static_cast<int>(dw.type);
+            if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
+                weaponAssetIds_[weaponIndex] < 0)
+            {
+                rend.modelIndex = -1;
+                rend.visible = false;
+                return;
+            }
+
+            const int assetId = weaponAssetIds_[weaponIndex];
+            const AssetEntry& asset = assets_.entry(assetId);
+
+            rend.modelIndex = asset.modelIndex;
+            rend.scale = asset.renderScale;
+
+            // Same spin + bob treatment the spawners use, so dropped weapons
+            // read as pickups at a glance.
+            static constexpr float k_dropSpinRadiansPerSec = glm::radians(45.0f);
+            static constexpr float k_dropBobAmplitude = 6.0f;
+            static constexpr float k_dropBobHz = 0.6f;
+            static constexpr float k_twoPi = 6.28318530718f;
+
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.visible = true;
+            rend.orientation =
+                glm::angleAxis(t * k_dropSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
+            rend.translation = asset.renderTranslation +
+                               glm::vec3{0.0f, std::sin(t * k_twoPi * k_dropBobHz) * k_dropBobAmplitude, 0.0f};
         });
 }
 

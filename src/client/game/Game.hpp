@@ -100,6 +100,9 @@ public:
     /// @brief Reset Renderable visibility for players transitioning through respawn.
     void refreshRemoteRespawnRenderables();
 
+    /// @brief Assign Renderable components to dropped-weapon entities (mirrors spawner visuals).
+    void refreshDroppedWeaponRenderables();
+
 private:
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
