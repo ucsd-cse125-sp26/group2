@@ -28,6 +28,7 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
+#include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
@@ -415,6 +416,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("explosion");
         systems::runExplosion(registry, particleEvents, pendingKillEvents);
+    }
+    {
+        GROUP2_PROF_SCOPE("fireField");
+        systems::runFireField(registry, dt, pendingKillEvents);
     }
     {
         GROUP2_PROF_SCOPE("playerStatus");

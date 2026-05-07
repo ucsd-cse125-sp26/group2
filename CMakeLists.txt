@@ -793,6 +793,9 @@ add_executable(group2
         src/ecs/components/Explosion.hpp
         src/ecs/systems/ExplosionSystem.hpp
         src/ecs/systems/ExplosionSystem.cpp
+        src/ecs/components/FireField.hpp
+        src/ecs/systems/FireSystem.hpp
+        src/ecs/systems/FireSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Hitbox.hpp
@@ -1135,6 +1138,9 @@ add_executable(client
         src/ecs/components/Explosion.hpp
         src/ecs/systems/ExplosionSystem.hpp
         src/ecs/systems/ExplosionSystem.cpp
+        src/ecs/components/FireField.hpp
+        src/ecs/systems/FireSystem.hpp
+        src/ecs/systems/FireSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Hitbox.hpp
@@ -1325,6 +1331,9 @@ add_executable(server
         src/ecs/components/Explosion.hpp
         src/ecs/systems/ExplosionSystem.hpp
         src/ecs/systems/ExplosionSystem.cpp
+        src/ecs/components/FireField.hpp
+        src/ecs/systems/FireSystem.hpp
+        src/ecs/systems/FireSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
@@ -1545,6 +1554,8 @@ add_executable(clientbot
     # must link.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/ExplosionSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/ExplosionSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/FireSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/FireSystem.hpp"
     # `ExplosionSystem` calls `applyDamage` (player status), which
     # may call `processKill`.  None of these run their server-only
     # side effects on the bot (no kill broadcast, no respawn timer

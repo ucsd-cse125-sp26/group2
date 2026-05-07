@@ -8,6 +8,7 @@
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/FireField.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -148,7 +149,8 @@ using Synced = std::tuple<entt::entity,
                           RespawnTimer,
                           WeaponSpawner,
                           RespawnPoint,
-                          AnimSnapshot>;
+                          AnimSnapshot,
+                          FireField>;
 
 // ── PR-10: snapshot delta encoding ──────────────────────────────────────
 
