@@ -35,6 +35,7 @@ struct InputSnapshot
     bool killSelf{false};          ///< Debug: kill self (rising-edge only).
     bool skipRespawn{false};       ///< Skip respawn timer (space while dead).
     bool flipGravity{false};       ///< Gravity flip toggle (G key, rising-edge only).
+    bool cycleGrenade{false};      ///< Cycle/select grenade slot (3 key, rising-edge only).
 
     float yaw{0.0f};               ///< Horizontal look angle in radians (accumulated from mouse X deltas).
     float pitch{0.0f};             ///< Vertical look angle in radians, clamped to [-89°, +89°] by InputSampleSystem.

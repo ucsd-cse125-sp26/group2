@@ -67,6 +67,8 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
 inline bool prevKillSelfKey = false;
 /// @brief Tracks previous-frame G key state for gravity flip edge detection.
 inline bool prevFlipGravityKey = false;
+/// @brief Tracks previous-frame 3 key state for grenade cycle edge detection.
+inline bool grenadeKeyHeldLastFrame_ = false;
 
 /// @brief Sample keyboard state into the movement flags.
 ///
@@ -141,6 +143,10 @@ inline void runWeaponKeys(Registry& registry)
             (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
+        // Grenade cycle/select on key 3 (rising-edge — see flipGravity for the same pattern).
+        const bool k_grenadeKey = kKeys[SDL_SCANCODE_3];
+        snap.cycleGrenade = k_grenadeKey && !grenadeKeyHeldLastFrame_;
+        grenadeKeyHeldLastFrame_ = k_grenadeKey;
         snap.reload = kKeys[SDL_SCANCODE_R];
         snap.pickup = kKeys[SDL_SCANCODE_F];
     });
