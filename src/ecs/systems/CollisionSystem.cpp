@@ -34,6 +34,43 @@
 namespace systems
 {
 
+namespace
+{
+
+/// @brief Detonate a grenade at its current position based on its GrenadeConfig.
+///
+/// For Explosion-kind: queues a damage+knockback explosion.
+/// For FireField-kind: spawns a FireField entity (Task 10 implements the system).
+///   Until Task 10 lands, this branch is a no-op stub — Molotov visibly destroys
+///   without leaving fire. Easy to grep for the TODO when Task 10 lands.
+void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3 position)
+{
+    if (!isGrenadeType(projectile.type)) {
+        return;
+    }
+    const GrenadeConfig& cfg = getGrenadeConfig(projectile.type);
+    switch (cfg.detonation) {
+    case GrenadeDetonationKind::Explosion:
+        queueExplosion(registry,
+                       position,
+                       cfg.explosionRadius,
+                       cfg.damage,
+                       projectile.owner,
+                       cfg.damageFalloffExp,
+                       cfg.selfDamageMult,
+                       cfg.maxKnockback,
+                       cfg.knockbackFalloffExp);
+        break;
+    case GrenadeDetonationKind::FireField:
+        // TODO(task 10): replace with spawnFireField(registry, position,
+        //                cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner);
+        (void)position; // silence unused-parameter warning until Task 10
+        break;
+    }
+}
+
+} // namespace
+
 static constexpr float k_pushback = 0.03125f;                         // Quake DIST_EPSILON
 static constexpr float k_groundProbeDistance = physics::k_stepHeight; // also used for slope snap
 
@@ -475,7 +512,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             if (projectile.fuseTimer >= 0.0f) {
                 projectile.fuseTimer -= dt;
                 if (projectile.fuseTimer <= 0.0f) {
-                    // Detonation routing happens in Task 9. For now: destroy.
+                    detonateGrenade(registry, projectile, pos.value);
                     if (registry.valid(e)) {
                         registry.destroy(e);
                     }
@@ -522,7 +559,10 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     continue; // continue the bump loop with reflected velocity
                 }
 
-                // Default (rocket-style) impact: explode + destroy.
+                // Default impact: detonate if applicable, then destroy.
+                //   - Rocket-style explosive (projectile.explosive=true): unchanged path.
+                //   - Grenade impact-detonate (Molotov has fuseTimer<0, sticky=false, explosive=false):
+                //     route to detonateGrenade so it can spawn a FireField.
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
                     queueExplosion(registry,
                                    pos.value,
@@ -533,6 +573,8 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                                    projConfig.selfDamageMultiplier,
                                    projConfig.maxKnockback,
                                    projConfig.knockbackFalloffExponent);
+                } else if (isGrenadeType(projectile.type)) {
+                    detonateGrenade(registry, projectile, pos.value);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);
