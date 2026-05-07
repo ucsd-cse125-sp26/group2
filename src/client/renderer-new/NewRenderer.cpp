@@ -308,7 +308,11 @@ int NewRenderer::loadSceneModel(
     fullPath /= ASSETS_DIR;
     fullPath /= filename;
 
-    AssetLoader::loadModel(modelId, fullPath.string(), texFileNames, flatten, flipUVs);
+    if (!AssetLoader::loadModel(modelId, fullPath.string(), texFileNames, flatten, flipUVs)) {
+        SDL_Log("NewRenderer::loadSceneModel: AssetLoader::loadModel('%s') failed", fullPath.string().c_str());
+        Asset::models_.erase(modelId);
+        return -1;
+    }
     Asset::Model& model = Asset::models_.at(modelId);
     AssetLoader::updateModelTransformCache(modelId);
 
