@@ -2564,7 +2564,12 @@ void Renderer::drawFrame(const glm::vec3 eye, const float yaw, const float pitch
                             continue;
 
                         MaterialUBO matUBO{};
-                        matUBO.baseColorFactor = mesh.material.baseColorFactor;
+                        // Per-cmd tint multiplies into baseColorFactor so callers
+                        // can recolor a shared model (e.g. grenade variants reusing
+                        // the rocket mesh) without mutating model material state.
+                        matUBO.baseColorFactor =
+                            glm::vec4(glm::vec3(mesh.material.baseColorFactor) * glm::vec3(ecmd.tint),
+                                      mesh.material.baseColorFactor.a);
                         matUBO.metallicFactor = mesh.material.metallicFactor;
                         matUBO.roughnessFactor = mesh.material.roughnessFactor;
                         matUBO.aoStrength = mesh.material.aoStrength;

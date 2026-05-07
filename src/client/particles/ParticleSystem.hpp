@@ -70,6 +70,9 @@ public:
     /// @brief Spawn a smoke cloud at pos.
     void spawnSmoke(glm::vec3 pos, float radius);
 
+    /// @brief Spawn a one-shot fire puff at pos (orange/red flame billboards).
+    void spawnFire(glm::vec3 pos, float radius);
+
     /// @brief Spawn rocket explosion at pos.
     void spawnExplosion(glm::vec3 pos, float blastRadius);
 

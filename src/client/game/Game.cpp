@@ -13,15 +13,18 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/FireField.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/ParticleEmitterTag.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Projectile.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -459,6 +462,13 @@ bool Game::init()
             break;
         case ParticleEffectType::Smoke:
             particleSystem.spawnSmoke(evt.pos1, evt.param);
+            break;
+        case ParticleEffectType::Fire:
+            // One-shot fire puff. Persistent FireField AoE rendering is
+            // driven directly off replicated FireField entities (above);
+            // this case exists so server-side code can request a one-off
+            // flame burst the same way it does smoke/explosions.
+            particleSystem.spawnFire(evt.pos1, evt.param /*radius*/);
             break;
         }
     });
@@ -1562,6 +1572,19 @@ SDL_AppResult Game::iterate()
     // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
 
+    // Drive fire VFX from replicated FireField entities (Molotov AoE).
+    // Server replicates `FireField` only; the renderer pulls fire emission
+    // off `Position` + `ParticleEmitterTag{Fire}`, so attach those locally
+    // and keep them synced to the field's authoritative position/radius.
+    // The SmokeEffect emitter pump (fire-coloured branch) does the rest.
+    registry.view<FireField>().each([&](entt::entity e, const FireField& field) {
+        registry.emplace_or_replace<Position>(e, Position{field.position});
+        auto& tag = registry.get_or_emplace<ParticleEmitterTag>(e);
+        tag.type = EmitterType::Fire;
+        tag.radius = field.radius;
+        tag.ratePerSecond = 24.f; // dense flame puffs for visible AoE
+    });
+
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer.getCamera(), registry);
     phaseSnap(phaseStats.particles);
@@ -2230,7 +2253,16 @@ SDL_AppResult Game::iterate()
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
-            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world});
+            // Projectile entities carry a per-grenade tint (HE = green,
+            // Molotov = orange, Impulse = blue) so the shared rocket model
+            // is visually distinct in flight.  Non-projectile entities use
+            // the default white tint (no recolor).
+            glm::vec4 tint{1.0f};
+            if (const auto* proj = registry.try_get<Projectile>(e)) {
+                tint = glm::vec4(proj->tint, 1.0f);
+            }
+
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world, .tint = tint});
         });
 
         // Third-person weapons for remote players

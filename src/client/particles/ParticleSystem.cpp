@@ -143,6 +143,11 @@ void ParticleSystem::spawnSmoke(glm::vec3 pos, float radius)
     smoke_.spawn(pos, radius);
 }
 
+void ParticleSystem::spawnFire(glm::vec3 pos, float radius)
+{
+    smoke_.spawn(pos, radius, /*isFire=*/true);
+}
+
 void ParticleSystem::spawnExplosion(glm::vec3 pos, float blastRadius)
 {
     explosions_.spawn(pos, blastRadius, smoke_);

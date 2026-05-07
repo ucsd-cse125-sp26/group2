@@ -48,6 +48,7 @@ struct EntityRenderCmd
 {
     int32_t modelIndex = -1;        ///< Index into Renderer::models[].
     glm::mat4 worldTransform{1.0f}; ///< Full world transform (position × rotation × scale).
+    glm::vec4 tint{1.0f};           ///< RGB multiplier into baseColorFactor (alpha unused). Default = no tint.
 };
 
 /// @brief Dynamic point light -- built by Game, injected into the PBR light array.
