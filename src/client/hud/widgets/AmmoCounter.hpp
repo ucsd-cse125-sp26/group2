@@ -16,16 +16,23 @@
 
 #include "hud/HudWidget.hpp"
 
+/// @brief Apex-style weapon cluster: weapon body up top with a type-color
+/// underline + bracketed fire-mode tag, then **two slot tabs side-by-side**
+/// at the bottom (one per slot, both visible). The active tab gets the
+/// type-color top border and full opacity; the inactive tab is faded.
 struct AmmoCounter : HudWidget
 {
-    float panelWidth = 360.f;
-    float panelHeight = 108.f;
-    float clipFontSize = 52.f;      ///< Hero numeral.
-    float magFontSize = 22.f;       ///< "/<capacity>" caption.
-    float reserveFontSize = 20.f;   ///< "+<reserve>" caption.
-    float nameFontSize = 18.f;      ///< Weapon name.
-    float fireModeFontSize = 11.f;  ///< Fire-mode tag.
-    float secondaryFontSize = 13.f; ///< Bottom-row secondary slot.
+    float panelWidth = 380.f;
+    float panelHeight = 124.f;
+    float clipFontSize = 52.f;          ///< Hero numeral.
+    float magFontSize = 22.f;           ///< "/<capacity>" caption.
+    float reserveFontSize = 20.f;       ///< "+<reserve>" caption.
+    float nameFontSize = 18.f;          ///< Weapon name.
+    float fireModeFontSize = 11.f;      ///< Fire-mode tag.
+    float slotFontSize = 12.f;          ///< Bottom slot-tab text.
+    float slotIndexFontSize = 10.f;     ///< Slot-tab index pill ("1"/"2").
+    float slotTabHeight = 26.f;         ///< Height of each bottom slot tab.
+    float typeUnderlineThickness = 2.f; ///< Underline below weapon body, in type color.
 
     AmmoCounter();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

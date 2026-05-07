@@ -176,6 +176,18 @@ void HudContext::triangle(float x0, float y0, float x1, float y1, float x2, floa
     vertices_.push_back(v(x2, y2));
 }
 
+void HudContext::triangleColors(
+    float x0, float y0, HudColor c0, float x1, float y1, HudColor c1, float x2, float y2, HudColor c2)
+{
+    spanDirty_ = true;
+    auto v = [](float px, float py, HudColor c) -> HudVertex {
+        return HudVertex{{px, py}, {0.f, 0.f}, {c.r, c.g, c.b, c.a}, 0.f, {0, 0, 0}};
+    };
+    vertices_.push_back(v(x0, y0, c0));
+    vertices_.push_back(v(x1, y1, c1));
+    vertices_.push_back(v(x2, y2, c2));
+}
+
 void HudContext::polyline(const float* points, int numPoints, float thickness, HudColor color)
 {
     if (!points || numPoints < 2)

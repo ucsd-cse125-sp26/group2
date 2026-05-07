@@ -18,16 +18,18 @@
 
 struct HealthArmorBar : HudWidget
 {
-    // Layout constants (mirroring the prototype's px values).
-    float panelWidth = 320.f; ///< Full row width (icon + bar + value).
+    // Layout constants — Apex-style chamfered plate.
+    float panelWidth = 340.f; ///< Plate width (matches design v2).
+    float panelPadX = 16.f;   ///< Inner horizontal padding.
+    float panelPadY = 10.f;   ///< Inner vertical padding.
+    float chamferSize = 14.f; ///< Bottom-right cut-corner depth (px).
     float shieldBarHeight = 6.f;
     float healthBarHeight = 14.f;
-    float barSpacing = 4.f;
+    float barSpacing = 6.f;       ///< Vertical gap between shield and HP rows.
+    int shieldSegments = 3;       ///< Apex-style segmented shield bar.
+    float shieldSegmentGap = 3.f; ///< Gap between adjacent shield segments.
     float iconSize = 14.f;
-    float iconGap = 8.f;
-    float valueGap = 8.f;
-    float hpFontSize = 22.f;
-    float shieldFontSize = 14.f;
+    float iconGap = 10.f;
     float trailHoldSeconds = 0.4f;  ///< How long the ghost trail lingers.
     float trailDrainSeconds = 0.6f; ///< How long the drain animation takes after holding.
 

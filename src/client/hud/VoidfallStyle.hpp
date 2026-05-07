@@ -77,6 +77,38 @@ constexpr HudColor k_green{0.30f, 0.86f, 0.45f, 1.0f};
 /// @brief Pickup amber-trim background.
 constexpr HudColor k_pickupBg{0.13f, 0.12f, 0.11f, 0.82f};
 
+// ── Weapon-type accent colors (Apex convention) ───────────────────────────
+//
+// Each weapon class has its own bright accent: AR teal, sniper purple,
+// pistol green, SMG amber, shotgun red.  Used for the weapon-panel
+// underline, fire-mode tag border, slot-tab top-edge, and slot-index pill
+// background — so the player parses *what* they're holding by color
+// before reading the name.
+constexpr HudColor k_typeAr{0.20f, 0.65f, 0.70f, 1.0f};      // teal
+constexpr HudColor k_typeSniper{0.40f, 0.30f, 0.75f, 1.0f};  // purple
+constexpr HudColor k_typePistol{0.20f, 0.75f, 0.45f, 1.0f};  // green
+constexpr HudColor k_typeSmg{0.95f, 0.65f, 0.18f, 1.0f};     // amber
+constexpr HudColor k_typeShotgun{0.85f, 0.30f, 0.20f, 1.0f}; // red
+
+/// @brief Map a weapon-type id (matching `WeaponType` integer order in
+/// `ecs/components/WeaponState.hpp`: 0=Rifle, 1=Rocket, 2=RailGun,
+/// 3=EnergyGun, 4-6=grenades) to its accent color.
+constexpr HudColor weaponTypeAccent(int weaponId)
+{
+    switch (weaponId) {
+    case 0:  // Rifle — full-auto AR
+        return k_typeAr;
+    case 1:  // Rocket — explosive, treat as shotgun-class
+        return k_typeShotgun;
+    case 2:  // RailGun — single-shot precision
+        return k_typeSniper;
+    case 3:  // EnergyGun — beam SMG-class
+        return k_typeSmg;
+    default: // grenades / unknown — fall back to generic amber
+        return k_amber;
+    }
+}
+
 /// @brief Apply alpha to a palette color (for fade-out).
 constexpr HudColor withAlpha(HudColor c, float alpha)
 {

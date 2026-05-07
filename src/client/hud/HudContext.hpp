@@ -42,6 +42,12 @@ public:
     /// @brief Emit a single solid-colored triangle (3 vertices).
     void triangle(float x0, float y0, float x1, float y1, float x2, float y2, HudColor color);
 
+    /// @brief Triangle with per-vertex colors — the rasteriser interpolates
+    ///        across the surface.  Used by chamfered / pentagon panels that
+    ///        need a horizontal or radial gradient.
+    void
+    triangleColors(float x0, float y0, HudColor c0, float x1, float y1, HudColor c1, float x2, float y2, HudColor c2);
+
     /// @brief Stroke a polyline with sharp-mitred corners using rotated rects.
     /// @param points 2*N pairs (x0,y0,x1,y1,...) — N >= 2.
     /// @param numPoints Number of (x,y) points.
