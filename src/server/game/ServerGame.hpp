@@ -87,6 +87,8 @@ private:
     ///     state transitions, and health regeneration.
     ///  8. **Weapon spawners** — `runWeaponSpawners()` ticks pickup cooldowns and
     ///     spawns weapon entities.
+    ///  8b. **Dropped weapons** — `runDroppedWeapons()` handles pickup and
+    ///     despawn for player-dropped weapons.
     ///  9. **Match controller** — `matchController.update()` manages match phase
     ///     transitions (warmup → countdown → in-progress → finished).
     /// 10. **Broadcast** — send updated registry snapshot, particle events, and

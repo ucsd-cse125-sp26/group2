@@ -27,6 +27,7 @@
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
+#include "ecs/systems/DroppedWeaponSystem.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
@@ -427,6 +428,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("weaponSpawners");
         systems::runWeaponSpawners(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("droppedWeapons");
+        systems::runDroppedWeapons(registry, dt);
     }
 
     {

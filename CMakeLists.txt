@@ -791,6 +791,8 @@ add_executable(group2
         src/ecs/components/RespawnPoint.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/DroppedWeaponSystem.hpp
+        src/ecs/systems/DroppedWeaponSystem.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1116,6 +1118,8 @@ add_executable(client
         src/ecs/components/WeaponSpawner.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/DroppedWeaponSystem.hpp
+        src/ecs/systems/DroppedWeaponSystem.cpp
 )
 
 target_include_directories(client PRIVATE
@@ -1305,6 +1309,8 @@ add_executable(server
         src/ecs/components/WeaponSpawner.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/DroppedWeaponSystem.hpp
+        src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/Hitbox.hpp
         src/ecs/components/HitboxHistory.hpp
         src/ecs/systems/HitboxSystem.hpp
