@@ -169,12 +169,17 @@ inline void handleDeath(entt::entity& player,
         // Drop the player's two weapons at their current position.
         // Both slots always carry a GunInstance, so both always drop —
         // including the default Rifle/RailGun loadout. Pickup preserves
-        // the at-death ammo state.
+        // the at-death ammo state.  The two drops are offset along the
+        // player's facing-right axis so the picker can comfortably aim
+        // at one without grabbing both.
         const Position deathPos = registry.get<Position>(player);
         const WeaponState& deathWeapons = registry.get<WeaponState>(player);
-        auto spawnDrop = [&](const GunInstance& g) {
+        const float yawAtDeath = registry.get<InputSnapshot>(player).yaw;
+        const glm::vec3 rightAxis{std::cos(yawAtDeath), 0.0f, -std::sin(yawAtDeath)};
+        constexpr float k_dropSideOffset = 32.0f; // ~AABB width — clear gap between the two drops
+        auto spawnDrop = [&](const GunInstance& g, float side) {
             const entt::entity e = registry.create();
-            registry.emplace<Position>(e, deathPos.value);
+            registry.emplace<Position>(e, deathPos.value + rightAxis * (side * k_dropSideOffset));
             registry.emplace<CollisionShape>(e);
             registry.emplace<DroppedWeapon>(e,
                                             DroppedWeapon{
@@ -184,8 +189,8 @@ inline void handleDeath(entt::entity& player,
                                                 .despawnTimer = systems::k_droppedWeaponLifetime,
                                             });
         };
-        spawnDrop(deathWeapons.primary);
-        spawnDrop(deathWeapons.secondary);
+        spawnDrop(deathWeapons.primary, -1.0f);
+        spawnDrop(deathWeapons.secondary, +1.0f);
 
         // Update death
         registry.get_or_emplace<PlayerVisState>(player).isDead = true;
