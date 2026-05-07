@@ -4,6 +4,7 @@
 #include "ecs/systems/CollisionSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
@@ -466,6 +467,22 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 }
                 return;
             }
+
+            // Grenade fuse tick. Negative fuseTimer means "no fuse, impact-detonate" — leave alone.
+            // (Sticky grenades like Impulse spawn with fuseTimer=-1 and only arm in the stick handler below.)
+            // Tick BEFORE movement integration so a cooked grenade detonates exactly at its current
+            // position rather than after one more tick of zero/coast velocity.
+            if (projectile.fuseTimer >= 0.0f) {
+                projectile.fuseTimer -= dt;
+                if (projectile.fuseTimer <= 0.0f) {
+                    // Detonation routing happens in Task 9. For now: destroy.
+                    if (registry.valid(e)) {
+                        registry.destroy(e);
+                    }
+                    return;
+                }
+            }
+
             projectile.currentLifeTime += dt;
 
             // Phase 0 — Depenetration
@@ -486,6 +503,26 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
+                // Sticky grenades: freeze velocity and arm the fuse if it wasn't already running.
+                // Consume `sticky` so subsequent hits don't keep snapping to zero.
+                if (projectile.sticky) {
+                    vel.value = glm::vec3{0.0f};
+                    projectile.sticky = false;
+                    if (projectile.fuseTimer < 0.0f) {
+                        const GrenadeConfig& cfg = getGrenadeConfig(projectile.type);
+                        projectile.fuseTimer = cfg.fuseTime;
+                    }
+                    break; // done moving this tick — let the fuse take over
+                }
+
+                // Bouncy grenades: reflect velocity, lose energy via restitution, keep going.
+                if (projectile.bounceRestitution > 0.0f) {
+                    const glm::vec3 k_n = k_hit.normal;
+                    vel.value = (vel.value - 2.0f * glm::dot(vel.value, k_n) * k_n) * projectile.bounceRestitution;
+                    continue; // continue the bump loop with reflected velocity
+                }
+
+                // Default (rocket-style) impact: explode + destroy.
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
                     queueExplosion(registry,
                                    pos.value,
