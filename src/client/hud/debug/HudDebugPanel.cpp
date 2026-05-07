@@ -76,8 +76,8 @@ void HudDebugPanel::build(Hud& hud, bool* open)
                 ImGui::DragFloat("Panel Width", &hp->panelWidth, 1.f, 50.f, 500.f);
                 ImGui::DragFloat("HP Bar Height", &hp->healthBarHeight, 0.5f, 4.f, 50.f);
                 ImGui::DragFloat("Shield Bar Height", &hp->shieldBarHeight, 0.5f, 2.f, 24.f);
-                ImGui::DragFloat("HP Font Size", &hp->hpFontSize, 0.5f, 8.f, 48.f);
-                ImGui::DragFloat("Shield Font Size", &hp->shieldFontSize, 0.5f, 8.f, 32.f);
+                ImGui::DragInt("Shield Segments", &hp->shieldSegments, 1, 1, 8);
+                ImGui::DragFloat("Chamfer Size", &hp->chamferSize, 0.5f, 0.f, 40.f);
             } else if (auto* ac = dynamic_cast<AmmoCounter*>(w.get())) {
                 ImGui::DragFloat("Clip Font", &ac->clipFontSize, 0.5f, 12.f, 64.f);
                 ImGui::DragFloat("Reserve Font", &ac->reserveFontSize, 0.5f, 8.f, 48.f);
