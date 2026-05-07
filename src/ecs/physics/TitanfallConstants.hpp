@@ -151,10 +151,10 @@ constexpr float k_grappleLaunchSpeedMult = 1.15f; ///< Speed multiplier on launc
 constexpr float k_grapplePerchFeetOffset = 50.0f; ///< Feet height above the hook point in perch mode (u).
                                                   ///< Lets you grapple to a corner/wall and land on top of the platform
                                                   ///< rather than slamming into the surface you hooked.
-constexpr float k_grapplePerchVerticalGain = 8.0f;    ///< Vertical-pull P-controller gain (1/s). Final vy is
-                                                      ///< clamped to ±k_grapplePullSpeed so very tall arcs are bounded.
-constexpr float k_grapplePerchRiseRange = 100.0f;     ///< Altitude diff (u) below target at which horizontal speed
-                                                      ///< bottoms out — controls how steep the rise phase feels.
+constexpr float k_grapplePerchVerticalGain = 8.0f; ///< Vertical-pull P-controller gain (1/s). Final vy is
+                                                   ///< clamped to ±k_grapplePullSpeed so very tall arcs are bounded.
+constexpr float k_grapplePerchRiseRange = 100.0f;  ///< Altitude diff (u) below target at which horizontal speed
+                                                   ///< bottoms out — controls how steep the rise phase feels.
 constexpr float k_grapplePerchMinHorizFactor = 0.25f; ///< Floor on horizontal-speed throttle while below target.
                                                       ///< 0.0 = freezes XZ when below; 1.0 = no rise bias at all.
 

@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="12" height="12">
-  <!-- Stylised skull (filled) -->
-  <path d="M3 5 a3 3 0 0 1 6 0 v3 h-1 v1 h-1 v-1 h-2 v1 h-1 v-1 h-1 z" fill="currentColor"/>
-  <rect x="4" y="4.5" width="1.5" height="1.5" fill="black"/>
-  <rect x="6.5" y="4.5" width="1.5" height="1.5" fill="black"/>
-</svg>

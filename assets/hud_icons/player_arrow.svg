@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -8 16 16" width="16" height="16">
-  <!-- Notched chevron used as the local-player marker on the minimap.
-       Matches the design's "M0,-8 L6,6 L0,3 L-6,6 Z" path verbatim. -->
-  <path d="M0 -8 L6 6 L0 3 L-6 6 Z" fill="currentColor"/>
-</svg>
