@@ -12,6 +12,9 @@ enum class WeaponType : uint8_t
     Rocket,    ///< Slow arcing projectile (ribbon trail)
     RailGun,   ///< Hitscan energy weapon (beam + lightning arcs)
     EnergyGun, ///< Fast hitscan energy burst
+    HEGrenade, ///< Bouncy grenade with 3s fuse, lethal explosion
+    Molotov,   ///< Impact-detonate, leaves a fire field (damage over time)
+    Impulse,   ///< Sticky 1s fuse, big knockback, no damage (movement tool)
 };
 
 enum class WeaponSlot : uint8_t

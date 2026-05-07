@@ -53,7 +53,7 @@ struct ProjectileConfig
 /// @brief Returns the gameplay config for a weapon type.
 inline const WeaponConfig& getWeaponConfig(WeaponType type)
 {
-    static constexpr std::array<WeaponConfig, 4> k_kWeaponConfigs{{
+    static constexpr std::array<WeaponConfig, 7> k_kWeaponConfigs{{
         WeaponConfig{
             .fireCooldown = 0.10f,
             .magazineSize = 50,
@@ -95,6 +95,33 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .dps = 80.0f,
             .ammoPerSecond = 20.0f,
         }, // EnergyGun (Zarya beam)
+        WeaponConfig{
+            .fireCooldown = 0.4f,
+            .magazineSize = 1,
+            .defaultAmmoCapacity = 99,
+            .damage = 0.0f,
+            .hitscan = false,
+            .initialProjectileSpeed = 1500.0f, // overridden by GrenadeConfig.throwSpeed at spawn
+            .explosive = false,
+        },                                     // HEGrenade
+        WeaponConfig{
+            .fireCooldown = 0.4f,
+            .magazineSize = 1,
+            .defaultAmmoCapacity = 99,
+            .damage = 0.0f,
+            .hitscan = false,
+            .initialProjectileSpeed = 1200.0f,
+            .explosive = false,
+        }, // Molotov
+        WeaponConfig{
+            .fireCooldown = 0.4f,
+            .magazineSize = 1,
+            .defaultAmmoCapacity = 99,
+            .damage = 0.0f,
+            .hitscan = false,
+            .initialProjectileSpeed = 1500.0f,
+            .explosive = false,
+        }, // Impulse
     }};
 
     return k_kWeaponConfigs[static_cast<std::size_t>(type)];
@@ -103,7 +130,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
 /// @brief Returns the projectile config for a weapon type.
 inline const ProjectileConfig& getProjectileConfig(WeaponType type)
 {
-    static constexpr std::array<ProjectileConfig, 4> k_kProjectileConfigs{{
+    static constexpr std::array<ProjectileConfig, 7> k_kProjectileConfigs{{
         ProjectileConfig{}, // Rifle
         ProjectileConfig{
             .modelId = 1,
@@ -119,6 +146,9 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
         },                                    // Rocket
         ProjectileConfig{},                   // RailGun
         ProjectileConfig{},                   // EnergyGun
+        ProjectileConfig{},                   // HEGrenade — flight params come from GrenadeConfig
+        ProjectileConfig{},                   // Molotov
+        ProjectileConfig{},                   // Impulse
     }};
 
     return k_kProjectileConfigs[static_cast<std::size_t>(type)];
