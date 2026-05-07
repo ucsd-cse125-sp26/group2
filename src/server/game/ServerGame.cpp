@@ -10,6 +10,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeInventory.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -591,6 +592,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                           },
                                       .current = WeaponSlot::PRIMARY,
                                   });
+    registry.emplace<GrenadeInventory>(player, GrenadeInventory{});
 
     // Attach server-side animator for skeleton-driven hitboxes.
     attachServerAnimator(player);
