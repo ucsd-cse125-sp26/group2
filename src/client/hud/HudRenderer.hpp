@@ -62,10 +62,15 @@ private:
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUShaderFormat shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
-    // Offscreen target
-    SDL_GPUTexture* offscreenTarget_ = nullptr;
+    // Offscreen targets — render into the multisample target, auto-resolve
+    // into the 1× sampleable target at end-of-pass. The 4× MSAA gives the
+    // entire HUD pass free geometry-edge AA on every diagonal icon stroke,
+    // chevron, ring, and rotated rect, which were previously hard-aliased.
+    SDL_GPUTexture* msaaTarget_ = nullptr;      ///< 4× multisampled, COLOR_TARGET only.
+    SDL_GPUTexture* offscreenTarget_ = nullptr; ///< 1×, COLOR_TARGET | SAMPLER (resolve dst).
     uint32_t width_ = 0;
     uint32_t height_ = 0;
+    static constexpr SDL_GPUSampleCount k_sampleCount = SDL_GPU_SAMPLECOUNT_4;
 
     // Pipeline
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr;

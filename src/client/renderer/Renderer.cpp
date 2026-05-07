@@ -1521,10 +1521,13 @@ bool Renderer::initHudBlit()
         return false;
     }
 
+    // The HUD render pass now outputs premultiplied alpha, so the blit's
+    // src factor is ONE (src is already multiplied by its own alpha) rather
+    // than SRC_ALPHA (which would over-darken edges).
     SDL_GPUColorTargetDescription ct{};
     ct.format = swapchainFormat;
     ct.blend_state.enable_blend = true;
-    ct.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    ct.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     ct.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     ct.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
     ct.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
@@ -1549,10 +1552,14 @@ bool Renderer::initHudBlit()
         return false;
     }
 
-    // Nearest-clamp sampler for pixel-perfect blit.
+    // Linear-clamp sampler for the HUD blit.  Was NEAREST originally
+    // ("pixel-perfect"), but that re-quantised every anti-aliased SDF text
+    // edge and every multisample-resolved icon edge to hard pixels on the
+    // way to the swapchain — wiping out exactly the soft anti-aliased
+    // detail the HUD pass had carefully produced.  Linear preserves it.
     SDL_GPUSamplerCreateInfo sci{};
-    sci.min_filter = SDL_GPU_FILTER_NEAREST;
-    sci.mag_filter = SDL_GPU_FILTER_NEAREST;
+    sci.min_filter = SDL_GPU_FILTER_LINEAR;
+    sci.mag_filter = SDL_GPU_FILTER_LINEAR;
     sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     hudSampler_ = SDL_CreateGPUSampler(device, &sci);
