@@ -6,7 +6,6 @@
 #include "particles/sdf/SdfAtlas.hpp"
 #include "widgets/AmmoCounter.hpp"
 #include "widgets/BuyMenu.hpp"
-#include "widgets/CompassWidget.hpp"
 #include "widgets/CrosshairWidget.hpp"
 #include "widgets/DamageAccumWidget.hpp"
 #include "widgets/DamageIndicator.hpp"
@@ -187,9 +186,9 @@ void Hud::createWidgets()
     // Directional damage arcs around the reticle.
     widgets_.push_back(std::make_unique<DamageIndicator>());
 
-    // Top center: match header + compass strip.
+    // Top center: match header.  (Compass strip removed — gravity flips
+    // make a heading readout meaningless and players found it useless.)
     widgets_.push_back(std::make_unique<MatchHeader>());
-    widgets_.push_back(std::make_unique<CompassWidget>());
 
     // Top right: KDA counter + killfeed (KDA renders first, KillFeed sits below).
     widgets_.push_back(std::make_unique<KdaCounter>());
