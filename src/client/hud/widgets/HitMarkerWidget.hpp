@@ -22,13 +22,13 @@ struct HitMarkerWidget : HudWidget
         Kill,
     };
 
-    float armLength = 9.f;
-    float armThickness = 2.5f;
-    float armGap = 7.f;
+    float armLength = 8.f;
+    float armThickness = 1.4f; ///< Down from 2.5 — too chunky in playtest.
+    float armGap = 6.f;
     float fadeDuration = 0.45f;
     float killFadeDuration = 0.6f;
-    float killRingRadius = 14.f;
-    float headshotTriangleSize = 6.f;
+    float killRingRadius = 13.f;
+    float headshotTriangleSize = 5.f;
 
     HitMarkerWidget();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

@@ -84,9 +84,9 @@ void HitMarkerWidget::draw(HudContext& ctx, float cx, float cy)
         // Bright white outer ring + thick diagonal X.
         const float r = killRingRadius * scale_ * s;
         const HudColor col = withFade(k_textBright);
-        // Ring approximated with eight small rotated rectangles around the perimeter.
-        const float ringT = 1.6f * s;
-        const int segments = 28;
+        // Ring approximated with small rotated rectangles around the perimeter.
+        const float ringT = 1.0f * s;
+        const int segments = 32;
         for (int i = 0; i < segments; ++i) {
             const float a0 = (static_cast<float>(i) / segments) * (2.f * std::numbers::pi_v<float>);
             const float bx = cx + std::cos(a0) * r;
