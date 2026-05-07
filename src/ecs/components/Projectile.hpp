@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <entt/entt.hpp>
+#include <glm/vec3.hpp>
 
 /// @brief Surface material hit by a projectile — drives impact effect parameters.
 enum class SurfaceType : uint8_t
@@ -29,4 +30,10 @@ struct Projectile
     entt::entity owner = entt::null;     ///< Entity that fired this projectile.
     bool explosive = false;              ///< True if the projectile detonates on impact.
     float currentLifeTime = 0.0f;        ///< Seconds since spawn (destroyed when exceeding max).
+
+    // Grenade-specific extensions. Defaults preserve rocket-style behavior.
+    float fuseTimer = -1.0f;             ///< Countdown; <0 means no fuse (impact-only).
+    float bounceRestitution = 0.0f;      ///< 0 = no bounce. CollisionSystem reflects velocity * this on hit.
+    bool sticky = false;                 ///< If true, sets vel=0 on first surface hit and starts fuse.
+    glm::vec3 tint = {1.0f, 1.0f, 1.0f}; ///< Render tint multiplier (cosmetic, client-side).
 };

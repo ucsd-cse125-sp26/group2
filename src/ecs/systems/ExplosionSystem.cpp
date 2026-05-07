@@ -7,9 +7,11 @@
 #include "ecs/components/Explosion.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/Velocity.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
+#include <cmath>
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
 #include <vector>
@@ -17,11 +19,26 @@
 namespace systems
 {
 
-void queueExplosion(Registry& registry, glm::vec3 position, float radius, float maxDamage, entt::entity owner)
+void queueExplosion(Registry& registry,
+                    glm::vec3 position,
+                    float radius,
+                    float maxDamage,
+                    entt::entity owner,
+                    float falloffExponent,
+                    float selfDamageMultiplier,
+                    float maxKnockback,
+                    float knockbackFalloffExponent)
 {
     const entt::entity explosion = registry.create();
-    registry.emplace<Explosion>(
-        explosion, Explosion{.position = position, .radius = radius, .maxDamage = maxDamage, .owner = owner});
+    registry.emplace<Explosion>(explosion,
+                                Explosion{.position = position,
+                                          .radius = radius,
+                                          .maxDamage = maxDamage,
+                                          .falloffExponent = falloffExponent,
+                                          .selfDamageMultiplier = selfDamageMultiplier,
+                                          .maxKnockback = maxKnockback,
+                                          .knockbackFalloffExponent = knockbackFalloffExponent,
+                                          .owner = owner});
 }
 
 void runExplosion(Registry& registry,
@@ -51,16 +68,40 @@ void runExplosion(Registry& registry,
                 continue;
             }
 
-            const float damage = explosion.maxDamage * (1.0f - (distance / explosion.radius));
-            if (damage <= 0.0f) {
-                continue;
+            // Falloff: value = peakValue * (1 - d/r)^exponent.
+            // Exponent 1.0 = linear; higher exponents give sharper falloff so direct hits
+            // remain lethal while near misses do little damage.
+            const float falloff = 1.0f - (distance / explosion.radius);
+
+            // ── Damage ──────────────────────────────────────────────────────
+            float damage = explosion.maxDamage * std::pow(falloff, explosion.falloffExponent);
+            if (player == explosion.owner) {
+                damage *= explosion.selfDamageMultiplier;
+            }
+            if (damage > 0.0f) {
+                entt::entity killer = explosion.owner;
+                if (killer == entt::null || !registry.valid(killer)) {
+                    killer = player;
+                }
+                applyDamage(damage, player, killer, registry, killEvents);
             }
 
-            entt::entity killer = explosion.owner;
-            if (killer == entt::null || !registry.valid(killer)) {
-                killer = player;
+            // ── Knockback (rocket-jump impulse) ─────────────────────────────
+            // Push direction is center-to-center, not closest-point-based — keeps a feet-
+            // exploding rocket pushing UP rather than sideways toward the closest AABB face.
+            // Falls back to world-up if explosion is exactly at the player's center.
+            if (explosion.maxKnockback > 0.0f) {
+                const float knockMag = explosion.maxKnockback * std::pow(falloff, explosion.knockbackFalloffExponent);
+                if (knockMag > 0.0f) {
+                    if (Velocity* vel = registry.try_get<Velocity>(player); vel != nullptr) {
+                        const glm::vec3 toPlayer = position.value - explosion.position;
+                        const float toPlayerLen = glm::length(toPlayer);
+                        const glm::vec3 dir =
+                            (toPlayerLen > 1e-4f) ? (toPlayer / toPlayerLen) : glm::vec3{0.0f, 1.0f, 0.0f};
+                        vel->value += dir * knockMag;
+                    }
+                }
             }
-            applyDamage(damage, player, killer, registry, killEvents);
         }
 
         resolvedExplosions.push_back(explosionEntity);

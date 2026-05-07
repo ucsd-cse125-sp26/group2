@@ -5,6 +5,7 @@
 #include "WeaponSpawnerSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -36,14 +37,16 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
         if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasWeapon)
         {
             const WeaponConfig config = getWeaponConfig(spawner.type);
-            if (weapon.primary.type == spawner.type) {
-                weapon.primary.totalAmmo = config.defaultAmmoCapacity;
-                weapon.primary.currentMagAmmo = config.magazineSize;
+            GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
+            GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
+            if (primary.type == spawner.type) {
+                primary.totalAmmo = config.defaultAmmoCapacity;
+                primary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
-            } else if (weapon.secondary.type == spawner.type) {
-                weapon.secondary.totalAmmo = config.defaultAmmoCapacity;
-                weapon.secondary.currentMagAmmo = config.magazineSize;
+            } else if (secondary.type == spawner.type) {
+                secondary.totalAmmo = config.defaultAmmoCapacity;
+                secondary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             }
@@ -54,25 +57,32 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
         const glm::vec3 viewFwd = viewForward(input.yaw, input.pitch);
 
         if (spawner.hasWeapon && input.pickup && isPlayerLookingAtPickup(eye, viewFwd, spawnerPos.value)) {
-            // pickup
+            // Resolve the destination slot under the type-compatibility guard.
+            // The currently-equipped slot is preferred so picking up a rifle
+            // while holding a rifle replaces it in-place; otherwise we fall
+            // back to PRIMARY. The grenade slot is exclusive to grenade types
+            // (canAcceptType enforces this), so a rifle pickup can never land
+            // there even if the player happens to have grenade equipped.
+            const WeaponSlot targetSlot =
+                canAcceptType(weapon.current, spawner.type) ? weapon.current : WeaponSlot::PRIMARY;
+            if (!canAcceptType(targetSlot, spawner.type)) {
+                // Fallback slot can't accept this type either (e.g. a
+                // hypothetical world-spawned grenade hitting this path).
+                // Reject the pickup rather than silently dropping it into
+                // the wrong slot.
+                // TODO: when world-spawned grenade pickups exist, route them to the GRENADE slot
+                // instead of silently dropping. (Stub policy for v1: WeaponSpawner only emits guns.)
+                return;
+            }
             spawner.hasWeapon = false;
             spawner.spawnCooldown = weaponCooldownTime;
             const WeaponConfig& config = getWeaponConfig(spawner.type);
-            if (weapon.current == WeaponSlot::PRIMARY) {
-                weapon.primary = GunInstance{
-                    .type = spawner.type,
-                    .totalAmmo = config.defaultAmmoCapacity,
-                    .currentMagAmmo = config.magazineSize,
-                    .fireCooldown = 0.0f,
-                };
-            } else {
-                weapon.secondary = GunInstance{
-                    .type = spawner.type,
-                    .totalAmmo = config.defaultAmmoCapacity,
-                    .currentMagAmmo = config.magazineSize,
-                    .fireCooldown = 0.0f,
-                };
-            }
+            getSlot(weapon, targetSlot) = GunInstance{
+                .type = spawner.type,
+                .totalAmmo = config.defaultAmmoCapacity,
+                .currentMagAmmo = config.magazineSize,
+                .fireCooldown = 0.0f,
+            };
         }
     });
 }

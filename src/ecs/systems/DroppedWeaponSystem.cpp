@@ -5,6 +5,7 @@
 
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -38,37 +39,40 @@ inline bool tryPickup(Registry& registry, Position dropPos, CollisionShape dropS
         // Overlap-grab refill: walking through a dropped weapon of a type the
         // player already holds tops that slot up using the snapshot ammo.
         if (overlapsAABB(dropPos.value, dropShape.halfExtents, pos.value, shape.halfExtents)) {
-            if (weapon.primary.type == dw.type) {
-                weapon.primary.totalAmmo = dw.totalAmmo;
-                weapon.primary.currentMagAmmo = dw.currentMagAmmo;
+            GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
+            GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
+            if (primary.type == dw.type) {
+                primary.totalAmmo = dw.totalAmmo;
+                primary.currentMagAmmo = dw.currentMagAmmo;
                 consumed = true;
                 return;
             }
-            if (weapon.secondary.type == dw.type) {
-                weapon.secondary.totalAmmo = dw.totalAmmo;
-                weapon.secondary.currentMagAmmo = dw.currentMagAmmo;
+            if (secondary.type == dw.type) {
+                secondary.totalAmmo = dw.totalAmmo;
+                secondary.currentMagAmmo = dw.currentMagAmmo;
                 consumed = true;
                 return;
             }
         }
 
-        // Look-and-press pickup: replaces the currently equipped slot.
+        // Look-and-press pickup: replaces the currently equipped slot when it
+        // can accept the dropped type, else falls back to PRIMARY. Mirrors the
+        // type-guard policy in WeaponSpawnerSystem so a player holding GRENADE
+        // can still pick up gun drops without dumping them into the wrong slot.
         const float eyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.77f * eyeDir, 0.0f};
         const glm::vec3 viewFwd = viewForward(input.yaw, input.pitch);
 
         if (input.pickup && isPlayerLookingAtPickup(eye, viewFwd, dropPos.value)) {
-            GunInstance picked{
+            const WeaponSlot targetSlot = canAcceptType(weapon.current, dw.type) ? weapon.current : WeaponSlot::PRIMARY;
+            if (!canAcceptType(targetSlot, dw.type))
+                return;
+            getSlot(weapon, targetSlot) = GunInstance{
                 .type = dw.type,
                 .totalAmmo = dw.totalAmmo,
                 .currentMagAmmo = dw.currentMagAmmo,
                 .fireCooldown = 0.0f,
             };
-            if (weapon.current == WeaponSlot::PRIMARY) {
-                weapon.primary = picked;
-            } else {
-                weapon.secondary = picked;
-            }
             consumed = true;
         }
     });

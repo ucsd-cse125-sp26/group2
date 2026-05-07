@@ -127,24 +127,31 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     registry.emplace_or_replace<PlayerVisState>(player);
     registry.emplace_or_replace<PlayerSimState>(player);
     registry.emplace_or_replace<Health>(player, Health{});
-    registry.emplace_or_replace<WeaponState>(player,
-                                             WeaponState{
-                                                 .primary =
-                                                     GunInstance{
-                                                         .type = WeaponType::Rifle,
-                                                         .totalAmmo = rifleConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = rifleConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .secondary =
-                                                     GunInstance{
-                                                         .type = WeaponType::RailGun,
-                                                         .totalAmmo = railConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = railConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .current = WeaponSlot::PRIMARY,
-                                             });
+    WeaponState weaponState{};
+    weaponState.current = WeaponSlot::PRIMARY;
+    getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
+        .type = WeaponType::Rifle,
+        .totalAmmo = rifleConfig.defaultAmmoCapacity,
+        .currentMagAmmo = rifleConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
+        .type = WeaponType::RailGun,
+        .totalAmmo = railConfig.defaultAmmoCapacity,
+        .currentMagAmmo = railConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    // Re-initialize the grenade slot to HEGrenade on respawn, mirroring
+    // initNewPlayerEntity (ServerGame.cpp). Keeps the GRENADE slot's
+    // GunInstance.type as the single source of truth for "which grenade
+    // is currently selected." Mag + reserve are populated so handleAmmo()
+    // succeeds when the player throws a grenade after respawn.
+    GunInstance& grenade = getSlot(weaponState, WeaponSlot::GRENADE);
+    grenade.type = WeaponType::HEGrenade;
+    const WeaponConfig& grenadeCfg = getWeaponConfig(WeaponType::HEGrenade);
+    grenade.currentMagAmmo = grenadeCfg.magazineSize;
+    grenade.totalAmmo = grenadeCfg.defaultAmmoCapacity;
+    registry.emplace_or_replace<WeaponState>(player, weaponState);
 }
 
 /// @brief Transition a player to the dead state if health has reached zero.
@@ -189,8 +196,8 @@ inline void handleDeath(entt::entity& player,
                                                 .despawnTimer = systems::k_droppedWeaponLifetime,
                                             });
         };
-        spawnDrop(deathWeapons.primary, -1.0f);
-        spawnDrop(deathWeapons.secondary, +1.0f);
+        spawnDrop(getSlot(deathWeapons, WeaponSlot::PRIMARY), -1.0f);
+        spawnDrop(getSlot(deathWeapons, WeaponSlot::SECONDARY), +1.0f);
 
         // Update death
         registry.get_or_emplace<PlayerVisState>(player).isDead = true;

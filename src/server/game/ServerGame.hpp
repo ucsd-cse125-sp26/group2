@@ -9,6 +9,8 @@
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/Hitbox.hpp"
+#include "ecs/components/PlayerColors.hpp"
+#include "ecs/components/PlayerNicknames.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
@@ -19,6 +21,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <entt/entity/entity.hpp>
 #include <memory>
 #include <unordered_map>
@@ -144,9 +147,21 @@ private:
     MatchController matchController;         ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.
-    bool running = false;                        ///< Loop continues while true.
-    int tickRateHz = 128;                        ///< Physics ticks per second.
-    int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
+
+    /// @brief Use-count per palette slot for least-used color reservation.
+    ///
+    /// Sized to player_colors::k_paletteSize. Incremented when a player
+    /// connects (assigns the smallest-count slot, ties broken by lowest
+    /// index for determinism); decremented on disconnect.
+    std::array<int, player_colors::k_paletteSize> colorSlotUseCounts_{};
+
+    /// @brief Use-count per nickname slot — same selection scheme as colors.
+    /// Decrements when an *auto-assigned* nickname is released; custom
+    /// nicknames don't touch the count, since they don't reserve a slot.
+    std::array<int, player_nicknames::k_nicknameCount> nicknameSlotUseCounts_{};
+    bool running = false; ///< Loop continues while true.
+    int tickRateHz = 128; ///< Physics ticks per second.
+    int tickCount = 0;    ///< Total ticks since start, used for periodic logging.
 
     /// @brief Send a registry snapshot every Nth tick. Computed in init() as
     /// `max(1, tickRateHz / snapshotHz)` so the snapshot rate is roughly

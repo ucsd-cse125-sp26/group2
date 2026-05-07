@@ -2,6 +2,7 @@
 #include "PickupPrompt.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -46,12 +47,13 @@ void PickupPrompt::update(float /*dt*/, const HudGameState& state, HudTweenPool&
 
 void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
 {
+    using namespace voidfall;
+
     const float s = uiScale_;
     const float fs = fontSize * s;
     const float kfs = keyFontSize * s;
     const float pad = keyBoxPadding * s;
     const float gap = spacing * s;
-    const float radius = keyBoxRadius * s;
 
     const char* keyStr = "F";
     char prompt[64];
@@ -77,27 +79,29 @@ void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
     const float startX = cx - totalW * 0.5f;
     const float midY = cy;
 
-    // Backing pill behind the whole prompt for readability over busy scenes.
-    const float bgPadX = 10.f * s;
-    const float bgPadY = 6.f * s;
+    // Backing pill behind the whole prompt — Voidfall flat panel with amber
+    // left-edge accent, no rounded corners.
+    const float bgPadX = 12.f * s;
+    const float bgPadY = 8.f * s;
     const float bgX = startX - bgPadX;
     const float bgY = midY - boxH * 0.5f - bgPadY;
     const float bgW = totalW + bgPadX * 2.f;
     const float bgH = boxH + bgPadY * 2.f;
-    ctx.roundedRect(bgX, bgY, bgW, bgH, radius + 2.f, HudColor(0.f, 0.f, 0.f, 0.55f));
+    drawPanel(ctx, bgX, bgY, bgW, bgH, k_bgPanel, k_line, 1.f);
+    // Amber left edge accent (4 px wide).
+    ctx.rect(bgX, bgY, 2.f * s, bgH, k_amber);
+    // Mil-spec corner brackets.
+    drawCornerBrackets(ctx, bgX, bgY, bgW, bgH, 10.f * s, 1.f * s, 2.f * s, k_amber);
 
-    // Key glyph box (lighter rounded rect with the key letter centered).
-    // text() draws baseline at y + size and cap top at ~y + 0.28*size, so the
-    // visible glyph center sits at y + 0.64*size; offset accordingly to truly
-    // center the F inside the box.
+    // Key glyph box (lighter rect with the key letter centered).
     const float boxX = startX;
     const float boxY = midY - boxH * 0.5f;
-    ctx.roundedRect(boxX, boxY, boxW, boxH, radius, HudColor(1.f, 1.f, 1.f, 0.18f));
-    ctx.text(keyStr, boxX + boxW * 0.5f, midY - kfs * 0.64f, kfs, HudColor::white(), HudAlign::Center);
+    ctx.rect(boxX, boxY, boxW, boxH, HudColor{0.f, 0.f, 0.f, 0.40f});
+    ctx.rectOutline(boxX, boxY, boxW, boxH, 1.f, k_lineBright);
+    ctx.text(keyStr, boxX + boxW * 0.5f, midY - kfs * 0.64f, kfs, k_textBright, HudAlign::Center);
 
-    // Descriptive text to the right of the key glyph, vertically centered
-    // using the same cap-height-based offset for consistency.
+    // Descriptive text to the right of the key glyph.
     const float textX = boxX + boxW + gap;
     const float textY = midY - fs * 0.64f;
-    ctx.text(prompt, textX, textY, fs, HudColor::white(), HudAlign::Left);
+    ctx.text(prompt, textX, textY, fs, k_textBright, HudAlign::Left);
 }

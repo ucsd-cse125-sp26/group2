@@ -14,6 +14,7 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec3 fragTangent;
 layout(location = 4) out vec3 fragBitangent;
+layout(location = 5) out vec4 fragTint;     // unused on non-skinned path; held at no-op for layout parity with pbr_skinned.vert
 
 /// @brief Per-frame camera and model matrices.
 layout(set = 1, binding = 0) uniform Matrices
@@ -37,4 +38,5 @@ void main()
     fragBitangent = cross(fragNormal, fragTangent) * inTangent.w;
 
     fragTexCoord  = inTexCoord;
+    fragTint      = vec4(1.0, 1.0, 1.0, 0.0); // alpha = 0 => no tint applied in pbr.frag
 }

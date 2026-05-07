@@ -4,6 +4,7 @@
 #include "ecs/systems/CollisionSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
@@ -14,6 +15,7 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
+#include "ecs/systems/FireSystem.hpp"
 
 #include <glm/geometric.hpp>
 
@@ -32,6 +34,39 @@
 
 namespace systems
 {
+
+namespace
+{
+
+/// @brief Detonate a grenade at its current position based on its GrenadeConfig.
+///
+/// For Explosion-kind: queues a damage+knockback explosion.
+/// For FireField-kind: spawns a FireField entity that applies DoT damage over time.
+void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3 position)
+{
+    if (!isGrenadeType(projectile.type)) {
+        return;
+    }
+    const GrenadeConfig& cfg = getGrenadeConfig(projectile.type);
+    switch (cfg.detonation) {
+    case GrenadeDetonationKind::Explosion:
+        queueExplosion(registry,
+                       position,
+                       cfg.explosionRadius,
+                       cfg.damage,
+                       projectile.owner,
+                       cfg.damageFalloffExp,
+                       cfg.selfDamageMult,
+                       cfg.maxKnockback,
+                       cfg.knockbackFalloffExp);
+        break;
+    case GrenadeDetonationKind::FireField:
+        spawnFireField(registry, position, cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner);
+        break;
+    }
+}
+
+} // namespace
 
 static constexpr float k_pushback = 0.03125f;                         // Quake DIST_EPSILON
 static constexpr float k_groundProbeDistance = physics::k_stepHeight; // also used for slope snap
@@ -451,15 +486,46 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             ProjectileConfig projConfig = getProjectileConfig(projectile.type);
             if (projectile.currentLifeTime >= projConfig.maxLifeTime) {
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
-                    queueExplosion(
-                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                    queueExplosion(registry,
+                                   pos.value,
+                                   projConfig.explosionRadius,
+                                   projectile.damage,
+                                   projectile.owner,
+                                   projConfig.explosionFalloffExponent,
+                                   projConfig.selfDamageMultiplier,
+                                   projConfig.maxKnockback,
+                                   projConfig.knockbackFalloffExponent);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);
                 }
                 return;
             }
+
+            // Grenade fuse tick. Negative fuseTimer means "no fuse, impact-detonate" — leave alone.
+            // (Sticky grenades like Impulse spawn with fuseTimer=-1 and only arm in the stick handler below.)
+            // Tick BEFORE movement integration so a cooked grenade detonates exactly at its current
+            // position rather than after one more tick of zero/coast velocity.
+            if (projectile.fuseTimer >= 0.0f) {
+                projectile.fuseTimer -= dt;
+                if (projectile.fuseTimer <= 0.0f) {
+                    detonateGrenade(registry, projectile, pos.value);
+                    if (registry.valid(e)) {
+                        registry.destroy(e);
+                    }
+                    return;
+                }
+            }
+
             projectile.currentLifeTime += dt;
+
+            // Apply gravity to grenade projectiles only. Rockets (and other non-grenade
+            // projectiles) remain ballistic-straight so existing tuning (e.g. rocket
+            // initialProjectileSpeed = 3000 u/s) is unchanged. Match the player's
+            // gravity constant; tune later via GrenadeConfig if too floaty.
+            if (isGrenadeType(projectile.type)) {
+                vel.value.y -= physics::k_gravity * dt;
+            }
 
             // Phase 0 — Depenetration
             depenetrate(pos.value, vel.value, shape.halfExtents, world);
@@ -479,9 +545,41 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
+                // Sticky grenades: freeze velocity and arm the fuse if it wasn't already running.
+                // Consume `sticky` so subsequent hits don't keep snapping to zero.
+                if (projectile.sticky) {
+                    vel.value = glm::vec3{0.0f};
+                    projectile.sticky = false;
+                    if (projectile.fuseTimer < 0.0f) {
+                        const GrenadeConfig& cfg = getGrenadeConfig(projectile.type);
+                        projectile.fuseTimer = cfg.fuseTime;
+                    }
+                    break; // done moving this tick — let the fuse take over
+                }
+
+                // Bouncy grenades: reflect velocity, lose energy via restitution, keep going.
+                if (projectile.bounceRestitution > 0.0f) {
+                    const glm::vec3 k_n = k_hit.normal;
+                    vel.value = (vel.value - 2.0f * glm::dot(vel.value, k_n) * k_n) * projectile.bounceRestitution;
+                    continue; // continue the bump loop with reflected velocity
+                }
+
+                // Default impact: detonate if applicable, then destroy.
+                //   - Rocket-style explosive (projectile.explosive=true): unchanged path.
+                //   - Grenade impact-detonate (Molotov has fuseTimer<0, sticky=false, explosive=false):
+                //     route to detonateGrenade so it can spawn a FireField.
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
-                    queueExplosion(
-                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                    queueExplosion(registry,
+                                   pos.value,
+                                   projConfig.explosionRadius,
+                                   projectile.damage,
+                                   projectile.owner,
+                                   projConfig.explosionFalloffExponent,
+                                   projConfig.selfDamageMultiplier,
+                                   projConfig.maxKnockback,
+                                   projConfig.knockbackFalloffExponent);
+                } else if (isGrenadeType(projectile.type)) {
+                    detonateGrenade(registry, projectile, pos.value);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);

@@ -30,13 +30,50 @@ public:
     void roundedRect(float x, float y, float w, float h, float radius, HudColor color);
     void rotatedRect(float cx, float cy, float w, float h, float angleDeg, HudColor color);
 
+    /// @brief Filled rect with a horizontal color gradient.
+    ///
+    /// `leftColor` is at the left edge, `rightColor` at the right.  The
+    /// rasteriser perspective-correct-interpolates per-vertex colors across
+    /// the quad, so the gradient is exact at any size and any rotation
+    /// (though we only emit axis-aligned gradients here — the design's
+    /// HP / shield bars are horizontal).
+    void gradientRect(float x, float y, float w, float h, HudColor leftColor, HudColor rightColor);
+
+    /// @brief Emit a single solid-colored triangle (3 vertices).
+    void triangle(float x0, float y0, float x1, float y1, float x2, float y2, HudColor color);
+
+    /// @brief Triangle with per-vertex colors — the rasteriser interpolates
+    ///        across the surface.  Used by chamfered / pentagon panels that
+    ///        need a horizontal or radial gradient.
+    void
+    triangleColors(float x0, float y0, HudColor c0, float x1, float y1, HudColor c1, float x2, float y2, HudColor c2);
+
+    /// @brief Stroke a polyline with sharp-mitred corners using rotated rects.
+    /// @param points 2*N pairs (x0,y0,x1,y1,...) — N >= 2.
+    /// @param numPoints Number of (x,y) points.
+    /// @param thickness Line width in pixels.
+    /// @param color    Stroke color.
+    void polyline(const float* points, int numPoints, float thickness, HudColor color);
+
     // ── Bars ────────────────────────────────────────────────────────────
 
     void bar(float x, float y, float w, float h, float fill01, HudColor fg, HudColor bg);
 
     // ── Text ────────────────────────────────────────────────────────────
 
-    void text(const char* str, float x, float y, float size, HudColor color, HudAlign align = HudAlign::Left);
+    /// @brief Render a UTF-8 ASCII string via SDF.
+    /// @param outlined  When true the glyph picks up a 1-px dark outline for
+    ///                  legibility against bright/varied backgrounds (damage
+    ///                  numbers over the world, etc.).  Defaults to off so
+    ///                  text rendered onto the dark Voidfall panel chrome
+    ///                  stays clean and doesn't gain a "sticker" look.
+    void text(const char* str,
+              float x,
+              float y,
+              float size,
+              HudColor color,
+              HudAlign align = HudAlign::Left,
+              bool outlined = false);
     float measureText(const char* str, float size) const;
 
     // ── Icons ───────────────────────────────────────────────────────────

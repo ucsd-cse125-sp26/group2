@@ -10,6 +10,7 @@ layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec3 fragTangent;
 layout(location = 4) in vec3 fragBitangent;
+layout(location = 5) in vec4 fragTint;     // unused on transparent path; declared for layout parity with pbr.vert
 
 // Two color outputs for MRT (accumulation + revealage).
 layout(location = 0) out vec4 accumulation;

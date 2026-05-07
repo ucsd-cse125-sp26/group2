@@ -665,6 +665,9 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/VoidfallStyle.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudIcons.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudIcons.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
@@ -697,6 +700,18 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
@@ -776,6 +791,9 @@ add_executable(group2
         src/ecs/components/Explosion.hpp
         src/ecs/systems/ExplosionSystem.hpp
         src/ecs/systems/ExplosionSystem.cpp
+        src/ecs/components/FireField.hpp
+        src/ecs/systems/FireSystem.hpp
+        src/ecs/systems/FireSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Hitbox.hpp
@@ -997,6 +1015,9 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/VoidfallStyle.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudIcons.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudIcons.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
@@ -1029,6 +1050,18 @@ add_executable(client
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.hpp"
         src/ecs/systems/MovementSystem.hpp
@@ -1103,6 +1136,9 @@ add_executable(client
         src/ecs/components/Explosion.hpp
         src/ecs/systems/ExplosionSystem.hpp
         src/ecs/systems/ExplosionSystem.cpp
+        src/ecs/components/FireField.hpp
+        src/ecs/systems/FireSystem.hpp
+        src/ecs/systems/FireSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Hitbox.hpp
@@ -1295,6 +1331,9 @@ add_executable(server
         src/ecs/components/Explosion.hpp
         src/ecs/systems/ExplosionSystem.hpp
         src/ecs/systems/ExplosionSystem.cpp
+        src/ecs/components/FireField.hpp
+        src/ecs/systems/FireSystem.hpp
+        src/ecs/systems/FireSystem.cpp
         src/ecs/systems/PlayerStatusSystem.hpp
         src/ecs/systems/PlayerStatusSystem.cpp
         src/ecs/components/Player.hpp
@@ -1517,6 +1556,8 @@ add_executable(clientbot
     # must link.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/ExplosionSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/ExplosionSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/FireSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/FireSystem.hpp"
     # `ExplosionSystem` calls `applyDamage` (player status), which
     # may call `processKill`.  None of these run their server-only
     # side effects on the bot (no kill broadcast, no respawn timer

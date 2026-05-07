@@ -12,6 +12,9 @@ imgui.ini
 /assets_old/
 config.toml
 
+# Brainstorming companion sessions
+.superpowers/
+
 # CMake artifacts (keep cmake/ module directory)
 CMakeFiles/
 CMakeCache.txt

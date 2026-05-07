@@ -301,6 +301,27 @@ private:
     float prevHealth_ = 100.f;
     float prevArmor_ = 100.f;
 
+    // ── Voidfall HUD bookkeeping ────────────────────────────────────────
+    /// @brief Time accumulated while the match is in PLAYING phase (s).
+    /// Drives the top-center match-header readout.  Reset on phase changes
+    /// other than PLAYING so a fresh match starts at 0:00.
+    float matchElapsedSeconds_ = 0.f;
+
+    /// @brief Last-frame snapshot of the local player's weapon-slot types
+    /// (-1 = empty).  Used to detect new weapons appearing → emit a pickup
+    /// notification ("+1 RIFLE") so the side feed reflects what just changed.
+    int prevPrimaryWeaponType_ = -1;
+    int prevSecondaryWeaponType_ = -1;
+    int prevAmmoReserve_ = -1; ///< Drives "+N <weapon> AMMO" reserve-grow notifications.
+
+    /// @brief Pickup notifications queued for the next HUD frame.  Emitted
+    /// when the local player's WeaponState gains a new weapon type or their
+    /// reserve ammo grows beyond the previous frame's reading.
+    std::vector<HudPickupNotification> pendingPickupNotifications_;
+
+    // (No additional bookkeeping needed — name strings are constructed
+    // each frame into the thread_local vector inside Game.cpp.)
+
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 1.0f;         ///< Weapon model scale (model is in mm).
     float vmForward = 0.0f;       ///< Forward offset from eye (Quake units).

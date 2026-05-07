@@ -67,6 +67,8 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
 inline bool prevKillSelfKey = false;
 /// @brief Tracks previous-frame G key state for gravity flip edge detection.
 inline bool prevFlipGravityKey = false;
+/// @brief Tracks previous-frame 3 key state for grenade cycle edge detection.
+inline bool prevGrenadeKey = false;
 
 /// @brief Sample keyboard state into the movement flags.
 ///
@@ -136,11 +138,17 @@ inline void runWeaponKeys(Registry& registry)
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
 
+    // Edge-detect 3 key: grenade cycle is a toggle, fire on rising edge only.
+    const bool grenadeKeyNow = kKeys[SDL_SCANCODE_3];
+    const bool grenadeEdge = grenadeKeyNow && !prevGrenadeKey;
+    prevGrenadeKey = grenadeKeyNow;
+
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting =
             (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
+        snap.cycleGrenade = grenadeEdge;
         snap.reload = kKeys[SDL_SCANCODE_R];
         snap.pickup = kKeys[SDL_SCANCODE_F];
     });
