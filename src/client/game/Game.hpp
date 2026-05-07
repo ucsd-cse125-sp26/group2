@@ -26,6 +26,7 @@
 #include "util/WorkerPool.hpp"
 
 #include <memory>
+#include <optional>
 
 #ifdef USE_HYBRID_RENDERER
 #include "renderer/HybridRenderer.hpp"
@@ -37,6 +38,7 @@ using ClientRenderer = Renderer;
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
@@ -110,6 +112,10 @@ public:
     void refreshRemoteRespawnRenderables();
 
 private:
+    bool applyIncomingSnapshot(
+        std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
+    void handleLocalPlayerReady(entt::entity local);
+
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
     /// Spiral-of-death guard: max physics ticks per iterate().  Dropped from
@@ -129,14 +135,16 @@ private:
     Renderer& legacyRenderer() noexcept;
     Registry registry;                           ///< The shared ECS registry.
     Client* client = nullptr;                    ///< Borrowed UDP network client owned by App.
-    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;                         ///< Client-side sound effects system.
-    Hud hud_;                                    ///< In-game HUD overlay system.
-    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
+    std::optional<registry_serialization::Loader> snapshotLoader_;
+    std::optional<entt::entity> mappedLocalPlayerEntity_;
+    ParticleSystem particleSystem; ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;           ///< Client-side sound effects system.
+    Hud hud_;                      ///< In-game HUD overlay system.
+    entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
-    Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
-    float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
-    int tickCount = 0;                           ///< Total physics ticks elapsed since start.
+    Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
+    float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
+    int tickCount = 0;             ///< Total physics ticks elapsed since start.
     /// @brief Monotonic per-tick counter stamped onto outgoing InputSnapshots.
     ///
     /// Bumped once per physics tick group inside iterate() and copied into the
@@ -279,7 +287,7 @@ private:
     bool hitmarkerIsHeadshot_ = false;  ///< True when the current hitmarker was a headshot.
     bool hitmarkerShieldBreak_ = false; ///< True when the current hit depleted target armor.
 
-    // Floating damage numbers — queued from onParticleEvent, consumed by HUD each frame.
+    // Floating damage numbers — queued from replicated particle events, consumed by HUD each frame.
     struct PendingDamageNumber
     {
         glm::vec3 pos;

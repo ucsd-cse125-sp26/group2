@@ -60,7 +60,8 @@ enum class PacketType : uint8_t
     SHOT_INTENT,
 
     JOIN_LOBBY,   ///< Client -> Server: request to join the lobby (carries player name).
-    LOBBY_UPDATE, ///< Server -> All clients: lobby state update (player list, match start countdown).
+    JOIN_FAILED,  ///< Server -> Client: lobby join failed (carries error message).
     PLAYER_READY, ///< Client -> Server: player signals ready for match start.
-    START_MATCH, ///< Server -> All clients: match start signal (carries match start time for client-server clock sync).
+    LOBBY_UPDATE, ///< Server -> All clients: lobby state update (player list, match start countdown).
+    START_MATCH,  ///< Server -> All clients: match start signal (transition)
 };

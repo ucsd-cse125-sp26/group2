@@ -22,6 +22,7 @@
 #include <SDL3_net/SDL_net.h>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <deque>
 #include <entt/entt.hpp>
 #include <mutex>
@@ -46,8 +47,12 @@ struct NetworkStats
 class Client
 {
 public:
-    using LocalPlayerReadyFn = std::function<void(entt::entity localEntity)>;
-    using ParticleEventCallback = std::function<void(const NetParticleEvent& evt, entt::entity localEntity)>;
+    using SnapshotApplyCallback = std::function<bool(std::uint32_t snapshotTick,
+                                                     const std::uint8_t* bytes,
+                                                     Uint32 size,
+                                                     Uint64 captureNs,
+                                                     std::uint32_t& ackedTick)>;
+    using RawParticleEventCallback = std::function<void(const NetParticleEvent& evt)>;
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
     /// @brief PR-20: callback for SHOT_DEBUG_REPORT.  Fired on the
@@ -101,15 +106,15 @@ public:
     /// @brief Update bandwidth stats. Call once per frame with the frame delta time.
     void updateStats(float dt);
 
-    void onLocalPlayerReady(LocalPlayerReadyFn fn) { localPlayerReadyFn = std::move(fn); }
-    void onParticleEvent(ParticleEventCallback fn) { particleEventFn_ = std::move(fn); }
+    void onSnapshotApply(SnapshotApplyCallback fn) { snapshotApplyFn_ = std::move(fn); }
+    void onRawParticleEvent(RawParticleEventCallback fn) { rawParticleEventFn_ = std::move(fn); }
     void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
     void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
-    bool poll(Registry& registry);
+    bool poll();
 
     /// @brief Access current network statistics.
     const NetworkStats& getNetStats() const { return stats; }
@@ -158,21 +163,9 @@ public:
     /// alpha here remains the local-player / fallback path.
     [[nodiscard]] float getSnapshotAlpha() const;
 
-    /// @brief PR-21: server-assigned local-player entity (post-mapping).
-    /// Returns nullopt before the first snapshot containing the local
-    /// player has applied (i.e. before the `localPlayerReadyFn` callback
-    /// has fired).  After that, returns the LOCAL `entt::entity` (mapped
-    /// through `continuous_loader`) that the bot or game thread can use
-    /// to find its own player in the registry.
-    [[nodiscard]] std::optional<entt::entity> getLocalPlayerEntity() const
-    {
-        if (!localPlayerEntity.has_value() || !registryLoader.has_value())
-            return std::nullopt;
-        const entt::entity mapped = registryLoader->map(*localPlayerEntity);
-        if (mapped == entt::null)
-            return std::nullopt;
-        return mapped;
-    }
+    /// @brief Server-assigned local-player entity before continuous_loader mapping.
+    /// The registry-owning caller maps this through its snapshot loader.
+    [[nodiscard]] std::optional<entt::entity> getServerLocalPlayerEntity() const { return localPlayerEntity; }
 
     /// @brief Render time the renderer should display non-local entities at.
     ///
@@ -235,6 +228,9 @@ public:
     /// `recordInterpolationSamples` filters local out, and which is
     /// driven by client-side prediction anyway).
     void applyInterpolatedTransforms(Registry& registry);
+
+    /// @brief Record interpolation samples after the caller has applied a snapshot.
+    void recordInterpolationSamples(Registry& registry, Uint64 captureNs);
 
     /// @brief Number of recent inputs included in each INPUT packet for redundancy.
     ///
@@ -300,14 +296,12 @@ public:
 private:
     MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr;             ///< Resolved server address.
-    std::optional<registry_serialization::Loader> registryLoader;
-    LocalPlayerReadyFn localPlayerReadyFn;         ///< Called once the server assigns a player entity.
-    ParticleEventCallback particleEventFn_;        ///< Called for each replicated particle event from server.
+    SnapshotApplyCallback snapshotApplyFn_;        ///< Applies snapshot bytes in the registry-owning caller.
+    RawParticleEventCallback rawParticleEventFn_;  ///< Called for unmapped replicated particle events.
     MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     KillEventCallback killEventFn_;                ///< Called for each replicated kill event from server.
     ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
-    bool localPlayerReadyNotified = false;         ///< True if localPlayerReadyFn has been called.
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //
@@ -355,7 +349,7 @@ private:
     // Symmetric to the server's stage 3b. The network thread continuously
     // (a) pumps the kernel receive buffer into msgStream's recvBuf and
     // (b) drains the outbound queue to the socket. The game thread keeps
-    // calling sendInputSnapshot / sendPing / poll(registry) — those now
+    // calling sendInputSnapshot / sendPing / poll() — those now
     // touch the queue + recvBuf under stateMutex_ rather than doing
     // syscalls inline. The win is that a render-frame stutter on the game
     // thread no longer causes the kernel buffer to back up.
@@ -365,7 +359,7 @@ private:
     std::atomic<bool> shouldStop_{false};
 
     /// @brief Latched-true once the network thread observes a socket error.
-    /// poll(registry) checks this and reports false to the game thread, so
+    /// poll() checks this and reports false to the game thread, so
     /// the existing "server died" disconnect path still works.
     std::atomic<bool> socketDead_{false};
 
@@ -546,19 +540,8 @@ private:
     void networkLoop();
 
     /// @brief Decode and dispatch a single complete framed message.
-    /// Called by poll(registry) after pulling the bytes out of recvBuf.
-    void dispatchMessage(const uint8_t* data, Uint32 size, Registry& registry);
+    /// Called by poll() after pulling the bytes out of recvBuf.
+    void dispatchMessage(const uint8_t* data, Uint32 size);
 
-    /// @brief PR-11: append a sample to every replicated remote entity's
-    /// `InterpolationBuffer`, AFTER the loader has rewritten the registry
-    /// from the just-arrived snapshot.  Skips the local player (the
-    /// `LocalPlayer` tag is set by the `localPlayerReadyFn` callback,
-    /// which fires earlier in dispatchMessage's UPDATE_REGISTRY/_DELTA
-    /// path, so by the time this runs the exclude filter is correct).
-    /// No-op when `interpDelaySnapshots_` is 0 (kill switch).
-    ///
-    /// @param registry  Client registry post-Loader::apply.
-    /// @param captureNs Wall-clock timestamp to stamp on every sample —
-    ///                  same value for every entity in the same snapshot.
-    void recordInterpolationSamples(Registry& registry, Uint64 captureNs);
+    bool applySnapshot(std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint32 wireSize);
 };

@@ -105,6 +105,49 @@ bool Game::initDebugUI(SDL_Window* windowPtr)
     return true;
 }
 
+void Game::handleLocalPlayerReady(entt::entity local)
+{
+    registry.emplace<LocalPlayer>(local);
+    registry.emplace<InputSnapshot>(local);
+    registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
+    registry.emplace_or_replace<PlayerSimState>(local);
+
+    if (!registry.all_of<RespawnTimer>(local))
+        registry.emplace<Controllable>(local);
+
+    attachAnimatedCharacter(local);
+    mappedLocalPlayerEntity_ = local;
+
+    SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
+}
+
+bool Game::applyIncomingSnapshot(
+    std::uint32_t /*snapshotTick*/, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick)
+{
+    registry.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
+        .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+    if (!snapshotLoader_)
+        snapshotLoader_.emplace(registry);
+
+    snapshotLoader_->apply(bytes, size, client->getServerLocalPlayerEntity(), &ackedTick);
+
+    registry.view<Position>(entt::exclude<PreviousPosition>).each([this](entt::entity e, const Position& pos) {
+        registry.emplace<PreviousPosition>(e, pos.value);
+    });
+
+    if (!mappedLocalPlayerEntity_) {
+        if (const auto serverLocal = client->getServerLocalPlayerEntity()) {
+            const entt::entity mapped = snapshotLoader_->map(*serverLocal);
+            if (mapped != entt::null)
+                handleLocalPlayerReady(mapped);
+        }
+    }
+
+    client->recordInterpolationSamples(registry, captureNs);
+    return true;
+}
+
 bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
 {
     renderer = rendererPtr;
@@ -309,40 +352,24 @@ bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clie
             reg.emplace_or_replace<Controllable>(e);
     }>();
 
-    client->onLocalPlayerReady([this](entt::entity local) {
-        registry.emplace<LocalPlayer>(local);
-        registry.emplace<InputSnapshot>(local);
-        // Phase 5a: PreviousPosition is now seeded by Client::dispatchMessage
-        // for ALL entities with Position on first snapshot, including the
-        // local player. Use emplace_or_replace here so this callback stays
-        // idempotent regardless of whether the seed pass got there first.
-        registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
-
-        // Phase 5b: emplace PlayerSimState on the local player so runMovement
-        // (which iterates `<..., PlayerSimState, ...>`) will process it
-        // during client-side prediction. PlayerSimState is a server-only
-        // component — remote players don't have it on the client, so the
-        // view filter naturally narrows to just the local player.
-        // Server's snapshots don't replicate PlayerSimState so this stays
-        // entirely client-side; that means subtle timer fields can drift
-        // between client/server — fixed by Phase 4b's owner-only stream
-        // when it lands.
-        registry.emplace_or_replace<PlayerSimState>(local);
-
-        // Only add Controllable if the player is not already dead (edge case:
-        // joining while mid-death on a long-running server).
-        if (!registry.all_of<RespawnTimer>(local))
-            registry.emplace<Controllable>(local);
-
-        // Animator runs for local too — future gun-IK / hands-on-weapon work
-        // needs an up-to-date upper-body pose even when the body is invisible.
-        // Rendering is gated by animUI_.showLocalBody (third-person debug).
-        attachAnimatedCharacter(local);
-
-        SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
+    client->onSnapshotApply([this](std::uint32_t snapshotTick,
+                                   const std::uint8_t* bytes,
+                                   Uint32 size,
+                                   Uint64 captureNs,
+                                   std::uint32_t& ackedTick) {
+        return applyIncomingSnapshot(snapshotTick, bytes, size, captureNs, ackedTick);
     });
 
-    client->onParticleEvent([this](const NetParticleEvent& evt, entt::entity localPlayer) {
+    client->onRawParticleEvent([this](const NetParticleEvent& rawEvt) {
+        if (!snapshotLoader_ || !mappedLocalPlayerEntity_)
+            return;
+
+        NetParticleEvent evt = rawEvt;
+        evt.source = snapshotLoader_->map(evt.source);
+        if (evt.target != entt::null)
+            evt.target = snapshotLoader_->map(evt.target);
+        const entt::entity localPlayer = *mappedLocalPlayerEntity_;
+
         // Hitmarker SFX: local player's shot was confirmed by the server to have
         // hit an enemy (surface == Flesh).  This check runs BEFORE the skip-self
         // guard so the shooter still hears the hitmarker even though their own
@@ -994,7 +1021,7 @@ SDL_AppResult Game::iterate()
         accumulator = k_physicsDt; // run exactly one tick to apply latest state
         // Drain the network now so we snap to the current server state
         // without fast-forwarding through every intermediate update.
-        client->poll(registry);
+        client->poll();
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
@@ -1366,7 +1393,7 @@ SDL_AppResult Game::iterate()
 
         phaseSnap(phaseStats.physics);
 
-        if (!client->poll(registry)) {
+        if (!client->poll()) {
             // TODO: Update so reset to menu or some other non-crash state
             return SDL_APP_SUCCESS;
         }
@@ -3011,7 +3038,7 @@ SDL_AppResult Game::iterate()
         }
         hudState.killFeedEvents = hudKillEntries;
 
-        // ── Hit confirms: feed from hitmarkerTimer_ (set by onParticleEvent) ──
+        // ── Hit confirms: feed from hitmarkerTimer_ (set by replicated particle events) ──
         thread_local std::vector<HudHitConfirm> hudHitConfirms;
         hudHitConfirms.clear();
         if (hitmarkerTimer_ > 0.2f) { // just triggered (timer starts at 0.25)
@@ -3262,8 +3289,8 @@ void Game::quit()
         renderer->setHudTexture(nullptr);
     }
     if (client) {
-        client->onLocalPlayerReady({});
-        client->onParticleEvent({});
+        client->onSnapshotApply({});
+        client->onRawParticleEvent({});
         client->onMatchStateUpdate({});
         client->onKillEvent({});
         client->onShotDebugReport({});
