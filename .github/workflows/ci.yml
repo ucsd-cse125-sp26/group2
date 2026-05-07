@@ -172,7 +172,7 @@ jobs:
   #  Runs on: push to main  →  auto-versioned release (semver)         #
   #                                                                      #
   #  Each platform produces ONE zip containing:                          #
-  #    client + server + shaders/ + config.toml + assets/                #
+  #    group2 + server + shaders/ + shaders-new/ + config.toml + assets/ #
   # ------------------------------------------------------------------ #
   release-build:
     name: Release Build (${{ matrix.name }})
@@ -335,7 +335,7 @@ jobs:
           pip install --quiet gdown
           gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
 
-      # Bundle client + server + shaders + config + assets into a single zip.
+      # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
         shell: bash
         run: |
