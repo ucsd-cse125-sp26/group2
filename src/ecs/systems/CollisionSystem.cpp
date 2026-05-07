@@ -451,8 +451,12 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             ProjectileConfig projConfig = getProjectileConfig(projectile.type);
             if (projectile.currentLifeTime >= projConfig.maxLifeTime) {
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
-                    queueExplosion(
-                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                    queueExplosion(registry,
+                                   pos.value,
+                                   projConfig.explosionRadius,
+                                   projectile.damage,
+                                   projectile.owner,
+                                   projConfig.explosionFalloffExponent);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);
@@ -480,8 +484,12 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 remainingTime *= (1.0f - k_hit.tFirst);
 
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {
-                    queueExplosion(
-                        registry, pos.value, projConfig.explosionRadius, projectile.damage, projectile.owner);
+                    queueExplosion(registry,
+                                   pos.value,
+                                   projConfig.explosionRadius,
+                                   projectile.damage,
+                                   projectile.owner,
+                                   projConfig.explosionFalloffExponent);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);

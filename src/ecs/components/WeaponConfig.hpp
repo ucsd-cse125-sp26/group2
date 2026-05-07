@@ -34,6 +34,10 @@ struct ProjectileConfig
     CollisionShape shape = CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}};
     float maxLifeTime = 5.0f;
     float explosionRadius = 0.0f;
+    /// @brief Damage falloff curve exponent. `damage = maxDamage * pow(1 - d/r, exponent)`.
+    /// 1.0 = linear (uniform falloff); 2.0 = quadratic; 3.0 = cubic (sharp falloff —
+    /// direct hits lethal, near misses chip damage).
+    float explosionFalloffExponent = 1.0f;
 };
 
 /// @brief Returns the gameplay config for a weapon type.
@@ -55,7 +59,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 12,
             .damage = 200.0f,
             .hitscan = false,
-            .initialProjectileSpeed = 500.0f,
+            .initialProjectileSpeed = 3000.0f,
             .explosive = true,
         }, // Rocket
         WeaponConfig{
@@ -97,10 +101,11 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .scale = 1.0f,
             .shape = CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}},
             .maxLifeTime = 5.0f,
-            .explosionRadius = 175.0f,
-        },                  // Rocket
-        ProjectileConfig{}, // RailGun
-        ProjectileConfig{}, // EnergyGun
+            .explosionRadius = 250.0f,
+            .explosionFalloffExponent = 3.0f, // Cubic: direct hits 1-shot, ~2m away ≈ 65 dmg, ~3m ≈ chip.
+        },                                    // Rocket
+        ProjectileConfig{},                   // RailGun
+        ProjectileConfig{},                   // EnergyGun
     }};
 
     return k_kProjectileConfigs[static_cast<std::size_t>(type)];

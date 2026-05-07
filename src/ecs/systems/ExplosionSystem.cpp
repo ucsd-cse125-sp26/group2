@@ -10,6 +10,7 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
+#include <cmath>
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
 #include <vector>
@@ -17,11 +18,16 @@
 namespace systems
 {
 
-void queueExplosion(Registry& registry, glm::vec3 position, float radius, float maxDamage, entt::entity owner)
+void queueExplosion(
+    Registry& registry, glm::vec3 position, float radius, float maxDamage, entt::entity owner, float falloffExponent)
 {
     const entt::entity explosion = registry.create();
-    registry.emplace<Explosion>(
-        explosion, Explosion{.position = position, .radius = radius, .maxDamage = maxDamage, .owner = owner});
+    registry.emplace<Explosion>(explosion,
+                                Explosion{.position = position,
+                                          .radius = radius,
+                                          .maxDamage = maxDamage,
+                                          .falloffExponent = falloffExponent,
+                                          .owner = owner});
 }
 
 void runExplosion(Registry& registry,
@@ -51,7 +57,11 @@ void runExplosion(Registry& registry,
                 continue;
             }
 
-            const float damage = explosion.maxDamage * (1.0f - (distance / explosion.radius));
+            // Falloff: damage = maxDamage * (1 - d/r)^exponent.
+            // Exponent 1.0 = linear; higher exponents give sharper falloff so direct hits
+            // remain lethal while near misses do little damage.
+            const float falloff = 1.0f - (distance / explosion.radius);
+            const float damage = explosion.maxDamage * std::pow(falloff, explosion.falloffExponent);
             if (damage <= 0.0f) {
                 continue;
             }
