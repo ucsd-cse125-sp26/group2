@@ -9,7 +9,7 @@
 DamageAccumWidget::DamageAccumWidget()
 {
     anchor = HudAnchor::Center;
-    offsetY = 40.f; // below crosshair
+    offsetY = 36.f; // below crosshair (~24 px gap from the 4-tick reticle)
     visible = true;
 }
 
@@ -39,9 +39,11 @@ void DamageAccumWidget::draw(HudContext& ctx, float cx, float cy)
         return;
 
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "%d", displayTotal_);
+    // Voidfall: accumulated damage is shown as a negative delta below the
+    // crosshair (matches the "−<total>" convention from the prototype).
+    std::snprintf(buf, sizeof(buf), "-%d", displayTotal_);
 
-    const float fontSize = 24.f * uiScale_;
+    const float fontSize = 13.f * uiScale_;
     const float outOff = 1.5f * uiScale_;
 
     // Outline: darkened version of the color, black for white.

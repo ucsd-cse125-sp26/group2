@@ -1,5 +1,11 @@
 /// @file HitMarkerWidget.hpp
-/// @brief Center-screen hit confirm flare with fade + scale animation.
+/// @brief Voidfall hit-marker — distinct shape per confirm type.
+///
+/// Four variants from the prototype:
+///   - SHIELD:   short cyan diagonal corner ticks (thin).
+///   - HP:       longer amber diagonal corner ticks (thicker).
+///   - HEADSHOT: red triangles pointing inward at the four cardinals.
+///   - KILL:     bright white ring + thick diagonal X.
 
 #pragma once
 
@@ -7,18 +13,29 @@
 
 struct HitMarkerWidget : HudWidget
 {
-    float armLength = 12.f;
+    enum class Kind
+    {
+        None,
+        Shield,
+        Hp,
+        Headshot,
+        Kill,
+    };
+
+    float armLength = 9.f;
     float armThickness = 2.5f;
-    float armGap = 5.f;
-    float fadeDuration = 0.35f;
+    float armGap = 7.f;
+    float fadeDuration = 0.45f;
+    float killFadeDuration = 0.6f;
+    float killRingRadius = 14.f;
+    float headshotTriangleSize = 6.f;
 
     HitMarkerWidget();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
     void draw(HudContext& ctx, float drawX, float drawY) override;
 
 private:
+    Kind kind_ = Kind::None;
     float alpha_ = 0.f;
     float scale_ = 1.f;
-    bool isHeadshot_ = false;
-    bool shieldBreak_ = false;
 };

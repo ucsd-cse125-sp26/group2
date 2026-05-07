@@ -13,6 +13,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/GrenadeInventory.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -3166,12 +3167,13 @@ SDL_AppResult Game::iterate()
             accumTotal_ = 0;
         }
         hudState.damageAccum.total = accumTotal_;
+        // Voidfall palette: headshot=red, shield=cyan, hp=amber.
         if (accumLastHitType_ == 2)
-            hudState.damageAccum.color = HudColor(1.0f, 0.85f, 0.2f, 1.f); // gold (headshot)
+            hudState.damageAccum.color = HudColor(0.92f, 0.30f, 0.20f, 1.f); // red (headshot)
         else if (accumLastHitType_ == 1)
-            hudState.damageAccum.color = HudColor(0.3f, 0.6f, 1.0f, 1.f);  // blue (shield)
+            hudState.damageAccum.color = HudColor(0.45f, 0.78f, 0.96f, 1.f); // cyan (shield)
         else
-            hudState.damageAccum.color = HudColor(1.f, 1.f, 1.f, 1.f);     // white (health)
+            hudState.damageAccum.color = HudColor(1.00f, 0.71f, 0.18f, 1.f); // amber (hp)
 
         // ── View-projection matrix for world→screen projection ──
         hudState.viewProj = renderer.getCamera().getViewProjection();
@@ -3227,8 +3229,182 @@ SDL_AppResult Game::iterate()
             }
         }
 
+        // ── Voidfall HUD: KDA from local player's PlayerMatchStats ──
+        registry.view<LocalPlayer, PlayerMatchStats>().each([&](const PlayerMatchStats& pms) {
+            hudState.kda.kills = pms.kills;
+            hudState.kda.deaths = pms.deaths;
+            // No assist tracking yet — leaving 0 until a future
+            // PlayerMatchStats.assists field is added & replicated.
+            hudState.kda.assists = 0;
+        });
+
+        // ── Voidfall HUD: equipment cooldowns ──
+        // Grapple: PlayerSimState lives server-side, but the same cooldown
+        // timer is mirrored to the client via PlayerVisState.grappleActive
+        // (active vs. cooled-down).  Without per-tick remaining, fake a
+        // smooth fill by holding 0 → 1 over k_grappleCooldown after each
+        // active-pull ends.  Falls back to "ready" when no PlayerSimState
+        // is reachable on the local entity.
+        {
+            float grappleCharge = 1.f;
+            registry.view<LocalPlayer, PlayerVisState>().each([&](const PlayerVisState& vis) {
+                // While the cable is taut, the cooldown hasn't started yet.
+                if (vis.grappleActive)
+                    grappleCharge = 0.f;
+            });
+            // If the simulation timer is reachable (server-side replicated
+            // path), use the precise value.  PlayerSimState is only present
+            // on the server, so on the client we approximate by ramping the
+            // value back up over the design's `k_grappleCooldown` once the
+            // cable becomes inactive.  Use a Game.cpp-local timer:
+            static float s_grappleSinceRelease = 1e9f; // big = idle
+            static bool s_grappleWasActive = false;
+            bool nowActive = false;
+            registry.view<LocalPlayer, PlayerVisState>().each(
+                [&](const PlayerVisState& vis) { nowActive = vis.grappleActive; });
+            if (nowActive)
+                s_grappleSinceRelease = 0.f;
+            else if (s_grappleWasActive && !nowActive)
+                s_grappleSinceRelease = 0.f;
+            else
+                s_grappleSinceRelease += frameTime;
+            s_grappleWasActive = nowActive;
+            if (nowActive)
+                grappleCharge = 0.f;
+            else
+                grappleCharge = std::clamp(s_grappleSinceRelease / tms::k_grappleCooldown, 0.f, 1.f);
+            hudState.equipment.grappleCharge = grappleCharge;
+
+            // Grenade: count from GrenadeInventory.  v1 has no cooldown
+            // (unlimited grenades for testing), so charge stays 1.0.
+            int grenadeCount = 2; // sensible default while inventory is unimplemented
+            registry.view<LocalPlayer, GrenadeInventory>().each([&](const GrenadeInventory& /*gi*/) {
+                // No `count` field on GrenadeInventory yet — show "∞" as 9.
+                grenadeCount = 9;
+            });
+            hudState.equipment.grenadeCount = grenadeCount;
+            hudState.equipment.grenadeCharge = 1.f;
+
+            // Tactical: not implemented in ECS yet; show as ready with a
+            // single charge so the slot still renders correctly.
+            hudState.equipment.tacticalCount = 1;
+            hudState.equipment.tacticalCharge = 1.f;
+        }
+
+        // ── Voidfall HUD: world-space enemy HP bars ──
+        thread_local std::vector<HudWorldEnemy> hudWorldEnemies;
+        thread_local std::vector<std::string> hudWorldEnemyNames;
+        hudWorldEnemies.clear();
+        hudWorldEnemyNames.clear();
+        // Reserve up-front so subsequent push_backs don't invalidate the
+        // string pointers we hand off to HudWorldEnemy::name (we copy the
+        // strings, but the reservation also avoids reallocation jitter).
+        hudWorldEnemyNames.reserve(16);
+        registry.view<ClientId, Position, CollisionShape, Health, PlayerVisState>().each(
+            [&](const ClientId& cid,
+                const Position& pos,
+                const CollisionShape& shape,
+                const Health& hp,
+                const PlayerVisState& pvis) {
+                if (localClientId.value != -1 && cid == localClientId)
+                    return;
+                if (pvis.isDead)
+                    return;
+                HudWorldEnemy we;
+                // Place the floating bar slightly above the enemy capsule.
+                const float headDir = pvis.gravityFlipped ? -1.0f : 1.0f;
+                we.worldX = pos.value.x;
+                we.worldY = pos.value.y + (shape.halfExtents.y + 18.f) * headDir;
+                we.worldZ = pos.value.z;
+                char buf[24];
+                SDL_snprintf(buf, sizeof(buf), "PLR-%02d", cid.value);
+                hudWorldEnemyNames.emplace_back(buf);
+                we.name = hudWorldEnemyNames.back();
+                we.health = static_cast<int>(hp.health);
+                we.maxHealth = 100;
+                we.armor = static_cast<int>(hp.armor);
+                we.maxArmor = 100;
+                we.isAlive = !pvis.isDead;
+                hudWorldEnemies.push_back(we);
+            });
+        hudState.worldEnemies = hudWorldEnemies;
+
+        // ── Voidfall HUD: secondary weapon snapshot ──
+        registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+            const GunInstance& secGun = (ws.current == WeaponSlot::SECONDARY) ? ws.primary : ws.secondary;
+            if (static_cast<int>(secGun.type) >= 0) {
+                hudState.secondaryWeaponId = static_cast<int>(secGun.type);
+                hudState.secondaryClip = secGun.currentMagAmmo;
+                hudState.secondaryReserve = secGun.totalAmmo;
+            }
+        });
+
+        // ── Voidfall HUD: pickup notifications (slide-in) ──
+        // Detect new weapons or ammo growth on the local player vs. the
+        // previous frame's snapshot.  This means picking up a Rifle from a
+        // spawner — or any other source that grows ws.primary/secondary —
+        // surfaces in the right-side feed.
+        {
+            int curPrim = -1;
+            int curSec = -1;
+            int curReserve = 0;
+            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                curPrim = static_cast<int>(ws.primary.type);
+                curSec = static_cast<int>(ws.secondary.type);
+                const GunInstance& gun = (ws.current == WeaponSlot::SECONDARY) ? ws.secondary : ws.primary;
+                curReserve = gun.currentMagAmmo + gun.totalAmmo;
+            });
+
+            auto pushPickup = [&](const std::string& label, int qty) {
+                pendingPickupNotifications_.push_back({label, qty});
+            };
+
+            if (prevPrimaryWeaponType_ != -1 && curPrim != prevPrimaryWeaponType_ && curPrim >= 0) {
+                const char* names[] = {"RIFLE", "ROCKET", "RAILGUN", "ENERGY"};
+                const char* nm = (curPrim >= 0 && curPrim < 4) ? names[curPrim] : "WEAPON";
+                pushPickup(nm, 1);
+            }
+            if (prevSecondaryWeaponType_ != -1 && curSec != prevSecondaryWeaponType_ && curSec >= 0) {
+                const char* names[] = {"RIFLE", "ROCKET", "RAILGUN", "ENERGY"};
+                const char* nm = (curSec >= 0 && curSec < 4) ? names[curSec] : "WEAPON";
+                pushPickup(nm, 1);
+            }
+            if (prevAmmoReserve_ >= 0 && curReserve > prevAmmoReserve_ + 5) {
+                pushPickup("AMMO", curReserve - prevAmmoReserve_);
+            }
+            prevPrimaryWeaponType_ = curPrim;
+            prevSecondaryWeaponType_ = curSec;
+            prevAmmoReserve_ = curReserve;
+
+            // Ship the pending list and drain — each notification is a
+            // one-shot event; the widget owns its lifetime.
+            hudState.pickupNotifications = pendingPickupNotifications_;
+        }
+
+        // ── Voidfall HUD: gravity direction ──
+        {
+            bool flipped = false;
+            registry.view<LocalPlayer, PlayerVisState>().each(
+                [&](const PlayerVisState& vis) { flipped = vis.gravityFlipped; });
+            hudState.gravityDirection = flipped ? 2 : 0; // 0 = down, 2 = up
+        }
+
+        // ── Voidfall HUD: match-header info ──
+        if (currentMatchPhase == MatchPhase::IN_PROGRESS || currentMatchPhase == MatchPhase::FINISHED) {
+            matchElapsedSeconds_ += frameTime;
+        } else {
+            matchElapsedSeconds_ = 0.f;
+        }
+        hudState.matchInfo.elapsedSeconds = matchElapsedSeconds_;
+        hudState.matchInfo.fragTarget = 30; // matches design default; replaced once the server replicates a target.
+        hudState.matchInfo.valid =
+            (currentMatchPhase == MatchPhase::IN_PROGRESS || currentMatchPhase == MatchPhase::FINISHED);
+
         hud_.update(frameTime, hudState);
         hud_.render();
+
+        // Drain pickup notifications now that the HUD has consumed them.
+        pendingPickupNotifications_.clear();
     }
 
     debugUI.render();

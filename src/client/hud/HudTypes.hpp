@@ -141,6 +141,50 @@ struct HudMinimapDot
     float worldX = 0.f, worldZ = 0.f;
 };
 
+/// @brief World-space enemy entry — for the floating HP bar that hovers above
+///        each visible enemy in the world (renders only when on-screen).
+struct HudWorldEnemy
+{
+    float worldX = 0.f, worldY = 0.f, worldZ = 0.f; ///< Top of the enemy capsule.
+    std::string name;                               ///< Display label (e.g. "RAIDEN").
+    int health = 100, maxHealth = 100;
+    int armor = 0, maxArmor = 100;
+    bool isAlive = true;
+};
+
+/// @brief Equipment slot state — drives the bottom-center grapple/grenade/tactical row.
+struct HudEquipmentState
+{
+    float grappleCharge = 1.f;  ///< 0..1, 1 = ready.
+    float grenadeCharge = 1.f;  ///< 0..1, 1 = ready (used when count not shown).
+    float tacticalCharge = 1.f; ///< 0..1, 1 = ready.
+    int grenadeCount = 2;       ///< Count for slot showing a number; 0 = unavailable.
+    int tacticalCount = 1;      ///< Count for slot showing a number; 0 = unavailable.
+};
+
+/// @brief Pickup notification entry — slide-in messages for items just acquired.
+struct HudPickupNotification
+{
+    std::string label; ///< E.g. "PULSE·MAG".
+    int qty = 1;       ///< Amount picked up.
+};
+
+/// @brief Local player K/D/A — feeds the top-right counter.
+struct HudKdaCounter
+{
+    int kills = 0;
+    int deaths = 0;
+    int assists = 0;
+};
+
+/// @brief Match info for the top-center header.
+struct HudMatchInfo
+{
+    float elapsedSeconds = 0.f; ///< Time since match started.
+    int fragTarget = 30;        ///< Score-to-win.
+    bool valid = false;         ///< False when no match metadata is available.
+};
+
 /// @brief Snapshot of game state consumed by the HUD each frame.
 ///
 /// Filled by Game from ECS data. The HUD never imports ECS headers.
@@ -186,6 +230,19 @@ struct HudGameState
     // these to render a "Press F to pick up <Weapon>" hint.
     bool pickupAvailable = false; ///< True when a pickup is currently actionable.
     int pickupWeaponId = 0;       ///< Mirrors WeaponType: 0=Rifle, 1=Rocket, 2=RailGun, 3=EnergyGun.
+
+    // Voidfall HUD additions.
+    std::span<const HudWorldEnemy> worldEnemies;                ///< Enemies whose HP bars float above them in-world.
+    HudEquipmentState equipment;                                ///< Grapple / grenade / tactical state.
+    std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
+    HudKdaCounter kda;                                          ///< Local player kill/assist/death counter (top-right).
+    HudMatchInfo matchInfo;   ///< Match elapsed time + frag target (top-center header).
+    int gravityDirection = 0; ///< 0=down, 1=left, 2=up, 3=right (HUD compass arrow).
+
+    // Secondary weapon snapshot (drives the small "[2] PULSAR  7/12" sub-row).
+    int secondaryWeaponId = -1; ///< -1 = no secondary loaded.
+    int secondaryClip = 0;      ///< Mag count of the secondary weapon.
+    int secondaryReserve = 0;   ///< Reserve count of the secondary weapon.
 
     // Screen dimensions (set by Game each frame).
     float screenW = 1280.f, screenH = 720.f;

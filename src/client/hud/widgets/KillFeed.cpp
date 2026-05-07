@@ -1,68 +1,123 @@
 /// @file KillFeed.cpp
+/// @brief Voidfall kill-feed implementation.
+
 #include "KillFeed.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
+#include <cstring>
+
+namespace
+{
+
+/// @brief Map weapon ID to a four-letter mil-spec callsign for the kill feed.
+const char* weaponCallsign(int /*weaponId*/)
+{
+    // The HudKillFeedEntry currently only carries a numeric weaponId; we don't
+    // have a typed map yet.  Default to "ARC-9" until the feed payload grows
+    // to include weapon names — same fallback as the prototype.
+    return "ARC-9";
+}
+
+bool nameMatchesYou(const std::string& s)
+{
+    return s == "You" || s == "YOU";
+}
+
+} // namespace
 
 KillFeed::KillFeed()
 {
     anchor = HudAnchor::TopRight;
-    offsetX = -10.f;
-    offsetY = 10.f;
+    offsetX = -20.f;
+    offsetY = 100.f; // sits below the KDA counter
 }
 
 void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
-    // Ingest new events.
     for (const auto& ev : state.killFeedEvents) {
         Entry e;
         e.killerName = ev.killerName;
         e.victimName = ev.victimName;
         e.isHeadshot = ev.isHeadshot;
+        e.youAreKiller = nameMatchesYou(ev.killerName);
+        e.youAreVictim = nameMatchesYou(ev.victimName);
         e.timer = entryLifetime;
+        e.slideIn = 0.f;
         entries_.insert(entries_.begin(), e);
     }
 
-    // Tick timers and remove expired.
-    for (auto& e : entries_)
+    for (auto& e : entries_) {
         e.timer -= dt;
+        e.slideIn = std::min(1.f, e.slideIn + dt * 6.f); // ~0.16s slide-in
+    }
     entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [](const Entry& e) { return e.timer <= 0.f; }),
                    entries_.end());
 
-    // Cap entry count.
     if (static_cast<int>(entries_.size()) > maxEntries)
         entries_.resize(static_cast<std::size_t>(maxEntries));
 }
 
-void KillFeed::draw(HudContext& ctx, float x, float y)
+void KillFeed::draw(HudContext& ctx, float anchorX, float y)
 {
+    using namespace voidfall;
+
     const float s = uiScale_;
     const float fs = fontSize * s;
     const float eh = entryHeight * s;
     const float ep = entryPadding * s;
+    const float padX = 8.f * s;
+    const float gap = 7.f * s;
 
     float curY = y;
     for (const auto& e : entries_) {
-        // Fade out in the last fadeOutDuration seconds.
-        const float alpha = std::min(e.timer / fadeOutDuration, 1.f);
-        const HudColor killerColor(1.f, 1.f, 1.f, alpha);
-        const HudColor victimColor(0.8f, 0.2f, 0.2f, alpha);
+        const float alpha = std::min(e.timer / fadeOutDuration, 1.f) * e.slideIn;
+        const float slideOff = (1.f - e.slideIn) * 16.f * s;
 
-        // "Killer > Victim" (right-aligned from anchor).
-        const char* arrow = " > ";
+        const char* weapon = weaponCallsign(0);
         const float killerW = ctx.measureText(e.killerName.c_str(), fs);
-        const float arrowW = ctx.measureText(arrow, fs);
+        const float weaponW = ctx.measureText(weapon, fs);
         const float victimW = ctx.measureText(e.victimName.c_str(), fs);
-        const float totalW = killerW + arrowW + victimW;
+        const float hsW = e.isHeadshot ? (10.f * s + gap) : 0.f;
+        const float contentW = killerW + gap + weaponW + hsW + gap + victimW;
+        const float pillW = contentW + padX * 2.f;
+        const float pillH = eh;
 
-        float curX = x - totalW;
-        ctx.text(e.killerName.c_str(), curX, curY, fs, killerColor);
-        curX += killerW;
-        ctx.text(arrow, curX, curY, fs, HudColor(0.7f, 0.7f, 0.7f, alpha));
-        curX += arrowW;
-        ctx.text(e.victimName.c_str(), curX, curY, fs, victimColor);
+        const float pillX = anchorX - pillW + slideOff;
+        const float pillY = curY;
 
-        curY += eh + ep;
+        // Background — amber-tinted when the local player is involved.
+        const HudColor bg = e.youAreKiller ? HudColor{0.30f, 0.20f, 0.05f, 0.65f * alpha}
+                                           : HudColor{0.10f, 0.09f, 0.08f, 0.78f * alpha};
+        const HudColor border = e.youAreKiller ? withAlpha(k_amber, alpha) : withAlpha(k_lineDim, alpha);
+        ctx.rect(pillX, pillY, pillW, pillH, bg);
+        ctx.rectOutline(pillX, pillY, pillW, pillH, 1.f, border);
+
+        // Killer name (amber-tinted if local player).
+        const float textY = pillY + (pillH - fs) * 0.5f - fs * 0.18f;
+        float cursorX = pillX + padX;
+        const HudColor killerColor = e.youAreKiller ? withAlpha(k_textBright, alpha) : withAlpha(k_text, alpha);
+        ctx.text(e.killerName.c_str(), cursorX, textY, fs, killerColor, HudAlign::Left);
+        cursorX += killerW + gap;
+
+        // Weapon abbreviation in amber.
+        ctx.text(weapon, cursorX, textY, fs, withAlpha(k_amber, alpha), HudAlign::Left);
+        cursorX += weaponW + gap;
+
+        // Headshot glyph: small red diamond.
+        if (e.isHeadshot) {
+            const float hsSize = 8.f * s;
+            ctx.rotatedRect(
+                cursorX + hsSize * 0.5f, pillY + pillH * 0.5f, hsSize, hsSize, 45.f, withAlpha(k_red, alpha));
+            cursorX += 10.f * s + gap;
+        }
+
+        // Victim name in red.
+        const HudColor victimColor = e.youAreVictim ? withAlpha(k_red, alpha) : withAlpha(k_textDim, alpha);
+        ctx.text(e.victimName.c_str(), cursorX, textY, fs, victimColor, HudAlign::Left);
+
+        curY += pillH + ep;
     }
 }
