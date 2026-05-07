@@ -18,26 +18,28 @@
 
 struct AmmoCounter : HudWidget
 {
-    float panelWidth = 320.f;
-    float panelHeight = 96.f;
-    float clipFontSize = 44.f;
-    float magFontSize = 18.f;
-    float reserveFontSize = 16.f;
-    float nameFontSize = 14.f;
-    float fireModeFontSize = 9.f;
-    float secondaryFontSize = 11.f;
+    float panelWidth = 360.f;
+    float panelHeight = 108.f;
+    float clipFontSize = 52.f;      ///< Hero numeral.
+    float magFontSize = 22.f;       ///< "/<capacity>" caption.
+    float reserveFontSize = 20.f;   ///< "+<reserve>" caption.
+    float nameFontSize = 18.f;      ///< Weapon name.
+    float fireModeFontSize = 11.f;  ///< Fire-mode tag.
+    float secondaryFontSize = 13.f; ///< Bottom-row secondary slot.
 
     AmmoCounter();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
     void draw(HudContext& ctx, float drawX, float drawY) override;
 
 private:
-    int displayClip_ = 30;
-    int displayReserve_ = 90;
-    int displayMag_ = 30; ///< Magazine size (used for "/30" caption).
+    int displayClip_ = 0;
+    int displayReserve_ = 0;
+    int displayMag_ = 0; ///< Live magazine capacity from WeaponConfig.magazineSize.
     int weaponId_ = 0;
 
     int secondaryClip_ = 0;
     int secondaryReserve_ = 0;
+    int secondaryMag_ = 0;
     int secondaryWeaponId_ = -1;
+    int secondaryKeybind_ = 2; ///< Keybind label for the inactive slot ("1" or "2").
 };

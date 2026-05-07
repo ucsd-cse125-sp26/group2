@@ -3341,6 +3341,10 @@ SDL_AppResult Game::iterate()
                 hudState.secondaryClip = secGun.currentMagAmmo;
                 hudState.secondaryReserve = secGun.totalAmmo;
                 hudState.secondaryMagCapacity = getWeaponConfig(secGun.type).magazineSize;
+                // Keybind label tracks the *inactive* slot so the sub-row
+                // always advertises the right swap key (`1` while holding
+                // SECONDARY, `2` while holding PRIMARY).
+                hudState.secondaryKeybind = static_cast<int>(otherSlot) + 1;
             }
         });
 

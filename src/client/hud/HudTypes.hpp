@@ -239,10 +239,18 @@ struct HudGameState
     HudMatchInfo matchInfo;   ///< Match elapsed time + frag target (top-center header).
     int gravityDirection = 0; ///< 0=down, 1=left, 2=up, 3=right (HUD compass arrow).
 
-    // Secondary weapon snapshot (drives the small "[2] PULSAR  7/12" sub-row).
-    int secondaryWeaponId = -1; ///< -1 = no secondary loaded.
-    int secondaryClip = 0;      ///< Mag count of the secondary weapon.
-    int secondaryReserve = 0;   ///< Reserve count of the secondary weapon.
+    // Inactive-slot weapon snapshot (drives the small "[1] ARC-9  …" or
+    // "[2] PULSAR  …" sub-row at the bottom of the weapon panel — i.e. the
+    // *other* weapon, whichever the player isn't currently holding).
+    int secondaryWeaponId = -1; ///< -1 = no inactive weapon loaded.
+    int secondaryClip = 0;      ///< Mag count of the inactive weapon.
+    int secondaryReserve = 0;   ///< Reserve count of the inactive weapon.
+    int secondaryKeybind = 2;   ///< 1 or 2 — the keybind that swaps to this slot.
+
+    // Magazine capacities — sourced from WeaponConfig.magazineSize each frame
+    // so the HUD never hardcodes per-weapon constants.
+    int magCapacity = 0;          ///< Max rounds per mag for the current weapon.
+    int secondaryMagCapacity = 0; ///< Max rounds per mag for the secondary weapon (when set).
 
     // Screen dimensions (set by Game each frame).
     float screenW = 1280.f, screenH = 720.f;

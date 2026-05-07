@@ -8,6 +8,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+
 namespace
 {
 
@@ -43,23 +45,6 @@ const char* weaponFireMode(int id)
     }
 }
 
-/// @brief Hardcoded magazine size per weapon — matches the prototype tuning.
-int weaponMagSize(int id)
-{
-    switch (id) {
-    case 0:
-        return 30;
-    case 1:
-        return 5;
-    case 2:
-        return 12;
-    case 3:
-        return 24;
-    default:
-        return 30;
-    }
-}
-
 } // namespace
 
 AmmoCounter::AmmoCounter()
@@ -77,11 +62,13 @@ void AmmoCounter::update(float /*dt*/, const HudGameState& state, HudTweenPool& 
     displayClip_ = state.ammoClip;
     displayReserve_ = state.ammoReserve;
     weaponId_ = state.weaponId;
-    displayMag_ = weaponMagSize(weaponId_);
+    displayMag_ = state.magCapacity;
 
     secondaryWeaponId_ = state.secondaryWeaponId;
     secondaryClip_ = state.secondaryClip;
     secondaryReserve_ = state.secondaryReserve;
+    secondaryMag_ = state.secondaryMagCapacity;
+    secondaryKeybind_ = state.secondaryKeybind;
 }
 
 void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
@@ -148,10 +135,13 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
     const float hairY = secY - 6.f * s;
     ctx.rect(x + padX, hairY, pw - padX * 2.f, 1.f, k_lineDim);
 
+    // Keybind for the inactive slot tracks which slot is *not* equipped:
+    // shows "1" while the player holds SECONDARY, "2" while holding PRIMARY.
+    char keyStr[2] = {static_cast<char>('0' + std::clamp(secondaryKeybind_, 1, 9)), '\0'};
+
     if (secondaryWeaponId_ >= 0) {
-        // Key tab "[2]"
-        drawKeyTab(ctx, "2", x + padX, secY, secondaryFontSize * s, 4.f * s, 1.f * s);
-        const float keyW = ctx.measureText("2", secondaryFontSize * s) + 8.f * s;
+        drawKeyTab(ctx, keyStr, x + padX, secY, secondaryFontSize * s, 4.f * s, 1.f * s);
+        const float keyW = ctx.measureText(keyStr, secondaryFontSize * s) + 8.f * s;
         ctx.text(weaponName(secondaryWeaponId_),
                  x + padX + keyW + 8.f * s,
                  secY,
@@ -159,9 +149,11 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
                  k_text,
                  HudAlign::Left);
         char secAmmo[24];
-        SDL_snprintf(secAmmo, sizeof(secAmmo), "%d/%d", secondaryClip_, weaponMagSize(secondaryWeaponId_));
+        SDL_snprintf(secAmmo, sizeof(secAmmo), "%d/%d", secondaryClip_, secondaryMag_);
         ctx.text(secAmmo, x + pw - padX, secY, secondaryFontSize * s, k_textDim, HudAlign::Right);
     } else {
-        ctx.text("[2] EMPTY", x + padX, secY, secondaryFontSize * s, k_textDim, HudAlign::Left);
+        char emptyBuf[16];
+        SDL_snprintf(emptyBuf, sizeof(emptyBuf), "[%s] EMPTY", keyStr);
+        ctx.text(emptyBuf, x + padX, secY, secondaryFontSize * s, k_textDim, HudAlign::Left);
     }
 }
