@@ -424,7 +424,10 @@ static void spawnGrenade(
                                      .owner = shooter,
                                      .explosive = false, // grenades route via fuse / impact, not the rocket path
                                      .currentLifeTime = 0.0f,
-                                     .fuseTimer = cfg.fuseTime,
+                                     // Sticky grenades (Impulse) start with no fuse — CollisionSystem arms it on first
+                                     // surface hit. Non-sticky grenades (HE w/ fuseTime=3.0; Molotov w/ fuseTime=-1 for
+                                     // impact-detonate) use the config value directly.
+                                     .fuseTimer = cfg.sticky ? -1.0f : cfg.fuseTime,
                                      .bounceRestitution = cfg.bounceRestitution,
                                      .sticky = cfg.sticky,
                                      .tint = cfg.tint,
@@ -656,7 +659,18 @@ inline void handleFire(Registry& registry,
     // basis), then spawns a Projectile with grenade-specific fields and
     // gates spam-throwing via throwCooldown.
     if (isGrenadeType(gun.type)) {
-        const glm::vec3 eyeRight = glm::normalize(glm::cross(direction, glm::vec3{0.0f, 1.0f, 0.0f}));
+        // Mirrors the defensive pattern in muzzleOrigin (above): guard against
+        // pitch-±90° degeneracy where direction is parallel to world-up. Input
+        // is clamped to ±89° in the input system so this can't trigger today,
+        // but normalize() of a near-zero vector would return NaN.
+        glm::vec3 eyeRight = glm::cross(direction, glm::vec3{0.0f, 1.0f, 0.0f});
+        const float eyeRightLen2 = glm::dot(eyeRight, eyeRight);
+        if (eyeRightLen2 < physics::k_parallelEpsilon) {
+            // Degenerate: aiming nearly straight up/down. Fall back to world-X right-axis.
+            eyeRight = glm::vec3{1.0f, 0.0f, 0.0f};
+        } else {
+            eyeRight = eyeRight * (1.0f / std::sqrt(eyeRightLen2));
+        }
         spawnGrenade(registry, shooter, gun.type, muzzle, direction, eyeRight);
         gun.fireCooldown = getGrenadeConfig(gun.type).throwCooldown;
         return;
