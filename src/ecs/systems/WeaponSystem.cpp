@@ -8,6 +8,8 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
+#include "ecs/components/GrenadeInventory.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/HitboxHistory.hpp"
@@ -62,14 +64,29 @@ inline GunInstance& getEquippedGun(WeaponState& weapon)
 }
 
 /// @brief Apply weapon slot switch from player input.
-/// @param input   Current input snapshot.
-/// @param weapon  Weapon state (modified in place).
-void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
+/// @param registry  ECS registry (for grenade-inventory lookup on cycle).
+/// @param shooter   Shooter entity (for grenade-inventory lookup on cycle).
+/// @param input     Current input snapshot.
+/// @param weapon    Weapon state (modified in place).
+void handleSwitch(Registry& registry, entt::entity shooter, const InputSnapshot& input, WeaponState& weapon)
 {
     if (input.switchToPrimary) {
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary) {
         weapon.current = WeaponSlot::SECONDARY;
+    }
+    // Grenade slot: press 3 to switch; press again while on grenade to cycle type.
+    if (input.cycleGrenade) {
+        auto* inv = registry.try_get<GrenadeInventory>(shooter);
+        if (inv != nullptr) {
+            GunInstance& equipped = getEquippedGun(weapon);
+            if (isGrenadeType(equipped.type)) {
+                inv->currentType = nextGrenadeType(inv->currentType);
+            }
+            equipped.type = inv->currentType;
+            // Reset firing state so we don't carry over a held LMB into the throw.
+            equipped.fireCooldown = 0.0f;
+        }
     }
 }
 
@@ -717,7 +734,7 @@ void runWeapon(Registry& registry,
         if (registry.all_of<RespawnTimer>(shooter))
             return;
 
-        handleSwitch(input, weapon);
+        handleSwitch(registry, shooter, input, weapon);
         handleCooldown(weapon, dt);
 
         // Clear beam state when switching away from a beam weapon.
