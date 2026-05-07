@@ -802,6 +802,8 @@ add_executable(group2
         src/ecs/systems/WeaponSpawnerSystem.cpp
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
+        src/ecs/components/AbilityState.hpp
+        src/ecs/components/AbilityConfig.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1030,6 +1032,8 @@ add_executable(server
         src/client/animation/SkinningBackend.hpp
         src/client/animation/SkinningBackend.cpp
         src/client/animation/SkinVertex.hpp
+        src/ecs/components/AbilityState.hpp
+        src/ecs/components/AbilityConfig.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1226,6 +1230,8 @@ add_executable(clientbot
     # path resolves.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.hpp"
+        src/ecs/components/AbilityState.hpp
+        src/ecs/components/AbilityConfig.hpp
 )
 
 # Headers under src/ are referenced via "network/...", "ecs/components/...".
