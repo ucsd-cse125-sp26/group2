@@ -60,17 +60,25 @@ void main()
         // Anti-aliased fill alpha: stays within ±0.5 px of the true edge.
         float fillAlpha = clamp(screenPxDistance + 0.5, 0.0, 1.0);
 
-        // Outline: a 1-pixel dark band just outside the glyph for legibility
-        // against bright backgrounds. The outline distance is offset inward
-        // by `kOutlinePxWidth` so the dark band lives in (-w..0) screen-pixel
-        // distance to the edge.
-        const float kOutlinePxWidth = 1.0;
-        float outlineDistance = screenPxDistance + kOutlinePxWidth;
+        // Outline strength is encoded into vShapeData.x by the CPU side:
+        //   0.0 = no outline (clean text over panel chrome)
+        //   1.0 = draw a thin dark outline (legibility over the world)
+        // We avoid drawing the outline universally because adjacent glyphs'
+        // outlines visibly overlap, mashing letters together — the
+        // "ARC-9 / RDY look like they have a black background" complaint.
+        float outlineAmount = clamp(vShapeData.x, 0.0, 1.0);
+
+        // Outline distance: 0.5 px wider than the glyph edge on the outside.
+        // Tighter than v1 (1 px) — at small text sizes a 1-px outline ate
+        // the gap between adjacent glyphs entirely.
+        const float kOutlinePxWidth = 0.5;
+        float outlineDistance = screenPxDistance + kOutlinePxWidth * outlineAmount;
         float outlineAlpha    = clamp(outlineDistance + 0.5, 0.0, 1.0);
 
-        // Composite: dark outline behind colored glyph fill.
+        // Composite: when outline is on, dark band sits behind the fill;
+        // when off, the alpha is just the fill itself (no dark halo).
         vec3  rgb   = mix(vec3(0.0), vColor.rgb, fillAlpha);
-        float alpha = outlineAlpha * vColor.a;
+        float alpha = mix(fillAlpha, outlineAlpha, outlineAmount) * vColor.a;
         outColor = premul(rgb, alpha);
 
     } else if (mode == 2) {

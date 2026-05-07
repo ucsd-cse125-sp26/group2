@@ -91,15 +91,10 @@ void DamageNumberWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
         // shows "−48" with a minus glyph, so prefix accordingly.
         std::snprintf(buf, sizeof(buf), "-%d", e.damage);
 
-        // Colored outline matching the number (darkened), black for white numbers.
-        const float outOff = 1.5f * uiScale_;
-        const bool isWhite = (e.color.r > 0.9f && e.color.g > 0.9f && e.color.b > 0.9f);
-        HudColor shadow;
-        if (isWhite)
-            shadow = HudColor(0.f, 0.f, 0.f, 0.7f * alpha);
-        else
-            shadow = HudColor(e.color.r * 0.3f, e.color.g * 0.3f, e.color.b * 0.3f, 0.8f * alpha);
-        ctx.text(buf, sx + outOff, sy + outOff, fontSize, shadow, HudAlign::Left);
-        ctx.text(buf, sx, sy, fontSize, color, HudAlign::Left);
+        // Single SDF text draw with outline-on — the shader paints a 1-px
+        // dark band tight to the glyph for readability over the world.
+        // Replaces the previous manual offset-shadow (which produced a
+        // double-vision halo at small sizes).
+        ctx.text(buf, sx, sy, fontSize, color, HudAlign::Left, /*outlined=*/true);
     }
 }

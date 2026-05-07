@@ -44,18 +44,9 @@ void DamageAccumWidget::draw(HudContext& ctx, float cx, float cy)
     std::snprintf(buf, sizeof(buf), "-%d", displayTotal_);
 
     const float fontSize = 13.f * uiScale_;
-    const float outOff = 1.5f * uiScale_;
-
-    // Outline: darkened version of the color, black for white.
-    const bool isWhite = (color_.r > 0.9f && color_.g > 0.9f && color_.b > 0.9f);
-    HudColor shadow;
-    if (isWhite)
-        shadow = HudColor(0.f, 0.f, 0.f, 0.7f * alpha_);
-    else
-        shadow = HudColor(color_.r * 0.3f, color_.g * 0.3f, color_.b * 0.3f, 0.8f * alpha_);
-    ctx.text(buf, cx + outOff, cy + outOff, fontSize, shadow, HudAlign::Center);
 
     HudColor color = color_;
     color.a *= alpha_;
-    ctx.text(buf, cx, cy, fontSize, color, HudAlign::Center);
+    // Sits over the live game view → outline opt-in for legibility.
+    ctx.text(buf, cx, cy, fontSize, color, HudAlign::Center, /*outlined=*/true);
 }

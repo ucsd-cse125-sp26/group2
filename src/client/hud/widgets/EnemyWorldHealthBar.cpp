@@ -137,7 +137,9 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
         // Name baseline above the bars — design feedback wanted the
         // nickname *in front* of the bars, not behind.
         const float nameTop = std::round(sy - hpH - (e.maxSh > 0 ? shH + 2.f * s : 0.f) - 4.f * s - fs);
-        ctx.text(e.name.c_str(), sx, nameTop, fs, withAlpha(k_red, alpha), HudAlign::Center);
+        // Name floats over the world → outline-on for legibility against
+        // bright sky / textured environments.
+        ctx.text(e.name.c_str(), sx, nameTop, fs, withAlpha(k_red, alpha), HudAlign::Center, /*outlined=*/true);
 
         // Shield bar (above HP) — only when target has any shield max.
         float barY = std::round(sy - hpH);

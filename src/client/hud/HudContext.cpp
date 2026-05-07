@@ -206,7 +206,7 @@ void HudContext::bar(float x, float y, float w, float h, float fill01, HudColor 
 
 // ── Text ────────────────────────────────────────────────────────────────────
 
-void HudContext::text(const char* str, float x, float y, float size, HudColor color, HudAlign align)
+void HudContext::text(const char* str, float x, float y, float size, HudColor color, HudAlign align, bool outlined)
 {
     if (!sdfAtlas_ || !str || !*str)
         return;
@@ -225,20 +225,20 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
         startX = x - totalWidth;
 
     // Pixel-snap the starting cursor and the baseline so glyphs land on a
-    // consistent subpixel grid (eliminates the "100" / "111" sampling drift
-    // where identical zero-glyphs render at slightly different widths).
+    // consistent subpixel grid.  We *only* snap the per-glyph quad anchor —
+    // not the cursor advance — so accumulated fractional advances still
+    // produce font-correct kerning.  An earlier revision rounded the
+    // advance itself; that produced uniform per-glyph spacing but mangled
+    // kerning between unequal-width glyphs (e.g. "A" → "R" → "C-9"
+    // visually mashed together).
     float cursorX = std::round(startX);
     const float baselineY = std::round(y + size);
 
-    // Per-glyph cursor accumulation is the source of the inter-glyph jitter
-    // in the original implementation: a fractional `advance * scale` would
-    // compound, and rounding *only* the position made some glyphs land at
-    // an 8-px gap and others at 9-px, even when the source glyphs were
-    // identical.  We track the cursor in float for sub-pixel accuracy of
-    // the whole string but compute each glyph's quad anchor as the
-    // round-to-nearest of `cursorX + bearing*scale`, then advance the
-    // cursor by an integer-rounded delta so identical successor glyphs
-    // step by exactly the same number of pixels.
+    // Outline strength is encoded into shapeData.x: 1.0 = draw the dark
+    // 1-px outline (legibility over varied/world backgrounds), 0.0 = no
+    // outline (clean text on dark panel chrome).  See `hud.frag` mode 1.
+    const float outlineFlag = outlined ? 1.0f : 0.0f;
+
     for (const char* p = str; *p; ++p) {
         const uint32_t cp = static_cast<uint8_t>(*p);
         const GlyphInfo* gi = sdfAtlas_->glyph(cp);
@@ -250,12 +250,26 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
         if (gw > 0.f && gh > 0.f) {
             const float gx = std::round(cursorX + gi->bearing.x * scale);
             const float gy = std::round(baselineY - gi->bearing.y * scale);
-            emitQuad(gx, gy, gw, gh, gi->uvMin.x, gi->uvMin.y, gi->uvMax.x, gi->uvMax.y, color, 1.f);
+            emitQuad(gx,
+                     gy,
+                     gw,
+                     gh,
+                     gi->uvMin.x,
+                     gi->uvMin.y,
+                     gi->uvMax.x,
+                     gi->uvMax.y,
+                     color,
+                     1.f,         // texMode = 1 (SDF text)
+                     outlineFlag, // shapeData.x = outline-on/off
+                     0.f,
+                     0.f);
         }
 
-        // Round the per-glyph advance so successive identical glyphs step
-        // by the same integer number of pixels, killing the spacing jitter.
-        cursorX += std::round(gi->advance * scale);
+        // Cursor advances by the *exact* fractional advance — the per-glyph
+        // quad anchor above is the only thing pixel-snapped.  This keeps
+        // successor glyphs at correct font metrics and never collides /
+        // overlaps regardless of size.
+        cursorX += gi->advance * scale;
     }
 }
 

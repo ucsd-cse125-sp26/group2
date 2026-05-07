@@ -46,7 +46,19 @@ public:
 
     // ── Text ────────────────────────────────────────────────────────────
 
-    void text(const char* str, float x, float y, float size, HudColor color, HudAlign align = HudAlign::Left);
+    /// @brief Render a UTF-8 ASCII string via SDF.
+    /// @param outlined  When true the glyph picks up a 1-px dark outline for
+    ///                  legibility against bright/varied backgrounds (damage
+    ///                  numbers over the world, etc.).  Defaults to off so
+    ///                  text rendered onto the dark Voidfall panel chrome
+    ///                  stays clean and doesn't gain a "sticker" look.
+    void text(const char* str,
+              float x,
+              float y,
+              float size,
+              HudColor color,
+              HudAlign align = HudAlign::Left,
+              bool outlined = false);
     float measureText(const char* str, float size) const;
 
     // ── Icons ───────────────────────────────────────────────────────────
