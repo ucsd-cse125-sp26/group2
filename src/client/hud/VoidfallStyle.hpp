@@ -22,28 +22,33 @@ namespace voidfall
 
 // ── Palette (matches prototype's CSS custom properties) ─────────────────────
 
-/// @brief Deep panel background — `oklch(0.13 0.010 60)`.
-constexpr HudColor k_bgVoid{0.10f, 0.09f, 0.08f, 0.92f};
-/// @brief Standard panel fill — `oklch(0.18 0.012 60 / 0.78)`.
-constexpr HudColor k_bgPanel{0.14f, 0.13f, 0.12f, 0.78f};
+/// @brief Deep panel background — opaque so HUD chrome doesn't pick up sky tint.
+constexpr HudColor k_bgVoid{0.08f, 0.075f, 0.07f, 0.96f};
+/// @brief Standard panel fill — bumped to 0.92α (was 0.78).
+/// At 0.78 the world bled through enough that bright-sky maps washed the
+/// chrome out and made dim text grey-on-grey.  0.92 keeps a faint sense of
+/// translucency without sacrificing readability against any background.
+constexpr HudColor k_bgPanel{0.10f, 0.095f, 0.085f, 0.92f};
 /// @brief Solid panel — used for hero callouts.
-constexpr HudColor k_bgPanelSolid{0.12f, 0.11f, 0.10f, 0.92f};
-/// @brief Inset bar background — `oklch(0.20 0.012 60)`.
-constexpr HudColor k_bgInset{0.16f, 0.15f, 0.14f, 0.85f};
+constexpr HudColor k_bgPanelSolid{0.09f, 0.085f, 0.075f, 0.96f};
+/// @brief Inset bar background.
+constexpr HudColor k_bgInset{0.12f, 0.115f, 0.105f, 0.92f};
 
 /// @brief Dim hairline — `oklch(0.32 0.015 60 / 0.6)`.
-constexpr HudColor k_lineDim{0.27f, 0.26f, 0.25f, 0.55f};
+constexpr HudColor k_lineDim{0.32f, 0.30f, 0.28f, 0.7f};
 /// @brief Standard hairline — `oklch(0.40 0.018 60)`.
-constexpr HudColor k_line{0.35f, 0.33f, 0.31f, 0.85f};
+constexpr HudColor k_line{0.42f, 0.40f, 0.37f, 0.95f};
 /// @brief Bright hairline — `oklch(0.55 0.02 60)`.
-constexpr HudColor k_lineBright{0.51f, 0.49f, 0.47f, 1.0f};
+constexpr HudColor k_lineBright{0.62f, 0.59f, 0.56f, 1.0f};
 
-/// @brief Dim text — `oklch(0.58 0.012 60)`.
-constexpr HudColor k_textDim{0.55f, 0.53f, 0.51f, 1.0f};
-/// @brief Standard text — `oklch(0.82 0.012 60)`.
-constexpr HudColor k_text{0.80f, 0.78f, 0.76f, 1.0f};
-/// @brief Brightest text — `oklch(0.95 0.008 60)`.
-constexpr HudColor k_textBright{0.96f, 0.94f, 0.92f, 1.0f};
+/// @brief Dim text — bumped luminance from ~0.55 to ~0.78 so secondary
+/// readouts (fire mode, "+reserve", "/mag", "[2] PULSAR") read clearly
+/// against the panel chrome instead of fading into it.
+constexpr HudColor k_textDim{0.78f, 0.76f, 0.73f, 1.0f};
+/// @brief Standard text — bumped slightly toward white for body chrome.
+constexpr HudColor k_text{0.92f, 0.90f, 0.87f, 1.0f};
+/// @brief Brightest text — kept near-white for hero readouts.
+constexpr HudColor k_textBright{1.00f, 0.99f, 0.97f, 1.0f};
 
 /// @brief Primary amber — `oklch(0.80 0.165 75)`.
 constexpr HudColor k_amber{1.00f, 0.71f, 0.18f, 1.0f};
