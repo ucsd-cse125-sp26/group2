@@ -257,14 +257,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
 void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
 {
-    std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" << std::endl;
     SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
     SDL_BindGPUFragmentSamplers(renderPass, 0, &hudTextureBinding, 1);
 
 
-    std::cout << "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" << std::endl;
     SDL_DrawGPUPrimitives(renderPass, 6,1,0,0);
-    std::cout << "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC" << std::endl;
 }
 
 void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
