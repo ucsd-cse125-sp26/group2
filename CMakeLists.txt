@@ -553,6 +553,7 @@ file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
 
 set(SHADER_NEW_SOURCES
     geometry.vert geometry.frag
+    hud.vert hud.frag
 )
 
 foreach(SHADER_SRC ${SHADER_NEW_SOURCES})

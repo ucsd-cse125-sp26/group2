@@ -32,6 +32,7 @@ public:
     [[nodiscard]] SDL_GPUDevice* getDevice() const { return device_; }
     [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const { return shaderFormat_; }
     [[nodiscard]] const NewCamera& getCamera() const { return camera_; }
+    void setHudTexture(SDL_GPUTexture* hudTexture);
 
     int loadSceneModel(
         const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining = "");
@@ -42,11 +43,16 @@ private:
     SDL_GPUShaderFormat shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
+
     SDL_GPUTexture* depthTexture_ = nullptr;
 
     // Temp for single texture
     SDL_GPUTexture* texture_ = nullptr;
     SDL_GPUSampler* sampler_ = nullptr;
+
+    SDL_GPUTexture* hudTexture_ = nullptr;
+    SDL_GPUSampler* hudSampler_ = nullptr;
 
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
@@ -56,6 +62,8 @@ private:
     /// @brief Build the geometry graphics pipeline from vertex/fragment shaders.
     /// @return True on success.
     bool createGeometryPipeline();
+
+    bool createHudPipeline();
 
     /// @brief Load models via AssetLoader and upload their mesh buffers to the GPU.
     /// @return True on success.
@@ -75,4 +83,7 @@ private:
     /// @param renderPass The active render pass.
     /// @param mesh The mesh to draw.
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
+
+    void drawHud(SDL_GPURenderPass* pass);
+
 };
