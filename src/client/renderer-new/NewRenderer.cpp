@@ -58,9 +58,20 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    if (!createHudPipeline()) {
+        SDL_Log("NewRenderer: failed to create hud pipeline: %s", SDL_GetError());
+        return false;
+    }
+
     sampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!sampler_) {
         SDL_Log("NewRenderer: failed to create sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    hudSampler_ = Boilerplate::createLinearRepeatSampler(device_);
+    if (!hudSampler_) {
+        SDL_Log("NewRenderer: failed to create hud sampler: %s", SDL_GetError());
         return false;
     }
 
@@ -75,6 +86,25 @@ bool NewRenderer::init(SDL_Window* window)
     return true;
 }
 
+bool NewRenderer::createHudPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShader.uniformBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/hud.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+
+    hudPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
+
+    return hudPipeline_ != nullptr;
+}
 bool NewRenderer::createGeometryPipeline()
 {
     Boilerplate::ShaderInfo vertexShader{};
@@ -96,7 +126,7 @@ bool NewRenderer::createGeometryPipeline()
     };
 
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true);
+        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true,false);
 
     return geometryPipeline_ != nullptr;
 }
@@ -181,16 +211,17 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     if (drawData)
         ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
 
+    /////////////////////////////////////////////////////////////////////////////////////////////////
     SDL_GPUColorTargetInfo colorTarget =
-        Boilerplate::makeColorTarget(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
+        Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
     SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture_);
 
-    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget);
-    SDL_BindGPUGraphicsPipeline(pass, geometryPipeline_);
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget);
+    SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture_, sampler_);
-    SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
+    SDL_BindGPUFragmentSamplers(geometryPass, 0, &textureBinding, 1);
 
     for (const auto& mInstance : Asset::modelInstances_) {
         glm::mat4 modelMatrix = glm::mat4(1.0f);
@@ -202,15 +233,38 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
             glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;
             SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
             Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
-            drawMesh(pass, mesh);
+            drawMesh(geometryPass, mesh);
         }
     }
 
-    if (drawData)
-        ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, pass);
+    SDL_EndGPURenderPass(geometryPass);
+    /////////////////////////////////////////////////////////////////////////////////////////////////
 
-    SDL_EndGPURenderPass(pass);
+    SDL_GPUColorTargetInfo uiColorTarget = Boilerplate::makeColorTargetLoad(swapchain);
+
+    SDL_GPURenderPass* uiPass = SDL_BeginGPURenderPass(cmd, &uiColorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
+
+    if (hudTexture_ != nullptr)
+        drawHud(uiPass);
+
+    if (drawData)
+        ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
+
+    SDL_EndGPURenderPass(uiPass);
     SDL_SubmitGPUCommandBuffer(cmd);
+}
+
+void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
+{
+    std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" << std::endl;
+    SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
+    SDL_BindGPUFragmentSamplers(renderPass, 0, &hudTextureBinding, 1);
+
+
+    std::cout << "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" << std::endl;
+    SDL_DrawGPUPrimitives(renderPass, 6,1,0,0);
+    std::cout << "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC" << std::endl;
 }
 
 void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
@@ -343,4 +397,9 @@ int NewRenderer::loadSceneModel(
     SDL_WaitForGPUIdle(device_);
 
     return Asset::modelInstances_.size() - 1;
+}
+
+void NewRenderer::setHudTexture(SDL_GPUTexture* hudTexture)
+{
+    hudTexture_ =  hudTexture;
 }
