@@ -6,6 +6,7 @@
 #include "client/animation/AnimationLibrary.hpp"
 #include "client/animation/CharacterAnimator.hpp"
 #include "client/animation/CharacterRig.hpp"
+#include "ecs/abilities/AbilityRegistry.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/Hitbox.hpp"
@@ -144,6 +145,7 @@ private:
 
     Server server;                           ///< Owns the TCP socket and network I/O.
     Registry registry;                       ///< ECS entity/component store.
+    AbilityRegistry abilityRegistry;        ///< Registry of abilities via type idx.
     MatchController matchController;         ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.

@@ -6,6 +6,7 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/abilities/GrappleAbility.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
@@ -31,6 +32,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/DroppedWeaponSystem.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
@@ -69,6 +71,9 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
 
     clientEntities.clear(); // For safety
     registry.clear();
+
+    // Register abilities
+    abilityRegistry.registerAbility(std::make_unique<GrappleAbility>());
 
     // ── Load map collision ──────────────────────────────────────────────
     // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
@@ -417,6 +422,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         systems::runMovement(registry, dt, physics::activeWorld());
     }
     {
+        GROUP2_PROF_SCOPE("ability");
+        systems::runAbility(registry, abilityRegistry, dt);
+    }
+    {
         GROUP2_PROF_SCOPE("collision");
         systems::runCollision(registry, dt, physics::activeWorld());
     }
@@ -585,7 +594,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
-    registry.emplace<AbilityState>(player, AbilityState{}); // Defaults to level 0 with 0 accum damage
+    registry.emplace<AbilityState>(player, AbilityState{ .primary = AbilityType::Grapple,}); // Defaults to level 0 with 0 accum damage
 
     if constexpr (player_colors::k_enabled) {
         // Pick the least-used palette slot; ties broken by lowest index
