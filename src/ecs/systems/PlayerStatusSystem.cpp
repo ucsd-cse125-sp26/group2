@@ -244,13 +244,13 @@ inline void updateAbilityLevel(Registry& registry, entt::entity player, float dm
     if (dmg < 0) return;
 
     AbilityState& abilityState = registry.get<AbilityState>(player);
+    if (abilityState.level >= systems::maxLevel) return;
+
     abilityState.accumDamage += dmg;
     if (abilityState.accumDamage >= systems::dmgThreshold) {
         abilityState.accumDamage = abilityState.accumDamage - systems::dmgThreshold;
-        if (abilityState.level < systems::maxLevel) {
-            abilityState.level += 1;
-            SDL_Log("Level %d", abilityState.level);
-        }
+        abilityState.level += 1;
+        if (abilityState.level >= systems::maxLevel) abilityState.accumDamage = systems::dmgThreshold;
     }
 }
 
