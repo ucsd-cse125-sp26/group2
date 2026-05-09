@@ -803,7 +803,13 @@ add_executable(group2
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/AbilityState.hpp
-        src/ecs/components/AbilityConfig.hpp
+        src/ecs/abilities/Ability.hpp
+        src/ecs/abilities/GrappleAbility.cpp
+        src/ecs/abilities/GrappleAbility.hpp
+        src/ecs/abilities/AbilityRegistry.cpp
+        src/ecs/abilities/AbilityRegistry.hpp
+        src/ecs/systems/AbilitySystem.cpp
+        src/ecs/systems/AbilitySystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1033,7 +1039,13 @@ add_executable(server
         src/client/animation/SkinningBackend.cpp
         src/client/animation/SkinVertex.hpp
         src/ecs/components/AbilityState.hpp
-        src/ecs/components/AbilityConfig.hpp
+        src/ecs/abilities/Ability.hpp
+        src/ecs/abilities/GrappleAbility.cpp
+        src/ecs/abilities/GrappleAbility.hpp
+        src/ecs/abilities/AbilityRegistry.cpp
+        src/ecs/abilities/AbilityRegistry.hpp
+        src/ecs/systems/AbilitySystem.cpp
+        src/ecs/systems/AbilitySystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1231,7 +1243,13 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.hpp"
         src/ecs/components/AbilityState.hpp
-        src/ecs/components/AbilityConfig.hpp
+        src/ecs/abilities/Ability.hpp
+        src/ecs/abilities/GrappleAbility.cpp
+        src/ecs/abilities/GrappleAbility.hpp
+        src/ecs/abilities/AbilityRegistry.cpp
+        src/ecs/abilities/AbilityRegistry.hpp
+        src/ecs/systems/AbilitySystem.cpp
+        src/ecs/systems/AbilitySystem.hpp
 )
 
 # Headers under src/ are referenced via "network/...", "ecs/components/...".
