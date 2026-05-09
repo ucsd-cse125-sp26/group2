@@ -8,7 +8,7 @@
 namespace systems
 {
 
-constexpr float dmgThreshold = 10000.0f;
+constexpr float dmgThreshold = 1000.0f;
 constexpr int maxLevel = 2;
 
 void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float dt);

@@ -30,9 +30,12 @@ void HealthArmorBar::update(float dt, const HudGameState& state, HudTweenPool& /
 
     const float targetHp = static_cast<float>(newHp) / static_cast<float>(maxHealth_);
     const float targetAr = static_cast<float>(newAr) / static_cast<float>(maxArmor_);
+    const float targetLevel = std::clamp(state.abilityLevelProgress, 0.f, 1.f);
     const float liveLerp = std::clamp(dt * 12.f, 0.f, 1.f);
     liveHealth_ += (targetHp - liveHealth_) * liveLerp;
     liveArmor_ += (targetAr - liveArmor_) * liveLerp;
+    liveLevel_ += (targetLevel - liveLevel_) * liveLerp;
+    trailLevel_ = std::max(trailLevel_, targetLevel);
 
     if (newHp < displayHealth_) {
         trailHealth_ = static_cast<float>(displayHealth_) / static_cast<float>(maxHealth_);
@@ -59,6 +62,12 @@ void HealthArmorBar::update(float dt, const HudGameState& state, HudTweenPool& /
     if (trailShHoldTimer_ <= 0.f && trailArmor_ > liveArmor_) {
         const float drainSpeed = 1.f / std::max(0.05f, trailDrainSeconds);
         trailArmor_ = std::max(liveArmor_, trailArmor_ - drainSpeed * dt);
+    }
+    if (trailLevel_ > liveLevel_) {
+        const float drainSpeed = 1.f / std::max(0.05f, trailDrainSeconds);
+        trailLevel_ = std::max(liveLevel_, trailLevel_ - drainSpeed * dt);
+    } else {
+        trailLevel_ = liveLevel_;
     }
 
     displayHealth_ = newHp;
@@ -122,12 +131,13 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float ch = chamferSize * s;
     const float shH = shieldBarHeight * s;
     const float hpH = healthBarHeight * s;
+    const float lvH = lvlBarHeight * s;
     const float gap = barSpacing * s;
     const float iconW = iconSize * s;
     const float iconG = iconGap * s;
 
-    // Plate height covers the icon column + the two stacked bars + padding.
-    const float plateH = padY * 2.f + shH + gap + hpH;
+    // Plate height covers the icon column + the three stacked bars + padding.
+    const float plateH = padY * 2.f + shH + gap + hpH + gap + lvH;
 
     // Anchor is bottom-left. Plate sits with its bottom edge at y, growing up.
     const float plateX = x;
@@ -178,4 +188,14 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
                          std::clamp(trailHealth_, 0.f, 1.f),
                          k_red,
                          k_redBright);
+    const float abRowY = hpRowY + hpH + gap;
+    drawGradientTrailBar(ctx,
+                         barX,
+                         abRowY,
+                         barW,
+                         lvH,
+                         std::clamp(liveLevel_, 0.f, 1.f),
+                         std::clamp(trailLevel_, 0.f, 1.f),
+                         k_amberDim,
+                         k_amber);
 }

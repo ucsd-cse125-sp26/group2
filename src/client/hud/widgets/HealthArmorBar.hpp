@@ -25,6 +25,7 @@ struct HealthArmorBar : HudWidget
     float chamferSize = 14.f; ///< Bottom-right cut-corner depth (px).
     float shieldBarHeight = 6.f;
     float healthBarHeight = 14.f;
+    float lvlBarHeight = 6.f;
     float barSpacing = 6.f;       ///< Vertical gap between shield and HP rows.
     int shieldSegments = 3;       ///< Apex-style segmented shield bar.
     float shieldSegmentGap = 3.f; ///< Gap between adjacent shield segments.
@@ -52,4 +53,6 @@ private:
     // Live fills (snap immediately to the current values).
     float liveHealth_ = 1.f;
     float liveArmor_ = 0.f;
+    float liveLevel_ = 0.f;
+    float trailLevel_ = 0.f;
 };
