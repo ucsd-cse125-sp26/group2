@@ -811,6 +811,8 @@ add_executable(group2
         src/ecs/abilities/AbilityRegistry.hpp
         src/ecs/systems/AbilitySystem.cpp
         src/ecs/systems/AbilitySystem.hpp
+        src/ecs/abilities/DashAbility.cpp
+        src/ecs/abilities/DashAbility.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1047,6 +1049,8 @@ add_executable(server
         src/ecs/abilities/AbilityRegistry.hpp
         src/ecs/systems/AbilitySystem.cpp
         src/ecs/systems/AbilitySystem.hpp
+        src/ecs/abilities/DashAbility.cpp
+        src/ecs/abilities/DashAbility.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1251,6 +1255,8 @@ add_executable(clientbot
         src/ecs/abilities/AbilityRegistry.hpp
         src/ecs/systems/AbilitySystem.cpp
         src/ecs/systems/AbilitySystem.hpp
+        src/ecs/abilities/DashAbility.cpp
+        src/ecs/abilities/DashAbility.hpp
 )
 
 # Headers under src/ are referenced via "network/...", "ecs/components/...".

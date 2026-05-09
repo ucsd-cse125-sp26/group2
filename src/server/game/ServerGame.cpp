@@ -418,12 +418,12 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, &shotDebugReports);
     }
     {
-        GROUP2_PROF_SCOPE("movement");
-        systems::runMovement(registry, dt, physics::activeWorld());
-    }
-    {
         GROUP2_PROF_SCOPE("ability");
         systems::runAbility(registry, abilityRegistry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("movement");
+        systems::runMovement(registry, dt, physics::activeWorld());
     }
     {
         GROUP2_PROF_SCOPE("collision");

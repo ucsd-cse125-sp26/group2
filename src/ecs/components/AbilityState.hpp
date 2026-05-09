@@ -24,5 +24,8 @@ struct AbilityState {
     AbilityType secondary = AbilityType::None;
 
     float primaryCooldown = 0.0f;
+    bool primaryActive = false;
+
     float secondaryCooldown = 0.0f;
+    bool secondaryActive = false;
 };
