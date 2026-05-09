@@ -10,6 +10,7 @@
 #include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
+#include <cstdio>
 
 HealthArmorBar::HealthArmorBar()
 {
@@ -72,6 +73,7 @@ void HealthArmorBar::update(float dt, const HudGameState& state, HudTweenPool& /
 
     displayHealth_ = newHp;
     displayArmor_ = newAr;
+    displayLevel_ = state.abilityLevel;
 }
 
 namespace
@@ -189,6 +191,16 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
                          k_red,
                          k_redBright);
     const float abRowY = hpRowY + hpH + gap;
+    const float abIconY = abRowY + (lvH - iconW) * 0.5f;
+    char levelBuf[8];
+    std::snprintf(levelBuf, sizeof(levelBuf), "%d", displayLevel_);
+    ctx.text(levelBuf,
+             plateX + padX + iconW * 0.5f,
+             abIconY,
+             iconW,
+             k_amber,
+             HudAlign::Center,
+             true);
     drawGradientTrailBar(ctx,
                          barX,
                          abRowY,

@@ -2419,6 +2419,7 @@ SDL_AppResult Game::iterate()
             [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });
         registry.view<LocalPlayer, AbilityState>().each([&](const AbilityState& ability) {
             hudState.abilityLevelProgress = std::clamp(ability.accumDamage / systems::dmgThreshold, 0.f, 1.f);
+            hudState.abilityLevel = ability.level;
         });
 
         // ── Weapon / ammo ──

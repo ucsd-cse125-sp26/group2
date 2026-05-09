@@ -41,6 +41,7 @@ struct HealthArmorBar : HudWidget
 private:
     int displayHealth_ = 100;
     int displayArmor_ = 0;
+    int displayLevel_ = 0;
     int maxHealth_ = 100;
     int maxArmor_ = 100;
 
