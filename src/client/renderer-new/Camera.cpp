@@ -61,9 +61,9 @@ void NewCamera::setUp(glm::vec3 up)
 
 void NewCamera::computeViewProjectionMatrix()
 {
-    glm::mat4 view = glm::lookAt(eye_, target_, up_);
-    glm::mat4 projection = glm::perspective(fovy_, aspect_, zNear_, zFar_);
-    view_projection_ = projection * view;
+    view_ = glm::lookAt(eye_, target_, up_);
+    projection_ = glm::perspective(fovy_, aspect_, zNear_, zFar_);
+    view_projection_ = projection_ * view_;
 }
 
 glm::vec3 NewCamera::getForward() const

@@ -160,7 +160,7 @@ bool NewRenderer::loadSceneAssets()
     return true;
 }
 
-void NewRenderer::createMeshBuffers(MeshIdInt meshId)
+void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 {
     Asset::Mesh& mesh = Asset::meshes_.at(meshId);
 
@@ -224,39 +224,45 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
 
 void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd)
 {
-    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
-    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
-
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
+    SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture_, sampler_);
+    SDL_BindGPUFragmentSamplers(geometryPass, 0, &textureBinding, 1);
+
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass,cmd);
+
+    const glm::mat4 projection = camera_.getProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
+    drawWeapon(geometryPass,cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 
 }
 
-void NewRenderer::drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd)
+void NewRenderer::drawWeapon(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd)
 {
-    ImDrawData* drawData = ImGui::GetDrawData();
-    if (drawData)
-        ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
+    Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
+    if (!Asset::models_.contains(Asset::weaponModelId_)) {
+        std::cout << "invalid weaponModelId" << std::endl;
+        return;
+    }
 
-    SDL_GPUColorTargetInfo uiColorTarget = Boilerplate::makeColorTargetLoad(swapchain);
+    constexpr auto newWVM = glm::mat4(1.0f);
+    Asset::weaponViewModel_ = glm::translate(newWVM,glm::vec3(1.0f, 0.0f, -3.0f));
+    drawModel(Asset::weaponModelId_,Asset::weaponViewModel_,renderPass,cmd);
+}
 
-    SDL_GPURenderPass* uiPass = SDL_BeginGPURenderPass(cmd, &uiColorTarget, 1, nullptr);
-    SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
-
-    if (hudTexture_ != nullptr)
-        drawHud(uiPass);
-
-    if (drawData)
-        ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
-
-    SDL_EndGPURenderPass(uiPass);
+void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd)
+{
+    for (const auto& mInstance : Asset::modelInstances_) {
+        drawModel(mInstance.modelId_,mInstance.transform_,renderPass,cmd);
+    }
 }
 
 void NewRenderer::drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd)
@@ -268,25 +274,6 @@ void NewRenderer::drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,
         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
         drawMesh(renderPass, mesh);
     }
-}
-
-void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd)
-{
-    SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture_, sampler_);
-    SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
-
-    for (const auto& mInstance : Asset::modelInstances_) {
-        drawModel(mInstance.modelId_,mInstance.transform_,renderPass,cmd);
-    }
-
-}
-void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
-{
-    SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
-    SDL_BindGPUFragmentSamplers(renderPass, 0, &hudTextureBinding, 1);
-
-
-    SDL_DrawGPUPrimitives(renderPass, 6,1,0,0);
 }
 
 void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
@@ -324,6 +311,40 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
     depthHeight_ = height;
     return true;
 }
+
+void NewRenderer::drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd)
+{
+    ImDrawData* drawData = ImGui::GetDrawData();
+    if (drawData)
+        ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
+
+    SDL_GPUColorTargetInfo uiColorTarget = Boilerplate::makeColorTargetLoad(swapchain);
+
+    SDL_GPURenderPass* uiPass = SDL_BeginGPURenderPass(cmd, &uiColorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
+
+    if (hudTexture_ != nullptr)
+        drawHud(uiPass);
+
+    if (drawData)
+        ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
+
+    SDL_EndGPURenderPass(uiPass);
+}
+void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
+{
+    SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
+    SDL_BindGPUFragmentSamplers(renderPass, 0, &hudTextureBinding, 1);
+
+
+    SDL_DrawGPUPrimitives(renderPass, 6,1,0,0);
+}
+
+void NewRenderer::setHudTexture(SDL_GPUTexture* hudTexture)
+{
+    hudTexture_ =  hudTexture;
+}
+
 
 void NewRenderer::quit()
 {
@@ -422,7 +443,3 @@ int NewRenderer::loadSceneModel(
     return Asset::modelInstances_.size() - 1;
 }
 
-void NewRenderer::setHudTexture(SDL_GPUTexture* hudTexture)
-{
-    hudTexture_ =  hudTexture;
-}
