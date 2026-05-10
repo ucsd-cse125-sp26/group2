@@ -45,7 +45,8 @@ private:
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
 
-    SDL_GPUTexture* depthTexture_ = nullptr;
+    //SDL_GPUTexture* depthTexture_ = nullptr;
+    SDL_GPUDepthStencilTargetInfo depthTarget_{};
 
     // Temp for single texture
     SDL_GPUTexture* texture_ = nullptr;
@@ -73,7 +74,7 @@ private:
     /// @param width  New viewport width in pixels.
     /// @param height New viewport height in pixels.
     /// @return True on success.
-    bool ensureDepthTexture(Uint32 width, Uint32 height);
+    bool ensureDepthTextureSize(Uint32 width, Uint32 height);
 
     /// @brief Allocate GPU vertex and index buffers for the given mesh.
     /// @param meshId Key into Asset::meshes_.
@@ -84,6 +85,15 @@ private:
     /// @param mesh The mesh to draw.
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
 
+    void drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd);
+
     void drawHud(SDL_GPURenderPass* pass);
+
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd);
+
+    void drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd);
+    void drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd);
+
+    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll,Uint32 width,Uint32 height);
 
 };
