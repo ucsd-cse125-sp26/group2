@@ -250,6 +250,10 @@ inline void updateAbilityLevel(Registry& registry, entt::entity player, float dm
     if (abilityState.accumDamage >= systems::dmgThreshold) {
         abilityState.accumDamage = abilityState.accumDamage - systems::dmgThreshold;
         abilityState.level += 1;
+
+        if (abilityState.level == 1) abilityState.pendingLevel1 = true;
+        if (abilityState.level == 2) abilityState.pendingLevel2 = true;
+
         if (abilityState.level >= systems::maxLevel) abilityState.accumDamage = systems::dmgThreshold;
     }
 }
