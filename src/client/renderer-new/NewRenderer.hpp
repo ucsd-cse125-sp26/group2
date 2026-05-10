@@ -45,7 +45,8 @@ private:
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
 
-    SDL_GPUTexture* depthTexture_ = nullptr;
+    //SDL_GPUTexture* depthTexture_ = nullptr;
+    SDL_GPUDepthStencilTargetInfo depthTarget_{};
 
     // Temp for single texture
     SDL_GPUTexture* texture_ = nullptr;
@@ -73,11 +74,21 @@ private:
     /// @param width  New viewport width in pixels.
     /// @param height New viewport height in pixels.
     /// @return True on success.
-    bool ensureDepthTexture(Uint32 width, Uint32 height);
+    bool ensureDepthTextureSize(Uint32 width, Uint32 height);
 
     /// @brief Allocate GPU vertex and index buffers for the given mesh.
     /// @param meshId Key into Asset::meshes_.
-    void createMeshBuffers(MeshIdInt meshId);
+    void createMeshBuffers(MeshIdInt meshId) const;
+
+    void drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd);
+
+    void drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd);
+
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd);
+
+    void drawWeapon(SDL_GPURenderPass *geometryPass,SDL_GPUCommandBuffer *cmd);
+
+    void drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd);
 
     /// @brief Bind a mesh's buffers and issue an indexed draw call.
     /// @param renderPass The active render pass.
@@ -86,4 +97,5 @@ private:
 
     void drawHud(SDL_GPURenderPass* pass);
 
+    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll,Uint32 width,Uint32 height);
 };

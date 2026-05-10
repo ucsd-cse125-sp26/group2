@@ -17,7 +17,7 @@ void main()
     vec4 albedo = texture(tex, frag_vt);
     float cosT = max(0.0f,dot(-light_direction,frag_normal));
     vec4 irradiance = light_color * cosT + ambient_color;
-    //color = albedo * irradiance;
-    color = albedo;
+    color = albedo * irradiance;
+    //color = albedo;
     //color = vec4(1.0f);
 }
