@@ -10,6 +10,7 @@ public:
     bool init(Server& serverPtr);
     bool addPlayer(ClientId id);
     bool removePlayer(ClientId id);
+    bool setPlayerReadyStatus(ClientId id, bool ready);
 
 private:
     Server* server = nullptr;

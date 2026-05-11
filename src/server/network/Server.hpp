@@ -146,12 +146,18 @@ public:
 
     using ClientConnectedCallback = std::function<void(ClientId)>;
     using ClientDisconnectedCallback = std::function<void(ClientId)>;
+    using PlayerReadyCallback = std::function<void(ClientId)>;
+    using PlayerUnreadyCallback = std::function<void(ClientId)>;
     void onClientConnected(ClientConnectedCallback fn) { clientConnectedFn_ = std::move(fn); }
     void onClientDisconnected(ClientDisconnectedCallback fn) { clientDisconnectedFn_ = std::move(fn); }
+    void onPlayerReady(PlayerReadyCallback fn) { playerReadyFn_ = std::move(fn); }
+    void onPlayerUnready(PlayerUnreadyCallback fn) { playerUnreadyFn_ = std::move(fn); }
 
 private:
     ClientConnectedCallback clientConnectedFn_;
     ClientDisconnectedCallback clientDisconnectedFn_;
+    PlayerReadyCallback playerReadyFn_;
+    PlayerUnreadyCallback playerUnreadyFn_;
 
     /// @brief Per-client connection state.
     ///

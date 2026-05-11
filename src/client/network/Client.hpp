@@ -104,6 +104,9 @@ public:
     /// = `0xFFFF` when the client wasn't aiming at any specific target.
     bool sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetClientId, const AnimSnapshot& targetAnim);
 
+    /// @brief Send a PLAYER_READY or PLAYER_UNREADY packet to the server.
+    bool sendPlayerReady(bool ready);
+
     /// @brief Send a PING packet to the server for RTT measurement.
     void sendPing();
 

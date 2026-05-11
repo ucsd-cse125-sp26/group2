@@ -5,8 +5,18 @@
 namespace lobby_ui
 {
 
-void buildPlayerList(const std::vector<LobbyPlayer>& players, ClientId localId)
+std::optional<bool> buildPlayerList(const std::vector<LobbyPlayer>& players, ClientId localId)
 {
+    bool localReady = false;
+    for (const auto& p : players) {
+        if (p.id == localId) {
+            localReady = p.ready;
+            break;
+        }
+    }
+
+    std::optional<bool> readyChange;
+
     ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
     ImGui::SetNextWindowSize(ImVec2(320.0f, 240.0f), ImGuiCond_Once);
     if (ImGui::Begin("Lobby")) {
@@ -22,9 +32,18 @@ void buildPlayerList(const std::vector<LobbyPlayer>& players, ClientId localId)
                 ImGui::Text("Player %d (You)", p.id.value);
             else
                 ImGui::Text("Player %d", p.id.value);
+
+            ImGui::SameLine();
+            ImGui::TextUnformatted(p.ready ? "Ready" : "Not ready");
         }
+
+        ImGui::Separator();
+        if (ImGui::Button(localReady ? "Unready" : "Ready"))
+            readyChange = !localReady;
     }
     ImGui::End();
+
+    return readyChange;
 }
 
 } // namespace lobby_ui

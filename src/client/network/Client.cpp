@@ -352,6 +352,12 @@ bool Client::sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetCli
     return send(buf, payloadLen);
 }
 
+bool Client::sendPlayerReady(bool ready)
+{
+    const auto type = static_cast<uint8_t>(ready ? PacketType::PLAYER_READY : PacketType::PLAYER_UNREADY);
+    return send(&type, sizeof(type));
+}
+
 bool Client::acceptReliableSequence(uint16_t seq)
 {
     // First sequence ever — accept and seed the window.

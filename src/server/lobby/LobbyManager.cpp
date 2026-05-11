@@ -1,12 +1,18 @@
 #include "lobby/LobbyManager.hpp"
 
+#include "ecs/components/ClientId.hpp"
 #include "network/Server.hpp"
+#include "network/lobby/LobbyStatus.hpp"
 
 #include <algorithm>
 
 bool LobbyManager::init(Server& serverPtr)
 {
     server = &serverPtr;
+
+    server->onPlayerReady([this](ClientId id) { setPlayerReadyStatus(id, true); });
+    server->onPlayerUnready([this](ClientId id) { setPlayerReadyStatus(id, false); });
+
     return true;
 }
 
@@ -73,4 +79,26 @@ ClientId LobbyManager::assignNewHost()
     hostId = newHostIt->id;
     server->broadcastLobbyUpdate(LobbyUpdateEvent{.type = LobbyUpdateEvent::Type::PlayerNewHost, .id = hostId});
     return hostId;
+}
+
+bool LobbyManager::setPlayerReadyStatus(ClientId id, bool ready)
+{
+    SDL_Log(
+        "LobbyManager: setting ready status of player with clientId %u to %s", id.value, ready ? "ready" : "not ready");
+    const auto playerIt =
+        std::find_if(players.begin(), players.end(), [id](const LobbyPlayer& p) { return p.id == id; });
+    if (playerIt == players.end())
+        return false;
+
+    playerIt->ready = ready;
+    LobbyUpdateEvent::Type eventType;
+    if (ready) {
+        eventType = LobbyUpdateEvent::Type::PlayerReady;
+    } else {
+        eventType = LobbyUpdateEvent::Type::PlayerUnready;
+    }
+
+    LobbyUpdateEvent updateEvent{.type = eventType, .id = id};
+    server->broadcastLobbyUpdate(updateEvent);
+    return true;
 }

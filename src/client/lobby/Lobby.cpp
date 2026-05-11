@@ -39,11 +39,20 @@ bool Lobby::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* cli
                                          [id = update.id](const LobbyPlayer& p) { return p.id == id; }),
                           players.end());
             break;
-        case LobbyUpdateEvent::Type::PlayerReadyStatusChanged:
-            SDL_Log("Lobby: player with clientId %u changed ready status", update.id.value);
+        case LobbyUpdateEvent::Type::PlayerReady:
+            SDL_Log("Lobby: player with clientId %u is now ready", update.id.value);
             for (auto& p : players) {
                 if (p.id == update.id) {
-                    p.ready = !p.ready;
+                    p.ready = true;
+                    break;
+                }
+            }
+            break;
+        case LobbyUpdateEvent::Type::PlayerUnready:
+            SDL_Log("Lobby: player with clientId %u is now unready", update.id.value);
+            for (auto& p : players) {
+                if (p.id == update.id) {
+                    p.ready = false;
                     break;
                 }
             }
@@ -83,7 +92,9 @@ SDL_AppResult Lobby::iterate()
         return SDL_APP_SUCCESS;
     }
 
-    lobby_ui::buildPlayerList(players, localClientId);
+    if (const auto readyChange = lobby_ui::buildPlayerList(players, localClientId)) {
+        client->sendPlayerReady(*readyChange);
+    }
 
     ImGui::Render();
 

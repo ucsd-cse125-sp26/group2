@@ -23,10 +23,11 @@ struct LobbyUpdateEvent
 {
     enum class Type : uint8_t
     {
-        PlayerJoined = 0,
-        PlayerLeft = 1,
-        PlayerReadyStatusChanged = 2,
-        PlayerNewHost = 3,
+        PlayerJoined,
+        PlayerLeft,
+        PlayerReady,
+        PlayerUnready,
+        PlayerNewHost,
     };
 
     Type type;

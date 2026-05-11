@@ -894,6 +894,19 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         break;
     }
 
+    case PacketType::PLAYER_READY: {
+        if (playerReadyFn_) {
+            playerReadyFn_(conn.clientId);
+        }
+        break;
+    }
+    case PacketType::PLAYER_UNREADY: {
+        if (playerUnreadyFn_) {
+            playerUnreadyFn_(conn.clientId);
+        }
+        break;
+    }
+
     default:
         SDL_Log("Server: received unknown packet type %d", static_cast<int>(type));
         break;
@@ -1219,8 +1232,11 @@ void Server::broadcastLobbyUpdate(const LobbyUpdateEvent& event)
     case LobbyUpdateEvent::Type::PlayerLeft:
         action = "leaving";
         break;
-    case LobbyUpdateEvent::Type::PlayerReadyStatusChanged:
-        action = "ready status changed";
+    case LobbyUpdateEvent::Type::PlayerReady:
+        action = "ready";
+        break;
+    case LobbyUpdateEvent::Type::PlayerUnready:
+        action = "not ready";
         break;
     case LobbyUpdateEvent::Type::PlayerNewHost:
         action = "new host";

@@ -59,10 +59,11 @@ enum class PacketType : uint8_t
     /// only; ~10 Hz worst case → ~270 B/s/client).
     SHOT_INTENT,
 
-    JOIN_LOBBY,   ///< Client -> Server: request to join the lobby (carries player name).
-    JOIN_FAILED,  ///< Server -> Client: lobby join failed (carries error message).
-    PLAYER_READY, ///< Client -> Server: player signals ready for match start.
-    LOBBY_UPDATE, ///< Server -> All clients: lobby state update (player list, match start countdown).
-    LOBBY_STATE,  ///< Server -> single Client: full lobby snapshot on join. Format: [count:u32][LobbyPlayer*count]
-    START_MATCH,  ///< Server -> All clients: match start signal (transition)
+    JOIN_LOBBY,     ///< Client -> Server: request to join the lobby (carries player name).
+    JOIN_FAILED,    ///< Server -> Client: lobby join failed (carries error message).
+    PLAYER_READY,   ///< Client -> Server: player signals ready for match start.
+    PLAYER_UNREADY, ///< Client -> Server: player cancels ready status.
+    LOBBY_UPDATE,   ///< Server -> All clients: lobby state update (player list, match start countdown).
+    LOBBY_STATE,    ///< Server -> single Client: full lobby snapshot on join. Format: [count:u32][LobbyPlayer*count]
+    START_MATCH,    ///< Server -> All clients: match start signal (transition)
 };
