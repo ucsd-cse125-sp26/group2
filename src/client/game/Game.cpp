@@ -167,6 +167,9 @@ bool Game::init()
         return false;
     }
 
+    // if (!particleSystem.init(renderer.getDevice(), Renderer::getHdrFormat(), renderer.getShaderFormat())) {
+    //     SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
+    // } else {
     // Particle system needs the device + formats from the renderer.
     // colorFmt is the format particles draw into (RGBA16F was the legacy
     // renderer's HDR target); kept here so the particle pipelines compile,
@@ -176,6 +179,7 @@ bool Game::init()
     {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
+        renderer.setParticleSystem(&particleSystem);
         // Wire dispatcher events to particle system.
         // NOTE: WeaponFiredEvent is NOT wired here — local weapon VFX (tracers,
         // beams, impacts) are spawned explicitly in iterate() so we control

@@ -5,6 +5,7 @@
 
 #include "Asset.hpp"
 #include "Camera.hpp"
+#include "particles/ParticleSystem.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -32,6 +33,7 @@ public:
     [[nodiscard]] SDL_GPUDevice* getDevice() const { return device_; }
     [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const { return shaderFormat_; }
     [[nodiscard]] const NewCamera& getCamera() const { return camera_; }
+    void setParticleSystem(ParticleSystem *particleSystem);
     void setHudTexture(SDL_GPUTexture* hudTexture);
 
     int loadSceneModel(
@@ -59,6 +61,8 @@ private:
     Uint32 depthHeight_ = 0;
 
     NewCamera camera_;
+
+    ParticleSystem* particleSystem_ = nullptr;
 
     /// @brief Build the geometry graphics pipeline from vertex/fragment shaders.
     /// @return True on success.

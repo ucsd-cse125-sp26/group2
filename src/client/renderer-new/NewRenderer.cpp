@@ -178,7 +178,7 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
-    SDL_Log("pre-drawFrame window flags: 0x%x", SDL_GetWindowFlags(window_));
+    //SDL_Log("pre-drawFrame window flags: 0x%x", SDL_GetWindowFlags(window_));
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
         SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
@@ -240,6 +240,9 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffe
     const glm::mat4 projection = camera_.getProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
     drawWeapon(geometryPass,cmd);
+
+
+    particleSystem_->render(geometryPass,cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 
@@ -443,3 +446,7 @@ int NewRenderer::loadSceneModel(
     return Asset::modelInstances_.size() - 1;
 }
 
+void NewRenderer::setParticleSystem(ParticleSystem *particleSystem)
+{
+    particleSystem_ = particleSystem;
+}
