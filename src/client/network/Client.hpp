@@ -14,6 +14,7 @@
 #include "network/RegistrySerialization.hpp"
 #include "network/ShotDebugReport.hpp" // PR-20: shared wire-format + runtime capture struct.
 #include "network/ShotEvent.hpp"
+#include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/FragmentReassembler.hpp"
 #include "network/transport/UdpEndpoint.hpp"
 
@@ -61,6 +62,9 @@ public:
     /// this and pairs the report with its own client-side fire-time
     /// snapshot by `shotInputTick`.
     using ShotDebugCallback = std::function<void(const net::shotdebug::ShotDebugCapture&)>;
+
+    using LobbyUpdateCallback = std::function<void(const LobbyUpdateEvent& update)>;
+    using LobbyStateCallback = std::function<void(const std::vector<LobbyPlayer>& players)>;
 
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr      Hostname or IP address of the server.
@@ -111,6 +115,8 @@ public:
     void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
     void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
+    void onLobbyUpdate(LobbyUpdateCallback fn) { lobbyUpdateFn_ = std::move(fn); }
+    void onLobbyState(LobbyStateCallback fn) { lobbyStateFn_ = std::move(fn); }
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
@@ -301,6 +307,8 @@ private:
     MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     KillEventCallback killEventFn_;                ///< Called for each replicated kill event from server.
     ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
+    LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.
+    LobbyStateCallback lobbyStateFn_;              ///< Called once on join with the full lobby snapshot.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────

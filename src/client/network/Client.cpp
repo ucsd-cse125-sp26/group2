@@ -14,6 +14,7 @@
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/PacketHeader.hpp"
 
 #include <SDL3/SDL.h>
@@ -1045,6 +1046,35 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         }
         if (!malformed && shotDebugFn_)
             shotDebugFn_(cap);
+        break;
+    }
+    case PacketType::LOBBY_UPDATE: {
+        if (payloadSize < sizeof(LobbyUpdateEvent))
+            break;
+
+        LobbyUpdateEvent lu{};
+        std::memcpy(&lu, payload, sizeof(LobbyUpdateEvent));
+
+        if (lobbyUpdateFn_)
+            lobbyUpdateFn_(lu);
+        break;
+    }
+    case PacketType::LOBBY_STATE: {
+        if (payloadSize < sizeof(uint32_t))
+            break;
+
+        uint32_t count = 0;
+        std::memcpy(&count, payload, sizeof(uint32_t));
+
+        const size_t expectedSize = sizeof(uint32_t) + count * sizeof(LobbyPlayer);
+        if (payloadSize < expectedSize)
+            break;
+
+        std::vector<LobbyPlayer> players(count);
+        std::memcpy(players.data(), payload + sizeof(uint32_t), count * sizeof(LobbyPlayer));
+
+        if (lobbyStateFn_)
+            lobbyStateFn_(players);
         break;
     }
     default:

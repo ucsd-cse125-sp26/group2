@@ -100,8 +100,6 @@ bool App::init()
     screen_ = std::move(lobbyScreen);
     current = Screen::Lobby;
 
-    transitionTo(Screen::InGame);
-
     return true;
 }
 

@@ -2,6 +2,7 @@
 /// @brief Server application entry point.
 
 #include "game/ServerGame.hpp"
+#include "lobby/LobbyManager.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
 #include "perf/Parallel.hpp"
@@ -196,6 +197,20 @@ int main()
         SDL_Quit();
         return 1;
     }
+
+    LobbyManager lobbyManager;
+    if (!lobbyManager.init(server)) {
+        game.shutdown();
+        server.shutdown();
+        ::group2::perf::stopAggregator();
+        closeCsv();
+        NET_Quit();
+        SDL_Quit();
+        return 1;
+    }
+
+    server.onClientConnected([&lobbyManager](ClientId clientId) { lobbyManager.addPlayer(clientId); });
+    server.onClientDisconnected([&lobbyManager](ClientId clientId) { lobbyManager.removePlayer(clientId); });
 
     game.run();
     game.shutdown();

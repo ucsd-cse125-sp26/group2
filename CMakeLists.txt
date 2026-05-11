@@ -1336,6 +1336,8 @@ add_executable(server
         src/client/animation/SkinningBackend.hpp
         src/client/animation/SkinningBackend.cpp
         src/client/renderer/ModelLoader.hpp
+        src/server/lobby/LobbyManager.hpp
+        src/server/lobby/LobbyManager.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

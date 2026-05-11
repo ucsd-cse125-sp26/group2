@@ -11,6 +11,7 @@
 #include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/ShotEvent.hpp"
+#include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/UdpEndpoint.hpp"
 #include "systems/EventQueue.hpp"
 
@@ -79,6 +80,9 @@ public:
     /// @brief Broadcast particle events to all clients for effect replication.
     void broadcastParticleEvents(const std::vector<NetParticleEvent>& events);
 
+    /// @brief Broadcast lobby status updates to clients.
+    void broadcastLobbyUpdate(const LobbyUpdateEvent& event);
+
     /// @brief Get the number of currently connected clients.
     /// @return The client count.
     int getClientCount();
@@ -126,6 +130,10 @@ public:
     /// @return False if the client isn't currently connected.
     bool sendToClient(const ClientId& clientId, const void* data, int len);
 
+    /// @brief Unicast a full lobby snapshot to a single client.
+    /// @return False if the client isn't currently connected.
+    bool sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players);
+
     /// @brief Drain every connection's outbound queue to its socket.
     ///
     /// Call once per server tick, after all per-tick broadcasts. Disconnects
@@ -136,7 +144,15 @@ public:
     /// layer's perspective stays the same.
     void flushAllOutbound();
 
+    using ClientConnectedCallback = std::function<void(ClientId)>;
+    using ClientDisconnectedCallback = std::function<void(ClientId)>;
+    void onClientConnected(ClientConnectedCallback fn) { clientConnectedFn_ = std::move(fn); }
+    void onClientDisconnected(ClientDisconnectedCallback fn) { clientDisconnectedFn_ = std::move(fn); }
+
 private:
+    ClientConnectedCallback clientConnectedFn_;
+    ClientDisconnectedCallback clientDisconnectedFn_;
+
     /// @brief Per-client connection state.
     ///
     /// PR-5b (server-perf): default-initialised for `try_emplace`
@@ -257,7 +273,8 @@ private:
     void handleMessage(Connection& client, const void* data, Uint32 len);
 
     /// @brief Accept up to one new client connection per call.
-    void acceptClients();
+    /// @return The newly connected ClientId, or ClientId{} (value -1) if none.
+    ClientId acceptClients();
 
     /// @brief Disconnect a client and clean up resources.
     ///
