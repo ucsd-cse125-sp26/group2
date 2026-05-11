@@ -7,6 +7,7 @@
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
@@ -40,6 +41,7 @@
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
 #include "network/EntityInterpolation.hpp"
@@ -2415,6 +2417,10 @@ SDL_AppResult Game::iterate()
         });
         registry.view<LocalPlayer, PlayerVisState>().each(
             [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });
+        registry.view<LocalPlayer, AbilityState>().each([&](const AbilityState& ability) {
+            hudState.abilityLevelProgress = std::clamp(ability.accumDamage / systems::dmgThreshold, 0.f, 1.f);
+            hudState.abilityLevel = ability.level;
+        });
 
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {

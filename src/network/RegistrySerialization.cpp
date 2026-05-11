@@ -3,6 +3,7 @@
 
 #include "RegistrySerialization.hpp"
 
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
@@ -144,6 +145,7 @@ using Synced = std::tuple<entt::entity,
                           CollisionShape,
                           WeaponState,
                           Health,
+                          AbilityState,
                           PlayerMatchStats,
                           Projectile,
                           BeamState,
