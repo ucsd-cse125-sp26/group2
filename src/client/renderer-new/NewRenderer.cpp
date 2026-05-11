@@ -160,7 +160,7 @@ bool NewRenderer::loadSceneAssets()
     return true;
 }
 
-void NewRenderer::createMeshBuffers(MeshIdInt meshId)
+void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 {
     Asset::Mesh& mesh = Asset::meshes_.at(meshId);
 
@@ -178,6 +178,7 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId)
 
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
+    SDL_Log("pre-drawFrame window flags: 0x%x", SDL_GetWindowFlags(window_));
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
         SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
@@ -187,81 +188,92 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     SDL_GPUTexture* swapchain = nullptr;
     Uint32 width = 0;
     Uint32 height = 0;
-    if (!SDL_AcquireGPUSwapchainTexture(cmd, window_, &swapchain, &width, &height) || !swapchain) {
+    if (!SDL_AcquireGPUSwapchainTexture(cmd, window_, &swapchain, &width, &height)) {
         SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUSwapchainTexture failed: %s", SDL_GetError());
-        SDL_SubmitGPUCommandBuffer(cmd);
+        SDL_CancelGPUCommandBuffer(cmd);
         return;
     }
 
-    if (!ensureDepthTexture(width, height)) {
-        SDL_Log("NewRenderer::drawFrame: ensureDepthTexture failed");
-        SDL_SubmitGPUCommandBuffer(cmd);
+    if (!swapchain) {
+        //SDL_Log("NewRenderer::drawFrame: swapchain not ready, skipping...: ");
+        SDL_CancelGPUCommandBuffer(cmd);
         return;
     }
 
+    if (!ensureDepthTextureSize(width, height)) {
+        SDL_Log("NewRenderer::drawFrame: ensureDepthTextureSize failed");
+        SDL_CancelGPUCommandBuffer(cmd);
+        return;
+    }
+
+    setMainCamera(eye,yaw,pitch,roll,width,height);
+
+    drawGeometryPass(swapchain,cmd);
+    drawUIPass(swapchain,cmd);
+
+    SDL_SubmitGPUCommandBuffer(cmd);
+}
+
+void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll,Uint32 width,Uint32 height)
+{
     camera_.setEye(eye);
     camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
     camera_.computeViewProjectionMatrix();
+}
 
-    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
-    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
-
-    ImDrawData* drawData = ImGui::GetDrawData();
-    if (drawData)
-        ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
-
-    /////////////////////////////////////////////////////////////////////////////////////////////////
+void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd)
+{
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
-    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture_);
-
-    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget);
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture_, sampler_);
     SDL_BindGPUFragmentSamplers(geometryPass, 0, &textureBinding, 1);
 
-    for (const auto& mInstance : Asset::modelInstances_) {
-        glm::mat4 modelMatrix = glm::mat4(1.0f);
-        modelMatrix = glm::scale(modelMatrix, glm::vec3(10000.0f));
-        modelMatrix = mInstance.transform_;
-        Asset::Model& model = Asset::models_.at(mInstance.modelId_);
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+    drawWorldModelInstances(geometryPass,cmd);
 
-        for (auto& element : model.modelElements_) {
-            glm::mat4 modelElementMatrix = modelMatrix * element.cachedTransform_;
-            SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
-            Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
-            drawMesh(geometryPass, mesh);
-        }
-    }
+    const glm::mat4 projection = camera_.getProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
+    drawWeapon(geometryPass,cmd);
 
     SDL_EndGPURenderPass(geometryPass);
-    /////////////////////////////////////////////////////////////////////////////////////////////////
 
-    SDL_GPUColorTargetInfo uiColorTarget = Boilerplate::makeColorTargetLoad(swapchain);
-
-    SDL_GPURenderPass* uiPass = SDL_BeginGPURenderPass(cmd, &uiColorTarget, 1, nullptr);
-    SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
-
-    if (hudTexture_ != nullptr)
-        drawHud(uiPass);
-
-    if (drawData)
-        ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
-
-    SDL_EndGPURenderPass(uiPass);
-    SDL_SubmitGPUCommandBuffer(cmd);
 }
 
-void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
+void NewRenderer::drawWeapon(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd)
 {
-    SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
-    SDL_BindGPUFragmentSamplers(renderPass, 0, &hudTextureBinding, 1);
+    Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
+    if (!Asset::models_.contains(Asset::weaponModelId_)) {
+        std::cout << "invalid weaponModelId" << std::endl;
+        return;
+    }
 
+    constexpr auto newWVM = glm::mat4(1.0f);
+    Asset::weaponViewModel_ = glm::translate(newWVM,glm::vec3(1.0f, 0.0f, -3.0f));
+    drawModel(Asset::weaponModelId_,Asset::weaponViewModel_,renderPass,cmd);
+}
 
-    SDL_DrawGPUPrimitives(renderPass, 6,1,0,0);
+void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd)
+{
+    for (const auto& mInstance : Asset::modelInstances_) {
+        drawModel(mInstance.modelId_,mInstance.transform_,renderPass,cmd);
+    }
+}
+
+void NewRenderer::drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd)
+{
+    Asset::Model& model = Asset::models_.at(modelId);
+    for (auto& element : model.modelElements_) {
+        glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
+        SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
+        Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+        drawMesh(renderPass, mesh);
+    }
 }
 
 void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
@@ -280,18 +292,19 @@ void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mes
     SDL_DrawGPUIndexedPrimitives(renderPass, indexCount, 1, 0, 0, 0);
 }
 
-bool NewRenderer::ensureDepthTexture(Uint32 width, Uint32 height)
+bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
 {
-    if (depthTexture_ && depthWidth_ == width && depthHeight_ == height)
+    if (depthTarget_.texture && depthWidth_ == width && depthHeight_ == height)
         return true;
 
-    if (depthTexture_) {
-        SDL_ReleaseGPUTexture(device_, depthTexture_);
-        depthTexture_ = nullptr;
+    if (depthTarget_.texture) {
+        SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
+        depthTarget_.texture = nullptr;
     }
 
-    depthTexture_ = Boilerplate::createDepthTexture(device_, width, height);
-    if (!depthTexture_)
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height));
+
+    if (!depthTarget_.texture)
         return false;
 
     depthWidth_ = width;
@@ -299,13 +312,47 @@ bool NewRenderer::ensureDepthTexture(Uint32 width, Uint32 height)
     return true;
 }
 
+void NewRenderer::drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd)
+{
+    ImDrawData* drawData = ImGui::GetDrawData();
+    if (drawData)
+        ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
+
+    SDL_GPUColorTargetInfo uiColorTarget = Boilerplate::makeColorTargetLoad(swapchain);
+
+    SDL_GPURenderPass* uiPass = SDL_BeginGPURenderPass(cmd, &uiColorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
+
+    if (hudTexture_ != nullptr)
+        drawHud(uiPass);
+
+    if (drawData)
+        ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
+
+    SDL_EndGPURenderPass(uiPass);
+}
+void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
+{
+    SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
+    SDL_BindGPUFragmentSamplers(renderPass, 0, &hudTextureBinding, 1);
+
+
+    SDL_DrawGPUPrimitives(renderPass, 6,1,0,0);
+}
+
+void NewRenderer::setHudTexture(SDL_GPUTexture* hudTexture)
+{
+    hudTexture_ =  hudTexture;
+}
+
+
 void NewRenderer::quit()
 {
     if (device_) {
         SDL_WaitForGPUIdle(device_);
 
-        if (depthTexture_)
-            SDL_ReleaseGPUTexture(device_, depthTexture_);
+        if (depthTarget_.texture)
+            SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
 
         for (auto& meshPair : Asset::meshes_) {
             Asset::Mesh& mesh = meshPair.second;
@@ -336,7 +383,7 @@ void NewRenderer::quit()
     shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
     geometryPipeline_ = nullptr;
-    depthTexture_ = nullptr;
+    depthTarget_.texture = nullptr;
     texture_ = nullptr;
     sampler_ = nullptr;
     depthWidth_ = 0;
@@ -396,7 +443,3 @@ int NewRenderer::loadSceneModel(
     return Asset::modelInstances_.size() - 1;
 }
 
-void NewRenderer::setHudTexture(SDL_GPUTexture* hudTexture)
-{
-    hudTexture_ =  hudTexture;
-}
