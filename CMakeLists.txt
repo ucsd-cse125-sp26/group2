@@ -224,6 +224,34 @@ if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE)
     endblock()
 endif()
 
+# glslang — GLSL → SPIR-V front-end.  Built from source so contributors don't
+# need a system Vulkan SDK install; produces the `glslang-standalone` CLI
+# target (output name: `glslang`) that the shader build step below invokes via
+# $<TARGET_FILE:…>.  Pinned to the same Vulkan SDK revision as SPIRV-Cross
+# above (line 149) to keep the toolchain consistent.
+#
+# ENABLE_OPT=OFF avoids pulling SPIRV-Tools (we don't run --spirv-opt; DXC and
+# shadercross handle later-stage codegen).  ENABLE_HLSL=OFF — HLSL goes through
+# DXC inside shadercross, not glslang.
+block()
+    set(BUILD_SHARED_LIBS         OFF)
+    set(BUILD_TESTING             OFF CACHE BOOL "" FORCE)
+    set(GLSLANG_TESTS             OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OPT                OFF CACHE BOOL "" FORCE)
+    set(ENABLE_HLSL               OFF CACHE BOOL "" FORCE)
+    set(ENABLE_GLSLANG_BINARIES   ON  CACHE BOOL "" FORCE)
+    set(ENABLE_SPVREMAPPER        OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CTEST              OFF CACHE BOOL "" FORCE)
+    set(SKIP_GLSLANG_INSTALL      ON  CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glslang
+        GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+        GIT_TAG        vulkan-sdk-1.4.309.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(glslang)
+endblock()
+
 # GLM — header-only math library (vectors, matrices, quaternions)
 FetchContent_Declare(
     glm
@@ -399,36 +427,48 @@ target_compile_options(imgui_lib PRIVATE
 
 # ---- Shaders: GLSL → SPIR-V (→ DXIL on Windows / MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
-#   Prefers glslc (shaderc); falls back to glslangValidator.
-#   Linux:   sudo apt-get install glslang-tools
-#   macOS:   brew install glslang
-#   Windows: install Vulkan SDK (https://vulkan.lunarg.com/)
+#   Prefers the vendored glslang CLI (target `glslang-standalone`) built from
+#   source by the FetchContent block above — no system Vulkan SDK needed.
+#   Falls back to system glslc / glslangValidator if a contributor has one
+#   from the Vulkan SDK or distro package (saves a couple minutes on first
+#   configure for those users).
 # Step 2: SPIR-V → DXIL / MSL via SDL_shadercross (the `shadercross` CLI built
 #   from the FetchContent block above).  Replaces the legacy spirv-cross +
 #   spv_to_msl path.
-find_program(GLSLC glslc
-    HINTS ENV VULKAN_SDK
-    PATHS /opt/homebrew/bin /usr/local/bin
-    PATH_SUFFIXES bin)
-find_program(GLSLANG_VALIDATOR glslangValidator
-    HINTS ENV VULKAN_SDK
-    PATHS /opt/homebrew/bin /usr/local/bin
-    PATH_SUFFIXES bin)
-
-if(GLSLC)
-    message(STATUS "Shader compiler: glslc (${GLSLC})")
-    set(SHADER_COMPILE_TOOL  "${GLSLC}")
-    set(SHADER_COMPILE_FLAGS "")        # glslc infers stage from .vert/.frag
-elseif(GLSLANG_VALIDATOR)
-    message(STATUS "Shader compiler: glslangValidator (${GLSLANG_VALIDATOR})")
-    set(SHADER_COMPILE_TOOL  "${GLSLANG_VALIDATOR}")
-    set(SHADER_COMPILE_FLAGS "-V")      # -V = output SPIR-V binary
+if(TARGET glslang-standalone)
+    message(STATUS "Shader compiler: vendored glslang (target: glslang-standalone)")
+    set(SHADER_COMPILE_TOOL  $<TARGET_FILE:glslang-standalone>)
+    set(SHADER_COMPILE_FLAGS "-V")       # -V = output SPIR-V binary
+    set(SHADER_COMPILE_DEPS  glslang-standalone)
 else()
-    message(FATAL_ERROR
-        "No GLSL→SPIR-V compiler found.\n"
-        "  Linux:   sudo apt-get install glslang-tools\n"
-        "  macOS:   brew install glslang\n"
-        "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
+    find_program(GLSLC glslc
+        HINTS ENV VULKAN_SDK
+        PATHS /opt/homebrew/bin /usr/local/bin
+        PATH_SUFFIXES bin)
+    find_program(GLSLANG_VALIDATOR glslangValidator
+        HINTS ENV VULKAN_SDK
+        PATHS /opt/homebrew/bin /usr/local/bin
+        PATH_SUFFIXES bin)
+    if(GLSLC)
+        message(STATUS "Shader compiler: glslc (${GLSLC})")
+        set(SHADER_COMPILE_TOOL  "${GLSLC}")
+        set(SHADER_COMPILE_FLAGS "")        # glslc infers stage from .vert/.frag
+        set(SHADER_COMPILE_DEPS  "")
+    elseif(GLSLANG_VALIDATOR)
+        message(STATUS "Shader compiler: glslangValidator (${GLSLANG_VALIDATOR})")
+        set(SHADER_COMPILE_TOOL  "${GLSLANG_VALIDATOR}")
+        set(SHADER_COMPILE_FLAGS "-V")
+        set(SHADER_COMPILE_DEPS  "")
+    else()
+        message(FATAL_ERROR
+            "No GLSL→SPIR-V compiler available.  This usually means the\n"
+            "vendored glslang FetchContent block failed to expose the\n"
+            "`glslang-standalone` target.  Check the configure log above\n"
+            "for FetchContent errors, or install a system shader compiler:\n"
+            "  Linux:   sudo apt-get install glslang-tools\n"
+            "  macOS:   brew install glslang\n"
+            "  Windows: install the Vulkan SDK (https://vulkan.lunarg.com/)")
+    endif()
 endif()
 
 # SDL_shadercross builds a `shadercross` CLI target above (SDLSHADERCROSS_CLI=ON).
@@ -525,7 +565,7 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
         OUTPUT  "${SPV_OUT}"
         COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
                 -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
-        DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}"
+        DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}" ${SHADER_COMPILE_DEPS}
         COMMENT "Compiling shader ${SHADER_SRC} → SPIR-V"
         VERBATIM
     )
@@ -563,7 +603,7 @@ foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
         OUTPUT  "${SPV_OUT}"
         COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
                 -o "${SPV_OUT}" "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}"
-        DEPENDS "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}"
+        DEPENDS "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}" ${SHADER_COMPILE_DEPS}
         COMMENT "Compiling new-renderer shader ${SHADER_SRC} → SPIR-V"
         VERBATIM
     )
