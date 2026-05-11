@@ -64,7 +64,7 @@ public:
     using ShotDebugCallback = std::function<void(const net::shotdebug::ShotDebugCapture&)>;
 
     using LobbyUpdateCallback = std::function<void(const LobbyUpdateEvent& update)>;
-    using LobbyStateCallback = std::function<void(const std::vector<LobbyPlayer>& players)>;
+    using LobbyStateCallback = std::function<void(const std::vector<LobbyPlayer>& players, ClientId localId)>;
 
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr      Hostname or IP address of the server.

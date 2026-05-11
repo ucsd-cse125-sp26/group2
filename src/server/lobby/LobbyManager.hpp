@@ -1,6 +1,9 @@
 #include "network/Server.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 
+#include <chrono>
+#include <unordered_map>
+
 class LobbyManager
 {
 public:
@@ -11,4 +14,8 @@ public:
 private:
     Server* server = nullptr;
     std::vector<LobbyPlayer> players;
+    std::unordered_map<ClientId, std::chrono::steady_clock::time_point> joinTimes;
+    ClientId hostId{-1};
+
+    ClientId assignNewHost();
 };

@@ -1200,21 +1200,37 @@ void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
 bool Server::sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players)
 {
     const auto count = static_cast<uint32_t>(players.size());
-    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(uint32_t) + count * sizeof(LobbyPlayer));
+    // Wire format: [PacketType:1B][localClientId:4B][count:4B][players:count*sizeof(LobbyPlayer)]
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(int) + sizeof(uint32_t) + count * sizeof(LobbyPlayer));
     buf[0] = static_cast<uint8_t>(PacketType::LOBBY_STATE);
-    std::memcpy(buf.data() + 1, &count, sizeof(uint32_t));
-    std::memcpy(buf.data() + 1 + sizeof(uint32_t), players.data(), count * sizeof(LobbyPlayer));
+    std::memcpy(buf.data() + 1, &clientId.value, sizeof(int));
+    std::memcpy(buf.data() + 1 + sizeof(int), &count, sizeof(uint32_t));
+    std::memcpy(buf.data() + 1 + sizeof(int) + sizeof(uint32_t), players.data(), count * sizeof(LobbyPlayer));
     return sendToClient(clientId, buf.data(), static_cast<int>(buf.size()));
 }
 
 void Server::broadcastLobbyUpdate(const LobbyUpdateEvent& event)
 {
+    const char* action = "updated";
+    switch (event.type) {
+    case LobbyUpdateEvent::Type::PlayerJoined:
+        action = "joining";
+        break;
+    case LobbyUpdateEvent::Type::PlayerLeft:
+        action = "leaving";
+        break;
+    case LobbyUpdateEvent::Type::PlayerReadyStatusChanged:
+        action = "ready status changed";
+        break;
+    case LobbyUpdateEvent::Type::PlayerNewHost:
+        action = "new host";
+        break;
+    }
+
     // Pack: [PacketType::LOBBY_UPDATE (1B)] [LobbyUpdateEvent]
     std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(LobbyUpdateEvent));
     buf[0] = static_cast<uint8_t>(PacketType::LOBBY_UPDATE);
     std::memcpy(buf.data() + 1, &event, sizeof(LobbyUpdateEvent));
     enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
-    SDL_Log("Server: broadcasted lobby update: player %d is %s",
-            event.id.value,
-            event.type == LobbyUpdateEvent::Type::PlayerJoined ? "joining" : "leaving");
+    SDL_Log("Server: broadcasted lobby update: player %d is %s", event.id.value, action);
 }

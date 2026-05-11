@@ -1060,21 +1060,24 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         break;
     }
     case PacketType::LOBBY_STATE: {
-        if (payloadSize < sizeof(uint32_t))
+        if (payloadSize < sizeof(int) + sizeof(uint32_t))
             break;
 
-        uint32_t count = 0;
-        std::memcpy(&count, payload, sizeof(uint32_t));
+        ClientId localId{};
+        std::memcpy(&localId.value, payload, sizeof(int));
 
-        const size_t expectedSize = sizeof(uint32_t) + count * sizeof(LobbyPlayer);
+        uint32_t count = 0;
+        std::memcpy(&count, payload + sizeof(int), sizeof(uint32_t));
+
+        const size_t expectedSize = sizeof(int) + sizeof(uint32_t) + count * sizeof(LobbyPlayer);
         if (payloadSize < expectedSize)
             break;
 
         std::vector<LobbyPlayer> players(count);
-        std::memcpy(players.data(), payload + sizeof(uint32_t), count * sizeof(LobbyPlayer));
+        std::memcpy(players.data(), payload + sizeof(int) + sizeof(uint32_t), count * sizeof(LobbyPlayer));
 
         if (lobbyStateFn_)
-            lobbyStateFn_(players);
+            lobbyStateFn_(players, localId);
         break;
     }
     default:

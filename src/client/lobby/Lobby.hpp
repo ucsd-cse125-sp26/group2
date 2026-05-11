@@ -26,4 +26,5 @@ private:
     SDL_Window* window = nullptr;
     Client* client = nullptr;
     std::vector<LobbyPlayer> players;
+    ClientId localClientId{-1};
 };

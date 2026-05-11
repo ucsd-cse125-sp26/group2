@@ -3,6 +3,7 @@
 #include "SDL3/SDL_init.h"
 #include "ui/LobbyUI.hpp"
 
+#include <algorithm>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <glm/vec3.hpp>
@@ -16,13 +17,20 @@ bool Lobby::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* cli
     if (!renderer || !window)
         return false;
 
-    client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot) { players = snapshot; });
+    client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
+        players = snapshot;
+        localClientId = localId;
+    });
 
     client->onLobbyUpdate([this](const LobbyUpdateEvent& update) {
         switch (update.type) {
         case LobbyUpdateEvent::Type::PlayerJoined:
             SDL_Log("Lobby: player with clientId %u joined", update.id.value);
-            players.push_back(LobbyPlayer{update.id});
+            if (std::none_of(
+                    players.begin(), players.end(), [id = update.id](const LobbyPlayer& p) { return p.id == id; }))
+            {
+                players.push_back(LobbyPlayer{update.id});
+            }
             break;
         case LobbyUpdateEvent::Type::PlayerLeft:
             SDL_Log("Lobby: player with clientId %u left", update.id.value);
@@ -39,6 +47,11 @@ bool Lobby::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* cli
                     break;
                 }
             }
+            break;
+        case LobbyUpdateEvent::Type::PlayerNewHost:
+            SDL_Log("Lobby: player with clientId %u is now host", update.id.value);
+            for (auto& p : players)
+                p.isHost = p.id == update.id;
             break;
         default:
         }
@@ -70,7 +83,7 @@ SDL_AppResult Lobby::iterate()
         return SDL_APP_SUCCESS;
     }
 
-    lobby_ui::buildPlayerList(players);
+    lobby_ui::buildPlayerList(players, localClientId);
 
     ImGui::Render();
 
