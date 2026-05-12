@@ -208,6 +208,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     setMainCamera(eye,yaw,pitch,roll,width,height);
 
+    particleSystem_->uploadToGpu(cmd);
     drawGeometryPass(swapchain,cmd);
     drawUIPass(swapchain,cmd);
 
@@ -241,8 +242,29 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffe
     SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
     drawWeapon(geometryPass,cmd);
 
-
-    particleSystem_->render(geometryPass,cmd);
+    //if (toggles.particles && particleSystem) {
+    if (particleSystem_) {
+        struct alignas(16) ParticleUniforms
+        {
+            glm::mat4 view;
+            glm::mat4 proj;
+            glm::vec3 camPos;
+            float _p0;
+            glm::vec3 camRight;
+            float _p1;
+            glm::vec3 camUp;
+            float _p2;
+        };
+        ParticleUniforms pu{};
+        pu.view = camera_.getViewMatrix();
+        pu.proj = camera_.getProjectionMatrix();
+        pu.camPos = camera_.getEye();
+        pu.camRight = camera_.getRight();
+        pu.camUp = camera_.getUp();
+        SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+        particleSystem_->setScreenSize(static_cast<float>(depthWidth_), static_cast<float>(depthHeight_));
+        particleSystem_->render(geometryPass, cmd);
+    }
 
     SDL_EndGPURenderPass(geometryPass);
 
