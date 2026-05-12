@@ -40,8 +40,9 @@ public:
     /// @param tickRateHz  Physics tick rate in Hz (default 128).
     /// @param snapshotHz  Registry snapshot send rate in Hz (default 32).
     ///                    Must be ≤ tickRateHz; clamped if not.
+    /// @param skipLobby   True to bypass lobby and enter countdown automatically.
     /// @return True on success, false on initialisation failure.
-    bool init(Server& server, int tickRateHz = 128, int snapshotHz = 32);
+    bool init(Server& server, int tickRateHz = 128, int snapshotHz = 32, bool skipLobby = false);
 
     /// @brief Block on the game loop until shutdown() is called.
     ///

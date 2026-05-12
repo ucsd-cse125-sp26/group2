@@ -54,6 +54,7 @@ bool App::init()
             SDL_SetHint(SDL_HINT_GPU_DRIVER, driver);
 
         networkConfig = loadNetworkConfig(cfgPath.c_str());
+        developerConfig = loadDeveloperConfig(cfgPath.c_str());
     }
 
     // ImGui context must exist before Renderer::init, which sets up the
@@ -87,14 +88,25 @@ bool App::init()
         return false;
     }
 
-    auto lobbyScreen = std::make_unique<Lobby>();
-    if (!lobbyScreen->init(&renderer, window, &client)) {
-        lobbyScreen->quit();
-        cleanup();
-        return false;
+    if (developerConfig.skipLobby) {
+        auto game = std::make_unique<Game>();
+        if (!game->initDebugUI(window) || !game->init(&renderer, window, &client)) {
+            game->quit();
+            cleanup();
+            return false;
+        }
+        screen_ = std::move(game);
+        current = Screen::InGame;
+    } else {
+        auto lobbyScreen = std::make_unique<Lobby>();
+        if (!lobbyScreen->init(&renderer, window, &client)) {
+            lobbyScreen->quit();
+            cleanup();
+            return false;
+        }
+        screen_ = std::move(lobbyScreen);
+        current = Screen::Lobby;
     }
-    screen_ = std::move(lobbyScreen);
-    current = Screen::Lobby;
 
     return true;
 }
@@ -120,6 +132,8 @@ SDL_AppResult App::iterate()
             transitionTo(Screen::InGame);
         }
     } else if (current == Screen::InGame) {
+        if (developerConfig.skipLobby)
+            return result;
         if (auto* game = dynamic_cast<Game*>(screen_.get()); game != nullptr && game->shouldReturnToLobby()) {
             transitionTo(Screen::Lobby);
         }

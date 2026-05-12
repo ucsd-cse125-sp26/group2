@@ -60,10 +60,11 @@ namespace
 constexpr float k_lobbyStartCountdownDuration = 3.0f;
 }
 
-bool ServerGame::init(Server& serverRef, int hz, int snapshotHz)
+bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
 {
     server = &serverRef;
     tickRateHz = hz;
+    matchController.setSkipLobby(skipLobby);
 
     // Phase 4a: snapshot rate ≤ tick rate. Both should be positive ints; we
     // re-clamp here in case the caller didn't (NetworkConfig already
