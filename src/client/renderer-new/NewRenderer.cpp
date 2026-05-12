@@ -208,7 +208,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     setMainCamera(eye,yaw,pitch,roll,width,height);
 
-    particleSystem_->uploadToGpu(cmd);
     drawGeometryPass(swapchain,cmd);
     drawUIPass(swapchain,cmd);
 
@@ -225,6 +224,9 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
 
 void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd)
 {
+    if (particleSystem_)
+        particleSystem_->uploadToGpu(cmd); //Must be before render pass
+
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
@@ -240,8 +242,15 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffe
 
     const glm::mat4 projection = camera_.getProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
-    drawWeapon(geometryPass,cmd);
 
+    drawWeapon(geometryPass,cmd);
+    drawParticles(geometryPass,cmd);
+
+    SDL_EndGPURenderPass(geometryPass);
+}
+
+void NewRenderer::drawParticles(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd) const
+{
     //if (toggles.particles && particleSystem) {
     if (particleSystem_) {
         struct alignas(16) ParticleUniforms
@@ -263,13 +272,9 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffe
         pu.camUp = camera_.getUp();
         SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
         particleSystem_->setScreenSize(static_cast<float>(depthWidth_), static_cast<float>(depthHeight_));
-        particleSystem_->render(geometryPass, cmd);
+        particleSystem_->render(renderPass, cmd);
     }
-
-    SDL_EndGPURenderPass(geometryPass);
-
 }
-
 void NewRenderer::drawWeapon(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd)
 {
     Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;

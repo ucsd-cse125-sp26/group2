@@ -10,6 +10,8 @@
 
 namespace Boilerplate
 {
+
+
 ImGui_ImplSDLGPU3_InitInfo createImGuiInfo(SDL_GPUDevice* device, SDL_Window* window)
 {
     ImGui_ImplSDLGPU3_InitInfo info{};
@@ -149,6 +151,38 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
                       shaderInfo.storageTextureCount);
 }
 
+SDL_GPUColorTargetBlendState createBlendState(BlendMode blendMode)
+{
+    SDL_GPUColorTargetBlendState blendStateReturn{};
+    switch (blendMode) {
+        case Add:
+            blendStateReturn.enable_blend = true;
+
+            blendStateReturn.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            blendStateReturn.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            blendStateReturn.color_blend_op = SDL_GPU_BLENDOP_ADD;
+
+            blendStateReturn.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            blendStateReturn.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            blendStateReturn.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            break;
+        case Over:
+        default:
+            blendStateReturn.enable_blend = true;
+
+            blendStateReturn.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            blendStateReturn.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            blendStateReturn.color_blend_op = SDL_GPU_BLENDOP_ADD;
+
+            blendStateReturn.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            blendStateReturn.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            blendStateReturn.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            break;
+    }
+
+    return blendStateReturn;
+}
+
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 SDL_Window* window,
                                                 SDL_GPUShaderFormat shaderFormat,
@@ -156,7 +190,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 const ShaderInfo& fragmentShaderInfo,
                                                 const VertexInputLayout& vertexInputLayout,
                                                 bool enableDepth,
-                                                bool overBlending)
+                                                BlendMode blendMode)
 {
     SDL_GPUShader* vertexShader = loadShader(device, vertexShaderInfo, shaderFormat);
     SDL_GPUShader* fragmentShader = loadShader(device, fragmentShaderInfo, shaderFormat);
@@ -181,22 +215,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
 
     SDL_GPUColorTargetDescription colorTarget{};
     colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
-    if (overBlending) {
-        SDL_GPUColorTargetBlendState overBlendState{};
-        overBlendState.enable_blend = true;
-
-        overBlendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-        overBlendState.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-
-        overBlendState.color_blend_op = SDL_GPU_BLENDOP_ADD;
-
-        overBlendState.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-        overBlendState.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-
-        overBlendState.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-
-        colorTarget.blend_state = overBlendState;
-    }
+    colorTarget.blend_state = createBlendState(blendMode);
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.vertex_shader = vertexShader;

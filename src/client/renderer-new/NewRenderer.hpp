@@ -88,6 +88,8 @@ private:
 
     void drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd);
 
+    void drawParticles(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd) const;
+
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd);
 
     void drawWeapon(SDL_GPURenderPass *geometryPass,SDL_GPUCommandBuffer *cmd);

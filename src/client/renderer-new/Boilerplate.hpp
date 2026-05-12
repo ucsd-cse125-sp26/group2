@@ -12,6 +12,11 @@
 
 namespace Boilerplate
 {
+enum BlendMode
+{
+    Over,
+    Add
+};
 /// @brief Descriptor for a single shader stage: file path, stage, and resource counts.
 struct ShaderInfo
 {
@@ -114,7 +119,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
 /// @param fragmentShaderInfo Fragment shader descriptor.
 /// @param vertexInputLayout Vertex buffer layout description.
 /// @param enableDepth Enable depth testing and writing (default true).
-/// @param overBlending
+/// @param blendMode
 /// @return The created pipeline, or nullptr on failure.
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 SDL_Window* window,
@@ -123,7 +128,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 const ShaderInfo& fragmentShaderInfo,
                                                 const VertexInputLayout& vertexInputLayout,
                                                 bool enableDepth = true,
-                                                bool overBlending = false);
+                                                BlendMode blendMode = Over);
 
 /// @brief Allocate a GPU buffer of the given size and usage.
 /// @param device The GPU device.
