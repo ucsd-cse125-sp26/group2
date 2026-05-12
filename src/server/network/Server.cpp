@@ -650,8 +650,20 @@ void Server::networkLoop()
         if (udpEndpoint_.isOpen()) {
             std::unique_lock<std::shared_mutex> lock(stateMutex_);
             for (auto& [_, conn] : clients) {
-                if (conn.udpAddr.addr == nullptr || conn.reliableQueue.empty())
+                if (conn.reliableQueue.empty())
                     continue;
+
+                if (conn.udpAddr.addr == nullptr) {
+                    for (auto& entry : conn.reliableQueue) {
+                        if (entry.framed) {
+                            conn.outbound.enqueue(
+                                0, frameMessage(entry.framed->data(), static_cast<int>(entry.framed->size())));
+                        }
+                    }
+                    conn.reliableQueue.clear();
+                    continue;
+                }
+
                 for (auto& entry : conn.reliableQueue) {
                     net::PacketHeader hdr{};
                     hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
