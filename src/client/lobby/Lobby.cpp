@@ -1,6 +1,7 @@
 #include "Lobby.hpp"
 
 #include "SDL3/SDL_init.h"
+#include "SDL3/SDL_timer.h"
 #include "ui/LobbyUI.hpp"
 
 #include <algorithm>
@@ -67,6 +68,22 @@ bool Lobby::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* cli
     });
 
     client->onMatchStateUpdate([this](const MatchStatePacket& packet) {
+        if (packet.phase == MatchPhase::LOBBY) {
+            startMatchState.reset();
+            startCountdownActive = packet.countdownTimer > 0.0f;
+            startCountdownRemaining = std::max(packet.countdownTimer, 0.0f);
+            lastStartCountdownTickNs = startCountdownActive ? SDL_GetTicksNS() : 0;
+            return;
+        }
+
+        if (packet.phase == MatchPhase::COUNTDOWN) {
+            startCountdownActive = false;
+            startCountdownRemaining = 0.0f;
+            lastStartCountdownTickNs = 0;
+            startMatchState = packet;
+            return;
+        }
+
         if (packet.phase != MatchPhase::LOBBY)
             startMatchState = packet;
     });
@@ -97,12 +114,16 @@ SDL_AppResult Lobby::iterate()
         return SDL_APP_SUCCESS;
     }
 
+    updateStartCountdown();
+
     LobbyUIConfig config{
         .players = players,
         .localId = localClientId,
         .isHost = std::any_of(
             players.begin(), players.end(), [this](const LobbyPlayer& p) { return p.id == localClientId && p.isHost; }),
-        .canStartMatch = canHostStartMatch(),
+        .canStartMatch = canHostStartMatch() && !startCountdownActive,
+        .startCountdownActive = startCountdownActive,
+        .startCountdownRemaining = startCountdownRemaining,
     };
 
     const auto result = lobby_ui::buildPlayerList(config);
@@ -139,6 +160,9 @@ std::optional<MatchStatePacket> Lobby::consumeStartMatchState()
 {
     auto state = startMatchState;
     startMatchState.reset();
+    startCountdownActive = false;
+    startCountdownRemaining = 0.0f;
+    lastStartCountdownTickNs = 0;
     return state;
 }
 
@@ -155,4 +179,24 @@ bool Lobby::canHostStartMatch() const
     }
 
     return sawNonHost;
+}
+
+void Lobby::updateStartCountdown()
+{
+    if (!startCountdownActive)
+        return;
+
+    const Uint64 now = SDL_GetTicksNS();
+    if (lastStartCountdownTickNs == 0) {
+        lastStartCountdownTickNs = now;
+        return;
+    }
+
+    const float dt = static_cast<float>(now - lastStartCountdownTickNs) / 1'000'000'000.0f;
+    lastStartCountdownTickNs = now;
+    startCountdownRemaining = std::max(0.0f, startCountdownRemaining - dt);
+
+    if (startCountdownRemaining <= 0.0f) {
+        startCountdownRemaining = 0.0f;
+    }
 }

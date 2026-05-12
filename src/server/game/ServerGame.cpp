@@ -45,6 +45,11 @@
 
 #include <algorithm>
 
+namespace
+{
+constexpr float k_lobbyStartCountdownDuration = 3.0f;
+}
+
 bool ServerGame::init(Server& serverRef, int hz, int snapshotHz)
 {
     server = &serverRef;
@@ -293,8 +298,16 @@ void ServerGame::eventHandler(Event event)
         break;
     }
     case EventType::StartMatchRequested: {
-        if (lobbyManager.hostStartMatch(event.clientId))
-            matchController.hostStartedMatch();
+        if (!lobbyStartCountdownActive && lobbyManager.hostStartMatch(event.clientId)) {
+            lobbyStartCountdownActive = true;
+            lobbyStartCountdownTimer = k_lobbyStartCountdownDuration;
+            lobbyStartRequester = event.clientId;
+            server->broadcastMatchStatus(MatchStatePacket{
+                .phase = MatchPhase::LOBBY,
+                .countdownTimer = lobbyStartCountdownTimer,
+                .winnerId = -1,
+            });
+        }
         break;
     }
     case EventType::ShotIntent: {
@@ -448,10 +461,28 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     {
         GROUP2_PROF_SCOPE("match");
-        const MatchPhase previousPhase = matchController.getCurrentPhase();
-        matchController.update(dt, registry, *server);
-        if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
-            lobbyManager.resetReadyStatuses();
+        if (lobbyStartCountdownActive) {
+            lobbyStartCountdownTimer -= dt;
+            if (lobbyStartCountdownTimer <= 0.0f) {
+                lobbyStartCountdownActive = false;
+                lobbyStartCountdownTimer = 0.0f;
+                if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
+                    matchController.hostStartedMatch();
+                    matchController.update(dt, registry, *server);
+                } else {
+                    server->broadcastMatchStatus(MatchStatePacket{
+                        .phase = MatchPhase::LOBBY,
+                        .countdownTimer = 0.0f,
+                        .winnerId = -1,
+                    });
+                }
+            }
+        } else {
+            const MatchPhase previousPhase = matchController.getCurrentPhase();
+            matchController.update(dt, registry, *server);
+            if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
+                lobbyManager.resetReadyStatuses();
+        }
     }
 
     // Phase 4a: snapshot rate decoupled from tick rate. The registry

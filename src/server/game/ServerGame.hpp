@@ -132,6 +132,9 @@ private:
     Registry registry;                       ///< ECS entity/component store.
     LobbyManager lobbyManager;               ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;         ///< Manages match flow and state.
+    bool lobbyStartCountdownActive = false;  ///< True while lobby is counting down before entering match countdown.
+    float lobbyStartCountdownTimer = 0.0f;   ///< Seconds remaining in the lobby staging countdown.
+    ClientId lobbyStartRequester{-1};        ///< Host that requested the active lobby staging countdown.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.
     bool running = false;                        ///< Loop continues while true.

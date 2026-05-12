@@ -26,6 +26,7 @@ public:
 
 private:
     bool canHostStartMatch() const;
+    void updateStartCountdown();
 
     ClientRenderer* renderer = nullptr;
     SDL_Window* window = nullptr;
@@ -33,4 +34,7 @@ private:
     std::vector<LobbyPlayer> players;
     ClientId localClientId{-1};
     std::optional<MatchStatePacket> startMatchState;
+    bool startCountdownActive = false;
+    float startCountdownRemaining = 0.0f;
+    Uint64 lastStartCountdownTickNs = 0;
 };

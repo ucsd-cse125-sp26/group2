@@ -16,6 +16,8 @@ struct LobbyUIConfig
     ClientId localId;
     bool isHost;
     bool canStartMatch;
+    bool startCountdownActive;
+    float startCountdownRemaining;
 };
 
 namespace lobby_ui

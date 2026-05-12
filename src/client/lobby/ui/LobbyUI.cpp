@@ -38,16 +38,24 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
 
         ImGui::Separator();
-        if (ImGui::Button(localReady ? "Unready" : "Ready"))
+        if (config.startCountdownActive) {
+            ImGui::Text("Entering match countdown in %.1fs", static_cast<double>(config.startCountdownRemaining));
+        }
+
+        ImGui::BeginDisabled(config.startCountdownActive);
+        if (ImGui::Button(localReady ? "Unready" : "Ready")) {
             result.readyChange = !localReady;
+        }
 
         if (config.isHost) {
             ImGui::SameLine();
             ImGui::BeginDisabled(!config.canStartMatch);
-            if (ImGui::Button("Start Match"))
+            if (ImGui::Button("Start Match")) {
                 result.startMatchClicked = true;
+            }
             ImGui::EndDisabled();
         }
+        ImGui::EndDisabled();
     }
     ImGui::End();
 
