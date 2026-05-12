@@ -4,7 +4,7 @@
 #include "HudRenderer.hpp"
 
 #include "particles/sdf/SdfAtlas.hpp"
-#include "renderer/ShaderUtils.hpp"
+#include "renderer-new/ShaderUtils.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -89,6 +89,7 @@ void HudRenderer::quit()
         return;
 
     SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
+    SDL_ReleaseGPUTexture(device_, msaaTarget_);
     SDL_ReleaseGPUTexture(device_, offscreenTarget_);
     SDL_ReleaseGPUTexture(device_, iconAtlasTex_);
     SDL_ReleaseGPUSampler(device_, iconAtlasSamp_);
@@ -96,6 +97,7 @@ void HudRenderer::quit()
     SDL_ReleaseGPUTransferBuffer(device_, transferBuffer_);
 
     pipeline_ = nullptr;
+    msaaTarget_ = nullptr;
     offscreenTarget_ = nullptr;
     iconAtlasTex_ = nullptr;
     iconAtlasSamp_ = nullptr;
@@ -111,7 +113,9 @@ void HudRenderer::resize(uint32_t newW, uint32_t newH)
     if (newW == width_ && newH == height_)
         return;
     SDL_ReleaseGPUTexture(device_, offscreenTarget_);
+    SDL_ReleaseGPUTexture(device_, msaaTarget_);
     offscreenTarget_ = nullptr;
+    msaaTarget_ = nullptr;
     createOffscreenTarget(newW, newH);
 }
 
@@ -148,12 +152,19 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
         SDL_EndGPUCopyPass(cp);
     }
 
-    // Begin render pass -> offscreen target.
+    // Begin render pass -> MSAA target with end-of-pass auto-resolve into
+    // the 1× sampleable target. The resolve happens inside the GPU at zero
+    // CPU cost; the swapchain blit only ever sees the resolved 1× texture.
     SDL_GPUColorTargetInfo ct{};
-    ct.texture = offscreenTarget_;
+    ct.texture = msaaTarget_;
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
     ct.clear_color = {0.f, 0.f, 0.f, 0.f}; // transparent black
-    ct.store_op = SDL_GPU_STOREOP_STORE;
+    ct.store_op = SDL_GPU_STOREOP_RESOLVE; // resolve MSAA -> single-sample, discard MSAA contents
+    ct.resolve_texture = offscreenTarget_;
+    ct.resolve_layer = 0;
+    ct.resolve_mip_level = 0;
+    ct.cycle = false;
+    ct.cycle_resolve_texture = false;
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, nullptr);
     SDL_BindGPUGraphicsPipeline(pass, pipeline_);
@@ -209,17 +220,44 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
 
 bool HudRenderer::createOffscreenTarget(uint32_t w, uint32_t h)
 {
-    SDL_GPUTextureCreateInfo tci{};
-    tci.type = SDL_GPU_TEXTURETYPE_2D;
-    tci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    tci.width = w;
-    tci.height = h;
-    tci.layer_count_or_depth = 1;
-    tci.num_levels = 1;
-    tci.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    offscreenTarget_ = SDL_CreateGPUTexture(device_, &tci);
+    // 4× MSAA color target — drawn into, never sampled. SDL_GPU requires
+    // the multisample texture and the resolve target be separate resources;
+    // the resolve target is the 1× sampleable copy that downstream code
+    // (renderer's HUD blit) reads from.
+    SDL_GPUTextureCreateInfo msaaInfo{};
+    msaaInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    msaaInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    msaaInfo.width = w;
+    msaaInfo.height = h;
+    msaaInfo.layer_count_or_depth = 1;
+    msaaInfo.num_levels = 1;
+    msaaInfo.sample_count = k_sampleCount;
+    msaaInfo.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    msaaTarget_ = SDL_CreateGPUTexture(device_, &msaaInfo);
+    if (!msaaTarget_) {
+        SDL_Log("HudRenderer: failed to create %dx MSAA target (%ux%u): %s",
+                static_cast<int>(k_sampleCount),
+                w,
+                h,
+                SDL_GetError());
+        return false;
+    }
+
+    // 1× sampleable resolve target — the HUD blit pipeline samples this.
+    SDL_GPUTextureCreateInfo resInfo{};
+    resInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    resInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    resInfo.width = w;
+    resInfo.height = h;
+    resInfo.layer_count_or_depth = 1;
+    resInfo.num_levels = 1;
+    resInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    resInfo.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    offscreenTarget_ = SDL_CreateGPUTexture(device_, &resInfo);
     if (!offscreenTarget_) {
-        SDL_Log("HudRenderer: failed to create offscreen target (%ux%u): %s", w, h, SDL_GetError());
+        SDL_Log("HudRenderer: failed to create resolve target (%ux%u): %s", w, h, SDL_GetError());
+        SDL_ReleaseGPUTexture(device_, msaaTarget_);
+        msaaTarget_ = nullptr;
         return false;
     }
     width_ = w;
@@ -274,11 +312,15 @@ bool HudRenderer::createPipeline()
     vertexInput.vertex_attributes = attrs;
     vertexInput.num_vertex_attributes = 5;
 
-    // Alpha blending.
+    // Premultiplied-alpha blending.  The fragment shader emits (rgb·a, a)
+    // so we pass src color through unmodified (`ONE`) and let blending take
+    // care of the rest.  Premultiplied alpha is also a hard requirement for
+    // correct MSAA resolve — averaging straight-alpha sub-samples produces
+    // dark fringes around glyph edges; premultiplied averages cleanly.
     SDL_GPUColorTargetDescription ctDesc{};
     ctDesc.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     ctDesc.blend_state.enable_blend = true;
-    ctDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    ctDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     ctDesc.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     ctDesc.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
     ctDesc.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
@@ -294,6 +336,8 @@ bool HudRenderer::createPipeline()
     pci.target_info.num_color_targets = 1;
     pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    // 4× MSAA sample-count must match the multisample target we render into.
+    pci.multisample_state.sample_count = k_sampleCount;
 
     pipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &pci);
     SDL_ReleaseGPUShader(device_, vert);

@@ -4,6 +4,8 @@
 #include "Boilerplate.hpp"
 
 #include <filesystem>
+
+#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 namespace Boilerplate
@@ -28,12 +30,21 @@ makeAttribute(Uint32 location, SDL_GPUVertexElementFormat format, Uint32 offset,
     return attribute;
 }
 
-SDL_GPUColorTargetInfo makeColorTarget(SDL_GPUTexture* texture, SDL_FColor clearColor)
+SDL_GPUColorTargetInfo makeColorTargetClear(SDL_GPUTexture* texture, SDL_FColor clearColor)
 {
     SDL_GPUColorTargetInfo target{};
     target.texture = texture;
     target.clear_color = clearColor;
     target.load_op = SDL_GPU_LOADOP_CLEAR;
+    target.store_op = SDL_GPU_STOREOP_STORE;
+    return target;
+}
+
+SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture)
+{
+    SDL_GPUColorTargetInfo target{};
+    target.texture = texture;
+    target.load_op = SDL_GPU_LOADOP_LOAD;
     target.store_op = SDL_GPU_STOREOP_STORE;
     return target;
 }
@@ -144,7 +155,8 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 const ShaderInfo& vertexShaderInfo,
                                                 const ShaderInfo& fragmentShaderInfo,
                                                 const VertexInputLayout& vertexInputLayout,
-                                                bool enableDepth)
+                                                bool enableDepth,
+                                                bool overBlending)
 {
     SDL_GPUShader* vertexShader = loadShader(device, vertexShaderInfo, shaderFormat);
     SDL_GPUShader* fragmentShader = loadShader(device, fragmentShaderInfo, shaderFormat);
@@ -169,6 +181,22 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
 
     SDL_GPUColorTargetDescription colorTarget{};
     colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
+    if (overBlending) {
+        SDL_GPUColorTargetBlendState overBlendState{};
+        overBlendState.enable_blend = true;
+
+        overBlendState.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+        overBlendState.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+        overBlendState.color_blend_op = SDL_GPU_BLENDOP_ADD;
+
+        overBlendState.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+        overBlendState.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+        overBlendState.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+
+        colorTarget.blend_state = overBlendState;
+    }
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.vertex_shader = vertexShader;

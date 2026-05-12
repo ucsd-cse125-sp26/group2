@@ -26,6 +26,7 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec3 fragTangent;
 layout(location = 4) out vec3 fragBitangent;
+layout(location = 5) out vec4 fragTint;     // rgb = tint color, a = blend factor (0 = no tint)
 
 /// std140 layout: aligned mat4 inside the SSBO.
 layout(std430, set = 0, binding = 0) readonly buffer BonePalette
@@ -42,6 +43,7 @@ struct InstanceData
     uint materialId;
     uint _pad0;
     uint _pad1;
+    vec4 tint;          // rgb = per-player color, a = blend factor (0 = no tint)
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer InstanceBuffer
@@ -85,4 +87,5 @@ void main()
     fragTangent      = normalize(worldRot * tLocal);
     fragBitangent    = cross(fragNormal, fragTangent) * inTangent.w;
     fragTexCoord     = inTexCoord;
+    fragTint         = inst.tint;
 }

@@ -18,6 +18,7 @@ struct InstanceData
     uint materialId;
     uint _pad0;
     uint _pad1;
+    vec4 tint;          // unused in shadow pass; declared for SSBO layout parity with pbr_skinned.vert
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer InstanceBuffer

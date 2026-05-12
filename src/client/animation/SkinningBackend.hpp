@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CharacterRig.hpp"
-#include "renderer/ModelLoader.hpp"
+#include "SkinVertex.hpp"
 
 #include <glm/glm.hpp>
 #include <vector>

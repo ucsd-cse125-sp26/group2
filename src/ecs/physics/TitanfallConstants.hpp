@@ -132,11 +132,11 @@ constexpr float k_crouchingHalfHeight = 22.0f; ///< Crouching/sliding AABB half-
 
 // Grappling hook (Widowmaker-style: direct pull → look-biased launch)
 
-constexpr float k_grappleMaxRange = 4000.0f; ///< Max hook distance (~20 m in Quake units).
-constexpr float k_grapplePullSpeed = 800.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive.
-constexpr float k_grappleDetachDist = 80.0f; ///< Auto-detach when this close to anchor (~2 m).
-constexpr float k_grappleMaxDuration = 5.0f; ///< Safety timeout (s).
-constexpr float k_grappleCooldown = 5.0f;    ///< Cooldown between grapples (s).
+constexpr float k_grappleMaxRange = 4000.0f;  ///< Max hook distance (~20 m in Quake units).
+constexpr float k_grapplePullSpeed = 4000.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive.
+constexpr float k_grappleDetachDist = 80.0f;  ///< Auto-detach when this close to anchor (~2 m).
+constexpr float k_grappleMaxDuration = 5.0f;  ///< Safety timeout (s).
+constexpr float k_grappleCooldown = 5.0f;     ///< Cooldown between grapples (s).
 constexpr float k_grappleLaunchLookBias =
     0.6f; ///< Look-direction weight on detach launch (0 = pure grapple dir, 1 = pure look).
 constexpr float k_grappleLaunchSpeedMult = 1.15f; ///< Speed multiplier on launch (slight boost for momentum).

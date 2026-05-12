@@ -8,6 +8,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/HitboxHistory.hpp"
@@ -41,6 +42,7 @@
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 using physics::HitboxHit;
 using physics::HitscanHit;
@@ -49,17 +51,6 @@ using physics::resolveHitscanHitbox;
 
 namespace systems
 {
-
-/// @brief Return the GunInstance for the currently selected weapon slot.
-/// @param weapon  Weapon state to query.
-/// @return Reference to the equipped gun.
-inline GunInstance& getEquippedGun(WeaponState& weapon)
-{
-    if (weapon.current == WeaponSlot::PRIMARY) {
-        return weapon.primary;
-    }
-    return weapon.secondary;
-}
 
 /// @brief Apply weapon slot switch from player input.
 /// @param input   Current input snapshot.
@@ -71,6 +62,21 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
     } else if (input.switchToSecondary) {
         weapon.current = WeaponSlot::SECONDARY;
     }
+
+    // Grenade slot: press 3 to switch to grenade; press again while on grenade to cycle type.
+    // Primary/Secondary slots are untouched — the player keeps their gun.
+    if (input.cycleGrenade) {
+        if (weapon.current == WeaponSlot::GRENADE) {
+            // Already on grenade — advance the type stored in the grenade slot.
+            GunInstance& grenade = getSlot(weapon, WeaponSlot::GRENADE);
+            grenade.type = nextGrenadeType(grenade.type);
+        } else {
+            // Switch to grenade slot. The slot's GunInstance.type is already populated.
+            weapon.current = WeaponSlot::GRENADE;
+        }
+        // Reset firing state so a held LMB doesn't throw immediately on switch/cycle.
+        getEquippedGun(weapon).fireCooldown = 0.0f;
+    }
 }
 
 /// @brief Tick fire cooldowns for all weapon slots.
@@ -80,8 +86,9 @@ inline void handleCooldown(WeaponState& weapon, float dt)
 {
     auto reduce = [dt](GunInstance& gun) { gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt); };
 
-    reduce(weapon.primary);
-    reduce(weapon.secondary);
+    for (auto& gun : weapon.slots) {
+        reduce(gun);
+    }
 }
 
 /// @brief Reload the gun's magazine from reserve ammo.
@@ -394,6 +401,42 @@ inline void captureShotDebug(Registry& registry,
     out->push_back(std::move(cap));
 }
 
+/// @brief Spawn a grenade projectile from the player's eye position.
+///
+/// Computes a throw direction by rotating the eye direction upward by the
+/// configured pitch offset (so a perfectly horizontal aim still arcs).
+/// Copies all flight-relevant fields from the grenade's GrenadeConfig into
+/// the new Projectile entity so CollisionSystem can dispatch on them.
+static void spawnGrenade(
+    Registry& registry, entt::entity shooter, WeaponType type, glm::vec3 muzzle, glm::vec3 eyeDir, glm::vec3 eyeRight)
+{
+    const GrenadeConfig& cfg = getGrenadeConfig(type);
+
+    // Rotate eyeDir upward around eyeRight by `throwPitchOffset` rad.
+    // Negative angle: pitch-up reduces world Y rotation when right points to the player's right.
+    const glm::vec3 throwDir = glm::normalize(glm::angleAxis(-cfg.throwPitchOffset, eyeRight) * eyeDir);
+
+    const entt::entity proj = registry.create();
+    registry.emplace<Projectile>(proj,
+                                 Projectile{
+                                     .type = type,
+                                     .damage = cfg.damage,
+                                     .owner = shooter,
+                                     .explosive = false, // grenades route via fuse / impact, not the rocket path
+                                     .currentLifeTime = 0.0f,
+                                     // Sticky grenades (Impulse) start with no fuse — CollisionSystem arms it on first
+                                     // surface hit. Non-sticky grenades (HE w/ fuseTime=3.0; Molotov w/ fuseTime=-1 for
+                                     // impact-detonate) use the config value directly.
+                                     .fuseTimer = cfg.sticky ? -1.0f : cfg.fuseTime,
+                                     .bounceRestitution = cfg.bounceRestitution,
+                                     .sticky = cfg.sticky,
+                                     .tint = cfg.tint,
+                                 });
+    registry.emplace<Position>(proj, Position{.value = muzzle});
+    registry.emplace<Velocity>(proj, Velocity{.value = throwDir * cfg.throwSpeed});
+    registry.emplace<CollisionShape>(proj, CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}});
+}
+
 /// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
 ///
 /// Handles three weapon archetypes:
@@ -610,6 +653,29 @@ inline void handleFire(Registry& registry,
     const glm::vec3 direction = viewForward(input.yaw, input.pitch);
     const glm::vec3 muzzle = muzzleOrigin(eye, direction, gravityFlipped);
 
+    // Grenade throw path: takes precedence over hitscan/rocket so grenade
+    // types never fall through to the standard fire branches. Computes a
+    // right-axis from direction × world up (matches muzzleOrigin's right
+    // basis), then spawns a Projectile with grenade-specific fields and
+    // gates spam-throwing via throwCooldown.
+    if (isGrenadeType(gun.type)) {
+        // Mirrors the defensive pattern in muzzleOrigin (above): guard against
+        // pitch-±90° degeneracy where direction is parallel to world-up. Input
+        // is clamped to ±89° in the input system so this can't trigger today,
+        // but normalize() of a near-zero vector would return NaN.
+        glm::vec3 eyeRight = glm::cross(direction, glm::vec3{0.0f, 1.0f, 0.0f});
+        const float eyeRightLen2 = glm::dot(eyeRight, eyeRight);
+        if (eyeRightLen2 < physics::k_parallelEpsilon) {
+            // Degenerate: aiming nearly straight up/down. Fall back to world-X right-axis.
+            eyeRight = glm::vec3{1.0f, 0.0f, 0.0f};
+        } else {
+            eyeRight = eyeRight * (1.0f / std::sqrt(eyeRightLen2));
+        }
+        spawnGrenade(registry, shooter, gun.type, muzzle, direction, eyeRight);
+        gun.fireCooldown = getGrenadeConfig(gun.type).throwCooldown;
+        return;
+    }
+
     if (config.hitscan) {
         // Phase 6 lag-compensated hitscan (see beam path for details).
         // PR-5: ray-filtered rewind.
@@ -751,8 +817,9 @@ void runWeapon(Registry& registry,
                 g.currentMagAmmo = c.magazineSize;
                 g.totalAmmo = c.defaultAmmoCapacity;
             };
-            refill(weapon.primary);
-            refill(weapon.secondary);
+            for (auto& g : weapon.slots) {
+                refill(g);
+            }
             input.refillAmmo = false; // consume the flag
         }
     });

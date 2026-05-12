@@ -6,6 +6,8 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/abilities/GrappleAbility.hpp"
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
@@ -15,7 +17,11 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Player.hpp"
+#include "ecs/components/PlayerColor.hpp"
+#include "ecs/components/PlayerColors.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
+#include "ecs/components/PlayerName.hpp"
+#include "ecs/components/PlayerNicknames.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -26,8 +32,11 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
+#include "ecs/systems/DroppedWeaponSystem.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
+#include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
@@ -44,6 +53,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cstring>
 
 namespace
 {
@@ -71,6 +81,9 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz)
         SDL_Log("[server] LobbyManager init failed");
         return false;
     }
+
+    // Register abilities
+    abilityRegistry.registerAbility(std::make_unique<GrappleAbility>());
 
     // ── Load map collision ──────────────────────────────────────────────
     // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
@@ -435,6 +448,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, &shotDebugReports);
     }
     {
+        GROUP2_PROF_SCOPE("ability");
+        systems::runAbility(registry, abilityRegistry, dt);
+    }
+    {
         GROUP2_PROF_SCOPE("movement");
         systems::runMovement(registry, dt, physics::activeWorld());
     }
@@ -447,6 +464,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         systems::runExplosion(registry, particleEvents, pendingKillEvents);
     }
     {
+        GROUP2_PROF_SCOPE("fireField");
+        systems::runFireField(registry, dt, pendingKillEvents);
+    }
+    {
         GROUP2_PROF_SCOPE("playerStatus");
         systems::runPlayerStatus(registry, dt);
     }
@@ -457,6 +478,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("weaponSpawners");
         systems::runWeaponSpawners(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("droppedWeapons");
+        systems::runDroppedWeapons(registry, dt);
     }
 
     {
@@ -620,28 +645,66 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
+    registry.emplace<AbilityState>(player,
+                                   AbilityState{
+                                       .primary = AbilityType::Grapple,
+                                   }); // Defaults to level 0 with 0 accum damage
+
+    if constexpr (player_colors::k_enabled) {
+        // Pick the least-used palette slot; ties broken by lowest index
+        // for deterministic assignment across reconnects within a match.
+        const auto minIt = std::min_element(colorSlotUseCounts_.begin(), colorSlotUseCounts_.end());
+        const int slot = static_cast<int>(std::distance(colorSlotUseCounts_.begin(), minIt));
+        ++colorSlotUseCounts_[static_cast<size_t>(slot)];
+        registry.emplace<PlayerColor>(player,
+                                      PlayerColor{
+                                          .rgb = player_colors::k_palette[static_cast<size_t>(slot)],
+                                          .paletteIdx = slot,
+                                      });
+    }
+
+    // Assign an animal nickname using the same least-used scheme.  When
+    // the future custom-nickname flow lands, it'll set `PlayerName.isCustom`
+    // and the auto-assigner here can simply skip that player.  Right now
+    // every joiner gets an animal handle.
+    {
+        const auto minNickIt = std::min_element(nicknameSlotUseCounts_.begin(), nicknameSlotUseCounts_.end());
+        const int nickSlot = static_cast<int>(std::distance(nicknameSlotUseCounts_.begin(), minNickIt));
+        ++nicknameSlotUseCounts_[static_cast<size_t>(nickSlot)];
+        PlayerName pn;
+        pn.set(player_nicknames::k_nicknames[static_cast<std::size_t>(nickSlot)]);
+        pn.isCustom = false;
+        registry.emplace<PlayerName>(player, pn);
+    }
     registry.emplace<BeamState>(player);
 
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    registry.emplace<WeaponState>(player,
-                                  WeaponState{
-                                      .primary =
-                                          GunInstance{
-                                              .type = WeaponType::Rifle,
-                                              .totalAmmo = rifleConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = rifleConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .secondary =
-                                          GunInstance{
-                                              .type = WeaponType::RailGun,
-                                              .totalAmmo = railConfig.defaultAmmoCapacity,
-                                              .currentMagAmmo = railConfig.magazineSize,
-                                              .fireCooldown = 0.0f,
-                                          },
-                                      .current = WeaponSlot::PRIMARY,
-                                  });
+    WeaponState weaponState{};
+    weaponState.current = WeaponSlot::PRIMARY;
+    getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
+        .type = WeaponType::Rifle,
+        .totalAmmo = rifleConfig.defaultAmmoCapacity,
+        .currentMagAmmo = rifleConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
+        .type = WeaponType::RailGun,
+        .totalAmmo = railConfig.defaultAmmoCapacity,
+        .currentMagAmmo = railConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    // Grenade slot is exclusive to grenade types — initialize the type so the
+    // single source of truth for "which grenade is selected" is the slot
+    // itself (no separate GrenadeInventory component). Mag + reserve must be
+    // populated from the WeaponConfig so handleAmmo() in WeaponSystem succeeds
+    // when the player throws a grenade.
+    GunInstance& grenade = getSlot(weaponState, WeaponSlot::GRENADE);
+    grenade.type = WeaponType::HEGrenade;
+    const WeaponConfig& grenadeCfg = getWeaponConfig(WeaponType::HEGrenade);
+    grenade.currentMagAmmo = grenadeCfg.magazineSize;
+    grenade.totalAmmo = grenadeCfg.defaultAmmoCapacity;
+    registry.emplace<WeaponState>(player, weaponState);
 
     // Attach server-side animator for skeleton-driven hitboxes.
     attachServerAnimator(player);
@@ -655,6 +718,29 @@ void ServerGame::deletePlayerEntity(ClientId clientId)
         const entt::entity player = it->second;
         detachServerAnimator(player);
         if (registry.valid(player)) {
+            // Release this player's palette slot so the next joiner can reuse it.
+            if (const auto* color = registry.try_get<PlayerColor>(player);
+                color != nullptr && color->paletteIdx >= 0 && color->paletteIdx < player_colors::k_paletteSize)
+            {
+                auto& useCount = colorSlotUseCounts_[static_cast<size_t>(color->paletteIdx)];
+                if (useCount > 0) {
+                    --useCount;
+                }
+            }
+
+            // Release the auto-assigned nickname slot too — same scheme.
+            // Custom names (PlayerName::isCustom == true) don't reserve a
+            // slot, so leave the use-counts alone in that case.
+            if (const auto* pn = registry.try_get<PlayerName>(player); pn != nullptr && !pn->isCustom) {
+                for (std::size_t i = 0; i < player_nicknames::k_nicknames.size(); ++i) {
+                    if (std::strcmp(player_nicknames::k_nicknames[i], pn->c_str()) == 0) {
+                        auto& nickUseCount = nicknameSlotUseCounts_[i];
+                        if (nickUseCount > 0)
+                            --nickUseCount;
+                        break;
+                    }
+                }
+            }
             registry.destroy(player);
         }
         clientEntities.erase(it);

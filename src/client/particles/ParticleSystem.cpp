@@ -51,7 +51,7 @@ void ParticleSystem::quit()
 
 // update
 
-void ParticleSystem::update(float dt, const Camera& cam, Registry& reg)
+void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
 {
     frameDt_ = dt;
     camPos_ = cam.getEye();
@@ -141,6 +141,11 @@ void ParticleSystem::spawnBulletHole(glm::vec3 pos, glm::vec3 normal, WeaponType
 void ParticleSystem::spawnSmoke(glm::vec3 pos, float radius)
 {
     smoke_.spawn(pos, radius);
+}
+
+void ParticleSystem::spawnFire(glm::vec3 pos, float radius)
+{
+    smoke_.spawn(pos, radius, /*isFire=*/true);
 }
 
 void ParticleSystem::spawnExplosion(glm::vec3 pos, float blastRadius)

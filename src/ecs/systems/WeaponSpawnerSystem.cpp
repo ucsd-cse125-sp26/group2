@@ -5,6 +5,7 @@
 #include "WeaponSpawnerSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -12,32 +13,11 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "ecs/systems/PickupGeometry.hpp"
 #include "entt/entity/entity.hpp"
 
 namespace systems
 {
-
-/// @brief Test whether two axis-aligned bounding boxes overlap.
-/// @param aPos   Center of box A.
-/// @param aHalf  Half-extents of box A.
-/// @param bPos   Center of box B.
-/// @param bHalf  Half-extents of box B.
-/// @return True if the boxes overlap on all three axes.
-inline bool overlapsAABB(glm::vec3 aPos, glm::vec3 aHalf, glm::vec3 bPos, glm::vec3 bHalf)
-{
-    return std::abs(aPos.x - bPos.x) <= (aHalf.x + bHalf.x) && std::abs(aPos.y - bPos.y) <= (aHalf.y + bHalf.y) &&
-           std::abs(aPos.z - bPos.z) <= (aHalf.z + bHalf.z);
-}
-
-inline glm::vec3 viewForward(float yaw, float pitch)
-{
-    const float cp = std::cos(pitch);
-    return glm::normalize(glm::vec3{
-        std::sin(yaw) * cp,
-        -std::sin(pitch),
-        std::cos(yaw) * cp,
-    });
-}
 
 /// @brief Check if any player overlaps the spawner and transfer the weapon on pickup.
 /// @param registry      The ECS registry.
@@ -57,52 +37,52 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
         if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasWeapon)
         {
             const WeaponConfig config = getWeaponConfig(spawner.type);
-            if (weapon.primary.type == spawner.type) {
-                weapon.primary.totalAmmo = config.defaultAmmoCapacity;
-                weapon.primary.currentMagAmmo = config.magazineSize;
+            GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
+            GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
+            if (primary.type == spawner.type) {
+                primary.totalAmmo = config.defaultAmmoCapacity;
+                primary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
-            } else if (weapon.secondary.type == spawner.type) {
-                weapon.secondary.totalAmmo = config.defaultAmmoCapacity;
-                weapon.secondary.currentMagAmmo = config.magazineSize;
+            } else if (secondary.type == spawner.type) {
+                secondary.totalAmmo = config.defaultAmmoCapacity;
+                secondary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             }
         }
 
-        static constexpr float k_pickupRange = 140.0f;
-        static constexpr float k_pickupMaxAngleDeg = 12.0f;
-        static const float k_pickupMinDot = std::cos(glm::radians(k_pickupMaxAngleDeg));
-
         const float spawnEyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.77f * spawnEyeDir, 0.0f};
-        const glm::vec3 toWeapon = spawnerPos.value - eye;
-        const float distSq = glm::dot(toWeapon, toWeapon);
+        const glm::vec3 viewFwd = viewForward(input.yaw, input.pitch);
 
-        const bool inRange = distSq <= k_pickupRange * k_pickupRange;
-        const bool lookingAtWeapon = distSq > 0.0001f && glm::dot(viewForward(input.yaw, input.pitch),
-                                                                  glm::normalize(toWeapon)) >= k_pickupMinDot;
-
-        if (spawner.hasWeapon && input.pickup && inRange && lookingAtWeapon) {
-            // pickup
+        if (spawner.hasWeapon && input.pickup && isPlayerLookingAtPickup(eye, viewFwd, spawnerPos.value)) {
+            // Resolve the destination slot under the type-compatibility guard.
+            // The currently-equipped slot is preferred so picking up a rifle
+            // while holding a rifle replaces it in-place; otherwise we fall
+            // back to PRIMARY. The grenade slot is exclusive to grenade types
+            // (canAcceptType enforces this), so a rifle pickup can never land
+            // there even if the player happens to have grenade equipped.
+            const WeaponSlot targetSlot =
+                canAcceptType(weapon.current, spawner.type) ? weapon.current : WeaponSlot::PRIMARY;
+            if (!canAcceptType(targetSlot, spawner.type)) {
+                // Fallback slot can't accept this type either (e.g. a
+                // hypothetical world-spawned grenade hitting this path).
+                // Reject the pickup rather than silently dropping it into
+                // the wrong slot.
+                // TODO: when world-spawned grenade pickups exist, route them to the GRENADE slot
+                // instead of silently dropping. (Stub policy for v1: WeaponSpawner only emits guns.)
+                return;
+            }
             spawner.hasWeapon = false;
             spawner.spawnCooldown = weaponCooldownTime;
             const WeaponConfig& config = getWeaponConfig(spawner.type);
-            if (weapon.current == WeaponSlot::PRIMARY) {
-                weapon.primary = GunInstance{
-                    .type = spawner.type,
-                    .totalAmmo = config.defaultAmmoCapacity,
-                    .currentMagAmmo = config.magazineSize,
-                    .fireCooldown = 0.0f,
-                };
-            } else {
-                weapon.secondary = GunInstance{
-                    .type = spawner.type,
-                    .totalAmmo = config.defaultAmmoCapacity,
-                    .currentMagAmmo = config.magazineSize,
-                    .fireCooldown = 0.0f,
-                };
-            }
+            getSlot(weapon, targetSlot) = GunInstance{
+                .type = spawner.type,
+                .totalAmmo = config.defaultAmmoCapacity,
+                .currentMagAmmo = config.magazineSize,
+                .fireCooldown = 0.0f,
+            };
         }
     });
 }

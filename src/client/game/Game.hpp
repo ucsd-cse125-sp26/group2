@@ -19,6 +19,7 @@
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "particles/ParticleSystem.hpp"
+#include "renderer-new/NewRenderer.hpp"
 #include "sfx/SfxSystem.hpp"
 #include "systems/GamepadAimAssistSystem.hpp"
 #include "systems/InputRingBuffer.hpp"
@@ -41,6 +42,7 @@ using ClientRenderer = Renderer;
 #include <cstdint>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
+#include <memory>
 
 /// @brief Top-level client game object.
 ///
@@ -114,6 +116,9 @@ public:
     /// @brief Reset Renderable visibility for players transitioning through respawn.
     void refreshRemoteRespawnRenderables();
 
+    /// @brief Assign Renderable components to dropped-weapon entities (mirrors spawner visuals).
+    void refreshDroppedWeaponRenderables();
+
 private:
     bool applyIncomingSnapshot(
         std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
@@ -134,20 +139,17 @@ private:
 
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-    ClientRenderer* renderer = nullptr;          ///< Borrowed renderer owned by App.
-    Renderer& legacyRenderer() noexcept;
+    NewRenderer renderer;                        ///< Graphics-team SDL3 GPU renderer.
     Registry registry;                           ///< The shared ECS registry.
-    Client* client = nullptr;                    ///< Borrowed UDP network client owned by App.
-    std::optional<registry_serialization::Loader> snapshotLoader_;
-    std::optional<entt::entity> mappedLocalPlayerEntity_;
-    ParticleSystem particleSystem; ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;           ///< Client-side sound effects system.
-    Hud hud_;                      ///< In-game HUD overlay system.
-    entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
+    Client client;                               ///< UDP network client.
+    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;                         ///< Client-side sound effects system.
+    Hud hud_;                                    ///< In-game HUD overlay system.
+    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
 
-    Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
-    float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
-    int tickCount = 0;             ///< Total physics ticks elapsed since start.
+    Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
+    float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
+    int tickCount = 0;                           ///< Total physics ticks elapsed since start.
     /// @brief Monotonic per-tick counter stamped onto outgoing InputSnapshots.
     ///
     /// Bumped once per physics tick group inside iterate() and copied into the
@@ -309,6 +311,27 @@ private:
     // Vignette state: track previous frame health/armor for delta detection.
     float prevHealth_ = 100.f;
     float prevArmor_ = 100.f;
+
+    // ── Voidfall HUD bookkeeping ────────────────────────────────────────
+    /// @brief Time accumulated while the match is in PLAYING phase (s).
+    /// Drives the top-center match-header readout.  Reset on phase changes
+    /// other than PLAYING so a fresh match starts at 0:00.
+    float matchElapsedSeconds_ = 0.f;
+
+    /// @brief Last-frame snapshot of the local player's weapon-slot types
+    /// (-1 = empty).  Used to detect new weapons appearing → emit a pickup
+    /// notification ("+1 RIFLE") so the side feed reflects what just changed.
+    int prevPrimaryWeaponType_ = -1;
+    int prevSecondaryWeaponType_ = -1;
+    int prevAmmoReserve_ = -1; ///< Drives "+N <weapon> AMMO" reserve-grow notifications.
+
+    /// @brief Pickup notifications queued for the next HUD frame.  Emitted
+    /// when the local player's WeaponState gains a new weapon type or their
+    /// reserve ammo grows beyond the previous frame's reading.
+    std::vector<HudPickupNotification> pendingPickupNotifications_;
+
+    // (No additional bookkeeping needed — name strings are constructed
+    // each frame into the thread_local vector inside Game.cpp.)
 
     // Viewmodel tuning (live-adjustable via ImGui)
     float vmScale = 1.0f;         ///< Weapon model scale (model is in mm).

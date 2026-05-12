@@ -2,6 +2,7 @@
 #include "DamageNumberWidget.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 #include <cstdio>
 
@@ -41,12 +42,13 @@ void DamageNumberWidget::update(float dt, const HudGameState& state, HudTweenPoo
         e.damage = dn.damage;
         e.life = 0.8f;
         e.maxLife = 0.8f;
+        // Voidfall palette: red headshots, cyan shield, amber on-hp.
         if (dn.headshot)
-            e.color = HudColor(1.0f, 0.85f, 0.2f, 1.f); // gold
+            e.color = voidfall::k_red;
         else if (dn.shielded)
-            e.color = HudColor(0.3f, 0.6f, 1.0f, 1.f);  // blue
+            e.color = voidfall::k_cyan;
         else
-            e.color = HudColor(1.f, 1.f, 1.f, 1.f);     // white
+            e.color = voidfall::k_amber;
     }
 }
 
@@ -80,18 +82,19 @@ void DamageNumberWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
         HudColor color = e.color;
         color.a *= alpha;
 
-        const float fontSize = 20.f * uiScale_;
-        std::snprintf(buf, sizeof(buf), "%d", e.damage);
+        // Design uses bigger numerals for headshots and kills.
+        // We don't know "kill" here (it's per-shot, not per-frame), so the
+        // distinction is headshot=22 px, regular=18 px (matches prototype).
+        const float baseSize = (e.color.r > 0.85f && e.color.g < 0.45f) ? 22.f : 18.f;
+        const float fontSize = baseSize * uiScale_;
+        // Voidfall convention: damage numbers are negative deltas.  Prototype
+        // shows "−48" with a minus glyph, so prefix accordingly.
+        std::snprintf(buf, sizeof(buf), "-%d", e.damage);
 
-        // Colored outline matching the number (darkened), black for white numbers.
-        const float outOff = 1.5f * uiScale_;
-        const bool isWhite = (e.color.r > 0.9f && e.color.g > 0.9f && e.color.b > 0.9f);
-        HudColor shadow;
-        if (isWhite)
-            shadow = HudColor(0.f, 0.f, 0.f, 0.7f * alpha);
-        else
-            shadow = HudColor(e.color.r * 0.3f, e.color.g * 0.3f, e.color.b * 0.3f, 0.8f * alpha);
-        ctx.text(buf, sx + outOff, sy + outOff, fontSize, shadow, HudAlign::Left);
-        ctx.text(buf, sx, sy, fontSize, color, HudAlign::Left);
+        // Single SDF text draw with outline-on — the shader paints a 1-px
+        // dark band tight to the glyph for readability over the world.
+        // Replaces the previous manual offset-shadow (which produced a
+        // double-vision halo at small sizes).
+        ctx.text(buf, sx, sy, fontSize, color, HudAlign::Left, /*outlined=*/true);
     }
 }

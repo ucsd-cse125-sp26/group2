@@ -8,6 +8,8 @@
 #pragma once
 
 #define TEX_CHANNELS 1
+#define MODEL_ROOT_NODE_INDEX 0
+#define ASSETS_DIR "assets"
 #include "glm/glm.hpp"
 
 #include <unordered_map>
@@ -46,6 +48,18 @@ struct Mesh
     GeoBufferInfo iBufferInfo_;
 };
 
+struct CpuMesh
+{
+    std::vector<Vertex> vertexData_;
+    std::vector<uint32_t> indexData_;
+};
+
+struct GpuMesh
+{
+    GeoBufferInfo vBufferInfo_;
+    GeoBufferInfo iBufferInfo_;
+};
+
 struct Material
 {
     glm::vec3 kDiffuse_;
@@ -76,10 +90,21 @@ struct Model
     std::vector<ModelElement> modelElements_;
 };
 
+struct ModelInstance
+{
+    ModelIdInt modelId_;
+    glm::mat4 transform_;
+    bool drawInScenePass = true;
+};
+
 inline std::unordered_map<MeshIdInt, Mesh> meshes_;
 inline std::unordered_map<ModelIdInt, Model> models_;
 inline std::unordered_map<TexIdInt, uint32_t> textures_;
 inline std::unordered_map<MaterialIdInt, Material> materials_;
+
+inline std::vector<ModelInstance> modelInstances_;
+inline ModelIdInt weaponModelId_ = 0;
+inline glm::mat4 weaponViewModel_ = glm::mat4(1.0f);
 
 /// @brief Compute a 32-bit FNV-1a hash of the given string.
 /// @param str The input string to hash.

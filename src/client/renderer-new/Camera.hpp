@@ -51,6 +51,16 @@ public:
 
     /// @brief Return the combined view-projection matrix.
     [[nodiscard]] glm::mat4 getViewProjectionMatrix() const { return view_projection_; }
+    [[nodiscard]] glm::mat4 getViewMatrix() const { return view_; }
+    [[nodiscard]] glm::mat4 getProjectionMatrix() const { return projection_; }
+
+    /// @brief Alias for `getViewProjectionMatrix()` — kept short for callsite ergonomics.
+    [[nodiscard]] glm::mat4 getViewProjection() const { return view_projection_; }
+
+    [[nodiscard]] const glm::vec3& getEye() const { return eye_; }
+    [[nodiscard]] glm::vec3 getForward() const;
+    [[nodiscard]] glm::vec3 getRight() const;
+    [[nodiscard]] const glm::vec3& getUp() const { return up_; }
 
 private:
     glm::vec3 eye_{0.0f, 0.0f, 3.0f};
@@ -63,5 +73,7 @@ private:
     float zNear_ = 5.0f;    ///< Near clip (Quake units); 5 ≈ half a foot.
     float zFar_ = 15000.0f; ///< Far clip; covers the 4 000-unit play area with margin.
 
+    glm::mat4 view_{1.0f};
+    glm::mat4 projection_{1.0f};
     glm::mat4 view_projection_{1.0f};
 };

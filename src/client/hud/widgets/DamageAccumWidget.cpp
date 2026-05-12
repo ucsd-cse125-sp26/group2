@@ -9,7 +9,7 @@
 DamageAccumWidget::DamageAccumWidget()
 {
     anchor = HudAnchor::Center;
-    offsetY = 40.f; // below crosshair
+    offsetY = 36.f; // below crosshair (~24 px gap from the 4-tick reticle)
     visible = true;
 }
 
@@ -39,21 +39,14 @@ void DamageAccumWidget::draw(HudContext& ctx, float cx, float cy)
         return;
 
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "%d", displayTotal_);
+    // Voidfall: accumulated damage is shown as a negative delta below the
+    // crosshair (matches the "−<total>" convention from the prototype).
+    std::snprintf(buf, sizeof(buf), "-%d", displayTotal_);
 
-    const float fontSize = 24.f * uiScale_;
-    const float outOff = 1.5f * uiScale_;
-
-    // Outline: darkened version of the color, black for white.
-    const bool isWhite = (color_.r > 0.9f && color_.g > 0.9f && color_.b > 0.9f);
-    HudColor shadow;
-    if (isWhite)
-        shadow = HudColor(0.f, 0.f, 0.f, 0.7f * alpha_);
-    else
-        shadow = HudColor(color_.r * 0.3f, color_.g * 0.3f, color_.b * 0.3f, 0.8f * alpha_);
-    ctx.text(buf, cx + outOff, cy + outOff, fontSize, shadow, HudAlign::Center);
+    const float fontSize = 13.f * uiScale_;
 
     HudColor color = color_;
     color.a *= alpha_;
-    ctx.text(buf, cx, cy, fontSize, color, HudAlign::Center);
+    // Sits over the live game view → outline opt-in for legibility.
+    ctx.text(buf, cx, cy, fontSize, color, HudAlign::Center, /*outlined=*/true);
 }

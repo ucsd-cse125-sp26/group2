@@ -8,6 +8,7 @@ layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec3 fragTangent;
 layout(location = 4) in vec3 fragBitangent;
+layout(location = 5) in vec4 fragTint;     // rgb = per-player tint, a = blend factor (0 = no-op)
 
 layout(location = 0) out vec4 outColor;
 
@@ -184,6 +185,10 @@ void main()
     // Sample textures
     vec4 albedoSample = texture(texAlbedo, fragTexCoord);
     vec3 albedo = albedoSample.rgb * mat.baseColorFactor.rgb;
+
+    // Per-player tint (skinned characters): blend albedo toward fragTint.rgb by fragTint.a.
+    // fragTint.a == 0 on non-player meshes so this is a no-op outside the skinned pipeline.
+    albedo = mix(albedo, fragTint.rgb, fragTint.a);
 
     // Metallic in B channel, roughness in G channel (glTF convention).
     vec2 mrSample = texture(texMetallicRoughness, fragTexCoord).bg;

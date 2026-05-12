@@ -3,8 +3,12 @@
 
 #include "PlayerStatusSystem.hpp"
 
+#include "AbilitySystem.hpp"
 #include "SDL3/SDL_log.h"
+#include "ecs/components/AbilityState.hpp"
+#include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -18,6 +22,7 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "ecs/systems/DroppedWeaponSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
 #include <ecs/components/RespawnPoint.hpp>
@@ -124,24 +129,31 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     registry.emplace_or_replace<PlayerVisState>(player);
     registry.emplace_or_replace<PlayerSimState>(player);
     registry.emplace_or_replace<Health>(player, Health{});
-    registry.emplace_or_replace<WeaponState>(player,
-                                             WeaponState{
-                                                 .primary =
-                                                     GunInstance{
-                                                         .type = WeaponType::Rifle,
-                                                         .totalAmmo = rifleConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = rifleConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .secondary =
-                                                     GunInstance{
-                                                         .type = WeaponType::RailGun,
-                                                         .totalAmmo = railConfig.defaultAmmoCapacity,
-                                                         .currentMagAmmo = railConfig.magazineSize,
-                                                         .fireCooldown = 0.0f,
-                                                     },
-                                                 .current = WeaponSlot::PRIMARY,
-                                             });
+    WeaponState weaponState{};
+    weaponState.current = WeaponSlot::PRIMARY;
+    getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
+        .type = WeaponType::Rifle,
+        .totalAmmo = rifleConfig.defaultAmmoCapacity,
+        .currentMagAmmo = rifleConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
+        .type = WeaponType::RailGun,
+        .totalAmmo = railConfig.defaultAmmoCapacity,
+        .currentMagAmmo = railConfig.magazineSize,
+        .fireCooldown = 0.0f,
+    };
+    // Re-initialize the grenade slot to HEGrenade on respawn, mirroring
+    // initNewPlayerEntity (ServerGame.cpp). Keeps the GRENADE slot's
+    // GunInstance.type as the single source of truth for "which grenade
+    // is currently selected." Mag + reserve are populated so handleAmmo()
+    // succeeds when the player throws a grenade after respawn.
+    GunInstance& grenade = getSlot(weaponState, WeaponSlot::GRENADE);
+    grenade.type = WeaponType::HEGrenade;
+    const WeaponConfig& grenadeCfg = getWeaponConfig(WeaponType::HEGrenade);
+    grenade.currentMagAmmo = grenadeCfg.magazineSize;
+    grenade.totalAmmo = grenadeCfg.defaultAmmoCapacity;
+    registry.emplace_or_replace<WeaponState>(player, weaponState);
 }
 
 /// @brief Transition a player to the dead state if health has reached zero.
@@ -163,6 +175,32 @@ inline void handleDeath(entt::entity& player,
                         BodyRegion hitRegion)
 {
     if (playerHealth.health <= 0) {
+        // Drop the player's two weapons at their current position.
+        // Both slots always carry a GunInstance, so both always drop —
+        // including the default Rifle/RailGun loadout. Pickup preserves
+        // the at-death ammo state.  The two drops are offset along the
+        // player's facing-right axis so the picker can comfortably aim
+        // at one without grabbing both.
+        const Position deathPos = registry.get<Position>(player);
+        const WeaponState& deathWeapons = registry.get<WeaponState>(player);
+        const float yawAtDeath = registry.get<InputSnapshot>(player).yaw;
+        const glm::vec3 rightAxis{std::cos(yawAtDeath), 0.0f, -std::sin(yawAtDeath)};
+        constexpr float k_dropSideOffset = 32.0f; // ~AABB width — clear gap between the two drops
+        auto spawnDrop = [&](const GunInstance& g, float side) {
+            const entt::entity e = registry.create();
+            registry.emplace<Position>(e, deathPos.value + rightAxis * (side * k_dropSideOffset));
+            registry.emplace<CollisionShape>(e);
+            registry.emplace<DroppedWeapon>(e,
+                                            DroppedWeapon{
+                                                .type = g.type,
+                                                .totalAmmo = g.totalAmmo,
+                                                .currentMagAmmo = g.currentMagAmmo,
+                                                .despawnTimer = systems::k_droppedWeaponLifetime,
+                                            });
+        };
+        spawnDrop(getSlot(deathWeapons, WeaponSlot::PRIMARY), -1.0f);
+        spawnDrop(getSlot(deathWeapons, WeaponSlot::SECONDARY), +1.0f);
+
         // Update death
         registry.get_or_emplace<PlayerVisState>(player).isDead = true;
         registry.get_or_emplace<Velocity>(player) = Velocity{};
@@ -201,6 +239,30 @@ inline void handleDeath(entt::entity& player,
     }
 }
 
+inline void updateAbilityLevel(Registry& registry, entt::entity player, float dmg)
+{
+    if (dmg < 0)
+        return;
+
+    AbilityState& abilityState = registry.get<AbilityState>(player);
+    if (abilityState.level >= systems::maxLevel)
+        return;
+
+    abilityState.accumDamage += dmg;
+    if (abilityState.accumDamage >= systems::dmgThreshold) {
+        abilityState.accumDamage = abilityState.accumDamage - systems::dmgThreshold;
+        abilityState.level += 1;
+
+        if (abilityState.level == 1)
+            abilityState.pendingLevel1 = true;
+        if (abilityState.level == 2)
+            abilityState.pendingLevel2 = true;
+
+        if (abilityState.level >= systems::maxLevel)
+            abilityState.accumDamage = systems::dmgThreshold;
+    }
+}
+
 void applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
@@ -216,6 +278,10 @@ void applyDamage(float damage,
 
     // Reset heal cooldown on every damage tick
     playerHealth.healTimer = systems::healCooldown;
+
+    if (player != killer) {
+        updateAbilityLevel(registry, killer, damage);
+    }
 
     if (playerHealth.armor >= damage) {
         playerHealth.armor -= damage;

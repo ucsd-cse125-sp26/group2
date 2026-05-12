@@ -16,6 +16,7 @@ enum class ParticleEffectType : uint8_t
     Impact,       ///< pos1=position, pos2=normal, surfaceType, weaponType
     Explosion,    ///< pos1=position, param=blastRadius
     Smoke,        ///< pos1=position, param=radius
+    Fire,         ///< Persistent flame billboards from a FireField. pos1=position, param=radius.
 };
 
 /// @brief Wire-format particle event broadcast from server to all clients.

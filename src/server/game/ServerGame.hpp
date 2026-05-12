@@ -6,9 +6,12 @@
 #include "client/animation/AnimationLibrary.hpp"
 #include "client/animation/CharacterAnimator.hpp"
 #include "client/animation/CharacterRig.hpp"
+#include "ecs/abilities/AbilityRegistry.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/Hitbox.hpp"
+#include "ecs/components/PlayerColors.hpp"
+#include "ecs/components/PlayerNicknames.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
@@ -20,6 +23,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <entt/entity/entity.hpp>
 #include <memory>
 #include <unordered_map>
@@ -78,6 +82,8 @@ private:
     ///     state transitions, and health regeneration.
     ///  8. **Weapon spawners** — `runWeaponSpawners()` ticks pickup cooldowns and
     ///     spawns weapon entities.
+    ///  8b. **Dropped weapons** — `runDroppedWeapons()` handles pickup and
+    ///     despawn for player-dropped weapons.
     ///  9. **Match controller** — `matchController.update()` manages match phase
     ///     transitions (warmup → countdown → in-progress → finished).
     /// 10. **Broadcast** — send updated registry snapshot, particle events, and
@@ -130,6 +136,7 @@ private:
 
     Server* server = nullptr;                ///< Non-owning pointer; main() owns and shuts down the socket.
     Registry registry;                       ///< ECS entity/component store.
+    AbilityRegistry abilityRegistry;         ///< Registry of abilities via type idx.
     LobbyManager lobbyManager;               ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;         ///< Manages match flow and state.
     bool lobbyStartCountdownActive = false;  ///< True while lobby is counting down before entering match countdown.
@@ -137,9 +144,21 @@ private:
     ClientId lobbyStartRequester{-1};        ///< Host that requested the active lobby staging countdown.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.
-    bool running = false;                        ///< Loop continues while true.
-    int tickRateHz = 128;                        ///< Physics ticks per second.
-    int tickCount = 0;                           ///< Total ticks since start, used for periodic logging.
+
+    /// @brief Use-count per palette slot for least-used color reservation.
+    ///
+    /// Sized to player_colors::k_paletteSize. Incremented when a player
+    /// connects (assigns the smallest-count slot, ties broken by lowest
+    /// index for determinism); decremented on disconnect.
+    std::array<int, player_colors::k_paletteSize> colorSlotUseCounts_{};
+
+    /// @brief Use-count per nickname slot — same selection scheme as colors.
+    /// Decrements when an *auto-assigned* nickname is released; custom
+    /// nicknames don't touch the count, since they don't reserve a slot.
+    std::array<int, player_nicknames::k_nicknameCount> nicknameSlotUseCounts_{};
+    bool running = false; ///< Loop continues while true.
+    int tickRateHz = 128; ///< Physics ticks per second.
+    int tickCount = 0;    ///< Total ticks since start, used for periodic logging.
 
     /// @brief Send a registry snapshot every Nth tick. Computed in init() as
     /// `max(1, tickRateHz / snapshotHz)` so the snapshot rate is roughly

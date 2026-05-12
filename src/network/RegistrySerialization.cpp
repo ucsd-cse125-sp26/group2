@@ -3,14 +3,19 @@
 
 #include "RegistrySerialization.hpp"
 
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DeathInfo.hpp"
+#include "ecs/components/DroppedWeapon.hpp"
+#include "ecs/components/FireField.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/PlayerColor.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
+#include "ecs/components/PlayerName.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
@@ -140,6 +145,7 @@ using Synced = std::tuple<entt::entity,
                           CollisionShape,
                           WeaponState,
                           Health,
+                          AbilityState,
                           PlayerMatchStats,
                           Projectile,
                           BeamState,
@@ -147,8 +153,12 @@ using Synced = std::tuple<entt::entity,
                           DeathInfo,
                           RespawnTimer,
                           WeaponSpawner,
+                          DroppedWeapon,
                           RespawnPoint,
-                          AnimSnapshot>;
+                          AnimSnapshot,
+                          FireField,
+                          PlayerColor,
+                          PlayerName>;
 
 // ── PR-10: snapshot delta encoding ──────────────────────────────────────
 

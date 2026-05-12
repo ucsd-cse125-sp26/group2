@@ -10,14 +10,18 @@
 #include "widgets/DamageAccumWidget.hpp"
 #include "widgets/DamageIndicator.hpp"
 #include "widgets/DamageNumberWidget.hpp"
+#include "widgets/EnemyWorldHealthBar.hpp"
+#include "widgets/EquipmentSlots.hpp"
+#include "widgets/GravityIndicator.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
+#include "widgets/KdaCounter.hpp"
 #include "widgets/KillFeed.hpp"
+#include "widgets/MatchHeader.hpp"
 #include "widgets/Minimap.hpp"
+#include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
-#include "widgets/RoundTimer.hpp"
 #include "widgets/Scoreboard.hpp"
-#include "widgets/TeamStatusBar.hpp"
 #include "widgets/VignetteWidget.hpp"
 
 bool Hud::init(SDL_GPUDevice* device,
@@ -166,20 +170,44 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
 void Hud::createWidgets()
 {
     // Widgets added in draw order (back to front).
-    // Vignette goes first (behind everything) since it's a full-screen overlay.
+    // Vignette goes first (full-screen overlay behind everything else).
     widgets_.push_back(std::make_unique<VignetteWidget>());
-    widgets_.push_back(std::make_unique<CrosshairWidget>());
-    widgets_.push_back(std::make_unique<HealthArmorBar>());
-    widgets_.push_back(std::make_unique<AmmoCounter>());
-    widgets_.push_back(std::make_unique<HitMarkerWidget>());
+
+    // World-space markers — drawn on top of the scene but before screen-space
+    // chrome so the chrome can occlude them at edges.
+    widgets_.push_back(std::make_unique<EnemyWorldHealthBar>());
     widgets_.push_back(std::make_unique<DamageNumberWidget>());
+
+    // Center reticle + hit-confirm + accumulated-damage stack.
+    widgets_.push_back(std::make_unique<CrosshairWidget>());
+    widgets_.push_back(std::make_unique<HitMarkerWidget>());
     widgets_.push_back(std::make_unique<DamageAccumWidget>());
-    widgets_.push_back(std::make_unique<KillFeed>());
+
+    // Directional damage arcs around the reticle.
     widgets_.push_back(std::make_unique<DamageIndicator>());
-    widgets_.push_back(std::make_unique<RoundTimer>());
-    widgets_.push_back(std::make_unique<TeamStatusBar>());
+
+    // Top center: match header.  (Compass strip removed — gravity flips
+    // make a heading readout meaningless and players found it useless.)
+    widgets_.push_back(std::make_unique<MatchHeader>());
+
+    // Top right: KDA counter + killfeed (KDA renders first, KillFeed sits below).
+    widgets_.push_back(std::make_unique<KdaCounter>());
+    widgets_.push_back(std::make_unique<KillFeed>());
+    widgets_.push_back(std::make_unique<PickupNotification>());
+
+    // Top left: minimap.
+    widgets_.push_back(std::make_unique<Minimap>());
+
+    // Bottom-row chrome.
+    widgets_.push_back(std::make_unique<HealthArmorBar>());   // Vitals (bottom-left)
+    widgets_.push_back(std::make_unique<EquipmentSlots>());   // bottom-center
+    widgets_.push_back(std::make_unique<AmmoCounter>());      // weapon panel (bottom-right)
+    widgets_.push_back(std::make_unique<GravityIndicator>()); // sits above weapon panel
+
+    // Modal panels (only visible when toggled).
+    // TeamStatusBar is intentionally omitted in the Voidfall design — its
+    // top-center band would clash with the new MatchHeader + Compass layout.
     widgets_.push_back(std::make_unique<Scoreboard>());
     widgets_.push_back(std::make_unique<BuyMenu>());
-    widgets_.push_back(std::make_unique<Minimap>());
     widgets_.push_back(std::make_unique<PickupPrompt>());
 }

@@ -57,7 +57,12 @@ makeAttribute(Uint32 location, SDL_GPUVertexElementFormat format, Uint32 offset,
 /// @param texture The target texture.
 /// @param clearColor The RGBA clear color.
 /// @return Populated SDL_GPUColorTargetInfo.
-SDL_GPUColorTargetInfo makeColorTarget(SDL_GPUTexture* texture, SDL_FColor clearColor);
+SDL_GPUColorTargetInfo makeColorTargetClear(SDL_GPUTexture* texture, SDL_FColor clearColor);
+
+/// @brief Create a color render-target info with a clear color.
+/// @param texture The target texture.
+/// @return Populated SDL_GPUColorTargetInfo.
+SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture);
 
 /// @brief Create a depth/stencil render-target info that clears to depth 1.0.
 /// @param texture The depth texture.
@@ -109,6 +114,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
 /// @param fragmentShaderInfo Fragment shader descriptor.
 /// @param vertexInputLayout Vertex buffer layout description.
 /// @param enableDepth Enable depth testing and writing (default true).
+/// @param overBlending
 /// @return The created pipeline, or nullptr on failure.
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 SDL_Window* window,
@@ -116,7 +122,8 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 const ShaderInfo& vertexShaderInfo,
                                                 const ShaderInfo& fragmentShaderInfo,
                                                 const VertexInputLayout& vertexInputLayout,
-                                                bool enableDepth = true);
+                                                bool enableDepth = true,
+                                                bool overBlending = false);
 
 /// @brief Allocate a GPU buffer of the given size and usage.
 /// @param device The GPU device.

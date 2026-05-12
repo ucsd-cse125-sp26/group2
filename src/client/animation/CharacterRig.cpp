@@ -43,7 +43,6 @@ struct CharacterRig::Impl
     std::vector<RigMeshData> meshes;
     std::unordered_map<std::string, int> jointMap;
     std::unordered_map<std::string, anim_utils::JointRestPose> restPoses;
-    LoadedModel templateLoadedModel;
     bool loaded = false;
 };
 
@@ -85,11 +84,6 @@ const std::unordered_map<std::string, int>& CharacterRig::jointMap() const noexc
 const std::unordered_map<std::string, anim_utils::JointRestPose>& CharacterRig::restPoses() const noexcept
 {
     return impl_->restPoses;
-}
-
-const LoadedModel& CharacterRig::templateLoadedModel() const noexcept
-{
-    return impl_->templateLoadedModel;
 }
 
 void CharacterRig::verticalBounds(float& outMinY, float& outMaxY) const
@@ -256,28 +250,12 @@ bool CharacterRig::loadFromFBX(const std::string& path)
             rigMesh.indices.push_back(face.mIndices[2]);
         }
 
-        // Default PBR material — grey matte (Mixamo FBXes seldom embed textures).
-        rigMesh.material.baseColorFactor = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
-        rigMesh.material.metallicFactor = 0.0f;
-        rigMesh.material.roughnessFactor = 0.8f;
-
         impl_->meshes.push_back(std::move(rigMesh));
     }
 
     if (impl_->meshes.empty()) {
         SDL_Log("CharacterRig: no skinned meshes found in '%s'", path.c_str());
         return false;
-    }
-
-    // 5. Build the template LoadedModel for per-entity upload.
-    impl_->templateLoadedModel.meshes.clear();
-    impl_->templateLoadedModel.textures.clear();
-    for (const auto& rigMesh : impl_->meshes) {
-        MeshData md;
-        md.vertices = rigMesh.baseVertices;
-        md.indices = rigMesh.indices;
-        md.material = rigMesh.material;
-        impl_->templateLoadedModel.meshes.push_back(std::move(md));
     }
 
     impl_->loaded = true;

@@ -150,7 +150,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: cmake --build --preset ${{ matrix.preset }} --target client server --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --target group2 server clientbot --parallel
 
   # ------------------------------------------------------------------ #
   #  Format check — pinned to clang-format-18 (ships on ubuntu-24.04)  #
@@ -172,7 +172,7 @@ jobs:
   #  Runs on: push to main  →  auto-versioned release (semver)         #
   #                                                                      #
   #  Each platform produces ONE zip containing:                          #
-  #    client + server + shaders/ + config.toml + assets/                #
+  #    group2 + server + shaders/ + shaders-new/ + config.toml + assets/ #
   # ------------------------------------------------------------------ #
   release-build:
     name: Release Build (${{ matrix.name }})
@@ -192,7 +192,7 @@ jobs:
             cc: clang
             cxx: clang++
             build_dir: build/release
-            client_bin: client
+            client_bin: group2
             server_bin: server
             archive_suffix: linux-x86_64
 
@@ -202,7 +202,7 @@ jobs:
             cc: clang
             cxx: clang++
             build_dir: build/release
-            client_bin: client
+            client_bin: group2
             server_bin: server
             archive_suffix: macos
 
@@ -212,7 +212,7 @@ jobs:
             cc: clang-cl
             cxx: clang-cl
             build_dir: build/release
-            client_bin: client.exe
+            client_bin: group2.exe
             server_bin: server.exe
             archive_suffix: windows-x86_64
 
@@ -318,7 +318,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: cmake --build --preset ${{ matrix.preset }} --target client server --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --target group2 server clientbot --parallel
 
       # Download the shared assets zip from Google Drive (cached across runs).
       - name: Cache assets
@@ -335,7 +335,7 @@ jobs:
           pip install --quiet gdown
           gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
 
-      # Bundle client + server + shaders + config + assets into a single zip.
+      # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
         shell: bash
         run: |
@@ -350,8 +350,9 @@ jobs:
           # Config
           cp "${{ matrix.build_dir }}/config.toml" "$STAGE/"
 
-          # Compiled SPIR-V shaders (legacy set used by the client target)
+          # Compiled SPIR-V shaders for both shader sets used at runtime.
           cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
+          cp -r "${{ matrix.build_dir }}/shaders-new" "$STAGE/"
 
           # Assets from Google Drive (cross-platform extraction via Python)
           python3 -c "import zipfile; zipfile.ZipFile('assets.zip').extractall('$STAGE')"

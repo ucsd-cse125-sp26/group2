@@ -7,10 +7,17 @@ cmake-build-debug/
 # FetchContent cache (persists across clean builds for speed)
 .deps/
 
+# Per-developer CMake preset overrides (e.g. relocating build out of a
+# network home with a quota).  CMake auto-loads this alongside CMakePresets.json.
+CMakeUserPresets.json
+
 imgui.ini
 /assets/
 /assets_old/
 config.toml
+
+# Brainstorming companion sessions
+.superpowers/
 
 # CMake artifacts (keep cmake/ module directory)
 CMakeFiles/
