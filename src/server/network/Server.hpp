@@ -144,14 +144,18 @@ public:
     /// layer's perspective stays the same.
     void flushAllOutbound();
 
+    /// @brief Invoked on the network thread immediately after a new client is accepted.
     using ClientConnectedCallback = std::function<void(ClientId)>;
+    /// @brief Invoked on the network thread immediately after a client is disconnected.
     using ClientDisconnectedCallback = std::function<void(ClientId)>;
+    /// @brief Register a callback fired whenever a client connects.
     void onClientConnected(ClientConnectedCallback fn) { clientConnectedFn_ = std::move(fn); }
+    /// @brief Register a callback fired whenever a client disconnects.
     void onClientDisconnected(ClientDisconnectedCallback fn) { clientDisconnectedFn_ = std::move(fn); }
 
 private:
-    ClientConnectedCallback clientConnectedFn_;
-    ClientDisconnectedCallback clientDisconnectedFn_;
+    ClientConnectedCallback clientConnectedFn_;       ///< Fired by acceptClients() when a new client is accepted.
+    ClientDisconnectedCallback clientDisconnectedFn_; ///< Fired by disconnectClient() when a client drops.
 
     /// @brief Per-client connection state.
     ///

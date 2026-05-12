@@ -1,3 +1,5 @@
+/// @file LobbyManager.cpp
+/// @brief LobbyManager implementation: roster mutations, host election, and state broadcasts.
 #include "lobby/LobbyManager.hpp"
 
 #include "ecs/components/ClientId.hpp"

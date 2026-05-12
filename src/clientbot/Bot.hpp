@@ -98,10 +98,11 @@ private:
     std::thread thread_;       ///< Worker thread; joined in dtor or join().
     InputSnapshot input_{};    ///< Reused per-tick input scratch.
     uint32_t predictTick_ = 0; ///< Monotonic tick counter, stamped onto each input.
-    std::optional<registry_serialization::Loader> snapshotLoader_;
-    std::optional<entt::entity> mappedLocalPlayerEntity_;
-    int botId_ = 0;            ///< Log prefix.
-    bool initialized_ = false; ///< True once init() succeeded; gates run().
+    std::optional<registry_serialization::Loader>
+        snapshotLoader_;       ///< Incremental snapshot loader; created on first snapshot apply.
+    std::optional<entt::entity> mappedLocalPlayerEntity_; ///< Local-registry entity for this bot's player, once mapped.
+    int botId_ = 0;                                       ///< Log prefix.
+    bool initialized_ = false;                            ///< True once init() succeeded; gates run().
 
     /// PR-1 (server-perf): set true after the first successful poll inside
     /// runLoop. Lets the fleet aggregator skip bots that are mid-connect
@@ -140,8 +141,11 @@ private:
     /// `LocalPlayer + InputSnapshot + PreviousPosition + PlayerSimState`
     /// once the bot can map its server-assigned local entity.
     void setupLocalPlayerCallback();
+    /// @brief Deserialize a snapshot and update the bot's registry; maps the local entity on first apply.
+    /// @return True on success.
     bool applyIncomingSnapshot(
         std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
+    /// @brief Return the bot's local-registry player entity, or nullopt before the first snapshot maps it.
     [[nodiscard]] std::optional<entt::entity> getLocalPlayerEntity() const;
 
     // ── PR-18: per-bot snapshot observation log ──────────────────────────

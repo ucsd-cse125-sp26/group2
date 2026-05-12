@@ -1,3 +1,5 @@
+/// @file Lobby.cpp
+/// @brief Lobby screen implementation: network callback wiring, per-frame rendering, and countdown logic.
 #include "Lobby.hpp"
 
 #include "SDL3/SDL_init.h"

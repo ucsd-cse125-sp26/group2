@@ -111,8 +111,11 @@ public:
     void refreshDroppedWeaponRenderables();
 
 private:
+    /// @brief Deserialize a snapshot from the server and update the ECS registry.
+    /// @return True on success; false if the snapshot could not be applied.
     bool applyIncomingSnapshot(
         std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
+    /// @brief Emplace player-control components onto the mapped local entity and record it.
     void handleLocalPlayerReady(entt::entity local);
 
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
@@ -126,15 +129,16 @@ private:
     /// briefly runs 0.5× wall speed until the accumulator drains naturally;
     /// human-imperceptible at 1000+ render Hz.
     static constexpr int k_maxTicksPerFrame = 2;
-    static constexpr int k_fpsHistorySize = 512; ///< Samples in the rolling FPS ring buffer.
+    static constexpr int k_fpsHistorySize = 512;                   ///< Samples in the rolling FPS ring buffer.
 
-    SDL_Window* window = nullptr;                ///< The application window.
-    DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-    NewRenderer* renderer = nullptr;             ///< Borrowed renderer owned by App.
-    Registry registry;                           ///< The shared ECS registry.
-    Client* client = nullptr;                    ///< Borrowed UDP network client owned by App.
-    std::optional<registry_serialization::Loader> snapshotLoader_;
-    std::optional<entt::entity> mappedLocalPlayerEntity_;
+    SDL_Window* window = nullptr;                                  ///< The application window.
+    DebugUI debugUI;                                               ///< Owns the ImGui context and SDL3 input backend.
+    NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
+    Registry registry;                                             ///< The shared ECS registry.
+    Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
+    std::optional<entt::entity>
+        mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
     SfxSystem sfxSystem;           ///< Client-side sound effects system.
     Hud hud_;                      ///< In-game HUD overlay system.
@@ -441,7 +445,7 @@ private:
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
-    bool returnToLobbyRequested = false;
+    bool returnToLobbyRequested = false; ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
 
     // Kill Feed State
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).

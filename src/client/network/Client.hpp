@@ -49,11 +49,14 @@ struct NetworkStats
 class Client
 {
 public:
+    /// @brief Called by Client to apply a raw snapshot; the registry-owning caller performs the actual load.
+    /// Returns true on success; ackedTick is populated with the server-acked client predict tick.
     using SnapshotApplyCallback = std::function<bool(std::uint32_t snapshotTick,
                                                      const std::uint8_t* bytes,
                                                      Uint32 size,
                                                      Uint64 captureNs,
                                                      std::uint32_t& ackedTick)>;
+    /// @brief Called for each replicated particle event before entity mapping; caller is responsible for mapping.
     using RawParticleEventCallback = std::function<void(const NetParticleEvent& evt)>;
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
@@ -64,7 +67,9 @@ public:
     /// snapshot by `shotInputTick`.
     using ShotDebugCallback = std::function<void(const net::shotdebug::ShotDebugCapture&)>;
 
+    /// @brief Fired for each incremental lobby roster update broadcast from the server.
     using LobbyUpdateCallback = std::function<void(const LobbyUpdateEvent& update)>;
+    /// @brief Fired once on join with the full lobby snapshot and this client's assigned ID.
     using LobbyStateCallback = std::function<void(const std::vector<LobbyPlayer>& players, ClientId localId)>;
 
     /// @brief Create the TCP socket and connect to the server.
@@ -117,13 +122,25 @@ public:
     /// @brief Update bandwidth stats. Call once per frame with the frame delta time.
     void updateStats(float dt);
 
-    void onSnapshotApply(SnapshotApplyCallback fn) { snapshotApplyFn_ = std::move(fn); }
-    void onRawParticleEvent(RawParticleEventCallback fn) { rawParticleEventFn_ = std::move(fn); }
+    void onSnapshotApply(SnapshotApplyCallback fn)
+    {
+        snapshotApplyFn_ = std::move(fn);
+    } ///< Register the snapshot-apply callback; must be set before the first poll().
+    void onRawParticleEvent(RawParticleEventCallback fn)
+    {
+        rawParticleEventFn_ = std::move(fn);
+    } ///< Register the raw particle-event callback.
     void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
     void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
-    void onLobbyUpdate(LobbyUpdateCallback fn) { lobbyUpdateFn_ = std::move(fn); }
-    void onLobbyState(LobbyStateCallback fn) { lobbyStateFn_ = std::move(fn); }
+    void onLobbyUpdate(LobbyUpdateCallback fn)
+    {
+        lobbyUpdateFn_ = std::move(fn);
+    } ///< Register the incremental lobby-update callback.
+    void onLobbyState(LobbyStateCallback fn)
+    {
+        lobbyStateFn_ = std::move(fn);
+    } ///< Register the full lobby-snapshot callback, fired once on join.
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
@@ -323,9 +340,10 @@ private:
     LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.
     LobbyStateCallback lobbyStateFn_;              ///< Called once on join with the full lobby snapshot.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
-    std::optional<MatchStatePacket> latestMatchState_;
-    std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_;
-    std::optional<ClientId> latestLobbyLocalId_;
+    std::optional<MatchStatePacket>
+        latestMatchState_;                         ///< Most-recent MATCH_STATE packet; populated by dispatchMessage.
+    std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_; ///< Most-recent lobby roster received from the server.
+    std::optional<ClientId> latestLobbyLocalId_; ///< This client's ID as reported in the LOBBY_STATE packet.
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //
@@ -567,5 +585,6 @@ private:
     /// Called by poll() after pulling the bytes out of recvBuf.
     void dispatchMessage(const uint8_t* data, Uint32 size);
 
+    /// @brief Invoke snapshotApplyFn_ with raw snapshot bytes; updates delta-decode state on success.
     bool applySnapshot(std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint32 wireSize);
 };

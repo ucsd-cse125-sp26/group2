@@ -1,3 +1,5 @@
+/// @file LobbyUI.cpp
+/// @brief ImGui implementation of the lobby player-list panel and ready/start controls.
 #include "LobbyUI.hpp"
 
 #include <imgui.h>

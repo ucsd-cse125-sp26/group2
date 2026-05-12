@@ -1,6 +1,13 @@
+/// @file IScreen.hpp
+/// @brief Abstract interface for top-level application screens (lobby, in-game).
+
 #pragma once
 #include <SDL3/SDL.h>
 
+/// @brief Interface implemented by each full-screen mode (Lobby, Game).
+///
+/// App owns one active IScreen at a time and delegates SDL event processing,
+/// per-frame iteration, and shutdown to it.
 class IScreen
 {
 public:
