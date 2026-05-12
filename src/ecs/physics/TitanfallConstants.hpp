@@ -23,7 +23,7 @@ constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s)
 // Jumping
 
 constexpr float k_jumpSpeed = 330.0f;       ///< Upward velocity on ground jump (u/s). Must mirror physics::k_jumpSpeed.
-constexpr float k_doubleJumpSpeed = 270.0f; ///< Upward velocity on air jump (u/s).
+constexpr float k_doubleJumpSpeed = 300.0f; ///< Upward velocity on air jump (u/s).
 constexpr float k_slidehopJumpSpeed = 250.0f;    ///< Upward velocity when jumping during slide (u/s).
 constexpr float k_doubleJumpCooldown = 0.10f;    ///< Min time after first jump before double jump is allowed (s).
 constexpr float k_doubleJumpHorizBoost = 400.0f; ///< Horizontal velocity (u/s) toward WASD wishDir on double jump.
@@ -63,6 +63,10 @@ constexpr float k_slideBrakingDecelMin = 200.0f;     ///< Initial braking decele
 constexpr float k_slideBrakingDecelMax = 400.0f;     ///< Maximum braking deceleration (u/s^2).
 constexpr float k_slideBrakingRampTime = 3.0f;       ///< Time to ramp from min to max braking (s).
 constexpr float k_slideFloorInfluenceForce = 400.0f; ///< How much slope angle affects slide speed (u/s^2).
+constexpr float k_slideSteerAccel = 200.0f;          ///< Sideways accel from WASD while sliding (u/s^2).
+                                                     ///< Applied along the component of wishDir perpendicular
+                                                     ///< to current motion, so it gently rotates the slide
+                                                     ///< trajectory without adding forward speed.
 constexpr int k_slideFatigueDecayTicks = 200;        ///< Ticks (at 128Hz = 3s) to reset one fatigue level.
 constexpr int k_slideFatigueMax = 4;                 ///< Max fatigue levels (boost fully killed at this).
 

@@ -253,12 +253,8 @@ namespace
 /// @param gravDir +1.0 for normal gravity, -1.0 for flipped (inverts all vertical impulses).
 void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/, float gravDir = 1.0f)
 {
-    if (!input.jump) {
-        // Key released — clear the wallrun autobhop lock so the next press
-        // registers as intentional and is allowed to wall-jump.
-        state.sim.wallJumpLocked = false;
+    if (!input.jump)
         return;
-    }
 
     // Ledge jump / mantle
     if (state.vis.moveMode == MoveMode::LedgeGrabbing) {
@@ -277,29 +273,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         return;
     }
 
-    // Wall jump
-    if (state.vis.moveMode == MoveMode::WallRunning) {
-        // If jump was held from before wallrun entry, swallow it — a release
-        // and re-press is required to wall-jump. Keeps bhop → wallrun flow
-        // smooth when autobhop is on.
-        if (state.sim.wallJumpLocked)
-            return;
-
-        vel.y = tms::k_wallJumpUpForce * gravDir;
-        vel += state.sim.wallNormal * tms::k_wallJumpSideForce;
-        state.vis.moveMode = MoveMode::OnFoot;
-        state.vis.exitingWall = true;
-        state.sim.exitWallTimer = tms::k_wallrunExitTime;
-        state.sim.wasWallRunning = true;
-        state.vis.grounded = false;
-        // DJ no longer refreshes from wall jump — only from ground time.
-        state.vis.jumpCount = 1;
-
-        // Blacklist this wall.
-        state.sim.wallBlacklistActive = true;
-        state.sim.wallBlacklistNormal = state.sim.wallNormal;
+    // Wall-jump is no longer fired on jump PRESS while attached. Lucio-style:
+    // releasing jump while wallrunning fires the impulse (see handleWallRunning).
+    // We don't fall through to other branches because being in WallRunning means
+    // no ground/double-jump should fire either.
+    if (state.vis.moveMode == MoveMode::WallRunning)
         return;
-    }
 
     // Climb jump
     if (state.vis.moveMode == MoveMode::Climbing) {
@@ -318,14 +297,12 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
         return;
     }
 
-    // Coyote wall jump (off wall within grace period)
-    if (!state.vis.grounded && state.sim.coyoteTimer > 0.0f && state.sim.wasWallRunning) {
-        // Same autobhop lock applies — if the player slipped off the wall
-        // while jump was held continuously from pre-entry, don't retroactively
-        // fire a coyote wall jump until they release and re-press.
-        if (state.sim.wallJumpLocked)
-            return;
-
+    // Coyote wall jump (off wall within grace period). Requires a FRESH press
+    // — otherwise, the moment the wallrun silently exits (e.g. wall ends while
+    // jump is still held), this branch would fire on the very next tick and
+    // look like a phantom auto-jump. Rising-edge gate prevents that.
+    const bool k_coyoteRisingEdge = input.jump && !state.sim.jumpHeldLastTick;
+    if (k_coyoteRisingEdge && !state.vis.grounded && state.sim.coyoteTimer > 0.0f && state.sim.wasWallRunning) {
         vel.y = tms::k_wallJumpUpForce * gravDir;
         vel += state.sim.wallBlacklistNormal * tms::k_wallJumpSideForce;
         state.sim.coyoteTimer = 0.0f;
@@ -571,6 +548,20 @@ void handleSliding(
         vel.z *= k_scale;
     }
 
+    // Slight steering: apply lateral wish acceleration so WASD can gently
+    // rotate the slide trajectory. The lateral component is wishDir minus
+    // its projection onto current motion, so forward input is ignored and
+    // only the perpendicular part curves the slide.
+    if (k_hs > 0.001f) {
+        const glm::vec3 k_wishDir =
+            physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+        if (glm::length(k_wishDir) > 0.001f) {
+            const glm::vec3 k_horizDir = horizVel(vel) / k_hs;
+            const glm::vec3 k_lateral = k_wishDir - k_horizDir * glm::dot(k_wishDir, k_horizDir);
+            vel += k_lateral * tms::k_slideSteerAccel * dt;
+        }
+    }
+
     // Surface angle influence: slopes accelerate/decelerate the slide.
     // A perfectly flat floor has groundNormal = (0,1,0), slopeForce = 0.
     // Downhill: the gravity component along the slope adds speed.
@@ -626,6 +617,10 @@ void tryEnterWallrun(glm::vec3& vel,
         return;
     if (walls.groundDistance < tms::k_wallrunMinGroundDist)
         return;
+    // Lucio-style: jump must be held to attach. Releasing detaches (handled in
+    // handleWallRunning), so attachment requires explicit intent every time.
+    if (!input.jump)
+        return;
 
     // Directional intent — the player's wish direction must have a component
     // pointing INTO the wall (i.e., along -wallNormal). This replaces the old
@@ -667,13 +662,6 @@ void tryEnterWallrun(glm::vec3& vel,
         state.sim.wallRunSpeedTimer = 0.0f;
         // DJ no longer refreshes from entering wallrun — only from ground time.
         state.vis.jumpCount = 0;
-
-        // Autobhop lock: if jump was held continuously from before entry (i.e.
-        // last tick AND this tick), the player rolled into this wallrun on a
-        // bhop chain — swallow the held jump so they don't instantly bounce
-        // off. A fresh press on this same tick (jump held now but NOT last
-        // tick) counts as genuine intent and fires normally.
-        state.sim.wallJumpLocked = input.jump && state.sim.jumpHeldLastTick;
 
         // Reduce vertical velocity to near-zero for a smooth wall-grab feel.
         vel.y = std::clamp(vel.y, -25.0f, 25.0f);
@@ -721,8 +709,15 @@ void handleWallRunning(glm::vec3& pos,
     state.sim.wallRunTimer += dt;
     state.sim.wallRunSpeedTimer += dt;
 
-    // Exit: max duration
-    if (state.sim.wallRunTimer >= tms::k_wallrunKickoffDuration) {
+    // Lucio-style detach: jump released → fire the full wall-jump impulse
+    // away from the wall, then exit. Holding jump is what kept the player
+    // attached; releasing it is the explicit "kick off" signal.
+    if (!input.jump) {
+        const float k_gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+        vel.y = tms::k_wallJumpUpForce * k_gravDir;
+        vel += state.sim.wallNormal * tms::k_wallJumpSideForce;
+        state.vis.jumpCount = 1;
+        state.sim.jumpedThisTick = true;
         exitWallrun(state, posY);
         return;
     }
@@ -735,18 +730,9 @@ void handleWallRunning(glm::vec3& pos,
         return;
     }
 
-    // Detach intent: the player can look up to 15° away from the wall plane
-    // before detaching.  This makes jump-off more intuitive — start turning
-    // away, then jump, and you still get the wall-jump boost.
-    const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    const float k_wishLen = glm::length(k_wishDir);
-    if (k_wishLen > 0.001f) {
-        const float k_intentDot = glm::dot(k_wishDir / k_wishLen, -state.sim.wallNormal);
-        if (k_intentDot < tms::k_wallrunDetachThreshold) {
-            exitWallrun(state, posY);
-            return;
-        }
-    }
+    // No look-away detach: Lucio glide stays attached regardless of where the
+    // player looks. The only ways out are jump release (above) or losing wall
+    // contact (e.g. the wall ends).
 
     // --- Update wall normal from latest detection (curved surface tracking) ---
     if (state.vis.wallRunSide == WallSide::Right)
@@ -827,19 +813,10 @@ void handleWallRunning(glm::vec3& pos,
     // Push toward wall to keep player stuck.
     vel -= state.sim.wallNormal * tms::k_wallrunPushForce * dt;
 
-    // Gradual slide-off: during the grip window, pin vertical velocity to 0 so
-    // the wallrun feels "stuck." Afterwards, gravity ramps in linearly over
-    // `k_wallrunGravityRampTime`; by the end of the ramp the player is falling
-    // at full gravity, which naturally slides them down the wall and prevents
-    // indefinite runs even if the player stays within the kickoff timer.
-    if (state.sim.wallRunTimer < tms::k_wallrunGripTime) {
-        vel.y = 0.0f;
-    } else {
-        const float k_rampT = (state.sim.wallRunTimer - tms::k_wallrunGripTime) / tms::k_wallrunGravityRampTime;
-        const float k_gravFactor = std::clamp(k_rampT, 0.0f, 1.0f);
-        const float k_gravDir = state.vis.gravityFlipped ? 1.0f : -1.0f;
-        vel.y += k_gravDir * physics::k_gravity * k_gravFactor * dt;
-    }
+    // Pure Lucio glide: gravity never applies while attached. The player can
+    // ride for as long as they hold jump and the wall continues. Vertical
+    // movement only resumes after detach (release or lost contact).
+    vel.y = 0.0f;
 
     // Camera tilt.
     state.vis.targetCameraTilt =
