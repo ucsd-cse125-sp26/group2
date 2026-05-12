@@ -101,7 +101,7 @@ bool NewRenderer::createHudPipeline()
     const Boilerplate::VertexInputLayout vertexLayout{};
 
     hudPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
+        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, Boilerplate::Over);
 
     return hudPipeline_ != nullptr;
 }
@@ -126,7 +126,7 @@ bool NewRenderer::createGeometryPipeline()
     };
 
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true,false);
+        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true,Boilerplate::Over);
 
     return geometryPipeline_ != nullptr;
 }
