@@ -71,4 +71,7 @@ enum class PacketType : uint8_t
     TEXT_CHAT,      ///< Client <-> Server: bounded UTF-8 all-chat message.
     VOICE_FRAME,    ///< Client <-> Server: Opus voice frame for proximity chat.
     VOICE_STATE,    ///< Client <-> Server: push-to-talk state hint for HUD indicators.
+
+    LOCAL_SERVER_ADVERTISEMENT, ///< Server -> clients on LAN before starting a game, lets clients discover that a server
+                          ///< exists
 };

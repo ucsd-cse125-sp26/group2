@@ -3,6 +3,7 @@
 
 #include "DeveloperConfig.hpp"
 #include "game/ServerGame.hpp"
+#include "network/DiscoveryServer.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
 #include "perf/Parallel.hpp"
@@ -189,11 +190,22 @@ int main()
         return 1;
     }
 
+    // start server discovery system
+    // TODO: random port
+    DiscoveryServer discoveryServer;
+    const DiscoveryServer::ServerInfo serverInfo{
+        .serverName = "Test Server",
+        .gamePort = serverNet.port,
+        .currentPlayers = 0,
+    };
+    discoveryServer.start(9998, serverInfo);
+
     ServerGame game;
     if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, developerCfg.skipLobby)) {
         server.shutdown();
         ::group2::perf::stopAggregator();
         closeCsv();
+        discoveryServer.stop();
         NET_Quit();
         SDL_Quit();
         return 1;
@@ -205,6 +217,8 @@ int main()
 
     ::group2::perf::stopAggregator();
     closeCsv();
+
+    discoveryServer.stop();
 
     NET_Quit();
     SDL_Quit();
