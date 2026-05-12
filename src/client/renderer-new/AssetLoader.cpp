@@ -21,24 +21,6 @@ const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::str
     return scene;
 }
 
-bool AssetLoader::loadModelsList()
-{
-    const ModelIdInt id = 0;
-    // std::string modelFileName = "assualtRifleJ.obj";
-    std::string modelFileName = "assualtRiflColorTest.glb";
-    const std::vector<std::string> texFileNames;
-
-    std::cout << "loading model" << std::endl;
-    // bool res = loadModel(id, modelFileName,texFileNames,false);
-    bool res = loadModel(id, modelFileName, texFileNames, false, true);
-    std::cout << "loaded model" << std::endl;
-    if (!res) {
-        std::cout << "MODEL NOT FOUND!!" << std::endl;
-    }
-
-    return true;
-}
-
 bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
 {
 
