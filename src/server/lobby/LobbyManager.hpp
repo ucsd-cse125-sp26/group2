@@ -1,3 +1,5 @@
+#pragma once
+
 #include "network/Server.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 
@@ -11,6 +13,7 @@ public:
     bool addPlayer(ClientId id);
     bool removePlayer(ClientId id);
     bool setPlayerReadyStatus(ClientId id, bool ready);
+    bool hostStartMatch(ClientId sender);
 
 private:
     Server* server = nullptr;

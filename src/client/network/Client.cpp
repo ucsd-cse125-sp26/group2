@@ -358,6 +358,12 @@ bool Client::sendPlayerReady(bool ready)
     return send(&type, sizeof(type));
 }
 
+bool Client::sendStartMatch()
+{
+    const auto type = static_cast<uint8_t>(PacketType::START_MATCH);
+    return send(&type, sizeof(type));
+}
+
 bool Client::acceptReliableSequence(uint16_t seq)
 {
     // First sequence ever — accept and seed the window.
@@ -974,6 +980,7 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
             break;
         MatchStatePacket matchState;
         std::memcpy(&matchState, payload, sizeof(MatchStatePacket));
+        latestMatchState_ = matchState;
         if (matchStateUpdateFn_)
             matchStateUpdateFn_(matchState);
         break;

@@ -895,15 +895,24 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
     }
 
     case PacketType::PLAYER_READY: {
-        if (playerReadyFn_) {
-            playerReadyFn_(conn.clientId);
-        }
+        Event event{};
+        event.type = EventType::PlayerReady;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
         break;
     }
     case PacketType::PLAYER_UNREADY: {
-        if (playerUnreadyFn_) {
-            playerUnreadyFn_(conn.clientId);
-        }
+        Event event{};
+        event.type = EventType::PlayerUnready;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        break;
+    }
+    case PacketType::START_MATCH: {
+        Event event{};
+        event.type = EventType::StartMatchRequested;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
         break;
     }
 

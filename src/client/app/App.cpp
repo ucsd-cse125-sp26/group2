@@ -114,7 +114,18 @@ SDL_AppResult App::iterate()
 {
     if (!screen_)
         return SDL_APP_FAILURE;
-    return screen_->iterate();
+    const SDL_AppResult result = screen_->iterate();
+    if (result != SDL_APP_CONTINUE)
+        return result;
+
+    if (current == Screen::Lobby) {
+        if (auto* lobby = dynamic_cast<Lobby*>(screen_.get()); lobby != nullptr && lobby->shouldStartMatch()) {
+            lobby->consumeStartMatchState();
+            transitionTo(Screen::InGame);
+        }
+    }
+
+    return result;
 }
 
 void App::quit()

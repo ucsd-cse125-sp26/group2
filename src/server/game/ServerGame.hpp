@@ -14,6 +14,7 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
+#include "server/lobby/LobbyManager.hpp"
 #include "systems/Event.hpp" // PR-27: ShotIntentPayload
 #include "systems/MatchController.hpp"
 
@@ -129,6 +130,7 @@ private:
 
     Server* server = nullptr;                ///< Non-owning pointer; main() owns and shuts down the socket.
     Registry registry;                       ///< ECS entity/component store.
+    LobbyManager lobbyManager;               ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;         ///< Manages match flow and state.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.

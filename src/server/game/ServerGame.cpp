@@ -62,6 +62,10 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz)
 
     clientEntities.clear(); // For safety
     registry.clear();
+    if (!lobbyManager.init(serverRef)) {
+        SDL_Log("[server] LobbyManager init failed");
+        return false;
+    }
 
     // ── Load map collision ──────────────────────────────────────────────
     // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
@@ -256,10 +260,13 @@ void ServerGame::eventHandler(Event event)
         const bool sent = server->notifyPlayerClientId(event.clientId, clientEntities[event.clientId]);
         if (!sent) {
             deletePlayerEntity(event.clientId);
+            break;
         }
+        lobbyManager.addPlayer(event.clientId);
         break;
     }
     case EventType::Disconnected: {
+        lobbyManager.removePlayer(event.clientId);
         deletePlayerEntity(event.clientId);
         break;
     }
@@ -275,6 +282,19 @@ void ServerGame::eventHandler(Event event)
 
         InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
         input = event.movementIntent;
+        break;
+    }
+    case EventType::PlayerReady: {
+        lobbyManager.setPlayerReadyStatus(event.clientId, true);
+        break;
+    }
+    case EventType::PlayerUnready: {
+        lobbyManager.setPlayerReadyStatus(event.clientId, false);
+        break;
+    }
+    case EventType::StartMatchRequested: {
+        if (lobbyManager.hostStartMatch(event.clientId))
+            matchController.hostStartedMatch();
         break;
     }
     case EventType::ShotIntent: {

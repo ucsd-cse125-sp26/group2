@@ -65,5 +65,6 @@ enum class PacketType : uint8_t
     PLAYER_UNREADY, ///< Client -> Server: player cancels ready status.
     LOBBY_UPDATE,   ///< Server -> All clients: lobby state update (player list, match start countdown).
     LOBBY_STATE,    ///< Server -> single Client: full lobby snapshot on join. Format: [count:u32][LobbyPlayer*count]
-    START_MATCH,    ///< Server -> All clients: match start signal (transition)
+    HOST_READY,     ///< Client -> Server: host signals ready to start match.
+    START_MATCH,    ///< Client -> Server: host requests match start.
 };

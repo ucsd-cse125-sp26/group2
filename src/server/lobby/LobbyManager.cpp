@@ -9,10 +9,6 @@
 bool LobbyManager::init(Server& serverPtr)
 {
     server = &serverPtr;
-
-    server->onPlayerReady([this](ClientId id) { setPlayerReadyStatus(id, true); });
-    server->onPlayerUnready([this](ClientId id) { setPlayerReadyStatus(id, false); });
-
     return true;
 }
 
@@ -100,5 +96,39 @@ bool LobbyManager::setPlayerReadyStatus(ClientId id, bool ready)
 
     LobbyUpdateEvent updateEvent{.type = eventType, .id = id};
     server->broadcastLobbyUpdate(updateEvent);
+    return true;
+}
+
+bool LobbyManager::hostStartMatch(ClientId sender)
+{
+    if (sender != hostId) {
+        SDL_Log(
+            "LobbyManager: rejecting START_MATCH from non-host clientId %u (host is %u)", sender.value, hostId.value);
+        return false;
+    }
+
+    int nonHostCount = 0;
+    for (const auto& player : players) {
+        if (player.isHost)
+            continue;
+
+        ++nonHostCount;
+        if (!player.ready) {
+            SDL_Log("LobbyManager: rejecting START_MATCH from host %u because clientId %u is not ready",
+                    sender.value,
+                    player.id.value);
+            return false;
+        }
+    }
+
+    if (nonHostCount == 0) {
+        SDL_Log("LobbyManager: rejecting START_MATCH from host %u because no non-host players are connected",
+                sender.value);
+        return false;
+    }
+
+    SDL_Log("LobbyManager: accepting START_MATCH from host %u with %d ready non-host player(s)",
+            sender.value,
+            nonHostCount);
     return true;
 }

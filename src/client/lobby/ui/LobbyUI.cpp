@@ -5,25 +5,25 @@
 namespace lobby_ui
 {
 
-std::optional<bool> buildPlayerList(const std::vector<LobbyPlayer>& players, ClientId localId)
+BuildResult buildPlayerList(const LobbyUIConfig& config)
 {
+    BuildResult result{};
+
     bool localReady = false;
-    for (const auto& p : players) {
-        if (p.id == localId) {
+    for (const auto& p : config.players) {
+        if (p.id == config.localId) {
             localReady = p.ready;
             break;
         }
     }
 
-    std::optional<bool> readyChange;
-
     ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
     ImGui::SetNextWindowSize(ImVec2(320.0f, 240.0f), ImGuiCond_Once);
     if (ImGui::Begin("Lobby")) {
-        ImGui::Text("Players (%zu)", players.size());
+        ImGui::Text("Players (%zu)", config.players.size());
         ImGui::Separator();
-        for (const auto& p : players) {
-            const bool isLocal = p.id == localId;
+        for (const auto& p : config.players) {
+            const bool isLocal = p.id == config.localId;
             if (p.isHost && isLocal)
                 ImGui::Text("Player %d (Host, You)", p.id.value);
             else if (p.isHost)
@@ -39,11 +39,19 @@ std::optional<bool> buildPlayerList(const std::vector<LobbyPlayer>& players, Cli
 
         ImGui::Separator();
         if (ImGui::Button(localReady ? "Unready" : "Ready"))
-            readyChange = !localReady;
+            result.readyChange = !localReady;
+
+        if (config.isHost) {
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!config.canStartMatch);
+            if (ImGui::Button("Start Match"))
+                result.startMatchClicked = true;
+            ImGui::EndDisabled();
+        }
     }
     ImGui::End();
 
-    return readyChange;
+    return result;
 }
 
 } // namespace lobby_ui

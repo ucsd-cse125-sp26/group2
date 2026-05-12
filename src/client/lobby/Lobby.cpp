@@ -66,10 +66,10 @@ bool Lobby::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* cli
         }
     });
 
-    // Dummy roster until the lobby is wired to the network.
-    // players.clear();
-    // for (int i = 1; i <= 5; ++i)
-    //     players.push_back(LobbyPlayer{ClientId{i}});
+    client->onMatchStateUpdate([this](const MatchStatePacket& packet) {
+        if (packet.phase != MatchPhase::LOBBY)
+            startMatchState = packet;
+    });
 
     return true;
 }
@@ -92,8 +92,21 @@ SDL_AppResult Lobby::iterate()
         return SDL_APP_SUCCESS;
     }
 
-    if (const auto readyChange = lobby_ui::buildPlayerList(players, localClientId)) {
-        client->sendPlayerReady(*readyChange);
+    LobbyUIConfig config{
+        .players = players,
+        .localId = localClientId,
+        .isHost = std::any_of(
+            players.begin(), players.end(), [this](const LobbyPlayer& p) { return p.id == localClientId && p.isHost; }),
+        .canStartMatch = canHostStartMatch(),
+    };
+
+    const auto result = lobby_ui::buildPlayerList(config);
+    if (result.readyChange) {
+        client->sendPlayerReady(*result.readyChange);
+    }
+
+    if (result.startMatchClicked) {
+        client->sendStartMatch();
     }
 
     ImGui::Render();
@@ -103,4 +116,38 @@ SDL_AppResult Lobby::iterate()
     return SDL_APP_CONTINUE;
 }
 
-void Lobby::quit() {}
+void Lobby::quit()
+{
+    if (client) {
+        client->onLobbyState({});
+        client->onLobbyUpdate({});
+        client->onMatchStateUpdate({});
+    }
+}
+
+bool Lobby::shouldStartMatch() const
+{
+    return startMatchState.has_value();
+}
+
+std::optional<MatchStatePacket> Lobby::consumeStartMatchState()
+{
+    auto state = startMatchState;
+    startMatchState.reset();
+    return state;
+}
+
+bool Lobby::canHostStartMatch() const
+{
+    bool sawNonHost = false;
+    for (const auto& player : players) {
+        if (player.isHost)
+            continue;
+
+        sawNonHost = true;
+        if (!player.ready)
+            return false;
+    }
+
+    return sawNonHost;
+}

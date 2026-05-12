@@ -3,6 +3,7 @@
 #include "network/Client.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 
+#include <optional>
 #include <vector>
 
 #ifdef USE_HYBRID_RENDERER
@@ -20,11 +21,16 @@ public:
     SDL_AppResult event(SDL_Event* event) override;
     SDL_AppResult iterate() override;
     void quit() override;
+    bool shouldStartMatch() const;
+    std::optional<MatchStatePacket> consumeStartMatchState();
 
 private:
+    bool canHostStartMatch() const;
+
     ClientRenderer* renderer = nullptr;
     SDL_Window* window = nullptr;
     Client* client = nullptr;
     std::vector<LobbyPlayer> players;
     ClientId localClientId{-1};
+    std::optional<MatchStatePacket> startMatchState;
 };

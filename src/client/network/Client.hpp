@@ -107,6 +107,9 @@ public:
     /// @brief Send a PLAYER_READY or PLAYER_UNREADY packet to the server.
     bool sendPlayerReady(bool ready);
 
+    /// @brief Send a START_MATCH packet to the server (host-only).
+    bool sendStartMatch();
+
     /// @brief Send a PING packet to the server for RTT measurement.
     void sendPing();
 
@@ -127,6 +130,9 @@ public:
 
     /// @brief Access current network statistics.
     const NetworkStats& getNetStats() const { return stats; }
+
+    /// @brief Return the latest match state packet received from the server, if any.
+    std::optional<MatchStatePacket> getLatestMatchState() const { return latestMatchState_; }
 
     /// @brief Latest server-acked client predict tick.
     ///
@@ -313,6 +319,7 @@ private:
     LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.
     LobbyStateCallback lobbyStateFn_;              ///< Called once on join with the full lobby snapshot.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
+    std::optional<MatchStatePacket> latestMatchState_;
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //

@@ -158,6 +158,11 @@ bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clie
         return false;
     }
 
+    if (const auto latestMatchState = client->getLatestMatchState()) {
+        currentMatchPhase = latestMatchState->phase;
+        countdownTimer = latestMatchState->countdownTimer;
+    }
+
     // Particle system needs the device + formats from the renderer.
     // colorFmt must match the render target particles draw into (HDR = RGBA16F),
     // NOT the swapchain format.  shaderFmt must be the single format the

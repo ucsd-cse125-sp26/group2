@@ -420,7 +420,7 @@ private:
     void attachAnimatedCharacter(entt::entity e);
 
     // Match State
-    MatchPhase currentMatchPhase = MatchPhase::WARMUP; ///< Latest match phase update from the server.
+    MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
 
     // Kill Feed State
