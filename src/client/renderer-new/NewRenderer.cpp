@@ -242,18 +242,23 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
 
 void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    if (Asset::modelInstances_.size() <= 4) {
-        return;
-    }
-    Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
-    if (!Asset::models_.contains(Asset::weaponModelId_)) {
-        std::cout << "invalid weaponModelId" << std::endl;
+    // if (Asset::modelInstances_.size() <= 4) {
+    //     return;
+    // }
+    // Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
+    // if (!Asset::models_.contains(Asset::weaponModelId_)) {
+    //     std::cout << "invalid weaponModelId" << std::endl;
+    //     return;
+    // }
+
+    //constexpr auto newWVM = glm::mat4(1.0f);
+
+    if (!Asset::models_.contains(weapon_.modelIndex)) {
+         std::cout << "invalid weapon ModelId" << std::endl;
         return;
     }
 
-    constexpr auto newWVM = glm::mat4(1.0f);
-    Asset::weaponViewModel_ = glm::translate(newWVM, glm::vec3(1.0f, 0.0f, -3.0f));
-    drawModel(Asset::weaponModelId_, Asset::weaponViewModel_, renderPass, cmd);
+    drawModel(weapon_.modelIndex, weapon_.transform, renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
@@ -440,4 +445,9 @@ int NewRenderer::loadSceneModel(
     SDL_WaitForGPUIdle(device_);
 
     return Asset::modelInstances_.size() - 1;
+}
+
+void NewRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
+{
+    weapon_ = vm;
 }

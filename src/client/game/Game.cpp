@@ -48,6 +48,7 @@
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
+#include "renderer-new/RendererTypes.hpp"
 #include "systems/InputSampleSystem.hpp"
 #include "systems/InputSendSystem.hpp"
 #include "systems/PredictionSystem.hpp"
@@ -2052,6 +2053,157 @@ SDL_AppResult Game::iterate()
         lastEquippedType_ = currentEquippedType_;
         viewmodelDefaultsApplied_ = true;
     }
+
+    const int currentWeaponModelIdx = weaponModelIndices_[static_cast<int>(currentEquippedType_)];
+
+    // Build weapon viewmodel
+    {
+        WeaponViewmodel vm;
+        const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end()) {
+            vm.modelIndex = currentWeaponModelIdx;
+            vm.visible = true;
+
+            const float cosPitch = std::cos(renderPitch);
+            const glm::vec3 forward{
+                std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
+            glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+            // Apply camera roll to the viewmodel basis so the weapon follows
+            // the 180° flip (or any tilt) instead of staying upright.
+            if (std::abs(currentCameraRoll_) > 0.001f) {
+                const float cosR = std::cos(currentCameraRoll_);
+                const float sinR = std::sin(currentCameraRoll_);
+                const glm::vec3 rolledRight = right * cosR + up * sinR;
+                const glm::vec3 rolledUp = up * cosR - right * sinR;
+                right = rolledRight;
+                up = rolledUp;
+            }
+
+            // --- Weapon sway (CoD-style barrel lead) ---
+            {
+                if (!swayInitialized_) {
+                    prevSwayYaw_ = renderYaw;
+                    prevSwayPitch_ = renderPitch;
+                    swayInitialized_ = true;
+                }
+
+                float yawDelta = renderYaw - prevSwayYaw_;
+                float pitchDelta = renderPitch - prevSwayPitch_;
+                prevSwayYaw_ = renderYaw;
+                prevSwayPitch_ = renderPitch;
+
+                // Wrap yaw delta for -pi/+pi boundary
+                if (yawDelta > glm::pi<float>())
+                    yawDelta -= glm::two_pi<float>();
+                if (yawDelta < -glm::pi<float>())
+                    yawDelta += glm::two_pi<float>();
+
+                if (frameTime > 0.0001f) {
+                    float targetX = std::clamp(yawDelta / frameTime * 0.05f * swayAmplitudeYaw_,
+                                               -swayAmplitudeYaw_ * 3.0f,
+                                               swayAmplitudeYaw_ * 3.0f);
+                    float targetY = std::clamp(pitchDelta / frameTime * 0.05f * swayAmplitudePitch_,
+                                               -swayAmplitudePitch_ * 3.0f,
+                                               swayAmplitudePitch_ * 3.0f);
+
+                    float alpha = std::min(1.0f, swaySmoothing_ * frameTime * 60.0f);
+                    swayOffsetX_ = glm::mix(swayOffsetX_, targetX, alpha);
+                    swayOffsetY_ = glm::mix(swayOffsetY_, targetY, alpha);
+                }
+                float decay = std::exp(-swayDecayRate_ * frameTime);
+                swayOffsetX_ *= decay;
+                swayOffsetY_ *= decay;
+            }
+
+            // --- Recoil decay ---
+            {
+                const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+                float decay = std::exp(-rp.recoverySpeed * frameTime);
+                recoilPitch_ *= decay;
+                recoilPushBack_ *= decay;
+                recoilRoll_ *= decay;
+
+                // Kill tiny residuals
+                if (std::abs(recoilPitch_) < 0.01f)
+                    recoilPitch_ = 0.0f;
+                if (std::abs(recoilPushBack_) < 0.01f)
+                    recoilPushBack_ = 0.0f;
+                if (std::abs(recoilRoll_) < 0.01f)
+                    recoilRoll_ = 0.0f;
+            }
+
+            // --- Velocity-direction-dependent bobbing ---
+            float bobPhase = 0.0f;
+            float bobAmpFwd = 0.0f;
+            float bobAmpStrafe = 0.0f;
+
+            registry.view<LocalPlayer, Velocity>().each([&](const Velocity& vel) {
+                glm::vec3 hVel{vel.value.x, 0.0f, vel.value.z};
+                glm::vec3 hFwd{forward.x, 0.0f, forward.z};
+                float hFwdLen = glm::length(hFwd);
+                if (hFwdLen < 0.001f) {
+                    hFwd = glm::vec3{std::sin(renderYaw), 0.0f, std::cos(renderYaw)};
+                } else {
+                    hFwd /= hFwdLen;
+                }
+                glm::vec3 hRight = glm::normalize(glm::cross(hFwd, glm::vec3{0, 1, 0}));
+
+                float fwdSpeed = std::abs(glm::dot(hVel, hFwd));
+                float strafeSpeed = std::abs(glm::dot(hVel, hRight));
+
+                bobPhase = static_cast<float>(SDL_GetTicks()) * 0.008f;
+
+                if (fwdSpeed > 10.0f)
+                    bobAmpFwd = std::min(fwdSpeed / 800.0f, 1.5f);
+                if (strafeSpeed > 10.0f)
+                    bobAmpStrafe = std::min(strafeSpeed / 800.0f, 1.0f);
+            });
+
+            // Forward: classic vertical-dominant bob
+            float bobX = std::sin(bobPhase) * bobAmpFwd * 0.3f;
+            float bobY = std::sin(bobPhase * 2.0f) * bobAmpFwd * 0.5f;
+
+            // Strafe: horizontal-dominant bob at slightly different frequency
+            bobX += std::sin(bobPhase * 0.9f) * bobAmpStrafe * 0.8f;
+            bobY += std::sin(bobPhase * 1.8f) * bobAmpStrafe * 0.2f;
+
+            // Position the weapon in camera space, then convert to world.
+            glm::vec3 weaponPos = renderEye + forward * vmForward + right * vmRight - up * vmDown;
+            // Apply sway
+            weaponPos += right * swayOffsetX_ + up * swayOffsetY_;
+            // Apply bob
+            weaponPos += right * bobX + up * bobY;
+            // Apply recoil pushback
+            weaponPos -= forward * recoilPushBack_;
+
+            // Build world transform: translate -> local-rotate -> camera-orient -> scale.
+            //
+            // 1) Camera orientation: maps model axes into camera space.
+            const glm::mat4 cameraOrient = glm::mat4(glm::vec4(right, 0.0f),
+                                                     glm::vec4(up, 0.0f),
+                                                     glm::vec4(forward, 0.0f),
+                                                     glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+            // 2) Local rotation offsets (yaw/pitch/roll in degrees) with recoil.
+            const glm::mat4 localRot =
+                glm::rotate(glm::mat4(1.0f), glm::radians(vmYawOffset), glm::vec3(0, 1, 0)) *
+                glm::rotate(glm::mat4(1.0f), glm::radians(vmPitchOffset + recoilPitch_), glm::vec3(1, 0, 0)) *
+                glm::rotate(glm::mat4(1.0f), glm::radians(vmRollOffset + recoilRoll_), glm::vec3(0, 0, 1));
+
+            glm::mat4 weaponWorld = glm::translate(glm::mat4(1.0f), weaponPos);
+            weaponWorld *= cameraOrient;
+            weaponWorld *= localRot;
+            // Negate X to cancel the reflection in the camera orient matrix
+            // (right, up, forward has det = -1).
+            weaponWorld = glm::scale(weaponWorld, glm::vec3(-vmScale, vmScale, vmScale));
+
+            vm.transform = weaponWorld;
+        }
+        renderer->setWeaponViewmodel(vm);
+    }
+
 
     // 7. Frame recording (R key) -- anchored to physics ticks
     if (physicsRan && recorder.isRecording()) {

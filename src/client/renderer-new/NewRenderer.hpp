@@ -5,6 +5,7 @@
 
 #include "Asset.hpp"
 #include "Camera.hpp"
+#include "RendererTypes.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -34,6 +35,8 @@ public:
     [[nodiscard]] const NewCamera& getCamera() const { return camera_; }
     void setHudTexture(SDL_GPUTexture* hudTexture);
 
+    void setWeaponViewmodel(const WeaponViewmodel& vm);
+
     int loadSceneModel(
         const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining = "");
 
@@ -59,6 +62,8 @@ private:
     Uint32 depthHeight_ = 0;
 
     NewCamera camera_;
+
+    WeaponViewmodel weapon_;
 
     /// @brief Build the geometry graphics pipeline from vertex/fragment shaders.
     /// @return True on success.
