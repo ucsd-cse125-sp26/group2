@@ -6,7 +6,7 @@
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
 #include "lobby/Lobby.hpp"
-#include "renderer/GraphicsConfig.hpp"
+#include "renderer-new/GraphicsConfig.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -17,11 +17,7 @@
 
 bool App::init()
 {
-#ifdef USE_HYBRID_RENDERER
     static constexpr const char* k_appName = "group2";
-#else
-    static constexpr const char* k_appName = "client";
-#endif
     SDL_SetAppMetadata(k_appName, "0.1.0", "com.cse125.group2");
 
     // Initialize SDL and network library

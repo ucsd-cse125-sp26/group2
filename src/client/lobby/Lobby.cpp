@@ -10,7 +10,7 @@
 #include <glm/vec3.hpp>
 #include <imgui.h>
 
-bool Lobby::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+bool Lobby::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
 {
     renderer = rendererPtr;
     window = windowPtr;

@@ -18,6 +18,7 @@
 #include "hud/Hud.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
+#include "network/RegistrySerialization.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "renderer-new/NewRenderer.hpp"
 #include "sfx/SfxSystem.hpp"
@@ -26,23 +27,13 @@
 #include "systems/KillFeedEvent.hpp"
 #include "util/WorkerPool.hpp"
 
-#include <memory>
-#include <optional>
-
-#ifdef USE_HYBRID_RENDERER
-#include "renderer/HybridRenderer.hpp"
-using ClientRenderer = HybridRenderer;
-#else
-#include "renderer/Renderer.hpp"
-using ClientRenderer = Renderer;
-#endif
-
 #include <SDL3/SDL.h>
 
 #include <cstdint>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <memory>
+#include <optional>
 
 /// @brief Top-level client game object.
 ///
@@ -56,7 +47,7 @@ public:
 
     /// @brief Initialise all subsystems and spawn the local player entity.
     /// @return False on any fatal initialisation error.
-    bool init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
+    bool init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
 
     /// @brief Forward an SDL event to ImGui and handle application-level keys.
     /// @param event  The SDL event to process.
@@ -139,17 +130,19 @@ private:
 
     SDL_Window* window = nullptr;                ///< The application window.
     DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-    NewRenderer renderer;                        ///< Graphics-team SDL3 GPU renderer.
+    NewRenderer* renderer = nullptr;             ///< Borrowed renderer owned by App.
     Registry registry;                           ///< The shared ECS registry.
-    Client client;                               ///< UDP network client.
-    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;                         ///< Client-side sound effects system.
-    Hud hud_;                                    ///< In-game HUD overlay system.
-    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
+    Client* client = nullptr;                    ///< Borrowed UDP network client owned by App.
+    std::optional<registry_serialization::Loader> snapshotLoader_;
+    std::optional<entt::entity> mappedLocalPlayerEntity_;
+    ParticleSystem particleSystem; ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;           ///< Client-side sound effects system.
+    Hud hud_;                      ///< In-game HUD overlay system.
+    entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
-    Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
-    float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
-    int tickCount = 0;                           ///< Total physics ticks elapsed since start.
+    Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
+    float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
+    int tickCount = 0;             ///< Total physics ticks elapsed since start.
     /// @brief Monotonic per-tick counter stamped onto outgoing InputSnapshots.
     ///
     /// Bumped once per physics tick group inside iterate() and copied into the

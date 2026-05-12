@@ -112,15 +112,6 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
 }
 } // namespace
 
-Renderer& Game::legacyRenderer() noexcept
-{
-#ifdef USE_HYBRID_RENDERER
-    return renderer->legacy();
-#else
-    return *renderer;
-#endif
-}
-
 bool Game::initDebugUI(SDL_Window* windowPtr)
 {
     window = windowPtr;
@@ -180,7 +171,7 @@ bool Game::applyIncomingSnapshot(
     return true;
 }
 
-bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
 {
     renderer = rendererPtr;
     window = windowPtr;
@@ -204,7 +195,7 @@ bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clie
     {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
-        renderer->setParticleSystem(&particleSystem);
+        // TODO(renderer-migration): renderer->setParticleSystem(&particleSystem);
 
         // Wire dispatcher events to particle system.
         // NOTE: WeaponFiredEvent is NOT wired here — local weapon VFX (tracers,
@@ -263,7 +254,7 @@ bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clie
             kMapAsset.filename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs, visualExclude);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
-            renderer->setModelScenePass(mapModelIdx, true);
+            // TODO(renderer-migration): renderer->setModelScenePass(mapModelIdx, true);
             SDL_Log("[client] map visual loaded (model index %d, exclude='%s')", mapModelIdx, visualExclude.c_str());
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
@@ -294,7 +285,7 @@ bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clie
                 renderer->loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
             assets_.setModelIndex(id, modelIdx);
             if (modelIdx >= 0) {
-                renderer->setModelScenePass(modelIdx, true);
+                // TODO(renderer-migration): renderer->setModelScenePass(modelIdx, true);
             }
 
             // Load collision at the same position/scale.
@@ -2910,7 +2901,7 @@ void Game::quit()
     particleSystem.quit();
     hud_.quit();
     if (renderer) {
-        renderer->setParticleSystem(nullptr);
+        // TODO(renderer-migration): renderer->setParticleSystem(nullptr);
         renderer->setHudTexture(nullptr);
     }
     if (client) {

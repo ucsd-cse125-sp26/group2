@@ -2,14 +2,7 @@
 #include "IScreen.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
-
-#ifdef USE_HYBRID_RENDERER
-#include "renderer/HybridRenderer.hpp"
-using AppRenderer = HybridRenderer;
-#else
-#include "renderer/Renderer.hpp"
-using AppRenderer = Renderer;
-#endif
+#include "renderer-new/NewRenderer.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -32,7 +25,7 @@ public:
 
 private:
     SDL_Window* window = nullptr;
-    AppRenderer renderer;
+    NewRenderer renderer;
     NetworkConfig networkConfig;
     Client client;
 
