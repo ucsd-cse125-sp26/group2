@@ -29,9 +29,6 @@ public:
                           const bool k_flatten,
                           const bool flipUVs);
 
-    /// @brief Load the hard-coded default models list.
-    /// @return True on success.
-    static bool loadModelsList();
     static void updateModelTransformCache(const ModelIdInt id);
 
 private:

@@ -133,10 +133,6 @@ bool NewRenderer::createGeometryPipeline()
 
 bool NewRenderer::loadSceneAssets()
 {
-    std::cout << "loading models" << std::endl;
-    AssetLoader::loadModelsList();
-    std::cout << "loaded models" << std::endl;
-
     std::vector<Boilerplate::BufferUpload> uploads;
 
     for (const auto& modelPair : Asset::models_) {
