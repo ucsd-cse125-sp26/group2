@@ -30,6 +30,7 @@
 #include <optional>
 #include <random>
 #include <thread>
+#include <utility>
 
 /// @brief Live network statistics updated each frame.
 struct NetworkStats
@@ -133,6 +134,9 @@ public:
 
     /// @brief Return the latest match state packet received from the server, if any.
     std::optional<MatchStatePacket> getLatestMatchState() const { return latestMatchState_; }
+
+    /// @brief Return the latest lobby roster received from the server, if any.
+    std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> getLatestLobbyState() const;
 
     /// @brief Latest server-acked client predict tick.
     ///
@@ -320,6 +324,8 @@ private:
     LobbyStateCallback lobbyStateFn_;              ///< Called once on join with the full lobby snapshot.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     std::optional<MatchStatePacket> latestMatchState_;
+    std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_;
+    std::optional<ClientId> latestLobbyLocalId_;
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //

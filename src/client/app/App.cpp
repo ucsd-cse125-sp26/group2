@@ -123,6 +123,10 @@ SDL_AppResult App::iterate()
             lobby->consumeStartMatchState();
             transitionTo(Screen::InGame);
         }
+    } else if (current == Screen::InGame) {
+        if (auto* game = dynamic_cast<Game*>(screen_.get()); game != nullptr && game->shouldReturnToLobby()) {
+            transitionTo(Screen::Lobby);
+        }
     }
 
     return result;

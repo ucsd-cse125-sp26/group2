@@ -448,7 +448,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     {
         GROUP2_PROF_SCOPE("match");
+        const MatchPhase previousPhase = matchController.getCurrentPhase();
         matchController.update(dt, registry, *server);
+        if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
+            lobbyManager.resetReadyStatuses();
     }
 
     // Phase 4a: snapshot rate decoupled from tick rate. The registry

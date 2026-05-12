@@ -472,6 +472,8 @@ bool Game::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* clie
     client->onMatchStateUpdate([this](const MatchStatePacket& packet) {
         currentMatchPhase = packet.phase;
         countdownTimer = packet.countdownTimer;
+        if (packet.phase == MatchPhase::LOBBY)
+            returnToLobbyRequested = true;
     });
 
     client->onKillEvent([this](const NetKillEvent& evt) {
@@ -3280,6 +3282,11 @@ SDL_AppResult Game::iterate()
     }
 
     return SDL_APP_CONTINUE;
+}
+
+bool Game::shouldReturnToLobby() const
+{
+    return returnToLobbyRequested;
 }
 
 void Game::quit()

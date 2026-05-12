@@ -364,6 +364,14 @@ bool Client::sendStartMatch()
     return send(&type, sizeof(type));
 }
 
+std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> Client::getLatestLobbyState() const
+{
+    if (!latestLobbyPlayers_ || !latestLobbyLocalId_)
+        return std::nullopt;
+
+    return std::make_pair(*latestLobbyPlayers_, *latestLobbyLocalId_);
+}
+
 bool Client::acceptReliableSequence(uint16_t seq)
 {
     // First sequence ever — accept and seed the window.
@@ -1068,6 +1076,38 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         LobbyUpdateEvent lu{};
         std::memcpy(&lu, payload, sizeof(LobbyUpdateEvent));
 
+        if (latestLobbyPlayers_) {
+            switch (lu.type) {
+            case LobbyUpdateEvent::Type::PlayerJoined:
+                if (std::none_of(latestLobbyPlayers_->begin(),
+                                 latestLobbyPlayers_->end(),
+                                 [id = lu.id](const LobbyPlayer& p) { return p.id == id; }))
+                {
+                    latestLobbyPlayers_->push_back(LobbyPlayer{lu.id});
+                }
+                break;
+            case LobbyUpdateEvent::Type::PlayerLeft:
+                latestLobbyPlayers_->erase(std::remove_if(latestLobbyPlayers_->begin(),
+                                                          latestLobbyPlayers_->end(),
+                                                          [id = lu.id](const LobbyPlayer& p) { return p.id == id; }),
+                                           latestLobbyPlayers_->end());
+                break;
+            case LobbyUpdateEvent::Type::PlayerReady:
+            case LobbyUpdateEvent::Type::PlayerUnready:
+                for (auto& player : *latestLobbyPlayers_) {
+                    if (player.id == lu.id) {
+                        player.ready = lu.type == LobbyUpdateEvent::Type::PlayerReady;
+                        break;
+                    }
+                }
+                break;
+            case LobbyUpdateEvent::Type::PlayerNewHost:
+                for (auto& player : *latestLobbyPlayers_)
+                    player.isHost = player.id == lu.id;
+                break;
+            }
+        }
+
         if (lobbyUpdateFn_)
             lobbyUpdateFn_(lu);
         break;
@@ -1088,6 +1128,9 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
 
         std::vector<LobbyPlayer> players(count);
         std::memcpy(players.data(), payload + sizeof(int) + sizeof(uint32_t), count * sizeof(LobbyPlayer));
+
+        latestLobbyPlayers_ = players;
+        latestLobbyLocalId_ = localId;
 
         if (lobbyStateFn_)
             lobbyStateFn_(players, localId);

@@ -14,6 +14,7 @@ public:
     bool removePlayer(ClientId id);
     bool setPlayerReadyStatus(ClientId id, bool ready);
     bool hostStartMatch(ClientId sender);
+    void resetReadyStatuses();
 
 private:
     Server* server = nullptr;
@@ -22,4 +23,5 @@ private:
     ClientId hostId{-1};
 
     ClientId assignNewHost();
+    void sendLobbyStateToAllPlayers();
 };

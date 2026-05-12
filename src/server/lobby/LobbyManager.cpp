@@ -132,3 +132,23 @@ bool LobbyManager::hostStartMatch(ClientId sender)
             nonHostCount);
     return true;
 }
+
+void LobbyManager::resetReadyStatuses()
+{
+    for (auto& player : players) {
+        if (!player.ready)
+            continue;
+
+        player.ready = false;
+        server->broadcastLobbyUpdate(LobbyUpdateEvent{.type = LobbyUpdateEvent::Type::PlayerUnready, .id = player.id});
+    }
+
+    sendLobbyStateToAllPlayers();
+}
+
+void LobbyManager::sendLobbyStateToAllPlayers()
+{
+    for (const auto& player : players) {
+        server->sendLobbyStateToClient(player.id, players);
+    }
+}

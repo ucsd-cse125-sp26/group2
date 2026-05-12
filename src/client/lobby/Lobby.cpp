@@ -71,6 +71,11 @@ bool Lobby::init(ClientRenderer* rendererPtr, SDL_Window* windowPtr, Client* cli
             startMatchState = packet;
     });
 
+    if (const auto latestLobbyState = client->getLatestLobbyState()) {
+        players = latestLobbyState->first;
+        localClientId = latestLobbyState->second;
+    }
+
     return true;
 }
 
