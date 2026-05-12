@@ -2,6 +2,7 @@
 /// @brief Top-level application object owning the window, renderer, and network client.
 
 #pragma once
+#include "DeveloperConfig.hpp"
 #include "IScreen.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
@@ -48,6 +49,7 @@ private:
     SDL_Window* window = nullptr;     ///< Main application window.
     NewRenderer renderer;             ///< SDL_GPU PBR renderer, shared across screens.
     NetworkConfig networkConfig;      ///< Host/port/transport loaded from config.toml.
+    DeveloperConfig developerConfig;  ///< Developer toggles loaded from config.toml.
     Client client;                    ///< Network client connected to the authoritative server.
 
     Screen current = Screen::Lobby;   ///< Which screen is currently active.

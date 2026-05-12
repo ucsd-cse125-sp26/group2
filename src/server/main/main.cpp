@@ -1,6 +1,7 @@
 /// @file main.cpp
 /// @brief Server application entry point.
 
+#include "DeveloperConfig.hpp"
 #include "game/ServerGame.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
@@ -176,6 +177,7 @@ int main()
     const char* base = SDL_GetBasePath();
     std::string cfgPath = std::string(base ? base : "") + "config.toml";
     const NetworkConfig cfg = loadNetworkConfig(cfgPath.c_str());
+    const DeveloperConfig developerCfg = loadDeveloperConfig(cfgPath.c_str());
     const NetworkAddress& serverNet = cfg.serverNetwork;
 
     Server server;
@@ -188,7 +190,7 @@ int main()
     }
 
     ServerGame game;
-    if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz)) {
+    if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, developerCfg.skipLobby)) {
         server.shutdown();
         ::group2::perf::stopAggregator();
         closeCsv();

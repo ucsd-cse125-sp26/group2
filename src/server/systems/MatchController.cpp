@@ -47,6 +47,13 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
 
+    if (skipLobby && currentPhase == MatchPhase::LOBBY) {
+        SDL_Log("MatchController: skip_lobby enabled, starting countdown");
+        currentPhase = MatchPhase::COUNTDOWN;
+        countdownTimer = k_countdownDuration;
+        winnerId = -1;
+    }
+
     broadcastMatchState(server);
 }
 
@@ -64,6 +71,11 @@ void MatchController::hostStartedMatch()
     currentPhase = MatchPhase::COUNTDOWN;
     countdownTimer = k_countdownDuration;
     winnerId = -1;
+}
+
+void MatchController::setSkipLobby(bool v)
+{
+    skipLobby = v;
 }
 
 int MatchController::getWinnerId()

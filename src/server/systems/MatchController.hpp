@@ -25,6 +25,9 @@ public:
     /// @brief Start the host-authorized countdown if the match is still in the lobby phase.
     void hostStartedMatch();
 
+    /// @brief Enable or disable developer-mode lobby bypass.
+    void setSkipLobby(bool v);
+
     /// @brief Return the winner's client ID, or -1 if no winner yet.
     int getWinnerId();
 
@@ -32,6 +35,7 @@ private:
     MatchPhase currentPhase = MatchPhase::LOBBY;       ///< Current phase of the match.
     float countdownTimer = 0.0f;                       ///< Seconds remaining in the current timed phase.
     int winnerId = -1;                                 ///< Client ID of the winner (-1 if none).
+    bool skipLobby = false;                            ///< True to auto-promote lobby to countdown.
 
     static constexpr float k_countdownDuration = 5.0f; ///< Seconds for the pre-match countdown.
     static constexpr float k_finishedDuration = 5.0f;  ///< Seconds to display results before reset.
