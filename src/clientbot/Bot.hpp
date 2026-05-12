@@ -26,6 +26,7 @@
 #include <atomic>
 #include <cstdint>
 #include <glm/vec3.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -97,8 +98,11 @@ private:
     std::thread thread_;       ///< Worker thread; joined in dtor or join().
     InputSnapshot input_{};    ///< Reused per-tick input scratch.
     uint32_t predictTick_ = 0; ///< Monotonic tick counter, stamped onto each input.
-    int botId_ = 0;            ///< Log prefix.
-    bool initialized_ = false; ///< True once init() succeeded; gates run().
+    std::optional<registry_serialization::Loader>
+        snapshotLoader_;       ///< Incremental snapshot loader; created on first snapshot apply.
+    std::optional<entt::entity> mappedLocalPlayerEntity_; ///< Local-registry entity for this bot's player, once mapped.
+    int botId_ = 0;                                       ///< Log prefix.
+    bool initialized_ = false;                            ///< True once init() succeeded; gates run().
 
     /// PR-1 (server-perf): set true after the first successful poll inside
     /// runLoop. Lets the fleet aggregator skip bots that are mid-connect
@@ -127,19 +131,22 @@ private:
     // architectural.
     InputRingBuffer inputRing_;
 
-    /// @brief Set true once `localPlayerReadyFn` fires for this bot.
+    /// @brief Set true once the bot maps the server-assigned local player.
     /// Gates the prediction loop so we don't try to runPrediction
     /// before the bot has its `LocalPlayer` / `InputSnapshot` /
     /// `PlayerSimState` components in the registry.
     bool localPlayerReady_ = false;
 
-    /// @brief PR-23: set up the `onLocalPlayerReady` callback that
-    /// emplaces `LocalPlayer + InputSnapshot + PreviousPosition +
-    /// PlayerSimState` on the bot's local entity, mirroring
-    /// `Game::onLocalPlayerReady`.  Called from `init()` BEFORE
-    /// `client_.init()` so the callback is wired before the first
-    /// snapshot lands.
+    /// @brief PR-23: set up the snapshot callback that emplaces
+    /// `LocalPlayer + InputSnapshot + PreviousPosition + PlayerSimState`
+    /// once the bot can map its server-assigned local entity.
     void setupLocalPlayerCallback();
+    /// @brief Deserialize a snapshot and update the bot's registry; maps the local entity on first apply.
+    /// @return True on success.
+    bool applyIncomingSnapshot(
+        std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
+    /// @brief Return the bot's local-registry player entity, or nullopt before the first snapshot maps it.
+    [[nodiscard]] std::optional<entt::entity> getLocalPlayerEntity() const;
 
     // ── PR-18: per-bot snapshot observation log ──────────────────────────
     //

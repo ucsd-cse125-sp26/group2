@@ -40,12 +40,11 @@
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
-#include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/AbilitySystem.hpp"
+#include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
 #include "network/EntityInterpolation.hpp"
-#include "network/NetworkConfig.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
@@ -56,7 +55,6 @@
 
 #include <SDL3/SDL_video.h>
 
-#include <SDL3_net/SDL_net.h>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -114,59 +112,78 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
 }
 } // namespace
 
-bool Game::init()
+bool Game::initDebugUI(SDL_Window* windowPtr)
 {
-    static constexpr const char* k_appName = "group2";
-    SDL_SetAppMetadata(k_appName, "0.1.0", "com.cse125.group2");
-
-    // SDL_INIT_GAMEPAD pulls in the gamepad subsystem so we receive
-    // SDL_EVENT_GAMEPAD_ADDED / _REMOVED and can call SDL_OpenGamepad.  It also
-    // implicitly initialises the joystick subsystem.  Already-connected pads
-    // fire SDL_EVENT_GAMEPAD_ADDED automatically once SDL pumps events, so the
-    // event handler is the single point that opens devices.
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-        SDL_Log("SDL_Init failed: %s", SDL_GetError());
-        return false;
-    }
-
-    if (!NET_Init()) {
-        SDL_Log("NET_Init() failed: %s", SDL_GetError());
-        return false;
-    }
-
-    {
-        const char* base = SDL_GetBasePath();
-        std::string cfgPath = std::string(base ? base : "") + "config.toml";
-        netCfg = loadNetworkConfig(cfgPath.c_str());
-
-        // Apply graphics backend selection BEFORE SDL_CreateGPUDevice runs in
-        // Renderer::init.  SDL_GPU honours SDL_HINT_GPU_DRIVER at device
-        // creation; if the requested driver is unavailable SDL falls back to
-        // another supported one automatically.
-        const GraphicsConfig gfxCfg = loadGraphicsConfig(cfgPath.c_str());
-        if (const char* driver = gpuBackendHintString(gfxCfg.backend))
-            SDL_SetHint(SDL_HINT_GPU_DRIVER, driver);
-    }
-
-    window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE);
+    window = windowPtr;
     if (!window) {
-        SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
+        SDL_Log("Game DebugUI init failed: missing window");
         return false;
     }
 
-    // DebugUI must be initialised before Renderer — it creates the ImGui
-    // context that the GPU render backend (in Renderer::init) requires.
     if (!debugUI.init(window)) {
         SDL_Log("DebugUI init failed");
-        SDL_DestroyWindow(window);
         return false;
     }
 
-    if (!renderer.init(window)) {
-        SDL_Log("Renderer init failed");
-        debugUI.shutdown();
-        SDL_DestroyWindow(window);
+    return true;
+}
+
+void Game::handleLocalPlayerReady(entt::entity local)
+{
+    registry.emplace<LocalPlayer>(local);
+    registry.emplace<InputSnapshot>(local);
+    registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
+    registry.emplace_or_replace<PlayerSimState>(local);
+
+    if (!registry.all_of<RespawnTimer>(local))
+        registry.emplace<Controllable>(local);
+
+    attachAnimatedCharacter(local);
+    mappedLocalPlayerEntity_ = local;
+
+    SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
+}
+
+bool Game::applyIncomingSnapshot(
+    std::uint32_t /*snapshotTick*/, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick)
+{
+    registry.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
+        .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+    if (!snapshotLoader_)
+        snapshotLoader_.emplace(registry);
+
+    snapshotLoader_->apply(bytes, size, client->getServerLocalPlayerEntity(), &ackedTick);
+
+    registry.view<Position>(entt::exclude<PreviousPosition>).each([this](entt::entity e, const Position& pos) {
+        registry.emplace<PreviousPosition>(e, pos.value);
+    });
+
+    if (!mappedLocalPlayerEntity_) {
+        if (const auto serverLocal = client->getServerLocalPlayerEntity()) {
+            const entt::entity mapped = snapshotLoader_->map(*serverLocal);
+            if (mapped != entt::null)
+                handleLocalPlayerReady(mapped);
+        }
+    }
+
+    client->recordInterpolationSamples(registry, captureNs);
+    return true;
+}
+
+bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+{
+    renderer = rendererPtr;
+    window = windowPtr;
+    client = clientPtr;
+    if (!renderer || !window || !client) {
+        SDL_Log("Game init failed: missing App-owned dependency");
         return false;
+    }
+
+    if (const auto latestMatchState = client->getLatestMatchState()) {
+        currentMatchPhase = latestMatchState->phase;
+        countdownTimer = latestMatchState->countdownTimer;
     }
 
     // Particle system needs the device + formats from the renderer.
@@ -174,10 +191,12 @@ bool Game::init()
     // renderer's HDR target); kept here so the particle pipelines compile,
     // but NewRenderer does not yet route particles into a render pass.
     if (!particleSystem.init(
-            renderer.getDevice(), SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, renderer.getShaderFormat()))
+            renderer->getDevice(), SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, renderer->getShaderFormat()))
     {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
+        // TODO(renderer-migration): renderer->setParticleSystem(&particleSystem);
+
         // Wire dispatcher events to particle system.
         // NOTE: WeaponFiredEvent is NOT wired here — local weapon VFX (tracers,
         // beams, impacts) are spawned explicitly in iterate() so we control
@@ -202,15 +221,15 @@ bool Game::init()
     if (particleSystem.sdfReady()) {
         int winW = 0, winH = 0;
         SDL_GetWindowSizeInPixels(window, &winW, &winH);
-        if (!hud_.init(renderer.getDevice(),
-                       renderer.getShaderFormat(),
+        if (!hud_.init(renderer->getDevice(),
+                       renderer->getShaderFormat(),
                        particleSystem.sdfAtlas(),
                        static_cast<uint32_t>(winW),
                        static_cast<uint32_t>(winH)))
         {
             SDL_Log("Hud init failed (non-fatal — HUD disabled)");
         } else {
-           renderer.setHudTexture(hud_.getOutputTexture());
+            renderer->setHudTexture(hud_.getOutputTexture());
         }
     }
 
@@ -231,10 +250,11 @@ bool Game::init()
         const std::string visualExclude =
             gamemap::k_separatedCollisionMap ? std::string(gamemap::k_collisionPattern) : std::string();
         const int mapId = addAssetDefinition(assets_, kMapAsset);
-        const int mapModelIdx = renderer.loadSceneModel(
+        const int mapModelIdx = renderer->loadSceneModel(
             kMapAsset.filename, kMapAsset.loadTranslation, kMapAsset.loadScale, kMapAsset.flipUVs, visualExclude);
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
+            // TODO(renderer-migration): renderer->setModelScenePass(mapModelIdx, true);
             SDL_Log("[client] map visual loaded (model index %d, exclude='%s')", mapModelIdx, visualExclude.c_str());
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
@@ -261,8 +281,12 @@ bool Game::init()
         // correct, just visibly jittery on curved contacts.
         auto loadProp = [&](const AssetDefinition& def) {
             const int id = addAssetDefinition(assets_, def);
-            const int modelIdx = renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
+            const int modelIdx =
+                renderer->loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
             assets_.setModelIndex(id, modelIdx);
+            if (modelIdx >= 0) {
+                // TODO(renderer-migration): renderer->setModelScenePass(modelIdx, true);
+            }
 
             // Load collision at the same position/scale.
             const std::string fullPath = basePath + "assets/" + def.filename;
@@ -282,7 +306,7 @@ bool Game::init()
     // ── Load entity models (render only, drawn via EntityRenderCmd) ──────
     {
         const int id = addAssetDefinition(assets_, kWraithAsset);
-        wraithModelIdx = renderer.loadSceneModel(
+        wraithModelIdx = renderer->loadSceneModel(
             kWraithAsset.filename, kWraithAsset.loadTranslation, kWraithAsset.loadScale, kWraithAsset.flipUVs);
         assets_.setModelIndex(id, wraithModelIdx);
         if (wraithModelIdx < 0)
@@ -297,7 +321,7 @@ bool Game::init()
                 const int id = addAssetDefinition(assets_, def);
                 weaponAssetIds_[i] = id;
                 weaponModelIndices_[i] =
-                    renderer.loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
+                    renderer->loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
                 assets_.setModelIndex(id, weaponModelIndices_[i]);
                 if (weaponModelIndices_[i] < 0)
                     SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
@@ -307,10 +331,10 @@ bool Game::init()
         // Load Rocket Projectile
         {
             const int id = addAssetDefinition(assets_, kRocketProjectile);
-            rocketProjectileModelIdx_ = renderer.loadSceneModel(kRocketProjectile.filename,
-                                                                kRocketProjectile.loadTranslation,
-                                                                kRocketProjectile.loadScale,
-                                                                kRocketProjectile.flipUVs);
+            rocketProjectileModelIdx_ = renderer->loadSceneModel(kRocketProjectile.filename,
+                                                                 kRocketProjectile.loadTranslation,
+                                                                 kRocketProjectile.loadScale,
+                                                                 kRocketProjectile.flipUVs);
             assets_.setModelIndex(id, rocketProjectileModelIdx_);
 
             if (rocketProjectileModelIdx_ < 0)
@@ -338,40 +362,24 @@ bool Game::init()
             reg.emplace_or_replace<Controllable>(e);
     }>();
 
-    client.onLocalPlayerReady([this](entt::entity local) {
-        registry.emplace<LocalPlayer>(local);
-        registry.emplace<InputSnapshot>(local);
-        // Phase 5a: PreviousPosition is now seeded by Client::dispatchMessage
-        // for ALL entities with Position on first snapshot, including the
-        // local player. Use emplace_or_replace here so this callback stays
-        // idempotent regardless of whether the seed pass got there first.
-        registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
-
-        // Phase 5b: emplace PlayerSimState on the local player so runMovement
-        // (which iterates `<..., PlayerSimState, ...>`) will process it
-        // during client-side prediction. PlayerSimState is a server-only
-        // component — remote players don't have it on the client, so the
-        // view filter naturally narrows to just the local player.
-        // Server's snapshots don't replicate PlayerSimState so this stays
-        // entirely client-side; that means subtle timer fields can drift
-        // between client/server — fixed by Phase 4b's owner-only stream
-        // when it lands.
-        registry.emplace_or_replace<PlayerSimState>(local);
-
-        // Only add Controllable if the player is not already dead (edge case:
-        // joining while mid-death on a long-running server).
-        if (!registry.all_of<RespawnTimer>(local))
-            registry.emplace<Controllable>(local);
-
-        // Animator runs for local too — future gun-IK / hands-on-weapon work
-        // needs an up-to-date upper-body pose even when the body is invisible.
-        // Rendering is gated by animUI_.showLocalBody (third-person debug).
-        attachAnimatedCharacter(local);
-
-        SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
+    client->onSnapshotApply([this](std::uint32_t snapshotTick,
+                                   const std::uint8_t* bytes,
+                                   Uint32 size,
+                                   Uint64 captureNs,
+                                   std::uint32_t& ackedTick) {
+        return applyIncomingSnapshot(snapshotTick, bytes, size, captureNs, ackedTick);
     });
 
-    client.onParticleEvent([this](const NetParticleEvent& evt, entt::entity localPlayer) {
+    client->onRawParticleEvent([this](const NetParticleEvent& rawEvt) {
+        if (!snapshotLoader_ || !mappedLocalPlayerEntity_)
+            return;
+
+        NetParticleEvent evt = rawEvt;
+        evt.source = snapshotLoader_->map(evt.source);
+        if (evt.target != entt::null)
+            evt.target = snapshotLoader_->map(evt.target);
+        const entt::entity localPlayer = *mappedLocalPlayerEntity_;
+
         // Hitmarker SFX: local player's shot was confirmed by the server to have
         // hit an enemy (surface == Flesh).  This check runs BEFORE the skip-self
         // guard so the shooter still hears the hitmarker even though their own
@@ -473,12 +481,14 @@ bool Game::init()
         }
     });
 
-    client.onMatchStateUpdate([this](const MatchStatePacket& packet) {
+    client->onMatchStateUpdate([this](const MatchStatePacket& packet) {
         currentMatchPhase = packet.phase;
         countdownTimer = packet.countdownTimer;
+        if (packet.phase == MatchPhase::LOBBY)
+            returnToLobbyRequested = true;
     });
 
-    client.onKillEvent([this](const NetKillEvent& evt) {
+    client->onKillEvent([this](const NetKillEvent& evt) {
         killFeed.insert(killFeed.begin(),
                         KillFeedEvent{
                             evt.killerId,
@@ -492,21 +502,11 @@ bool Game::init()
     // buffer.  Pairs with the client-side fire-time snapshot the
     // game thread captures inside iterate() (see fire-detection
     // block).  Always-on so the user can flip the overlay any time.
-    client.onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
+    client->onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
 
     // Initialize runtime 3P weapon params from defaults
     for (int i = 0; i < 4; ++i)
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
-
-    const NetworkAddress clientNet = netCfg.clientNetwork;
-    if (!client.init(clientNet.host.c_str(), clientNet.port, netCfg.transport)) {
-        SDL_Log("Failed to connect to server");
-        particleSystem.quit();
-        renderer.quit();
-        debugUI.shutdown();
-        SDL_DestroyWindow(window);
-        return false;
-    }
 
     // Grab the mouse into relative mode so camera look works immediately.
     SDL_SetWindowRelativeMouseMode(window, true);
@@ -688,7 +688,7 @@ SDL_AppResult Game::event(SDL_Event* event)
         const auto newW = static_cast<uint32_t>(event->window.data1);
         const auto newH = static_cast<uint32_t>(event->window.data2);
         hud_.resize(newW, newH);
-        renderer.setHudTexture(hud_.getOutputTexture());
+        renderer->setHudTexture(hud_.getOutputTexture());
     }
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
@@ -705,7 +705,7 @@ SDL_AppResult Game::event(SDL_Event* event)
             // F1 — send a test hello packet to the server.
             // case SDLK_F1: {
             //     static constexpr char k_helloMsg[] = "Hello from client!";
-            //     client.send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
+            //     client->send(k_helloMsg, static_cast<int>(sizeof(k_helloMsg) - 1));
             //     SDL_Log("Sent test packet to server");
             //     break;
             // }
@@ -936,7 +936,7 @@ SDL_AppResult Game::iterate()
     // If the game was suspended (backgrounded / minimized), the raw delta can
     // be enormous.  Rather than trying to catch up through potentially seconds
     // of physics ticks (and replaying every buffered TCP message visually), we
-    // detect the gap and skip straight to the present.  The next client.poll()
+    // detect the gap and skip straight to the present.  The next client->poll()
     // will still drain the TCP buffer so entity state snaps to current.
     static constexpr float k_suspendThreshold = 0.5f; // half-second gap = clearly suspended
     if (frameTime > k_suspendThreshold) {
@@ -945,7 +945,7 @@ SDL_AppResult Game::iterate()
         accumulator = k_physicsDt; // run exactly one tick to apply latest state
         // Drain the network now so we snap to the current server state
         // without fast-forwarding through every intermediate update.
-        client.poll(registry);
+        client->poll();
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
@@ -1217,10 +1217,10 @@ SDL_AppResult Game::iterate()
     // Network stats: send periodic pings and update bandwidth counters
     phaseSnap(phaseStats.input);
 
-    client.updateStats(frameTime);
+    client->updateStats(frameTime);
     pingTimer += frameTime;
     if (pingTimer >= 1.0f) {
-        client.sendPing();
+        client->sendPing();
         pingTimer = 0.0f;
     }
 
@@ -1277,7 +1277,7 @@ SDL_AppResult Game::iterate()
         // Phase 5a/b: PreviousPosition is updated by Client::
         // dispatchMessage when a snapshot arrives, not every physics
         // tick.  The renderer interpolates over the snapshot interval
-        // via `client.getSnapshotAlpha()` so motion stays smooth at
+        // via `client->getSnapshotAlpha()` so motion stays smooth at
         // the much-coarser snapshot rate.  Per physics tick we ALSO
         // snapshot the local player's pos→prev BEFORE running
         // prediction so the renderer shows tick-rate-smooth
@@ -1314,11 +1314,11 @@ SDL_AppResult Game::iterate()
         // last physics tick's number.  Prior k_inputRedundancy
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
-        systems::runInputSend(registry, client);
+        systems::runInputSend(registry, *client);
 
         phaseSnap(phaseStats.physics);
 
-        if (!client.poll(registry)) {
+        if (!client->poll()) {
             // TODO: Update so reset to menu or some other non-crash state
             return SDL_APP_SUCCESS;
         }
@@ -1329,8 +1329,8 @@ SDL_AppResult Game::iterate()
         // then to restore the predicted state at the *current* predict
         // tick — net effect is "server-side correction folded in,
         // client-side immediate response preserved".
-        if (client.consumeSnapshotApplied()) {
-            const uint32_t ackedTick = client.getServerAckedClientTick();
+        if (client->consumeSnapshotApplied()) {
+            const uint32_t ackedTick = client->getServerAckedClientTick();
             if (ackedTick != 0 && clientPredictTick > ackedTick) {
                 systems::runReconciliation(
                     registry, inputRing_, ackedTick, clientPredictTick, k_physicsDt, physics::activeWorld());
@@ -1493,7 +1493,7 @@ SDL_AppResult Game::iterate()
     });
 
     // Update particle system (render-rate, not physics-rate)
-    particleSystem.update(frameTime, renderer.getCamera(), registry);
+    particleSystem.update(frameTime, renderer->getCamera(), registry);
     phaseSnap(phaseStats.particles);
 
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
@@ -1657,7 +1657,7 @@ SDL_AppResult Game::iterate()
     // directly, so they all align on a single interpolated
     // source-of-truth — no body-vs-tracer mismatch.  No-op when
     // `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=0`.
-    client.applyInterpolatedTransforms(registry);
+    client->applyInterpolatedTransforms(registry);
 
     // Update skeletal animation + build the renderer's per-frame skinned
     // palette + instance arrays (perf Phase 1B).
@@ -1673,12 +1673,12 @@ SDL_AppResult Game::iterate()
     // CPU skinning, no per-entity vertex re-upload, no per-entity draws.
     {
         const int numJoints = charRig_.numJoints();
-        const float snapshotAlpha = client.getSnapshotAlpha();
+        const float snapshotAlpha = client->getSnapshotAlpha();
         // PR-11: render-time = now − N × snapshotInterval (default 2 ticks
         // ≈ 62.5 ms at 32 Hz).  0 means "no buffered playback yet" — the
         // renderer falls back to the Phase-5a (prev, cur, alpha) lerp
         // through `entity_interpolation::sample`'s fallback path.
-        const Uint64 interpRenderNs = client.getInterpolationRenderTimeNs();
+        const Uint64 interpRenderNs = client->getInterpolationRenderTimeNs();
         constexpr float k_animationTick = 1.0f / 30.0f;
 
         // ─── Phase 1: sequential prepass ────────────────────────────────────
@@ -1707,7 +1707,7 @@ SDL_AppResult Game::iterate()
         candidates.reserve(128);
 
         // Frustum extraction (Gribb-Hartmann).
-        const glm::mat4 vp = renderer.getCamera().getViewProjectionMatrix();
+        const glm::mat4 vp = renderer->getCamera().getViewProjectionMatrix();
         struct Plane
         {
             glm::vec3 n;
@@ -2027,7 +2027,7 @@ SDL_AppResult Game::iterate()
                                 intentAnim = a;
                         });
                     }
-                    client.sendShotIntent(snap.tick, intentTargetCid, intentAnim);
+                    client->sendShotIntent(snap.tick, intentTargetCid, intentAnim);
                 });
         }
     }
@@ -2156,7 +2156,7 @@ SDL_AppResult Game::iterate()
                         statsFPSMax,
                         statsFPS1pLow,
                         statsFPS5pLow);
-        debugUI.buildNetworkUI(client.getNetStats());
+        debugUI.buildNetworkUI(client->getNetStats());
     }
 
     // All of the optional debug panels below are skipped in bench mode — none
@@ -2171,8 +2171,8 @@ SDL_AppResult Game::iterate()
         // half-and-half across outbound + inbound delay queues; loss is an
         // independent Bernoulli drop applied per-datagram in each direction.
         debugUI.buildNetworkSimUI();
-        client.setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
-        client.setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
+        client->setSimulatedLatencyMs(debugUI.getSimulatedLatencyMs());
+        client->setSimulatedLossPercent(debugUI.getSimulatedLossPercent());
 
         // Process ammo refill request — pulse refillAmmo on InputSnapshot for
         // exactly one frame so the server handles it once then stops.
@@ -2463,7 +2463,7 @@ SDL_AppResult Game::iterate()
         }
         hudState.killFeedEvents = hudKillEntries;
 
-        // ── Hit confirms: feed from hitmarkerTimer_ (set by onParticleEvent) ──
+        // ── Hit confirms: feed from hitmarkerTimer_ (set by replicated particle events) ──
         thread_local std::vector<HudHitConfirm> hudHitConfirms;
         hudHitConfirms.clear();
         if (hitmarkerTimer_ > 0.2f) { // just triggered (timer starts at 0.25)
@@ -2520,8 +2520,8 @@ SDL_AppResult Game::iterate()
                     // self-reported RTT onto their PlayerMatchStats.rttMs
                     // every tick (see ServerGame::updateLagCompTargets),
                     // which then rides the existing snapshot stream to
-                    // every connected client. Reading from this row's
-                    // own component instead of `client.getNetStats()`
+                    // every connected client-> Reading from this row's
+                    // own component instead of `client->getNetStats()`
                     // means every scoreboard row shows the right
                     // player's ping — not the local viewer's ping
                     // duplicated across every line.
@@ -2593,7 +2593,7 @@ SDL_AppResult Game::iterate()
             hudState.damageAccum.color = HudColor(1.00f, 0.71f, 0.18f, 1.f); // amber (hp)
 
         // ── View-projection matrix for world→screen projection ──
-        hudState.viewProj = renderer.getCamera().getViewProjectionMatrix();
+        hudState.viewProj = renderer->getCamera().getViewProjectionMatrix();
 
         // ── Weapon pickup prompt ──
         // Mirror the server pickup-detection rule (range + look cone via
@@ -2855,7 +2855,7 @@ SDL_AppResult Game::iterate()
             currentCameraRoll_ = 0.0f;
     }
     phaseSnap(phaseStats.imgui);
-    renderer.drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
+    renderer->drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
     phaseSnap(phaseStats.drawFrame);
 
     if (benchActive_) {
@@ -2888,6 +2888,11 @@ SDL_AppResult Game::iterate()
     return SDL_APP_CONTINUE;
 }
 
+bool Game::shouldReturnToLobby() const
+{
+    return returnToLobbyRequested;
+}
+
 void Game::quit()
 {
     if (recorder.isRecording())
@@ -2895,17 +2900,27 @@ void Game::quit()
     sfxSystem.quit();
     particleSystem.quit();
     hud_.quit();
-    renderer.quit();
+    if (renderer) {
+        // TODO(renderer-migration): renderer->setParticleSystem(nullptr);
+        renderer->setHudTexture(nullptr);
+    }
+    if (client) {
+        client->onSnapshotApply({});
+        client->onRawParticleEvent({});
+        client->onMatchStateUpdate({});
+        client->onKillEvent({});
+        client->onShotDebugReport({});
+    }
+}
+
+void Game::shutdownAfterRenderer()
+{
     debugUI.shutdown();
-    client.shutdown();
     if (activeGamepad_) {
         SDL_CloseGamepad(activeGamepad_);
         activeGamepad_ = nullptr;
         activeGamepadId_ = 0;
     }
-    SDL_DestroyWindow(window);
-    NET_Quit();
-    SDL_Quit();
 }
 
 void Game::refreshRemotePlayerRenderables()

@@ -55,8 +55,14 @@
 #include <algorithm>
 #include <cstring>
 
-bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, const TransportConfig& transport)
+namespace
 {
+constexpr float k_lobbyStartCountdownDuration = 3.0f;
+}
+
+bool ServerGame::init(Server& serverRef, int hz, int snapshotHz)
+{
+    server = &serverRef;
     tickRateHz = hz;
 
     // Phase 4a: snapshot rate ≤ tick rate. Both should be positive ints; we
@@ -71,6 +77,10 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
 
     clientEntities.clear(); // For safety
     registry.clear();
+    if (!lobbyManager.init(serverRef)) {
+        SDL_Log("[server] LobbyManager init failed");
+        return false;
+    }
 
     // Register abilities
     abilityRegistry.registerAbility(std::make_unique<GrappleAbility>());
@@ -104,9 +114,6 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
         // Set active world with map + all props.
         physics::setActiveWorld(mapCollision_.geometry());
     }
-
-    if (!server.init(addr, port, transport))
-        return false;
 
     // ── Load animation subsystem for hitbox detection ──
     initAnimation();
@@ -174,7 +181,7 @@ void ServerGame::run()
     registry.emplace<Position>(playerSpawner4, glm::vec3{0.0f, 200.0f, 0.0f});
 
     while (running) {
-        server.poll();
+        server->poll();
 
         nextTick += k_tickDuration;
         tick(k_dt, nextTick);
@@ -195,7 +202,6 @@ void ServerGame::run()
 void ServerGame::shutdown()
 {
     running = false;
-    server.shutdown();
     closeGroundTruthLog();
     ::group2::perf::shotlog::close();
 }
@@ -269,13 +275,16 @@ void ServerGame::eventHandler(Event event)
     switch (event.type) {
     case EventType::Connected: {
         initNewPlayerEntity(event.clientId);
-        const bool sent = server.notifyPlayerClientId(event.clientId, clientEntities[event.clientId]);
+        const bool sent = server->notifyPlayerClientId(event.clientId, clientEntities[event.clientId]);
         if (!sent) {
             deletePlayerEntity(event.clientId);
+            break;
         }
+        lobbyManager.addPlayer(event.clientId);
         break;
     }
     case EventType::Disconnected: {
+        lobbyManager.removePlayer(event.clientId);
         deletePlayerEntity(event.clientId);
         break;
     }
@@ -291,6 +300,27 @@ void ServerGame::eventHandler(Event event)
 
         InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
         input = event.movementIntent;
+        break;
+    }
+    case EventType::PlayerReady: {
+        lobbyManager.setPlayerReadyStatus(event.clientId, true);
+        break;
+    }
+    case EventType::PlayerUnready: {
+        lobbyManager.setPlayerReadyStatus(event.clientId, false);
+        break;
+    }
+    case EventType::StartMatchRequested: {
+        if (!lobbyStartCountdownActive && lobbyManager.hostStartMatch(event.clientId)) {
+            lobbyStartCountdownActive = true;
+            lobbyStartCountdownTimer = k_lobbyStartCountdownDuration;
+            lobbyStartRequester = event.clientId;
+            server->broadcastMatchStatus(MatchStatePacket{
+                .phase = MatchPhase::LOBBY,
+                .countdownTimer = lobbyStartCountdownTimer,
+                .winnerId = -1,
+            });
+        }
         break;
     }
     case EventType::ShotIntent: {
@@ -333,7 +363,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         // operations/sec on stateMutex_, which contended hard with the
         // network thread's 1 kHz I/O cycle. Now: one lock per tick.
         static thread_local std::vector<Event> events;
-        server.drainEvents(events);
+        server->drainEvents(events);
         for (const Event& event : events) {
             eventHandler(event);
             // Tick-time bail-out kept identical to pre-PR-2b: if event
@@ -387,7 +417,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         // transient `PendingShotIntent` component, keyed by the
         // shooter's CURRENT input tick.  `WeaponSystem::handleFire`
         // reads this when logging the shot to record the client-
-        // asserted target id + anim state delta in `server_shots.csv`.
+        // asserted target id + anim state delta in `servershots.csv`.
         // Anything left over after this loop runs is ageing out — the
         // map is also bounded by `k_pendingShotIntentsMax` (256
         // entries) on the enqueue side.
@@ -456,7 +486,28 @@ void ServerGame::tick(float dt, Uint64 nextTick)
 
     {
         GROUP2_PROF_SCOPE("match");
-        matchController.update(dt, registry, server);
+        if (lobbyStartCountdownActive) {
+            lobbyStartCountdownTimer -= dt;
+            if (lobbyStartCountdownTimer <= 0.0f) {
+                lobbyStartCountdownActive = false;
+                lobbyStartCountdownTimer = 0.0f;
+                if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
+                    matchController.hostStartedMatch();
+                    matchController.update(dt, registry, *server);
+                } else {
+                    server->broadcastMatchStatus(MatchStatePacket{
+                        .phase = MatchPhase::LOBBY,
+                        .countdownTimer = 0.0f,
+                        .winnerId = -1,
+                    });
+                }
+            }
+        } else {
+            const MatchPhase previousPhase = matchController.getCurrentPhase();
+            matchController.update(dt, registry, *server);
+            if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
+                lobbyManager.resetReadyStatuses();
+        }
     }
 
     // Phase 4a: snapshot rate decoupled from tick rate. The registry
@@ -473,12 +524,12 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // no longer pays for the I/O syscalls.
     if ((tickCount % snapshotEveryNTicks) == 0) {
         GROUP2_PROF_SCOPE("broadcastRegistry");
-        server.broadcastRegistry(registry);
+        server->broadcastRegistry(registry);
     }
     {
         GROUP2_PROF_SCOPE("broadcastEvents");
-        server.broadcastParticleEvents(particleEvents);
-        server.broadcastKillEvents(pendingKillEvents);
+        server->broadcastParticleEvents(particleEvents);
+        server->broadcastKillEvents(pendingKillEvents);
     }
     pendingKillEvents.clear();
 
@@ -547,7 +598,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
             // are diagnostic packets — losing one is fine, but if the
             // queue happened to coalesce them by key the user would
             // see only the most-recent shot in the ring buffer.
-            server.sendToClient(ClientId{cap.shooterClientId}, bytes.data(), static_cast<int>(bytes.size()));
+            server->sendToClient(ClientId{cap.shooterClientId}, bytes.data(), static_cast<int>(bytes.size()));
         }
     }
 
@@ -594,7 +645,10 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
-    registry.emplace<AbilityState>(player, AbilityState{ .primary = AbilityType::Grapple,}); // Defaults to level 0 with 0 accum damage
+    registry.emplace<AbilityState>(player,
+                                   AbilityState{
+                                       .primary = AbilityType::Grapple,
+                                   }); // Defaults to level 0 with 0 accum damage
 
     if constexpr (player_colors::k_enabled) {
         // Pick the least-used palette slot; ties broken by lowest index
@@ -775,11 +829,11 @@ void ServerGame::updateLagCompTargets()
     // Pre-PR-20.7 we used the Source-engine formula `RTT/2 + interp`,
     // which is correct ONLY when the client predicts other players
     // forward to its estimate of server-now (so the client renders
-    // enemies at `server_now − cl_interp`).  Our client does not do
+    // enemies at `servernow − cl_interp`).  Our client does not do
     // that prediction — it renders at `most_recent_snapshot_apply −
     // cl_interp`.  The most-recent snapshot was generated at
-    // `server_now − inbound_RTT/2`, so our client actually renders
-    // enemies at `server_now − RTT/2 − cl_interp`.
+    // `servernow − inbound_RTT/2`, so our client actually renders
+    // enemies at `servernow − RTT/2 − cl_interp`.
     //
     // Concrete derivation (T = client clock time of fire, sync'd to
     // server clock):
@@ -809,7 +863,7 @@ void ServerGame::updateLagCompTargets()
     // delay) in one mostly-lock-free operation, then drive the loop
     // off the local copy.
     static thread_local std::vector<Server::ClientNetState> netCache;
-    server.snapshotClientNetStates(netCache);
+    server->snapshotClientNetStates(netCache);
 
     // Lookup map from cache for the inner loop. Reserve once, reuse
     // the std::unordered_map across ticks — avoids per-tick alloc.

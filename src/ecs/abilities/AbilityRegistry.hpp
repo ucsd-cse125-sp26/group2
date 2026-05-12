@@ -3,12 +3,13 @@
 
 #pragma once
 
+#include "Ability.hpp"
+
 #include <memory>
 #include <unordered_map>
 
-#include "Ability.hpp"
-
-class AbilityRegistry {
+class AbilityRegistry
+{
 public:
     AbilityRegistry() = default;
 
@@ -21,4 +22,3 @@ public:
 private:
     std::unordered_map<AbilityType, std::unique_ptr<Ability>> abilities;
 };
-

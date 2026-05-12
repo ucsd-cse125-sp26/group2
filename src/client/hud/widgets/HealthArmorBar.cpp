@@ -194,13 +194,7 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float abIconY = abRowY + (lvH - iconW) * 0.5f;
     char levelBuf[8];
     std::snprintf(levelBuf, sizeof(levelBuf), "%d", displayLevel_);
-    ctx.text(levelBuf,
-             plateX + padX + iconW * 0.5f,
-             abIconY,
-             iconW,
-             k_amber,
-             HudAlign::Center,
-             true);
+    ctx.text(levelBuf, plateX + padX + iconW * 0.5f, abIconY, iconW, k_amber, HudAlign::Center, true);
     drawGradientTrailBar(ctx,
                          barX,
                          abRowY,

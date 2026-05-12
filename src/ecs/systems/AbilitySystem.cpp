@@ -33,15 +33,16 @@ inline void useAbility(entt::entity player, AbilityType type, Registry& registry
 
 void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float dt)
 {
-    registry.view<Player, InputSnapshot, AbilityState>().each([&registry, &abilityRegistry, dt](entt::entity e, InputSnapshot& snap, const AbilityState& state) {
-        if (snap.ability1) {
-            useAbility(e, state.primary, registry, abilityRegistry);
-        }
+    registry.view<Player, InputSnapshot, AbilityState>().each(
+        [&registry, &abilityRegistry, dt](entt::entity e, InputSnapshot& snap, const AbilityState& state) {
+            if (snap.ability1) {
+                useAbility(e, state.primary, registry, abilityRegistry);
+            }
 
-        if (snap.ability2) {
-            useAbility(e, state.secondary, registry, abilityRegistry);
-        }
-    });
+            if (snap.ability2) {
+                useAbility(e, state.secondary, registry, abilityRegistry);
+            }
+        });
 }
 
-}
+} // namespace systems

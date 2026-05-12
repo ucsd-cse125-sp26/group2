@@ -73,12 +73,7 @@ void DashAbility::activate(entt::entity player, Registry& registry)
     const glm::vec3 forward = lookDirFromInput(input);
     const glm::vec3 end = eye + forward * 500.0f;
 
-    const physics::SphereHitResult hit = physics::sphereCast(
-        4.0f,
-        eye,
-        end,
-        physics::activeWorld()
-    );
+    const physics::SphereHitResult hit = physics::sphereCast(4.0f, eye, end, physics::activeWorld());
 
     if (!hit.hit) {
         return;

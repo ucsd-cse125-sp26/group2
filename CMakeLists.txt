@@ -853,6 +853,12 @@ add_executable(group2
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/client/app/App.hpp
+        src/client/app/App.cpp
+        src/client/lobby/Lobby.hpp
+        src/client/lobby/Lobby.cpp
+        src/client/lobby/ui/LobbyUI.hpp
+        src/client/lobby/ui/LobbyUI.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1091,6 +1097,8 @@ add_executable(server
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/server/lobby/LobbyManager.hpp
+        src/server/lobby/LobbyManager.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
