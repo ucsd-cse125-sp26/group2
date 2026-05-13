@@ -233,8 +233,8 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd);
 
-    const glm::mat4 projection = camera_.getProjectionMatrix();
-    SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
+    // const glm::mat4 projection = camera_.getProjectionMatrix();
+    // SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
     drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
@@ -242,18 +242,30 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
 
 void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    if (Asset::modelInstances_.size() <= 4) {
-        return;
-    }
-    Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
-    if (!Asset::models_.contains(Asset::weaponModelId_)) {
-        std::cout << "invalid weaponModelId" << std::endl;
+    // if (Asset::modelInstances_.size() <= 4) {
+    //     return;
+    // }
+    // Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
+    // if (!Asset::models_.contains(Asset::weaponModelId_)) {
+    //     std::cout << "invalid weaponModelId" << std::endl;
+    //     return;
+    // }
+
+    //constexpr auto newWVM = glm::mat4(1.0f);
+
+    if (Asset::modelInstances_.size() <= weapon_.modelIndex) {
         return;
     }
 
-    constexpr auto newWVM = glm::mat4(1.0f);
-    Asset::weaponViewModel_ = glm::translate(newWVM, glm::vec3(1.0f, 0.0f, -3.0f));
-    drawModel(Asset::weaponModelId_, Asset::weaponViewModel_, renderPass, cmd);
+    Asset::ModelInstance& weaponModelInstance = Asset::modelInstances_.at(weapon_.modelIndex);
+    ModelIdInt weaponModelId = weaponModelInstance.modelId_;
+
+    if (!Asset::models_.contains(weaponModelId)) {
+         std::cout << "invalid weapon ModelId" << std::endl;
+        return;
+    }
+
+    drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
@@ -396,9 +408,6 @@ int NewRenderer::loadSceneModel(
     bool flatten = false;
     const std::vector<std::string> texFileNames;
 
-    auto modelTransform = glm::mat4(1.0f);
-    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
-    modelTransform[3] = glm::vec4(pos, 1.0f);
 
     const char* const base = SDL_GetBasePath();
     std::filesystem::path fullPath = base ? base : "";
@@ -412,6 +421,10 @@ int NewRenderer::loadSceneModel(
     }
     Asset::Model& model = Asset::models_.at(modelId);
     AssetLoader::updateModelTransformCache(modelId);
+
+    auto modelTransform = glm::mat4(1.0f);
+    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
+    modelTransform[3] = glm::vec4(pos, 1.0f);
 
     Asset::ModelInstance sceneInstance{};
     sceneInstance.drawInScenePass = true;
@@ -440,4 +453,9 @@ int NewRenderer::loadSceneModel(
     SDL_WaitForGPUIdle(device_);
 
     return Asset::modelInstances_.size() - 1;
+}
+
+void NewRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
+{
+    weapon_ = vm;
 }

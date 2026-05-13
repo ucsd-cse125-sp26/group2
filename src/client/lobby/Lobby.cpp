@@ -66,6 +66,7 @@ bool Lobby::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* client
                 p.isHost = p.id == update.id;
             break;
         default:
+            break;
         }
     });
 
