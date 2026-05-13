@@ -233,8 +233,8 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd);
 
-    const glm::mat4 projection = camera_.getProjectionMatrix();
-    SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
+    // const glm::mat4 projection = camera_.getProjectionMatrix();
+    // SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
     drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
@@ -253,12 +253,19 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 
     //constexpr auto newWVM = glm::mat4(1.0f);
 
-    if (!Asset::models_.contains(weapon_.modelIndex)) {
+    if (Asset::modelInstances_.size() <= weapon_.modelIndex) {
+        return;
+    }
+
+    Asset::ModelInstance& weaponModelInstance = Asset::modelInstances_.at(weapon_.modelIndex);
+    ModelIdInt weaponModelId = weaponModelInstance.modelId_;
+
+    if (!Asset::models_.contains(weaponModelId)) {
          std::cout << "invalid weapon ModelId" << std::endl;
         return;
     }
 
-    drawModel(weapon_.modelIndex, weapon_.transform, renderPass, cmd);
+    drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
@@ -401,9 +408,6 @@ int NewRenderer::loadSceneModel(
     bool flatten = false;
     const std::vector<std::string> texFileNames;
 
-    auto modelTransform = glm::mat4(1.0f);
-    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
-    modelTransform[3] = glm::vec4(pos, 1.0f);
 
     const char* const base = SDL_GetBasePath();
     std::filesystem::path fullPath = base ? base : "";
@@ -417,6 +421,10 @@ int NewRenderer::loadSceneModel(
     }
     Asset::Model& model = Asset::models_.at(modelId);
     AssetLoader::updateModelTransformCache(modelId);
+
+    auto modelTransform = glm::mat4(1.0f);
+    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
+    modelTransform[3] = glm::vec4(pos, 1.0f);
 
     Asset::ModelInstance sceneInstance{};
     sceneInstance.drawInScenePass = true;

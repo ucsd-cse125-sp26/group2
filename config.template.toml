@@ -41,4 +41,4 @@ backend = "auto"
 [developer]
 # When true, the client starts directly in-game and the server automatically
 # advances lobby phases into countdowns. Intended for local gameplay iteration.
-skip_lobby = false
+skip_lobby = true
