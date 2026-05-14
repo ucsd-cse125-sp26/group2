@@ -18,6 +18,7 @@
 #include "ecs/components/PlayerName.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -158,7 +159,8 @@ using Synced = std::tuple<entt::entity,
                           AnimSnapshot,
                           FireField,
                           PlayerColor,
-                          PlayerName>;
+                          PlayerName,
+                          PowerupSpawner>;
 
 // ── PR-10: snapshot delta encoding ──────────────────────────────────────
 
