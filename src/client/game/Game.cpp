@@ -28,6 +28,7 @@
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/Renderable.hpp"
@@ -304,15 +305,6 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         physics::setActiveWorld(mapCollision_.geometry());
     }
 
-    // ── Load entity models (render only, drawn via EntityRenderCmd) ──────
-    {
-        const int id = addAssetDefinition(assets_, kWraithAsset);
-        wraithModelIdx = renderer->loadSceneModel(
-            kWraithAsset.filename, kWraithAsset.loadTranslation, kWraithAsset.loadScale, kWraithAsset.flipUVs);
-        assets_.setModelIndex(id, wraithModelIdx);
-        if (wraithModelIdx < 0)
-            SDL_Log("[client] WARNING: Wraith model failed to load — player model will be invisible");
-    }
 
     // Load all weapon models (per WeaponType)
     {
@@ -1342,6 +1334,7 @@ SDL_AppResult Game::iterate()
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
         refreshDroppedWeaponRenderables();
+        refreshRemotePowerupRenderables();
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -3400,7 +3393,6 @@ void Game::shutdownAfterRenderer()
 
 void Game::refreshRemotePlayerRenderables()
 {
-    // Remote players use the shared Mixamo rig — no more Wraith placeholder.
     // Scale + Y offset are driven from the auto-calculated values (and tunable
     // via the Animation Tester panel).
     //
@@ -3509,6 +3501,19 @@ void Game::refreshRemoteRespawnRenderables()
                 rend.orientation = assetRotation(asset);
                 rend.translation = asset.renderTranslation;
             }
+        });
+}
+
+void Game::refreshRemotePowerupRenderables()
+{
+    registry.view<Position, PowerupSpawner, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const PowerupSpawner& spawner, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            const int powerupIndex = rocketProjectileModelIdx_;
+
+            rend.modelIndex = powerupIndex;
+            rend.scale = glm::vec3(kRocketProjectile.loadScale);
+            rend.visible = spawner.hasPowerup;
         });
 }
 

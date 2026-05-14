@@ -21,7 +21,6 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Raycast.hpp"
-#include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/LagCompensation.hpp"
 

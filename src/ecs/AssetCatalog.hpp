@@ -47,16 +47,10 @@ inline const std::array<AssetDefinition, 2> kPropAssets{{
      .decomposeCollision = true},
 }};
 
-inline const AssetDefinition kWraithAsset{
-    .name = "wraith",
-    .filename = "Apex_Legend_Wraith.glb",
-    .role = AssetRole::Entity,
-    .loadScale = 8.0f,
-};
 
 inline const AssetDefinition kRocketProjectile{
     .name = "rocket_projectile",
-    .filename = "bottle_a.glb", // update with rocket projectile asset
+    .filename = "rocket_projectile.glb", // update with rocket projectile asset
     .role = AssetRole::Entity,
     .loadScale = 20.0f,
 };

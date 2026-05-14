@@ -106,6 +106,7 @@ public:
 
     /// @brief Reset Renderable visibility for players transitioning through respawn.
     void refreshRemoteRespawnRenderables();
+    void refreshRemotePowerupRenderables();
 
     /// @brief Assign Renderable components to dropped-weapon entities (mirrors spawner visuals).
     void refreshDroppedWeaponRenderables();
@@ -248,7 +249,6 @@ private:
 
     // Legacy model index aliases (for code that still uses raw indices).
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
-    int wraithModelIdx = -1;
     int glowSphereModelIdx_ = -1;
     int movableSphereModelIdx_ = -1;
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
