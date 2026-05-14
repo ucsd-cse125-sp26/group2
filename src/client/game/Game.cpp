@@ -2204,7 +2204,6 @@ SDL_AppResult Game::iterate()
         renderer->setWeaponViewmodel(vm);
     }
 
-
     // 7. Frame recording (R key) -- anchored to physics ticks
     if (physicsRan && recorder.isRecording()) {
         FrameState state;

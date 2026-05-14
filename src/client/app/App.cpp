@@ -81,15 +81,14 @@ bool App::init()
         return false;
     }
 
-    // Create network
-    const NetworkAddress clientNet = networkConfig.clientNetwork;
-    if (!client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport)) {
-        SDL_Log("Failed to connect to server");
-        cleanup();
-        return false;
-    }
-
+    // Developer skip
     if (developerConfig.skipLobby) {
+        const NetworkAddress clientNet = networkConfig.clientNetwork;
+        if (!client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport)) {
+            SDL_Log("Failed to connect to server");
+            cleanup();
+            return false;
+        }
         auto game = std::make_unique<Game>();
         if (!game->initDebugUI(window) || !game->init(&renderer, window, &client)) {
             game->quit();
@@ -128,9 +127,25 @@ SDL_AppResult App::iterate()
         return result;
 
     switch (current) {
-    case Screen::Home:
-        // TODO: Home screen signals when to transition to lobby
+    case Screen::Home: {
+        auto home = dynamic_cast<Home*>(screen_.get());
+        if (!home)
+            break;
+        if (auto joinRequest = home->consumeJoinRequest()) {
+            std::string serverIp = joinRequest->serverIp;
+            uint16_t serverPort = joinRequest->serverPort;
+            SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
+            if (!client.init(serverIp.c_str(), serverPort, networkConfig.transport)) {
+                SDL_Log("Failed to connect to server at %s:%d", serverIp.c_str(), serverPort);
+                home->setJoinError("Failed to connect to server");
+            } else {
+                // TODO: Timeout if takes too long
+                SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
+                transitionTo(Screen::Lobby);
+            }
+        }
         break;
+    }
     case Screen::Lobby:
         if (auto* lobby = dynamic_cast<Lobby*>(screen_.get()); lobby != nullptr && lobby->shouldStartMatch()) {
             lobby->consumeStartMatchState();

@@ -251,7 +251,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     //     return;
     // }
 
-    //constexpr auto newWVM = glm::mat4(1.0f);
+    // constexpr auto newWVM = glm::mat4(1.0f);
 
     if (Asset::modelInstances_.size() <= weapon_.modelIndex) {
         return;
@@ -261,7 +261,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     ModelIdInt weaponModelId = weaponModelInstance.modelId_;
 
     if (!Asset::models_.contains(weaponModelId)) {
-         std::cout << "invalid weapon ModelId" << std::endl;
+        std::cout << "invalid weapon ModelId" << std::endl;
         return;
     }
 
@@ -407,7 +407,6 @@ int NewRenderer::loadSceneModel(
     ModelIdInt modelId = Asset::getIdFromString(filename);
     bool flatten = false;
     const std::vector<std::string> texFileNames;
-
 
     const char* const base = SDL_GetBasePath();
     std::filesystem::path fullPath = base ? base : "";

@@ -33,11 +33,34 @@ SDL_AppResult Home::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    if (home_ui::buildJoinMenu()) {
-        // TODO: Trigger App transition to Lobby with entered IP/port
-        SDL_Log("Join button clicked! (TODO: trigger transition to Lobby with entered IP/port)");
+    // TODO: Display joinError in UI if set
+    JoinMenuResult result = home_ui::buildJoinMenu(joinMenuState);
+    if (result.connectClicked) {
+        SDL_Log("Join button clicked! IP: %s, Port: %d", joinMenuState.serverIp, joinMenuState.serverPort);
+        if (joinMenuState.serverPort < 0 || joinMenuState.serverPort > 65535) {
+            SDL_Log("Invalid port number: %d", joinMenuState.serverPort);
+        } else {
+            pendingJoinRequest = JoinRequest{.serverIp = joinMenuState.serverIp,
+                                             .serverPort = static_cast<uint16_t>(joinMenuState.serverPort)};
+        }
     }
     ImGui::Render();
     renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
     return SDL_APP_CONTINUE;
+}
+
+std::optional<JoinRequest> Home::consumeJoinRequest()
+{
+    if (!pendingJoinRequest) {
+        return std::nullopt;
+    }
+
+    std::optional<JoinRequest> result = pendingJoinRequest;
+    pendingJoinRequest.reset();
+    return result;
+}
+
+void Home::setJoinError(const std::string& error)
+{
+    joinError = error;
 }
