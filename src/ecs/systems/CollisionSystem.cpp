@@ -10,6 +10,7 @@
 #include "ecs/components/Projectile.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/physics/DebugCollisionDraw.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
@@ -81,6 +82,7 @@ static constexpr float k_groundProbeDistance = physics::k_stepHeight; // also us
 static void
 depenetratePlanes(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, std::span<const physics::Plane> planes)
 {
+    uint32_t planeIdx = 0;
     for (const physics::Plane& plane : planes) {
         const float k_r = std::abs(plane.normal.x) * halfExtents.x + std::abs(plane.normal.y) * halfExtents.y +
                           std::abs(plane.normal.z) * halfExtents.z;
@@ -93,7 +95,17 @@ depenetratePlanes(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
             const float k_into = glm::dot(vel, plane.normal);
             if (k_into < 0.0f)
                 vel -= plane.normal * k_into;
+
+            // Diagnostic contact: report the point on the plane closest to the entity.
+            if (physics::debug::isEnabled()) {
+                physics::debug::pushDepenContact(pos - plane.normal * k_r,
+                                                 plane.normal,
+                                                 k_overlap,
+                                                 physics::debug::ContactSource::PlaneDepen,
+                                                 planeIdx);
+            }
         }
+        ++planeIdx;
     }
 }
 
@@ -138,6 +150,15 @@ static void depenetrateBox(glm::vec3& pos, glm::vec3& vel, const glm::vec3& half
     const float k_into = glm::dot(vel, pushDir);
     if (k_into < 0.0f)
         vel -= pushDir * k_into;
+
+    if (physics::debug::isEnabled()) {
+        // Contact lies on the face we just pushed out of, at the AABB centre's projection.
+        const glm::vec3 boxCentre = (box.min + box.max) * 0.5f;
+        const glm::vec3 contactPoint = pos - pushDir * std::abs(glm::dot(halfExtents, glm::abs(pushDir)));
+        (void)boxCentre;
+        physics::debug::pushDepenContact(
+            contactPoint, pushDir, minPen, physics::debug::ContactSource::BoxDepen, 0);
+    }
 }
 
 /// @brief Push the entity out of a convex brush it currently overlaps.
@@ -177,6 +198,16 @@ depenetrateBrush(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, c
     const float k_into = glm::dot(vel, plane.normal);
     if (k_into < 0.0f)
         vel -= plane.normal * k_into;
+
+    if (physics::debug::isEnabled()) {
+        const float k_r = std::abs(plane.normal.x) * halfExtents.x + std::abs(plane.normal.y) * halfExtents.y +
+                          std::abs(plane.normal.z) * halfExtents.z;
+        physics::debug::pushDepenContact(pos - plane.normal * k_r,
+                                         plane.normal,
+                                         minOverlap,
+                                         physics::debug::ContactSource::BrushDepen,
+                                         static_cast<uint32_t>(minPlane));
+    }
 }
 
 /// @brief Push the entity out of a vertical cylinder it currently overlaps.
@@ -226,6 +257,14 @@ depenetrateCylinder(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents
     const float k_into = glm::dot(vel, pushDir);
     if (k_into < 0.0f)
         vel -= pushDir * k_into;
+
+    if (physics::debug::isEnabled()) {
+        // Contact point: a half-extent step back into the cylinder surface along the push direction.
+        const float r = std::abs(pushDir.x) * halfExtents.x + std::abs(pushDir.y) * halfExtents.y +
+                        std::abs(pushDir.z) * halfExtents.z;
+        physics::debug::pushDepenContact(
+            pos - pushDir * r, pushDir, pen, physics::debug::ContactSource::CylinderDepen, 0);
+    }
 }
 
 /// @brief Push the entity out of a world sphere it currently overlaps.
@@ -254,6 +293,11 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
     const float k_into = glm::dot(vel, pushDir);
     if (k_into < 0.0f)
         vel -= pushDir * k_into;
+
+    if (physics::debug::isEnabled()) {
+        physics::debug::pushDepenContact(
+            sph.center + pushDir * sph.radius, pushDir, k_pen, physics::debug::ContactSource::SphereDepen, 0);
+    }
 }
 
 /// @brief Push the entity out of a triangle mesh it currently overlaps.
@@ -406,6 +450,19 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
 
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
+
+                if (physics::debug::isEnabled()) {
+                    // Mark the contact at the surface point (AABB centre offset back along the
+                    // surface normal by the AABB's projected half-extent).  `sweepAll` doesn't
+                    // distinguish the source primitive in `HitResult`, so we tag it as a generic
+                    // sweep contact for now; per-primitive tagging arrives with Phase 2.
+                    const float r = std::abs(k_hit.normal.x) * shape.halfExtents.x +
+                                    std::abs(k_hit.normal.y) * shape.halfExtents.y +
+                                    std::abs(k_hit.normal.z) * shape.halfExtents.z;
+                    physics::debug::pushSweepContact(pos.value - k_hit.normal * r,
+                                                     k_hit.normal,
+                                                     physics::debug::ContactSource::PlaneSweep);
+                }
 
                 // Floor detection: normal.y > 0.7 for normal gravity,
                 // normal.y < -0.7 for flipped (ceilings become floors).

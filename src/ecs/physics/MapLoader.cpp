@@ -923,7 +923,29 @@ bool shouldSkipNode(const char* nodeName)
 /// @param decomposeNonConvex  If true and the mesh fails the single-hull
 ///        convex-brush check, run V-HACD convex decomposition before falling
 ///        back to triMesh.
+/// @brief Look up the dominant `SurfaceType` for a mesh by reading its
+/// assigned Blender material name.  Falls back to `Concrete` if the scene has
+/// no materials, the mesh has no index, or the name doesn't match.
+SurfaceType resolveMeshSurfaceType(const aiMesh* mesh, const aiScene* scene)
+{
+    if (scene == nullptr || mesh == nullptr)
+        return SurfaceType::Concrete;
+    if (mesh->mMaterialIndex >= scene->mNumMaterials)
+        return SurfaceType::Concrete;
+
+    const aiMaterial* mat = scene->mMaterials[mesh->mMaterialIndex];
+    if (mat == nullptr)
+        return SurfaceType::Concrete;
+
+    aiString name;
+    if (mat->Get(AI_MATKEY_NAME, name) != AI_SUCCESS)
+        return SurfaceType::Concrete;
+
+    return surfaceTypeFromMaterialName(std::string_view{name.C_Str(), name.length});
+}
+
 void extractMeshCollision(const aiMesh* mesh,
+                          const aiScene* scene,
                           const glm::mat4& world,
                           float scale,
                           const std::string& forceType,
@@ -944,11 +966,15 @@ void extractMeshCollision(const aiMesh* mesh,
     if (verts.empty())
         return;
 
+    // Phase 3: derive the SurfaceType once from the mesh's Blender material
+    // and stamp it onto every primitive we emit below.
+    const SurfaceType meshSurface = resolveMeshSurfaceType(mesh, scene);
+
     // --- Forced type from sub-collection ---
     if (forceType == "boxes") {
         glm::vec3 bmin, bmax;
         computeAABB(verts, bmin, bmax);
-        out.boxes.push_back({bmin, bmax});
+        out.boxes.push_back({bmin, bmax, meshSurface});
         SDL_Log("MapLoader: AABB (forced) [%.1f,%.1f,%.1f]→[%.1f,%.1f,%.1f] '%s'",
                 static_cast<double>(bmin.x),
                 static_cast<double>(bmin.y),
@@ -963,14 +989,14 @@ void extractMeshCollision(const aiMesh* mesh,
         glm::vec3 center;
         float radius;
         if (fitSphere(verts, center, radius)) {
-            out.spheres.push_back({center, radius});
+            out.spheres.push_back({center, radius, meshSurface});
         } else {
             // Fallback: bounding sphere
             glm::vec3 bmin, bmax;
             computeAABB(verts, bmin, bmax);
             center = (bmin + bmax) * 0.5f;
             radius = glm::length(bmax - bmin) * 0.5f;
-            out.spheres.push_back({center, radius});
+            out.spheres.push_back({center, radius, meshSurface});
         }
         SDL_Log("MapLoader: Sphere (forced) c=(%.1f,%.1f,%.1f) r=%.1f '%s'",
                 static_cast<double>(out.spheres.back().center.x),
@@ -984,7 +1010,7 @@ void extractMeshCollision(const aiMesh* mesh,
         glm::vec3 base;
         float radius, height;
         if (fitCylinder(verts, base, radius, height)) {
-            out.cylinders.push_back({base, radius, height});
+            out.cylinders.push_back({base, radius, height, meshSurface});
         } else {
             // Fallback: bounding cylinder from AABB
             glm::vec3 bmin, bmax;
@@ -992,7 +1018,7 @@ void extractMeshCollision(const aiMesh* mesh,
             base = glm::vec3((bmin.x + bmax.x) * 0.5f, bmin.y, (bmin.z + bmax.z) * 0.5f);
             radius = std::max(bmax.x - bmin.x, bmax.z - bmin.z) * 0.5f;
             height = bmax.y - bmin.y;
-            out.cylinders.push_back({base, radius, height});
+            out.cylinders.push_back({base, radius, height, meshSurface});
         }
         SDL_Log("MapLoader: Cylinder (forced) base=(%.1f,%.1f,%.1f) r=%.1f h=%.1f '%s'",
                 static_cast<double>(out.cylinders.back().base.x),
@@ -1006,13 +1032,14 @@ void extractMeshCollision(const aiMesh* mesh,
     if (forceType == "brushes") {
         WorldBrush brush{};
         if (extractConvexBrush(mesh, world, scale, brush)) {
+            brush.surfaceType = meshSurface;
             out.brushes.push_back(brush);
             SDL_Log("MapLoader: Brush (forced) %d planes '%s'", brush.planeCount, nodeName);
         } else {
             // Fallback to AABB
             glm::vec3 bmin, bmax;
             computeAABB(verts, bmin, bmax);
-            out.boxes.push_back({bmin, bmax});
+            out.boxes.push_back({bmin, bmax, meshSurface});
             SDL_Log("MapLoader: AABB (brush fallback) '%s'", nodeName);
         }
         return;
@@ -1021,6 +1048,8 @@ void extractMeshCollision(const aiMesh* mesh,
         WorldTriMesh tm;
         buildTriMeshFromAiMesh(mesh, world, scale, tm);
         buildTriMeshBVH(tm);
+        weldTriMesh(tm);
+        tm.defaultSurface = meshSurface;
         SDL_Log("MapLoader: TriMesh (forced) %zu tris, %zu BVH nodes '%s'",
                 tm.indices.size() / 3,
                 tm.bvhNodes.size(),
@@ -1049,7 +1078,7 @@ void extractMeshCollision(const aiMesh* mesh,
                 bmax[axis] += pad;
             }
         }
-        out.boxes.push_back({bmin, bmax});
+        out.boxes.push_back({bmin, bmax, meshSurface});
         SDL_Log("MapLoader: Platform (forced) [%.1f,%.1f,%.1f]→[%.1f,%.1f,%.1f] '%s'",
                 static_cast<double>(bmin.x),
                 static_cast<double>(bmin.y),
@@ -1072,7 +1101,7 @@ void extractMeshCollision(const aiMesh* mesh,
     if (isAxisAlignedBox(mesh, world)) {
         glm::vec3 bmin, bmax;
         computeAABB(verts, bmin, bmax);
-        out.boxes.push_back({bmin, bmax});
+        out.boxes.push_back({bmin, bmax, meshSurface});
         SDL_Log("MapLoader: AABB (auto) [%.1f,%.1f,%.1f]→[%.1f,%.1f,%.1f] '%s'",
                 static_cast<double>(bmin.x),
                 static_cast<double>(bmin.y),
@@ -1089,7 +1118,7 @@ void extractMeshCollision(const aiMesh* mesh,
         glm::vec3 base;
         float radius, height;
         if (fitCylinder(verts, base, radius, height)) {
-            out.cylinders.push_back({base, radius, height});
+            out.cylinders.push_back({base, radius, height, meshSurface});
             SDL_Log("MapLoader: Cylinder (auto) base=(%.1f,%.1f,%.1f) r=%.1f h=%.1f '%s'",
                     static_cast<double>(base.x),
                     static_cast<double>(base.y),
@@ -1106,7 +1135,7 @@ void extractMeshCollision(const aiMesh* mesh,
         glm::vec3 center;
         float radius;
         if (fitSphere(verts, center, radius)) {
-            out.spheres.push_back({center, radius});
+            out.spheres.push_back({center, radius, meshSurface});
             SDL_Log("MapLoader: Sphere (auto) c=(%.1f,%.1f,%.1f) r=%.1f '%s'",
                     static_cast<double>(center.x),
                     static_cast<double>(center.y),
@@ -1126,6 +1155,7 @@ void extractMeshCollision(const aiMesh* mesh,
     {
         WorldBrush brush{};
         if (extractConvexBrush(mesh, world, scale, brush, nodeName)) {
+            brush.surfaceType = meshSurface;
             out.brushes.push_back(brush);
             SDL_Log("MapLoader: Brush (auto) %d planes '%s'", brush.planeCount, nodeName);
             return;
@@ -1136,8 +1166,14 @@ void extractMeshCollision(const aiMesh* mesh,
     //     handful of convex brushes.  Smoother runtime collision than triMesh
     //     (no per-triangle MTV jitter on curved surfaces) and the cost is paid
     //     only once at load time.
-    if (decomposeNonConvex && decomposeIntoBrushes(mesh, world, scale, nodeName, out) > 0) {
-        return;
+    if (decomposeNonConvex) {
+        const size_t k_brushesBefore = out.brushes.size();
+        if (decomposeIntoBrushes(mesh, world, scale, nodeName, out) > 0) {
+            // Stamp the mesh's material on every brush we just produced.
+            for (size_t i = k_brushesBefore; i < out.brushes.size(); ++i)
+                out.brushes[i].surfaceType = meshSurface;
+            return;
+        }
     }
 
     // 5. TriMesh (for complex geometry that doesn't fit simpler primitives)
@@ -1146,6 +1182,8 @@ void extractMeshCollision(const aiMesh* mesh,
         buildTriMeshFromAiMesh(mesh, world, scale, tm);
         if (tm.indices.size() >= 3) {
             buildTriMeshBVH(tm);
+            weldTriMesh(tm);
+            tm.defaultSurface = meshSurface;
             SDL_Log("MapLoader: TriMesh (auto) %zu tris, %zu BVH nodes '%s'",
                     tm.indices.size() / 3,
                     tm.bvhNodes.size(),
@@ -1210,7 +1248,7 @@ void extractCollision(const aiNode* node,
 
         for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
             const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
-            extractMeshCollision(mesh, world, scale, forceType, node->mName.C_Str(), tryDecompose, out);
+            extractMeshCollision(mesh, scene, world, scale, forceType, node->mName.C_Str(), tryDecompose, out);
         }
     }
 
@@ -1336,7 +1374,7 @@ bool loadPropCollision(
             for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
                 const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
                 // Scale = 1.0 because the scale is already baked into the transform.
-                extractMeshCollision(mesh, world, 1.0f, "", node->mName.C_Str(), decompose, out);
+                extractMeshCollision(mesh, scene, world, 1.0f, "", node->mName.C_Str(), decompose, out);
             }
 
             for (unsigned int c = 0; c < node->mNumChildren; ++c)

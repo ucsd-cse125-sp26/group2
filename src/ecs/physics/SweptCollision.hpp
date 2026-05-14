@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "SurfaceType.hpp"
+
 #include <cstdint>
 #include <glm/vec3.hpp>
 #include <span>
@@ -23,15 +25,17 @@ namespace physics
 /// @brief An infinite plane dividing free space from solid geometry.
 struct Plane
 {
-    glm::vec3 normal; ///< Unit vector pointing into free (non-solid) space.
-    float distance;   ///< Signed offset: `dot(normal, p) == distance` for points on the plane.
+    glm::vec3 normal;                              ///< Unit vector pointing into free (non-solid) space.
+    float distance;                                ///< Signed offset: `dot(normal, p) == distance` for points on the plane.
+    SurfaceType surfaceType = SurfaceType::Concrete; ///< Material tag for impact VFX / SFX (Phase 3).
 };
 
 /// @brief An axis-aligned box in world space, used as static collision geometry.
 struct WorldAABB
 {
-    glm::vec3 min; ///< Minimum corner (lowest x, y, z).
-    glm::vec3 max; ///< Maximum corner (highest x, y, z).
+    glm::vec3 min;                                   ///< Minimum corner (lowest x, y, z).
+    glm::vec3 max;                                   ///< Maximum corner (highest x, y, z).
+    SurfaceType surfaceType = SurfaceType::Concrete; ///< Material tag (Phase 3).
 };
 
 /// @brief A convex volume defined by bounding planes (for ramps, angled walls, etc.).
@@ -51,6 +55,7 @@ struct WorldBrush
     static constexpr int k_maxPlanes = 64;
     Plane planes[k_maxPlanes];
     int planeCount{0};
+    SurfaceType surfaceType = SurfaceType::Concrete; ///< Material tag (Phase 3).
 };
 
 /// @brief A vertical (Y-axis) cylinder in world space.
@@ -59,16 +64,18 @@ struct WorldBrush
 /// from `base.y` to `base.y + height` along the Y axis.
 struct WorldCylinder
 {
-    glm::vec3 base; ///< Centre of the bottom cap.
-    float radius;   ///< Horizontal radius.
-    float height;   ///< Extent along +Y from base.
+    glm::vec3 base;                                  ///< Centre of the bottom cap.
+    float radius;                                    ///< Horizontal radius.
+    float height;                                    ///< Extent along +Y from base.
+    SurfaceType surfaceType = SurfaceType::Concrete; ///< Material tag (Phase 3).
 };
 
 /// @brief A sphere in world space.
 struct WorldSphere
 {
-    glm::vec3 center; ///< Centre point.
-    float radius;     ///< Radius.
+    glm::vec3 center;                                ///< Centre point.
+    float radius;                                    ///< Radius.
+    SurfaceType surfaceType = SurfaceType::Concrete; ///< Material tag (Phase 3).
 };
 
 /// @brief A single BVH node for spatial acceleration of triangle meshes.
@@ -85,6 +92,15 @@ struct BVHNode
 /// Built once at load time via `buildTriMeshBVH()`.  The BVH is a flat array
 /// binary tree; leaves hold up to 4 triangles.  `triIndices` is a permutation
 /// array mapping BVH leaf ranges to triangle indices in `indices`.
+///
+/// **Phase 2 welding data** (`faceNormals`, `edgeActive`, `vertActive`):
+/// produced by `weldTriMesh()` after `buildTriMeshBVH()`.  Drives Voronoi-
+/// region contact clipping in the runtime collision primitives: per-triangle
+/// `edgeActive` bits mark genuine boundary edges; `vertActive` marks corners
+/// touched by an active edge.  Internal edges (welded coplanar / concave
+/// edges shared between adjacent triangles) are cleared so the depenetration
+/// path discards ghost contacts on them, matching the behaviour of Havok /
+/// Bullet / Jolt mesh shapes.
 struct WorldTriMesh
 {
     std::vector<glm::vec3> vertices;  ///< All vertex positions (world space, scaled).
@@ -93,6 +109,17 @@ struct WorldTriMesh
     std::vector<uint32_t> triIndices; ///< Permutation: BVH leaf ranges → triangle indices.
     glm::vec3 boundsMin{0.0f};        ///< Whole-mesh AABB min.
     glm::vec3 boundsMax{0.0f};        ///< Whole-mesh AABB max.
+
+    // Welding data (one entry per canonical triangle index in `indices`).
+    std::vector<glm::vec3> faceNormals; ///< CCW face normal (unit length) per triangle.
+    std::vector<uint8_t> edgeActive;    ///< Bit i set ⇔ edge i of this triangle is an active (boundary or convex) edge.
+    std::vector<uint8_t> vertActive;    ///< Bit i set ⇔ vertex i of this triangle is touched by an active edge.
+
+    // Phase 3 material data.  If `triangleMaterials` is empty, every triangle
+    // falls back to `defaultSurface`.  Authored by `MapLoader` from Blender
+    // per-face materials.
+    std::vector<uint8_t> triangleMaterials;            ///< One `SurfaceType` index per triangle (empty = use default).
+    SurfaceType defaultSurface = SurfaceType::Concrete; ///< Fallback for triangles without per-face material data.
 };
 
 /// @brief All world collision geometry for one tick.
@@ -112,6 +139,7 @@ struct HitResult
     bool hit{false};                    ///< True if the sweep intersected a plane.
     float tFirst{1.0f};                 ///< Fraction along the movement path [0..1] where the first hit occurs.
     glm::vec3 normal{0.0f, 1.0f, 0.0f}; ///< Surface normal at the contact point.
+    SurfaceType surfaceType{SurfaceType::Concrete}; ///< Material at the hit surface (Phase 3).
 };
 
 /// @brief Sweep an AABB along the path [start, end] against a list of infinite planes.
@@ -167,6 +195,7 @@ struct SphereHitResult
     float t{1.0f};                      ///< Fraction along path [0..1].
     glm::vec3 normal{0.0f, 1.0f, 0.0f}; ///< Surface normal at contact.
     glm::vec3 point{0.0f};              ///< World-space contact point on the surface.
+    SurfaceType surfaceType{SurfaceType::Concrete}; ///< Material at the hit surface (Phase 3).
 };
 
 /// @brief Cast a sphere along the path [start, end] against all world geometry.

@@ -212,12 +212,15 @@ inline bool raycastSphere(glm::vec3 origin,
 }
 
 /// @brief Raycast against a triangle mesh using BVH-accelerated Möller-Trumbore.
-inline bool raycastTriMesh(glm::vec3 origin,
-                           glm::vec3 direction,
-                           const WorldTriMesh& mesh,
-                           float maxDistance,
-                           float& outDistance,
-                           glm::vec3& outNormal)
+/// @brief Indexed variant — also reports the canonical triangle index that
+/// was hit, so callers can look up per-triangle materials in the mesh.
+inline bool raycastTriMeshIndexed(glm::vec3 origin,
+                                  glm::vec3 direction,
+                                  const WorldTriMesh& mesh,
+                                  float maxDistance,
+                                  float& outDistance,
+                                  glm::vec3& outNormal,
+                                  uint32_t& outTriIdx)
 {
     // Quick reject against mesh AABB.
     float dummyDist = maxDistance;
@@ -229,6 +232,7 @@ inline bool raycastTriMesh(glm::vec3 origin,
     bool anyHit = false;
     float bestDist = maxDistance;
     glm::vec3 bestNormal{0.0f};
+    uint32_t bestTri = 0;
 
     int stack[64];
     int stackPtr = 0;
@@ -277,6 +281,7 @@ inline bool raycastTriMesh(glm::vec3 origin,
                     bestNormal = glm::normalize(glm::cross(e1, e2));
                     if (glm::dot(bestNormal, direction) > 0.0f)
                         bestNormal = -bestNormal;
+                    bestTri = ti;
                     anyHit = true;
                 }
             }
@@ -289,8 +294,21 @@ inline bool raycastTriMesh(glm::vec3 origin,
     if (anyHit) {
         outDistance = bestDist;
         outNormal = bestNormal;
+        outTriIdx = bestTri;
     }
     return anyHit;
+}
+
+/// @brief Convenience wrapper for callers that don't care which triangle was hit.
+inline bool raycastTriMesh(glm::vec3 origin,
+                           glm::vec3 direction,
+                           const WorldTriMesh& mesh,
+                           float maxDistance,
+                           float& outDistance,
+                           glm::vec3& outNormal)
+{
+    uint32_t ignored = 0;
+    return raycastTriMeshIndexed(origin, direction, mesh, maxDistance, outDistance, outNormal, ignored);
 }
 
 /// @brief Ray vs convex brush intersection (generalised slab method).
@@ -386,7 +404,7 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
         bestHit.normal = plane.normal;
-        bestHit.surface = SurfaceType::Concrete;
+        bestHit.surface = plane.surfaceType;
     }
 
     for (const WorldAABB& box : world.boxes) {
@@ -400,7 +418,7 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
         bestHit.normal = normal;
-        bestHit.surface = SurfaceType::Concrete;
+        bestHit.surface = box.surfaceType;
     }
 
     for (const WorldBrush& brush : world.brushes) {
@@ -412,7 +430,7 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
         bestHit.normal = normal;
-        bestHit.surface = SurfaceType::Concrete;
+        bestHit.surface = brush.surfaceType;
     }
 
     for (const WorldCylinder& cyl : world.cylinders) {
@@ -424,7 +442,7 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
         bestHit.normal = normal;
-        bestHit.surface = SurfaceType::Concrete;
+        bestHit.surface = cyl.surfaceType;
     }
 
     for (const WorldSphere& sph : world.spheres) {
@@ -436,19 +454,23 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
         bestHit.normal = normal;
-        bestHit.surface = SurfaceType::Concrete;
+        bestHit.surface = sph.surfaceType;
     }
 
     for (const WorldTriMesh& tm : world.triMeshes) {
         float distance = bestHit.distance;
         glm::vec3 normal{0.0f};
-        if (!raycastTriMesh(origin, direction, tm, bestHit.distance, distance, normal))
+        uint32_t hitTriIdx = 0;
+        if (!raycastTriMeshIndexed(origin, direction, tm, bestHit.distance, distance, normal, hitTriIdx))
             continue;
         bestHit.hit = true;
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
         bestHit.normal = normal;
-        bestHit.surface = SurfaceType::Concrete;
+        // Per-triangle material if cooked, else mesh default.
+        bestHit.surface =
+            (hitTriIdx < tm.triangleMaterials.size()) ? static_cast<SurfaceType>(tm.triangleMaterials[hitTriIdx])
+                                                       : tm.defaultSurface;
     }
 
     return bestHit;

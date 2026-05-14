@@ -36,6 +36,7 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/DebugCollisionDraw.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
@@ -912,6 +913,12 @@ void Game::applyFrameRateLimit()
 
 SDL_AppResult Game::iterate()
 {
+    // Phase-1 debug viz: drain the previous frame's contact accumulator and
+    // start a new bucket.  All `physics::debug::pushContact(...)` calls during
+    // the upcoming sim ticks accumulate here; the foreground overlay reads
+    // them later in the render block.  No-op when capture is disabled.
+    physics::debug::beginFrame();
+
     // 1. Accumulate real elapsed time
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
@@ -2195,6 +2202,7 @@ SDL_AppResult Game::iterate()
             const glm::mat4 hbVP = hbProj * hbView;
             debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
+            debugUI.buildContactDebugUI(hbVP, winWf, winHf);
             debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
             debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
