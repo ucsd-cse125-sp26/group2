@@ -787,6 +787,10 @@ add_executable(group2
         src/ecs/physics/ContactManifold.hpp
         src/ecs/physics/ContactCache.hpp
         src/ecs/physics/ContactCache.cpp
+        src/ecs/physics/Solver.hpp
+        src/ecs/physics/Solver.cpp
+        src/ecs/physics/Joints.hpp
+        src/ecs/physics/Joints.cpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
         src/ecs/components/TriggerVolume.hpp
@@ -1026,6 +1030,10 @@ add_executable(server
         src/ecs/physics/ContactManifold.hpp
         src/ecs/physics/ContactCache.hpp
         src/ecs/physics/ContactCache.cpp
+        src/ecs/physics/Solver.hpp
+        src/ecs/physics/Solver.cpp
+        src/ecs/physics/Joints.hpp
+        src/ecs/physics/Joints.cpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
         src/ecs/components/TriggerVolume.hpp
@@ -1293,6 +1301,10 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactManifold.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactCache.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactCache.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Solver.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Solver.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/RigidBody.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Orientation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/TriggerVolume.hpp"
