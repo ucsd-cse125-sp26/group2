@@ -162,10 +162,10 @@ void ServerGame::run()
     for (int i = 0; i < gamemap::weaponSpawner_.size(); i++) {
         WeaponType weaponType = gamemap::weaponSpawner_[i].type;
         glm::vec3 pos = gamemap::weaponSpawner_[i].pos;
-        
+
         const entt::entity spawner = registry.create();
         registry.emplace<WeaponSpawner>(
-            spawner, 
+            spawner,
             WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
         );
         registry.emplace<Position>(spawner, pos);
@@ -188,7 +188,7 @@ void ServerGame::run()
 
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
-            spawner, 
+            spawner,
             PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false}
         );
         registry.emplace<Position>(spawner, pos);
