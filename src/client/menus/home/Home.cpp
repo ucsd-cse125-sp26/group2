@@ -33,11 +33,12 @@ SDL_AppResult Home::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    // TODO: Display joinError in UI if set
-    JoinMenuResult result = home_ui::buildJoinMenu(joinMenuState);
+    JoinMenuResult result = home_ui::buildJoinMenu(joinMenuState, joinError);
     if (result.connectClicked) {
+        joinError.clear();
         SDL_Log("Join button clicked! IP: %s, Port: %d", joinMenuState.serverIp, joinMenuState.serverPort);
-        if (joinMenuState.serverPort < 0 || joinMenuState.serverPort > 65535) {
+        if (joinMenuState.serverPort < 1 || joinMenuState.serverPort > 65535) {
+            joinError = "Port must be between 1 and 65535";
             SDL_Log("Invalid port number: %d", joinMenuState.serverPort);
         } else {
             pendingJoinRequest = JoinRequest{.serverIp = joinMenuState.serverIp,

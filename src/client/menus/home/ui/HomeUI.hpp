@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 struct JoinMenuState
 {
     char serverIp[64] = "127.0.0.1";
@@ -13,5 +15,5 @@ struct JoinMenuResult
 
 namespace home_ui
 {
-JoinMenuResult buildJoinMenu(JoinMenuState& state);
+JoinMenuResult buildJoinMenu(JoinMenuState& state, std::string_view errorMessage = {});
 }

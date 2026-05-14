@@ -4,9 +4,8 @@
 
 namespace home_ui
 {
-JoinMenuResult buildJoinMenu(JoinMenuState& state)
+JoinMenuResult buildJoinMenu(JoinMenuState& state, std::string_view errorMessage)
 {
-    // TODO: Display joinError in UI if set
     JoinMenuResult result;
     result.connectClicked = false;
 
@@ -17,6 +16,11 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state)
         ImGui::InputInt("Port", &state.serverPort);
         if (ImGui::Button("Join")) {
             result.connectClicked = true;
+        }
+        if (!errorMessage.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "%.*s", static_cast<int>(errorMessage.size()), errorMessage.data());
         }
     }
     ImGui::End();
