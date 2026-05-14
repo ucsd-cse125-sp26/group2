@@ -5,7 +5,8 @@
 
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
-#include "lobby/Lobby.hpp"
+#include "menus/home/Home.hpp"
+#include "menus/lobby/Lobby.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 
 #include <SDL3/SDL_video.h>
@@ -14,6 +15,46 @@
 #include <backends/imgui_impl_sdl3.h>
 #include <imgui.h>
 #include <string>
+
+namespace
+{
+constexpr int k_joinConnectionTimeoutMs = 5000;
+
+/// @brief Return a short log-friendly string for a ConnectError value.
+const char* connectErrorLogName(ConnectError error)
+{
+    switch (error) {
+    case ConnectError::None:
+        return "none";
+    case ConnectError::ResolveFailed:
+        return "resolve failed";
+    case ConnectError::ResolveTimedOut:
+        return "resolve timed out";
+    case ConnectError::CreateClientFailed:
+        return "create client failed";
+    case ConnectError::ConnectTimedOut:
+        return "connect timed out";
+    case ConnectError::ConnectFailed:
+        return "connect failed";
+    }
+
+    return "unknown";
+}
+
+/// @brief Return a user-facing error message for a failed connection attempt.
+const char* joinErrorMessage(ConnectError error)
+{
+    switch (error) {
+    case ConnectError::ResolveFailed:
+        return "Could not resolve server address";
+    case ConnectError::ResolveTimedOut:
+    case ConnectError::ConnectTimedOut:
+        return "Connection timed out";
+    default:
+        return "Failed to connect to server";
+    }
+}
+} // namespace
 
 bool App::init()
 {
@@ -80,15 +121,15 @@ bool App::init()
         return false;
     }
 
-    // Create network
-    const NetworkAddress clientNet = networkConfig.clientNetwork;
-    if (!client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport)) {
-        SDL_Log("Failed to connect to server");
-        cleanup();
-        return false;
-    }
-
+    // Developer skip
     if (developerConfig.skipLobby) {
+        const NetworkAddress clientNet = networkConfig.clientNetwork;
+        const ConnectError connectError = client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport);
+        if (connectError != ConnectError::None) {
+            SDL_Log("Failed to connect to server: %s", connectErrorLogName(connectError));
+            cleanup();
+            return false;
+        }
         auto game = std::make_unique<Game>();
         if (!game->initDebugUI(window) || !game->init(&renderer, window, &client)) {
             game->quit();
@@ -98,14 +139,14 @@ bool App::init()
         screen_ = std::move(game);
         current = Screen::InGame;
     } else {
-        auto lobbyScreen = std::make_unique<Lobby>();
-        if (!lobbyScreen->init(&renderer, window, &client)) {
-            lobbyScreen->quit();
+        auto homeScreen = std::make_unique<Home>();
+        if (!homeScreen->init(&renderer, window)) {
+            homeScreen->quit();
             cleanup();
             return false;
         }
-        screen_ = std::move(lobbyScreen);
-        current = Screen::Lobby;
+        screen_ = std::move(homeScreen);
+        current = Screen::Home;
     }
 
     return true;
@@ -126,17 +167,56 @@ SDL_AppResult App::iterate()
     if (result != SDL_APP_CONTINUE)
         return result;
 
-    if (current == Screen::Lobby) {
-        if (auto* lobby = dynamic_cast<Lobby*>(screen_.get()); lobby != nullptr && lobby->shouldStartMatch()) {
+    switch (current) {
+    case Screen::Home: {
+        auto home = dynamic_cast<Home*>(screen_.get());
+        if (!home)
+            break;
+        if (auto joinRequest = home->consumeJoinRequest()) {
+            std::string serverIp = joinRequest->serverIp;
+            uint16_t serverPort = joinRequest->serverPort;
+            SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
+            const ConnectError connectError =
+                client.init(serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs);
+            if (connectError != ConnectError::None) {
+                SDL_Log("Failed to connect to server at %s:%d: %s",
+                        serverIp.c_str(),
+                        serverPort,
+                        connectErrorLogName(connectError));
+                home->setJoinError(joinErrorMessage(connectError));
+            } else {
+                SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
+                transitionTo(Screen::Lobby);
+            }
+        }
+        break;
+    }
+    case Screen::Lobby: {
+        auto* lobby = dynamic_cast<Lobby*>(screen_.get());
+        if (!lobby)
+            break;
+
+        if (lobby->consumeReturnToMenu()) {
+            client.shutdown();
+            transitionTo(Screen::Home);
+            break;
+        }
+
+        if (lobby->shouldStartMatch()) {
             lobby->consumeStartMatchState();
             transitionTo(Screen::InGame);
         }
-    } else if (current == Screen::InGame) {
+        break;
+    }
+    case Screen::InGame:
         if (developerConfig.skipLobby)
-            return result;
+            break;
         if (auto* game = dynamic_cast<Game*>(screen_.get()); game != nullptr && game->shouldReturnToLobby()) {
             transitionTo(Screen::Lobby);
         }
+        break;
+    default:
+        break;
     }
 
     return result;
@@ -178,6 +258,18 @@ void App::transitionTo(Screen next)
         }
         break;
     }
+    case Screen::Home: {
+        auto homeScreen = std::make_unique<Home>();
+        if (homeScreen->init(&renderer, window)) {
+            screen_ = std::move(homeScreen);
+            current = next;
+        } else {
+            homeScreen->quit();
+        }
+        break;
+    }
+    default:
+        break;
     }
 }
 

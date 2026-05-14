@@ -263,7 +263,7 @@ bool Bot::init(const std::string& host, Uint16 port, int botId)
     // PR-23: callback MUST be set before client_.init() so the first
     // applicable snapshot can map and initialise the local player.
     setupLocalPlayerCallback();
-    if (!client_.init(host.c_str(), port)) {
+    if (client_.init(host.c_str(), port) != ConnectError::None) {
         SDL_Log("[bot %d] connection failed", botId_);
         return false;
     }

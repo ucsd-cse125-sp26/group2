@@ -413,6 +413,7 @@ add_library(imgui_lib STATIC
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp
+    ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
 )
 target_include_directories(imgui_lib PUBLIC
     ${imgui_SOURCE_DIR}
@@ -857,11 +858,15 @@ add_executable(group2
         src/ecs/abilities/DashAbility.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
-        src/client/lobby/Lobby.hpp
-        src/client/lobby/Lobby.cpp
-        src/client/lobby/ui/LobbyUI.hpp
-        src/client/lobby/ui/LobbyUI.cpp
+        src/client/menus/lobby/Lobby.hpp
+        src/client/menus/lobby/Lobby.cpp
+        src/client/menus/lobby/ui/LobbyUI.hpp
+        src/client/menus/lobby/ui/LobbyUI.cpp
         src/client/renderer-new/RendererTypes.hpp
+        src/client/menus/home/Home.hpp
+        src/client/menus/home/Home.cpp
+        src/client/menus/home/ui/HomeUI.hpp
+        src/client/menus/home/ui/HomeUI.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

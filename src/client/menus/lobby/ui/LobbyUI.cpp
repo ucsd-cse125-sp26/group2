@@ -58,6 +58,11 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
             ImGui::EndDisabled();
         }
         ImGui::EndDisabled();
+
+        ImGui::Separator();
+        if (ImGui::Button("Return to Main Menu")) {
+            result.returnToMenuClicked = true;
+        }
     }
     ImGui::End();
 

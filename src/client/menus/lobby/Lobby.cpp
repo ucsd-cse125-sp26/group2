@@ -138,6 +138,10 @@ SDL_AppResult Lobby::iterate()
         client->sendStartMatch();
     }
 
+    if (result.returnToMenuClicked) {
+        returnToMenu = true;
+    }
+
     ImGui::Render();
 
     // Default camera: lobby has no scene, so the renderer just draws sky + ImGui overlay.
@@ -202,4 +206,13 @@ void Lobby::updateStartCountdown()
     if (startCountdownRemaining <= 0.0f) {
         startCountdownRemaining = 0.0f;
     }
+}
+
+bool Lobby::consumeReturnToMenu()
+{
+    if (!returnToMenu)
+        return false;
+
+    returnToMenu = false;
+    return true;
 }

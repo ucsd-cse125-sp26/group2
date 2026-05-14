@@ -34,6 +34,8 @@ public:
     /// @return The packet that triggered the match start, or nullopt if none was pending.
     std::optional<MatchStatePacket> consumeStartMatchState();
 
+    bool consumeReturnToMenu(); ///< True if the user has requested to return to the main menu, then clear that request.
+
 private:
     /// @brief True if the local client is host and all non-host players are ready.
     bool canHostStartMatch() const;
@@ -50,4 +52,5 @@ private:
     bool startCountdownActive = false;               ///< True while the pre-match countdown is ticking.
     float startCountdownRemaining = 0.0f;            ///< Seconds remaining in the countdown.
     Uint64 lastStartCountdownTickNs = 0;             ///< SDL tick timestamp of the last countdown update (ns).
+    bool returnToMenu = false;                       ///< Set to true when the user wants to return to the main menu.
 };

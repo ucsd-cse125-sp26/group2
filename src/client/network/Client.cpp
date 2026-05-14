@@ -25,26 +25,39 @@
 #include <cmath>
 #include <cstring>
 
-bool Client::init(const char* addr, Uint16 port, const TransportConfig& transport)
+ConnectError Client::init(const char* addr, Uint16 port, const TransportConfig& transport, int timeoutMs)
 {
     serverAddr = NET_ResolveHostname(addr);
-    if (NET_WaitUntilResolved(serverAddr, -1) == NET_FAILURE) {
+    if (!serverAddr) {
+        SDL_Log("Failed to start resolving server address: %s", SDL_GetError());
+        return ConnectError::ResolveFailed;
+    }
+
+    const NET_Status resolveStatus = NET_WaitUntilResolved(serverAddr, timeoutMs);
+    if (resolveStatus != NET_SUCCESS) {
         SDL_Log("Failed to resolve server address: %s", SDL_GetError());
-        return false;
+        NET_UnrefAddress(serverAddr);
+        serverAddr = nullptr;
+        return resolveStatus == NET_WAITING ? ConnectError::ResolveTimedOut : ConnectError::ResolveFailed;
     }
 
     auto sock = NET_CreateClient(serverAddr, port);
     if (!sock) {
         SDL_Log("Failed to create client %s", SDL_GetError());
-        return false;
+        NET_UnrefAddress(serverAddr);
+        serverAddr = nullptr;
+        return ConnectError::CreateClientFailed;
     }
     NET_SetStreamSocketNoDelay(sock, true);
 
-    if (NET_WaitUntilConnected(sock, -1) == NET_FAILURE) {
+    const NET_Status connectStatus = NET_WaitUntilConnected(sock, timeoutMs);
+    if (connectStatus != NET_SUCCESS) {
         SDL_Log("Client: connection failed: %s", SDL_GetError());
         NET_DestroyStreamSocket(sock);
         sock = nullptr;
-        return false;
+        NET_UnrefAddress(serverAddr);
+        serverAddr = nullptr;
+        return connectStatus == NET_WAITING ? ConnectError::ConnectTimedOut : ConnectError::ConnectFailed;
     }
 
     msgStream.socket = sock;
@@ -95,7 +108,7 @@ bool Client::init(const char* addr, Uint16 port, const TransportConfig& transpor
     socketDead_.store(false, std::memory_order_relaxed);
     networkThread_ = std::thread(&Client::networkLoop, this);
 
-    return true;
+    return ConnectError::None;
 }
 
 void Client::shutdown()
