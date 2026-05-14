@@ -4,6 +4,7 @@
 #include "PlayerStatusSystem.hpp"
 
 #include "AbilitySystem.hpp"
+#include "PowerupSpawnerSystem.hpp"
 #include "SDL3/SDL_log.h"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
@@ -16,6 +17,7 @@
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
+#include "ecs/components/PowerupState.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -274,6 +276,7 @@ void applyDamage(float damage,
     if (registry.all_of<RespawnTimer>(player))
         return;
 
+
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 
     // Reset heal cooldown on every damage tick
@@ -281,6 +284,12 @@ void applyDamage(float damage,
 
     if (player != killer) {
         updateAbilityLevel(registry, killer, damage);
+
+        PowerupState& powerupState = registry.get<PowerupState>(killer);
+        PowerupConfig damageConfig = getPowerupConfig(PowerupType::Damage);
+        if (hasPowerup(powerupState, PowerupType::Damage)) {
+            damage = damage * damageConfig.amount;
+        }
     }
 
     if (playerHealth.armor >= damage) {
