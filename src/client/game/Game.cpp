@@ -2270,8 +2270,8 @@ SDL_AppResult Game::iterate()
 
 
         ////////////////////////////////////// Point Lights ///////////////////////////////////////////
-        // // Build dynamic point lights list.
-        // std::vector<PointLight> dynLights;
+        // Build dynamic point lights list.
+        std::vector<PointLight> dynLights;
         // // Static glow sphere point light.
         // dynLights.push_back(PointLight{
         //     .position = glowSpherePos,
