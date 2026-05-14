@@ -2187,6 +2187,24 @@ SDL_AppResult Game::iterate()
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
         });
 
+        // // Glow sphere — always rendered at a fixed world position for bloom testing.
+        // constexpr glm::vec3 glowSpherePos{0.0f, 80.0f, 300.0f};
+        // if (glowSphereModelIdx_ >= 0) {
+        //     entityCmds.push_back(EntityRenderCmd{
+        //         .modelIndex = glowSphereModelIdx_,
+        //         .worldTransform = glm::translate(glm::mat4(1.0f), glowSpherePos),
+        //     });
+        // }
+        //
+        // // Movable glow sphere — follows the player's view direction.
+        // const glm::vec3 movableSpherePos = cachedEye_ + cachedCamFwd_ * sphereFollowDist_;
+        // if (movableSphereEnabled_ && movableSphereModelIdx_ >= 0) {
+        //     entityCmds.push_back(EntityRenderCmd{
+        //         .modelIndex = movableSphereModelIdx_,
+        //         .worldTransform = glm::translate(glm::mat4(1.0f), movableSpherePos),
+        //     });
+        // }
+
         // // Glow beam cylinder — follows player position and view direction.
         // // Offsets are (forward, up, right) relative to camera.
         // const glm::vec3 camRight = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
@@ -2252,8 +2270,35 @@ SDL_AppResult Game::iterate()
 
 
         ////////////////////////////////////// Point Lights ///////////////////////////////////////////
-        // Build dynamic point lights list.
-        std::vector<PointLight> dynLights;
+        // // Build dynamic point lights list.
+        // std::vector<PointLight> dynLights;
+        // // Static glow sphere point light.
+        // dynLights.push_back(PointLight{
+        //     .position = glowSpherePos,
+        //     .color = glm::vec3(1.0f, 0.6f, 0.2f),
+        //     .intensity = 5.0f,
+        //     .range = 500.0f,
+        // });
+        //
+        // // Flashlight — point light near the camera.
+        // if (flashlightEnabled_) {
+        //     dynLights.push_back(PointLight{
+        //         .position = cachedEye_ + cachedCamFwd_ * flashlightOffset_,
+        //         .color = glm::vec3(1.0f, 0.95f, 0.9f),
+        //         .intensity = flashlightIntensity_,
+        //         .range = flashlightRange_,
+        //     });
+        // }
+        //
+        // // Movable glow sphere point light.
+        // if (movableSphereEnabled_) {
+        //     dynLights.push_back(PointLight{
+        //         .position = movableSpherePos,
+        //         .color = glm::vec3(0.4f, 0.7f, 1.0f),
+        //         .intensity = sphereIntensity_,
+        //         .range = sphereRange_,
+        //     });
+        // }
 
         // // Beam point lights — evenly distributed along the beam length.
         // if (beamEnabled_) {
