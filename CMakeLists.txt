@@ -858,10 +858,15 @@ add_executable(group2
         src/ecs/abilities/DashAbility.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
-        src/client/lobby/Lobby.hpp
-        src/client/lobby/Lobby.cpp
-        src/client/lobby/ui/LobbyUI.hpp
-        src/client/lobby/ui/LobbyUI.cpp
+        src/client/menus/lobby/Lobby.hpp
+        src/client/menus/lobby/Lobby.cpp
+        src/client/menus/lobby/ui/LobbyUI.hpp
+        src/client/menus/lobby/ui/LobbyUI.cpp
+        src/client/renderer-new/RendererTypes.hpp
+        src/client/menus/home/Home.hpp
+        src/client/menus/home/Home.cpp
+        src/client/menus/home/ui/HomeUI.hpp
+        src/client/menus/home/ui/HomeUI.cpp
         src/ecs/components/PowerupSpawner.hpp
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp
