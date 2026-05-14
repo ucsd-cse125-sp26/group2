@@ -861,6 +861,10 @@ add_executable(group2
         src/client/lobby/Lobby.cpp
         src/client/lobby/ui/LobbyUI.hpp
         src/client/lobby/ui/LobbyUI.cpp
+        src/ecs/components/PowerupSpawner.hpp
+        src/ecs/components/PowerupState.hpp
+        src/ecs/systems/PowerupSpawnerSystem.cpp
+        src/ecs/systems/PowerupSpawnerSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1103,6 +1107,10 @@ add_executable(server
         src/ecs/abilities/DashAbility.hpp
         src/server/lobby/LobbyManager.hpp
         src/server/lobby/LobbyManager.cpp
+        src/ecs/components/PowerupSpawner.hpp
+        src/ecs/components/PowerupState.hpp
+        src/ecs/systems/PowerupSpawnerSystem.cpp
+        src/ecs/systems/PowerupSpawnerSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1309,6 +1317,10 @@ add_executable(clientbot
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/ecs/components/PowerupSpawner.hpp
+        src/ecs/components/PowerupState.hpp
+        src/ecs/systems/PowerupSpawnerSystem.cpp
+        src/ecs/systems/PowerupSpawnerSystem.hpp
 )
 
 # Headers under src/ are referenced via "network/...", "ecs/components/...".
