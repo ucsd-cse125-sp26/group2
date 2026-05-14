@@ -5,7 +5,7 @@
 
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
-#include "lobby/Lobby.hpp"
+#include "menus/lobby/Lobby.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 
 #include <SDL3/SDL_video.h>
