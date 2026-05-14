@@ -865,6 +865,8 @@ add_executable(group2
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp
         src/ecs/systems/PowerupSpawnerSystem.hpp
+        src/ecs/systems/PowerupSystem.cpp
+        src/ecs/systems/PowerupSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1111,6 +1113,8 @@ add_executable(server
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp
         src/ecs/systems/PowerupSpawnerSystem.hpp
+        src/ecs/systems/PowerupSystem.cpp
+        src/ecs/systems/PowerupSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1321,6 +1325,8 @@ add_executable(clientbot
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp
         src/ecs/systems/PowerupSpawnerSystem.hpp
+        src/ecs/systems/PowerupSystem.cpp
+        src/ecs/systems/PowerupSystem.hpp
 )
 
 # Headers under src/ are referenced via "network/...", "ecs/components/...".

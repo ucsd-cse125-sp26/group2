@@ -11,6 +11,7 @@ namespace systems
 {
 
 bool hasPowerup(const PowerupState& state, PowerupType type);
+void removePowerup(PowerupState& state, PowerupType type);
 
 /// @brief Tick Powerup spawners: check player overlap for pickup, manage cooldowns.
 /// @param registry    The ECS registry.

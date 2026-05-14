@@ -1,5 +1,5 @@
-/// @file WeaponSpawnerSystem.cpp
-/// @brief Weapon spawner manager system.
+/// @file PowerupSpawnerSystem.cpp
+/// @brief Powerup spawner manager system.
 
 #pragma once
 #include "PowerupSpawnerSystem.hpp"
@@ -40,6 +40,13 @@ void addOrRefreshPowerup(PowerupState& state, PowerupType type, float duration)
     state.active.push_back(ActivePowerup{
         .type = type,
         .timeRemaining = duration,
+    });
+}
+
+void removePowerup(PowerupState& state, PowerupType type)
+{
+    std::erase_if(state.active, [type](const ActivePowerup& powerup) {
+        return powerup.type == type;
     });
 }
 

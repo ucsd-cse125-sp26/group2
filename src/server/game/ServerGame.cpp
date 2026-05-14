@@ -43,6 +43,7 @@
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
+#include "ecs/systems/PowerupSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/PacketType.hpp"
@@ -497,6 +498,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("PowerupSpawners");
         systems::runPowerupSpawners(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("powerup");
+        systems::runPowerups(registry, dt);
     }
 
     {
