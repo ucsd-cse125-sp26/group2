@@ -232,6 +232,7 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd);
+    drawEntityModels(geometryPass, cmd);
 
     // const glm::mat4 projection = camera_.getProjectionMatrix();
     // SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
@@ -272,6 +273,18 @@ void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPU
 {
     for (const auto& mInstance : Asset::modelInstances_) {
         drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+    }
+}
+
+void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+{
+    for (const auto& entityCmd : entities_) {
+        if (entityCmd.modelIndex < 0 ) {
+            std::cout << "invalid modelIndex" << std::endl;
+            break;
+        }
+        ModelIdInt modelId = Asset::modelInstances_.at(entityCmd.modelIndex).modelId_;
+        drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
     }
 }
 
@@ -457,4 +470,18 @@ int NewRenderer::loadSceneModel(
 void NewRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
 {
     weapon_ = vm;
+}
+
+void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
+{
+    return;
+}
+void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)
+{
+    entities_ = std::move(entityList);
+    return;
+}
+void NewRenderer::setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor)
+{
+    return;
 }
