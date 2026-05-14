@@ -2,11 +2,240 @@
 /// @brief Implementation of AssetLoader — Assimp scene import and mesh extraction.
 
 #include "AssetLoader.hpp"
+#include "Asset.hpp"
 
 #include <filesystem>
 #include <iostream>
 #include <stack>
+#include <stb_image.h>
 #include <vector>
+
+#include <fstream>
+#include <functional>
+
+static void dumpSceneStructureToFile(
+    const aiScene* scene,
+    const std::string& outputFile,
+    const std::string& sourceAssetFile)
+{
+    if (!scene || !scene->mRootNode) {
+        return;
+    }
+
+    std::ofstream out(outputFile);
+
+    if (!out.is_open()) {
+        return;
+    }
+
+    auto indent = [&](int depth) {
+        for (int i = 0; i < depth; i++) {
+            out << "    ";
+        }
+    };
+
+    auto printTransform = [&](const aiMatrix4x4& t) {
+        out << std::fixed << std::setprecision(3);
+
+        out << "[[" << t.a1 << ", " << t.a2 << ", " << t.a3 << ", " << t.a4 << "],\n"
+            << " [" << t.b1 << ", " << t.b2 << ", " << t.b3 << ", " << t.b4 << "],\n"
+            << " [" << t.c1 << ", " << t.c2 << ", " << t.c3 << ", " << t.c4 << "],\n"
+            << " [" << t.d1 << ", " << t.d2 << ", " << t.d3 << ", " << t.d4 << "]]";
+    };
+
+    auto printMetadataValue = [&](const aiMetadataEntry& entry) {
+        switch (entry.mType) {
+        case AI_BOOL:
+            out << (*(bool*)entry.mData ? "true" : "false");
+            break;
+
+        case AI_INT32:
+            out << *(int32_t*)entry.mData;
+            break;
+
+        case AI_UINT64:
+            out << *(uint64_t*)entry.mData;
+            break;
+
+        case AI_FLOAT:
+            out << *(float*)entry.mData;
+            break;
+
+        case AI_DOUBLE:
+            out << *(double*)entry.mData;
+            break;
+
+        case AI_AISTRING:
+            out << ((aiString*)entry.mData)->C_Str();
+            break;
+
+        default:
+            out << "<unsupported metadata type " << entry.mType << ">";
+            break;
+        }
+    };
+
+    auto printMetadata = [&](const aiMetadata* metadata, int depth) {
+        if (!metadata || metadata->mNumProperties == 0) {
+            indent(depth);
+            out << "Metadata: none\n";
+            return;
+        }
+
+        indent(depth);
+        out << "Metadata:\n";
+
+        for (unsigned int i = 0; i < metadata->mNumProperties; i++) {
+            indent(depth + 1);
+            out << metadata->mKeys[i].C_Str() << " = ";
+            printMetadataValue(metadata->mValues[i]);
+            out << "\n";
+        }
+    };
+
+    std::function<void(const aiNode*, int)> recurse;
+
+    recurse = [&](const aiNode* node, int depth) {
+        if (!node) {
+            return;
+        }
+
+        indent(depth);
+        out << "Node: " << node->mName.C_Str() << "\n";
+
+        indent(depth);
+        out << "Meshes: " << node->mNumMeshes
+            << " | Children: " << node->mNumChildren << "\n";
+
+        indent(depth);
+        out << "Transform:\n";
+
+        indent(depth + 1);
+        printTransform(node->mTransformation);
+        out << "\n";
+
+        printMetadata(node->mMetaData, depth);
+
+        if (node->mNumChildren == 0) {
+            indent(depth);
+            out << "---- LEAF NODE ----\n";
+
+            if (node->mNumMeshes == 0) {
+                indent(depth + 1);
+                out << "No meshes attached\n";
+            }
+
+            for (unsigned int i = 0; i < node->mNumMeshes; i++) {
+                unsigned int meshIndex = node->mMeshes[i];
+
+                if (meshIndex >= scene->mNumMeshes) {
+                    indent(depth + 1);
+                    out << "Mesh[" << meshIndex << "] INVALID INDEX\n";
+                    continue;
+                }
+
+                const aiMesh* mesh = scene->mMeshes[meshIndex];
+
+                indent(depth + 1);
+                out << "Mesh[" << meshIndex << "]\n";
+
+                indent(depth + 2);
+                out << "Name: " << mesh->mName.C_Str() << "\n";
+
+                indent(depth + 2);
+                out << "Vertices: " << mesh->mNumVertices << "\n";
+
+                indent(depth + 2);
+                out << "Faces: " << mesh->mNumFaces << "\n";
+
+                indent(depth + 2);
+                out << "Material Index: " << mesh->mMaterialIndex << "\n";
+
+                indent(depth + 2);
+                out << "Has Positions: "
+                    << (mesh->HasPositions() ? "true" : "false") << "\n";
+
+                indent(depth + 2);
+                out << "Has Normals: "
+                    << (mesh->HasNormals() ? "true" : "false") << "\n";
+
+                indent(depth + 2);
+                out << "Has UV0: "
+                    << (mesh->HasTextureCoords(0) ? "true" : "false") << "\n";
+
+                indent(depth + 2);
+                out << "Has Tangents: "
+                    << (mesh->HasTangentsAndBitangents() ? "true" : "false") << "\n";
+
+                indent(depth + 2);
+                out << "Primitive Types: " << mesh->mPrimitiveTypes << "\n";
+
+                if (mesh->mMaterialIndex < scene->mNumMaterials) {
+                    aiMaterial* mat = scene->mMaterials[mesh->mMaterialIndex];
+
+                    aiString matName;
+                    mat->Get(AI_MATKEY_NAME, matName);
+
+                    indent(depth + 2);
+                    out << "Material Name: " << matName.C_Str() << "\n";
+
+                    aiString texPath;
+
+                    if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &texPath) == AI_SUCCESS) {
+                        indent(depth + 2);
+                        out << "Base Color Texture: " << texPath.C_Str() << "\n";
+                    }
+
+                    if (mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) == AI_SUCCESS) {
+                        indent(depth + 2);
+                        out << "Diffuse Texture: " << texPath.C_Str() << "\n";
+                    }
+
+                    if (mat->GetTexture(aiTextureType_NORMALS, 0, &texPath) == AI_SUCCESS) {
+                        indent(depth + 2);
+                        out << "Normal Texture: " << texPath.C_Str() << "\n";
+                    }
+
+                    if (mat->GetTexture(aiTextureType_EMISSIVE, 0, &texPath) == AI_SUCCESS) {
+                        indent(depth + 2);
+                        out << "Emissive Texture: " << texPath.C_Str() << "\n";
+                    }
+
+                    if (mat->GetTexture(aiTextureType_METALNESS, 0, &texPath) == AI_SUCCESS) {
+                        indent(depth + 2);
+                        out << "Metalness Texture: " << texPath.C_Str() << "\n";
+                    }
+
+                    if (mat->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &texPath) == AI_SUCCESS) {
+                        indent(depth + 2);
+                        out << "Roughness Texture: " << texPath.C_Str() << "\n";
+                    }
+                }
+            }
+
+            indent(depth);
+            out << "-------------------\n";
+        }
+
+        out << "\n";
+
+        for (unsigned int i = 0; i < node->mNumChildren; i++) {
+            recurse(node->mChildren[i], depth + 1);
+        }
+    };
+
+    out << "==== ASSIMP SCENE DUMP ====\n\n";
+
+    out << "Source Asset: " << sourceAssetFile << "\n";
+    out << "Output File: " << outputFile << "\n\n";
+
+    out << "Meshes: " << scene->mNumMeshes << "\n";
+    out << "Materials: " << scene->mNumMaterials << "\n";
+    out << "Textures: " << scene->mNumTextures << "\n";
+    out << "Animations: " << scene->mNumAnimations << "\n\n";
+
+    recurse(scene->mRootNode, 0);
+}
 
 const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::string& fileName, const bool flipUVs)
 {
@@ -67,6 +296,16 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
     return true;
 }
 
+bool readAiColor(aiMaterial& material, const char* key, unsigned int type, unsigned int index, glm::vec3& out)
+{
+    aiColor3D color;
+    if (material.Get(key, type, index, color) != AI_SUCCESS)
+        return false;
+
+    out = {color.r, color.g, color.b};
+    return true;
+}
+
 bool AssetLoader::loadModel(const ModelIdInt id,
                             const std::string& modelFileName,
                             const std::vector<std::string>& texFileNames,
@@ -83,6 +322,13 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     // std::cout << "loadAsset" << std::endl;
     const aiScene* asimpSceneStructurePtr = loadAsset(importer, modelFileName, flipUVs);
+    if (modelFileName == "/home/wifu/CLionProjects/CSE125/build/release/assets/maps/map1.glb") {
+        dumpSceneStructureToFile(
+            asimpSceneStructurePtr,
+            "scene_dump.txt",
+            modelFileName
+        );
+    }
 
     if (asimpSceneStructurePtr == nullptr) {
         std::cout << debugPrefix << "scene is null" << std::endl;
@@ -151,6 +397,81 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
     std::cout << debugPrefix << "loadedMeshes" << std::endl;
 
+    if (asimpSceneStructurePtr->HasMaterials()) {
+        for (unsigned int i = 0; i < asimpSceneStructurePtr->mNumMaterials; i++) {
+            aiMaterial* mat = asimpSceneStructurePtr->mMaterials[i];
+            MaterialIdInt matId =
+                Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
+
+            Asset::Material& mat_ = Asset::materials_[matId];
+
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_DIFFUSE, mat_.kDiffuse_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_AMBIENT, mat_.kAmbient_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_SPECULAR, mat_.kSpecular_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_EMISSIVE, mat_.kEmission_);
+
+            float shininess = 0.0f;
+            if (mat->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS) {
+                mat_.nSpecular = shininess;
+                mat_.hasPhongData_ = true;
+            }
+
+            float ior = 0.0f;
+            if (mat->Get(AI_MATKEY_REFRACTI, ior) == AI_SUCCESS) {
+                mat_.nIor = ior;
+                mat_.hasPhongData_ = true;
+            }
+
+            aiString texPath;
+            if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &texPath) != AI_SUCCESS &&
+                mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) != AI_SUCCESS)
+            {
+                continue; // no texture for this material
+            }
+
+            TexIdInt texId =
+                Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
+
+            mat_.texId_[0] = texId;
+
+            Asset::Texture& tex_ = Asset::textures_[texId];
+
+            if (tex_.tex_raw != nullptr) {
+                continue; // already decoded this texture
+            }
+
+            const aiTexture* embeddedTexture = asimpSceneStructurePtr->GetEmbeddedTexture(texPath.C_Str());
+            if (!embeddedTexture || embeddedTexture->mHeight != 0) {
+                SDL_Log("AssetLoader: skipping unsupported material texture '%s' "
+                        "(expected compressed embedded texture, embedded=%s, height=%u)",
+                        texPath.C_Str(),
+                        embeddedTexture ? "true" : "false",
+                        embeddedTexture ? embeddedTexture->mHeight : 0);
+                continue;
+            }
+
+            stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
+                                                   static_cast<int>(embeddedTexture->mWidth),
+                                                   &tex_.width,
+                                                   &tex_.height,
+                                                   &tex_.channels,
+                                                   4);
+
+            if (!pixels) {
+                std::cout << "stbi failed for "
+                        << texPath.C_Str()
+                        << ": "
+                        << stbi_failure_reason()
+                        << std::endl;
+                continue;
+            }
+
+            tex_.tex_raw = pixels;
+        }
+    }
+
+    std::cout << debugPrefix << "loadedTexture" << std::endl;
+
     return true;
 }
 
@@ -181,6 +502,10 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
         uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
 
         const aiMesh& mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
+
+        MaterialIdInt matId = Asset::getMaterialIdFromString(meshNameSpace + "material_" + std::to_string(mesh_j_Ai.mMaterialIndex));
+
+        me_j.materialId_ = matId;
 
         std::string meshName = meshNameSpace + nodeNameStr + std::to_string(mesh_j_IdAi);
         MeshIdInt meshNameId = Asset::getMeshIdFromString(meshName);

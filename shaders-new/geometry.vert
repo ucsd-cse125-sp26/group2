@@ -18,6 +18,6 @@ layout(set = 1, binding = 1) uniform Object {
 void main()
 {
     gl_Position = camera.view_projection * object.model * vec4(v, 1.0f);
-    frag_normal = normalize(object.model * vec4(vn,0.0f)).xyz;
+    frag_normal = normalize(transpose(inverse(mat3(object.model))) * vn);
     frag_vt = vt;
 }

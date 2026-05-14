@@ -75,7 +75,8 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    texture_ = Boilerplate::loadTexture(device_, "assets/ropfyx6etjdb1.jpg");
+    // DEFAULT TEXTURE
+    texture_ = Boilerplate::loadTexture(device_, "assets/404.jpeg");
     if (!texture_) {
         SDL_Log("NewRenderer: failed to load texture");
         return false;
@@ -116,6 +117,7 @@ bool NewRenderer::createGeometryPipeline()
     fragmentShader.path = "shaders-new/geometry.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
     fragmentShader.samplerCount = 1;
+    fragmentShader.uniformBufferCount = 2;
 
     Boilerplate::VertexInputLayout vertexLayout{};
     vertexLayout.vertexPitch = sizeof(Vertex);
@@ -129,31 +131,6 @@ bool NewRenderer::createGeometryPipeline()
         device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, false);
 
     return geometryPipeline_ != nullptr;
-}
-
-bool NewRenderer::loadSceneAssets()
-{
-    std::vector<Boilerplate::BufferUpload> uploads;
-
-    for (const auto& modelPair : Asset::models_) {
-        for (auto& element : modelPair.second.modelElements_) {
-            createMeshBuffers(element.meshId_);
-            Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
-            uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
-            uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
-        }
-    }
-
-    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
-    if (!cmd) {
-        SDL_Log("NewRenderer: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
-        return false;
-    }
-
-    Boilerplate::uploadBuffers(device_, cmd, uploads);
-    SDL_SubmitGPUCommandBuffer(cmd);
-
-    return true;
 }
 
 void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
@@ -226,9 +203,6 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
-    SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture_, sampler_);
-    SDL_BindGPUFragmentSamplers(geometryPass, 0, &textureBinding, 1);
-
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd);
@@ -295,8 +269,36 @@ void NewRenderer::drawModel(ModelIdInt modelId,
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
+        const Asset::Material* material = nullptr;
+        if (Asset::materials_.contains(element.materialId_))
+            material = &Asset::materials_.at(element.materialId_);
+
+        SDL_GPUTexture* texture = nullptr;
+        if (material != nullptr) {
+            const TexIdInt texId = material->texId_[0];
+            if (Asset::textures_.contains(texId))
+                texture = Asset::textures_.at(texId).tex;
+        }
+
+        const bool useTexture = texture != nullptr || material == nullptr || !material->hasPhongData_;
+        if (texture == nullptr)
+            texture = texture_;
+
+        SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture, sampler_);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
+
+        // Material uniform.
+        glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
+        if (material != nullptr)
+            materialDiffuse = glm::vec4(material->kDiffuse_, 1.0f);
+        Uint32 useTextureUniform = useTexture ? 1u : 0u;
+        SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
+        SDL_PushGPUFragmentUniformData(cmd, 1, &useTextureUniform, sizeof(useTextureUniform));
+        
+        // Bind model matrix
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
+        
         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
         drawMesh(renderPass, mesh);
     }
@@ -452,6 +454,36 @@ int NewRenderer::loadSceneModel(
         Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
         uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
         uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
+
+       MaterialIdInt matId = element.materialId_;
+        if (!Asset::materials_.contains(matId)) {
+            continue;
+        }
+
+        Asset::Material& mat = Asset::materials_.at(matId);
+        TexIdInt texId = mat.texId_[0];
+
+        if (texId == 0 || !Asset::textures_.contains(texId)) {
+            continue;
+        }
+
+        Asset::Texture& tex = Asset::textures_.at(texId);
+
+        if (tex.tex == nullptr &&
+            tex.tex_raw != nullptr &&
+            tex.width > 0 &&
+            tex.height > 0)
+        {
+            tex.tex = Boilerplate::createTextureRGBA8(
+                device_,
+                static_cast<Uint32>(tex.width),
+                static_cast<Uint32>(tex.height),
+                tex.tex_raw
+            );
+
+            stbi_image_free(tex.tex_raw);
+            tex.tex_raw = nullptr;
+        }
     }
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
