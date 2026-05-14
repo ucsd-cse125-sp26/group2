@@ -63,12 +63,13 @@ struct GpuMesh
 
 struct Material
 {
-    glm::vec3 kDiffuse_;
-    glm::vec3 kAmbient_;
-    glm::vec3 kSpecular_;
-    glm::vec3 kEmission_;
-    float nSpecular;
-    float nIor;
+    glm::vec3 kDiffuse_ = glm::vec3(0.8f);
+    glm::vec3 kAmbient_ = glm::vec3(0.08f);
+    glm::vec3 kSpecular_ = glm::vec3(0.0f);
+    glm::vec3 kEmission_ = glm::vec3(0.0f);
+    float nSpecular = 32.0f;
+    float nIor = 1.0f;
+    bool hasPhongData_ = false;
     TexIdInt texId_[TEX_CHANNELS] = {};
 };
 

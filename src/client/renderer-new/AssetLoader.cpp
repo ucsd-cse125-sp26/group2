@@ -69,6 +69,16 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
     return true;
 }
 
+bool readAiColor(aiMaterial& material, const char* key, unsigned int type, unsigned int index, glm::vec3& out)
+{
+    aiColor3D color;
+    if (material.Get(key, type, index, color) != AI_SUCCESS)
+        return false;
+
+    out = {color.r, color.g, color.b};
+    return true;
+}
+
 bool AssetLoader::loadModel(const ModelIdInt id,
                             const std::string& modelFileName,
                             const std::vector<std::string>& texFileNames,
@@ -153,11 +163,30 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
     std::cout << debugPrefix << "loadedMeshes" << std::endl;
 
-    // Texture stuff
-
     if (asimpSceneStructurePtr->HasMaterials()) {
         for (unsigned int i = 0; i < asimpSceneStructurePtr->mNumMaterials; i++) {
             aiMaterial* mat = asimpSceneStructurePtr->mMaterials[i];
+            MaterialIdInt matId =
+                Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
+
+            Asset::Material& mat_ = Asset::materials_[matId];
+
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_DIFFUSE, mat_.kDiffuse_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_AMBIENT, mat_.kAmbient_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_SPECULAR, mat_.kSpecular_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_EMISSIVE, mat_.kEmission_);
+
+            float shininess = 0.0f;
+            if (mat->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS) {
+                mat_.nSpecular = shininess;
+                mat_.hasPhongData_ = true;
+            }
+
+            float ior = 0.0f;
+            if (mat->Get(AI_MATKEY_REFRACTI, ior) == AI_SUCCESS) {
+                mat_.nIor = ior;
+                mat_.hasPhongData_ = true;
+            }
 
             aiString texPath;
             if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &texPath) != AI_SUCCESS &&
@@ -166,20 +195,9 @@ bool AssetLoader::loadModel(const ModelIdInt id,
                 continue; // no texture for this material
             }
 
-            const aiTexture* tex =
-                asimpSceneStructurePtr->GetEmbeddedTexture(texPath.C_Str());
-
-            if (!tex) {
-                continue;
-            }
-
-            MaterialIdInt matId =
-                Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
-
             TexIdInt texId =
                 Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
 
-            Asset::Material& mat_ = Asset::materials_[matId];
             mat_.texId_[0] = texId;
 
             Asset::Texture& tex_ = Asset::textures_[texId];
@@ -188,14 +206,22 @@ bool AssetLoader::loadModel(const ModelIdInt id,
                 continue; // already decoded this texture
             }
 
-            stbi_uc* pixels = stbi_load_from_memory(
-                reinterpret_cast<const unsigned char*>(tex->pcData),
-                static_cast<int>(tex->mWidth),
-                &tex_.width,
-                &tex_.height,
-                &tex_.channels,
-                4
-            );
+            const aiTexture* embeddedTexture = asimpSceneStructurePtr->GetEmbeddedTexture(texPath.C_Str());
+            if (!embeddedTexture || embeddedTexture->mHeight != 0) {
+                SDL_Log("AssetLoader: skipping unsupported material texture '%s' "
+                        "(expected compressed embedded texture, embedded=%s, height=%u)",
+                        texPath.C_Str(),
+                        embeddedTexture ? "true" : "false",
+                        embeddedTexture ? embeddedTexture->mHeight : 0);
+                continue;
+            }
+
+            stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
+                                                   static_cast<int>(embeddedTexture->mWidth),
+                                                   &tex_.width,
+                                                   &tex_.height,
+                                                   &tex_.channels,
+                                                   4);
 
             if (!pixels) {
                 std::cout << "stbi failed for "

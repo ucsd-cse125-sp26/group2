@@ -117,6 +117,7 @@ bool NewRenderer::createGeometryPipeline()
     fragmentShader.path = "shaders-new/geometry.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
     fragmentShader.samplerCount = 1;
+    fragmentShader.uniformBufferCount = 2;
 
     Boilerplate::VertexInputLayout vertexLayout{};
     vertexLayout.vertexPitch = sizeof(Vertex);
@@ -234,40 +235,35 @@ void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass *renderPass,SDL_GPUC
     }
 }
 
-SDL_GPUTexture* element2texture(const Asset::ModelElement& element)
-{
-    MaterialIdInt matId = element.materialId_;
-
-    if (!Asset::materials_.contains(matId))
-        return nullptr;
-
-    TexIdInt texId = Asset::materials_.at(matId).texId_[0];
-
-    if (!Asset::textures_.contains(texId))
-        return nullptr;
-
-    return Asset::textures_.at(texId).tex;
-}
-
 void NewRenderer::drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd)
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
-        // TODO: if no/null texId, then use default "missing texture"
-        SDL_GPUTexture* texture = element2texture(element); 
+        const Asset::Material* material = nullptr;
+        if (Asset::materials_.contains(element.materialId_))
+            material = &Asset::materials_.at(element.materialId_);
 
-        // if (texture == nullptr) texture = texture_; // Use ropf... as fallback
-
-        if (texture == nullptr) {
-            std::cout << "using fallback texture\n";
-            texture = texture_;
-        } else {
-            std::cout << "using loaded texture\n";
+        SDL_GPUTexture* texture = nullptr;
+        if (material != nullptr) {
+            const TexIdInt texId = material->texId_[0];
+            if (Asset::textures_.contains(texId))
+                texture = Asset::textures_.at(texId).tex;
         }
 
-        // Bind texture (TODO: change texture_ to texture)
+        const bool useTexture = texture != nullptr || material == nullptr || !material->hasPhongData_;
+        if (texture == nullptr)
+            texture = texture_;
+
         SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture, sampler_);
         SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
+
+        // Material uniform.
+        glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
+        if (material != nullptr)
+            materialDiffuse = glm::vec4(material->kDiffuse_, 1.0f);
+        Uint32 useTextureUniform = useTexture ? 1u : 0u;
+        SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
+        SDL_PushGPUFragmentUniformData(cmd, 1, &useTextureUniform, sizeof(useTextureUniform));
         
         // Bind model matrix
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
@@ -474,4 +470,3 @@ int NewRenderer::loadSceneModel(
 
     return Asset::modelInstances_.size() - 1;
 }
-
