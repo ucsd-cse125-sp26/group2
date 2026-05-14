@@ -1,3 +1,6 @@
+/// @file Home.cpp
+/// @brief Home screen implementation: form handling and frame rendering.
+
 #include "Home.hpp"
 
 #include "ui/HomeUI.hpp"
@@ -36,7 +39,7 @@ SDL_AppResult Home::iterate()
     JoinMenuResult result = home_ui::buildJoinMenu(joinMenuState, joinError);
     if (result.connectClicked) {
         joinError.clear();
-        SDL_Log("Join button clicked! IP: %s, Port: %d", joinMenuState.serverIp, joinMenuState.serverPort);
+        SDL_Log("Join button clicked! IP: %s, Port: %d", joinMenuState.serverIp.c_str(), joinMenuState.serverPort);
         if (joinMenuState.serverPort < 1 || joinMenuState.serverPort > 65535) {
             joinError = "Port must be between 1 and 65535";
             SDL_Log("Invalid port number: %d", joinMenuState.serverPort);

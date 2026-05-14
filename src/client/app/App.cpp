@@ -20,6 +20,7 @@ namespace
 {
 constexpr int k_joinConnectionTimeoutMs = 5000;
 
+/// @brief Return a short log-friendly string for a ConnectError value.
 const char* connectErrorLogName(ConnectError error)
 {
     switch (error) {
@@ -40,6 +41,7 @@ const char* connectErrorLogName(ConnectError error)
     return "unknown";
 }
 
+/// @brief Return a user-facing error message for a failed connection attempt.
 const char* joinErrorMessage(ConnectError error)
 {
     switch (error) {

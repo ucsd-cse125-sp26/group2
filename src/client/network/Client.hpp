@@ -142,8 +142,11 @@ public:
     {
         rawParticleEventFn_ = std::move(fn);
     } ///< Register the raw particle-event callback.
+    /// @brief Register the match-state update callback, fired on every MATCH_STATE packet.
     void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
+    /// @brief Register the kill-event callback, fired for each replicated kill from the server.
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
+    /// @brief Register the shot-debug callback (PR-20); fired for each SHOT_DEBUG_REPORT.
     void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
     void onLobbyUpdate(LobbyUpdateCallback fn)
     {
