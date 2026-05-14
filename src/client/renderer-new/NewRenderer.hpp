@@ -41,7 +41,7 @@ public:
         const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining = "");
 
     void setPointLights(std::vector<PointLight> pointLights);
-    void setEntityRenderList(std::vector<EntityRenderCmd> pointLights);
+    void setEntityRenderList(std::vector<EntityRenderCmd>&& entityList);
     void setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor);
 
 private:
@@ -67,6 +67,7 @@ private:
 
     NewCamera camera_;
 
+    std::vector<EntityRenderCmd> entities_;
     WeaponViewmodel weapon_;
 
     /// @brief Build the geometry graphics pipeline from vertex/fragment shaders.
@@ -101,6 +102,7 @@ private:
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
                    SDL_GPUCommandBuffer* cmd);
+    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
     /// @brief Bind a mesh's buffers and issue an indexed draw call.
     /// @param renderPass The active render pass.

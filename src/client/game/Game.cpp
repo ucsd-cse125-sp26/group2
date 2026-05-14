@@ -2034,9 +2034,9 @@ SDL_AppResult Game::iterate()
     }
     phaseSnap(phaseStats.animation);
 
-//////////////////////////////////////////////////////
     // Build entity render list
     {
+        /////////////////////////////////////////// Entity Render List ///////////////////////////////////////////
         // Phase 5a: snapshot-rate alpha for remote-entity position lerp.
         // Read once per frame; applied to every entity below that has a
         // PreviousPosition (i.e. has received at least one snapshot).
@@ -2187,84 +2187,92 @@ SDL_AppResult Game::iterate()
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
         });
 
-        // Glow beam cylinder — follows player position and view direction.
-        // Offsets are (forward, up, right) relative to camera.
-        const glm::vec3 camRight = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
-        const glm::vec3 camUp = glm::normalize(glm::cross(camRight, cachedCamFwd_));
-        const glm::vec3 beamWorldStart =
-            cachedEye_ + cachedCamFwd_ * beamStartOff_.x + camUp * beamStartOff_.y + camRight * beamStartOff_.z;
-        const glm::vec3 beamWorldEnd =
-            cachedEye_ + cachedCamFwd_ * beamEndOff_.x + camUp * beamEndOff_.y + camRight * beamEndOff_.z;
-
-        if (beamEnabled_ && glowCylinderModelIdx_ >= 0) {
-            // Update visual emissive color to match the color picker (HDR scaled).
-            const float emScale = 10.0f;
-            renderer->setModelEmissive(glowCylinderModelIdx_, glm::vec4(beamColor_ * emScale, 0.0f));
-            entityCmds.push_back(EntityRenderCmd{
-                .modelIndex = glowCylinderModelIdx_,
-                .worldTransform = cylinderTransform(beamWorldStart, beamWorldEnd, beamRadius_),
-            });
-        }
+        // // Glow beam cylinder — follows player position and view direction.
+        // // Offsets are (forward, up, right) relative to camera.
+        // const glm::vec3 camRight = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+        // const glm::vec3 camUp = glm::normalize(glm::cross(camRight, cachedCamFwd_));
+        // const glm::vec3 beamWorldStart =
+        //     cachedEye_ + cachedCamFwd_ * beamStartOff_.x + camUp * beamStartOff_.y + camRight * beamStartOff_.z;
+        // const glm::vec3 beamWorldEnd =
+        //     cachedEye_ + cachedCamFwd_ * beamEndOff_.x + camUp * beamEndOff_.y + camRight * beamEndOff_.z;
+        //
+        // if (beamEnabled_ && glowCylinderModelIdx_ >= 0) {
+        //     // Update visual emissive color to match the color picker (HDR scaled).
+        //     const float emScale = 10.0f;
+        //     renderer->setModelEmissive(glowCylinderModelIdx_, glm::vec4(beamColor_ * emScale, 0.0f));
+        //     entityCmds.push_back(EntityRenderCmd{
+        //         .modelIndex = glowCylinderModelIdx_,
+        //         .worldTransform = cylinderTransform(beamWorldStart, beamWorldEnd, beamRadius_),
+        //     });
+        // }
 
         // Weapon beam visuals — driven by BeamState synced from server registry.
         // Local player: client-side predicted raycast for zero-lag response.
         // Remote players: use the server-computed positions from BeamState.
-        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
-            if (!beam.active || glowCylinderModelIdx_ < 0)
-                return;
-
-            glm::vec3 beamOrigin = beam.origin;
-            glm::vec3 beamEnd = beam.hitPoint;
-
-            if (registry.all_of<LocalPlayer>(e)) {
-                // Client-side prediction: raycast with this frame's camera
-                // direction so the beam tracks the crosshair with zero latency.
-                const float cosPitch = std::cos(renderPitch);
-                const glm::vec3 fwd{
-                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
-                const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
-                const glm::vec3 up = glm::normalize(glm::cross(rgt, fwd));
-
-                // Muzzle position from viewmodel offset.
-                beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
-
-                // Predicted endpoint: raycast from eye along current view.
-                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
-                beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
-            }
-
-            // Green Zarya-style tint, HDR-scaled for bloom.
-            renderer->setModelEmissive(glowCylinderModelIdx_, glm::vec4(glm::vec3(0.3f, 1.0f, 0.2f) * 10.0f, 0.0f));
-
-            entityCmds.push_back(EntityRenderCmd{
-                .modelIndex = glowCylinderModelIdx_,
-                .worldTransform = cylinderTransform(beamOrigin, beamEnd, 2.0f),
-            });
-        });
+        // registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+        //     if (!beam.active || glowCylinderModelIdx_ < 0)
+        //         return;
+        //
+        //     glm::vec3 beamOrigin = beam.origin;
+        //     glm::vec3 beamEnd = beam.hitPoint;
+        //
+        //     if (registry.all_of<LocalPlayer>(e)) {
+        //         // Client-side prediction: raycast with this frame's camera
+        //         // direction so the beam tracks the crosshair with zero latency.
+        //         const float cosPitch = std::cos(renderPitch);
+        //         const glm::vec3 fwd{
+        //             std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+        //         const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
+        //         const glm::vec3 up = glm::normalize(glm::cross(rgt, fwd));
+        //
+        //         // Muzzle position from viewmodel offset.
+        //         beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
+        //
+        //         // Predicted endpoint: raycast from eye along current view.
+        //         const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
+        //         beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+        //     }
+        //
+        //     // Green Zarya-style tint, HDR-scaled for bloom.
+        //     renderer->setModelEmissive(glowCylinderModelIdx_, glm::vec4(glm::vec3(0.3f, 1.0f, 0.2f) * 10.0f, 0.0f));
+        //
+        //     entityCmds.push_back(EntityRenderCmd{
+        //         .modelIndex = glowCylinderModelIdx_,
+        //         .worldTransform = cylinderTransform(beamOrigin, beamEnd, 2.0f),
+        //     });
+        // });
 
         renderer->setEntityRenderList(std::move(entityCmds));
+        /////////////////////////////////////////// Entity Render List ///////////////////////////////////////////
 
+
+
+
+
+
+
+        ////////////////////////////////////// Point Lights ///////////////////////////////////////////
         // Build dynamic point lights list.
         std::vector<PointLight> dynLights;
 
-        // Beam point lights — evenly distributed along the beam length.
-        if (beamEnabled_) {
-            const glm::vec3 beamDelta = beamWorldEnd - beamWorldStart;
-            const float beamLen = glm::length(beamDelta);
-            const int numBeamLights = (beamLightSpacing_ > 1.0f && beamLen > 0.1f)
-                                          ? std::max(2, static_cast<int>(beamLen / beamLightSpacing_) + 1)
-                                          : 2;
-            const glm::vec3 beamLightColor = beamColor_ * 1.5f;
-            for (int i = 0; i < numBeamLights; ++i) {
-                const float t = static_cast<float>(i) / static_cast<float>(numBeamLights - 1);
-                dynLights.push_back(PointLight{
-                    .position = beamWorldStart + beamDelta * t,
-                    .color = beamLightColor,
-                    .intensity = beamLightIntensity_,
-                    .range = beamLightRange_,
-                });
-            }
-        }
+        // // Beam point lights — evenly distributed along the beam length.
+        // if (beamEnabled_) {
+        //     const glm::vec3 beamDelta = beamWorldEnd - beamWorldStart;
+        //     const float beamLen = glm::length(beamDelta);
+        //     const int numBeamLights = (beamLightSpacing_ > 1.0f && beamLen > 0.1f)
+        //                                   ? std::max(2, static_cast<int>(beamLen / beamLightSpacing_) + 1)
+        //                                   : 2;
+        //     const glm::vec3 beamLightColor = beamColor_ * 1.5f;
+        //     for (int i = 0; i < numBeamLights; ++i) {
+        //         const float t = static_cast<float>(i) / static_cast<float>(numBeamLights - 1);
+        //         dynLights.push_back(PointLight{
+        //             .position = beamWorldStart + beamDelta * t,
+        //             .color = beamLightColor,
+        //             .intensity = beamLightIntensity_,
+        //             .range = beamLightRange_,
+        //         });
+        //     }
+        // }
 
         // Weapon beam point lights — from BeamState, evenly distributed.
         // Local player uses predicted positions (same as the visual beam above).
@@ -2302,7 +2310,9 @@ SDL_AppResult Game::iterate()
         });
 
         renderer->setPointLights(std::move(dynLights));
+        /////////////////////////////////////////// Point Lights ///////////////////////////////////////////
     }
+
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
         const GunInstance& gun = getEquippedGun(ws);
