@@ -56,7 +56,7 @@ inline const AssetDefinition kWraithAsset{
 
 inline const AssetDefinition kRocketProjectile{
     .name = "rocket_projectile",
-    .filename = "bottle_a.glb", // update with rocket projectile asset
+    .filename = "rocket_projectile.glb", // update with rocket projectile asset
     .role = AssetRole::Entity,
     .loadScale = 20.0f,
 };

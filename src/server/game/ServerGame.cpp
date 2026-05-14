@@ -24,6 +24,8 @@
 #include "ecs/components/PlayerNicknames.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
+#include "ecs/components/PowerupSpawner.hpp"
+#include "ecs/components/PowerupState.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -40,6 +42,7 @@
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/PacketType.hpp"
@@ -180,6 +183,13 @@ void ServerGame::run()
     const entt::entity playerSpawner4 = registry.create();
     registry.emplace<RespawnPoint>(playerSpawner4, RespawnPoint{});
     registry.emplace<Position>(playerSpawner4, glm::vec3{0.0f, 200.0f, 0.0f});
+
+    // Temp powerup spawner
+    PowerupConfig damageConfig = getPowerupConfig(PowerupType::Shield);
+    const entt::entity powerupSpawner = registry.create();
+    registry.emplace<PowerupSpawner>(powerupSpawner, PowerupSpawner{.type = damageConfig.type, .spawnCooldown = damageConfig.spawnCooldown, .hasPowerup = false});
+    registry.emplace<Position>(powerupSpawner, glm::vec3{0.0f, 200.0f, 0.0f});
+    registry.emplace<CollisionShape>(powerupSpawner);
 
     while (running) {
         server->poll();
@@ -484,6 +494,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         GROUP2_PROF_SCOPE("droppedWeapons");
         systems::runDroppedWeapons(registry, dt);
     }
+    {
+        GROUP2_PROF_SCOPE("PowerupSpawners");
+        systems::runPowerupSpawners(registry, dt);
+    }
 
     {
         GROUP2_PROF_SCOPE("match");
@@ -650,6 +664,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                    AbilityState{
                                        .primary = AbilityType::Grapple,
                                    }); // Defaults to level 0 with 0 accum damage
+    registry.emplace<PowerupState>(player);
 
     if constexpr (player_colors::k_enabled) {
         // Pick the least-used palette slot; ties broken by lowest index
