@@ -45,6 +45,16 @@ struct NetworkStats
     float registryUpdatesPerSec = 0.0f; ///< Registry updates received per second.
 };
 
+enum class ConnectError
+{
+    None,
+    ResolveFailed,
+    ResolveTimedOut,
+    CreateClientFailed,
+    ConnectTimedOut,
+    ConnectFailed,
+};
+
 /// @brief TCP stream client — sends input to the server and receives state updates.
 class Client
 {
@@ -77,8 +87,10 @@ public:
     /// @param port      TCP port the server is listening on. The UDP
     ///                  sidecar (Phase 3d) connects to the same port.
     /// @param transport Phase 3d: which UDP features to enable.
-    /// @return False on socket creation or DNS failure.
-    bool init(const char* addr, Uint16 port, const TransportConfig& transport = {});
+    /// @param timeoutMs Maximum time to wait for DNS resolution and TCP
+    ///                  connection, in milliseconds. Negative waits forever.
+    /// @return None on success, otherwise the specific connection failure.
+    ConnectError init(const char* addr, Uint16 port, const TransportConfig& transport = {}, int timeoutMs = -1);
 
     /// @brief Close the socket and release the resolved address.
     void shutdown();

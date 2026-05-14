@@ -16,6 +16,44 @@
 #include <imgui.h>
 #include <string>
 
+namespace
+{
+constexpr int k_joinConnectionTimeoutMs = 5000;
+
+const char* connectErrorLogName(ConnectError error)
+{
+    switch (error) {
+    case ConnectError::None:
+        return "none";
+    case ConnectError::ResolveFailed:
+        return "resolve failed";
+    case ConnectError::ResolveTimedOut:
+        return "resolve timed out";
+    case ConnectError::CreateClientFailed:
+        return "create client failed";
+    case ConnectError::ConnectTimedOut:
+        return "connect timed out";
+    case ConnectError::ConnectFailed:
+        return "connect failed";
+    }
+
+    return "unknown";
+}
+
+const char* joinErrorMessage(ConnectError error)
+{
+    switch (error) {
+    case ConnectError::ResolveFailed:
+        return "Could not resolve server address";
+    case ConnectError::ResolveTimedOut:
+    case ConnectError::ConnectTimedOut:
+        return "Connection timed out";
+    default:
+        return "Failed to connect to server";
+    }
+}
+} // namespace
+
 bool App::init()
 {
     static constexpr const char* k_appName = "group2";
@@ -84,8 +122,9 @@ bool App::init()
     // Developer skip
     if (developerConfig.skipLobby) {
         const NetworkAddress clientNet = networkConfig.clientNetwork;
-        if (!client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport)) {
-            SDL_Log("Failed to connect to server");
+        const ConnectError connectError = client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport);
+        if (connectError != ConnectError::None) {
+            SDL_Log("Failed to connect to server: %s", connectErrorLogName(connectError));
             cleanup();
             return false;
         }
@@ -135,11 +174,15 @@ SDL_AppResult App::iterate()
             std::string serverIp = joinRequest->serverIp;
             uint16_t serverPort = joinRequest->serverPort;
             SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
-            if (!client.init(serverIp.c_str(), serverPort, networkConfig.transport)) {
-                SDL_Log("Failed to connect to server at %s:%d", serverIp.c_str(), serverPort);
-                home->setJoinError("Failed to connect to server");
+            const ConnectError connectError =
+                client.init(serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs);
+            if (connectError != ConnectError::None) {
+                SDL_Log("Failed to connect to server at %s:%d: %s",
+                        serverIp.c_str(),
+                        serverPort,
+                        connectErrorLogName(connectError));
+                home->setJoinError(joinErrorMessage(connectError));
             } else {
-                // TODO: Timeout if takes too long
                 SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
                 transitionTo(Screen::Lobby);
             }
