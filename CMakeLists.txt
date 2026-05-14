@@ -782,6 +782,11 @@ add_executable(group2
         src/ecs/physics/Forces.hpp
         src/ecs/physics/Forces.cpp
         src/ecs/physics/Inertia.hpp
+        src/ecs/physics/BroadphaseTree.hpp
+        src/ecs/physics/BroadphaseTree.cpp
+        src/ecs/physics/ContactManifold.hpp
+        src/ecs/physics/ContactCache.hpp
+        src/ecs/physics/ContactCache.cpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
         src/ecs/components/TriggerVolume.hpp
@@ -1016,6 +1021,11 @@ add_executable(server
         src/ecs/physics/Forces.hpp
         src/ecs/physics/Forces.cpp
         src/ecs/physics/Inertia.hpp
+        src/ecs/physics/BroadphaseTree.hpp
+        src/ecs/physics/BroadphaseTree.cpp
+        src/ecs/physics/ContactManifold.hpp
+        src/ecs/physics/ContactCache.hpp
+        src/ecs/physics/ContactCache.cpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
         src/ecs/components/TriggerVolume.hpp
@@ -1278,6 +1288,11 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Inertia.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/BroadphaseTree.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/BroadphaseTree.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactManifold.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactCache.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactCache.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/RigidBody.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Orientation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/TriggerVolume.hpp"
