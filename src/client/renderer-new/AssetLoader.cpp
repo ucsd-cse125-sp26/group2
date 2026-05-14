@@ -2,10 +2,12 @@
 /// @brief Implementation of AssetLoader — Assimp scene import and mesh extraction.
 
 #include "AssetLoader.hpp"
+#include "Asset.hpp"
 
 #include <filesystem>
 #include <iostream>
 #include <stack>
+#include <stb_image.h>
 #include <vector>
 
 const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::string& fileName, const bool flipUVs)
@@ -151,6 +153,65 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
     std::cout << debugPrefix << "loadedMeshes" << std::endl;
 
+    // Texture stuff
+
+    if (asimpSceneStructurePtr->HasMaterials()) {
+        for (unsigned int i = 0; i < asimpSceneStructurePtr->mNumMaterials; i++) {
+            aiMaterial* mat = asimpSceneStructurePtr->mMaterials[i];
+
+            aiString texPath;
+            if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &texPath) != AI_SUCCESS &&
+                mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) != AI_SUCCESS)
+            {
+                continue; // no texture for this material
+            }
+
+            const aiTexture* tex =
+                asimpSceneStructurePtr->GetEmbeddedTexture(texPath.C_Str());
+
+            if (!tex) {
+                continue;
+            }
+
+            MaterialIdInt matId =
+                Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
+
+            TexIdInt texId =
+                Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
+
+            Asset::Material& mat_ = Asset::materials_[matId];
+            mat_.texId_[0] = texId;
+
+            Asset::Texture& tex_ = Asset::textures_[texId];
+
+            if (tex_.tex_raw != nullptr) {
+                continue; // already decoded this texture
+            }
+
+            stbi_uc* pixels = stbi_load_from_memory(
+                reinterpret_cast<const unsigned char*>(tex->pcData),
+                static_cast<int>(tex->mWidth),
+                &tex_.width,
+                &tex_.height,
+                &tex_.channels,
+                4
+            );
+
+            if (!pixels) {
+                std::cout << "stbi failed for "
+                        << texPath.C_Str()
+                        << ": "
+                        << stbi_failure_reason()
+                        << std::endl;
+                continue;
+            }
+
+            tex_.tex_raw = pixels;
+        }
+    }
+
+    std::cout << debugPrefix << "loadedTexture" << std::endl;
+
     return true;
 }
 
@@ -181,6 +242,10 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
         uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
 
         const aiMesh& mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
+
+        MaterialIdInt matId = Asset::getMaterialIdFromString(meshNameSpace + "material_" + std::to_string(mesh_j_Ai.mMaterialIndex));
+
+        me_j.materialId_ = matId;
 
         std::string meshName = meshNameSpace + nodeNameStr + std::to_string(mesh_j_IdAi);
         MeshIdInt meshNameId = Asset::getMeshIdFromString(meshName);

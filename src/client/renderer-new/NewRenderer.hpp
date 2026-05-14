@@ -66,10 +66,6 @@ private:
 
     bool createHudPipeline();
 
-    /// @brief Load models via AssetLoader and upload their mesh buffers to the GPU.
-    /// @return True on success.
-    bool loadSceneAssets();
-
     /// @brief (Re-)create the depth texture if the viewport size changed.
     /// @param width  New viewport width in pixels.
     /// @param height New viewport height in pixels.
