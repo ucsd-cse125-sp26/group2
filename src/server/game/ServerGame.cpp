@@ -35,8 +35,10 @@
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "ecs/physics/CollisionEvents.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/PacketType.hpp"
@@ -418,6 +420,14 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("collision");
         systems::runCollision(registry, dt, physics::activeWorld());
+    }
+    {
+        // Phase 4: trigger overlap diff → Enter / Stay / Exit events.
+        // Drained by gameplay below.  Server is authoritative; clients pass
+        // isPredictedClient=true so their predicted ticks don't double-fire.
+        GROUP2_PROF_SCOPE("triggers");
+        physics::events::beginTick();
+        systems::runTriggers(registry, /*isPredictedClient=*/false);
     }
     {
         GROUP2_PROF_SCOPE("explosion");

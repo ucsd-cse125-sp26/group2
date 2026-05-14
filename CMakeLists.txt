@@ -776,6 +776,12 @@ add_executable(group2
         src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/DebugCollisionDraw.hpp
         src/ecs/physics/DebugCollisionDraw.cpp
+        src/ecs/physics/SurfaceType.hpp
+        src/ecs/physics/CollisionEvents.hpp
+        src/ecs/physics/CollisionEvents.cpp
+        src/ecs/components/TriggerVolume.hpp
+        src/ecs/systems/TriggerSystem.hpp
+        src/ecs/systems/TriggerSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -999,6 +1005,12 @@ add_executable(server
         src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/DebugCollisionDraw.hpp
         src/ecs/physics/DebugCollisionDraw.cpp
+        src/ecs/physics/SurfaceType.hpp
+        src/ecs/physics/CollisionEvents.hpp
+        src/ecs/physics/CollisionEvents.cpp
+        src/ecs/components/TriggerVolume.hpp
+        src/ecs/systems/TriggerSystem.hpp
+        src/ecs/systems/TriggerSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -1250,6 +1262,12 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SurfaceType.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/TriggerVolume.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/TriggerSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/TriggerSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/VHACDImpl.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.hpp"
