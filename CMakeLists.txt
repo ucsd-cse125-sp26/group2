@@ -779,6 +779,11 @@ add_executable(group2
         src/ecs/physics/SurfaceType.hpp
         src/ecs/physics/CollisionEvents.hpp
         src/ecs/physics/CollisionEvents.cpp
+        src/ecs/physics/Forces.hpp
+        src/ecs/physics/Forces.cpp
+        src/ecs/physics/Inertia.hpp
+        src/ecs/components/RigidBody.hpp
+        src/ecs/components/Orientation.hpp
         src/ecs/components/TriggerVolume.hpp
         src/ecs/systems/TriggerSystem.hpp
         src/ecs/systems/TriggerSystem.cpp
@@ -1008,6 +1013,11 @@ add_executable(server
         src/ecs/physics/SurfaceType.hpp
         src/ecs/physics/CollisionEvents.hpp
         src/ecs/physics/CollisionEvents.cpp
+        src/ecs/physics/Forces.hpp
+        src/ecs/physics/Forces.cpp
+        src/ecs/physics/Inertia.hpp
+        src/ecs/components/RigidBody.hpp
+        src/ecs/components/Orientation.hpp
         src/ecs/components/TriggerVolume.hpp
         src/ecs/systems/TriggerSystem.hpp
         src/ecs/systems/TriggerSystem.cpp
@@ -1265,6 +1275,11 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SurfaceType.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Inertia.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/RigidBody.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Orientation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/TriggerVolume.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/TriggerSystem.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/TriggerSystem.cpp"

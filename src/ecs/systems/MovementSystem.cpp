@@ -11,6 +11,7 @@
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
+#include "ecs/physics/Forces.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
@@ -1232,6 +1233,12 @@ void applySpeedCap(glm::vec3& vel, const PlayerStateRef state)
 
 void runMovement(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
+    // Phase 6: drain force / impulse accumulators into velocities before the
+    // per-entity kernel runs.  No-op for entities without `RigidBody` — the
+    // legacy direct-velocity-mutation pattern (e.g. for kinematic players)
+    // is unaffected.  This is the prerequisite path for dynamic bodies.
+    physics::forces::integrateAccumulators(registry, dt);
+
     // Entities WITH InputSnapshot — full player movement.
     //
     // PR-7 (server-perf): per-player movement is independent — each

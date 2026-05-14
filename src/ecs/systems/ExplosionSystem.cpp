@@ -8,6 +8,7 @@
 #include "ecs/components/Player.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/physics/Forces.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
@@ -93,13 +94,16 @@ void runExplosion(Registry& registry,
             if (explosion.maxKnockback > 0.0f) {
                 const float knockMag = explosion.maxKnockback * std::pow(falloff, explosion.knockbackFalloffExponent);
                 if (knockMag > 0.0f) {
-                    if (Velocity* vel = registry.try_get<Velocity>(player); vel != nullptr) {
-                        const glm::vec3 toPlayer = position.value - explosion.position;
-                        const float toPlayerLen = glm::length(toPlayer);
-                        const glm::vec3 dir =
-                            (toPlayerLen > 1e-4f) ? (toPlayer / toPlayerLen) : glm::vec3{0.0f, 1.0f, 0.0f};
-                        vel->value += dir * knockMag;
-                    }
+                    const glm::vec3 toPlayer = position.value - explosion.position;
+                    const float toPlayerLen = glm::length(toPlayer);
+                    const glm::vec3 dir =
+                        (toPlayerLen > 1e-4f) ? (toPlayer / toPlayerLen) : glm::vec3{0.0f, 1.0f, 0.0f};
+                    // Phase 6: route knockback through the unified impulse API so
+                    // it composes correctly with future mass-aware bodies.  For
+                    // entities without RigidBody (today's players) this falls
+                    // back to direct `velocity += impulse` — identical to the
+                    // old code path.
+                    physics::forces::applyImpulse(registry, player, dir * knockMag);
                 }
             }
         }
