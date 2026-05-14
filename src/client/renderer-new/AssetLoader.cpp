@@ -10,233 +10,6 @@
 #include <stb_image.h>
 #include <vector>
 
-#include <fstream>
-#include <functional>
-
-static void dumpSceneStructureToFile(
-    const aiScene* scene,
-    const std::string& outputFile,
-    const std::string& sourceAssetFile)
-{
-    if (!scene || !scene->mRootNode) {
-        return;
-    }
-
-    std::ofstream out(outputFile);
-
-    if (!out.is_open()) {
-        return;
-    }
-
-    auto indent = [&](int depth) {
-        for (int i = 0; i < depth; i++) {
-            out << "    ";
-        }
-    };
-
-    auto printTransform = [&](const aiMatrix4x4& t) {
-        out << std::fixed << std::setprecision(3);
-
-        out << "[[" << t.a1 << ", " << t.a2 << ", " << t.a3 << ", " << t.a4 << "],\n"
-            << " [" << t.b1 << ", " << t.b2 << ", " << t.b3 << ", " << t.b4 << "],\n"
-            << " [" << t.c1 << ", " << t.c2 << ", " << t.c3 << ", " << t.c4 << "],\n"
-            << " [" << t.d1 << ", " << t.d2 << ", " << t.d3 << ", " << t.d4 << "]]";
-    };
-
-    auto printMetadataValue = [&](const aiMetadataEntry& entry) {
-        switch (entry.mType) {
-        case AI_BOOL:
-            out << (*(bool*)entry.mData ? "true" : "false");
-            break;
-
-        case AI_INT32:
-            out << *(int32_t*)entry.mData;
-            break;
-
-        case AI_UINT64:
-            out << *(uint64_t*)entry.mData;
-            break;
-
-        case AI_FLOAT:
-            out << *(float*)entry.mData;
-            break;
-
-        case AI_DOUBLE:
-            out << *(double*)entry.mData;
-            break;
-
-        case AI_AISTRING:
-            out << ((aiString*)entry.mData)->C_Str();
-            break;
-
-        default:
-            out << "<unsupported metadata type " << entry.mType << ">";
-            break;
-        }
-    };
-
-    auto printMetadata = [&](const aiMetadata* metadata, int depth) {
-        if (!metadata || metadata->mNumProperties == 0) {
-            indent(depth);
-            out << "Metadata: none\n";
-            return;
-        }
-
-        indent(depth);
-        out << "Metadata:\n";
-
-        for (unsigned int i = 0; i < metadata->mNumProperties; i++) {
-            indent(depth + 1);
-            out << metadata->mKeys[i].C_Str() << " = ";
-            printMetadataValue(metadata->mValues[i]);
-            out << "\n";
-        }
-    };
-
-    std::function<void(const aiNode*, int)> recurse;
-
-    recurse = [&](const aiNode* node, int depth) {
-        if (!node) {
-            return;
-        }
-
-        indent(depth);
-        out << "Node: " << node->mName.C_Str() << "\n";
-
-        indent(depth);
-        out << "Meshes: " << node->mNumMeshes
-            << " | Children: " << node->mNumChildren << "\n";
-
-        indent(depth);
-        out << "Transform:\n";
-
-        indent(depth + 1);
-        printTransform(node->mTransformation);
-        out << "\n";
-
-        printMetadata(node->mMetaData, depth);
-
-        if (node->mNumChildren == 0) {
-            indent(depth);
-            out << "---- LEAF NODE ----\n";
-
-            if (node->mNumMeshes == 0) {
-                indent(depth + 1);
-                out << "No meshes attached\n";
-            }
-
-            for (unsigned int i = 0; i < node->mNumMeshes; i++) {
-                unsigned int meshIndex = node->mMeshes[i];
-
-                if (meshIndex >= scene->mNumMeshes) {
-                    indent(depth + 1);
-                    out << "Mesh[" << meshIndex << "] INVALID INDEX\n";
-                    continue;
-                }
-
-                const aiMesh* mesh = scene->mMeshes[meshIndex];
-
-                indent(depth + 1);
-                out << "Mesh[" << meshIndex << "]\n";
-
-                indent(depth + 2);
-                out << "Name: " << mesh->mName.C_Str() << "\n";
-
-                indent(depth + 2);
-                out << "Vertices: " << mesh->mNumVertices << "\n";
-
-                indent(depth + 2);
-                out << "Faces: " << mesh->mNumFaces << "\n";
-
-                indent(depth + 2);
-                out << "Material Index: " << mesh->mMaterialIndex << "\n";
-
-                indent(depth + 2);
-                out << "Has Positions: "
-                    << (mesh->HasPositions() ? "true" : "false") << "\n";
-
-                indent(depth + 2);
-                out << "Has Normals: "
-                    << (mesh->HasNormals() ? "true" : "false") << "\n";
-
-                indent(depth + 2);
-                out << "Has UV0: "
-                    << (mesh->HasTextureCoords(0) ? "true" : "false") << "\n";
-
-                indent(depth + 2);
-                out << "Has Tangents: "
-                    << (mesh->HasTangentsAndBitangents() ? "true" : "false") << "\n";
-
-                indent(depth + 2);
-                out << "Primitive Types: " << mesh->mPrimitiveTypes << "\n";
-
-                if (mesh->mMaterialIndex < scene->mNumMaterials) {
-                    aiMaterial* mat = scene->mMaterials[mesh->mMaterialIndex];
-
-                    aiString matName;
-                    mat->Get(AI_MATKEY_NAME, matName);
-
-                    indent(depth + 2);
-                    out << "Material Name: " << matName.C_Str() << "\n";
-
-                    aiString texPath;
-
-                    if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &texPath) == AI_SUCCESS) {
-                        indent(depth + 2);
-                        out << "Base Color Texture: " << texPath.C_Str() << "\n";
-                    }
-
-                    if (mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) == AI_SUCCESS) {
-                        indent(depth + 2);
-                        out << "Diffuse Texture: " << texPath.C_Str() << "\n";
-                    }
-
-                    if (mat->GetTexture(aiTextureType_NORMALS, 0, &texPath) == AI_SUCCESS) {
-                        indent(depth + 2);
-                        out << "Normal Texture: " << texPath.C_Str() << "\n";
-                    }
-
-                    if (mat->GetTexture(aiTextureType_EMISSIVE, 0, &texPath) == AI_SUCCESS) {
-                        indent(depth + 2);
-                        out << "Emissive Texture: " << texPath.C_Str() << "\n";
-                    }
-
-                    if (mat->GetTexture(aiTextureType_METALNESS, 0, &texPath) == AI_SUCCESS) {
-                        indent(depth + 2);
-                        out << "Metalness Texture: " << texPath.C_Str() << "\n";
-                    }
-
-                    if (mat->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &texPath) == AI_SUCCESS) {
-                        indent(depth + 2);
-                        out << "Roughness Texture: " << texPath.C_Str() << "\n";
-                    }
-                }
-            }
-
-            indent(depth);
-            out << "-------------------\n";
-        }
-
-        out << "\n";
-
-        for (unsigned int i = 0; i < node->mNumChildren; i++) {
-            recurse(node->mChildren[i], depth + 1);
-        }
-    };
-
-    out << "==== ASSIMP SCENE DUMP ====\n\n";
-
-    out << "Source Asset: " << sourceAssetFile << "\n";
-    out << "Output File: " << outputFile << "\n\n";
-
-    out << "Meshes: " << scene->mNumMeshes << "\n";
-    out << "Materials: " << scene->mNumMaterials << "\n";
-    out << "Textures: " << scene->mNumTextures << "\n";
-    out << "Animations: " << scene->mNumAnimations << "\n\n";
-
-    recurse(scene->mRootNode, 0);
-}
-
 const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::string& fileName, const bool flipUVs)
 {
     SDL_Log("Working dir: %s", std::filesystem::current_path().string().c_str());
@@ -306,6 +79,21 @@ bool readAiColor(aiMaterial& material, const char* key, unsigned int type, unsig
     return true;
 }
 
+static bool hasMetadataKey(const aiNode& node, const std::string& keyToFind)
+{
+    if (!node.mMetaData) {
+        return false;
+    }
+
+    for (unsigned int i = 0; i < node.mMetaData->mNumProperties; i++) {
+        if (std::string(node.mMetaData->mKeys[i].C_Str()) == keyToFind) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool AssetLoader::loadModel(const ModelIdInt id,
                             const std::string& modelFileName,
                             const std::vector<std::string>& texFileNames,
@@ -322,13 +110,6 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     // std::cout << "loadAsset" << std::endl;
     const aiScene* asimpSceneStructurePtr = loadAsset(importer, modelFileName, flipUVs);
-    if (modelFileName == "/home/wifu/CLionProjects/CSE125/build/release/assets/maps/map1.glb") {
-        dumpSceneStructureToFile(
-            asimpSceneStructurePtr,
-            "scene_dump.txt",
-            modelFileName
-        );
-    }
 
     if (asimpSceneStructurePtr == nullptr) {
         std::cout << debugPrefix << "scene is null" << std::endl;
@@ -369,6 +150,11 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
         const uint32_t currentModelNodeIndex = nodeTraversalStack.top();
         nodeTraversalStack.pop();
+
+        // // Skip if collider or gameplay entity
+        if (hasMetadataKey(currentNode, "entity_type") || hasMetadataKey(currentNode, "is_collision")) {
+            continue;
+        }
 
         Asset::ModelNode& currentModelNode = newModel.modelNodes_[currentModelNodeIndex];
         currentModelNode.transform_ = glmFromAiTransform(currentNode.mTransformation);
