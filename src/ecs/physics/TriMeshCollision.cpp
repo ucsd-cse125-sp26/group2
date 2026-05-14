@@ -611,83 +611,104 @@ void depenetrateAABBvsTriMesh(
         pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
         return;
 
-    // Voronoi-clipped depenetration in a single pass.
+    // Voronoi-clipped depenetration with bounded iteration.
     //
-    // Older multi-pass averaging is no longer needed: per-triangle MTVs are now
-    // along the (consistent) face normal, so adjacent welded triangles produce
-    // mutually reinforcing pushes — no oscillation across the seam.  At a sharp
-    // convex edge (e.g. step corner), the two adjacent triangles produce two
-    // different face normals; aggregating still resolves to a smooth average,
-    // matching Jolt's `MeshShape::sCollideShape` behaviour.
-    glm::vec3 sumDir(0.0f);
-    float maxDepth = 0.0f;
-    int overlapCount = 0;
+    // Per-triangle MTVs are face-normal (Phase 2 welding) so adjacent
+    // coplanar welded triangles can't produce ghost contacts that fight
+    // each other.  But a single aggregation pass is geometrically
+    // insufficient at concave / convex corners where TWO orthogonal face
+    // normals meet: averaging produces a diagonal direction, and pushing
+    // by `maxDepth` along that diagonal leaves ~30 % residual penetration
+    // on each face (the diagonal push falls short of fully clearing each
+    // axis by a factor of `1 - cos(angle/2)` ≈ 0.293 for a 90° corner).
+    //
+    // The bump loop's "starts inside → skip" rule means residual
+    // penetration after a single depen pass is fatal: next tick the
+    // sweep won't detect the surface and the player phases through.
+    // High-velocity actions (wallrun, double jump, grapple) jam the
+    // player into corners hard enough that the residual matters.
+    //
+    // Fix: iterate up to k_maxPasses times.  Each pass aggregates the
+    // *current* set of overlapping triangles and pushes once; convergence
+    // is geometric (each pass reduces residual by the same ratio), so 4
+    // passes clear corners down to < 1 % of their initial penetration —
+    // well below the pushback epsilon.
+    constexpr int k_maxPasses = 4;
 
-    int stack[64];
-    int stackPtr = 0;
-    stack[0] = 0;
+    for (int pass = 0; pass < k_maxPasses; ++pass) {
+        glm::vec3 sumDir(0.0f);
+        float maxDepth = 0.0f;
+        int overlapCount = 0;
 
-    while (stackPtr >= 0) {
-        const int nodeIdx = stack[stackPtr--];
-        const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+        int stack[64];
+        int stackPtr = 0;
+        stack[0] = 0;
 
-        const glm::vec3 expMin = node.boundsMin - halfExtents;
-        const glm::vec3 expMax = node.boundsMax + halfExtents;
-        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
-            pos.z > expMax.z)
-            continue;
+        while (stackPtr >= 0) {
+            const int nodeIdx = stack[stackPtr--];
+            const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
-        if (node.count > 0) {
-            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
-                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
-                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
-                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
-                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+            const glm::vec3 expMin = node.boundsMin - halfExtents;
+            const glm::vec3 expMax = node.boundsMax + halfExtents;
+            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y ||
+                pos.z < expMin.z || pos.z > expMax.z)
+                continue;
 
-                glm::vec3 mtv;
-                if (!aabbVsTriVoronoi(pos,
-                                      halfExtents,
-                                      v0,
-                                      v1,
-                                      v2,
-                                      mesh.faceNormals[ti],
-                                      mesh.edgeActive[ti],
-                                      mesh.vertActive[ti],
-                                      mtv))
-                    continue;
+            if (node.count > 0) {
+                for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                    const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                    const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                    const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                    const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
 
-                const float depth = glm::length(mtv);
-                if (depth < 1e-6f)
-                    continue;
+                    glm::vec3 mtv;
+                    if (!aabbVsTriVoronoi(pos,
+                                          halfExtents,
+                                          v0,
+                                          v1,
+                                          v2,
+                                          mesh.faceNormals[ti],
+                                          mesh.edgeActive[ti],
+                                          mesh.vertActive[ti],
+                                          mtv))
+                        continue;
 
-                const glm::vec3 mtvDir = mtv / depth;
-                sumDir += mtvDir;
-                maxDepth = std::max(maxDepth, depth);
-                ++overlapCount;
+                    const float depth = glm::length(mtv);
+                    if (depth < 1e-6f)
+                        continue;
 
-                if (debug::isEnabled()) {
-                    debug::pushDepenContact(pos, mtvDir, depth, debug::ContactSource::TriMeshDepen, ti);
+                    const glm::vec3 mtvDir = mtv / depth;
+                    sumDir += mtvDir;
+                    maxDepth = std::max(maxDepth, depth);
+                    ++overlapCount;
+
+                    if (debug::isEnabled()) {
+                        debug::pushDepenContact(pos, mtvDir, depth, debug::ContactSource::TriMeshDepen, ti);
+                    }
                 }
+            } else {
+                stack[++stackPtr] = node.leftFirst;
+                stack[++stackPtr] = node.leftFirst + 1;
             }
-        } else {
-            stack[++stackPtr] = node.leftFirst;
-            stack[++stackPtr] = node.leftFirst + 1;
         }
+
+        if (overlapCount == 0)
+            return; // fully separated — done in fewer than k_maxPasses
+
+        const float dirLen = glm::length(sumDir);
+        if (dirLen < 1e-6f)
+            return; // contributions cancel — entity centred inside a closed mesh.
+
+        const glm::vec3 dir = sumDir / dirLen;
+        pos += dir * (maxDepth + pushback);
+
+        // Cancel inward velocity component on every pass so a sliding
+        // player loses normal-direction motion immediately instead of
+        // grinding back into the surface for k_maxPasses-1 frames.
+        const float into = glm::dot(vel, dir);
+        if (into < 0.0f)
+            vel -= dir * into;
     }
-
-    if (overlapCount == 0)
-        return;
-
-    const float dirLen = glm::length(sumDir);
-    if (dirLen < 1e-6f)
-        return; // contributions cancel — entity centred inside a closed mesh.
-
-    const glm::vec3 dir = sumDir / dirLen;
-    pos += dir * (maxDepth + pushback);
-
-    const float into = glm::dot(vel, dir);
-    if (into < 0.0f)
-        vel -= dir * into;
 }
 
 } // namespace physics

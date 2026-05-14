@@ -61,7 +61,7 @@ inline constexpr const char* k_collisionPattern = "COL_";
 /// Has no effect in prototype mode (`k_separatedCollisionMap = false`):
 /// every mesh is collision there, and forcing all of them to triMesh would
 /// be prohibitively expensive.
-inline constexpr bool k_guessShapesProcessed = true;
+inline constexpr bool k_guessShapesProcessed = false;
 
 /// @brief Run V-HACD convex decomposition on non-convex prop meshes?
 ///
