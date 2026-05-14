@@ -186,7 +186,7 @@ void ServerGame::run()
     registry.emplace<Position>(playerSpawner4, glm::vec3{0.0f, 200.0f, 0.0f});
 
     // Temp powerup spawner
-    PowerupConfig damageConfig = getPowerupConfig(PowerupType::Shield);
+    PowerupConfig damageConfig = getPowerupConfig(PowerupType::Damage);
     const entt::entity powerupSpawner = registry.create();
     registry.emplace<PowerupSpawner>(powerupSpawner, PowerupSpawner{.type = damageConfig.type, .spawnCooldown = 0, .hasPowerup = true});
     registry.emplace<Position>(powerupSpawner, glm::vec3{-200.0f, 50.0f, 300.0f});

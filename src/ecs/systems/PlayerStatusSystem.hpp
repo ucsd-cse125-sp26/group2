@@ -33,7 +33,8 @@ void applyHeal(float amount, Health& playerHealth);
 /// @param registry   The ECS registry.
 /// @param killEvents Accumulates kill events for network broadcast.
 /// @param hitRegion  Body region that was hit (for kill feed / headshot tracking).
-void applyDamage(float damage,
+/// @return Final damage value after status modifiers such as powerups. Returns 0 if damage was ignored.
+float applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
                  Registry& registry,
