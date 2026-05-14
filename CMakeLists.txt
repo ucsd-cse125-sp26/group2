@@ -793,11 +793,16 @@ add_executable(group2
         src/ecs/physics/Joints.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
+        src/ecs/physics/CookedMeshFormat.hpp
+        src/ecs/physics/CookedMeshFormat.cpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
+        src/ecs/components/Ragdoll.hpp
         src/ecs/components/TriggerVolume.hpp
         src/ecs/systems/TriggerSystem.hpp
         src/ecs/systems/TriggerSystem.cpp
+        src/ecs/systems/RagdollSystem.hpp
+        src/ecs/systems/RagdollSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -1038,11 +1043,16 @@ add_executable(server
         src/ecs/physics/Joints.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
+        src/ecs/physics/CookedMeshFormat.hpp
+        src/ecs/physics/CookedMeshFormat.cpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
+        src/ecs/components/Ragdoll.hpp
         src/ecs/components/TriggerVolume.hpp
         src/ecs/systems/TriggerSystem.hpp
         src/ecs/systems/TriggerSystem.cpp
+        src/ecs/systems/RagdollSystem.hpp
+        src/ecs/systems/RagdollSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -1311,6 +1321,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/RigidBody.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Orientation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/TriggerVolume.hpp"
