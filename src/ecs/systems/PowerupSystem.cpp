@@ -44,10 +44,13 @@ void runPowerups(Registry& registry, float dt)
 {
     auto view = registry.view<Player, PowerupState>();
     view.each([&](PowerupState& powerups) {
-        for (ActivePowerup powerup : powerups.active) {
-            powerup.timeRemaining -= dt;
-            if (powerup.timeRemaining <= 0) {
-                removePowerup(powerups, powerup.type);
+        for (auto it = powerups.active.begin(); it != powerups.active.end(); ) {
+            it->timeRemaining -= dt;
+
+            if (it->timeRemaining <= 0.0f) {
+                it = powerups.active.erase(it);
+            } else {
+                ++it;
             }
         }
     });

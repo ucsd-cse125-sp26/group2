@@ -274,7 +274,7 @@ inline void updateAbilityLevel(Registry& registry, entt::entity player, float dm
     }
 }
 
-void applyDamage(float damage,
+float applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
                  Registry& registry,
@@ -283,21 +283,21 @@ void applyDamage(float damage,
 {
     // If player is dead, ignore damage
     if (registry.all_of<RespawnTimer>(player))
-        return;
+        return 0.0f;
 
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 
     // Reset heal cooldown on every damage tick
     playerHealth.healTimer = systems::healCooldown;
 
-    if (player != killer) {
-        updateAbilityLevel(registry, killer, damage);
-
-        PowerupState& powerupState = registry.get<PowerupState>(killer);
-        PowerupConfig damageConfig = getPowerupConfig(PowerupType::Damage);
-        if (hasPowerup(powerupState, PowerupType::Damage)) {
+    if (player != killer && registry.valid(killer)) {
+        const PowerupState* powerupState = registry.try_get<PowerupState>(killer);
+        const PowerupConfig damageConfig = getPowerupConfig(PowerupType::Damage);
+        if (powerupState != nullptr && hasPowerup(*powerupState, PowerupType::Damage)) {
             damage = damage * damageConfig.amount;
         }
+
+        updateAbilityLevel(registry, killer, damage);
     }
 
     if (playerHealth.armor >= damage) {
@@ -312,6 +312,8 @@ void applyDamage(float damage,
             playerHealth.health -= overflow;
         }
     }
+
+    return damage;
 }
 
 /// @brief Tick passive health regeneration after the heal cooldown expires.
