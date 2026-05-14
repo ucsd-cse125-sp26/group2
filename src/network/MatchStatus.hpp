@@ -4,6 +4,7 @@
 
 enum class MatchPhase : uint8_t
 {
+    LOBBY, ///< Pre-match lobby phase; players are not yet spawned in-world.
     WARMUP,
     COUNTDOWN,
     IN_PROGRESS,

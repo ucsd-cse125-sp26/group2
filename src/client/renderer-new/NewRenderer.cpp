@@ -128,7 +128,7 @@ bool NewRenderer::createGeometryPipeline()
     };
 
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true,false);
+        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, false);
 
     return geometryPipeline_ != nullptr;
 }
@@ -168,7 +168,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     if (!swapchain) {
-        //SDL_Log("NewRenderer::drawFrame: swapchain not ready, skipping...: ");
+        // SDL_Log("NewRenderer::drawFrame: swapchain not ready, skipping...: ");
         SDL_CancelGPUCommandBuffer(cmd);
         return;
     }
@@ -179,15 +179,15 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
-    setMainCamera(eye,yaw,pitch,roll,width,height);
+    setMainCamera(eye, yaw, pitch, roll, width, height);
 
-    drawGeometryPass(swapchain,cmd);
-    drawUIPass(swapchain,cmd);
+    drawGeometryPass(swapchain, cmd);
+    drawUIPass(swapchain, cmd);
 
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
-void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll,Uint32 width,Uint32 height)
+void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height)
 {
     camera_.setEye(eye);
     camera_.setTarget(pitch, yaw, roll);
@@ -195,7 +195,7 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
     camera_.computeViewProjectionMatrix();
 }
 
-void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain, SDL_GPUCommandBuffer *cmd)
+void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
@@ -205,37 +205,67 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture *swapchain, SDL_GPUCommandBuff
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
-    drawWorldModelInstances(geometryPass,cmd);
+    drawWorldModelInstances(geometryPass, cmd);
+    drawEntityModels(geometryPass, cmd);
 
-    const glm::mat4 projection = camera_.getProjectionMatrix();
-    SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
-    drawWeapon(geometryPass,cmd);
+    // const glm::mat4 projection = camera_.getProjectionMatrix();
+    // SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
+    drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
-
 }
 
-void NewRenderer::drawWeapon(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd)
+void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
-    if (!Asset::models_.contains(Asset::weaponModelId_)) {
-        std::cout << "invalid weaponModelId" << std::endl;
+    // if (Asset::modelInstances_.size() <= 4) {
+    //     return;
+    // }
+    // Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
+    // if (!Asset::models_.contains(Asset::weaponModelId_)) {
+    //     std::cout << "invalid weaponModelId" << std::endl;
+    //     return;
+    // }
+
+    // constexpr auto newWVM = glm::mat4(1.0f);
+
+    if (Asset::modelInstances_.size() <= weapon_.modelIndex) {
         return;
     }
 
-    constexpr auto newWVM = glm::mat4(1.0f);
-    Asset::weaponViewModel_ = glm::translate(newWVM,glm::vec3(1.0f, 0.0f, -3.0f));
-    drawModel(Asset::weaponModelId_,Asset::weaponViewModel_,renderPass,cmd);
+    Asset::ModelInstance& weaponModelInstance = Asset::modelInstances_.at(weapon_.modelIndex);
+    ModelIdInt weaponModelId = weaponModelInstance.modelId_;
+
+    if (!Asset::models_.contains(weaponModelId)) {
+        std::cout << "invalid weapon ModelId" << std::endl;
+        return;
+    }
+
+    drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
 }
 
-void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd)
+void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     for (const auto& mInstance : Asset::modelInstances_) {
         drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
     }
 }
 
-void NewRenderer::drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd)
+void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+{
+    for (const auto& entityCmd : entities_) {
+        if (entityCmd.modelIndex < 0 ) {
+            std::cout << "invalid modelIndex" << std::endl;
+            break;
+        }
+        ModelIdInt modelId = Asset::modelInstances_.at(entityCmd.modelIndex).modelId_;
+        drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
+    }
+}
+
+void NewRenderer::drawModel(ModelIdInt modelId,
+                            const glm::mat4& modelTransform,
+                            SDL_GPURenderPass* renderPass,
+                            SDL_GPUCommandBuffer* cmd)
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
@@ -310,7 +340,7 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
     return true;
 }
 
-void NewRenderer::drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd)
+void NewRenderer::drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
     ImDrawData* drawData = ImGui::GetDrawData();
     if (drawData)
@@ -334,15 +364,13 @@ void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
     SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
     SDL_BindGPUFragmentSamplers(renderPass, 0, &hudTextureBinding, 1);
 
-
-    SDL_DrawGPUPrimitives(renderPass, 6,1,0,0);
+    SDL_DrawGPUPrimitives(renderPass, 6, 1, 0, 0);
 }
 
 void NewRenderer::setHudTexture(SDL_GPUTexture* hudTexture)
 {
-    hudTexture_ =  hudTexture;
+    hudTexture_ = hudTexture;
 }
-
 
 void NewRenderer::quit()
 {
@@ -395,10 +423,6 @@ int NewRenderer::loadSceneModel(
     bool flatten = false;
     const std::vector<std::string> texFileNames;
 
-    auto modelTransform = glm::mat4(1.0f);
-    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
-    modelTransform[3] = glm::vec4(pos, 1.0f);
-
     const char* const base = SDL_GetBasePath();
     std::filesystem::path fullPath = base ? base : "";
     fullPath /= ASSETS_DIR;
@@ -411,6 +435,10 @@ int NewRenderer::loadSceneModel(
     }
     Asset::Model& model = Asset::models_.at(modelId);
     AssetLoader::updateModelTransformCache(modelId);
+
+    auto modelTransform = glm::mat4(1.0f);
+    modelTransform = glm::scale(modelTransform, glm::vec3(scale));
+    modelTransform[3] = glm::vec4(pos, 1.0f);
 
     Asset::ModelInstance sceneInstance{};
     sceneInstance.drawInScenePass = true;
@@ -469,4 +497,23 @@ int NewRenderer::loadSceneModel(
     SDL_WaitForGPUIdle(device_);
 
     return Asset::modelInstances_.size() - 1;
+}
+
+void NewRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
+{
+    weapon_ = vm;
+}
+
+void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
+{
+    return;
+}
+void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)
+{
+    entities_ = std::move(entityList);
+    return;
+}
+void NewRenderer::setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor)
+{
+    return;
 }

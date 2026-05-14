@@ -74,28 +74,16 @@ void drawArrow(ImDrawList* dl, ImVec2 start, ImVec2 end, ImU32 color, float thic
 
 // DebugUI methods
 
-bool DebugUI::init(SDL_Window* window)
+bool DebugUI::init(SDL_Window* /*window*/)
 {
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-    ImGui::StyleColorsDark();
-
-    if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
-        SDL_Log("DebugUI: ImGui_ImplSDL3_InitForSDLGPU failed");
-        return false;
-    }
-
+    // ImGui context + SDL3 platform backend are owned by App (created before
+    // Renderer::init, destroyed after Renderer::quit).  Nothing to do here.
     return true;
 }
 
 void DebugUI::shutdown()
 {
-    ImGui_ImplSDL3_Shutdown();
-    ImGui::DestroyContext();
+    // ImGui context teardown lives in App::cleanup.
 }
 
 void DebugUI::processEvent(const SDL_Event* event)

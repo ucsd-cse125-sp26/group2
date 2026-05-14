@@ -10,14 +10,9 @@
 void MatchController::update(float deltaTime, Registry& registry, Server& server)
 {
     switch (currentPhase) {
+    case MatchPhase::LOBBY:
+        break;
     case MatchPhase::WARMUP: {
-        // NOTE: Change in future to support more dynamic match start conditions
-        // such as manual start by host, min player count
-        if (server.getClientCount() >= 2) {
-            SDL_Log("MatchController: enough players connected, starting countdown");
-            currentPhase = MatchPhase::COUNTDOWN;
-            countdownTimer = k_countdownDuration;
-        }
         break;
     }
     case MatchPhase::COUNTDOWN: {
@@ -39,11 +34,10 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
     case MatchPhase::FINISHED: {
-        // NOTE: Currently resets to WARMUP after fixed duration
         countdownTimer -= deltaTime;
         if (countdownTimer <= 0.0f) {
             SDL_Log("MatchController: finished duration elapsed");
-            currentPhase = MatchPhase::WARMUP;
+            currentPhase = MatchPhase::LOBBY;
             countdownTimer = 0.0f;
             systems::resetStats(registry);
         }
@@ -53,12 +47,35 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
 
+    if (skipLobby && currentPhase == MatchPhase::LOBBY) {
+        SDL_Log("MatchController: skip_lobby enabled, starting countdown");
+        currentPhase = MatchPhase::COUNTDOWN;
+        countdownTimer = k_countdownDuration;
+        winnerId = -1;
+    }
+
     broadcastMatchState(server);
 }
 
 MatchPhase MatchController::getCurrentPhase()
 {
     return currentPhase;
+}
+
+void MatchController::hostStartedMatch()
+{
+    if (currentPhase != MatchPhase::LOBBY)
+        return;
+
+    SDL_Log("MatchController: host started match, starting countdown");
+    currentPhase = MatchPhase::COUNTDOWN;
+    countdownTimer = k_countdownDuration;
+    winnerId = -1;
+}
+
+void MatchController::setSkipLobby(bool v)
+{
+    skipLobby = v;
 }
 
 int MatchController::getWinnerId()

@@ -13,6 +13,4 @@ constexpr int maxLevel = 2;
 
 void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float dt);
 
-}
-
-
+} // namespace systems

@@ -9,6 +9,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/PacketHeader.hpp"
 #include "perf/Parallel.hpp" // PR-9: parallelFor for per-client syscall fan-out.
 #include "perf/Profiler.hpp" // PR-1: NetworkCounters & scope timers.
@@ -246,6 +247,13 @@ void Server::flushAllOutbound()
                 clients.erase(it);
             }
         }
+    }
+    if (clientDisconnectedFn_) {
+        for (ClientId id : failed)
+            clientDisconnectedFn_(id);
+    }
+    {
+        std::unique_lock<std::shared_mutex> lock(stateMutex_);
 
         auto& nc = ::group2::perf::net();
         nc.clientCount.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
@@ -454,10 +462,13 @@ void Server::networkLoop()
     // between them — letting the game thread enqueue / dequeue without
     // having to wait for an entire I/O cycle to finish.
     while (!shouldStop_.load(std::memory_order_relaxed)) {
+        ClientId newClient{};
         {
             std::unique_lock<std::shared_mutex> lock(stateMutex_);
-            acceptClients();
+            newClient = acceptClients();
         }
+        if (newClient.value != -1 && clientConnectedFn_)
+            clientConnectedFn_(newClient);
         // PR-6: readClients now manages its own shared/unique split.
         readClients();
 
@@ -639,8 +650,20 @@ void Server::networkLoop()
         if (udpEndpoint_.isOpen()) {
             std::unique_lock<std::shared_mutex> lock(stateMutex_);
             for (auto& [_, conn] : clients) {
-                if (conn.udpAddr.addr == nullptr || conn.reliableQueue.empty())
+                if (conn.reliableQueue.empty())
                     continue;
+
+                if (conn.udpAddr.addr == nullptr) {
+                    for (auto& entry : conn.reliableQueue) {
+                        if (entry.framed) {
+                            conn.outbound.enqueue(
+                                0, frameMessage(entry.framed->data(), static_cast<int>(entry.framed->size())));
+                        }
+                    }
+                    conn.reliableQueue.clear();
+                    continue;
+                }
+
                 for (auto& entry : conn.reliableQueue) {
                     net::PacketHeader hdr{};
                     hdr.kind = static_cast<uint8_t>(net::PacketKind::Payload);
@@ -667,14 +690,14 @@ void Server::networkLoop()
     }
 }
 
-void Server::acceptClients()
+ClientId Server::acceptClients()
 {
     // Accept up to one new client per tick, should be good enough.
 
     NET_StreamSocket* socket = nullptr;
     if (!NET_AcceptClient(server, &socket)) {
         SDL_Log("NET_AcceptClient failed: %s", SDL_GetError());
-        return;
+        return {};
     } else if (socket) {
         SDL_Log("Server: accepted new client");
         NET_SetStreamSocketNoDelay(socket, true);
@@ -704,7 +727,9 @@ void Server::acceptClients()
         }
         connIdToClient_[connId] = clientId;
         eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected, .movementIntent = {}});
+        return clientId;
     }
+    return {};
 }
 
 void Server::disconnectClient(Connection& conn)
@@ -766,12 +791,18 @@ void Server::readClients()
     }
 
     if (!failed.empty()) {
-        std::unique_lock<std::shared_mutex> lock(stateMutex_);
-        for (ClientId id : failed) {
-            if (auto it = clients.find(id); it != clients.end()) {
-                disconnectClient(it->second);
-                clients.erase(it);
+        {
+            std::unique_lock<std::shared_mutex> lock(stateMutex_);
+            for (ClientId id : failed) {
+                if (auto it = clients.find(id); it != clients.end()) {
+                    disconnectClient(it->second);
+                    clients.erase(it);
+                }
             }
+        }
+        if (clientDisconnectedFn_) {
+            for (ClientId id : failed)
+                clientDisconnectedFn_(id);
         }
     }
 }
@@ -872,6 +903,28 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
             std::memcpy(buf + 1, payload, sizeof(Uint64));
             conn.outbound.enqueue(0, frameMessage(buf, static_cast<int>(sizeof(buf))));
         }
+        break;
+    }
+
+    case PacketType::PLAYER_READY: {
+        Event event{};
+        event.type = EventType::PlayerReady;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        break;
+    }
+    case PacketType::PLAYER_UNREADY: {
+        Event event{};
+        event.type = EventType::PlayerUnready;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        break;
+    }
+    case PacketType::START_MATCH: {
+        Event event{};
+        event.type = EventType::StartMatchRequested;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
         break;
     }
 
@@ -1176,4 +1229,45 @@ void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
     enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
 
     SDL_Log("Server: broadcasted %u kill events to clients", count);
+}
+
+bool Server::sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players)
+{
+    const auto count = static_cast<uint32_t>(players.size());
+    // Wire format: [PacketType:1B][localClientId:4B][count:4B][players:count*sizeof(LobbyPlayer)]
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(int) + sizeof(uint32_t) + count * sizeof(LobbyPlayer));
+    buf[0] = static_cast<uint8_t>(PacketType::LOBBY_STATE);
+    std::memcpy(buf.data() + 1, &clientId.value, sizeof(int));
+    std::memcpy(buf.data() + 1 + sizeof(int), &count, sizeof(uint32_t));
+    std::memcpy(buf.data() + 1 + sizeof(int) + sizeof(uint32_t), players.data(), count * sizeof(LobbyPlayer));
+    return sendToClient(clientId, buf.data(), static_cast<int>(buf.size()));
+}
+
+void Server::broadcastLobbyUpdate(const LobbyUpdateEvent& event)
+{
+    const char* action = "updated";
+    switch (event.type) {
+    case LobbyUpdateEvent::Type::PlayerJoined:
+        action = "joining";
+        break;
+    case LobbyUpdateEvent::Type::PlayerLeft:
+        action = "leaving";
+        break;
+    case LobbyUpdateEvent::Type::PlayerReady:
+        action = "ready";
+        break;
+    case LobbyUpdateEvent::Type::PlayerUnready:
+        action = "not ready";
+        break;
+    case LobbyUpdateEvent::Type::PlayerNewHost:
+        action = "new host";
+        break;
+    }
+
+    // Pack: [PacketType::LOBBY_UPDATE (1B)] [LobbyUpdateEvent]
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(LobbyUpdateEvent));
+    buf[0] = static_cast<uint8_t>(PacketType::LOBBY_UPDATE);
+    std::memcpy(buf.data() + 1, &event, sizeof(LobbyUpdateEvent));
+    enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
+    SDL_Log("Server: broadcasted lobby update: player %d is %s", event.id.value, action);
 }

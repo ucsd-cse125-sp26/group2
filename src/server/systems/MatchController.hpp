@@ -6,7 +6,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/Server.hpp"
 
-/// @brief Manages match flow: warmup → countdown → in-progress → finished → warmup.
+/// @brief Manages match flow: lobby → countdown → in-progress → finished → lobby.
 ///
 /// Transitions between phases based on player count and kill thresholds.
 /// Broadcasts match state to all clients every tick.
@@ -22,13 +22,20 @@ public:
     /// @brief Return the current match phase.
     MatchPhase getCurrentPhase();
 
+    /// @brief Start the host-authorized countdown if the match is still in the lobby phase.
+    void hostStartedMatch();
+
+    /// @brief Enable or disable developer-mode lobby bypass.
+    void setSkipLobby(bool v);
+
     /// @brief Return the winner's client ID, or -1 if no winner yet.
     int getWinnerId();
 
 private:
-    MatchPhase currentPhase = MatchPhase::WARMUP;      ///< Current phase of the match.
+    MatchPhase currentPhase = MatchPhase::LOBBY;       ///< Current phase of the match.
     float countdownTimer = 0.0f;                       ///< Seconds remaining in the current timed phase.
     int winnerId = -1;                                 ///< Client ID of the winner (-1 if none).
+    bool skipLobby = false;                            ///< True to auto-promote lobby to countdown.
 
     static constexpr float k_countdownDuration = 5.0f; ///< Seconds for the pre-match countdown.
     static constexpr float k_finishedDuration = 5.0f;  ///< Seconds to display results before reset.
@@ -45,7 +52,7 @@ private:
     // countdownTimer (which the client smoothes locally between
     // ticks). We now broadcast only when those values move enough
     // to be observable on the client.
-    MatchPhase lastBroadcastPhase = MatchPhase::WARMUP;
+    MatchPhase lastBroadcastPhase = MatchPhase::LOBBY;
     int lastBroadcastWinnerId = -1;
     float lastBroadcastCountdown = -1.0f;
     int ticksSinceBroadcast = 0;

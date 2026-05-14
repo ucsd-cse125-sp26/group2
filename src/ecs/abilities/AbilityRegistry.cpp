@@ -3,7 +3,8 @@
 
 #include "AbilityRegistry.hpp"
 
-void AbilityRegistry::registerAbility(std::unique_ptr<Ability> ability) {
+void AbilityRegistry::registerAbility(std::unique_ptr<Ability> ability)
+{
     if (!ability) {
         return;
     }
@@ -12,7 +13,8 @@ void AbilityRegistry::registerAbility(std::unique_ptr<Ability> ability) {
     abilities[type] = std::move(ability);
 }
 
-Ability* AbilityRegistry::getAbility(const AbilityType type) {
+Ability* AbilityRegistry::getAbility(const AbilityType type)
+{
     const auto it = abilities.find(type);
 
     if (it == abilities.end()) {
@@ -22,6 +24,7 @@ Ability* AbilityRegistry::getAbility(const AbilityType type) {
     return it->second.get();
 }
 
-bool AbilityRegistry::hasAbility(const AbilityType type) const {
+bool AbilityRegistry::hasAbility(const AbilityType type) const
+{
     return abilities.contains(type);
 }

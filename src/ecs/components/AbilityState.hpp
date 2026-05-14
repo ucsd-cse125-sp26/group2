@@ -5,12 +5,14 @@
 
 #include <vector>
 
-enum class AbilitySlot {
+enum class AbilitySlot
+{
     Primary,
     Secondary
 };
 
-enum class AbilityType {
+enum class AbilityType
+{
     None,
     Dash,
     Grapple,
@@ -28,7 +30,8 @@ const std::vector<AbilityType> secondaryAbilityTypes = {
     AbilityType::Recall,
 };
 
-struct AbilityState {
+struct AbilityState
+{
     int level = 0;
     float accumDamage = 0;
     bool pendingLevel1 = false;

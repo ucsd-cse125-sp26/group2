@@ -185,12 +185,9 @@ void Bot::closeShotsLog() noexcept
     }
 }
 
-// PR-23: register the `onLocalPlayerReady` callback that emplaces the
-// client-only components needed for prediction.  Mirrors
-// `Game::setup`'s identical block (`registry.emplace<LocalPlayer>(local)`
-// + InputSnapshot + PreviousPosition + PlayerSimState).  Called BEFORE
-// `client_.init()` so the callback is set when the first snapshot
-// containing the local player applies.
+// PR-23: register the snapshot callback that emplaces the client-only
+// components needed for prediction once the server-assigned local entity
+// can be mapped through the bot-owned snapshot loader.
 //
 // What each component is for:
 //   * `LocalPlayer`     — tag used by `runMovement`'s view filter and
@@ -208,28 +205,65 @@ void Bot::closeShotsLog() noexcept
 //                         players in the real client.
 void Bot::setupLocalPlayerCallback()
 {
-    client_.onLocalPlayerReady([this](entt::entity local) {
-        registry_.emplace<LocalPlayer>(local);
-        registry_.emplace<InputSnapshot>(local);
-        // PR-23 (analog of Game.cpp:367): seed PreviousPosition from
-        // current Position so the per-tick prev=pos capture inside
-        // the runLoop has a starting value.
-        registry_.emplace_or_replace<PreviousPosition>(local, registry_.get<Position>(local).value);
-        registry_.emplace_or_replace<PlayerSimState>(local);
-        localPlayerReady_ = true;
-        SDL_Log("[bot %d] PR-23: local player ready (entity=%u) — prediction enabled",
-                botId_,
-                static_cast<unsigned>(local));
+    client_.onSnapshotApply([this](std::uint32_t snapshotTick,
+                                   const std::uint8_t* bytes,
+                                   Uint32 size,
+                                   Uint64 captureNs,
+                                   std::uint32_t& ackedTick) {
+        return applyIncomingSnapshot(snapshotTick, bytes, size, captureNs, ackedTick);
     });
+}
+
+bool Bot::applyIncomingSnapshot(
+    std::uint32_t /*snapshotTick*/, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick)
+{
+    registry_.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
+        .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+
+    if (!snapshotLoader_)
+        snapshotLoader_.emplace(registry_);
+
+    snapshotLoader_->apply(bytes, size, client_.getServerLocalPlayerEntity(), &ackedTick);
+
+    registry_.view<Position>(entt::exclude<PreviousPosition>).each([this](entt::entity e, const Position& pos) {
+        registry_.emplace<PreviousPosition>(e, pos.value);
+    });
+
+    if (!mappedLocalPlayerEntity_) {
+        if (const auto serverLocal = client_.getServerLocalPlayerEntity()) {
+            const entt::entity local = snapshotLoader_->map(*serverLocal);
+            if (local != entt::null) {
+                registry_.emplace<LocalPlayer>(local);
+                registry_.emplace<InputSnapshot>(local);
+                registry_.emplace_or_replace<PreviousPosition>(local, registry_.get<Position>(local).value);
+                registry_.emplace_or_replace<PlayerSimState>(local);
+                mappedLocalPlayerEntity_ = local;
+                localPlayerReady_ = true;
+                SDL_Log("[bot %d] PR-23: local player ready (entity=%u) — prediction enabled",
+                        botId_,
+                        static_cast<unsigned>(local));
+            }
+        }
+    }
+
+    client_.recordInterpolationSamples(registry_, captureNs);
+    return true;
+}
+
+std::optional<entt::entity> Bot::getLocalPlayerEntity() const
+{
+    if (!mappedLocalPlayerEntity_)
+        return std::nullopt;
+    return *mappedLocalPlayerEntity_;
 }
 
 bool Bot::init(const std::string& host, Uint16 port, int botId)
 {
     botId_ = botId;
     // PR-23: callback MUST be set before client_.init() so the first
-    // snapshot's localPlayerReadyFn fires correctly.
+    // applicable snapshot can map and initialise the local player.
     setupLocalPlayerCallback();
-    if (!client_.init(host.c_str(), port)) {
+    if (client_.init(host.c_str(), port) != ConnectError::None) {
         SDL_Log("[bot %d] connection failed", botId_);
         return false;
     }
@@ -495,7 +529,7 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
                 return p != nullptr && p[0] != '\0' && p[0] != '0';
             }();
             if (k_aimEnabled) {
-                if (auto localEnt = client_.getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
+                if (auto localEnt = getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
                     const auto* myPos = registry_.try_get<Position>(*localEnt);
                     const auto* myShape = registry_.try_get<CollisionShape>(*localEnt);
                     if (myPos != nullptr && myShape != nullptr) {
@@ -548,7 +582,7 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
             const bool nowShooting = input_.shooting;
             prevShootingForLog_ = nowShooting;
             if (nowShooting && !wasShooting && shotsCsv_ != nullptr) {
-                if (auto localEnt = client_.getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
+                if (auto localEnt = getLocalPlayerEntity(); localEnt && registry_.valid(*localEnt)) {
                     const auto* myCid = registry_.try_get<ClientId>(*localEnt);
                     const auto* myPos = registry_.try_get<Position>(*localEnt);
                     const auto* myShape = registry_.try_get<CollisionShape>(*localEnt);
@@ -725,7 +759,7 @@ void Bot::runLoop(const std::atomic<bool>& stopFlag)
         // back-pressuring server flushSend and corrupting the load-test
         // signal we're trying to measure. Client::poll already implements
         // the Phase-1 drain-fully fix in MessageStream.
-        if (!client_.poll(registry_)) {
+        if (!client_.poll()) {
             SDL_Log("[bot %d] server connection died", botId_);
             break;
         }

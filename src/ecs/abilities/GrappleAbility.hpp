@@ -14,4 +14,3 @@ public:
     bool canUse(entt::entity player, Registry& registry) const override;
     void activate(entt::entity player, Registry& registry) override;
 };
-

@@ -413,6 +413,7 @@ add_library(imgui_lib STATIC
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp
+    ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
 )
 target_include_directories(imgui_lib PUBLIC
     ${imgui_SOURCE_DIR}
@@ -628,6 +629,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.hpp"
     # PR-11 (server-perf): client-side render-delay interpolation
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
@@ -853,6 +856,23 @@ add_executable(group2
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/client/app/App.hpp
+        src/client/app/App.cpp
+        src/client/menus/lobby/Lobby.hpp
+        src/client/menus/lobby/Lobby.cpp
+        src/client/menus/lobby/ui/LobbyUI.hpp
+        src/client/menus/lobby/ui/LobbyUI.cpp
+        src/client/renderer-new/RendererTypes.hpp
+        src/client/menus/home/Home.hpp
+        src/client/menus/home/Home.cpp
+        src/client/menus/home/ui/HomeUI.hpp
+        src/client/menus/home/ui/HomeUI.cpp
+        src/ecs/components/PowerupSpawner.hpp
+        src/ecs/components/PowerupState.hpp
+        src/ecs/systems/PowerupSpawnerSystem.cpp
+        src/ecs/systems/PowerupSpawnerSystem.hpp
+        src/ecs/systems/PowerupSystem.cpp
+        src/ecs/systems/PowerupSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -976,6 +996,8 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/ServerGame.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.hpp"
     # PR-1 (server-perf): scoped profiler + 1 Hz aggregator.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.cpp"
@@ -1091,6 +1113,14 @@ add_executable(server
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/server/lobby/LobbyManager.hpp
+        src/server/lobby/LobbyManager.cpp
+        src/ecs/components/PowerupSpawner.hpp
+        src/ecs/components/PowerupState.hpp
+        src/ecs/systems/PowerupSpawnerSystem.cpp
+        src/ecs/systems/PowerupSpawnerSystem.hpp
+        src/ecs/systems/PowerupSystem.cpp
+        src/ecs/systems/PowerupSystem.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1297,6 +1327,12 @@ add_executable(clientbot
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/ecs/components/PowerupSpawner.hpp
+        src/ecs/components/PowerupState.hpp
+        src/ecs/systems/PowerupSpawnerSystem.cpp
+        src/ecs/systems/PowerupSpawnerSystem.hpp
+        src/ecs/systems/PowerupSystem.cpp
+        src/ecs/systems/PowerupSystem.hpp
 )
 
 # Headers under src/ are referenced via "network/...", "ecs/components/...".

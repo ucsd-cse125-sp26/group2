@@ -7,11 +7,11 @@
 
 class Ability
 {
-    public:
-        virtual ~Ability() = default;
+public:
+    virtual ~Ability() = default;
 
-        virtual AbilityType type() const = 0;
-        virtual float cooldown() const = 0;
-        virtual bool canUse(entt::entity player, Registry& registry) const = 0;
-        virtual void activate(entt::entity player, Registry& registry) = 0;
+    virtual AbilityType type() const = 0;
+    virtual float cooldown() const = 0;
+    virtual bool canUse(entt::entity player, Registry& registry) const = 0;
+    virtual void activate(entt::entity player, Registry& registry) = 0;
 };

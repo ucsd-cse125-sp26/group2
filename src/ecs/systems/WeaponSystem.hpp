@@ -4,7 +4,6 @@
 #pragma once
 
 #include "ecs/registry/Registry.hpp"
-#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/NetKillEvent.hpp"
 #include "network/ShotDebugReport.hpp" // ShotDebugCapture (PR-20).
 #include "network/ShotEvent.hpp"

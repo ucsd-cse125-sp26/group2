@@ -90,7 +90,7 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
 void runWeaponSpawners(Registry& registry, float dt)
 {
     auto view = registry.view<WeaponSpawner, Position, CollisionShape>();
-    view.each([&](entt::entity e, WeaponSpawner& spawner, const Position& pos, const CollisionShape& shape) {
+    view.each([&](WeaponSpawner& spawner, const Position& pos, const CollisionShape& shape) {
         checkForPlayers(registry, pos, shape, spawner);
         if ((spawner.spawnCooldown - dt) > 0.0f) {
             spawner.spawnCooldown -= dt;
