@@ -297,6 +297,7 @@ float applyDamage(float damage,
     if (registry.all_of<RespawnTimer>(player))
         return 0.0f;
 
+
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 
     // Reset heal cooldown on every damage tick
