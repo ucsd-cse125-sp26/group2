@@ -37,6 +37,7 @@ public:
     /// @brief Named screens the application can display.
     enum class Screen
     {
+        Home,  ///< Main menu screen.
         Lobby, ///< Pre-match lobby waiting room.
         InGame ///< Active match session.
     };
@@ -52,7 +53,7 @@ private:
     DeveloperConfig developerConfig;  ///< Developer toggles loaded from config.toml.
     Client client;                    ///< Network client connected to the authoritative server.
 
-    Screen current = Screen::Lobby;   ///< Which screen is currently active.
+    Screen current = Screen::Home;    ///< Which screen is currently active.
     std::unique_ptr<IScreen> screen_; ///< Active screen instance.
     bool imguiContextOwned = false;   ///< True once App has created the ImGui context.
 

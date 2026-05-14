@@ -5,6 +5,7 @@
 
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
+#include "menus/home/Home.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 
@@ -98,14 +99,14 @@ bool App::init()
         screen_ = std::move(game);
         current = Screen::InGame;
     } else {
-        auto lobbyScreen = std::make_unique<Lobby>();
-        if (!lobbyScreen->init(&renderer, window, &client)) {
-            lobbyScreen->quit();
+        auto homeScreen = std::make_unique<Home>();
+        if (!homeScreen->init(&renderer, window)) {
+            homeScreen->quit();
             cleanup();
             return false;
         }
-        screen_ = std::move(lobbyScreen);
-        current = Screen::Lobby;
+        screen_ = std::move(homeScreen);
+        current = Screen::Home;
     }
 
     return true;
@@ -126,17 +127,25 @@ SDL_AppResult App::iterate()
     if (result != SDL_APP_CONTINUE)
         return result;
 
-    if (current == Screen::Lobby) {
+    switch (current) {
+    case Screen::Home:
+        // TODO: Home screen signals when to transition to lobby
+        break;
+    case Screen::Lobby:
         if (auto* lobby = dynamic_cast<Lobby*>(screen_.get()); lobby != nullptr && lobby->shouldStartMatch()) {
             lobby->consumeStartMatchState();
             transitionTo(Screen::InGame);
         }
-    } else if (current == Screen::InGame) {
+        break;
+    case Screen::InGame:
         if (developerConfig.skipLobby)
-            return result;
+            break;
         if (auto* game = dynamic_cast<Game*>(screen_.get()); game != nullptr && game->shouldReturnToLobby()) {
             transitionTo(Screen::Lobby);
         }
+        break;
+    default:
+        break;
     }
 
     return result;
@@ -178,6 +187,18 @@ void App::transitionTo(Screen next)
         }
         break;
     }
+    case Screen::Home: {
+        auto homeScreen = std::make_unique<Home>();
+        if (homeScreen->init(&renderer, window)) {
+            screen_ = std::move(homeScreen);
+            current = next;
+        } else {
+            homeScreen->quit();
+        }
+        break;
+    }
+    default:
+        break;
     }
 }
 

@@ -862,6 +862,10 @@ add_executable(group2
         src/client/menus/lobby/ui/LobbyUI.hpp
         src/client/menus/lobby/ui/LobbyUI.cpp
         src/client/renderer-new/RendererTypes.hpp
+        src/client/menus/home/Home.hpp
+        src/client/menus/home/Home.cpp
+        src/client/menus/home/ui/HomeUI.hpp
+        src/client/menus/home/ui/HomeUI.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
