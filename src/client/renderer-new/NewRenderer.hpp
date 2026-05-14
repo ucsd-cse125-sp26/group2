@@ -17,6 +17,7 @@
 #include "Asset.hpp"
 #include "Camera.hpp"
 #include "RendererTypes.hpp"
+#include "SkinnedRenderer.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -190,69 +191,24 @@ public:
 
     // ─── Skinned characters (animated players) ───────────────────────────────
     //
-    // Two-call interface mirroring the legacy renderer:
-    //   - setSkinnedRig() ONCE at startup → uploads bind-pose mesh + bone-
-    //     influence buffer; allocates per-frame SSBOs.
-    //   - setSkinnedFrame() EVERY FRAME → uploads a flat bone palette + a
-    //     parallel per-instance buffer (worldTransform, paletteBase, tint).
+    // The skinning pipeline (rig install, per-frame palette upload, instanced
+    // draw, shaders) is its own subsystem — see `SkinnedRenderer.hpp`.
+    // Game code talks to it through the accessor below:
     //
-    // CURRENT STATE:
-    //   - setSkinnedRig: IMPLEMENTED (GPU upload of mesh + influences).
-    //   - setSkinnedFrame: IMPLEMENTED (uploads palette+instance SSBOs each frame).
-    //   - The actual instanced draw call: NOT IMPLEMENTED (skinnedPipeline_ is null).
+    //   renderer.skinned().setRig(meshes, numJoints);            // once
+    //   renderer.skinned().setFrame(palette, instances);          // every frame
     //
-    // To bring skinned characters to screen, graphics team needs to:
-    //   1. Add shaders/skinned vertex+fragment (LBS in vertex shader, sample
-    //      bonePalette SSBO indexed by paletteBase + boneIndex).
-    //   2. Create `skinnedPipeline_` (two vertex buffers: ModelVertex + BoneInfluence;
-    //      two SSBOs as vertex storage; one UBO for view/proj).
-    //   3. Implement `drawSkinnedCharacters()` (called from drawFrame between
-    //      static geometry and the weapon — see the placeholder in cpp).
-    //   4. Test by spawning multiple players; one instanced draw per rig mesh
-    //      should render all of them.
+    // `NewRenderer::drawFrame` automatically drives the matching
+    // `uploadFrame()` (before render pass) and `draw()` (inside geometry pass)
+    // — game code never calls those directly.
 
-    /// @brief Install the shared skinned-character rig.  Call ONCE after `init()`.
-    /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
-    /// @param numJoints  Number of skeleton joints.  Determines per-instance palette stride.
-    /// @return True on success.  False if already installed, or upload failed.
+    /// @brief Accessor for the skinned-character subsystem.
     ///
-    /// IMPLEMENTATION (real, already wired):
-    ///   - Iterates `meshes`, creating two GPU vertex buffers per mesh:
-    ///       slot 0: bind-pose vertices (`ModelVertex`, 48 bytes/vert)
-    ///       slot 1: bone influences  (`BoneInfluence`, 32 bytes/vert)
-    ///     plus an index buffer.  Saves them in `skinnedMeshes_`.
-    ///   - Stores `numJoints` in `skinnedNumJoints_`; sets `skinnedRigInstalled_`.
-    ///   - Does NOT allocate the palette/instance SSBOs — those are grown
-    ///     lazily on the first `setSkinnedFrame` call.
-    ///
-    /// DATA SOURCE: Game.cpp builds `vector<RigMeshSource>` from
-    /// `CharacterRig::meshes()` (animation/CharacterRig.hpp) once after the
-    /// rig FBX loads.  See `RigMeshSource` in RendererTypes.hpp for the layout.
-    bool setSkinnedRig(const std::vector<RigMeshSource>& meshes, int numJoints);
-
-    /// @brief Push this frame's per-character bone palette + per-instance data.
-    /// @param palette    Flat array, sized `numInstances * numJoints` (mat4 each).
-    /// @param instances  One entry per visible character.  `paletteBase` of entry
-    ///                   `i` MUST equal `i * numJoints` so the shader's index math works.
-    ///
-    /// IMPLEMENTATION (real, already wired):
-    ///   - Copies both vectors into CPU-side staging (`framePalette_`, `frameInstances_`).
-    ///   - During `drawFrame` (before the geometry pass), uploads them into
-    ///     `palettesSSBO_` and `instancesSSBO_` via transfer buffers with
-    ///     cycle=true (so we don't stall on last frame's GPU read).
-    ///   - SSBOs grow on demand if more instances/joints appear than fit.
-    ///
-    /// DATA SOURCE: Game.cpp's per-frame animation block (parallel walk of
-    /// ECS view `<AnimatedCharacter, Position, Velocity, PlayerVisState,
-    /// InputSnapshot>`):
-    ///   1. For each visible character compute `worldTransform = T(pos)*R(yaw)*S(scale)`.
-    ///   2. `palette[slot * numJoints .. (slot+1) * numJoints] = animator.skinMatrices()`.
-    ///   3. `instances[slot] = {worldTransform, paletteBase=slot*numJoints, tint}`.
-    ///
-    /// CONSUMER: the (not-yet-written) skinned vertex shader reads
-    ///   `instances[gl_InstanceIndex]` for worldTransform + paletteBase
-    ///   `palette[paletteBase + boneIndices.k]` weighted by `boneWeights.k`.
-    void setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+    /// Use to register the shared rig once at startup, and to push the per-
+    /// frame palette + instance arrays each frame.  See SkinnedRenderer.hpp
+    /// for the full API + data-flow notes.
+    [[nodiscard]] SkinnedRenderer& skinned() { return skinnedRenderer_; }
+    [[nodiscard]] const SkinnedRenderer& skinned() const { return skinnedRenderer_; }
 
     // ─── Static models ───────────────────────────────────────────────────────
 
@@ -393,36 +349,6 @@ private:
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
 
-    // ─── Skinned-character internals (NEW) ───────────────────────────────────
-
-    /// @brief One mesh of the installed skinned rig.  Built by `setSkinnedRig`.
-    ///
-    /// `vb` carries `ModelVertex` (48-byte bind-pose vertices) at vertex buffer slot 0.
-    /// `boneVb` carries `BoneInfluence` (32-byte index+weight) at vertex buffer slot 1.
-    /// Both are parallel arrays — vertex `i` of `vb` uses bone influences `i` of `boneVb`.
-    struct SkinnedMesh
-    {
-        SDL_GPUBuffer* vb = nullptr;
-        SDL_GPUBuffer* boneVb = nullptr;
-        SDL_GPUBuffer* ib = nullptr;
-        Uint32 indexCount = 0;
-        Uint32 vertexCount = 0;
-    };
-
-    /// @brief Per-frame palette+instance upload.  Called from `drawFrame` before begin-render-pass.
-    /// @param cmd       Frame command buffer.
-    /// @param copyPass  An open copy pass on `cmd`.
-    void uploadSkinnedFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUCopyPass* copyPass);
-
-    /// @brief Grow palette/instance SSBOs (and their transfer buffers) to at least these byte sizes.
-    bool ensureSkinnedSSBOs(Uint32 paletteBytes, Uint32 instanceBytes);
-
-    /// @brief Issue the instanced draws for every skinned character.
-    ///
-    /// TODO(graphics): Currently a no-op placeholder.  See the doc on
-    /// `setSkinnedFrame` for the algorithm to implement.
-    void drawSkinnedCharacters(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
-
     // ─── Member state ────────────────────────────────────────────────────────
 
     SDL_Window* window_ = nullptr;
@@ -431,7 +357,6 @@ private:
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
-    SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr; ///< TODO(graphics): create in init (or lazily on first skinned frame).
 
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 depthWidth_ = 0;
@@ -456,23 +381,8 @@ private:
     bool vsyncEnabled_ = true;
     std::string pendingScreenshotPath_;
 
-    // Skinned-rig state ──────────────────────────────────────────────────────
-    bool skinnedRigInstalled_ = false;
-    int skinnedNumJoints_ = 0;
-    std::vector<SkinnedMesh> skinnedMeshes_;
-
-    SDL_GPUBuffer* palettesSSBO_ = nullptr;          ///< STORAGE_READ, mat4[numInstances * numJoints].
-    SDL_GPUBuffer* instancesSSBO_ = nullptr;         ///< STORAGE_READ, SkinnedInstance[numInstances].
-    Uint32 palettesCapacityBytes_ = 0;
-    Uint32 instancesCapacityBytes_ = 0;
-    SDL_GPUTransferBuffer* paletteXfer_ = nullptr;
-    SDL_GPUTransferBuffer* instanceXfer_ = nullptr;
-    Uint32 paletteXferCapacityBytes_ = 0;
-    Uint32 instanceXferCapacityBytes_ = 0;
-
-    std::vector<glm::mat4> framePalette_;            ///< CPU staging for the next frame's palette.
-    std::vector<SkinnedInstance> frameInstances_;    ///< CPU staging for the next frame's instances.
-    bool skinnedFrameDirty_ = false;                 ///< True when CPU data has changed since last upload.
+    // Skinned-character subsystem (see SkinnedRenderer.hpp) ──────────────────
+    SkinnedRenderer skinnedRenderer_;
 
     // Telemetry counters (filled by drawFrame) ────────────────────────────────
     float lastAcquireMs_ = 0.0f;
