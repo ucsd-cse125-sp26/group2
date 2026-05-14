@@ -146,12 +146,23 @@ SDL_AppResult App::iterate()
         }
         break;
     }
-    case Screen::Lobby:
-        if (auto* lobby = dynamic_cast<Lobby*>(screen_.get()); lobby != nullptr && lobby->shouldStartMatch()) {
+    case Screen::Lobby: {
+        auto* lobby = dynamic_cast<Lobby*>(screen_.get());
+        if (!lobby)
+            break;
+
+        if (lobby->consumeReturnToMenu()) {
+            client.shutdown();
+            transitionTo(Screen::Home);
+            break;
+        }
+
+        if (lobby->shouldStartMatch()) {
             lobby->consumeStartMatchState();
             transitionTo(Screen::InGame);
         }
         break;
+    }
     case Screen::InGame:
         if (developerConfig.skipLobby)
             break;

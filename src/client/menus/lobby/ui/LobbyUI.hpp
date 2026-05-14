@@ -13,6 +13,7 @@ struct BuildResult
     std::optional<bool>
         readyChange;                ///< Desired ready state change: true = ready, false = unready, nullopt = unchanged.
     bool startMatchClicked = false; ///< True if the host pressed "Start Match" this frame.
+    bool returnToMenuClicked = false; ///< True if the user pressed "Return to Main Menu" this frame.
 };
 
 /// @brief Input data consumed by lobby_ui::buildPlayerList each frame.
