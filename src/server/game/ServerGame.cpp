@@ -588,7 +588,17 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<InputSnapshot>(player);
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);
-    registry.emplace<CollisionShape>(player);
+    // Phase 5: player is a capsule for smoother movement against ramps and
+    // triangulated geometry.  `halfExtents` is the capsule's tight bounding
+    // box (32×72×32) so existing axis-aligned swept queries treat the shape
+    // exactly; the capsule fields drive Phase-5+ shape-aware paths.
+    registry.emplace<CollisionShape>(player,
+                                     CollisionShape{
+                                         .type = CollisionShapeType::Capsule,
+                                         .halfExtents = {16.0f, 36.0f, 16.0f},
+                                         .radius = 16.0f,
+                                         .halfHeight = 20.0f,
+                                     });
     registry.emplace<PlayerVisState>(player);
     registry.emplace<PlayerSimState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});

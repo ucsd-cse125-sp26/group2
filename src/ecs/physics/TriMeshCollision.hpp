@@ -54,6 +54,12 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance = 0.0349065850f /* 
 /// Contacts in inactive regions are discarded — the neighbour triangle whose
 /// active region actually owns that point will produce the correct face-normal
 /// contact instead.
+///
+/// For capsule shapes (Phase 5), pass `halfExtents = (radius, radius + halfHeight, radius)`
+/// — the resulting Minkowski hull is conservative but exact for axis-aligned
+/// face normals (the most common case for hand-authored maps).  Truly
+/// diagonal triangle face normals (e.g. a 45° ramp triangle) produce a
+/// slight `(sqrt(2)-1)*radius` over-estimate of player size.
 HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh);
 
 /// @brief Push an AABB out of a triangle mesh using Voronoi-clipped face-normal MTVs.
