@@ -40,6 +40,10 @@ public:
     int loadSceneModel(
         const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining = "");
 
+    void setPointLights(std::vector<PointLight> pointLights);
+    void setEntityRenderList(std::vector<EntityRenderCmd> pointLights);
+    void setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor);
+
 private:
     SDL_Window* window_ = nullptr;
     SDL_GPUDevice* device_ = nullptr;

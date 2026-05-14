@@ -2034,6 +2034,275 @@ SDL_AppResult Game::iterate()
     }
     phaseSnap(phaseStats.animation);
 
+//////////////////////////////////////////////////////
+    // Build entity render list
+    {
+        // Phase 5a: snapshot-rate alpha for remote-entity position lerp.
+        // Read once per frame; applied to every entity below that has a
+        // PreviousPosition (i.e. has received at least one snapshot).
+        const float snapshotAlpha = client->getSnapshotAlpha();
+        // PR-11: render-delay timestamp for non-local entities.  See the
+        // animation-pass site above for the full rationale; in short,
+        // playing back at `now − N × snapshotInterval` lets the renderer
+        // always have a buffered "future" sample to lerp toward, hiding
+        // single-snapshot losses and smoothing jitter.  0 means
+        // "no buffered playback" — fall through to the Phase-5a lerp.
+        const Uint64 interpRenderNs = client->getInterpolationRenderTimeNs();
+
+        // Phase 3f: extract view frustum for culling entity render commands +
+        // third-person weapons.  Same Gribb-Hartmann decomposition we use for
+        // skinned chars, but reusable across both passes here.  Bounding-
+        // sphere check per entity is ~24 ops — negligible — but cuts the
+        // per-frame draw count by typically 50–80% on a 100-bot scene.
+        const glm::mat4 cullVP = renderer->getCamera().getViewProjection();
+        struct CullPlane
+        {
+            glm::vec3 n;
+            float d;
+        };
+        CullPlane cullPlanes[6];
+        {
+            const glm::mat4 m = glm::transpose(cullVP);
+            const auto extract = [&](int idx, const glm::vec4& row) {
+                const glm::vec3 n(row.x, row.y, row.z);
+                const float len = glm::length(n);
+                cullPlanes[idx].n = n / len;
+                cullPlanes[idx].d = row.w / len;
+            };
+            extract(0, m[3] + m[0]);
+            extract(1, m[3] - m[0]);
+            extract(2, m[3] + m[1]);
+            extract(3, m[3] - m[1]);
+            extract(4, m[3] + m[2]);
+            extract(5, m[3] - m[2]);
+        }
+        const auto entityVisible = [&](const glm::vec3& center, float radius) {
+            for (const auto& p : cullPlanes)
+                if (glm::dot(p.n, center) + p.d < -radius)
+                    return false;
+            return true;
+        };
+
+        std::vector<EntityRenderCmd> entityCmds;
+        registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
+            if (!rend.visible || rend.modelIndex < 0)
+                return;
+            // Skip local player model in first-person (Option A from the plan).
+            // The animator still runs so future gun-IK has an up-to-date pose;
+            // only rendering is suppressed — and optionally re-enabled via the
+            // "Show local body" debug toggle for third-person inspection.
+            if (!animUI_.showLocalBody && registry.all_of<LocalPlayer>(e))
+                return;
+
+            // PR-19: pos.value is already pre-interpolated by
+            // `Client::applyInterpolatedTransforms` for non-local
+            // entities when buffered render-delay is active.  When
+            // disabled, fall back to the Phase-5a (prev, cur, alpha)
+            // lerp for snapshot-rate smoothness.  Same dual-path
+            // pattern as the skinned-body site above.
+            glm::vec3 renderPos = pos.value;
+            if (interpRenderNs != 0) {
+                // pos.value already pre-interpolated; no work here.
+            } else if (const auto* prev = registry.try_get<PreviousPosition>(e)) {
+                renderPos = glm::mix(prev->value, pos.value, snapshotAlpha);
+            }
+
+            // Frustum cull — generous radius covers any rend.scale up to ~5×
+            // the rig height.  Glow spheres / map props pass this trivially
+            // when in view.  Out-of-view entities skip the per-mesh draw loop.
+            const float entityRadius = 80.0f * std::max({rend.scale.x, rend.scale.y, rend.scale.z, 1.0f});
+            if (!entityVisible(renderPos, entityRadius))
+                return;
+
+            glm::mat4 world = glm::translate(glm::mat4(1.0f), renderPos + rend.translation);
+            world *= glm::mat4_cast(rend.orientation);
+            world = glm::scale(world, rend.scale);
+
+            // Projectile entities carry a per-grenade tint (HE = green,
+            // Molotov = orange, Impulse = blue) so the shared rocket model
+            // is visually distinct in flight.  Non-projectile entities use
+            // the default white tint (no recolor).
+            glm::vec4 tint{1.0f};
+            if (const auto* proj = registry.try_get<Projectile>(e)) {
+                tint = glm::vec4(proj->tint, 1.0f);
+            }
+
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world, .tint = tint});
+        });
+
+        // Third-person weapons for remote players
+        registry.view<Position, InputSnapshot, WeaponState, CollisionShape>().each([&](entt::entity e,
+                                                                                       const Position& pos,
+                                                                                       const InputSnapshot& input,
+                                                                                       const WeaponState& ws,
+                                                                                       const CollisionShape&) {
+            if (registry.all_of<LocalPlayer>(e))
+                return;
+            if (registry.all_of<RespawnTimer>(e))
+                return;
+
+            // PR-11: pull the interpolated player transform so the
+            // weapon hangs off the same body the renderer just drew at
+            // line 1730.  Without this, the player skin animates at
+            // `now − N × snapshotInterval` while the weapon sticks to
+            // the most-recent server position, separating the two by
+            // ~62 ms of motion (visible "ghost gun").
+            // PR-19: pos.value + input.yaw are already pre-interpolated
+            // by `Client::applyInterpolatedTransforms` when buffered
+            // render-delay is active, so the weapon naturally hangs
+            // off the same body the skinned-character pass just drew.
+            // No explicit sample() call needed any more — single
+            // source of truth = pos.value (and InputSnapshot.yaw).
+            const glm::vec3 playerPos = pos.value;
+            const float yaw = input.yaw;
+            // Phase 3f: a remote third-person weapon ~50 world-units long;
+            // a 100-unit cull radius around the player position is a tight
+            // fit and skips the entire weapon draw when off-screen.
+            if (!entityVisible(playerPos, 100.0f))
+                return;
+
+            const GunInstance& gun = getEquippedGun(ws);
+            const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
+            if (wpnIdx < 0)
+                return;
+
+            const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
+
+            // Player orientation vectors (horizontal plane)
+            const glm::vec3 pFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
+            const glm::vec3 pRight = glm::normalize(glm::cross(pFwd, glm::vec3{0, 1, 0}));
+
+            // Weapon world position = player center + hand offset
+            glm::vec3 wpnPos =
+                playerPos + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
+
+            // Build transform: translate -> yaw -> pitch -> roll -> scale
+            glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);
+            wpnWorld *= glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
+            float clampedPitch = std::clamp(input.pitch, glm::radians(-30.0f), glm::radians(30.0f));
+            wpnWorld *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
+            wpnWorld *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
+            wpnWorld = glm::scale(wpnWorld, glm::vec3(tp.scale));
+
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
+        });
+
+        // Glow beam cylinder — follows player position and view direction.
+        // Offsets are (forward, up, right) relative to camera.
+        const glm::vec3 camRight = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
+        const glm::vec3 camUp = glm::normalize(glm::cross(camRight, cachedCamFwd_));
+        const glm::vec3 beamWorldStart =
+            cachedEye_ + cachedCamFwd_ * beamStartOff_.x + camUp * beamStartOff_.y + camRight * beamStartOff_.z;
+        const glm::vec3 beamWorldEnd =
+            cachedEye_ + cachedCamFwd_ * beamEndOff_.x + camUp * beamEndOff_.y + camRight * beamEndOff_.z;
+
+        if (beamEnabled_ && glowCylinderModelIdx_ >= 0) {
+            // Update visual emissive color to match the color picker (HDR scaled).
+            const float emScale = 10.0f;
+            renderer->setModelEmissive(glowCylinderModelIdx_, glm::vec4(beamColor_ * emScale, 0.0f));
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowCylinderModelIdx_,
+                .worldTransform = cylinderTransform(beamWorldStart, beamWorldEnd, beamRadius_),
+            });
+        }
+
+        // Weapon beam visuals — driven by BeamState synced from server registry.
+        // Local player: client-side predicted raycast for zero-lag response.
+        // Remote players: use the server-computed positions from BeamState.
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+            if (!beam.active || glowCylinderModelIdx_ < 0)
+                return;
+
+            glm::vec3 beamOrigin = beam.origin;
+            glm::vec3 beamEnd = beam.hitPoint;
+
+            if (registry.all_of<LocalPlayer>(e)) {
+                // Client-side prediction: raycast with this frame's camera
+                // direction so the beam tracks the crosshair with zero latency.
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
+                const glm::vec3 up = glm::normalize(glm::cross(rgt, fwd));
+
+                // Muzzle position from viewmodel offset.
+                beamOrigin = renderEye + fwd * vmForward + rgt * vmRight - up * vmDown;
+
+                // Predicted endpoint: raycast from eye along current view.
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
+                beamEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+            }
+
+            // Green Zarya-style tint, HDR-scaled for bloom.
+            renderer->setModelEmissive(glowCylinderModelIdx_, glm::vec4(glm::vec3(0.3f, 1.0f, 0.2f) * 10.0f, 0.0f));
+
+            entityCmds.push_back(EntityRenderCmd{
+                .modelIndex = glowCylinderModelIdx_,
+                .worldTransform = cylinderTransform(beamOrigin, beamEnd, 2.0f),
+            });
+        });
+
+        renderer->setEntityRenderList(std::move(entityCmds));
+
+        // Build dynamic point lights list.
+        std::vector<PointLight> dynLights;
+
+        // Beam point lights — evenly distributed along the beam length.
+        if (beamEnabled_) {
+            const glm::vec3 beamDelta = beamWorldEnd - beamWorldStart;
+            const float beamLen = glm::length(beamDelta);
+            const int numBeamLights = (beamLightSpacing_ > 1.0f && beamLen > 0.1f)
+                                          ? std::max(2, static_cast<int>(beamLen / beamLightSpacing_) + 1)
+                                          : 2;
+            const glm::vec3 beamLightColor = beamColor_ * 1.5f;
+            for (int i = 0; i < numBeamLights; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numBeamLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = beamWorldStart + beamDelta * t,
+                    .color = beamLightColor,
+                    .intensity = beamLightIntensity_,
+                    .range = beamLightRange_,
+                });
+            }
+        }
+
+        // Weapon beam point lights — from BeamState, evenly distributed.
+        // Local player uses predicted positions (same as the visual beam above).
+        registry.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+            if (!beam.active)
+                return;
+
+            glm::vec3 lightStart = beam.origin;
+            glm::vec3 lightEnd = beam.hitPoint;
+
+            if (registry.all_of<LocalPlayer>(e)) {
+                const float cosPitch = std::cos(renderPitch);
+                const glm::vec3 fwd{
+                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+                lightStart = renderEye;
+                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
+                lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+            }
+
+            const glm::vec3 delta = lightEnd - lightStart;
+            const float len = glm::length(delta);
+            if (len < 1.0f)
+                return;
+            const int numLights = std::max(2, static_cast<int>(len / 80.0f) + 1);
+            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f};
+            for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
+                dynLights.push_back(PointLight{
+                    .position = lightStart + delta * t,
+                    .color = lightColor,
+                    .intensity = 3.0f,
+                    .range = 200.0f,
+                });
+            }
+        });
+
+        renderer->setPointLights(std::move(dynLights));
+    }
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
         const GunInstance& gun = getEquippedGun(ws);

@@ -459,3 +459,16 @@ void NewRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
 {
     weapon_ = vm;
 }
+
+void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
+{
+    return;
+}
+void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd> pointLights)
+{
+    return;
+}
+void NewRenderer::setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor)
+{
+    return;
+}
