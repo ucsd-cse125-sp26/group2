@@ -56,33 +56,62 @@ constexpr BoneDesc k_bones[] = {
     {RagdollBone::FootR,     {6, -34, 4}, 4, 2, 1},
 };
 
-/// @brief One joint in the ragdoll skeleton.  We use point joints
-/// universally — cleanest visual behaviour without conetwist tuning.
-/// Hinges could replace specific entries (elbows / knees) for tighter
-/// behaviour but require additional axis tuning.
+/// @brief One joint in the ragdoll skeleton.  Phase 13 follow-up: each
+/// joint declares its kind so the spawn code can build the appropriate
+/// constraint — cone-twist for shoulders/hips/neck (smooth ball-socket
+/// range with twist limits), hinge for elbows/knees (1-DOF rotation),
+/// point for wrists/ankles/spine (no extra constraint, just locked
+/// anchor).
 struct JointDesc
 {
+    enum class Kind : uint8_t
+    {
+        Point,    ///< Anchor-only (full freedom).
+        Hinge,    ///< 1-DOF rotation about `axisInParent`.
+        ConeTwist ///< Cone swing + twist limits about `axisInParent`.
+    };
+
     RagdollBone parent;
     RagdollBone child;
     glm::vec3 anchorLocalToParent;
     glm::vec3 anchorLocalToChild;
+    Kind kind = Kind::Point;
+    glm::vec3 axisInParent{0, 0, 1};
+    float swingLimit = 0.6f;       ///< Cone-twist only — radians.
+    float twistLimit = 0.5f;       ///< Cone-twist only.
+    float hingeMin = -1.5f;        ///< Hinge only.
+    float hingeMax = 0.05f;        ///< Hinge only.
 };
 
 constexpr JointDesc k_joints[] = {
-    {RagdollBone::Torso, RagdollBone::Head, {0, 14, 0}, {0, -10, 0}},      ///< Neck
-    {RagdollBone::Torso, RagdollBone::Pelvis, {0, -14, 0}, {0, 6, 0}},     ///< Spine
-    {RagdollBone::Torso, RagdollBone::UpperArmL, {-12, 6, 0}, {2, 8, 0}},  ///< Shoulder L
-    {RagdollBone::Torso, RagdollBone::UpperArmR, {12, 6, 0}, {-2, 8, 0}},  ///< Shoulder R
-    {RagdollBone::UpperArmL, RagdollBone::ForearmL, {0, -10, 0}, {0, 9, 0}}, ///< Elbow L
-    {RagdollBone::UpperArmR, RagdollBone::ForearmR, {0, -10, 0}, {0, 9, 0}}, ///< Elbow R
-    {RagdollBone::ForearmL, RagdollBone::HandL, {0, -9, 0}, {0, 4, 0}},     ///< Wrist L
-    {RagdollBone::ForearmR, RagdollBone::HandR, {0, -9, 0}, {0, 4, 0}},     ///< Wrist R
-    {RagdollBone::Pelvis, RagdollBone::UpperLegL, {-6, -4, 0}, {0, 12, 0}}, ///< Hip L
-    {RagdollBone::Pelvis, RagdollBone::UpperLegR, {6, -4, 0}, {0, 12, 0}},  ///< Hip R
-    {RagdollBone::UpperLegL, RagdollBone::LowerLegL, {0, -12, 0}, {0, 10, 0}}, ///< Knee L
-    {RagdollBone::UpperLegR, RagdollBone::LowerLegR, {0, -12, 0}, {0, 10, 0}}, ///< Knee R
-    {RagdollBone::LowerLegL, RagdollBone::FootL, {0, -10, 0}, {0, 2, 0}},    ///< Ankle L
-    {RagdollBone::LowerLegR, RagdollBone::FootR, {0, -10, 0}, {0, 2, 0}},    ///< Ankle R
+    {RagdollBone::Torso, RagdollBone::Head, {0, 14, 0}, {0, -10, 0},
+     JointDesc::Kind::ConeTwist, {1, 0, 0}, 0.7f, 0.6f, 0, 0},                  ///< Neck — moderate cone, twist
+    {RagdollBone::Torso, RagdollBone::Pelvis, {0, -14, 0}, {0, 6, 0},
+     JointDesc::Kind::ConeTwist, {1, 0, 0}, 0.4f, 0.3f, 0, 0},                  ///< Spine — small
+    {RagdollBone::Torso, RagdollBone::UpperArmL, {-12, 6, 0}, {2, 8, 0},
+     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.4f, 1.0f, 0, 0},                 ///< Shoulder L — wide cone
+    {RagdollBone::Torso, RagdollBone::UpperArmR, {12, 6, 0}, {-2, 8, 0},
+     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.4f, 1.0f, 0, 0},                 ///< Shoulder R
+    {RagdollBone::UpperArmL, RagdollBone::ForearmL, {0, -10, 0}, {0, 9, 0},
+     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, -2.0f, 0.05f},                    ///< Elbow L (flex only)
+    {RagdollBone::UpperArmR, RagdollBone::ForearmR, {0, -10, 0}, {0, 9, 0},
+     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, -2.0f, 0.05f},                    ///< Elbow R
+    {RagdollBone::ForearmL, RagdollBone::HandL, {0, -9, 0}, {0, 4, 0},
+     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Wrist L
+    {RagdollBone::ForearmR, RagdollBone::HandR, {0, -9, 0}, {0, 4, 0},
+     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Wrist R
+    {RagdollBone::Pelvis, RagdollBone::UpperLegL, {-6, -4, 0}, {0, 12, 0},
+     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.0f, 0.4f, 0, 0},                 ///< Hip L
+    {RagdollBone::Pelvis, RagdollBone::UpperLegR, {6, -4, 0}, {0, 12, 0},
+     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.0f, 0.4f, 0, 0},                 ///< Hip R
+    {RagdollBone::UpperLegL, RagdollBone::LowerLegL, {0, -12, 0}, {0, 10, 0},
+     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, 0.0f, 2.2f},                      ///< Knee L (flex back only)
+    {RagdollBone::UpperLegR, RagdollBone::LowerLegR, {0, -12, 0}, {0, 10, 0},
+     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, 0.0f, 2.2f},                      ///< Knee R
+    {RagdollBone::LowerLegL, RagdollBone::FootL, {0, -10, 0}, {0, 2, 0},
+     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Ankle L
+    {RagdollBone::LowerLegR, RagdollBone::FootR, {0, -10, 0}, {0, 2, 0},
+     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Ankle R
 };
 static_assert(std::size(k_joints) == 14u, "14 joints expected for 15-body tree");
 
@@ -115,16 +144,62 @@ entt::entity createBone(Registry& registry, entt::entity character, const BoneDe
     return body;
 }
 
-entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bodyB, glm::vec3 anchorA,
-                       glm::vec3 anchorB)
+entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bodyB, const JointDesc& jd)
 {
     entt::entity j = registry.create();
-    physics::PointJoint pj{};
-    pj.bodyA = bodyA;
-    pj.bodyB = bodyB;
-    pj.localAnchorA = anchorA;
-    pj.localAnchorB = anchorB;
-    registry.emplace<physics::PointJoint>(j, pj);
+    switch (jd.kind) {
+    case JointDesc::Kind::Point: {
+        physics::PointJoint pj{};
+        pj.bodyA = bodyA;
+        pj.bodyB = bodyB;
+        pj.localAnchorA = jd.anchorLocalToParent;
+        pj.localAnchorB = jd.anchorLocalToChild;
+        registry.emplace<physics::PointJoint>(j, pj);
+        break;
+    }
+    case JointDesc::Kind::Hinge: {
+        physics::HingeJoint hj{};
+        hj.bodyA = bodyA;
+        hj.bodyB = bodyB;
+        hj.localAnchorA = jd.anchorLocalToParent;
+        hj.localAnchorB = jd.anchorLocalToChild;
+        hj.localAxisA = jd.axisInParent;
+        hj.localAxisB = jd.axisInParent;
+        hj.hasLimit = true;
+        hj.minAngle = jd.hingeMin;
+        hj.maxAngle = jd.hingeMax;
+        registry.emplace<physics::HingeJoint>(j, hj);
+        break;
+    }
+    case JointDesc::Kind::ConeTwist: {
+        physics::ConeTwistJoint cj{};
+        cj.bodyA = bodyA;
+        cj.bodyB = bodyB;
+        cj.localAnchorA = jd.anchorLocalToParent;
+        cj.localAnchorB = jd.anchorLocalToChild;
+        cj.swingLimit = jd.swingLimit;
+        cj.twistLimit = jd.twistLimit;
+        // Orient the local joint frame so +X aligns with the desired
+        // twist axis.  Default is identity (axis = +X local).  When a
+        // different axis is requested we build the rotation that takes
+        // +X to that axis.
+        const glm::vec3 to = glm::normalize(jd.axisInParent);
+        const glm::vec3 from{1, 0, 0};
+        const float d = glm::dot(from, to);
+        if (d > 0.9999f) {
+            cj.localFrameA = glm::quat{1, 0, 0, 0};
+        } else if (d < -0.9999f) {
+            cj.localFrameA = glm::quat{0, 0, 1, 0}; // 180° about Y
+        } else {
+            const glm::vec3 axis = glm::normalize(glm::cross(from, to));
+            const float angle = std::acos(d);
+            cj.localFrameA = glm::angleAxis(angle, axis);
+        }
+        cj.localFrameB = cj.localFrameA;
+        registry.emplace<physics::ConeTwistJoint>(j, cj);
+        break;
+    }
+    }
     return j;
 }
 
@@ -156,7 +231,7 @@ entt::entity spawnRagdoll(Registry& registry, entt::entity character)
     for (const JointDesc& jd : k_joints) {
         const entt::entity parent = rag.bodies[static_cast<size_t>(jd.parent)];
         const entt::entity child = rag.bodies[static_cast<size_t>(jd.child)];
-        rag.joints[jointIdx++] = createJoint(registry, parent, child, jd.anchorLocalToParent, jd.anchorLocalToChild);
+        rag.joints[jointIdx++] = createJoint(registry, parent, child, jd);
     }
 
     registry.emplace<Ragdoll>(character, rag);

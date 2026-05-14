@@ -795,6 +795,9 @@ add_executable(group2
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
         src/ecs/physics/CookedMeshFormat.cpp
+        src/ecs/physics/DeterminismHash.hpp
+        src/ecs/physics/DeterminismHash.cpp
+        src/ecs/physics/SimdAabb.hpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
         src/ecs/components/Ragdoll.hpp
@@ -803,6 +806,8 @@ add_executable(group2
         src/ecs/systems/TriggerSystem.cpp
         src/ecs/systems/RagdollSystem.hpp
         src/ecs/systems/RagdollSystem.cpp
+        src/ecs/systems/DynamicsSystem.hpp
+        src/ecs/systems/DynamicsSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -1045,6 +1050,9 @@ add_executable(server
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
         src/ecs/physics/CookedMeshFormat.cpp
+        src/ecs/physics/DeterminismHash.hpp
+        src/ecs/physics/DeterminismHash.cpp
+        src/ecs/physics/SimdAabb.hpp
         src/ecs/components/RigidBody.hpp
         src/ecs/components/Orientation.hpp
         src/ecs/components/Ragdoll.hpp
@@ -1053,6 +1061,8 @@ add_executable(server
         src/ecs/systems/TriggerSystem.cpp
         src/ecs/systems/RagdollSystem.hpp
         src/ecs/systems/RagdollSystem.cpp
+        src/ecs/systems/DynamicsSystem.hpp
+        src/ecs/systems/DynamicsSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -1323,6 +1333,14 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Ragdoll.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DynamicsSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DynamicsSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DeterminismHash.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DeterminismHash.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SimdAabb.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/RigidBody.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Orientation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/TriggerVolume.hpp"

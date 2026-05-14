@@ -268,6 +268,123 @@ void solveHingeJoint(Registry& registry, HingeJoint& j, const SolverConfig& cfg,
     }
 }
 
+/// @brief Cone-twist joint solver — Phase 11 follow-up that turns the
+/// previously-stubbed declaration into a working ragdoll-grade constraint.
+///
+/// Algorithm:
+///   1. Lock the anchor point (3-DOF) using the same effective-mass math as
+///      `solvePointJoint`.
+///   2. Decompose the relative orientation into swing + twist using the
+///      quaternion swing-twist split (Stan Melax 2003).
+///   3. Clamp the swing angle to `swingLimit` (cone) and the twist angle
+///      to `twistLimit`; convert each violation into an angular impulse
+///      applied through `cfg.baumgarteScale`.
+///
+/// Reference: Stan Melax, "Practical Algebra for Game Programmers", and
+/// Erin Catto's GDC 2007 ragdoll talk.
+void solveConeTwistJoint(Registry& registry, ConeTwistJoint& j, const SolverConfig& cfg, float dt)
+{
+    BodyRef a = gatherBody(registry, j.bodyA);
+    BodyRef b = gatherBody(registry, j.bodyB);
+    if (a.pos == nullptr || b.pos == nullptr)
+        return;
+
+    // ── Anchor (3-DOF point lock) ────────────────────────────────────
+    const glm::vec3 worldA = worldPoint(a, j.localAnchorA);
+    const glm::vec3 worldB = worldPoint(b, j.localAnchorB);
+    const glm::vec3 rA = worldA - a.pos->value;
+    const glm::vec3 rB = worldB - b.pos->value;
+    const glm::vec3 anchorError = worldA - worldB;
+    const glm::mat3 effMass = anchorEffectiveMass(a, b, rA, rB);
+    const glm::vec3 anchorBias = -(cfg.baumgarteScale / dt) * anchorError;
+
+    applyImpulse(a, b, j.accumulatedAnchorImpulse, rA, rB);
+    applyAngularImpulse(a, b, j.accumulatedAngularImpulse);
+
+    for (int it = 0; it < cfg.velocityIterations; ++it) {
+        // Anchor constraint
+        glm::vec3 vA{0.0f};
+        glm::vec3 vB{0.0f};
+        if (a.vel != nullptr)
+            vA = a.vel->value;
+        if (b.vel != nullptr)
+            vB = b.vel->value;
+        if (a.angVel != nullptr)
+            vA += glm::cross(a.angVel->value, rA);
+        if (b.angVel != nullptr)
+            vB += glm::cross(b.angVel->value, rB);
+        const glm::vec3 cVel = vB - vA;
+        const glm::vec3 impulse = effMass * -(cVel + anchorBias);
+        j.accumulatedAnchorImpulse += impulse;
+        applyImpulse(a, b, impulse, rA, rB);
+
+        // ── Swing-twist decomposition ────────────────────────────────
+        // Work entirely in A's local frame to make limit comparisons cheap.
+        // Local twist axis is +X by convention (matches the localFrame quats).
+        const glm::quat qA = (a.ori != nullptr) ? a.ori->value : glm::quat{1, 0, 0, 0};
+        const glm::quat qB = (b.ori != nullptr) ? b.ori->value : glm::quat{1, 0, 0, 0};
+
+        // Joint frame quaternions in world space.
+        const glm::quat fA = qA * j.localFrameA;
+        const glm::quat fB = qB * j.localFrameB;
+        // Relative rotation that takes A's frame to B's frame.
+        const glm::quat qRel = glm::conjugate(fA) * fB;
+
+        // Swing-twist split (Stan Melax): twist axis = +X in A's local frame.
+        constexpr glm::vec3 k_twistAxis{1.0f, 0.0f, 0.0f};
+        const glm::vec3 qRelVec{qRel.x, qRel.y, qRel.z};
+        const glm::vec3 projTwist = glm::dot(qRelVec, k_twistAxis) * k_twistAxis;
+        glm::quat twist{qRel.w, projTwist.x, projTwist.y, projTwist.z};
+        const float twistLen = std::sqrt(twist.w * twist.w + projTwist.x * projTwist.x);
+        if (twistLen > 1e-6f) {
+            twist.w /= twistLen;
+            twist.x /= twistLen;
+            twist.y /= twistLen;
+            twist.z /= twistLen;
+        } else {
+            twist = glm::quat{1.0f, 0.0f, 0.0f, 0.0f};
+        }
+        const glm::quat swing = qRel * glm::conjugate(twist);
+
+        // Swing angle.  Half-angle: 2 * acos(w).  We need the angle
+        // between the twist axis (rotated by swing) and the original.
+        const float swingW = std::clamp(swing.w, -1.0f, 1.0f);
+        const float swingAngle = 2.0f * std::acos(swingW);
+
+        // Twist angle.
+        const float twistW = std::clamp(twist.w, -1.0f, 1.0f);
+        float twistAngle = 2.0f * std::acos(twistW);
+        // Normalize twist sign by projection onto the axis so the sign is
+        // meaningful (matches `twistLimit` interpretation as ±range).
+        const float twistSign = glm::dot(glm::vec3{twist.x, twist.y, twist.z}, k_twistAxis) >= 0.0f ? 1.0f : -1.0f;
+        twistAngle *= twistSign;
+
+        // ── Swing limit ─────────────────────────────────────────────
+        if (swingAngle > j.swingLimit) {
+            const float over = swingAngle - j.swingLimit;
+            // Axis to push around: perpendicular to twist axis, in the
+            // swing plane.
+            const glm::vec3 swingVec{swing.x, swing.y, swing.z};
+            const glm::vec3 swingAxisLocal =
+                glm::length(swingVec) > 1e-6f ? glm::normalize(swingVec) : glm::vec3{0.0f, 0.0f, 1.0f};
+            // Transform to world space via A's joint frame.
+            const glm::vec3 swingAxisWorld = fA * swingAxisLocal;
+            const glm::vec3 L = swingAxisWorld * (-over * cfg.baumgarteScale / dt);
+            applyAngularImpulse(a, b, L);
+            j.accumulatedAngularImpulse += L;
+        }
+
+        // ── Twist limit ─────────────────────────────────────────────
+        if (std::abs(twistAngle) > j.twistLimit) {
+            const float over = twistAngle - std::clamp(twistAngle, -j.twistLimit, j.twistLimit);
+            const glm::vec3 twistAxisWorld = fA * k_twistAxis;
+            const glm::vec3 L = twistAxisWorld * (-over * cfg.baumgarteScale / dt);
+            applyAngularImpulse(a, b, L);
+            j.accumulatedAngularImpulse += L;
+        }
+    }
+}
+
 } // namespace
 
 void solveJoints(Registry& registry, const SolverConfig& cfg, float dt)
@@ -298,6 +415,18 @@ void solveJoints(Registry& registry, const SolverConfig& cfg, float dt)
         auto& j = registry.get<HingeJoint>(e);
         if (j.bodyA != entt::null && j.bodyB != entt::null)
             solveHingeJoint(registry, j, cfg, dt);
+    }
+
+    std::vector<entt::entity> coneTwists;
+    for (auto e : registry.view<ConeTwistJoint>())
+        coneTwists.push_back(e);
+    std::sort(coneTwists.begin(), coneTwists.end(), [](entt::entity a, entt::entity b) {
+        return entt::to_integral(a) < entt::to_integral(b);
+    });
+    for (entt::entity e : coneTwists) {
+        auto& j = registry.get<ConeTwistJoint>(e);
+        if (j.bodyA != entt::null && j.bodyB != entt::null)
+            solveConeTwistJoint(registry, j, cfg, dt);
     }
 }
 

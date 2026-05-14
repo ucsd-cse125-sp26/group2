@@ -36,8 +36,12 @@
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/physics/CollisionEvents.hpp"
+#include "ecs/physics/Sleep.hpp"
+#include "ecs/physics/Solver.hpp"
+#include "ecs/systems/DynamicsSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/RagdollSystem.hpp"
 #include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
@@ -428,6 +432,21 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         GROUP2_PROF_SCOPE("triggers");
         physics::events::beginTick();
         systems::runTriggers(registry, /*isPredictedClient=*/false);
+    }
+    {
+        // Phase 6/10/12 dynamics: integrate, solve contacts + joints,
+        // update sleep state for every entity with a RigidBody.  Player
+        // movement is still kinematic (CollisionSystem above); this tick
+        // exists for ragdoll bones + future dynamic props.
+        GROUP2_PROF_SCOPE("dynamics");
+        static const physics::SolverConfig k_solverCfg{};
+        static const physics::SleepConfig k_sleepCfg{};
+        systems::runDynamics(registry, dt, physics::activeWorld(), contactCache_, k_solverCfg, k_sleepCfg);
+    }
+    {
+        // Phase 13: age out ragdolls so gameplay can fade / despawn corpses.
+        GROUP2_PROF_SCOPE("ragdolls");
+        systems::runRagdolls(registry, dt);
     }
     {
         GROUP2_PROF_SCOPE("explosion");

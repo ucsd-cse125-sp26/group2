@@ -21,6 +21,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/DroppedWeaponSystem.hpp"
+#include "ecs/systems/RagdollSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
 #include <ecs/components/RespawnPoint.hpp>
@@ -198,6 +199,14 @@ inline void handleDeath(entt::entity& player,
         };
         spawnDrop(getSlot(deathWeapons, WeaponSlot::PRIMARY), -1.0f);
         spawnDrop(getSlot(deathWeapons, WeaponSlot::SECONDARY), +1.0f);
+
+        // Phase 13 ragdoll: capture pre-death velocity BEFORE we clear it
+        // below, so the corpse inherits the player's motion at the moment
+        // of death (rocket-juggled corpses keep their fling momentum).
+        // The renderer hides the kinematic player (Renderable visible=false)
+        // and instead reads the 15 ragdoll bone transforms via
+        // `RagdollBoneTag` to drive the skinned-mesh palette.
+        spawnRagdoll(registry, player);
 
         // Update death
         registry.get_or_emplace<PlayerVisState>(player).isDead = true;

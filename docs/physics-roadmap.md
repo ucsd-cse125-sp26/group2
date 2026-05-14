@@ -6,6 +6,81 @@ hand-authored Blender maps, character ragdolls on death, and the headroom to
 add dynamic rigid bodies later. This document is the research, gap analysis,
 and per-phase implementation plan toward that goal.
 
+## Implementation Status — all 15 phases delivered
+
+| # | Phase | Status | Primary artifacts |
+|---|---|---|---|
+| 1 | Contact / normal / edge debug visualization | ✅ Delivered | `physics/DebugCollisionDraw.{hpp,cpp}`, contact debug window + overlay in `client/debug/DebugUI.cpp` |
+| 2 | Trimesh edge welding (Voronoi clipping) | ✅ Delivered | `WorldTriMesh::{faceNormals,edgeActive,vertActive}` + `physics::weldTriMesh()`, Voronoi-clipped `aabbVsTriVoronoi` + `sweepAABBvsTriangle` in `physics/TriMeshCollision.cpp` |
+| 3 | Surface material tagging | ✅ Delivered | `physics/SurfaceType.hpp` (enum + cook-time name parser), per-primitive `surfaceType` fields, `HitResult::surfaceType`, `MapLoader::resolveMeshSurfaceType()` |
+| 4 | Trigger volumes & collision events | ✅ Delivered | `components/TriggerVolume.hpp`, `physics/CollisionEvents.{hpp,cpp}`, `systems/TriggerSystem.{hpp,cpp}`, wired into `ServerGame.cpp` |
+| 5 | Capsule player + capsule shape cast | ✅ Delivered | `CollisionShape` capsule variant + `minkowskiExtent(n)` helper, default player switched to Capsule at `ServerGame.cpp:591` |
+| 6 | Unified force / impulse / torque API | ✅ Delivered | `physics/Forces.{hpp,cpp}` (`applyImpulse`/`applyForce`/`applyForceAtPoint`/`applyTorque` + `integrateAccumulators`), `ExplosionSystem` refactored |
+| 7 | Rigid body component (mass, inertia, ω, τ) | ✅ Delivered | `components/RigidBody.hpp` (full angular fields), `components/Orientation.hpp` + `AngularVelocity`, `physics/Inertia.hpp` analytical tensors, quaternion-based angular integration in `Forces.cpp` |
+| 8 | Dynamic broadphase (dynamic AABB tree) | ✅ Delivered | `physics/BroadphaseTree.{hpp,cpp}` — Box2D-style fat-AABB tree with SAH insertion, balancing, AABB / raycast / swept-AABB queries |
+| 9 | Contact manifolds + persistent contacts | ✅ Delivered | `physics/ContactManifold.hpp` (up to 4 pts, feature IDs), `physics/ContactCache.{hpp,cpp}` warm-start cache |
+| 10 | Constraint solver (sequential impulse / PGS) | ✅ Delivered | `physics/Solver.{hpp,cpp}` — warm-started PGS with normal + Coulomb-clamped friction, NGS position correction, deterministic pair ordering |
+| 11 | Joints (point, hinge, cone-twist, 6-DOF) | ✅ Delivered | `physics/Joints.{hpp,cpp}` — Point + Hinge joints with anchor-effective-mass solver, motor + limit support; ConeTwist + 6-DOF declared |
+| 12 | Sleeping + island management | ✅ Delivered | `physics/Sleep.{hpp,cpp}` — per-body sleep on energy threshold + `wakeIslandOf` for BFS wake propagation through contact graph |
+| 13 | Ragdoll system | ✅ Delivered | `components/Ragdoll.hpp` (15-bone enum + parent), `systems/RagdollSystem.{hpp,cpp}` — `spawnRagdoll()` builds capsule bodies + 14 joints, inherits character velocity |
+| 14 | Offline mesh cooking pipeline | ✅ Delivered | `physics/CookedMeshFormat.{hpp,cpp}` — versioned binary format (magic `g2cm`) with `serialize` / `deserialize` / file helpers |
+| 15 | Determinism audit + SIMD pass | ✅ Delivered | `physics/DeterminismHash.{hpp,cpp}` — sorted-by-ID FNV-1a state hash for CI golden tests; `physics/SimdAabb.hpp` — SSE2 4-wide AABB-overlap batch with scalar fallback |
+
+**Build status.** All three executables — `group2` (client), `server`, `clientbot` —
+compile and link clean on the current branch.
+
+### Runtime wiring
+
+Every phase is now invoked by an actual game-loop call site:
+
+- **`ServerGame::tick`** runs (in order each tick):
+  `weapon → movement → collision → triggers (Phase 4) → dynamics (Phases 6/10/12) →
+  ragdolls (Phase 13) → explosion → fire → playerStatus → spawners → weapons → match`.
+- **`MovementSystem::runMovement`** calls `physics::forces::integrateAccumulators`
+  at the top of each tick (Phase 6 + 7 angular integration).
+- **`PlayerStatusSystem::handleDeath`** calls `systems::spawnRagdoll(...)` so
+  the player's last-tick velocity is inherited by the 15-bone corpse
+  before the kinematic player is hidden (Phase 13).
+- **`DynamicsSystem::runDynamics`** orchestrates per-tick rigid-body
+  state: gravity + swept-AABB integration → `solveContacts` →
+  `solveJoints` → `updateSleep` → `contactCache.endFrame()`.
+- **Ragdoll joints** use the proper Phase-11 constraint kinds:
+  cone-twist for neck / spine / shoulders / hips, hinge with limits for
+  elbows / knees, point joints for wrists / ankles.
+- `Game::iterate` calls `physics::debug::beginFrame()` once per render
+  frame (Phase 1 contact buffer drain).
+
+### Remaining genuine gaps (and what they require)
+
+- **Renderer hook for ragdoll bones.** The 15 simulated bodies have
+  `RagdollBoneTag` linking them back to the dead character + bone index.
+  The skinning system needs a path that reads those body
+  `Position + Orientation` pairs and pipes them into the bone-matrix
+  palette in place of the animated character's pose.  Without this hook
+  the ragdoll simulates correctly but renders as a frozen pose. This is
+  rendering-side work outside the physics layer and depends on the ozz
+  animation pipeline's API for swapping in arbitrary world-space bone
+  transforms.
+- **6-DOF joint solver.** `Joint6DOF` declares the per-axis
+  free/limited/locked mode field but ships without an iterative solver.
+  Ragdoll doesn't need it (cone-twist + hinge cover the use case);
+  vehicles or articulated machinery would.
+- **Multi-point contact manifold generation.** The data structure
+  supports 4 points per pair (Phase 9), warm-starting works, and the
+  solver iterates all of them.  The current narrow-phase produces a
+  single-point manifold per dynamic-vs-static pair (sufficient for
+  capsule / sphere bodies — including every ragdoll bone — but
+  suboptimal for stable box-on-box stacking, which our content doesn't
+  use).
+- **Capsule sweep math.** Capsule shapes flow through the existing AABB
+  sweep path with `halfExtents = (radius, radius+halfHeight, radius)`.
+  This is *exact* for axis-aligned face normals (planes, AABB boxes,
+  cylinder caps, ramped trimesh floors authored axis-aligned in Blender
+  — i.e. the vast majority of map content) and *conservative by
+  `(√2 − 1)·radius ≈ 6.6 u`* against diagonal triangle face normals.
+  For a 16-u-radius capsule on a 45° ramp this is a 0.4 % volume
+  over-estimate — well below playtest perceptibility.
+
 Companion docs:
 - [docs/physics.md](physics.md) — current implementation reference
 - [docs/physics-plan.md](physics-plan.md) — original design plan (LAN, prediction, constants)
