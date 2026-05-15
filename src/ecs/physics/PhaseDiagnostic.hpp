@@ -113,4 +113,33 @@ void annotate(entt::entity entity, std::string_view label) noexcept;
 /// the row about to be written.  Exposed for unit tests.
 void consumeAnnotation(entt::entity entity, char (&out)[48]) noexcept;
 
+/// @brief One row of depen-contact telemetry.  Emitted by the trimesh
+/// depen kernel when a per-triangle MTV depth significantly exceeds the
+/// player's Minkowski half-radius for that triangle's normal — i.e., the
+/// player center is on the BACK side of the face plane (`signedDist < 0`),
+/// which is geometrically possible only against back-facing duplicate
+/// triangles, inverted-winding tris, or a real (multi-tick) tunnel.
+struct DepenContact
+{
+    uint32_t triId = 0;
+    glm::vec3 playerPos{0.0f};   ///< Player capsule center at the moment of overlap.
+    glm::vec3 faceNormal{0.0f};  ///< Cooked face normal of the offending triangle.
+    glm::vec3 v0{0.0f};
+    glm::vec3 v1{0.0f};
+    glm::vec3 v2{0.0f};
+    float signedDist = 0.0f;     ///< `dot(faceN, playerPos - v0)`. Negative ⇒ player on back side.
+    float minkowskiR = 0.0f;     ///< `|faceN|·halfExtents` — depth would saturate at `2·R` (s = -R).
+    float depth = 0.0f;          ///< MTV magnitude = `R - signedDist`.
+    int region = 0;              ///< Closest feature on the triangle: 0=Face, 1=Edge0, 2=Edge1, 3=Edge2, 4=Vert0, 5=Vert1, 6=Vert2.
+    uint8_t edgeFlags = 0;       ///< Cooked active-edge mask (bit i ⇔ edge i active per Phase 2 welding).
+    uint8_t vertFlags = 0;       ///< Cooked active-vertex mask.
+};
+
+/// @brief Append one depen-contact row to its own CSV log
+/// (`depen-trace-<timestamp>.csv` in the working dir).  Called from the
+/// trimesh depen kernel only for "suspicious" contacts (depth ≫ R) so the
+/// log stays small.  Lazy file open; thread-safe via a separate mutex from
+/// the per-tick frame log.  No-op when telemetry is disabled.
+void recordDepenContact(const DepenContact& contact) noexcept;
+
 } // namespace physics::diag
