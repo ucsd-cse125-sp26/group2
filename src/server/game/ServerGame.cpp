@@ -169,6 +169,7 @@ void ServerGame::run()
             WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
         );
         registry.emplace<Position>(spawner, pos);
+        registry.emplace<CollisionShape>(spawner);
     }
 
     // Respawn points (with cooldown state)
