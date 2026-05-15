@@ -728,6 +728,14 @@ void depenetrateAABBvsTriMesh(
     // well below the pushback epsilon.
     constexpr int k_maxPasses = 4;
 
+    // Per-tick total-push budget for rate-limited recovery.  See the long
+    // comment at the cap site below for why this exists; here we just need
+    // a budget that accumulates across passes within this single tick.
+    // Compare to halfExtents.x as the conservative axis-aligned bound;
+    // we'll tighten per-direction at the push site once we know dir.
+    float totalPushedThisTick = 0.0f;
+    constexpr float k_capRatioOfR = 0.5f;
+
     for (int pass = 0; pass < k_maxPasses; ++pass) {
         glm::vec3 sumDir(0.0f);
         float maxDepth = 0.0f;
@@ -832,7 +840,41 @@ void depenetrateAABBvsTriMesh(
             return; // contributions cancel — entity centred inside a closed mesh.
 
         const glm::vec3 dir = sumDir / dirLen;
-        pos += dir * (maxDepth + pushback);
+
+        // Rate-limited recovery.  In production engines (Bullet, Jolt) deep
+        // penetration is resolved over MULTIPLE ticks at bounded velocity,
+        // not in a single teleport.  Reason: when the player ends up deep
+        // inside geometry — spawn-into-floor, network reconciliation, or
+        // (most commonly here) cumulative bump-pushback after corner
+        // navigation lands them behind a wall's back-face partner — a
+        // single-tick `r - s` push can exceed `2r` and visually teleports
+        // them past the bounded triangle's footprint, often through the
+        // wall.
+        //
+        // Cap per-TICK (across all passes) recovery at half the Minkowski
+        // half-radius along the push direction.  This scales naturally
+        // with wall orientation (axis-aligned R=16 → cap 8u; 45° R=22.6 →
+        // cap 11.3u; vertical R=36 → cap 18u for floor recovery).  A 27u
+        // corner-pop becomes ~3 ticks of gradual squeeze instead of one
+        // teleport.  Shallow contacts (the common case, depth ≪ cap) are
+        // unaffected — they resolve in a single tick / pass as before.
+        //
+        // The cap is across passes within a single tick so that the
+        // k_maxPasses=4 loop (which exists to converge geometry at
+        // concave corners) doesn't accumulate to 2R and undo the cap.
+        // Genuine corner-bisector convergence needs ≪ R total push
+        // (~30% residual per pass, geometric decay) and stays well
+        // inside the cap; only the spurious deep-overlap cases exhaust
+        // the budget and resume next tick.
+        const float k_R_dir =
+            std::abs(dir.x) * halfExtents.x + std::abs(dir.y) * halfExtents.y + std::abs(dir.z) * halfExtents.z;
+        const float k_perTickCap = k_R_dir * k_capRatioOfR;
+        const float remainingBudget = std::max(0.0f, k_perTickCap - totalPushedThisTick);
+        const float pushAmount = std::min(maxDepth + pushback, remainingBudget);
+        if (pushAmount <= 0.0f)
+            return; // budget exhausted; resume next tick.
+        pos += dir * pushAmount;
+        totalPushedThisTick += pushAmount;
 
         // Cancel inward velocity component on every pass so a sliding
         // player loses normal-direction motion immediately instead of
