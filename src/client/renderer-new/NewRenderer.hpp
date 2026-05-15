@@ -5,6 +5,7 @@
 
 #include "Asset.hpp"
 #include "Camera.hpp"
+#include "RendererTypes.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -34,8 +35,14 @@ public:
     [[nodiscard]] const NewCamera& getCamera() const { return camera_; }
     void setHudTexture(SDL_GPUTexture* hudTexture);
 
+    void setWeaponViewmodel(const WeaponViewmodel& vm);
+
     int loadSceneModel(
         const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining = "");
+
+    void setPointLights(std::vector<PointLight> pointLights);
+    void setEntityRenderList(std::vector<EntityRenderCmd>&& entityList);
+    void setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor);
 
 private:
     SDL_Window* window_ = nullptr;
@@ -45,7 +52,7 @@ private:
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
 
-    //SDL_GPUTexture* depthTexture_ = nullptr;
+    // SDL_GPUTexture* depthTexture_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
 
     // Temp for single texture
@@ -60,15 +67,14 @@ private:
 
     NewCamera camera_;
 
+    std::vector<EntityRenderCmd> entities_;
+    WeaponViewmodel weapon_;
+
     /// @brief Build the geometry graphics pipeline from vertex/fragment shaders.
     /// @return True on success.
     bool createGeometryPipeline();
 
     bool createHudPipeline();
-
-    /// @brief Load models via AssetLoader and upload their mesh buffers to the GPU.
-    /// @return True on success.
-    bool loadSceneAssets();
 
     /// @brief (Re-)create the depth texture if the viewport size changed.
     /// @param width  New viewport width in pixels.
@@ -80,15 +86,19 @@ private:
     /// @param meshId Key into Asset::meshes_.
     void createMeshBuffers(MeshIdInt meshId) const;
 
-    void drawGeometryPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd);
+    void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
 
-    void drawUIPass(SDL_GPUTexture *swapchain,SDL_GPUCommandBuffer *cmd);
+    void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
 
-    void drawWorldModelInstances(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd);
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
-    void drawWeapon(SDL_GPURenderPass *geometryPass,SDL_GPUCommandBuffer *cmd);
+    void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
 
-    void drawModel(ModelIdInt modelId, const glm::mat4& modelTransform,SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer *cmd);
+    void drawModel(ModelIdInt modelId,
+                   const glm::mat4& modelTransform,
+                   SDL_GPURenderPass* renderPass,
+                   SDL_GPUCommandBuffer* cmd);
+    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
     /// @brief Bind a mesh's buffers and issue an indexed draw call.
     /// @param renderPass The active render pass.
@@ -97,5 +107,5 @@ private:
 
     void drawHud(SDL_GPURenderPass* pass);
 
-    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll,Uint32 width,Uint32 height);
+    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
 };

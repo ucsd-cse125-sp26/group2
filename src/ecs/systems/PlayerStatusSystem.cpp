@@ -3,7 +3,10 @@
 
 #include "PlayerStatusSystem.hpp"
 
+#include "AbilitySystem.hpp"
+#include "PowerupSpawnerSystem.hpp"
 #include "SDL3/SDL_log.h"
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
@@ -14,6 +17,7 @@
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
+#include "ecs/components/PowerupState.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -246,6 +250,30 @@ inline void handleDeath(entt::entity& player,
     }
 }
 
+inline void updateAbilityLevel(Registry& registry, entt::entity player, float dmg)
+{
+    if (dmg < 0)
+        return;
+
+    AbilityState& abilityState = registry.get<AbilityState>(player);
+    if (abilityState.level >= systems::maxLevel)
+        return;
+
+    abilityState.accumDamage += dmg;
+    if (abilityState.accumDamage >= systems::dmgThreshold) {
+        abilityState.accumDamage = abilityState.accumDamage - systems::dmgThreshold;
+        abilityState.level += 1;
+
+        if (abilityState.level == 1)
+            abilityState.pendingLevel1 = true;
+        if (abilityState.level == 2)
+            abilityState.pendingLevel2 = true;
+
+        if (abilityState.level >= systems::maxLevel)
+            abilityState.accumDamage = systems::dmgThreshold;
+    }
+}
+
 void applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
@@ -257,10 +285,21 @@ void applyDamage(float damage,
     if (registry.all_of<RespawnTimer>(player))
         return;
 
+
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 
     // Reset heal cooldown on every damage tick
     playerHealth.healTimer = systems::healCooldown;
+
+    if (player != killer) {
+        updateAbilityLevel(registry, killer, damage);
+
+        PowerupState& powerupState = registry.get<PowerupState>(killer);
+        PowerupConfig damageConfig = getPowerupConfig(PowerupType::Damage);
+        if (hasPowerup(powerupState, PowerupType::Damage)) {
+            damage = damage * damageConfig.amount;
+        }
+    }
 
     if (playerHealth.armor >= damage) {
         playerHealth.armor -= damage;

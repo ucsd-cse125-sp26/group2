@@ -7,6 +7,14 @@ layout(location = 0) out vec4 color;
 
 layout(set = 2, binding = 0) uniform sampler2D tex;
 
+layout(set = 3, binding = 0) uniform Material {
+    vec4 diffuse;
+} material;
+
+layout(set = 3, binding = 1) uniform MaterialFlags {
+    uint useTexture;
+} materialFlags;
+
 // Just a single directional light for now...
 const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
@@ -14,10 +22,11 @@ const vec4 ambient_color = vec4(normalize(vec3(0.08f, 0.08f,0.12f)),1.0f); // da
 
 void main()
 {
-    vec4 albedo = texture(tex, frag_vt);
-    float cosT = max(0.0f,dot(-light_direction,frag_normal));
+    vec3 normal = gl_FrontFacing ? frag_normal : -frag_normal;
+
+    vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
+    float cosT = max(0.0f, dot(-light_direction, normal));
     vec4 irradiance = light_color * cosT + ambient_color;
+
     color = albedo * irradiance;
-    //color = albedo;
-    //color = vec4(1.0f);
 }

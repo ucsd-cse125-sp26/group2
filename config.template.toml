@@ -37,3 +37,8 @@ snapshot-hz = 128
 #   "vulkan"      — Vulkan (default on Linux; available on Windows as fallback)
 #   "metal"       — macOS: Metal (default on macOS)
 backend = "auto"
+
+[developer]
+# When true, the client starts directly in-game and the server automatically
+# advances lobby phases into countdowns. Intended for local gameplay iteration.
+skip_lobby = true

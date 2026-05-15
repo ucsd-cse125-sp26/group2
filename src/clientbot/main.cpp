@@ -53,6 +53,10 @@ extern "C" void onSignal(int /*sig*/)
 
 void installSignalHandlers()
 {
+#if defined(_WIN32)
+    std::signal(SIGINT, onSignal);
+    std::signal(SIGTERM, onSignal);
+#else
     // `= {}` value-initialises every field. Same effect as `sa{};` but
     // formats identically under clang-format-18 and clang-format-22 —
     // the v18 layout-disagreement with the brace-init-only form was the
@@ -63,6 +67,7 @@ void installSignalHandlers()
     sa.sa_flags = 0; // no SA_RESTART; let blocking calls return EINTR if any
     sigaction(SIGINT, &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
+#endif
 }
 
 /// @brief Parse "host:port" into separate fields.

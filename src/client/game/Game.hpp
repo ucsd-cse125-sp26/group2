@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "IScreen.hpp"
 #include "animation/AnimationLibrary.hpp"
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
@@ -17,7 +18,7 @@
 #include "hud/Hud.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
-#include "network/NetworkConfig.hpp"
+#include "network/RegistrySerialization.hpp"
 #include "particles/ParticleSystem.hpp"
 #include "renderer-new/NewRenderer.hpp"
 #include "sfx/SfxSystem.hpp"
@@ -28,25 +29,30 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <memory>
+#include <optional>
 
 /// @brief Top-level client game object.
 ///
-/// Owns all subsystems: window, ECS registry, renderer, debug UI, and network client.
-/// Wired into SDL's application-callback API (SDL_AppInit / SDL_AppEvent / SDL_AppIterate / SDL_AppQuit).
-class Game
+/// Owns the active game screen subsystems and borrows App-owned window, renderer, and network client.
+/// Wired through App into SDL's application-callback API.
+class Game : public IScreen
 {
 public:
+    /// @brief Create the Game-owned ImGui context before App initialises the renderer backend.
+    bool initDebugUI(SDL_Window* windowPtr);
+
     /// @brief Initialise all subsystems and spawn the local player entity.
     /// @return False on any fatal initialisation error.
-    bool init();
+    bool init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
 
     /// @brief Forward an SDL event to ImGui and handle application-level keys.
     /// @param event  The SDL event to process.
     /// @return SDL_APP_SUCCESS to quit, SDL_APP_CONTINUE to keep running.
-    SDL_AppResult event(SDL_Event* event);
+    SDL_AppResult event(SDL_Event* event) override;
 
     /// @brief Advance one frame: sample input, step physics, render.
     ///
@@ -81,10 +87,16 @@ public:
     ///
     /// @return SDL_APP_CONTINUE normally; SDL_APP_SUCCESS on quit request.
     /// @see ServerGame::tick for the authoritative server-side equivalent.
-    SDL_AppResult iterate();
+    SDL_AppResult iterate() override;
+
+    /// @brief True once the server has returned the match phase to the lobby.
+    bool shouldReturnToLobby() const;
 
     /// @brief Shut down all subsystems in reverse-init order.
-    void quit();
+    void quit() override;
+
+    /// @brief Destroy the Game-owned ImGui context after App shuts down the renderer backend.
+    void shutdownAfterRenderer() override;
 
     /// @brief Update Renderable components for remote players (model, scale, orientation from animation rig).
     void refreshRemotePlayerRenderables();
@@ -94,11 +106,19 @@ public:
 
     /// @brief Reset Renderable visibility for players transitioning through respawn.
     void refreshRemoteRespawnRenderables();
+    void refreshRemotePowerupRenderables();
 
     /// @brief Assign Renderable components to dropped-weapon entities (mirrors spawner visuals).
     void refreshDroppedWeaponRenderables();
 
 private:
+    /// @brief Deserialize a snapshot from the server and update the ECS registry.
+    /// @return True on success; false if the snapshot could not be applied.
+    bool applyIncomingSnapshot(
+        std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
+    /// @brief Emplace player-control components onto the mapped local entity and record it.
+    void handleLocalPlayerReady(entt::entity local);
+
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
     /// Spiral-of-death guard: max physics ticks per iterate().  Dropped from
@@ -110,22 +130,24 @@ private:
     /// briefly runs 0.5× wall speed until the accumulator drains naturally;
     /// human-imperceptible at 1000+ render Hz.
     static constexpr int k_maxTicksPerFrame = 2;
-    static constexpr int k_fpsHistorySize = 512; ///< Samples in the rolling FPS ring buffer.
+    static constexpr int k_fpsHistorySize = 512;                   ///< Samples in the rolling FPS ring buffer.
 
-    NetworkConfig netCfg;                        ///< Runtime network config loaded from config.toml.
-    SDL_Window* window = nullptr;                ///< The application window.
-    DebugUI debugUI;                             ///< Owns the ImGui context and SDL3 input backend.
-    NewRenderer renderer;                        ///< Graphics-team SDL3 GPU renderer.
-    Registry registry;                           ///< The shared ECS registry.
-    Client client;                               ///< UDP network client.
-    ParticleSystem particleSystem;               ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;                         ///< Client-side sound effects system.
-    Hud hud_;                                    ///< In-game HUD overlay system.
-    entt::dispatcher dispatcher;                 ///< Event bus for weapon/impact/explosion events.
+    SDL_Window* window = nullptr;                                  ///< The application window.
+    DebugUI debugUI;                                               ///< Owns the ImGui context and SDL3 input backend.
+    NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
+    Registry registry;                                             ///< The shared ECS registry.
+    Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
+    std::optional<entt::entity>
+        mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
+    ParticleSystem particleSystem; ///< Client-side VFX particle system.
+    SfxSystem sfxSystem;           ///< Client-side sound effects system.
+    Hud hud_;                      ///< In-game HUD overlay system.
+    entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
-    Uint64 prevTime = 0;                         ///< SDL performance counter at the last iterate() call.
-    float accumulator = 0.0f;                    ///< Unprocessed physics time in seconds.
-    int tickCount = 0;                           ///< Total physics ticks elapsed since start.
+    Uint64 prevTime = 0;           ///< SDL performance counter at the last iterate() call.
+    float accumulator = 0.0f;      ///< Unprocessed physics time in seconds.
+    int tickCount = 0;             ///< Total physics ticks elapsed since start.
     /// @brief Monotonic per-tick counter stamped onto outgoing InputSnapshots.
     ///
     /// Bumped once per physics tick group inside iterate() and copied into the
@@ -227,7 +249,6 @@ private:
 
     // Legacy model index aliases (for code that still uses raw indices).
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
-    int wraithModelIdx = -1;
     int glowSphereModelIdx_ = -1;
     int movableSphereModelIdx_ = -1;
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
@@ -268,7 +289,7 @@ private:
     bool hitmarkerIsHeadshot_ = false;  ///< True when the current hitmarker was a headshot.
     bool hitmarkerShieldBreak_ = false; ///< True when the current hit depleted target armor.
 
-    // Floating damage numbers — queued from onParticleEvent, consumed by HUD each frame.
+    // Floating damage numbers — queued from replicated particle events, consumed by HUD each frame.
     struct PendingDamageNumber
     {
         glm::vec3 pos;
@@ -422,8 +443,9 @@ private:
     void attachAnimatedCharacter(entt::entity e);
 
     // Match State
-    MatchPhase currentMatchPhase = MatchPhase::WARMUP; ///< Latest match phase update from the server.
+    MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
+    bool returnToLobbyRequested = false; ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
 
     // Kill Feed State
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).

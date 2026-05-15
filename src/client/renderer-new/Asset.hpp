@@ -12,6 +12,7 @@
 #define ASSETS_DIR "assets"
 #include "glm/glm.hpp"
 
+#include <stb_image.h>
 #include <unordered_map>
 #include <vector>
 
@@ -62,18 +63,29 @@ struct GpuMesh
 
 struct Material
 {
-    glm::vec3 kDiffuse_;
-    glm::vec3 kAmbient_;
-    glm::vec3 kSpecular_;
-    glm::vec3 kEmission_;
-    float nSpecular;
-    float nIor;
-    TexIdInt texId_[TEX_CHANNELS];
+    glm::vec3 kDiffuse_ = glm::vec3(0.8f);
+    glm::vec3 kAmbient_ = glm::vec3(0.08f);
+    glm::vec3 kSpecular_ = glm::vec3(0.0f);
+    glm::vec3 kEmission_ = glm::vec3(0.0f);
+    float nSpecular = 32.0f;
+    float nIor = 1.0f;
+    bool hasPhongData_ = false;
+    TexIdInt texId_[TEX_CHANNELS] = {};
 };
+
+struct Texture
+{
+    stbi_uc* tex_raw = nullptr;
+    SDL_GPUTexture* tex = nullptr;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+};
+
 struct ModelElement
 {
     MeshIdInt meshId_;
-    MaterialIdInt materialId_;
+    MaterialIdInt materialId_ = 0;
     glm::mat4 cachedTransform_;
 };
 
@@ -99,7 +111,7 @@ struct ModelInstance
 
 inline std::unordered_map<MeshIdInt, Mesh> meshes_;
 inline std::unordered_map<ModelIdInt, Model> models_;
-inline std::unordered_map<TexIdInt, uint32_t> textures_;
+inline std::unordered_map<TexIdInt, Texture> textures_;
 inline std::unordered_map<MaterialIdInt, Material> materials_;
 
 inline std::vector<ModelInstance> modelInstances_;

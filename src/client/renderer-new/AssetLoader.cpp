@@ -2,10 +2,12 @@
 /// @brief Implementation of AssetLoader — Assimp scene import and mesh extraction.
 
 #include "AssetLoader.hpp"
+#include "Asset.hpp"
 
 #include <filesystem>
 #include <iostream>
 #include <stack>
+#include <stb_image.h>
 #include <vector>
 
 const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::string& fileName, const bool flipUVs)
@@ -19,24 +21,6 @@ const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::str
     SDL_Log("Assimp error: %s", importer.GetErrorString());
 
     return scene;
-}
-
-bool AssetLoader::loadModelsList()
-{
-    const ModelIdInt id = 0;
-    // std::string modelFileName = "assualtRifleJ.obj";
-    std::string modelFileName = "assualtRiflColorTest.glb";
-    const std::vector<std::string> texFileNames;
-
-    std::cout << "loading model" << std::endl;
-    // bool res = loadModel(id, modelFileName,texFileNames,false);
-    bool res = loadModel(id, modelFileName, texFileNames, false, true);
-    std::cout << "loaded model" << std::endl;
-    if (!res) {
-        std::cout << "MODEL NOT FOUND!!" << std::endl;
-    }
-
-    return true;
 }
 
 bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
@@ -83,6 +67,31 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
     }
 
     return true;
+}
+
+bool readAiColor(aiMaterial& material, const char* key, unsigned int type, unsigned int index, glm::vec3& out)
+{
+    aiColor3D color;
+    if (material.Get(key, type, index, color) != AI_SUCCESS)
+        return false;
+
+    out = {color.r, color.g, color.b};
+    return true;
+}
+
+static bool hasMetadataKey(const aiNode& node, const std::string& keyToFind)
+{
+    if (!node.mMetaData) {
+        return false;
+    }
+
+    for (unsigned int i = 0; i < node.mMetaData->mNumProperties; i++) {
+        if (std::string(node.mMetaData->mKeys[i].C_Str()) == keyToFind) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool AssetLoader::loadModel(const ModelIdInt id,
@@ -142,6 +151,11 @@ bool AssetLoader::loadModel(const ModelIdInt id,
         const uint32_t currentModelNodeIndex = nodeTraversalStack.top();
         nodeTraversalStack.pop();
 
+        // // Skip if collider or gameplay entity
+        if (hasMetadataKey(currentNode, "entity_type") || hasMetadataKey(currentNode, "is_collision")) {
+            continue;
+        }
+
         Asset::ModelNode& currentModelNode = newModel.modelNodes_[currentModelNodeIndex];
         currentModelNode.transform_ = glmFromAiTransform(currentNode.mTransformation);
         currentModelNode.childIndices_.reserve(currentNode.mNumChildren);
@@ -168,6 +182,81 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     }
 
     std::cout << debugPrefix << "loadedMeshes" << std::endl;
+
+    if (asimpSceneStructurePtr->HasMaterials()) {
+        for (unsigned int i = 0; i < asimpSceneStructurePtr->mNumMaterials; i++) {
+            aiMaterial* mat = asimpSceneStructurePtr->mMaterials[i];
+            MaterialIdInt matId =
+                Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
+
+            Asset::Material& mat_ = Asset::materials_[matId];
+
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_DIFFUSE, mat_.kDiffuse_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_AMBIENT, mat_.kAmbient_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_SPECULAR, mat_.kSpecular_);
+            mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_EMISSIVE, mat_.kEmission_);
+
+            float shininess = 0.0f;
+            if (mat->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS) {
+                mat_.nSpecular = shininess;
+                mat_.hasPhongData_ = true;
+            }
+
+            float ior = 0.0f;
+            if (mat->Get(AI_MATKEY_REFRACTI, ior) == AI_SUCCESS) {
+                mat_.nIor = ior;
+                mat_.hasPhongData_ = true;
+            }
+
+            aiString texPath;
+            if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &texPath) != AI_SUCCESS &&
+                mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) != AI_SUCCESS)
+            {
+                continue; // no texture for this material
+            }
+
+            TexIdInt texId =
+                Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
+
+            mat_.texId_[0] = texId;
+
+            Asset::Texture& tex_ = Asset::textures_[texId];
+
+            if (tex_.tex_raw != nullptr) {
+                continue; // already decoded this texture
+            }
+
+            const aiTexture* embeddedTexture = asimpSceneStructurePtr->GetEmbeddedTexture(texPath.C_Str());
+            if (!embeddedTexture || embeddedTexture->mHeight != 0) {
+                SDL_Log("AssetLoader: skipping unsupported material texture '%s' "
+                        "(expected compressed embedded texture, embedded=%s, height=%u)",
+                        texPath.C_Str(),
+                        embeddedTexture ? "true" : "false",
+                        embeddedTexture ? embeddedTexture->mHeight : 0);
+                continue;
+            }
+
+            stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
+                                                   static_cast<int>(embeddedTexture->mWidth),
+                                                   &tex_.width,
+                                                   &tex_.height,
+                                                   &tex_.channels,
+                                                   4);
+
+            if (!pixels) {
+                std::cout << "stbi failed for "
+                        << texPath.C_Str()
+                        << ": "
+                        << stbi_failure_reason()
+                        << std::endl;
+                continue;
+            }
+
+            tex_.tex_raw = pixels;
+        }
+    }
+
+    std::cout << debugPrefix << "loadedTexture" << std::endl;
 
     return true;
 }
@@ -199,6 +288,10 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
         uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
 
         const aiMesh& mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
+
+        MaterialIdInt matId = Asset::getMaterialIdFromString(meshNameSpace + "material_" + std::to_string(mesh_j_Ai.mMaterialIndex));
+
+        me_j.materialId_ = matId;
 
         std::string meshName = meshNameSpace + nodeNameStr + std::to_string(mesh_j_IdAi);
         MeshIdInt meshNameId = Asset::getMeshIdFromString(meshName);

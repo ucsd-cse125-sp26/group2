@@ -1,8 +1,10 @@
 /// @file main.cpp
 /// @brief Server application entry point.
 
+#include "DeveloperConfig.hpp"
 #include "game/ServerGame.hpp"
 #include "network/NetworkConfig.hpp"
+#include "network/Server.hpp"
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 
@@ -175,13 +177,21 @@ int main()
     const char* base = SDL_GetBasePath();
     std::string cfgPath = std::string(base ? base : "") + "config.toml";
     const NetworkConfig cfg = loadNetworkConfig(cfgPath.c_str());
+    const DeveloperConfig developerCfg = loadDeveloperConfig(cfgPath.c_str());
     const NetworkAddress& serverNet = cfg.serverNetwork;
 
+    Server server;
+    if (!server.init(serverNet.host.c_str(), serverNet.port, cfg.transport)) {
+        ::group2::perf::stopAggregator();
+        closeCsv();
+        NET_Quit();
+        SDL_Quit();
+        return 1;
+    }
+
     ServerGame game;
-    // Phase 4a: snapshot rate from [server-replication].snapshot-hz.
-    // Phase 3d: TransportConfig for UDP sidecar feature toggles.
-    if (!game.init(serverNet.host.c_str(), serverNet.port, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, cfg.transport))
-    {
+    if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, developerCfg.skipLobby)) {
+        server.shutdown();
         ::group2::perf::stopAggregator();
         closeCsv();
         NET_Quit();
@@ -191,6 +201,7 @@ int main()
 
     game.run();
     game.shutdown();
+    server.shutdown();
 
     ::group2::perf::stopAggregator();
     closeCsv();
