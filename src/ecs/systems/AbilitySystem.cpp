@@ -13,6 +13,18 @@
 namespace systems
 {
 
+inline void tickCooldown(float& cooldown, float dt)
+{
+    if (cooldown <= 0.0f) {
+        return;
+    }
+
+    cooldown -= dt;
+    if (cooldown < 0.0f) {
+        cooldown = 0.0f;
+    }
+}
+
 inline void useAbility(entt::entity player, AbilityType type, Registry& registry, AbilityRegistry& abilityRegistry)
 {
     if (type == AbilityType::None) {
@@ -39,9 +51,12 @@ void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float /*dt
                 useAbility(e, state.primary, registry, abilityRegistry);
             }
 
-            if (snap.ability2) {
+            if (snap.ability2 && !state.secondaryActive) {
                 useAbility(e, state.secondary, registry, abilityRegistry);
             }
+
+            state.primaryActive = snap.ability1;
+            state.secondaryActive = snap.ability2;
         });
 }
 
