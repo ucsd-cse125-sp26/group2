@@ -28,5 +28,6 @@ void main()
     float cosT = max(0.0f, dot(-light_direction, normal));
     vec4 irradiance = light_color * cosT + ambient_color;
 
+    albedo.rgb *= (normal * 0.5f) + 0.5f;
     color = albedo * irradiance;
 }
