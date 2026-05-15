@@ -40,8 +40,15 @@
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "ecs/physics/CollisionEvents.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
+#include "ecs/physics/Sleep.hpp"
+#include "ecs/physics/Solver.hpp"
+#include "ecs/systems/DynamicsSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/RagdollSystem.hpp"
+#include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
@@ -79,6 +86,13 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
             hz,
             hz / snapshotEveryNTicks,
             snapshotEveryNTicks);
+
+    // Phase-through diagnostic: default ON for the server so investigating
+    // a phase-through bug doesn't require a UI toggle on a headless build.
+    // Writes phase-diag-<timestamp>.csv next to the server binary; flip off
+    // with `--no-phase-diag` once the bug is fixed (TODO: CLI plumb).
+    physics::diag::setEnabled(true);
+    SDL_Log("[server] phase-through diagnostic ENABLED — writing phase-diag-*.csv");
 
     clientEntities.clear(); // For safety
     registry.clear();
@@ -460,6 +474,29 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         systems::runCollision(registry, dt, physics::activeWorld());
     }
     {
+        // Phase 4: trigger overlap diff → Enter / Stay / Exit events.
+        // Drained by gameplay below.  Server is authoritative; clients pass
+        // isPredictedClient=true so their predicted ticks don't double-fire.
+        GROUP2_PROF_SCOPE("triggers");
+        physics::events::beginTick();
+        systems::runTriggers(registry, /*isPredictedClient=*/false);
+    }
+    {
+        // Phase 6/10/12 dynamics: integrate, solve contacts + joints,
+        // update sleep state for every entity with a RigidBody.  Player
+        // movement is still kinematic (CollisionSystem above); this tick
+        // exists for ragdoll bones + future dynamic props.
+        GROUP2_PROF_SCOPE("dynamics");
+        static const physics::SolverConfig k_solverCfg{};
+        static const physics::SleepConfig k_sleepCfg{};
+        systems::runDynamics(registry, dt, physics::activeWorld(), contactCache_, k_solverCfg, k_sleepCfg);
+    }
+    {
+        // Phase 13: age out ragdolls so gameplay can fade / despawn corpses.
+        GROUP2_PROF_SCOPE("ragdolls");
+        systems::runRagdolls(registry, dt);
+    }
+    {
         GROUP2_PROF_SCOPE("explosion");
         systems::runExplosion(registry, particleEvents, pendingKillEvents);
     }
@@ -647,7 +684,17 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<InputSnapshot>(player);
     registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
     registry.emplace<Velocity>(player);
-    registry.emplace<CollisionShape>(player);
+    // Phase 5: player is a capsule for smoother movement against ramps and
+    // triangulated geometry.  `halfExtents` is the capsule's tight bounding
+    // box (32×72×32) so existing axis-aligned swept queries treat the shape
+    // exactly; the capsule fields drive Phase-5+ shape-aware paths.
+    registry.emplace<CollisionShape>(player,
+                                     CollisionShape{
+                                         .type = CollisionShapeType::Capsule,
+                                         .halfExtents = {16.0f, 36.0f, 16.0f},
+                                         .radius = 16.0f,
+                                         .halfHeight = 20.0f,
+                                     });
     registry.emplace<PlayerVisState>(player);
     registry.emplace<PlayerSimState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});

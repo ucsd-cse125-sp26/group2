@@ -45,6 +45,7 @@ HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::
             result.hit = true;
             result.tFirst = k_t;
             result.normal = plane.normal;
+            result.surfaceType = plane.surfaceType;
         }
     }
 
@@ -120,6 +121,7 @@ HitResult sweepAABBvsBox(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, 
         result.hit = true;
         result.tFirst = tEntry;
         result.normal = hitNormal;
+        result.surfaceType = box.surfaceType;
     }
 
     return result;
@@ -189,6 +191,7 @@ HitResult sweepAABBvsBrush(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end
         result.hit = true;
         result.tFirst = tEntry;
         result.normal = hitNormal;
+        result.surfaceType = brush.surfaceType;
     }
 
     return result;
@@ -298,6 +301,7 @@ HitResult sweepAABBvsCylinder(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 
     result.hit = true;
     result.tFirst = tEntry;
     result.normal = hitNormal;
+    result.surfaceType = cyl.surfaceType;
     return result;
 }
 
@@ -345,6 +349,7 @@ HitResult sweepAABBvsSphere(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 en
     result.hit = true;
     result.tFirst = k_t;
     result.normal = hitNormal;
+    result.surfaceType = sph.surfaceType;
     return result;
 }
 

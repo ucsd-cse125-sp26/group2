@@ -777,6 +777,42 @@ add_executable(group2
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/DebugCollisionDraw.hpp
+        src/ecs/physics/DebugCollisionDraw.cpp
+        src/ecs/physics/PhaseDiagnostic.hpp
+        src/ecs/physics/PhaseDiagnostic.cpp
+        src/ecs/physics/SurfaceType.hpp
+        src/ecs/physics/CollisionEvents.hpp
+        src/ecs/physics/CollisionEvents.cpp
+        src/ecs/physics/Forces.hpp
+        src/ecs/physics/Forces.cpp
+        src/ecs/physics/Inertia.hpp
+        src/ecs/physics/BroadphaseTree.hpp
+        src/ecs/physics/BroadphaseTree.cpp
+        src/ecs/physics/ContactManifold.hpp
+        src/ecs/physics/ContactCache.hpp
+        src/ecs/physics/ContactCache.cpp
+        src/ecs/physics/Solver.hpp
+        src/ecs/physics/Solver.cpp
+        src/ecs/physics/Joints.hpp
+        src/ecs/physics/Joints.cpp
+        src/ecs/physics/Sleep.hpp
+        src/ecs/physics/Sleep.cpp
+        src/ecs/physics/CookedMeshFormat.hpp
+        src/ecs/physics/CookedMeshFormat.cpp
+        src/ecs/physics/DeterminismHash.hpp
+        src/ecs/physics/DeterminismHash.cpp
+        src/ecs/physics/SimdAabb.hpp
+        src/ecs/components/RigidBody.hpp
+        src/ecs/components/Orientation.hpp
+        src/ecs/components/Ragdoll.hpp
+        src/ecs/components/TriggerVolume.hpp
+        src/ecs/systems/TriggerSystem.hpp
+        src/ecs/systems/TriggerSystem.cpp
+        src/ecs/systems/RagdollSystem.hpp
+        src/ecs/systems/RagdollSystem.cpp
+        src/ecs/systems/DynamicsSystem.hpp
+        src/ecs/systems/DynamicsSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -1027,6 +1063,42 @@ add_executable(server
         src/ecs/physics/MapLoader.cpp
         src/ecs/physics/TriMeshCollision.hpp
         src/ecs/physics/TriMeshCollision.cpp
+        src/ecs/physics/DebugCollisionDraw.hpp
+        src/ecs/physics/DebugCollisionDraw.cpp
+        src/ecs/physics/PhaseDiagnostic.hpp
+        src/ecs/physics/PhaseDiagnostic.cpp
+        src/ecs/physics/SurfaceType.hpp
+        src/ecs/physics/CollisionEvents.hpp
+        src/ecs/physics/CollisionEvents.cpp
+        src/ecs/physics/Forces.hpp
+        src/ecs/physics/Forces.cpp
+        src/ecs/physics/Inertia.hpp
+        src/ecs/physics/BroadphaseTree.hpp
+        src/ecs/physics/BroadphaseTree.cpp
+        src/ecs/physics/ContactManifold.hpp
+        src/ecs/physics/ContactCache.hpp
+        src/ecs/physics/ContactCache.cpp
+        src/ecs/physics/Solver.hpp
+        src/ecs/physics/Solver.cpp
+        src/ecs/physics/Joints.hpp
+        src/ecs/physics/Joints.cpp
+        src/ecs/physics/Sleep.hpp
+        src/ecs/physics/Sleep.cpp
+        src/ecs/physics/CookedMeshFormat.hpp
+        src/ecs/physics/CookedMeshFormat.cpp
+        src/ecs/physics/DeterminismHash.hpp
+        src/ecs/physics/DeterminismHash.cpp
+        src/ecs/physics/SimdAabb.hpp
+        src/ecs/components/RigidBody.hpp
+        src/ecs/components/Orientation.hpp
+        src/ecs/components/Ragdoll.hpp
+        src/ecs/components/TriggerVolume.hpp
+        src/ecs/systems/TriggerSystem.hpp
+        src/ecs/systems/TriggerSystem.cpp
+        src/ecs/systems/RagdollSystem.hpp
+        src/ecs/systems/RagdollSystem.cpp
+        src/ecs/systems/DynamicsSystem.hpp
+        src/ecs/systems/DynamicsSystem.cpp
         src/ecs/physics/VHACDImpl.cpp
         src/ecs/physics/WallDetection.hpp
         src/ecs/physics/WallDetection.cpp
@@ -1294,6 +1366,42 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/MapLoader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/PhaseDiagnostic.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/PhaseDiagnostic.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SurfaceType.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Inertia.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/BroadphaseTree.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/BroadphaseTree.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactManifold.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactCache.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/ContactCache.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Solver.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Solver.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Ragdoll.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DynamicsSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DynamicsSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DeterminismHash.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DeterminismHash.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SimdAabb.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/RigidBody.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/Orientation.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/components/TriggerVolume.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/TriggerSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/TriggerSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/VHACDImpl.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.hpp"

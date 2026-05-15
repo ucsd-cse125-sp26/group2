@@ -251,6 +251,60 @@ public:
     bool drawCollisionSpheres = true;
     bool drawCollisionTriMeshes = true;
 
+    /// @brief Draw the Contact Debug window + (optionally) per-contact overlay.
+    ///
+    /// Records every physics contact (sweep hits + per-primitive depenetration
+    /// MTV contributions) when the "Capture contacts" toggle is on, then
+    /// renders them in the foreground draw list:
+    ///   - small circle at each contact point (colour = source category)
+    ///   - arrow along the contact normal (length = `contactNormalLength`,
+    ///     scaled by depth for depenetration contacts)
+    /// Per-source visibility toggles let you isolate (e.g.) just the
+    /// trimesh-depen contributions — invaluable for debugging Phase 2
+    /// internal-edge welding.
+    ///
+    /// `physics::debug::beginFrame()` MUST be called once per rendered frame
+    /// before this — see Game::iterate.
+    ///
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showContactDebugWindow = false;  ///< Show the Contact Debug ImGui window.
+    bool drawContactOverlay = false;      ///< Draw contact-point + normal overlay in 3D.
+
+    // Per-source visibility toggles for the contact overlay.
+    bool drawContactPlaneSweep = true;
+    bool drawContactBoxSweep = true;
+    bool drawContactBrushSweep = true;
+    bool drawContactCylinderSweep = true;
+    bool drawContactSphereSweep = true;
+    bool drawContactTriMeshSweep = true;
+    bool drawContactPlaneDepen = true;
+    bool drawContactBoxDepen = true;
+    bool drawContactBrushDepen = true;
+    bool drawContactCylinderDepen = true;
+    bool drawContactSphereDepen = true;
+    bool drawContactTriMeshDepen = true;
+
+    /// @brief World units of arrow length for unit-normal contacts.  Depen
+    /// contacts scale this by their depth so deeper interpenetrations draw
+    /// longer arrows.
+    float contactNormalLength = 16.0f;
+
+    /// @brief Radius (px) of the contact-point circle in screen space.
+    float contactPointRadius = 4.0f;
+
+    /// @brief Draw the per-trimesh welded-edge overlay: each triangle edge
+    /// is coloured green when active (real boundary / convex corner) or red
+    /// when welded (internal coplanar / concave seam suppressed at runtime).
+    /// Validates the Phase 2 mesh-cook output by eye.
+    bool drawMeshEdgeOverlay = false;
+
+    /// @brief Optional vertex markers on welded-edge overlay (active = green dot).
+    bool drawMeshVertexOverlay = false;
+
     /// @brief Finalise the ImGui frame. Call after all ImGui draw calls, before Renderer::drawFrame().
     void render();
 

@@ -4,20 +4,11 @@
 #pragma once
 
 #include "WeaponState.hpp"
+#include "ecs/physics/SurfaceType.hpp" // SurfaceType moved here in Phase 3; this re-include preserves existing call sites.
 
 #include <cstdint>
 #include <entt/entt.hpp>
 #include <glm/vec3.hpp>
-
-/// @brief Surface material hit by a projectile — drives impact effect parameters.
-enum class SurfaceType : uint8_t
-{
-    Metal,
-    Concrete,
-    Flesh,
-    Wood,
-    Energy,
-};
 
 /// @brief Component attached to projectile entities.
 ///

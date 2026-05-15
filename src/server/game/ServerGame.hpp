@@ -12,6 +12,7 @@
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/PlayerColors.hpp"
 #include "ecs/components/PlayerNicknames.hpp"
+#include "ecs/physics/ContactCache.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
@@ -167,6 +168,12 @@ private:
     /// the server snapshots every 4th tick — 4× less serialization +
     /// broadcast work than pre-Phase-4.
     int snapshotEveryNTicks = 4;
+
+    // ── Phase 6+ rigid-body dynamics state ──
+    /// @brief Persistent contact-manifold cache for warm-starting the PGS
+    /// solver across ticks.  Cleared on map load; trimmed each tick by
+    /// `runDynamics`.
+    physics::ContactCache contactCache_;
 
     // ── Server-side animation subsystem ──
     CharacterRig serverRig_;             ///< Shared skeleton (loaded from same FBX as client).

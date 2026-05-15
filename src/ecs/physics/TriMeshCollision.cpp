@@ -1,11 +1,28 @@
 /// @file TriMeshCollision.cpp
-/// @brief BVH builder and swept-AABB-vs-triangle-mesh collision.
+/// @brief BVH builder, edge-welding cooker, and Voronoi-clipped runtime
+///        primitives for AABB-vs-triangle-mesh collision.
+///
+/// Phase 2 of the physics roadmap.  Replaces the older SAT-MTV per-triangle
+/// path (which produced "ghost contacts" on internal edges of triangulated
+/// flat surfaces, requiring multi-pass MTV averaging to mask the noise) with:
+///   1. A cook-time welding pass (`weldTriMesh`) that classifies every
+///      shared edge as convex / concave / coplanar, marking only convex
+///      edges and their incident vertices as "active".
+///   2. Runtime primitives that find the closest Voronoi feature on a
+///      triangle to the AABB centre, discard contacts on inactive features,
+///      and otherwise produce a face-normal MTV.  See Ericson, *Real-Time
+///      Collision Detection* §5.1.5 for the closest-feature algorithm, and
+///      Jolt's `MeshShape::sCollideConvex` for the discard logic.
 
 #include "TriMeshCollision.hpp"
 
+#include "ecs/physics/DebugCollisionDraw.hpp"
+
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <glm/geometric.hpp>
+#include <unordered_map>
 
 namespace physics
 {
@@ -136,182 +153,204 @@ bool sweptAABBOverlapsAABB(
     return true;
 }
 
-// Swept-AABB vs single triangle (plane test + SAT confirmation)
+// Voronoi-region helpers
 
-/// @brief Test if a static AABB (centered at `center`, half-extents `he`)
-///        overlaps triangle (v0, v1, v2) using the separating axis theorem.
-///        Tests 13 axes: 3 AABB face normals + 1 triangle normal + 9 edge crosses.
-bool staticAABBvsTriSAT(glm::vec3 center, glm::vec3 he, glm::vec3 v0, glm::vec3 v1, glm::vec3 v2)
+/// @brief Which Voronoi region of a triangle a query point's closest projection
+/// falls into.  Used to clip contacts against inactive (welded) features.
+enum class TriRegion : uint8_t
 {
-    // Translate triangle so AABB center is at origin.
-    const glm::vec3 a = v0 - center;
-    const glm::vec3 b = v1 - center;
-    const glm::vec3 c = v2 - center;
+    Face = 0,
+    Edge0 = 1, ///< Edge v0→v1
+    Edge1 = 2, ///< Edge v1→v2
+    Edge2 = 3, ///< Edge v2→v0
+    Vert0 = 4,
+    Vert1 = 5,
+    Vert2 = 6,
+};
 
-    const glm::vec3 edges[3] = {b - a, c - b, a - c};
-
-    // 1. AABB face normals (3 axes: X, Y, Z) — project triangle onto each axis.
-    for (int axis = 0; axis < 3; ++axis) {
-        const float triMin = std::min({a[axis], b[axis], c[axis]});
-        const float triMax = std::max({a[axis], b[axis], c[axis]});
-        if (triMax < -he[axis] || triMin > he[axis])
-            return false;
+/// @brief Closest point on triangle (a, b, c) to query point p, plus the
+/// Voronoi region tag for the chosen feature.  Ericson, *RTCD* §5.1.5.
+TriRegion closestPointOnTriangle(glm::vec3 p, glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3& outClosest)
+{
+    const glm::vec3 ab = b - a;
+    const glm::vec3 ac = c - a;
+    const glm::vec3 ap = p - a;
+    const float d1 = glm::dot(ab, ap);
+    const float d2 = glm::dot(ac, ap);
+    if (d1 <= 0.0f && d2 <= 0.0f) {
+        outClosest = a;
+        return TriRegion::Vert0;
     }
 
-    // 2. Triangle face normal.
-    const glm::vec3 triN = glm::cross(edges[0], edges[1]);
-    if (glm::length(triN) > 1e-8f) {
-        const float r = he.x * std::abs(triN.x) + he.y * std::abs(triN.y) + he.z * std::abs(triN.z);
-        const float s = glm::dot(triN, a); // distance from origin (AABB center) to tri plane
-        if (std::abs(s) > r)
-            return false;
+    const glm::vec3 bp = p - b;
+    const float d3 = glm::dot(ab, bp);
+    const float d4 = glm::dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) {
+        outClosest = b;
+        return TriRegion::Vert1;
     }
 
-    // 3. Cross-product axes: AABB edge × triangle edge (9 axes).
-    //    AABB edges are (1,0,0), (0,1,0), (0,0,1).
-    const glm::vec3 aabbAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            const glm::vec3 ax = glm::cross(aabbAxes[i], edges[j]);
-            if (glm::dot(ax, ax) < 1e-10f)
-                continue; // parallel — skip
-
-            const float r = he.x * std::abs(ax.x) + he.y * std::abs(ax.y) + he.z * std::abs(ax.z);
-            const float p0 = glm::dot(ax, a);
-            const float p1 = glm::dot(ax, b);
-            const float p2 = glm::dot(ax, c);
-            const float triMin = std::min({p0, p1, p2});
-            const float triMax = std::max({p0, p1, p2});
-            if (triMax < -r || triMin > r)
-                return false;
-        }
+    const float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+        const float v = d1 / (d1 - d3);
+        outClosest = a + ab * v;
+        return TriRegion::Edge0;
     }
 
-    return true; // no separating axis found — overlapping
+    const glm::vec3 cp = p - c;
+    const float d5 = glm::dot(ab, cp);
+    const float d6 = glm::dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) {
+        outClosest = c;
+        return TriRegion::Vert2;
+    }
+
+    const float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+        const float w = d2 / (d2 - d6);
+        outClosest = a + ac * w;
+        return TriRegion::Edge2;
+    }
+
+    const float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
+        const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        outClosest = b + (c - b) * w;
+        return TriRegion::Edge1;
+    }
+
+    // Inside face.
+    const float denom = 1.0f / (va + vb + vc);
+    const float v = vb * denom;
+    const float w = vc * denom;
+    outClosest = a + ab * v + ac * w;
+    return TriRegion::Face;
 }
 
-/// @brief Compute the minimum-translation-vector (MTV) that separates a static
-///        AABB from a single triangle, using the same 13 SAT axes as
-///        `staticAABBvsTriSAT`.  Returns true if they overlap; on overlap,
-///        `outMtv` is the smallest vector that — when added to the AABB centre
-///        — makes the shapes disjoint.
-///
-/// All cross-product axes are normalised before measuring overlap, so the
-/// returned depth is in world units across every axis (the boolean SAT test
-/// in `staticAABBvsTriSAT` skips this normalisation because it only needs to
-/// compare signs).
-bool aabbVsTriMTV(glm::vec3 center, glm::vec3 he, glm::vec3 v0, glm::vec3 v1, glm::vec3 v2, glm::vec3& outMtv)
+// Voronoi-clipped depenetration MTV: returns true iff there is a valid contact
+// between an AABB centred at `center` (half-extents `he`) and the triangle.
+// `faceN` is the triangle's cooked face normal (CCW); `edgeFlags` and
+// `vertFlags` are the cooked active-feature masks.  On success, `outMtv` is the
+// face-normal MTV that pushes the AABB out to the free side of the triangle.
+bool aabbVsTriVoronoi(glm::vec3 center,
+                     glm::vec3 he,
+                     glm::vec3 v0,
+                     glm::vec3 v1,
+                     glm::vec3 v2,
+                     glm::vec3 faceN,
+                     uint8_t edgeFlags,
+                     uint8_t vertFlags,
+                     glm::vec3& outMtv)
 {
-    // Translate triangle so AABB centre is at origin (mirrors staticAABBvsTriSAT).
-    const glm::vec3 a = v0 - center;
-    const glm::vec3 b = v1 - center;
-    const glm::vec3 c = v2 - center;
+    // 1. Plane test: is the AABB even straddling the triangle's plane?
+    //    `r` is the AABB's projected half-extent on the normal (Minkowski radius).
+    const float r = std::abs(faceN.x) * he.x + std::abs(faceN.y) * he.y + std::abs(faceN.z) * he.z;
+    const float s = glm::dot(faceN, center - v0); // signed distance to plane
+    if (std::abs(s) > r)
+        return false;
 
-    const glm::vec3 edges[3] = {b - a, c - b, a - c};
+    // 2. Find the closest feature on the bounded triangle.  Used both to
+    //    detect ghost contacts ("AABB doesn't actually reach the closest
+    //    point") and — historically — to discard inactive welded features.
+    //    The discard behaviour was too aggressive: indoor FPS maps have
+    //    *concave* wall-floor corners where BOTH neighbours' closest
+    //    feature is the shared welded edge.  Discarding both leaves the
+    //    player wedged with zero depenetration push, which is the
+    //    wallrun-into-corner phase-through bug.
+    //
+    //    New behaviour (Bullet `btAdjustInternalEdgeContacts`-style):
+    //    inactive features are NOT discarded — the face normal is used as
+    //    the contact direction.  Two adjacent triangles sharing an
+    //    inactive edge still produce mutually-consistent MTVs because
+    //    their face normals either agree (coplanar internal seam) or
+    //    aggregate to the corner bisector (concave fold).  Ghost contacts
+    //    at far edges are still suppressed by the AABB-reach check below.
+    glm::vec3 closest;
+    const TriRegion region = closestPointOnTriangle(center, v0, v1, v2, closest);
 
-    glm::vec3 bestAxis(0.0f);
-    float bestDepth = 1e30f;
-
-    // For one SAT axis: project AABB ([-r, r] in axis-local coords) and triangle
-    // ([triMin, triMax]) and update the best-MTV running tally.  Returns false
-    // if the axis is a separating axis (no overlap → no need to test others).
-    auto considerAxis = [&](const glm::vec3& axis, float triMin, float triMax, float r) -> bool {
-        if (triMax < -r || triMin > r)
-            return false; // separating axis — shapes are disjoint
-
-        // Two ways to push the AABB out of the overlap on this axis:
-        //   push +axis by (triMax + r): AABB.min ends up at triMax (touching from -side)
-        //   push -axis by (r - triMin): AABB.max ends up at triMin (touching from +side)
-        // Pick whichever is smaller; that's the axis-local MTV contribution.
-        const float pushPlus = triMax + r;
-        const float pushMinus = r - triMin;
-
-        const float depth = std::min(pushPlus, pushMinus);
-        const glm::vec3 dir = (pushPlus < pushMinus) ? axis : -axis;
-
-        if (depth < bestDepth) {
-            bestDepth = depth;
-            bestAxis = dir;
-        }
-        return true;
-    };
-
-    // 1. AABB face normals — already unit length.
-    for (int axIdx = 0; axIdx < 3; ++axIdx) {
-        glm::vec3 ax(0.0f);
-        ax[axIdx] = 1.0f;
-        const float triMin = std::min({a[axIdx], b[axIdx], c[axIdx]});
-        const float triMax = std::max({a[axIdx], b[axIdx], c[axIdx]});
-        if (!considerAxis(ax, triMin, triMax, he[axIdx]))
-            return false;
-    }
-
-    // 2. Triangle face normal — normalise so depth is in world units.
-    glm::vec3 triN = glm::cross(edges[0], edges[1]);
-    const float triNLen = glm::length(triN);
-    if (triNLen > 1e-8f) {
-        triN /= triNLen;
-        const float r = he.x * std::abs(triN.x) + he.y * std::abs(triN.y) + he.z * std::abs(triN.z);
-        const float s = glm::dot(triN, a); // all 3 vertices are coplanar → single value
-        if (!considerAxis(triN, s, s, r))
-            return false;
-    }
-
-    // 3. Cross-product axes (3 AABB edges × 3 triangle edges = 9 axes).
-    const glm::vec3 aabbAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            glm::vec3 ax = glm::cross(aabbAxes[i], edges[j]);
-            const float axLen = glm::length(ax);
-            if (axLen < 1e-5f)
-                continue; // edges parallel — degenerate axis, skip
-            ax /= axLen;
-
-            const float r = he.x * std::abs(ax.x) + he.y * std::abs(ax.y) + he.z * std::abs(ax.z);
-            const float p0 = glm::dot(ax, a);
-            const float p1 = glm::dot(ax, b);
-            const float p2 = glm::dot(ax, c);
-            const float triMin = std::min({p0, p1, p2});
-            const float triMax = std::max({p0, p1, p2});
-            if (!considerAxis(ax, triMin, triMax, r))
+    // 3. For non-face features, verify the AABB actually reaches the
+    //    closest point.  This is the *only* place we discard contacts —
+    //    the plane test passed, but the triangle's bounded region is too
+    //    far from the AABB to actually overlap.
+    if (region != TriRegion::Face) {
+        const glm::vec3 d = closest - center;
+        const float dLenSq = glm::dot(d, d);
+        if (dLenSq > 1e-12f) {
+            const float dLen = std::sqrt(dLenSq);
+            const glm::vec3 unitD = d / dLen;
+            const float rD = std::abs(unitD.x) * he.x + std::abs(unitD.y) * he.y + std::abs(unitD.z) * he.z;
+            // Small slack for floating-point inexactness near the boundary.
+            if (dLen > rD + 1e-4f)
                 return false;
         }
     }
 
-    outMtv = bestAxis * bestDepth;
+    // 4. Phase-through guard.  The depth formula `r - s` below can push
+    //    by up to 2r when `s < 0` (player center on the back side of a
+    //    one-sided triangle), which teleports through coplanar
+    //    opposing-normal duplicates.  The welder marks the relevant
+    //    feature inactive in that case (cosTheta ≈ -1 for the partner
+    //    → signedDihedral == 0 → not active).  Skip the contact when
+    //    the closest feature is in such an inactive region — the
+    //    front-facing partner triangle owns the real contact, and the
+    //    bump loop catches genuine tunneling on the next sweep.  Face-
+    //    region contacts use the heuristic "no edge of this triangle
+    //    is active", which also catches back-to-back duplicates
+    //    (whose shared edges are all inactive).
+    if (s < 0.0f) {
+        bool inactive = false;
+        switch (region) {
+        case TriRegion::Face:  inactive = (edgeFlags == 0u); break;
+        case TriRegion::Edge0: inactive = (edgeFlags & 0x1u) == 0u; break;
+        case TriRegion::Edge1: inactive = (edgeFlags & 0x2u) == 0u; break;
+        case TriRegion::Edge2: inactive = (edgeFlags & 0x4u) == 0u; break;
+        case TriRegion::Vert0: inactive = (vertFlags & 0x1u) == 0u; break;
+        case TriRegion::Vert1: inactive = (vertFlags & 0x2u) == 0u; break;
+        case TriRegion::Vert2: inactive = (vertFlags & 0x4u) == 0u; break;
+        }
+        if (inactive)
+            return false;
+    }
+
+    // 5. Face-normal MTV.  Push along the face normal so coplanar triangles
+    //    sharing an inactive edge produce mutually consistent MTV
+    //    directions (no fight at the seam), and so concave corners get
+    //    two face-normal MTVs that aggregate to the bisector.
+    const float depth = r - s;
+    if (depth <= 0.0f)
+        return false;
+    outMtv = faceN * depth;
     return true;
 }
 
-/// @brief Swept AABB vs a single triangle.
-HitResult
-sweepAABBvsTriangle(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, glm::vec3 v0, glm::vec3 v1, glm::vec3 v2)
+// Voronoi-clipped swept-AABB-vs-triangle.  Performs a ray-vs-expanded-plane
+// test (Minkowski-expanded by the AABB along the face normal), then validates
+// the contact point against the triangle's Voronoi regions and welding flags.
+HitResult sweepAABBvsTriangle(glm::vec3 halfExtents,
+                              glm::vec3 start,
+                              glm::vec3 end,
+                              glm::vec3 v0,
+                              glm::vec3 v1,
+                              glm::vec3 v2,
+                              glm::vec3 faceN,
+                              uint8_t edgeFlags,
+                              uint8_t vertFlags)
 {
     HitResult result;
 
-    // Triangle normal.
-    const glm::vec3 e1 = v1 - v0;
-    const glm::vec3 e2 = v2 - v0;
-    glm::vec3 triN = glm::cross(e1, e2);
-    const float triNLen = glm::length(triN);
-    if (triNLen < 1e-8f)
-        return result; // degenerate triangle
-    triN /= triNLen;
+    // Orient the face normal so it points toward the start of the sweep —
+    // the contact is on whichever side the sweeper is approaching from.
+    glm::vec3 n = faceN;
+    if (glm::dot(n, start - v0) < 0.0f)
+        n = -n;
 
-    // Ensure the normal faces toward the start position.
-    if (glm::dot(triN, start - v0) < 0.0f)
-        triN = -triN;
+    const float r = std::abs(n.x) * halfExtents.x + std::abs(n.y) * halfExtents.y + std::abs(n.z) * halfExtents.z;
+    const float distStart = glm::dot(n, start - v0);
+    const float distEnd = glm::dot(n, end - v0);
 
-    // Minkowski expansion along triangle normal.
-    const float r =
-        std::abs(triN.x) * halfExtents.x + std::abs(triN.y) * halfExtents.y + std::abs(triN.z) * halfExtents.z;
-
-    const float distStart = glm::dot(triN, start) - glm::dot(triN, v0);
-    const float distEnd = glm::dot(triN, end) - glm::dot(triN, v0);
-
-    // Must start outside (in front of) the expanded plane.
+    // Must start outside (in front of) the expanded plane and be moving toward it.
     if (distStart < r)
         return result;
-    // Must be moving toward the plane.
     if (distEnd >= distStart)
         return result;
 
@@ -319,18 +358,66 @@ sweepAABBvsTriangle(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, glm::
     if (t < 0.0f || t >= 1.0f)
         return result;
 
-    // AABB center at contact time.
+    // Contact-time AABB centre.
     const glm::vec3 contactPos = start + (end - start) * t;
 
-    // SAT confirmation: does the AABB at contactPos actually overlap the triangle?
-    if (!staticAABBvsTriSAT(contactPos, halfExtents, v0, v1, v2))
-        return result;
+    // Validate that the AABB at contact time actually reaches the triangle.
+    // For projections inside the bounded triangle (Face region) this is
+    // implied by the plane test.  For projections on edges / vertices we
+    // need the AABB-reach check — otherwise we'd fire false hits on
+    // triangles whose bounded body is outside the AABB's projected extent.
+    //
+    // We deliberately do NOT discard contacts based on the edge / vertex
+    // *active* flag.  For coplanar internal seams, both adjacent
+    // triangles report the same hit time with the same face normal —
+    // either is correct.  For concave corners (indoor wall-floor seams,
+    // for example) both report the same hit time with different face
+    // normals — the bump loop's velocity clip handles the bisector
+    // afterwards.  Discarding "inactive" features here was the root
+    // cause of the wallrun-into-corner phase-through bug — a contact
+    // discarded by both neighbours left the sweep blind to the corner
+    // entirely.
+    glm::vec3 closest;
+    const TriRegion region = closestPointOnTriangle(contactPos, v0, v1, v2, closest);
+    if (region != TriRegion::Face) {
+        const glm::vec3 d = closest - contactPos;
+        const float dLenSq = glm::dot(d, d);
+        if (dLenSq > 1e-12f) {
+            const float dLen = std::sqrt(dLenSq);
+            const glm::vec3 unitD = d / dLen;
+            const float rD =
+                std::abs(unitD.x) * halfExtents.x + std::abs(unitD.y) * halfExtents.y + std::abs(unitD.z) * halfExtents.z;
+            if (dLen > rD + 1e-3f)
+                return result;
+        }
+    }
+    (void)edgeFlags;
+    (void)vertFlags;
 
     result.hit = true;
     result.tFirst = t;
-    result.normal = triN;
+    result.normal = n;
     return result;
 }
+
+// Welding helpers
+
+/// @brief Canonical uint64 key for an undirected edge between two vertex indices.
+inline uint64_t edgeKey(uint32_t a, uint32_t b) noexcept
+{
+    if (a > b)
+        std::swap(a, b);
+    return (static_cast<uint64_t>(a) << 32) | static_cast<uint64_t>(b);
+}
+
+/// @brief Per-edge adjacency record built during welding.  Stores up to two
+/// incident triangles; non-manifold edges (>2 triangles) bump `count` past 2.
+struct EdgeRecord
+{
+    uint32_t tri[2] = {UINT32_MAX, UINT32_MAX};
+    uint8_t edgeIdx[2] = {0, 0};
+    uint8_t count = 0;
+};
 
 } // namespace
 
@@ -368,19 +455,131 @@ void buildTriMeshBVH(WorldTriMesh& mesh)
     subdivide(mesh, 0);
 }
 
+void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
+{
+    const uint32_t triCount = static_cast<uint32_t>(mesh.indices.size() / 3);
+    mesh.faceNormals.assign(triCount, glm::vec3{0.0f, 1.0f, 0.0f});
+    mesh.edgeActive.assign(triCount, 0u);
+    mesh.vertActive.assign(triCount, 0u);
+    if (triCount == 0)
+        return;
+
+    // 1. Face normals.  Degenerate triangles (collinear vertices) get a
+    //    fallback +Y normal — they never produce contacts because their
+    //    plane test always fails the |s| ≤ r check, so the fallback value
+    //    only matters for indexing safety.
+    for (uint32_t t = 0; t < triCount; ++t) {
+        const glm::vec3& v0 = mesh.vertices[mesh.indices[t * 3 + 0]];
+        const glm::vec3& v1 = mesh.vertices[mesh.indices[t * 3 + 1]];
+        const glm::vec3& v2 = mesh.vertices[mesh.indices[t * 3 + 2]];
+        const glm::vec3 raw = glm::cross(v1 - v0, v2 - v0);
+        const float lenSq = glm::dot(raw, raw);
+        if (lenSq > 1e-12f)
+            mesh.faceNormals[t] = raw / std::sqrt(lenSq);
+    }
+
+    // 2. Build edge → triangle adjacency.  Order is deterministic because we
+    //    iterate triangles in index order; the hash map's iteration order is
+    //    NOT used (we only look records up by key in step 4).
+    std::unordered_map<uint64_t, EdgeRecord> adjacency;
+    adjacency.reserve(static_cast<size_t>(triCount) * 3u);
+
+    for (uint32_t t = 0; t < triCount; ++t) {
+        const uint32_t v[3] = {
+            mesh.indices[t * 3 + 0],
+            mesh.indices[t * 3 + 1],
+            mesh.indices[t * 3 + 2],
+        };
+        for (int e = 0; e < 3; ++e) {
+            const uint64_t k = edgeKey(v[e], v[(e + 1) % 3]);
+            EdgeRecord& rec = adjacency[k];
+            if (rec.count < 2) {
+                rec.tri[rec.count] = t;
+                rec.edgeIdx[rec.count] = static_cast<uint8_t>(e);
+            }
+            ++rec.count;
+        }
+    }
+
+    // 3. Classify each edge of each triangle.
+    const float cosThresh = std::cos(coplanarTolerance);
+
+    for (uint32_t t = 0; t < triCount; ++t) {
+        const uint32_t v[3] = {
+            mesh.indices[t * 3 + 0],
+            mesh.indices[t * 3 + 1],
+            mesh.indices[t * 3 + 2],
+        };
+        const glm::vec3& nA = mesh.faceNormals[t];
+
+        for (int e = 0; e < 3; ++e) {
+            const uint64_t k = edgeKey(v[e], v[(e + 1) % 3]);
+            const auto it = adjacency.find(k);
+            // Every edge must have a record (we inserted them all in step 2).
+            const EdgeRecord& rec = it->second;
+
+            bool active = false;
+            if (rec.count == 1u) {
+                // Boundary edge — always a real surface feature.
+                active = true;
+            } else if (rec.count == 2u) {
+                // Find the *other* triangle and compare face normals.
+                const uint32_t other = (rec.tri[0] == t) ? rec.tri[1] : rec.tri[0];
+                const glm::vec3& nB = mesh.faceNormals[other];
+                const float cosTheta = glm::dot(nA, nB);
+
+                // Convex edge ⇔ cross(nA, nB) points along the edge direction
+                // (CCW orientation).  This works regardless of which triangle
+                // "owns" the canonical edge because both observations use the
+                // same edge vector when classified from either side — the sign
+                // flips with the cross-product orientation.
+                const glm::vec3& va = mesh.vertices[v[e]];
+                const glm::vec3& vb = mesh.vertices[v[(e + 1) % 3]];
+                const glm::vec3 edgeVec = vb - va;
+                const float signedDihedral = glm::dot(glm::cross(nA, nB), edgeVec);
+
+                active = (signedDihedral > 0.0f) && (cosTheta < cosThresh);
+            } else {
+                // Non-manifold edge (>2 incident triangles).  Treat as active —
+                // it's a real geometric feature even if it's pathological.
+                active = true;
+            }
+
+            if (active)
+                mesh.edgeActive[t] = static_cast<uint8_t>(mesh.edgeActive[t] | (1u << e));
+        }
+    }
+
+    // 4. Vertex flags derived from edge flags.  Vertex i is active in tri t
+    //    iff either of t's two edges incident to i is active.
+    //      Vertex 0 ⇐ edges 0 (v0→v1) and 2 (v2→v0)
+    //      Vertex 1 ⇐ edges 0 and 1 (v1→v2)
+    //      Vertex 2 ⇐ edges 1 and 2
+    for (uint32_t t = 0; t < triCount; ++t) {
+        const uint8_t e = mesh.edgeActive[t];
+        uint8_t vMask = 0;
+        if (e & (1u << 0))
+            vMask |= static_cast<uint8_t>((1u << 0) | (1u << 1));
+        if (e & (1u << 1))
+            vMask |= static_cast<uint8_t>((1u << 1) | (1u << 2));
+        if (e & (1u << 2))
+            vMask |= static_cast<uint8_t>((1u << 2) | (1u << 0));
+        mesh.vertActive[t] = vMask;
+    }
+}
+
 HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)
 {
     HitResult best;
-    if (mesh.bvhNodes.empty())
+    if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
         return best;
 
     const glm::vec3 delta = end - start;
 
-    // Quick reject against mesh AABB.
+    // Quick reject against whole-mesh AABB.
     if (!sweptAABBOverlapsAABB(halfExtents, start, delta, mesh.boundsMin, mesh.boundsMax, 1.0f))
         return best;
 
-    // Iterative BVH traversal with fixed-size stack.
     int stack[64];
     int stackPtr = 0;
     stack[0] = 0; // root
@@ -394,19 +593,39 @@ HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 e
             continue;
 
         if (node.count > 0) {
-            // Leaf — test individual triangles.
             for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
                 const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
                 const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
                 const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
                 const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
 
-                const HitResult hr = sweepAABBvsTriangle(halfExtents, start, end, v0, v1, v2);
-                if (hr.hit && hr.tFirst < best.tFirst)
+                HitResult hr = sweepAABBvsTriangle(halfExtents,
+                                                   start,
+                                                   end,
+                                                   v0,
+                                                   v1,
+                                                   v2,
+                                                   mesh.faceNormals[ti],
+                                                   mesh.edgeActive[ti],
+                                                   mesh.vertActive[ti]);
+                if (hr.hit && hr.tFirst < best.tFirst) {
+                    // Per-triangle material if cooked, else mesh-wide default.
+                    if (ti < mesh.triangleMaterials.size())
+                        hr.surfaceType = static_cast<SurfaceType>(mesh.triangleMaterials[ti]);
+                    else
+                        hr.surfaceType = mesh.defaultSurface;
                     best = hr;
+                    if (debug::isEnabled()) {
+                        const glm::vec3 hitPos = start + (end - start) * hr.tFirst;
+                        const float r = std::abs(hr.normal.x) * halfExtents.x +
+                                        std::abs(hr.normal.y) * halfExtents.y +
+                                        std::abs(hr.normal.z) * halfExtents.z;
+                        debug::pushSweepContact(
+                            hitPos - hr.normal * r, hr.normal, debug::ContactSource::TriMeshSweep, ti);
+                    }
+                }
             }
         } else {
-            // Interior — push children.
             stack[++stackPtr] = node.leftFirst;
             stack[++stackPtr] = node.leftFirst + 1;
         }
@@ -418,35 +637,37 @@ HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 e
 void depenetrateAABBvsTriMesh(
     glm::vec3& pos, glm::vec3& vel, glm::vec3 halfExtents, const WorldTriMesh& mesh, float pushback)
 {
-    if (mesh.bvhNodes.empty())
+    if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
         return;
 
-    // Quick reject: AABB must overlap the whole-mesh bounds (Minkowski-expanded).
+    // Quick reject: AABB must overlap the Minkowski-expanded whole-mesh bounds.
     if (pos.x + halfExtents.x < mesh.boundsMin.x || pos.x - halfExtents.x > mesh.boundsMax.x ||
         pos.y + halfExtents.y < mesh.boundsMin.y || pos.y - halfExtents.y > mesh.boundsMax.y ||
         pos.z + halfExtents.z < mesh.boundsMin.z || pos.z - halfExtents.z > mesh.boundsMax.z)
         return;
 
-    // Iterative aggregated depenetration to reduce jitter on curved surfaces.
+    // Voronoi-clipped depenetration with bounded iteration.
     //
-    // The naïve approach — apply each overlapping triangle's MTV one at a time —
-    // jitters when the entity straddles many triangles at once on a curved
-    // surface (e.g. inside a tube): each push moves the entity into a slightly
-    // different overlap with the *next* triangle, so the net motion oscillates.
+    // Per-triangle MTVs are face-normal (Phase 2 welding) so adjacent
+    // coplanar welded triangles can't produce ghost contacts that fight
+    // each other.  But a single aggregation pass is geometrically
+    // insufficient at concave / convex corners where TWO orthogonal face
+    // normals meet: averaging produces a diagonal direction, and pushing
+    // by `maxDepth` along that diagonal leaves ~30 % residual penetration
+    // on each face (the diagonal push falls short of fully clearing each
+    // axis by a factor of `1 - cos(angle/2)` ≈ 0.293 for a 90° corner).
     //
-    // Instead, in each pass we:
-    //   1. Find every overlapping triangle (BVH-walk) at the *same* position.
-    //   2. Sum their normalised MTV directions (a Quake-style "average normal"
-    //      across all simultaneous contacts).
-    //   3. Push once along that averaged direction by the deepest single MTV
-    //      magnitude (plus the pushback bias).
+    // The bump loop's "starts inside → skip" rule means residual
+    // penetration after a single depen pass is fatal: next tick the
+    // sweep won't detect the surface and the player phases through.
+    // High-velocity actions (wallrun, double jump, grapple) jam the
+    // player into corners hard enough that the residual matters.
     //
-    // For a curved mesh, the averaged direction points smoothly out of the
-    // surface (e.g. radially outward from a tube's axis) instead of fighting
-    // between adjacent triangle normals.  For a corner where two faces meet,
-    // it points roughly diagonally and a few iterations clear the residual
-    // overlap on each face.  k_maxPasses caps the work even for pathological
-    // self-intersecting meshes.
+    // Fix: iterate up to k_maxPasses times.  Each pass aggregates the
+    // *current* set of overlapping triangles and pushes once; convergence
+    // is geometric (each pass reduces residual by the same ratio), so 4
+    // passes clear corners down to < 1 % of their initial penetration —
+    // well below the pushback epsilon.
     constexpr int k_maxPasses = 4;
 
     for (int pass = 0; pass < k_maxPasses; ++pass) {
@@ -462,15 +683,13 @@ void depenetrateAABBvsTriMesh(
             const int nodeIdx = stack[stackPtr--];
             const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
-            // Cull this node by Minkowski-expanded AABB overlap test.
             const glm::vec3 expMin = node.boundsMin - halfExtents;
             const glm::vec3 expMax = node.boundsMax + halfExtents;
-            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
-                pos.z > expMax.z)
+            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y ||
+                pos.z < expMin.z || pos.z > expMax.z)
                 continue;
 
             if (node.count > 0) {
-                // Leaf — accumulate MTV contributions from every overlapping triangle.
                 for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
                     const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
                     const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
@@ -478,16 +697,29 @@ void depenetrateAABBvsTriMesh(
                     const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
 
                     glm::vec3 mtv;
-                    if (!aabbVsTriMTV(pos, halfExtents, v0, v1, v2, mtv))
+                    if (!aabbVsTriVoronoi(pos,
+                                          halfExtents,
+                                          v0,
+                                          v1,
+                                          v2,
+                                          mesh.faceNormals[ti],
+                                          mesh.edgeActive[ti],
+                                          mesh.vertActive[ti],
+                                          mtv))
                         continue;
 
                     const float depth = glm::length(mtv);
                     if (depth < 1e-6f)
-                        continue;          // numerical floor — already touching
+                        continue;
 
-                    sumDir += mtv / depth; // unit direction; sum smooths across adjacent tris
+                    const glm::vec3 mtvDir = mtv / depth;
+                    sumDir += mtvDir;
                     maxDepth = std::max(maxDepth, depth);
                     ++overlapCount;
+
+                    if (debug::isEnabled()) {
+                        debug::pushDepenContact(pos, mtvDir, depth, debug::ContactSource::TriMeshDepen, ti);
+                    }
                 }
             } else {
                 stack[++stackPtr] = node.leftFirst;
@@ -496,25 +728,18 @@ void depenetrateAABBvsTriMesh(
         }
 
         if (overlapCount == 0)
-            return; // fully separated — done
+            return; // fully separated — done in fewer than k_maxPasses
 
         const float dirLen = glm::length(sumDir);
         if (dirLen < 1e-6f)
-            return; // contributions cancel out (rare; happens only if entity is
-                    // perfectly centred inside a closed mesh and all radial pushes
-                    // cancel — no useful direction to push, give up gracefully)
+            return; // contributions cancel — entity centred inside a closed mesh.
 
         const glm::vec3 dir = sumDir / dirLen;
-
-        // Push along the averaged direction by enough to clear the deepest single
-        // overlap (plus the pushback bias).  Other simultaneous overlaps may not
-        // be fully cleared if their MTV directions diverge significantly from the
-        // average — those get caught by the next pass.
         pos += dir * (maxDepth + pushback);
 
-        // Cancel velocity component flowing INTO the contact.  Using the averaged
-        // direction means the entity slides along the *average* surface normal,
-        // which is the smoothest behaviour on curved meshes.
+        // Cancel inward velocity component on every pass so a sliding
+        // player loses normal-direction motion immediately instead of
+        // grinding back into the surface for k_maxPasses-1 frames.
         const float into = glm::dot(vel, dir);
         if (into < 0.0f)
             vel -= dir * into;
