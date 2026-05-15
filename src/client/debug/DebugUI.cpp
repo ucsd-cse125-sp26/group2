@@ -1145,6 +1145,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     ImGui::SeparatorText("Vitals");
     if (registry.all_of<Health>(localPlayer)) {
         const Health& health = registry.get<Health>(localPlayer);
+        ImGui::Text("Overshield: %.0f", static_cast<double>(health.overShield));
         ImGui::Text("Armor:   %.0f / %.0f", static_cast<double>(health.armor), static_cast<double>(systems::armorMax));
         ImGui::Text(
             "Health:  %.0f / %.0f", static_cast<double>(health.health), static_cast<double>(systems::healthMax));

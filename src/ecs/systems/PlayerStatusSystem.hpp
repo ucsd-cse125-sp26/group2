@@ -14,6 +14,7 @@ namespace systems
 {
 const float armorMax = 100.0f;   ///< Maximum armor value.
 const float healthMax = 100.0f;  ///< Maximum health value.
+const float overShieldMax = 200.0f;
 const float healCooldown = 5.0f; ///< Seconds after last damage before passive healing starts.
 const float healingRate = 20.0f; ///< Passive healing amount per second.
 

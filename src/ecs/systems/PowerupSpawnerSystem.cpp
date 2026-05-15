@@ -3,7 +3,9 @@
 
 #include "PowerupSpawnerSystem.hpp"
 
+#include "PlayerStatusSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -61,6 +63,11 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
             addOrRefreshPowerup(powerups, spawner.type, config.duration);
             spawner.hasPowerup = false;
             spawner.spawnCooldown = config.spawnCooldown;
+
+            if (spawner.type == PowerupType::Shield) {
+                Health& healthComp = registry.get<Health>(player);
+                healthComp.overShield = overShieldMax;
+            }
         }
     });
 }
