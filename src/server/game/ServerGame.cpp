@@ -36,6 +36,7 @@
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/physics/CollisionEvents.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/Sleep.hpp"
 #include "ecs/physics/Solver.hpp"
 #include "ecs/systems/DynamicsSystem.hpp"
@@ -71,6 +72,13 @@ bool ServerGame::init(const char* addr, Uint16 port, int hz, int snapshotHz, con
             hz,
             hz / snapshotEveryNTicks,
             snapshotEveryNTicks);
+
+    // Phase-through diagnostic: default ON for the server so investigating
+    // a phase-through bug doesn't require a UI toggle on a headless build.
+    // Writes phase-diag-<timestamp>.csv next to the server binary; flip off
+    // with `--no-phase-diag` once the bug is fixed (TODO: CLI plumb).
+    physics::diag::setEnabled(true);
+    SDL_Log("[server] phase-through diagnostic ENABLED — writing phase-diag-*.csv");
 
     clientEntities.clear(); // For safety
     registry.clear();

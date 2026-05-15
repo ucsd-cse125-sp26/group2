@@ -227,22 +227,6 @@ TriRegion closestPointOnTriangle(glm::vec3 p, glm::vec3 a, glm::vec3 b, glm::vec
     return TriRegion::Face;
 }
 
-/// @brief Map a `TriRegion` to a bit-mask test against the edge/vertex flags.
-/// Returns true iff the feature is active (so the contact survives).
-bool isFeatureActive(TriRegion region, uint8_t edgeFlags, uint8_t vertFlags)
-{
-    switch (region) {
-    case TriRegion::Face:  return true;
-    case TriRegion::Edge0: return (edgeFlags & (1u << 0)) != 0u;
-    case TriRegion::Edge1: return (edgeFlags & (1u << 1)) != 0u;
-    case TriRegion::Edge2: return (edgeFlags & (1u << 2)) != 0u;
-    case TriRegion::Vert0: return (vertFlags & (1u << 0)) != 0u;
-    case TriRegion::Vert1: return (vertFlags & (1u << 1)) != 0u;
-    case TriRegion::Vert2: return (vertFlags & (1u << 2)) != 0u;
-    }
-    return true;
-}
-
 // Voronoi-clipped depenetration MTV: returns true iff there is a valid contact
 // between an AABB centred at `center` (half-extents `he`) and the triangle.
 // `faceN` is the triangle's cooked face normal (CCW); `edgeFlags` and
@@ -265,19 +249,29 @@ bool aabbVsTriVoronoi(glm::vec3 center,
     if (std::abs(s) > r)
         return false;
 
-    // 2. Find the closest feature on the (unbounded plane → bounded triangle).
+    // 2. Find the closest feature on the bounded triangle.  Used both to
+    //    detect ghost contacts ("AABB doesn't actually reach the closest
+    //    point") and — historically — to discard inactive welded features.
+    //    The discard behaviour was too aggressive: indoor FPS maps have
+    //    *concave* wall-floor corners where BOTH neighbours' closest
+    //    feature is the shared welded edge.  Discarding both leaves the
+    //    player wedged with zero depenetration push, which is the
+    //    wallrun-into-corner phase-through bug.
+    //
+    //    New behaviour (Bullet `btAdjustInternalEdgeContacts`-style):
+    //    inactive features are NOT discarded — the face normal is used as
+    //    the contact direction.  Two adjacent triangles sharing an
+    //    inactive edge still produce mutually-consistent MTVs because
+    //    their face normals either agree (coplanar internal seam) or
+    //    aggregate to the corner bisector (concave fold).  Ghost contacts
+    //    at far edges are still suppressed by the AABB-reach check below.
     glm::vec3 closest;
     const TriRegion region = closestPointOnTriangle(center, v0, v1, v2, closest);
 
-    // 3. Voronoi-region clip: discard contacts on inactive features.  The
-    //    neighbour triangle that actually owns this region (active face) will
-    //    produce the correct face-normal contact instead.
-    if (!isFeatureActive(region, edgeFlags, vertFlags))
-        return false;
-
-    // 4. For non-face features, verify the AABB actually reaches the closest
-    //    point (the plane test alone over-approximates near edges / corners
-    //    whose closest point lies outside the AABB's projected extent).
+    // 3. For non-face features, verify the AABB actually reaches the
+    //    closest point.  This is the *only* place we discard contacts —
+    //    the plane test passed, but the triangle's bounded region is too
+    //    far from the AABB to actually overlap.
     if (region != TriRegion::Face) {
         const glm::vec3 d = closest - center;
         const float dLenSq = glm::dot(d, d);
@@ -291,9 +285,37 @@ bool aabbVsTriVoronoi(glm::vec3 center,
         }
     }
 
-    // 5. Face-normal MTV.  The push is along the face normal so coplanar
-    //    triangles sharing an inactive edge produce mutually consistent MTV
-    //    directions — no fight at the seam, no oscillation.
+    // 4. Phase-through guard.  The depth formula `r - s` below can push
+    //    by up to 2r when `s < 0` (player center on the back side of a
+    //    one-sided triangle), which teleports through coplanar
+    //    opposing-normal duplicates.  The welder marks the relevant
+    //    feature inactive in that case (cosTheta ≈ -1 for the partner
+    //    → signedDihedral == 0 → not active).  Skip the contact when
+    //    the closest feature is in such an inactive region — the
+    //    front-facing partner triangle owns the real contact, and the
+    //    bump loop catches genuine tunneling on the next sweep.  Face-
+    //    region contacts use the heuristic "no edge of this triangle
+    //    is active", which also catches back-to-back duplicates
+    //    (whose shared edges are all inactive).
+    if (s < 0.0f) {
+        bool inactive = false;
+        switch (region) {
+        case TriRegion::Face:  inactive = (edgeFlags == 0u); break;
+        case TriRegion::Edge0: inactive = (edgeFlags & 0x1u) == 0u; break;
+        case TriRegion::Edge1: inactive = (edgeFlags & 0x2u) == 0u; break;
+        case TriRegion::Edge2: inactive = (edgeFlags & 0x4u) == 0u; break;
+        case TriRegion::Vert0: inactive = (vertFlags & 0x1u) == 0u; break;
+        case TriRegion::Vert1: inactive = (vertFlags & 0x2u) == 0u; break;
+        case TriRegion::Vert2: inactive = (vertFlags & 0x4u) == 0u; break;
+        }
+        if (inactive)
+            return false;
+    }
+
+    // 5. Face-normal MTV.  Push along the face normal so coplanar triangles
+    //    sharing an inactive edge produce mutually consistent MTV
+    //    directions (no fight at the seam), and so concave corners get
+    //    two face-normal MTVs that aggregate to the bisector.
     const float depth = r - s;
     if (depth <= 0.0f)
         return false;
@@ -339,13 +361,24 @@ HitResult sweepAABBvsTriangle(glm::vec3 halfExtents,
     // Contact-time AABB centre.
     const glm::vec3 contactPos = start + (end - start) * t;
 
-    // Voronoi check at contact time.
+    // Validate that the AABB at contact time actually reaches the triangle.
+    // For projections inside the bounded triangle (Face region) this is
+    // implied by the plane test.  For projections on edges / vertices we
+    // need the AABB-reach check — otherwise we'd fire false hits on
+    // triangles whose bounded body is outside the AABB's projected extent.
+    //
+    // We deliberately do NOT discard contacts based on the edge / vertex
+    // *active* flag.  For coplanar internal seams, both adjacent
+    // triangles report the same hit time with the same face normal —
+    // either is correct.  For concave corners (indoor wall-floor seams,
+    // for example) both report the same hit time with different face
+    // normals — the bump loop's velocity clip handles the bisector
+    // afterwards.  Discarding "inactive" features here was the root
+    // cause of the wallrun-into-corner phase-through bug — a contact
+    // discarded by both neighbours left the sweep blind to the corner
+    // entirely.
     glm::vec3 closest;
     const TriRegion region = closestPointOnTriangle(contactPos, v0, v1, v2, closest);
-    if (!isFeatureActive(region, edgeFlags, vertFlags))
-        return result;
-
-    // For non-face features, validate the AABB actually reaches the closest point.
     if (region != TriRegion::Face) {
         const glm::vec3 d = closest - contactPos;
         const float dLenSq = glm::dot(d, d);
@@ -358,6 +391,8 @@ HitResult sweepAABBvsTriangle(glm::vec3 halfExtents,
                 return result;
         }
     }
+    (void)edgeFlags;
+    (void)vertFlags;
 
     result.hit = true;
     result.tFirst = t;

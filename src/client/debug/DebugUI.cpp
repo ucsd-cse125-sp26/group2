@@ -19,6 +19,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/DebugCollisionDraw.hpp"
 #include "ecs/physics/Movement.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
@@ -1872,6 +1873,15 @@ void DebugUI::buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, 
             ImGui::Separator();
             ImGui::Checkbox("Draw welded edges (green=active, red=welded)", &drawMeshEdgeOverlay);
             ImGui::Checkbox("Draw welded vertices", &drawMeshVertexOverlay);
+
+            ImGui::Separator();
+            ImGui::TextWrapped(
+                "Phase telemetry: per-tick player physics state → phase-diag-*.csv in working dir. "
+                "Look for the SuspectedPhase column = 1 to find phase-through moments. "
+                "Open the CSV in any spreadsheet; sort by SuspectedPhase, DeepPenetration, or BumpExhausted.");
+            bool phaseDiag = physics::diag::isEnabled();
+            if (ImGui::Checkbox("Record phase telemetry (writes CSV)", &phaseDiag))
+                physics::diag::setEnabled(phaseDiag);
 
             const auto k_contacts = physics::debug::contacts();
 

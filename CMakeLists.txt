@@ -776,6 +776,8 @@ add_executable(group2
         src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/DebugCollisionDraw.hpp
         src/ecs/physics/DebugCollisionDraw.cpp
+        src/ecs/physics/PhaseDiagnostic.hpp
+        src/ecs/physics/PhaseDiagnostic.cpp
         src/ecs/physics/SurfaceType.hpp
         src/ecs/physics/CollisionEvents.hpp
         src/ecs/physics/CollisionEvents.cpp
@@ -1031,6 +1033,8 @@ add_executable(server
         src/ecs/physics/TriMeshCollision.cpp
         src/ecs/physics/DebugCollisionDraw.hpp
         src/ecs/physics/DebugCollisionDraw.cpp
+        src/ecs/physics/PhaseDiagnostic.hpp
+        src/ecs/physics/PhaseDiagnostic.cpp
         src/ecs/physics/SurfaceType.hpp
         src/ecs/physics/CollisionEvents.hpp
         src/ecs/physics/CollisionEvents.cpp
@@ -1314,6 +1318,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/PhaseDiagnostic.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/PhaseDiagnostic.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SurfaceType.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CollisionEvents.cpp"

@@ -5,6 +5,7 @@
 
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/GrenadeConfig.hpp"
+#include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
@@ -12,6 +13,7 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/DebugCollisionDraw.hpp"
 #include "ecs/physics/Movement.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
@@ -433,19 +435,44 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             // Gravity-flip direction: +1 normal (floors below), -1 flipped (ceilings as floors).
             const float gravDir = state.gravityFlipped ? -1.0f : 1.0f;
 
+            // --- Phase-diagnostic capture (off unless enabled via DebugUI) ---
+            // Snapshot pre-depen state so we can compare against post-depen and
+            // post-bump-loop later this tick.  Records every player every tick
+            // into phase-diag-<timestamp>.csv when the toggle is on.
+            const bool diagOn = physics::diag::isEnabled();
+            physics::diag::PlayerFrame diagFrame{};
+            if (diagOn) {
+                diagFrame.entity = e;
+                diagFrame.posBefore = pos.value;
+                diagFrame.velBefore = vel.value;
+            }
+
             // Phase 0 — Depenetration
             depenetrate(pos.value, vel.value, shape.halfExtents, world);
+
+            if (diagOn) {
+                diagFrame.posAfterDepen = pos.value;
+                diagFrame.depenPushDistance = glm::length(pos.value - diagFrame.posBefore);
+                if (diagFrame.depenPushDistance > 20.0f)
+                    diagFrame.flags |= physics::diag::PhaseFlag::DeepPenetration;
+            }
 
             // Phase 1 — Bump loop (collision response + stair stepping)
             float remainingTime = dt;
 
-            for (int clip = 0; clip < 4 && remainingTime > 1e-5f; ++clip) {
+            int clip = 0;
+            for (; clip < 4 && remainingTime > 1e-5f; ++clip) {
                 const glm::vec3 k_target = pos.value + vel.value * remainingTime;
                 const physics::HitResult k_hit = physics::sweepAll(shape.halfExtents, pos.value, k_target, world);
 
                 if (!k_hit.hit) {
                     pos.value = k_target;
                     break;
+                }
+
+                if (diagOn) {
+                    ++diagFrame.bumpHits;
+                    diagFrame.lastHitNormal = k_hit.normal;
                 }
 
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
@@ -525,6 +552,36 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     state.grounded = true;
                     state.groundNormal = k_probe.normal;
                 }
+            }
+
+            // --- Phase-diagnostic finalize ---
+            if (diagOn) {
+                diagFrame.posAfter = pos.value;
+                diagFrame.velAfter = vel.value;
+                if (remainingTime > 1e-5f && clip >= 4)
+                    diagFrame.flags |= physics::diag::PhaseFlag::BumpExhausted;
+                if (state.grounded)
+                    diagFrame.flags |= physics::diag::PhaseFlag::Grounded;
+                if (state.grappleActive)
+                    diagFrame.flags |= physics::diag::PhaseFlag::GrappleActive;
+                if (state.gravityFlipped)
+                    diagFrame.flags |= physics::diag::PhaseFlag::GravityFlipped;
+                diagFrame.moveMode = static_cast<int>(state.moveMode);
+                diagFrame.wallrunSide = static_cast<int>(state.wallRunSide);
+                diagFrame.jumpCount = state.jumpCount;
+                if (diagFrame.moveMode == 2) // WallRunning
+                    diagFrame.flags |= physics::diag::PhaseFlag::WallRunning;
+                if (diagFrame.moveMode == 1) // Sliding
+                    diagFrame.flags |= physics::diag::PhaseFlag::Sliding;
+                if (diagFrame.moveMode == 3) // Climbing
+                    diagFrame.flags |= physics::diag::PhaseFlag::Climbing;
+                if (diagFrame.moveMode == 4) // LedgeGrabbing
+                    diagFrame.flags |= physics::diag::PhaseFlag::LedgeGrabbing;
+                if (auto* sim = registry.try_get<PlayerSimState>(e); sim != nullptr) {
+                    if (sim->jumpedThisTick)
+                        diagFrame.flags |= physics::diag::PhaseFlag::DoubleJumped;
+                }
+                physics::diag::recordFrame(diagFrame);
             }
         }
     };
