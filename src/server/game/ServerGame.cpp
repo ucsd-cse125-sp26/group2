@@ -6,6 +6,7 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/abilities/GravityAbility.hpp"
 #include "ecs/abilities/GrappleAbility.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
@@ -89,6 +90,7 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
 
     // Register abilities
     abilityRegistry.registerAbility(std::make_unique<GrappleAbility>());
+    abilityRegistry.registerAbility(std::make_unique<GravityAbility>());
 
     // ── Load map collision ──────────────────────────────────────────────
     // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
@@ -668,6 +670,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<AbilityState>(player,
                                    AbilityState{
                                        .primary = AbilityType::Grapple,
+                                       .secondary = AbilityType::Gravity,
                                    }); // Defaults to level 0 with 0 accum damage
     registry.emplace<PowerupState>(player);
 
