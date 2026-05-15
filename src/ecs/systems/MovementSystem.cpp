@@ -758,19 +758,59 @@ void handleWallRunning(glm::vec3& pos,
             vel -= state.sim.wallNormal * k_normalVel;
     }
 
-    // 2. Position correction: if the wall contact point is known, nudge the
-    //    player toward the wall to maintain consistent standoff distance.
+    // 2. Standoff correction.  Two architectural rules:
+    //
+    //    (a) The desired standoff must equal the Minkowski half-radius of
+    //        the player AABB along the wall normal, plus a 1u slack —
+    //        NOT `max(halfExtents.x, halfExtents.z) + 1`.  The latter is
+    //        only correct for axis-aligned walls.  For a 45° wall the
+    //        true envelope radius is `|n.x|*halfExtents.x + |n.z|*halfExtents.z`
+    //        ≈ 22.6u, so the old 17u standoff placed the player ~5.6u
+    //        INSIDE the Minkowski envelope every wallrun on a diagonal
+    //        surface — the capsule visually clipped through the wall,
+    //        and CollisionSystem couldn't catch the player when they
+    //        slid past the bounded triangle's footprint.
+    //
+    //    (b) The correction must NOT directly mutate `pos`.  MovementSystem
+    //        sets velocity; CollisionSystem owns position.  Direct pos
+    //        mutation bypasses depen/sweep/bump entirely, so the corrected
+    //        position can land inside geometry (or past a bounded
+    //        triangle's footprint) without CollisionSystem ever knowing.
+    //        Express the correction as an inward velocity component
+    //        instead — the bump loop's sweep will clip it at the wall
+    //        surface (placing the player at R + pushback), and if there
+    //        is no actual collision geometry at the contact point (open-
+    //        mesh / finite-triangle case), the wallrun probe will
+    //        eventually lose the wall and disengage normally rather than
+    //        teleporting the player through.
     {
         const glm::vec3 wallPt = (state.vis.wallRunSide == WallSide::Right) ? walls.rightPoint : walls.leftPoint;
-        // Vector from wall contact point to player center, along wall normal.
         const float k_currentDist = glm::dot(pos - wallPt, state.sim.wallNormal);
-        // Desired standoff: just outside the collision shape.
-        const float k_desiredDist = std::max(halfExtents.x, halfExtents.z) + 1.0f;
+        // True Minkowski radius for the AABB along this wall's normal.
+        const float k_R = std::abs(state.sim.wallNormal.x) * halfExtents.x +
+                          std::abs(state.sim.wallNormal.y) * halfExtents.y +
+                          std::abs(state.sim.wallNormal.z) * halfExtents.z;
+        const float k_desiredDist = k_R + 1.0f;
         const float k_drift = k_currentDist - k_desiredDist;
-        // If drifting outward, pull back. Lerp to avoid jitter.
         if (k_drift > 0.5f) {
-            const float k_correction = std::min(k_drift * 10.0f * dt, k_drift);
-            pos -= state.sim.wallNormal * k_correction;
+            // Replace (not accumulate) the inward velocity component.  We
+            // want the player heading toward the wall at speed
+            // proportional to drift, but capped to avoid runaway when the
+            // bump loop can't catch the motion (e.g., past bounded-tri
+            // footprint).  Setting the component rather than adding makes
+            // the per-tick correction one-shot — drift recomputes next
+            // tick from the new pos and the new value applies.
+            constexpr float k_correctGain = 10.0f;   // 1/τ; matches original exp-decay rate.
+            constexpr float k_maxCorrectSpeed = 100.0f;
+            const float k_desiredInwardSpeed = std::min(k_drift * k_correctGain, k_maxCorrectSpeed);
+            // Current inward speed (positive = moving toward wall).
+            const float k_currentInwardSpeed = -glm::dot(vel, state.sim.wallNormal);
+            // Only INCREASE inward speed toward the desired; never reduce
+            // below current (avoids fighting CollisionSystem's bump clip,
+            // which leaves vel·faceN ≤ 0 after a wall contact).
+            if (k_desiredInwardSpeed > k_currentInwardSpeed) {
+                vel -= state.sim.wallNormal * (k_desiredInwardSpeed - k_currentInwardSpeed);
+            }
         }
     }
 

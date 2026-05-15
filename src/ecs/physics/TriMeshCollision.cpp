@@ -259,39 +259,41 @@ TriRegion closestPointOnTriangle(glm::vec3 p, glm::vec3 a, glm::vec3 b, glm::vec
 // space) but the actual free space is in the OPPOSITE direction.  Result is
 // a teleport — up to `2r` along the wrong direction.
 //
-// Three guards make depen robust against this class of mesh-data defect.
-// Listed in order of decreasing strictness; each catches a distinct subset
-// of failures.
+// Two guards make depen robust against this class of mesh-data defect:
 //
-//   (i) Deep back-side cap (s < -k_slack).  A `s ≈ -r` contact saturates
-//       depth = `r - s` at ~2r — the signature of a coplanar back-facing
-//       duplicate (the player's center sits on the front-facing partner's
-//       +r Minkowski plane).  Hard reject.  This is the defense against
-//       the rare stationary case where (ii) wouldn't apply.
+//   (i) Velocity-coherent culling (vel·faceN > 0, any s in [-r, r]).
+//       If the player's velocity is already carrying them in faceN's
+//       direction, depen's `r - s` push is redundant — kinematics will
+//       resolve the contact via natural motion.  Critically, when the
+//       proxy is wrong (open mesh / non-manifold), velocity reflects
+//       what the game treats as valid free space whereas faceN reflects
+//       only what one isolated triangle thinks; applying depen amplifies
+//       the proxy error into a teleport.  Defer to motion.
 //
-//   (ii) Velocity-coherent culling (s < 0 ∧ vel·faceN > 0).  If the
-//        player's velocity is already carrying them in the direction depen
-//        would push, the contact will resolve via motion alone within a
-//        few ticks — depen's `r + |s|` push is redundant.  Critically,
-//        when the proxy is wrong (open mesh / non-manifold), the velocity
-//        is also moving the player in the "wrong" faceN direction (from
-//        the local triangle's POV); applying depen would amplify that
-//        error into a teleport.  Defer to motion: the player's own
-//        kinematics resolve the situation correctly *because* they reflect
-//        what the game treats as valid free space, whereas faceN reflects
-//        only what one isolated triangle thinks.
+//       Applies on BOTH sides of the plane, not just back-side.  In
+//       closed-manifold normal play, post-bump position has
+//       s = r + pushback (the plane test above rejects, depen never
+//       runs).  When depen DOES run, it's always an abnormal-recovery
+//       case (spawn-inside, teleport, sub-tick tunnel, open-mesh
+//       crossing).  For each abnormal recovery, vel·faceN > 0 means
+//       motion is already correcting the situation; vel·faceN ≤ 0
+//       means depen needs to act.  Sign of s doesn't change that
+//       logic — a player who CROSSED the plane mid-tick (open-mesh
+//       case) ends up on the +s side with vel·faceN > 0, exactly as
+//       harmful to push as the -s case.
 //
-//   (iii) Welded-feature rejection (s < 0 ∧ closest feature welded
-//         inactive).  For coplanar opposing-normal pairs that DO share
-//         vertex indices, the welder pairs them via topology and marks
-//         their shared features inactive — drop the contact, the front-
-//         facing partner owns it.  Covers the closed-manifold half of
-//         the two-sided wall problem; (i) and (ii) cover the open-mesh
-//         half.
+//   (ii) Welded-feature rejection (s < 0 ∧ closest feature welded
+//        inactive).  For coplanar opposing-normal pairs that DO share
+//        vertex indices, the welder pairs them via topology and marks
+//        their shared features inactive — drop the contact, the
+//        front-facing partner owns it.  Closed-manifold half of the
+//        two-sided wall problem; (i) covers the open-mesh half.
 //
-// Genuine "stuck inside" recovery cases (spawn-into-floor, teleport into
-// geometry) have vel ≈ 0 (or vel·faceN ≤ 0) and well-below-cap |s|, so all
-// three guards pass through and depen fires normally.
+// Genuine "stuck inside" recovery cases (spawn-into-floor, teleport
+// into geometry, sub-tick tunneling) have vel ≈ 0 or vel·faceN ≤ 0, so
+// guard (i) passes through and depen fires normally.  This preserves
+// the legitimate "eject from solid material" behavior that the rest of
+// the game relies on.
 bool aabbVsTriVoronoi(glm::vec3 center,
                      glm::vec3 vel,
                      glm::vec3 he,
@@ -333,33 +335,27 @@ bool aabbVsTriVoronoi(glm::vec3 center,
         }
     }
 
-    // 4. Back-side contact validation — see file-level comment block above
-    //    for the architectural rationale.  Three guards, applied in
-    //    decreasing-strictness order:
+    // 4. Contact validation — see file-level comment block above for the
+    //    architectural rationale.
 
-    //    (i) Deep back-side cap.  Defends against stationary saturated
-    //    back-face duplicates.  4u accommodates floating-point precision
-    //    and minor sub-tick overshoots without blocking deeper legitimate
-    //    cases (which are handled by the next two rules).
-    constexpr float k_maxBackSidePenetration = 4.0f;
-    if (s < -k_maxBackSidePenetration)
+    //    (i) Velocity-coherent culling.  Applies to both sides of the
+    //    plane.  If motion is already carrying the player in faceN's
+    //    direction, depen's `r - s` push is redundant for closed-manifold
+    //    meshes and actively harmful for open-mesh / non-manifold cases
+    //    where the local face-normal proxy is globally wrong.  `> 0`
+    //    rather than `>= 0` so a stationary or tangentially-moving
+    //    player still gets depen — the rule only suppresses when motion
+    //    is CLEARLY heading outward.  Legitimate "stuck inside"
+    //    recoveries (spawn-into-floor, post-teleport recovery) have
+    //    vel ≈ 0 → not suppressed → depen pushes normally.
+    if (glm::dot(vel, faceN) > 0.0f)
         return false;
 
+    //    (ii) Welded-feature rejection.  Back-side contacts only: for
+    //    shared-index coplanar pairs, the welder marks shared features
+    //    inactive.  Drop the contact when the closest projection lands
+    //    in such a region — the front-facing partner triangle owns it.
     if (s < 0.0f) {
-        //    (ii) Velocity-coherent culling.  If motion is already carrying
-        //    the player in faceN's direction, depen's `r + |s|` push is
-        //    redundant for closed-manifold meshes and actively harmful for
-        //    open-mesh / non-manifold cases where the proxy is wrong.
-        //    `dot > 0` rather than `>= 0` so a stationary or tangentially-
-        //    moving player still gets depen — the rule only suppresses
-        //    when motion is *clearly* heading outward.
-        if (glm::dot(vel, faceN) > 0.0f)
-            return false;
-
-        //    (iii) Welded-feature rejection.  For shared-index coplanar
-        //    pairs, the welder marks shared features inactive.  Drop the
-        //    contact when the closest projection lands in such a region —
-        //    the front-facing partner triangle owns the contact.
         bool inactive = false;
         switch (region) {
         case TriRegion::Face:  inactive = (edgeFlags == 0u); break;
@@ -784,21 +780,24 @@ void depenetrateAABBvsTriMesh(
                         debug::pushDepenContact(pos, mtvDir, depth, debug::ContactSource::TriMeshDepen, ti);
                     }
 
-                    // Deep-contact trace: log when depth notably exceeds the
-                    // Minkowski half-radius for this triangle's normal.  That
-                    // condition (depth > R) only fires when s < 0, i.e. the
-                    // player center sits on the BACK side of the face plane.
-                    // depth approaching 2R is the saturated back-face signature
-                    // (coplanar reverse-winding duplicate / inverted tri).
+                    // Deep-contact trace: log any depen push that pushes
+                    // the player by more than half the Minkowski half-
+                    // radius for this triangle's normal — that's the
+                    // "approaching a teleport" range.  Two known failure
+                    // signatures both fall above this threshold:
+                    //   * Saturated back-face (s ≈ -R): depth ≈ 2R, well
+                    //     above 0.75R.
+                    //   * Front-side after open-mesh crossing (s ≈ 0+):
+                    //     depth ≈ R, also above 0.75R.
+                    // Normal sub-tick depens have depth ≪ 0.75R (the bump-
+                    // loop's pushback puts post-bump pos at s = R + ε,
+                    // and any sub-tick overshoot is tiny).
                     if (diag::isEnabled()) {
                         const glm::vec3& fn = mesh.faceNormals[ti];
                         const float rTri = std::abs(fn.x) * halfExtents.x +
                                             std::abs(fn.y) * halfExtents.y +
                                             std::abs(fn.z) * halfExtents.z;
-                        // 1.0u slack soaks routine sub-tick penetration from
-                        // sweep-clearance rounding; the pathology saturates at
-                        // depth ≈ 2R so this threshold catches it cleanly.
-                        if (depth > rTri + 1.0f) {
+                        if (depth > rTri * 0.75f) {
                             const float sTri = glm::dot(fn, pos - v0);
                             glm::vec3 closestTri;
                             const TriRegion regionTri = closestPointOnTriangle(pos, v0, v1, v2, closestTri);
