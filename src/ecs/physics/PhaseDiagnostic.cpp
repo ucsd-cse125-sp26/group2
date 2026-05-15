@@ -26,6 +26,11 @@ bool wroteHeader = false;
 std::mutex annotationMutex;
 std::unordered_map<entt::entity, std::string> pendingAnnotations;
 
+// Separate mutex / file for the depen-contact trace so the rare deep-contact
+// path never serializes on the per-tick frame log.
+std::mutex depenLogMutex;
+FILE* depenLogFile = nullptr;
+
 void openLazily()
 {
     if (logFile != nullptr)
@@ -70,6 +75,46 @@ const char* moveModeName(int m)
     case 4: return "LedgeGrabbing";
     default: return "?";
     }
+}
+
+const char* triRegionName(int r)
+{
+    switch (r) {
+    case 0: return "Face";
+    case 1: return "Edge0";
+    case 2: return "Edge1";
+    case 3: return "Edge2";
+    case 4: return "Vert0";
+    case 5: return "Vert1";
+    case 6: return "Vert2";
+    default: return "?";
+    }
+}
+
+void openDepenLazily()
+{
+    if (depenLogFile != nullptr)
+        return;
+    const auto now = std::chrono::system_clock::now();
+    const auto t = std::chrono::system_clock::to_time_t(now);
+    char nameBuf[64];
+    std::tm tmbuf{};
+#if defined(_WIN32)
+    ::localtime_s(&tmbuf, &t);
+#else
+    ::localtime_r(&t, &tmbuf);
+#endif
+    std::strftime(nameBuf, sizeof(nameBuf), "depen-trace-%Y%m%d-%H%M%S.csv", &tmbuf);
+    depenLogFile = std::fopen(nameBuf, "w");
+    if (depenLogFile == nullptr)
+        return;
+    // depthOverR is depth / R - useful sort key: 2.0 = saturated back-face (the
+    // duplicate-triangle / inverted-winding signature); 1.0-1.5 = ordinary
+    // sub-tick penetration from sweep clearance.
+    std::fprintf(depenLogFile,
+                 "row,triId,posX,posY,posZ,faceNx,faceNy,faceNz,"
+                 "v0x,v0y,v0z,v1x,v1y,v1z,v2x,v2y,v2z,"
+                 "signedDist,minkowskiR,depth,depthOverR,region,edgeFlagsHex,vertFlagsHex\n");
 }
 
 } // namespace
@@ -182,6 +227,44 @@ void recordFrame(const PlayerFrame& f) noexcept
                  (flagBits & static_cast<uint32_t>(PhaseFlag::SuspectedPhase)) ? 1 : 0,
                  note);
     std::fflush(logFile);
+}
+
+void recordDepenContact(const DepenContact& c) noexcept
+{
+    if (!enabledFlag.load(std::memory_order_relaxed))
+        return;
+
+    std::lock_guard<std::mutex> lk(depenLogMutex);
+    openDepenLazily();
+    if (depenLogFile == nullptr)
+        return;
+
+    static uint64_t row = 0;
+    ++row;
+
+    const float depthOverR = (c.minkowskiR > 1e-6f) ? (c.depth / c.minkowskiR) : 0.0f;
+
+    std::fprintf(depenLogFile,
+                 "%lu,%u,"
+                 "%.3f,%.3f,%.3f,"
+                 "%.4f,%.4f,%.4f,"
+                 "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+                 "%.4f,%.4f,%.4f,%.3f,"
+                 "%s,0x%X,0x%X\n",
+                 static_cast<unsigned long>(row),
+                 c.triId,
+                 static_cast<double>(c.playerPos.x), static_cast<double>(c.playerPos.y),
+                 static_cast<double>(c.playerPos.z),
+                 static_cast<double>(c.faceNormal.x), static_cast<double>(c.faceNormal.y),
+                 static_cast<double>(c.faceNormal.z),
+                 static_cast<double>(c.v0.x), static_cast<double>(c.v0.y), static_cast<double>(c.v0.z),
+                 static_cast<double>(c.v1.x), static_cast<double>(c.v1.y), static_cast<double>(c.v1.z),
+                 static_cast<double>(c.v2.x), static_cast<double>(c.v2.y), static_cast<double>(c.v2.z),
+                 static_cast<double>(c.signedDist), static_cast<double>(c.minkowskiR),
+                 static_cast<double>(c.depth), static_cast<double>(depthOverR),
+                 triRegionName(c.region),
+                 static_cast<unsigned>(c.edgeFlags), static_cast<unsigned>(c.vertFlags));
+    std::fflush(depenLogFile);
 }
 
 } // namespace physics::diag

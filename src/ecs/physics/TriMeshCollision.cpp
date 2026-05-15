@@ -17,6 +17,7 @@
 #include "TriMeshCollision.hpp"
 
 #include "ecs/physics/DebugCollisionDraw.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -228,11 +229,71 @@ TriRegion closestPointOnTriangle(glm::vec3 p, glm::vec3 a, glm::vec3 b, glm::vec
 }
 
 // Voronoi-clipped depenetration MTV: returns true iff there is a valid contact
-// between an AABB centred at `center` (half-extents `he`) and the triangle.
-// `faceN` is the triangle's cooked face normal (CCW); `edgeFlags` and
-// `vertFlags` are the cooked active-feature masks.  On success, `outMtv` is the
-// face-normal MTV that pushes the AABB out to the free side of the triangle.
+// between an AABB centred at `center` (half-extents `he`), with velocity `vel`,
+// and the triangle.  `faceN` is the triangle's cooked face normal (CCW);
+// `edgeFlags` and `vertFlags` are the cooked active-feature masks.  On success,
+// `outMtv` is the face-normal MTV that pushes the AABB out to the free side of
+// the triangle.
+//
+// Depenetration architecture & assumptions
+// ----------------------------------------
+// Depen's correctness rests on the per-triangle face normal serving as a
+// reliable LOCAL proxy for "the direction toward valid free space".  On a
+// closed-manifold mesh (every solid region enclosed by a CCW-wound surface,
+// normals point outward, every edge shared by exactly two triangles) the proxy
+// is globally correct — combined with the bump-loop's swept tests, the system
+// is bulletproof against tunneling.
+//
+// Production mesh data routinely violates this assumption:
+//
+//   * Two-sided render hacks emit reverse-winded coplanar duplicates with
+//     SEPARATE vertex indices (so the welder can't pair them topologically).
+//   * Finite "billboard" triangles or partial walls — the player can navigate
+//     legitimate free space adjacent to a triangle by traversing past its
+//     edge.  Sweep never fires on the triangle; the player ends up on its
+//     "back side" without ever crossing it.
+//   * Mis-wound triangles from buggy exporters or CSG operations.
+//
+// In all these cases the local face-normal proxy is globally WRONG: depen
+// would push the player ALONG faceN (which is supposed to point toward free
+// space) but the actual free space is in the OPPOSITE direction.  Result is
+// a teleport — up to `2r` along the wrong direction.
+//
+// Three guards make depen robust against this class of mesh-data defect.
+// Listed in order of decreasing strictness; each catches a distinct subset
+// of failures.
+//
+//   (i) Deep back-side cap (s < -k_slack).  A `s ≈ -r` contact saturates
+//       depth = `r - s` at ~2r — the signature of a coplanar back-facing
+//       duplicate (the player's center sits on the front-facing partner's
+//       +r Minkowski plane).  Hard reject.  This is the defense against
+//       the rare stationary case where (ii) wouldn't apply.
+//
+//   (ii) Velocity-coherent culling (s < 0 ∧ vel·faceN > 0).  If the
+//        player's velocity is already carrying them in the direction depen
+//        would push, the contact will resolve via motion alone within a
+//        few ticks — depen's `r + |s|` push is redundant.  Critically,
+//        when the proxy is wrong (open mesh / non-manifold), the velocity
+//        is also moving the player in the "wrong" faceN direction (from
+//        the local triangle's POV); applying depen would amplify that
+//        error into a teleport.  Defer to motion: the player's own
+//        kinematics resolve the situation correctly *because* they reflect
+//        what the game treats as valid free space, whereas faceN reflects
+//        only what one isolated triangle thinks.
+//
+//   (iii) Welded-feature rejection (s < 0 ∧ closest feature welded
+//         inactive).  For coplanar opposing-normal pairs that DO share
+//         vertex indices, the welder pairs them via topology and marks
+//         their shared features inactive — drop the contact, the front-
+//         facing partner owns it.  Covers the closed-manifold half of
+//         the two-sided wall problem; (i) and (ii) cover the open-mesh
+//         half.
+//
+// Genuine "stuck inside" recovery cases (spawn-into-floor, teleport into
+// geometry) have vel ≈ 0 (or vel·faceN ≤ 0) and well-below-cap |s|, so all
+// three guards pass through and depen fires normally.
 bool aabbVsTriVoronoi(glm::vec3 center,
+                     glm::vec3 vel,
                      glm::vec3 he,
                      glm::vec3 v0,
                      glm::vec3 v1,
@@ -251,27 +312,14 @@ bool aabbVsTriVoronoi(glm::vec3 center,
 
     // 2. Find the closest feature on the bounded triangle.  Used both to
     //    detect ghost contacts ("AABB doesn't actually reach the closest
-    //    point") and — historically — to discard inactive welded features.
-    //    The discard behaviour was too aggressive: indoor FPS maps have
-    //    *concave* wall-floor corners where BOTH neighbours' closest
-    //    feature is the shared welded edge.  Discarding both leaves the
-    //    player wedged with zero depenetration push, which is the
-    //    wallrun-into-corner phase-through bug.
-    //
-    //    New behaviour (Bullet `btAdjustInternalEdgeContacts`-style):
-    //    inactive features are NOT discarded — the face normal is used as
-    //    the contact direction.  Two adjacent triangles sharing an
-    //    inactive edge still produce mutually-consistent MTVs because
-    //    their face normals either agree (coplanar internal seam) or
-    //    aggregate to the corner bisector (concave fold).  Ghost contacts
-    //    at far edges are still suppressed by the AABB-reach check below.
+    //    point") and to clip against welded-inactive features below.
     glm::vec3 closest;
     const TriRegion region = closestPointOnTriangle(center, v0, v1, v2, closest);
 
     // 3. For non-face features, verify the AABB actually reaches the
-    //    closest point.  This is the *only* place we discard contacts —
-    //    the plane test passed, but the triangle's bounded region is too
-    //    far from the AABB to actually overlap.
+    //    closest point.  Rejects ghost contacts where the plane test
+    //    passed but the triangle's bounded region is too far from the
+    //    AABB to actually overlap.
     if (region != TriRegion::Face) {
         const glm::vec3 d = closest - center;
         const float dLenSq = glm::dot(d, d);
@@ -285,19 +333,33 @@ bool aabbVsTriVoronoi(glm::vec3 center,
         }
     }
 
-    // 4. Phase-through guard.  The depth formula `r - s` below can push
-    //    by up to 2r when `s < 0` (player center on the back side of a
-    //    one-sided triangle), which teleports through coplanar
-    //    opposing-normal duplicates.  The welder marks the relevant
-    //    feature inactive in that case (cosTheta ≈ -1 for the partner
-    //    → signedDihedral == 0 → not active).  Skip the contact when
-    //    the closest feature is in such an inactive region — the
-    //    front-facing partner triangle owns the real contact, and the
-    //    bump loop catches genuine tunneling on the next sweep.  Face-
-    //    region contacts use the heuristic "no edge of this triangle
-    //    is active", which also catches back-to-back duplicates
-    //    (whose shared edges are all inactive).
+    // 4. Back-side contact validation — see file-level comment block above
+    //    for the architectural rationale.  Three guards, applied in
+    //    decreasing-strictness order:
+
+    //    (i) Deep back-side cap.  Defends against stationary saturated
+    //    back-face duplicates.  4u accommodates floating-point precision
+    //    and minor sub-tick overshoots without blocking deeper legitimate
+    //    cases (which are handled by the next two rules).
+    constexpr float k_maxBackSidePenetration = 4.0f;
+    if (s < -k_maxBackSidePenetration)
+        return false;
+
     if (s < 0.0f) {
+        //    (ii) Velocity-coherent culling.  If motion is already carrying
+        //    the player in faceN's direction, depen's `r + |s|` push is
+        //    redundant for closed-manifold meshes and actively harmful for
+        //    open-mesh / non-manifold cases where the proxy is wrong.
+        //    `dot > 0` rather than `>= 0` so a stationary or tangentially-
+        //    moving player still gets depen — the rule only suppresses
+        //    when motion is *clearly* heading outward.
+        if (glm::dot(vel, faceN) > 0.0f)
+            return false;
+
+        //    (iii) Welded-feature rejection.  For shared-index coplanar
+        //    pairs, the welder marks shared features inactive.  Drop the
+        //    contact when the closest projection lands in such a region —
+        //    the front-facing partner triangle owns the contact.
         bool inactive = false;
         switch (region) {
         case TriRegion::Face:  inactive = (edgeFlags == 0u); break;
@@ -698,6 +760,7 @@ void depenetrateAABBvsTriMesh(
 
                     glm::vec3 mtv;
                     if (!aabbVsTriVoronoi(pos,
+                                          vel,
                                           halfExtents,
                                           v0,
                                           v1,
@@ -719,6 +782,41 @@ void depenetrateAABBvsTriMesh(
 
                     if (debug::isEnabled()) {
                         debug::pushDepenContact(pos, mtvDir, depth, debug::ContactSource::TriMeshDepen, ti);
+                    }
+
+                    // Deep-contact trace: log when depth notably exceeds the
+                    // Minkowski half-radius for this triangle's normal.  That
+                    // condition (depth > R) only fires when s < 0, i.e. the
+                    // player center sits on the BACK side of the face plane.
+                    // depth approaching 2R is the saturated back-face signature
+                    // (coplanar reverse-winding duplicate / inverted tri).
+                    if (diag::isEnabled()) {
+                        const glm::vec3& fn = mesh.faceNormals[ti];
+                        const float rTri = std::abs(fn.x) * halfExtents.x +
+                                            std::abs(fn.y) * halfExtents.y +
+                                            std::abs(fn.z) * halfExtents.z;
+                        // 1.0u slack soaks routine sub-tick penetration from
+                        // sweep-clearance rounding; the pathology saturates at
+                        // depth ≈ 2R so this threshold catches it cleanly.
+                        if (depth > rTri + 1.0f) {
+                            const float sTri = glm::dot(fn, pos - v0);
+                            glm::vec3 closestTri;
+                            const TriRegion regionTri = closestPointOnTriangle(pos, v0, v1, v2, closestTri);
+                            diag::DepenContact dc{};
+                            dc.triId = ti;
+                            dc.playerPos = pos;
+                            dc.faceNormal = fn;
+                            dc.v0 = v0;
+                            dc.v1 = v1;
+                            dc.v2 = v2;
+                            dc.signedDist = sTri;
+                            dc.minkowskiR = rTri;
+                            dc.depth = depth;
+                            dc.region = static_cast<int>(regionTri);
+                            dc.edgeFlags = mesh.edgeActive[ti];
+                            dc.vertFlags = mesh.vertActive[ti];
+                            diag::recordDepenContact(dc);
+                        }
                     }
                 }
             } else {
