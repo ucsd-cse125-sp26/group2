@@ -17,10 +17,13 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/DebugCollisionDraw.hpp"
 #include "ecs/physics/Movement.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/Client.hpp" // for NetworkStats
@@ -135,6 +138,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::SeparatorText("Physics");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
+    ImGui::Checkbox("Contact Debug", &showContactDebugWindow);
     ImGui::Checkbox("Weapon Spawners", &showWeaponSpawnerWindow);
     ImGui::Checkbox("Spawn Points", &showSpawnPointWindow);
     ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
@@ -1705,6 +1709,272 @@ void DebugUI::buildCollisionUI(const physics::WorldGeometry& world,
         const ImU32 triColor = IM_COL32(200, 50, 255, 220);
         for (const auto& tm : world.triMeshes)
             drawTriMeshWireframe(dl, tm, viewProj, screenWidth, screenHeight, triColor);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contact debug overlay helpers (anonymous namespace, file-local)
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+
+/// @brief Colour palette for contact sources.  Sweep contacts are bright;
+/// depen contacts are warmer so the two categories are visually distinct.
+ImU32 contactSourceColor(physics::debug::ContactSource src)
+{
+    using Src = physics::debug::ContactSource;
+    switch (src) {
+    case Src::PlaneSweep:    return IM_COL32(120, 220, 255, 230);
+    case Src::BoxSweep:      return IM_COL32(50, 150, 255, 230);
+    case Src::BrushSweep:    return IM_COL32(60, 240, 90, 230);
+    case Src::CylinderSweep: return IM_COL32(255, 200, 80, 230);
+    case Src::SphereSweep:   return IM_COL32(255, 110, 200, 230);
+    case Src::TriMeshSweep:  return IM_COL32(210, 80, 255, 230);
+    case Src::PlaneDepen:    return IM_COL32(255, 90, 90, 230);
+    case Src::BoxDepen:      return IM_COL32(255, 130, 60, 230);
+    case Src::BrushDepen:    return IM_COL32(255, 220, 50, 230);
+    case Src::CylinderDepen: return IM_COL32(255, 90, 40, 230);
+    case Src::SphereDepen:   return IM_COL32(255, 50, 130, 230);
+    case Src::TriMeshDepen:  return IM_COL32(255, 50, 50, 230);
+    case Src::Count: break;
+    }
+    return IM_COL32(255, 255, 255, 220);
+}
+
+/// @brief Visibility filter from the per-source toggles on `DebugUI`.
+bool contactSourceVisible(const DebugUI& ui, physics::debug::ContactSource src)
+{
+    using Src = physics::debug::ContactSource;
+    switch (src) {
+    case Src::PlaneSweep:    return ui.drawContactPlaneSweep;
+    case Src::BoxSweep:      return ui.drawContactBoxSweep;
+    case Src::BrushSweep:    return ui.drawContactBrushSweep;
+    case Src::CylinderSweep: return ui.drawContactCylinderSweep;
+    case Src::SphereSweep:   return ui.drawContactSphereSweep;
+    case Src::TriMeshSweep:  return ui.drawContactTriMeshSweep;
+    case Src::PlaneDepen:    return ui.drawContactPlaneDepen;
+    case Src::BoxDepen:      return ui.drawContactBoxDepen;
+    case Src::BrushDepen:    return ui.drawContactBrushDepen;
+    case Src::CylinderDepen: return ui.drawContactCylinderDepen;
+    case Src::SphereDepen:   return ui.drawContactSphereDepen;
+    case Src::TriMeshDepen:  return ui.drawContactTriMeshDepen;
+    case Src::Count: break;
+    }
+    return true;
+}
+
+/// @brief Draw an arrow (3D line + 2D arrowhead) from `p` along `dir` with `length` world units.
+void drawArrow(ImDrawList* dl,
+               glm::vec3 p,
+               glm::vec3 dir,
+               float length,
+               const glm::mat4& vp,
+               float sw,
+               float sh,
+               ImU32 color,
+               float thickness = 1.5f)
+{
+    const glm::vec3 tip = p + dir * length;
+    drawWorldLine(dl, p, tip, vp, sw, sh, color, thickness);
+
+    // Small 2D arrowhead at the tip.
+    ImVec2 sTail;
+    ImVec2 sTip;
+    if (!worldToScreen(p, vp, sw, sh, sTail))
+        return;
+    if (!worldToScreen(tip, vp, sw, sh, sTip))
+        return;
+
+    const float dx = sTip.x - sTail.x;
+    const float dy = sTip.y - sTail.y;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 1e-3f)
+        return;
+
+    const float headLen = std::min(10.0f, len * 0.35f);
+    const float invLen = 1.0f / len;
+    const float ux = dx * invLen;
+    const float uy = dy * invLen;
+    // Two perpendicular offsets for the head wings.
+    const float px = -uy;
+    const float py = ux;
+    const ImVec2 wingA{sTip.x - ux * headLen + px * headLen * 0.5f,
+                       sTip.y - uy * headLen + py * headLen * 0.5f};
+    const ImVec2 wingB{sTip.x - ux * headLen - px * headLen * 0.5f,
+                       sTip.y - uy * headLen - py * headLen * 0.5f};
+    dl->AddLine(sTip, wingA, color, thickness);
+    dl->AddLine(sTip, wingB, color, thickness);
+}
+
+/// @brief Draw a small filled disc at a world position (or skip if behind camera).
+void drawPointMarker(ImDrawList* dl, glm::vec3 p, const glm::mat4& vp, float sw, float sh, ImU32 color, float radiusPx)
+{
+    ImVec2 s;
+    if (!worldToScreen(p, vp, sw, sh, s))
+        return;
+    dl->AddCircleFilled(s, radiusPx, color, 8);
+    // Tiny dark ring so the marker reads against bright backgrounds.
+    dl->AddCircle(s, radiusPx + 0.5f, IM_COL32(0, 0, 0, 200), 8, 1.0f);
+}
+
+const char* contactSourceLabel(physics::debug::ContactSource src)
+{
+    using Src = physics::debug::ContactSource;
+    switch (src) {
+    case Src::PlaneSweep:    return "Plane sweep";
+    case Src::BoxSweep:      return "Box sweep";
+    case Src::BrushSweep:    return "Brush sweep";
+    case Src::CylinderSweep: return "Cylinder sweep";
+    case Src::SphereSweep:   return "Sphere sweep";
+    case Src::TriMeshSweep:  return "TriMesh sweep";
+    case Src::PlaneDepen:    return "Plane depen";
+    case Src::BoxDepen:      return "Box depen";
+    case Src::BrushDepen:    return "Brush depen";
+    case Src::CylinderDepen: return "Cylinder depen";
+    case Src::SphereDepen:   return "Sphere depen";
+    case Src::TriMeshDepen:  return "TriMesh depen";
+    case Src::Count: break;
+    }
+    return "?";
+}
+
+} // namespace
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildContactDebugUI
+// ─────────────────────────────────────────────────────────────────────────────
+void DebugUI::buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight)
+{
+    // ── ImGui window (only when showContactDebugWindow is true) ──
+    if (showContactDebugWindow) {
+        if (ImGui::Begin("Contact Debug", &showContactDebugWindow)) {
+            bool enabled = physics::debug::isEnabled();
+            if (ImGui::Checkbox("Capture contacts (records every hit/MTV)", &enabled))
+                physics::debug::setEnabled(enabled);
+
+            ImGui::Checkbox("Draw overlay", &drawContactOverlay);
+            ImGui::Separator();
+
+            ImGui::SliderFloat("Normal length (u)", &contactNormalLength, 1.0f, 200.0f, "%.1f");
+            ImGui::SliderFloat("Point radius (px)", &contactPointRadius, 1.0f, 12.0f, "%.1f");
+
+            ImGui::Separator();
+            ImGui::Checkbox("Draw welded edges (green=active, red=welded)", &drawMeshEdgeOverlay);
+            ImGui::Checkbox("Draw welded vertices", &drawMeshVertexOverlay);
+
+            ImGui::Separator();
+            ImGui::TextWrapped(
+                "Phase telemetry: per-tick player physics state → phase-diag-*.csv in working dir. "
+                "Look for the SuspectedPhase column = 1 to find phase-through moments. "
+                "Open the CSV in any spreadsheet; sort by SuspectedPhase, DeepPenetration, or BumpExhausted.");
+            bool phaseDiag = physics::diag::isEnabled();
+            if (ImGui::Checkbox("Record phase telemetry (writes CSV)", &phaseDiag))
+                physics::diag::setEnabled(phaseDiag);
+
+            const auto k_contacts = physics::debug::contacts();
+
+            // Tally per source for a fast diagnostic at a glance.
+            int counts[static_cast<size_t>(physics::debug::ContactSource::Count)] = {};
+            for (const auto& c : k_contacts) {
+                const auto idx = static_cast<size_t>(c.source);
+                if (idx < std::size(counts))
+                    ++counts[idx];
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Total contacts this frame: %zu", k_contacts.size());
+
+            ImGui::SeparatorText("Per-source");
+            const auto sources = {
+                physics::debug::ContactSource::PlaneSweep,
+                physics::debug::ContactSource::BoxSweep,
+                physics::debug::ContactSource::BrushSweep,
+                physics::debug::ContactSource::CylinderSweep,
+                physics::debug::ContactSource::SphereSweep,
+                physics::debug::ContactSource::TriMeshSweep,
+                physics::debug::ContactSource::PlaneDepen,
+                physics::debug::ContactSource::BoxDepen,
+                physics::debug::ContactSource::BrushDepen,
+                physics::debug::ContactSource::CylinderDepen,
+                physics::debug::ContactSource::SphereDepen,
+                physics::debug::ContactSource::TriMeshDepen,
+            };
+            bool* toggles[] = {
+                &drawContactPlaneSweep, &drawContactBoxSweep, &drawContactBrushSweep,
+                &drawContactCylinderSweep, &drawContactSphereSweep, &drawContactTriMeshSweep,
+                &drawContactPlaneDepen, &drawContactBoxDepen, &drawContactBrushDepen,
+                &drawContactCylinderDepen, &drawContactSphereDepen, &drawContactTriMeshDepen,
+            };
+            int sIdx = 0;
+            for (physics::debug::ContactSource s : sources) {
+                ImGui::PushStyleColor(ImGuiCol_Text, contactSourceColor(s));
+                ImGui::Checkbox(contactSourceLabel(s), toggles[sIdx]);
+                ImGui::PopStyleColor();
+                ImGui::SameLine();
+                ImGui::Text("(%d)", counts[static_cast<size_t>(s)]);
+                ++sIdx;
+            }
+        }
+        ImGui::End();
+    }
+
+    // ── Overlay (independent of window visibility) ──
+    if (!drawContactOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const auto k_contacts = physics::debug::contacts();
+    for (const auto& c : k_contacts) {
+        if (!contactSourceVisible(*this, c.source))
+            continue;
+
+        const ImU32 color = contactSourceColor(c.source);
+
+        // Depen arrows are stretched by their depth so deep penetrations are visually loud.
+        const float lengthMul = (c.depth > 0.0f) ? std::clamp(c.depth / 8.0f, 0.5f, 4.0f) : 1.0f;
+        const float length = contactNormalLength * lengthMul;
+
+        drawPointMarker(dl, c.point, viewProj, screenWidth, screenHeight, color, contactPointRadius);
+        drawArrow(dl, c.point, c.normal, length, viewProj, screenWidth, screenHeight, color);
+    }
+
+    // Phase 2 welded-edge / vertex overlay.  Walks every active-world trimesh,
+    // draws each triangle edge green-or-red by its `edgeActive` bit, and each
+    // vertex as a small dot coloured the same way.  Validates the cooked
+    // welding data by eye against the underlying mesh wireframe.
+    if (drawMeshEdgeOverlay || drawMeshVertexOverlay) {
+        const physics::WorldGeometry& world = physics::activeWorld();
+        const ImU32 active = IM_COL32(60, 240, 90, 230);
+        const ImU32 welded = IM_COL32(255, 80, 80, 220);
+
+        for (const physics::WorldTriMesh& tm : world.triMeshes) {
+            const size_t triCount = tm.indices.size() / 3u;
+            // Skip meshes whose welding pass has not run yet.
+            if (tm.edgeActive.size() != triCount || tm.vertActive.size() != triCount)
+                continue;
+
+            for (size_t t = 0; t < triCount; ++t) {
+                const glm::vec3& v0 = tm.vertices[tm.indices[t * 3u + 0u]];
+                const glm::vec3& v1 = tm.vertices[tm.indices[t * 3u + 1u]];
+                const glm::vec3& v2 = tm.vertices[tm.indices[t * 3u + 2u]];
+                const uint8_t e = tm.edgeActive[t];
+                const uint8_t vMask = tm.vertActive[t];
+
+                if (drawMeshEdgeOverlay) {
+                    drawWorldLine(dl, v0, v1, viewProj, screenWidth, screenHeight, (e & 1u) ? active : welded, 1.5f);
+                    drawWorldLine(dl, v1, v2, viewProj, screenWidth, screenHeight, (e & 2u) ? active : welded, 1.5f);
+                    drawWorldLine(dl, v2, v0, viewProj, screenWidth, screenHeight, (e & 4u) ? active : welded, 1.5f);
+                }
+                if (drawMeshVertexOverlay) {
+                    drawPointMarker(
+                        dl, v0, viewProj, screenWidth, screenHeight, (vMask & 1u) ? active : welded, 3.0f);
+                    drawPointMarker(
+                        dl, v1, viewProj, screenWidth, screenHeight, (vMask & 2u) ? active : welded, 3.0f);
+                    drawPointMarker(
+                        dl, v2, viewProj, screenWidth, screenHeight, (vMask & 4u) ? active : welded, 3.0f);
+                }
+            }
+        }
     }
 }
 
