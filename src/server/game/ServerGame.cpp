@@ -144,53 +144,41 @@ void ServerGame::run()
     const Uint64 k_tickDuration = k_perfFreq / static_cast<Uint64>(tickRateHz);
     Uint64 nextTick = SDL_GetPerformanceCounter();
 
-    // temp weapon spawner
-    const entt::entity energySpawner = registry.create();
-    registry.emplace<WeaponSpawner>(
-        energySpawner, WeaponSpawner{.type = WeaponType::EnergyGun, .spawnCooldown = 0.0, .hasWeapon = false});
-    registry.emplace<Position>(energySpawner, glm::vec3{-100.0f, 15.0f, 0.0f});
-    registry.emplace<CollisionShape>(energySpawner);
+    // Weapon spawners
+    for (int i = 0; i < gamemap::weaponSpawner_.size(); i++) {
+        WeaponType weaponType = gamemap::weaponSpawner_[i].type;
+        glm::vec3 pos = gamemap::weaponSpawner_[i].pos;
+        
+        const entt::entity spawner = registry.create();
+        registry.emplace<WeaponSpawner>(
+            spawner, 
+            WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
+        );
+        registry.emplace<Position>(spawner, pos);
+    }
 
-    // temp rocket spawner
-    const entt::entity rocketSpawner = registry.create();
-    registry.emplace<WeaponSpawner>(
-        rocketSpawner, WeaponSpawner{.type = WeaponType::Rocket, .spawnCooldown = 0.0, .hasWeapon = false});
-    registry.emplace<Position>(rocketSpawner, glm::vec3{-100.0f, 15.0f, 120.0f});
-    registry.emplace<CollisionShape>(rocketSpawner);
+    // Respawn points (with cooldown state)
+    for (int i = 0; i < gamemap::spawnPoints_.size(); i++) {
+        const entt::entity spawnPoint = registry.create();
+        registry.emplace<RespawnPoint>(spawnPoint, RespawnPoint{});
+        registry.emplace<Position>(spawnPoint, gamemap::spawnPoints_[i]);
+    }
 
-    // temp rocket spawner
-    const entt::entity rifleSpawner = registry.create();
-    registry.emplace<WeaponSpawner>(rifleSpawner,
-                                    WeaponSpawner{.type = WeaponType::Rifle, .spawnCooldown = 0.0, .hasWeapon = false});
-    registry.emplace<Position>(rifleSpawner, glm::vec3{-100.0f, 15.0f, -120.0f});
-    registry.emplace<CollisionShape>(rifleSpawner);
+    // Powerup spawners
+    for (int i = 0; i < gamemap::powerupSpawner_.size(); i++) {
+        PowerupType powerupType = gamemap::powerupSpawner_[i].type;
+        glm::vec3 pos = gamemap::powerupSpawner_[i].pos;
 
-    // temp rail gun spawner
-    const entt::entity railSpawner = registry.create();
-    registry.emplace<WeaponSpawner>(
-        railSpawner, WeaponSpawner{.type = WeaponType::RailGun, .spawnCooldown = 0.0, .hasWeapon = false});
-    registry.emplace<Position>(railSpawner, glm::vec3{-100.0f, 15.0f, -240.0f});
-    registry.emplace<CollisionShape>(railSpawner);
+        PowerupConfig config = getPowerupConfig(powerupType);
 
-    // Static respawn points (with cooldown state)
-    const entt::entity playerSpawner1 = registry.create();
-    registry.emplace<RespawnPoint>(playerSpawner1, RespawnPoint{});
-    registry.emplace<Position>(playerSpawner1, glm::vec3{-444.0f, 0.0f, 2000.0f});
-
-    const entt::entity playerSpawner2 = registry.create();
-    registry.emplace<RespawnPoint>(playerSpawner2, RespawnPoint{});
-    registry.emplace<Position>(playerSpawner2, glm::vec3{800.0f, 40.0f, 800.0f});
-
-    const entt::entity playerSpawner4 = registry.create();
-    registry.emplace<RespawnPoint>(playerSpawner4, RespawnPoint{});
-    registry.emplace<Position>(playerSpawner4, glm::vec3{0.0f, 200.0f, 0.0f});
-
-    // Temp powerup spawner
-    PowerupConfig damageConfig = getPowerupConfig(PowerupType::Shield);
-    const entt::entity powerupSpawner = registry.create();
-    registry.emplace<PowerupSpawner>(powerupSpawner, PowerupSpawner{.type = damageConfig.type, .spawnCooldown = 0, .hasPowerup = true});
-    registry.emplace<Position>(powerupSpawner, glm::vec3{-200.0f, 50.0f, 300.0f});
-    registry.emplace<CollisionShape>(powerupSpawner);
+        const entt::entity spawner = registry.create();
+        registry.emplace<PowerupSpawner>(
+            spawner, 
+            PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false}
+        );
+        registry.emplace<Position>(spawner, pos);
+        registry.emplace<CollisionShape>(spawner);
+    }
 
     while (running) {
         server->poll();
