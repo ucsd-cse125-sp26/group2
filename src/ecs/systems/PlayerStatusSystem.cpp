@@ -274,6 +274,18 @@ inline void updateAbilityLevel(Registry& registry, entt::entity player, float dm
     }
 }
 
+inline float absorbDamage(float& pool, float damage)
+{
+    if (pool < 0 ) {
+        pool = 0;
+        return damage;
+    }
+
+    const float absorbed = std::min(pool, damage);
+    pool -= absorbed;
+    return damage - absorbed;
+}
+
 float applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
@@ -301,16 +313,17 @@ float applyDamage(float damage,
         updateAbilityLevel(registry, killer, damage);
     }
 
-    if (playerHealth.armor >= damage) {
-        playerHealth.armor -= damage;
-    } else {
-        const float overflow = damage - playerHealth.armor;
-        playerHealth.armor = 0;
-        if (playerHealth.health - overflow <= 0) {
-            playerHealth.health = 0;
+    float remainingDamage = damage;
+
+    remainingDamage = absorbDamage(playerHealth.overShield, remainingDamage);
+    remainingDamage = absorbDamage(playerHealth.armor, remainingDamage);
+
+    if (remainingDamage > 0.0f) {
+        if (playerHealth.health <= remainingDamage) {
+            playerHealth.health = 0.0f;
             handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion);
         } else {
-            playerHealth.health -= overflow;
+            playerHealth.health -= remainingDamage;
         }
     }
 
