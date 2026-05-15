@@ -43,11 +43,14 @@ inline void useAbility(entt::entity player, AbilityType type, Registry& registry
     ability->activate(player, registry);
 }
 
-void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float /*dt*/)
+void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float dt)
 {
     registry.view<Player, InputSnapshot, AbilityState>().each(
-        [&registry, &abilityRegistry](entt::entity e, InputSnapshot& snap, const AbilityState& state) {
-            if (snap.ability1) {
+        [&registry, &abilityRegistry, dt](entt::entity e, InputSnapshot& snap, AbilityState& state) {
+            tickCooldown(state.primaryCooldown, dt);
+            tickCooldown(state.secondaryCooldown, dt);
+
+            if (snap.ability1 && !state.primaryActive) {
                 useAbility(e, state.primary, registry, abilityRegistry);
             }
 
