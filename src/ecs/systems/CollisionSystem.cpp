@@ -343,16 +343,152 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
         depenetrateTriMesh(pos, vel, halfExtents, tm);
 }
 
+// Capsule depenetration (Phase A of physics-future-path.md)
+//
+// Planes and brushes get capsule-specific versions because the AABB's
+// anisotropic `|n.x|*hx + |n.y|*hy + |n.z|*hz` over-estimates the
+// capsule envelope on diagonal-wall normals (the standoff bug).  Box,
+// cylinder, and sphere depenetration reuse the AABB versions with the
+// capsule's enclosing AABB — those primitives only appear in the
+// dev-arena testWorld, and conservative slab math is acceptable.
+
+static void depenetratePlanesCapsule(
+    glm::vec3& pos, glm::vec3& vel, const physics::CapsuleShape& capsule, std::span<const physics::Plane> planes)
+{
+    uint32_t planeIdx = 0;
+    for (const physics::Plane& plane : planes) {
+        const float k_r = capsule.minkowskiExtent(plane.normal);
+        const float k_dist = glm::dot(plane.normal, pos) - plane.distance;
+
+        if (k_dist < k_r) {
+            const float k_overlap = k_r - k_dist;
+            pos += plane.normal * (k_overlap + k_pushback);
+
+            const float k_into = glm::dot(vel, plane.normal);
+            if (k_into < 0.0f)
+                vel -= plane.normal * k_into;
+
+            if (physics::debug::isEnabled()) {
+                physics::debug::pushDepenContact(pos - plane.normal * k_r,
+                                                 plane.normal,
+                                                 k_overlap,
+                                                 physics::debug::ContactSource::PlaneDepen,
+                                                 planeIdx);
+            }
+        }
+        ++planeIdx;
+    }
+}
+
+static void depenetrateBrushCapsule(
+    glm::vec3& pos, glm::vec3& vel, const physics::CapsuleShape& capsule, const physics::WorldBrush& brush)
+{
+    float minOverlap = 1e30f;
+    int minPlane = -1;
+
+    for (int i = 0; i < brush.planeCount; ++i) {
+        const auto& p = brush.planes[i];
+        const float k_r = capsule.minkowskiExtent(p.normal);
+        const float k_dist = glm::dot(p.normal, pos) - p.distance;
+
+        if (k_dist >= k_r)
+            return;
+
+        const float k_overlap = k_r - k_dist;
+        if (k_overlap < minOverlap) {
+            minOverlap = k_overlap;
+            minPlane = i;
+        }
+    }
+
+    if (minPlane < 0)
+        return;
+
+    const auto& plane = brush.planes[minPlane];
+    pos += plane.normal * (minOverlap + k_pushback);
+
+    const float k_into = glm::dot(vel, plane.normal);
+    if (k_into < 0.0f)
+        vel -= plane.normal * k_into;
+
+    if (physics::debug::isEnabled()) {
+        const float k_r = capsule.minkowskiExtent(plane.normal);
+        physics::debug::pushDepenContact(pos - plane.normal * k_r,
+                                         plane.normal,
+                                         minOverlap,
+                                         physics::debug::ContactSource::BrushDepen,
+                                         static_cast<uint32_t>(minPlane));
+    }
+}
+
+/// @brief Capsule version of `depenetrate()`.  Dispatches to capsule-specific
+/// implementations for planes / brushes / trimeshes and to the AABB versions
+/// with the capsule's enclosing AABB for box / cylinder / sphere.
+static void depenetrateCapsule(glm::vec3& pos,
+                               glm::vec3& vel,
+                               const physics::CapsuleShape& capsule,
+                               const physics::WorldGeometry& world)
+{
+    depenetratePlanesCapsule(pos, vel, capsule, world.planes);
+
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+
+    for (const physics::WorldAABB& box : world.boxes)
+        depenetrateBox(pos, vel, he, box);
+
+    for (const physics::WorldBrush& brush : world.brushes)
+        depenetrateBrushCapsule(pos, vel, capsule, brush);
+
+    for (const physics::WorldCylinder& cyl : world.cylinders)
+        depenetrateCylinder(pos, vel, he, cyl);
+
+    for (const physics::WorldSphere& sph : world.spheres)
+        depenetrateSphere(pos, vel, he, sph);
+
+    for (const physics::WorldTriMesh& tm : world.triMeshes)
+        physics::depenetrateCapsuleVsTriMesh(pos, vel, capsule, tm, k_pushback);
+}
+
+/// @brief Build a `physics::CapsuleShape` query from an entity's `CollisionShape`.
+///
+/// `up` is constant +Y — gravity flip only inverts the floor-detection
+/// threshold (`normal.y > 0.7` vs `< -0.7`), not the player's capsule axis,
+/// because the capsule is symmetric under reflection of `up`.
+static physics::CapsuleShape makeCapsuleQuery(const CollisionShape& shape)
+{
+    return {.radius = shape.radius, .halfHeight = shape.halfHeight, .up = glm::vec3{0.0f, 1.0f, 0.0f}};
+}
+
+/// @brief Shape-aware sweepAll dispatch.  Capsule path for Capsule shape,
+/// AABB path otherwise.
+static physics::HitResult sweepShape(
+    const CollisionShape& shape, glm::vec3 start, glm::vec3 end, const physics::WorldGeometry& world)
+{
+    if (shape.type == CollisionShapeType::Capsule)
+        return physics::sweepAll(makeCapsuleQuery(shape), start, end, world);
+    return physics::sweepAll(shape.halfExtents, start, end, world);
+}
+
+/// @brief Shape-aware depenetration dispatch.
+static void depenetrateShape(
+    glm::vec3& pos, glm::vec3& vel, const CollisionShape& shape, const physics::WorldGeometry& world)
+{
+    if (shape.type == CollisionShapeType::Capsule)
+        depenetrateCapsule(pos, vel, makeCapsuleQuery(shape), world);
+    else
+        depenetrate(pos, vel, shape.halfExtents, world);
+}
+
 /// @brief Attempt to step over a low obstacle when a wall is hit.
 /// @param pos            Entity position (modified in place on success).
 /// @param vel            Entity velocity (modified in place on success).
-/// @param halfExtents    AABB half-extents of the entity.
+/// @param shape          Collision shape (dispatches AABB vs capsule).
 /// @param remainingTime  Time remaining in the current bump iteration.
 /// @param world          World collision geometry.
 /// @return True if the step succeeded and position/velocity were updated.
 static bool tryStepUp(glm::vec3& pos,
                       glm::vec3& vel,
-                      const glm::vec3& halfExtents,
+                      const CollisionShape& shape,
                       float remainingTime,
                       const physics::WorldGeometry& world)
 {
@@ -360,19 +496,19 @@ static bool tryStepUp(glm::vec3& pos,
 
     // 1. Lift straight up — abort if ceiling blocks.
     const glm::vec3 k_liftEnd = pos + k_stepVec;
-    const physics::HitResult k_lift = physics::sweepAll(halfExtents, pos, k_liftEnd, world);
+    const physics::HitResult k_lift = sweepShape(shape, pos, k_liftEnd, world);
     if (k_lift.hit)
         return false;
 
     // 2. Sweep horizontally at step height — abort if still blocked.
     const glm::vec3 k_horizEnd = k_liftEnd + glm::vec3{vel.x * remainingTime, 0.0f, vel.z * remainingTime};
-    const physics::HitResult k_horiz = physics::sweepAll(halfExtents, k_liftEnd, k_horizEnd, world);
+    const physics::HitResult k_horiz = sweepShape(shape, k_liftEnd, k_horizEnd, world);
     if (k_horiz.hit)
         return false;
 
     // 3. Drop back down — must land on a floor-like surface.
     const glm::vec3 k_dropEnd = k_horizEnd - k_stepVec;
-    const physics::HitResult k_drop = physics::sweepAll(halfExtents, k_horizEnd, k_dropEnd, world);
+    const physics::HitResult k_drop = sweepShape(shape, k_horizEnd, k_dropEnd, world);
 
     if (!k_drop.hit || k_drop.normal.y <= 0.7f)
         return false;
@@ -386,13 +522,13 @@ static bool tryStepUp(glm::vec3& pos,
 /// @brief Keep the entity glued to descending slopes and step-downs.
 /// @param pos          Entity position (modified in place).
 /// @param vel          Entity velocity (modified in place).
-/// @param halfExtents  AABB half-extents of the entity.
+/// @param shape        Collision shape (dispatches AABB vs capsule).
 /// @param world        World collision geometry.
 static void
-snapToGround(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldGeometry& world)
+snapToGround(glm::vec3& pos, glm::vec3& vel, const CollisionShape& shape, const physics::WorldGeometry& world)
 {
     const glm::vec3 k_probeTarget = pos - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
-    const physics::HitResult k_snap = physics::sweepAll(halfExtents, pos, k_probeTarget, world);
+    const physics::HitResult k_snap = sweepShape(shape, pos, k_probeTarget, world);
 
     if (!k_snap.hit || k_snap.normal.y <= 0.7f)
         return;
@@ -400,6 +536,16 @@ snapToGround(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const
     pos = pos - glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
     pos += k_snap.normal * k_pushback;
     vel.y = 0.0f;
+}
+
+/// @brief Minkowski half-extent of `shape` along unit direction `n`.  Used
+/// for shape-aware contact-point offset in debug visualization.
+static float shapeMinkowskiExtent(const CollisionShape& shape, glm::vec3 n)
+{
+    if (shape.type == CollisionShapeType::Capsule)
+        return makeCapsuleQuery(shape).minkowskiExtent(n);
+    return std::abs(n.x) * shape.halfExtents.x + std::abs(n.y) * shape.halfExtents.y +
+           std::abs(n.z) * shape.halfExtents.z;
 }
 
 void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world)
@@ -448,7 +594,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             }
 
             // Phase 0 — Depenetration
-            depenetrate(pos.value, vel.value, shape.halfExtents, world);
+            depenetrateShape(pos.value, vel.value, shape, world);
 
             if (diagOn) {
                 diagFrame.posAfterDepen = pos.value;
@@ -463,7 +609,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             int clip = 0;
             for (; clip < 4 && remainingTime > 1e-5f; ++clip) {
                 const glm::vec3 k_target = pos.value + vel.value * remainingTime;
-                const physics::HitResult k_hit = physics::sweepAll(shape.halfExtents, pos.value, k_target, world);
+                const physics::HitResult k_hit = sweepShape(shape, pos.value, k_target, world);
 
                 if (!k_hit.hit) {
                     pos.value = k_target;
@@ -479,13 +625,11 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 remainingTime *= (1.0f - k_hit.tFirst);
 
                 if (physics::debug::isEnabled()) {
-                    // Mark the contact at the surface point (AABB centre offset back along the
-                    // surface normal by the AABB's projected half-extent).  `sweepAll` doesn't
+                    // Mark the contact at the surface point (centre offset back along the
+                    // surface normal by the shape's projected half-extent).  `sweepAll` doesn't
                     // distinguish the source primitive in `HitResult`, so we tag it as a generic
                     // sweep contact for now; per-primitive tagging arrives with Phase 2.
-                    const float r = std::abs(k_hit.normal.x) * shape.halfExtents.x +
-                                    std::abs(k_hit.normal.y) * shape.halfExtents.y +
-                                    std::abs(k_hit.normal.z) * shape.halfExtents.z;
+                    const float r = shapeMinkowskiExtent(shape, k_hit.normal);
                     physics::debug::pushSweepContact(pos.value - k_hit.normal * r,
                                                      k_hit.normal,
                                                      physics::debug::ContactSource::PlaneSweep);
@@ -508,7 +652,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     }
                 } else {
                     if (k_wasGrounded && !state.gravityFlipped &&
-                        tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world))
+                        tryStepUp(pos.value, vel.value, shape, remainingTime, world))
                     {
                         state.grounded = true;
                         break;
@@ -526,15 +670,14 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     if (state.gravityFlipped) {
                         // Snap upward toward ceiling.
                         const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
-                        const physics::HitResult k_snap =
-                            physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
+                        const physics::HitResult k_snap = sweepShape(shape, pos.value, k_probeTarget, world);
                         if (k_snap.hit && k_snap.normal.y < -0.7f) {
                             pos.value = pos.value + glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
                             pos.value += k_snap.normal * k_pushback;
                             vel.value.y = 0.0f;
                         }
                     } else {
-                        snapToGround(pos.value, vel.value, shape.halfExtents, world);
+                        snapToGround(pos.value, vel.value, shape, world);
                     }
                 }
             }
@@ -543,8 +686,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             if (!state.grappleActive) {
                 // Probe in the direction of gravity: downward normally, upward when flipped.
                 const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, -gravDir * k_groundProbeDistance, 0.0f};
-                const physics::HitResult k_probe =
-                    physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
+                const physics::HitResult k_probe = sweepShape(shape, pos.value, k_probeTarget, world);
 
                 const bool k_isGroundProbe =
                     state.gravityFlipped ? (k_probe.normal.y < -0.7f) : (k_probe.normal.y > 0.7f);

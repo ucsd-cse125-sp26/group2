@@ -87,4 +87,21 @@ HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 e
 void depenetrateAABBvsTriMesh(
     glm::vec3& pos, glm::vec3& vel, glm::vec3 halfExtents, const WorldTriMesh& mesh, float pushback = 0.03125f);
 
+/// @brief Sweep a capsule against a triangle mesh.  Capsule analogue of
+/// `sweepAABBvsTriMesh` for Phase A of physics-future-path.md.
+///
+/// Replaces the AABB's anisotropic Minkowski extent (which couples to wall
+/// orientation and produced the standoff bug at MovementSystem.cpp:761-815)
+/// with the capsule's isotropic-plus-axis extent `r = radius + halfHeight *
+/// |dot(up, n)|`.  On any horizontal wall normal, the half-extent is just
+/// `radius` — no dependency on which way the wall faces in the XZ plane.
+HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh);
+
+/// @brief Push a capsule out of a triangle mesh.  Capsule analogue of
+/// `depenetrateAABBvsTriMesh` — identical iteration scheme (4 passes,
+/// per-tick budget cap, velocity-coherent + welded-feature guards) with
+/// the capsule Minkowski extent in place of the AABB sum.
+void depenetrateCapsuleVsTriMesh(
+    glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldTriMesh& mesh, float pushback = 0.03125f);
+
 } // namespace physics

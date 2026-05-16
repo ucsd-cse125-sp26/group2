@@ -458,6 +458,155 @@ HitResult sweepAABBvsTriangle(glm::vec3 halfExtents,
     return result;
 }
 
+// Capsule-vs-triangle primitives
+//
+// The capsule version mirrors the AABB Voronoi pipeline above, replacing the
+// AABB's anisotropic Minkowski half-extent
+//     r = |n.x|*hx + |n.y|*hy + |n.z|*hz                      (AABB)
+// with the capsule's isotropic-plus-axis half-extent
+//     r = radius + halfHeight * |dot(up, n)|                  (capsule)
+//
+// This is the single line of math that kills the standoff bug at
+// MovementSystem.cpp:761-815: for a capsule, the half-extent along ANY
+// horizontal wall normal is just `radius` (no `|n.x|*hx + |n.z|*hz`
+// rotation-dependent term).  All other guards (velocity-coherent culling,
+// welded-feature rejection, bounded-reach check) carry over unchanged.
+
+/// @brief Capsule depenetration core.  Returns an MTV pushing a capsule
+/// centred at `center` out of triangle `(v0, v1, v2)` along its face normal.
+///
+/// Architecture matches `aabbVsTriVoronoi` above — see that function's
+/// preamble for the rationale on velocity-coherent culling and welded-
+/// feature rejection.  Both guards are *required* for robustness against
+/// non-manifold / two-sided mesh hacks; do not remove them without also
+/// fixing the meshes.
+bool capsuleVsTriVoronoi(glm::vec3 center,
+                         glm::vec3 vel,
+                         CapsuleShape capsule,
+                         glm::vec3 v0,
+                         glm::vec3 v1,
+                         glm::vec3 v2,
+                         glm::vec3 faceN,
+                         uint8_t edgeFlags,
+                         uint8_t vertFlags,
+                         glm::vec3& outMtv)
+{
+    // 1. Plane test.  Capsule Minkowski extent along the face normal.
+    const float r = capsule.minkowskiExtent(faceN);
+    const float s = glm::dot(faceN, center - v0);
+    if (std::abs(s) > r)
+        return false;
+
+    // 2. Closest Voronoi feature on the bounded triangle to the capsule centre.
+    glm::vec3 closest;
+    const TriRegion region = closestPointOnTriangle(center, v0, v1, v2, closest);
+
+    // 3. Bounded-reach check for non-face features.  Same logic as AABB,
+    //    but the capsule extent depends on |dot(up, unitD)| rather than
+    //    the AABB's anisotropic sum.
+    if (region != TriRegion::Face) {
+        const glm::vec3 d = closest - center;
+        const float dLenSq = glm::dot(d, d);
+        if (dLenSq > 1e-12f) {
+            const float dLen = std::sqrt(dLenSq);
+            const glm::vec3 unitD = d / dLen;
+            const float rD = capsule.minkowskiExtent(unitD);
+            if (dLen > rD + 1e-4f)
+                return false;
+        }
+    }
+
+    // 4. Velocity-coherent culling.
+    if (glm::dot(vel, faceN) > 0.0f)
+        return false;
+
+    // 5. Welded-feature rejection on back-side contacts.
+    if (s < 0.0f) {
+        bool inactive = false;
+        switch (region) {
+        case TriRegion::Face:  inactive = (edgeFlags == 0u); break;
+        case TriRegion::Edge0: inactive = (edgeFlags & 0x1u) == 0u; break;
+        case TriRegion::Edge1: inactive = (edgeFlags & 0x2u) == 0u; break;
+        case TriRegion::Edge2: inactive = (edgeFlags & 0x4u) == 0u; break;
+        case TriRegion::Vert0: inactive = (vertFlags & 0x1u) == 0u; break;
+        case TriRegion::Vert1: inactive = (vertFlags & 0x2u) == 0u; break;
+        case TriRegion::Vert2: inactive = (vertFlags & 0x4u) == 0u; break;
+        }
+        if (inactive)
+            return false;
+    }
+
+    // 6. Face-normal MTV at depth `r - s`.
+    const float depth = r - s;
+    if (depth <= 0.0f)
+        return false;
+    outMtv = faceN * depth;
+    return true;
+}
+
+/// @brief Capsule swept-collision against a single triangle.  Mirror of
+/// `sweepAABBvsTriangle` with capsule Minkowski extent.
+///
+/// As with the AABB version, we deliberately do NOT discard contacts on
+/// inactive (welded) edges or vertices here — the bump loop relies on
+/// both adjacent coplanar triangles reporting the same hit time to
+/// produce a stable contact.  The active-edge swap (replace contact
+/// normal with neighbour's face normal on welded-edge contacts) is
+/// Phase B of the future-path plan; this function lays the groundwork.
+HitResult sweepCapsuleVsTriangle(CapsuleShape capsule,
+                                 glm::vec3 start,
+                                 glm::vec3 end,
+                                 glm::vec3 v0,
+                                 glm::vec3 v1,
+                                 glm::vec3 v2,
+                                 glm::vec3 faceN,
+                                 uint8_t edgeFlags,
+                                 uint8_t vertFlags)
+{
+    HitResult result;
+
+    // Orient the face normal toward the start of the sweep.
+    glm::vec3 n = faceN;
+    if (glm::dot(n, start - v0) < 0.0f)
+        n = -n;
+
+    const float r = capsule.minkowskiExtent(n);
+    const float distStart = glm::dot(n, start - v0);
+    const float distEnd = glm::dot(n, end - v0);
+
+    if (distStart < r)
+        return result;
+    if (distEnd >= distStart)
+        return result;
+
+    const float t = (distStart - r) / (distStart - distEnd);
+    if (t < 0.0f || t >= 1.0f)
+        return result;
+
+    const glm::vec3 contactPos = start + (end - start) * t;
+
+    glm::vec3 closest;
+    const TriRegion region = closestPointOnTriangle(contactPos, v0, v1, v2, closest);
+    if (region != TriRegion::Face) {
+        const glm::vec3 d = closest - contactPos;
+        const float dLenSq = glm::dot(d, d);
+        if (dLenSq > 1e-12f) {
+            const float dLen = std::sqrt(dLenSq);
+            const glm::vec3 unitD = d / dLen;
+            const float rD = capsule.minkowskiExtent(unitD);
+            if (dLen > rD + 1e-3f)
+                return result;
+        }
+    }
+    (void)edgeFlags;
+    (void)vertFlags;
+
+    result.hit = true;
+    result.tFirst = t;
+    result.normal = n;
+    return result;
+}
+
 // Welding helpers
 
 /// @brief Canonical uint64 key for an undirected edge between two vertex indices.
@@ -879,6 +1028,177 @@ void depenetrateAABBvsTriMesh(
         // Cancel inward velocity component on every pass so a sliding
         // player loses normal-direction motion immediately instead of
         // grinding back into the surface for k_maxPasses-1 frames.
+        const float into = glm::dot(vel, dir);
+        if (into < 0.0f)
+            vel -= dir * into;
+    }
+}
+
+// Capsule trimesh queries (Phase A of physics-future-path.md)
+//
+// Structure mirrors the AABB versions above.  Broad-phase BVH culling uses
+// the capsule's enclosing AABB (`capsule.enclosingHalfExtents()`); per-
+// triangle work calls the capsule Voronoi helpers added in the anonymous
+// namespace.
+
+HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)
+{
+    HitResult best;
+    if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
+        return best;
+
+    const glm::vec3 delta = end - start;
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+
+    if (!sweptAABBOverlapsAABB(he, start, delta, mesh.boundsMin, mesh.boundsMax, 1.0f))
+        return best;
+
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+        if (!sweptAABBOverlapsAABB(he, start, delta, node.boundsMin, node.boundsMax, best.tFirst))
+            continue;
+
+        if (node.count > 0) {
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+
+                HitResult hr = sweepCapsuleVsTriangle(capsule,
+                                                     start,
+                                                     end,
+                                                     v0,
+                                                     v1,
+                                                     v2,
+                                                     mesh.faceNormals[ti],
+                                                     mesh.edgeActive[ti],
+                                                     mesh.vertActive[ti]);
+                if (hr.hit && hr.tFirst < best.tFirst) {
+                    if (ti < mesh.triangleMaterials.size())
+                        hr.surfaceType = static_cast<SurfaceType>(mesh.triangleMaterials[ti]);
+                    else
+                        hr.surfaceType = mesh.defaultSurface;
+                    best = hr;
+                    if (debug::isEnabled()) {
+                        const glm::vec3 hitPos = start + (end - start) * hr.tFirst;
+                        const float r = capsule.minkowskiExtent(hr.normal);
+                        debug::pushSweepContact(
+                            hitPos - hr.normal * r, hr.normal, debug::ContactSource::TriMeshSweep, ti);
+                    }
+                }
+            }
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
+
+    return best;
+}
+
+void depenetrateCapsuleVsTriMesh(
+    glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldTriMesh& mesh, float pushback)
+{
+    if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
+        return;
+
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+
+    if (pos.x + he.x < mesh.boundsMin.x || pos.x - he.x > mesh.boundsMax.x ||
+        pos.y + he.y < mesh.boundsMin.y || pos.y - he.y > mesh.boundsMax.y ||
+        pos.z + he.z < mesh.boundsMin.z || pos.z - he.z > mesh.boundsMax.z)
+        return;
+
+    // Iteration scheme matches the AABB version exactly — see the block
+    // comment in `depenetrateAABBvsTriMesh` for the rationale on multi-pass
+    // convergence at concave corners and per-tick budgeted recovery.
+    constexpr int k_maxPasses = 4;
+    constexpr float k_capRatioOfR = 0.5f;
+    float totalPushedThisTick = 0.0f;
+
+    for (int pass = 0; pass < k_maxPasses; ++pass) {
+        glm::vec3 sumDir(0.0f);
+        float maxDepth = 0.0f;
+        int overlapCount = 0;
+
+        int stack[64];
+        int stackPtr = 0;
+        stack[0] = 0;
+
+        while (stackPtr >= 0) {
+            const int nodeIdx = stack[stackPtr--];
+            const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+            const glm::vec3 expMin = node.boundsMin - he;
+            const glm::vec3 expMax = node.boundsMax + he;
+            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y ||
+                pos.z < expMin.z || pos.z > expMax.z)
+                continue;
+
+            if (node.count > 0) {
+                for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                    const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                    const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                    const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                    const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+
+                    glm::vec3 mtv;
+                    if (!capsuleVsTriVoronoi(pos,
+                                             vel,
+                                             capsule,
+                                             v0,
+                                             v1,
+                                             v2,
+                                             mesh.faceNormals[ti],
+                                             mesh.edgeActive[ti],
+                                             mesh.vertActive[ti],
+                                             mtv))
+                        continue;
+
+                    const float depth = glm::length(mtv);
+                    if (depth < 1e-6f)
+                        continue;
+
+                    const glm::vec3 mtvDir = mtv / depth;
+                    sumDir += mtvDir;
+                    maxDepth = std::max(maxDepth, depth);
+                    ++overlapCount;
+
+                    if (debug::isEnabled()) {
+                        debug::pushDepenContact(pos, mtvDir, depth, debug::ContactSource::TriMeshDepen, ti);
+                    }
+                }
+            } else {
+                stack[++stackPtr] = node.leftFirst;
+                stack[++stackPtr] = node.leftFirst + 1;
+            }
+        }
+
+        if (overlapCount == 0)
+            return;
+
+        const float dirLen = glm::length(sumDir);
+        if (dirLen < 1e-6f)
+            return;
+
+        const glm::vec3 dir = sumDir / dirLen;
+
+        const float rDir = capsule.minkowskiExtent(dir);
+        const float perTickCap = rDir * k_capRatioOfR;
+        const float remainingBudget = std::max(0.0f, perTickCap - totalPushedThisTick);
+        const float pushAmount = std::min(maxDepth + pushback, remainingBudget);
+        if (pushAmount <= 0.0f)
+            return;
+        pos += dir * pushAmount;
+        totalPushedThisTick += pushAmount;
+
         const float into = glm::dot(vel, dir);
         if (into < 0.0f)
             vel -= dir * into;

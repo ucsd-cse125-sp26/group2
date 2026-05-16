@@ -353,6 +353,295 @@ HitResult sweepAABBvsSphere(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 en
     return result;
 }
 
+// Capsule swept-collision primitives (Phase A of physics-future-path.md)
+//
+// EXACT for planes and brushes — the capsule's projected half-extent along a
+// plane normal is `radius + halfHeight * |dot(up, n)|`, no approximation.
+//
+// CONSERVATIVE for boxes, cylinders, and spheres — we use the capsule's
+// enclosing AABB and route through the same slab / quadratic math the AABB
+// versions use.  The over-approximation is bounded by the capsule's corner
+// curvature and is acceptable for the dev-arena primitives (real maps are
+// trimesh, which has its own exact capsule path in TriMeshCollision.cpp).
+// Tighter per-primitive capsule math is a Phase-B refinement.
+
+HitResult sweepCapsuleVsPlanes(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, std::span<const Plane> planes)
+{
+    HitResult result;
+
+    for (const Plane& plane : planes) {
+        const float k_r = capsule.minkowskiExtent(plane.normal);
+        const float k_distStart = glm::dot(plane.normal, start) - plane.distance;
+        const float k_distEnd = glm::dot(plane.normal, end) - plane.distance;
+
+        if (k_distStart < k_r)
+            continue;
+        if (k_distEnd >= k_distStart)
+            continue;
+
+        const float k_t = (k_distStart - k_r) / (k_distStart - k_distEnd);
+        if (k_t >= 0.0f && k_t < result.tFirst) {
+            result.hit = true;
+            result.tFirst = k_t;
+            result.normal = plane.normal;
+            result.surfaceType = plane.surfaceType;
+        }
+    }
+
+    return result;
+}
+
+HitResult sweepCapsuleVsBox(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldAABB& box)
+{
+    HitResult result;
+
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+    const glm::vec3 k_expMin = box.min - he;
+    const glm::vec3 k_expMax = box.max + he;
+
+    if (start.x >= k_expMin.x && start.x <= k_expMax.x && start.y >= k_expMin.y && start.y <= k_expMax.y &&
+        start.z >= k_expMin.z && start.z <= k_expMax.z)
+        return result;
+
+    const glm::vec3 k_delta = end - start;
+
+    float tEntry = -1e30f;
+    float tExit = 1e30f;
+    glm::vec3 hitNormal{0.0f};
+
+    for (int axis = 0; axis < 3; ++axis) {
+        const float k_lo = k_expMin[axis];
+        const float k_hi = k_expMax[axis];
+
+        if (std::abs(k_delta[axis]) < 1e-8f) {
+            if (start[axis] < k_lo || start[axis] > k_hi)
+                return result;
+        } else {
+            const float k_invD = 1.0f / k_delta[axis];
+            float t1 = (k_lo - start[axis]) * k_invD;
+            float t2 = (k_hi - start[axis]) * k_invD;
+
+            glm::vec3 n1{0.0f};
+            n1[axis] = -1.0f;
+            glm::vec3 n2{0.0f};
+            n2[axis] = 1.0f;
+
+            if (t1 > t2) {
+                std::swap(t1, t2);
+                std::swap(n1, n2);
+            }
+
+            if (t1 > tEntry) {
+                tEntry = t1;
+                hitNormal = n1;
+            }
+            if (t2 < tExit)
+                tExit = t2;
+
+            if (tEntry > tExit || tExit < 0.0f)
+                return result;
+        }
+    }
+
+    if (tEntry >= 0.0f && tEntry < 1.0f && tEntry < result.tFirst) {
+        result.hit = true;
+        result.tFirst = tEntry;
+        result.normal = hitNormal;
+        result.surfaceType = box.surfaceType;
+    }
+
+    return result;
+}
+
+HitResult sweepCapsuleVsBrush(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldBrush& brush)
+{
+    HitResult result;
+
+    float tEntry = -1e30f;
+    float tExit = 1e30f;
+    glm::vec3 hitNormal{0.0f, 1.0f, 0.0f};
+    bool startsOutside = false;
+
+    for (int i = 0; i < brush.planeCount; ++i) {
+        const Plane& plane = brush.planes[i];
+        const float k_r = capsule.minkowskiExtent(plane.normal);
+
+        const float k_adjStart = glm::dot(plane.normal, start) - plane.distance - k_r;
+        const float k_adjEnd = glm::dot(plane.normal, end) - plane.distance - k_r;
+
+        if (k_adjStart > 0.0f)
+            startsOutside = true;
+        if (k_adjStart > 0.0f && k_adjEnd > 0.0f)
+            return result;
+        if (k_adjStart <= 0.0f && k_adjEnd <= 0.0f)
+            continue;
+
+        const float k_t = k_adjStart / (k_adjStart - k_adjEnd);
+
+        if (k_adjStart > 0.0f) {
+            if (k_t > tEntry) {
+                tEntry = k_t;
+                hitNormal = plane.normal;
+            }
+        } else {
+            if (k_t < tExit)
+                tExit = k_t;
+        }
+    }
+
+    if (!startsOutside)
+        return result;
+
+    if (tEntry < tExit && tEntry >= 0.0f && tEntry < 1.0f) {
+        result.hit = true;
+        result.tFirst = tEntry;
+        result.normal = hitNormal;
+        result.surfaceType = brush.surfaceType;
+    }
+
+    return result;
+}
+
+HitResult sweepCapsuleVsCylinder(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldCylinder& cyl)
+{
+    HitResult result;
+
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+    const float k_effR = cyl.radius + std::max(he.x, he.z);
+    const float k_yMin = cyl.base.y - he.y;
+    const float k_yMax = cyl.base.y + cyl.height + he.y;
+
+    const glm::vec3 k_delta = end - start;
+
+    float tYentry = -1e30f;
+    float tYexit = 1e30f;
+    bool yCapHitBottom = false;
+
+    if (std::abs(k_delta.y) < 1e-8f) {
+        if (start.y < k_yMin || start.y > k_yMax)
+            return result;
+    } else {
+        const float k_invDy = 1.0f / k_delta.y;
+        float t1 = (k_yMin - start.y) * k_invDy;
+        float t2 = (k_yMax - start.y) * k_invDy;
+        bool t1IsBottom = true;
+        if (t1 > t2) {
+            std::swap(t1, t2);
+            t1IsBottom = false;
+        }
+        tYentry = t1;
+        tYexit = t2;
+        yCapHitBottom = t1IsBottom;
+    }
+
+    const float k_ox = start.x - cyl.base.x;
+    const float k_oz = start.z - cyl.base.z;
+    const float k_dx = k_delta.x;
+    const float k_dz = k_delta.z;
+
+    const float k_a = k_dx * k_dx + k_dz * k_dz;
+    const float k_b = 2.0f * (k_ox * k_dx + k_oz * k_dz);
+    const float k_c = k_ox * k_ox + k_oz * k_oz - k_effR * k_effR;
+
+    float tXZentry = -1e30f;
+    float tXZexit = 1e30f;
+
+    if (k_a < 1e-12f) {
+        if (k_c > 0.0f)
+            return result;
+    } else {
+        const float k_disc = k_b * k_b - 4.0f * k_a * k_c;
+        if (k_disc < 0.0f)
+            return result;
+
+        const float k_sqrtDisc = std::sqrt(k_disc);
+        const float k_inv2a = 0.5f / k_a;
+        tXZentry = (-k_b - k_sqrtDisc) * k_inv2a;
+        tXZexit = (-k_b + k_sqrtDisc) * k_inv2a;
+    }
+
+    bool hitIsYcap = false;
+    float tEntry;
+    if (tYentry > tXZentry) {
+        tEntry = tYentry;
+        hitIsYcap = true;
+    } else {
+        tEntry = tXZentry;
+        hitIsYcap = false;
+    }
+    const float tExit = std::min(tYexit, tXZexit);
+
+    if (tEntry > tExit || tExit < 0.0f)
+        return result;
+    if (tEntry < 0.0f)
+        return result;
+    if (tEntry >= 1.0f)
+        return result;
+
+    glm::vec3 hitNormal;
+    if (hitIsYcap) {
+        hitNormal = yCapHitBottom ? glm::vec3(0.0f, -1.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    } else {
+        const glm::vec3 k_hitPos = start + k_delta * tEntry;
+        hitNormal = glm::vec3(k_hitPos.x - cyl.base.x, 0.0f, k_hitPos.z - cyl.base.z);
+        const float k_len = glm::length(hitNormal);
+        if (k_len > 1e-6f)
+            hitNormal /= k_len;
+        else
+            hitNormal = glm::vec3(1.0f, 0.0f, 0.0f);
+    }
+
+    result.hit = true;
+    result.tFirst = tEntry;
+    result.normal = hitNormal;
+    result.surfaceType = cyl.surfaceType;
+    return result;
+}
+
+HitResult sweepCapsuleVsSphere(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldSphere& sph)
+{
+    HitResult result;
+
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+    const float k_effR = sph.radius + std::max({he.x, he.y, he.z});
+
+    const glm::vec3 k_oc = start - sph.center;
+    const glm::vec3 k_delta = end - start;
+
+    const float k_a = glm::dot(k_delta, k_delta);
+    if (k_a < 1e-12f)
+        return result;
+
+    const float k_b = 2.0f * glm::dot(k_oc, k_delta);
+    const float k_c = glm::dot(k_oc, k_oc) - k_effR * k_effR;
+
+    if (k_c <= 0.0f)
+        return result;
+
+    const float k_disc = k_b * k_b - 4.0f * k_a * k_c;
+    if (k_disc < 0.0f)
+        return result;
+
+    const float k_t = (-k_b - std::sqrt(k_disc)) / (2.0f * k_a);
+
+    if (k_t < 0.0f || k_t >= 1.0f)
+        return result;
+
+    const glm::vec3 k_hitPos = start + k_delta * k_t;
+    glm::vec3 hitNormal = k_hitPos - sph.center;
+    const float k_len = glm::length(hitNormal);
+    if (k_len > 1e-6f)
+        hitNormal /= k_len;
+    else
+        hitNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    result.hit = true;
+    result.tFirst = k_t;
+    result.normal = hitNormal;
+    result.surfaceType = sph.surfaceType;
+    return result;
+}
+
 // sweepAll
 
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
@@ -385,6 +674,43 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
 
     for (const WorldTriMesh& tm : world.triMeshes) {
         const HitResult k_hr = sweepAABBvsTriMesh(halfExtents, start, end, tm);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
+    return best;
+}
+
+HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
+{
+    HitResult best = sweepCapsuleVsPlanes(capsule, start, end, world.planes);
+
+    for (const WorldAABB& box : world.boxes) {
+        const HitResult k_hr = sweepCapsuleVsBox(capsule, start, end, box);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
+    for (const WorldBrush& brush : world.brushes) {
+        const HitResult k_hr = sweepCapsuleVsBrush(capsule, start, end, brush);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
+    for (const WorldCylinder& cyl : world.cylinders) {
+        const HitResult k_hr = sweepCapsuleVsCylinder(capsule, start, end, cyl);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
+    for (const WorldSphere& sph : world.spheres) {
+        const HitResult k_hr = sweepCapsuleVsSphere(capsule, start, end, sph);
+        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+            best = k_hr;
+    }
+
+    for (const WorldTriMesh& tm : world.triMeshes) {
+        const HitResult k_hr = sweepCapsuleVsTriMesh(capsule, start, end, tm);
         if (k_hr.hit && k_hr.tFirst < best.tFirst)
             best = k_hr;
     }

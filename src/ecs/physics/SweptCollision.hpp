@@ -5,7 +5,9 @@
 
 #include "SurfaceType.hpp"
 
+#include <cmath>
 #include <cstdint>
+#include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 #include <span>
 #include <vector>
@@ -133,6 +135,58 @@ struct WorldGeometry
     std::span<const WorldTriMesh> triMeshes;
 };
 
+/// @brief Capsule shape input for swept-collision queries.
+///
+/// A capsule is a line segment thickened by a radius.  The segment endpoints
+/// are `center ± up * halfHeight`; the surface is every point within `radius`
+/// of the segment.  `up` defaults to +Y but may be any unit vector — this
+/// supports gravity-flipped play (where the capsule axis is -Y) and any
+/// future arbitrarily-oriented characters without changing the query API.
+///
+/// Functions taking a `CapsuleShape` treat `center` as the capsule's centre
+/// of mass (the midpoint of the segment), matching the semantics of the
+/// AABB family that takes a centre + halfExtents.
+struct CapsuleShape
+{
+    float radius{16.0f};                    ///< Cylinder cross-section radius.
+    float halfHeight{20.0f};                ///< Half the segment length (excludes spherical caps).
+    glm::vec3 up{0.0f, 1.0f, 0.0f};         ///< Unit-length axis direction.
+
+    /// @brief Top endpoint of the inner segment at `center`.
+    [[nodiscard]] glm::vec3 segA(glm::vec3 center) const noexcept
+    {
+        return center + up * halfHeight;
+    }
+
+    /// @brief Bottom endpoint of the inner segment at `center`.
+    [[nodiscard]] glm::vec3 segB(glm::vec3 center) const noexcept
+    {
+        return center - up * halfHeight;
+    }
+
+    /// @brief Tight half-extents of the AABB that encloses the capsule at `center`.
+    ///
+    /// Used for BVH broad-phase culling.  For a Y-aligned capsule of radius
+    /// `r` and half-height `h`, this returns `(r, h + r, r)`.
+    [[nodiscard]] glm::vec3 enclosingHalfExtents() const noexcept
+    {
+        return {std::abs(up.x) * halfHeight + radius,
+                std::abs(up.y) * halfHeight + radius,
+                std::abs(up.z) * halfHeight + radius};
+    }
+
+    /// @brief Minkowski half-extent of the capsule along a unit direction `n`.
+    ///
+    /// For a Y-aligned capsule this is `r + h * |n.y|`; for an arbitrary
+    /// axis it is `r + h * |dot(up, n)|`.  Used by every plane / slab /
+    /// Minkowski-sum query as the capsule analogue of
+    /// `|n.x|*hx + |n.y|*hy + |n.z|*hz` for an AABB.
+    [[nodiscard]] float minkowskiExtent(glm::vec3 n) const noexcept
+    {
+        return radius + halfHeight * std::abs(glm::dot(up, n));
+    }
+};
+
 /// @brief Result of a swept AABB collision query.
 struct HitResult
 {
@@ -185,6 +239,29 @@ HitResult sweepAABBvsSphere(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 en
 
 /// @brief Sweep an AABB against all world geometry, returning the earliest hit.
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
+
+// Capsule swept-collision against convex primitives (Phase A of physics-future-path.md).
+// EXACT for planes and brushes; CONSERVATIVE (uses capsule's enclosing AABB) for box,
+// cylinder, sphere — the dev-arena primitives.  Real map geometry is trimesh and has
+// an exact capsule path in TriMeshCollision.hpp.
+
+/// @brief Sweep a capsule along [start, end] against a list of infinite planes.
+HitResult sweepCapsuleVsPlanes(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, std::span<const Plane> planes);
+
+/// @brief Sweep a capsule against a static axis-aligned box.  Conservative.
+HitResult sweepCapsuleVsBox(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldAABB& box);
+
+/// @brief Sweep a capsule against a convex brush.  Exact (per-plane Minkowski extent).
+HitResult sweepCapsuleVsBrush(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldBrush& brush);
+
+/// @brief Sweep a capsule against a vertical cylinder.  Conservative.
+HitResult sweepCapsuleVsCylinder(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldCylinder& cyl);
+
+/// @brief Sweep a capsule against a sphere.  Conservative.
+HitResult sweepCapsuleVsSphere(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldSphere& sph);
+
+/// @brief Sweep a capsule against all world geometry, returning the earliest hit.
+HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
 
 // Sphere cast
 
