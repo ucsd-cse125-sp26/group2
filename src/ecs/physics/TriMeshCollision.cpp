@@ -668,6 +668,10 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
     mesh.faceNormals.assign(triCount, glm::vec3{0.0f, 1.0f, 0.0f});
     mesh.edgeActive.assign(triCount, 0u);
     mesh.vertActive.assign(triCount, 0u);
+    // Phase B: 3 neighbour slots per triangle (one per edge).  UINT32_MAX
+    // signals "no neighbour" — boundary edge (only 1 incident triangle) or
+    // non-manifold edge (>2 incident triangles).
+    mesh.edgeNeighbor.assign(static_cast<size_t>(triCount) * 3u, UINT32_MAX);
     if (triCount == 0)
         return;
 
@@ -727,7 +731,7 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
 
             bool active = false;
             if (rec.count == 1u) {
-                // Boundary edge — always a real surface feature.
+                // Boundary edge — always a real surface feature.  No neighbour.
                 active = true;
             } else if (rec.count == 2u) {
                 // Find the *other* triangle and compare face normals.
@@ -746,9 +750,17 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
                 const float signedDihedral = glm::dot(glm::cross(nA, nB), edgeVec);
 
                 active = (signedDihedral > 0.0f) && (cosTheta < cosThresh);
+
+                // Phase B: record the neighbour for use by the welded-coplanar
+                // contact-normal swap (sweepCapsuleVsTriangle) and Phase D
+                // wallrun edge traversal.  Both manifold sides (active or not)
+                // have a well-defined neighbour through a manifold edge.
+                mesh.edgeNeighbor[t * 3u + static_cast<uint32_t>(e)] = other;
             } else {
                 // Non-manifold edge (>2 incident triangles).  Treat as active —
                 // it's a real geometric feature even if it's pathological.
+                // No single "the" neighbour — leave UINT32_MAX so the swap
+                // path falls back to the original face normal.
                 active = true;
             }
 

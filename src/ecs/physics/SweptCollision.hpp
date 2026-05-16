@@ -117,6 +117,21 @@ struct WorldTriMesh
     std::vector<uint8_t> edgeActive;    ///< Bit i set ⇔ edge i of this triangle is an active (boundary or convex) edge.
     std::vector<uint8_t> vertActive;    ///< Bit i set ⇔ vertex i of this triangle is touched by an active edge.
 
+    /// @brief Phase B — edge → neighbour triangle adjacency.
+    ///
+    /// Three entries per triangle, one per edge: `edgeNeighbor[3*t + e]` is the
+    /// triangle index of the triangle sharing edge `e` of triangle `t`, or
+    /// `UINT32_MAX` for boundary edges (no neighbour) and non-manifold edges
+    /// (more than two incident triangles).
+    ///
+    /// Populated by `weldTriMesh()` as a side-product of the existing per-edge
+    /// classification pass.  Consumed by:
+    ///   * `sweepCapsuleVsTriangle` for the welded-coplanar contact-normal
+    ///     swap (Phase B), and
+    ///   * Phase D wallrun edge traversal, which walks the surface manifold
+    ///     by hopping between neighbouring triangles at edge crossings.
+    std::vector<uint32_t> edgeNeighbor;
+
     // Phase 3 material data.  If `triangleMaterials` is empty, every triangle
     // falls back to `defaultSurface`.  Authored by `MapLoader` from Blender
     // per-face materials.

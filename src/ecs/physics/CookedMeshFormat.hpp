@@ -16,6 +16,7 @@
 ///   FaceNormals (Tri * vec3)        (Tri * 12 B)  Tri = M/3
 ///   EdgeActive (Tri * uint8)        (Tri B)
 ///   VertActive (Tri * uint8)        (Tri B)
+///   EdgeNeighbor (Tri * 3 * u32)    (Tri * 12 B)  v2 — Phase B adjacency
 ///   TriangleMaterials (Tri * u8)    (Tri B) — 0xFF sentinel = none, use default
 ///   (Optional alignment padding to 4 B)
 ///   BVHNodes (K * BVHNode)          (K * sizeof(BVHNode))
@@ -34,7 +35,7 @@ namespace physics::cook
 {
 
 inline constexpr uint32_t k_magic = 0x6D63'3267u; // 'g2cm'
-inline constexpr uint32_t k_version = 1u;
+inline constexpr uint32_t k_version = 2u; // v2 adds edgeNeighbor (Phase B)
 
 /// @brief 32-byte fixed-size header that opens every cooked-mesh blob.
 struct Header
