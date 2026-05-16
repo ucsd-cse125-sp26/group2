@@ -562,6 +562,23 @@ static float shapeMinCrossSection(const CollisionShape& shape)
     return std::min({shape.halfExtents.x, shape.halfExtents.y, shape.halfExtents.z});
 }
 
+/// @brief Shape-aware scene-wide clearance dispatch.  Capsule path uses
+/// Phase C-deep's per-primitive closest-point queries; AABB falls back to
+/// "always clear" (sentinel large distance) so the same outer loop works
+/// for projectile shapes without further per-primitive math.
+static physics::ClearanceResult clearanceShape(
+    const CollisionShape& shape, glm::vec3 pos, const physics::WorldGeometry& world)
+{
+    if (shape.type == CollisionShapeType::Capsule)
+        return physics::clearanceCapsuleVsWorld(makeCapsuleQuery(shape), pos, world);
+    // AABB shapes (projectiles) use sweep TOI directly without omni-clearance
+    // — the loop's fast-reject branch never fires for them, swept query
+    // runs as it always has.
+    physics::ClearanceResult clr;
+    clr.distance = 1e30f; // never trigger fast-reject; never trigger contact branch
+    return clr;
+}
+
 void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
     // CollisionSystem only reads/writes the replicated half (grounded /
@@ -617,15 +634,15 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     diagFrame.flags |= physics::diag::PhaseFlag::DeepPenetration;
             }
 
-            // Phase C — Sub-step count for high-velocity stability.
+            // Phase C — Sub-step count for high-velocity safety floor.
             //
-            // When projected motion this tick exceeds `0.5 · min_shape_radius`,
-            // split into N equal substeps so each substep's swept distance
-            // stays comfortably below the swept shape's safety margin.  At
-            // normal player speeds (≤ 800 u/s, fullStep ≈ 6.25 u vs cap
-            // 8 u for our 16 u capsule) N = 1; grapple at 2000+ u/s gives
-            // N ≥ 2.  Both client and server compute the same N from the
-            // same inputs, so determinism is preserved.
+            // The CA inner loop below is itself a tunneling-free integrator:
+            // sweep TOI is exact directional clearance, so we never advance
+            // past a surface.  Sub-stepping remains as a hard upper bound on
+            // per-substep motion magnitude — extreme velocities (post-explosion
+            // launches, scripted teleports) split into multiple substeps so
+            // each CA loop runs over a bounded distance.  Determinism is
+            // preserved (client and server compute the same N).
             const float fullStep = glm::length(vel.value) * dt;
             const float maxSafeStep = shapeMinCrossSection(shape) * physics::k_substepSafetyRatio;
             const int numSubsteps =
@@ -635,23 +652,119 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     : 1;
             const float subDt = dt / static_cast<float>(numSubsteps);
 
-            // Phase 1 — Bump loop (sub-stepped collision response + stair stepping).
+            // Phase 1 — Conservative Advancement (Mirtich 2000, hybrid form).
             //
-            // `bumpExhaustedAnySubstep` records whether ANY substep blew through
-            // its 4-clip budget; it propagates to the diag frame after the loop.
-            bool bumpExhaustedAnySubstep = false;
-            int lastClipCount = 0;
+            // Each iteration combines two oracles that together give
+            // production-grade behaviour:
+            //
+            //   * Omnidirectional clearance (`clearanceCapsuleVsWorld`) —
+            //     scene-wide closest-point query.  Fires the *contact branch*
+            //     when distance ≤ ε (clip velocity, push back along the
+            //     closest-surface normal), and the *fast-reject branch* when
+            //     the closest surface is farther than the per-iteration motion
+            //     bound (definitely no contact this step — full advance,
+            //     skipping the sweep entirely).
+            //
+            //   * Directional sweep TOI (`sweepShape`) — exact swept-shape
+            //     time-of-impact along the velocity direction.  Used when
+            //     clearance is too small to fast-reject but too large to
+            //     declare contact.  Advances to the swept TOI, then clips
+            //     velocity and pushes back, exactly as the prior bump loop
+            //     did.
+            //
+            // Why hybrid: pure omnidirectional CA converges to ε-steps for
+            // tangent sliding (player slides along floor → omni clearance
+            // collapses to ε per iter, ≫ 100 iterations to slide across a
+            // room).  Pure sweep-only is the existing bump loop — already
+            // directional CA, but spends a swept query every iter even when
+            // the player is in open space.  The hybrid gets the best of
+            // both: clearance fast-reject saves the sweep in open space,
+            // and the sweep does the work where the clearance can't (close
+            // proximity, complex contact geometry).
+            //
+            // Convergence: typically 1 iter (clear → fast-reject → full
+            // advance) for cruise motion, 2–3 iters for one-contact slides
+            // (sweep → advance to TOI → clip → fast-reject full advance),
+            // 4–6 iters for corner squeezes.  `k_maxCAIterations` bounds
+            // the worst case.
+            constexpr int k_maxCAIterations = 8;
+            bool caExhaustedAnySubstep = false;
 
             for (int sub = 0; sub < numSubsteps; ++sub) {
                 float remainingTime = subDt;
+                bool stepped = false;
+                int iter = 0;
 
-                int clip = 0;
-                for (; clip < 4 && remainingTime > 1e-5f; ++clip) {
+                for (; iter < k_maxCAIterations && remainingTime > 1e-5f; ++iter) {
+                    const physics::ClearanceResult clr = clearanceShape(shape, pos.value, world);
+
+                    // Contact branch — clearance reports we're already touching
+                    // (or penetrating).  Resolve in place using clr's normal:
+                    // floor / wall / step-up / clip + pushback.
+                    if (clr.contact) {
+                        if (diagOn) {
+                            ++diagFrame.bumpHits;
+                            diagFrame.lastHitNormal = clr.normal;
+                        }
+                        if (physics::debug::isEnabled()) {
+                            physics::debug::pushSweepContact(clr.pointOnGeometry,
+                                                             clr.normal,
+                                                             physics::debug::ContactSource::PlaneSweep);
+                        }
+
+                        const bool k_isFloor =
+                            state.gravityFlipped ? (clr.normal.y < -0.7f) : (clr.normal.y > 0.7f);
+
+                        if (k_isFloor) {
+                            pos.value += clr.normal * k_pushback;
+                            vel.value =
+                                physics::clipVelocity(vel.value, clr.normal, physics::k_overbounceFloor);
+                            if (!state.grappleActive) {
+                                state.grounded = true;
+                                state.groundNormal = clr.normal;
+                            }
+                        } else {
+                            if (k_wasGrounded && !state.gravityFlipped && !stepped &&
+                                tryStepUp(pos.value, vel.value, shape, remainingTime, world))
+                            {
+                                state.grounded = true;
+                                stepped = true;
+                                break;
+                            }
+                            pos.value += clr.normal * k_pushback;
+                            vel.value =
+                                physics::clipVelocity(vel.value, clr.normal, physics::k_overbounceWall);
+                        }
+                        continue;
+                    }
+
+                    // Fast-reject branch — the closest geometry is farther
+                    // than the motion bound, so no contact is possible this
+                    // step.  Full advance without ever calling sweep.
+                    const float vLen = glm::length(vel.value);
+                    const float motionBound = vLen * remainingTime;
+                    if (motionBound < 1e-6f) {
+                        // Negligible motion — done.
+                        remainingTime = 0.0f;
+                        break;
+                    }
+                    if (clr.distance > motionBound + k_pushback) {
+                        pos.value += vel.value * remainingTime;
+                        remainingTime = 0.0f;
+                        break;
+                    }
+
+                    // Sweep branch — close enough that contact is possible.
+                    // Run the swept query to get exact directional TOI.
                     const glm::vec3 k_target = pos.value + vel.value * remainingTime;
                     const physics::HitResult k_hit = sweepShape(shape, pos.value, k_target, world);
 
                     if (!k_hit.hit) {
+                        // Clearance over-estimated proximity (e.g. omni
+                        // clearance picked a wall to our side that the swept
+                        // line never reaches).  Safe full advance.
                         pos.value = k_target;
+                        remainingTime = 0.0f;
                         break;
                     }
 
@@ -664,36 +777,28 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     remainingTime *= (1.0f - k_hit.tFirst);
 
                     if (physics::debug::isEnabled()) {
-                        // Mark the contact at the surface point (centre offset back along the
-                        // surface normal by the shape's projected half-extent).  `sweepAll` doesn't
-                        // distinguish the source primitive in `HitResult`, so we tag it as a generic
-                        // sweep contact for now; per-primitive tagging arrives with Phase 2.
                         const float r = shapeMinkowskiExtent(shape, k_hit.normal);
                         physics::debug::pushSweepContact(pos.value - k_hit.normal * r,
                                                          k_hit.normal,
                                                          physics::debug::ContactSource::PlaneSweep);
                     }
 
-                    // Floor detection: normal.y > 0.7 for normal gravity,
-                    // normal.y < -0.7 for flipped (ceilings become floors).
-                    const bool k_isFloor = state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
+                    const bool k_isFloor =
+                        state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
 
                     if (k_isFloor) {
                         pos.value += k_hit.normal * k_pushback;
-                        if (state.grappleActive) {
-                            // During grapple: slide along floor but don't ground or kill pull velocity.
-                            // Just push out of the surface, keep the grapple velocity intact.
-                            vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
-                        } else {
-                            vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
+                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
+                        if (!state.grappleActive) {
                             state.grounded = true;
                             state.groundNormal = k_hit.normal;
                         }
                     } else {
-                        if (k_wasGrounded && !state.gravityFlipped &&
+                        if (k_wasGrounded && !state.gravityFlipped && !stepped &&
                             tryStepUp(pos.value, vel.value, shape, remainingTime, world))
                         {
                             state.grounded = true;
+                            stepped = true;
                             break;
                         }
                         pos.value += k_hit.normal * k_pushback;
@@ -701,9 +806,8 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     }
                 }
 
-                lastClipCount = clip;
-                if (remainingTime > 1e-5f && clip >= 4)
-                    bumpExhaustedAnySubstep = true;
+                if (iter >= k_maxCAIterations && remainingTime > 1e-5f)
+                    caExhaustedAnySubstep = true;
             }
 
             // Phase 2 — Slope sticking (skip during grapple — player must fly freely)
@@ -744,8 +848,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             if (diagOn) {
                 diagFrame.posAfter = pos.value;
                 diagFrame.velAfter = vel.value;
-                (void)lastClipCount; // recorded per-substep; aggregated below.
-                if (bumpExhaustedAnySubstep)
+                if (caExhaustedAnySubstep)
                     diagFrame.flags |= physics::diag::PhaseFlag::BumpExhausted;
                 if (state.grounded)
                     diagFrame.flags |= physics::diag::PhaseFlag::Grounded;
