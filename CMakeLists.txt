@@ -843,6 +843,8 @@ add_executable(group2
         src/ecs/components/ClientId.hpp
         src/client/renderer-new/NewRenderer.cpp
         src/client/renderer-new/NewRenderer.hpp
+        src/client/renderer-new/SkinnedRenderer.cpp
+        src/client/renderer-new/SkinnedRenderer.hpp
         src/client/renderer-new/Camera.cpp
         src/client/renderer-new/Camera.hpp
         src/client/renderer-new/Asset.hpp

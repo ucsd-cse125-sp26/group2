@@ -1,5 +1,10 @@
 /// @file NewRenderer.cpp
 /// @brief Implementation of the work-in-progress NewRenderer.
+///
+/// Grep for `TODO(graphics)` to find every stub still waiting on the
+/// graphics team.  Each TODO has a doc-comment block on the matching
+/// header declaration describing what data is captured and where it
+/// should end up.
 
 #include "NewRenderer.hpp"
 
@@ -13,7 +18,24 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <imgui.h>
 #include <iostream>
+#include <unordered_map>
 #include <vector>
+
+namespace
+{
+/// Convert SDL high-resolution counter ticks to milliseconds.
+float ticksToMs(Uint64 elapsed, Uint64 freq)
+{
+    return freq == 0 ? 0.0f : (static_cast<float>(elapsed) * 1000.0f) / static_cast<float>(freq);
+}
+
+/// Side-table for per-model emissive overrides set via `setModelEmissive`.
+/// TODO(graphics): consume these inside `drawModel` when building the
+/// material UBO — currently captured but unused.
+std::unordered_map<int32_t, glm::vec4> g_emissiveOverrides;
+} // namespace
+
+// ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 bool NewRenderer::init(SDL_Window* window)
 {
@@ -75,7 +97,7 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    // DEFAULT TEXTURE
+    // DEFAULT TEXTURE — used for any mesh whose material has no albedo.
     texture_ = Boilerplate::loadTexture(device_, "assets/404.jpeg");
     if (!texture_) {
         SDL_Log("NewRenderer: failed to load texture");
@@ -83,6 +105,8 @@ bool NewRenderer::init(SDL_Window* window)
     }
 
     camera_ = NewCamera();
+
+    skinnedRenderer_.init(device_);
 
     return true;
 }
@@ -106,6 +130,7 @@ bool NewRenderer::createHudPipeline()
 
     return hudPipeline_ != nullptr;
 }
+
 bool NewRenderer::createGeometryPipeline()
 {
     Boilerplate::ShaderInfo vertexShader{};
@@ -149,14 +174,20 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
     mesh.iBufferInfo_.srcData = mesh.indexData_.data();
 }
 
+// ─── Per-frame entry point ──────────────────────────────────────────────────
+
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
-    SDL_Log("pre-drawFrame window flags: 0x%x", SDL_GetWindowFlags(window_));
+    const Uint64 freq = SDL_GetPerformanceFrequency();
+    const Uint64 t0 = SDL_GetPerformanceCounter();
+
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
         SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
         return;
     }
+    const Uint64 t1 = SDL_GetPerformanceCounter();
+    lastAcquireMs_ = ticksToMs(t1 - t0, freq);
 
     SDL_GPUTexture* swapchain = nullptr;
     Uint32 width = 0;
@@ -168,7 +199,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     if (!swapchain) {
-        // SDL_Log("NewRenderer::drawFrame: swapchain not ready, skipping...: ");
+        // Swapchain not ready (e.g. minimised) — drop the frame silently.
         SDL_CancelGPUCommandBuffer(cmd);
         return;
     }
@@ -181,10 +212,29 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     setMainCamera(eye, yaw, pitch, roll, width, height);
 
+    // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
+    // the first render pass so the copy is sequenced ahead of the draws.
+    {
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
+        if (copyPass) {
+            skinnedRenderer_.uploadFrame(cmd, copyPass);
+            SDL_EndGPUCopyPass(copyPass);
+        }
+    }
+
     drawGeometryPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
 
+    const Uint64 t2 = SDL_GetPerformanceCounter();
+    lastRecordMs_ = ticksToMs(t2 - t1, freq);
+
     SDL_SubmitGPUCommandBuffer(cmd);
+
+    const Uint64 t3 = SDL_GetPerformanceCounter();
+    lastSubmitMs_ = ticksToMs(t3 - t2, freq);
+
+    // TODO(graphics): if `pendingScreenshotPath_` is non-empty, schedule a
+    // swapchain readback and write a PNG.  See `requestScreenshot` doc.
 }
 
 void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height)
@@ -208,8 +258,8 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);
 
-    // const glm::mat4 projection = camera_.getProjectionMatrix();
-    // SDL_PushGPUVertexUniformData(cmd, 0, &projection, sizeof(glm::mat4));
+    skinnedRenderer_.draw(geometryPass, cmd);
+
     drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
@@ -217,20 +267,10 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
 
 void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    // if (Asset::modelInstances_.size() <= 4) {
-    //     return;
-    // }
-    // Asset::weaponModelId_ = Asset::modelInstances_.at(4).modelId_;
-    // if (!Asset::models_.contains(Asset::weaponModelId_)) {
-    //     std::cout << "invalid weaponModelId" << std::endl;
-    //     return;
-    // }
-
-    // constexpr auto newWVM = glm::mat4(1.0f);
-
-    if (Asset::modelInstances_.size() <= weapon_.modelIndex) {
+    if (!weapon_.visible)
         return;
-    }
+    if (weapon_.modelIndex < 0 || static_cast<size_t>(weapon_.modelIndex) >= Asset::modelInstances_.size())
+        return;
 
     Asset::ModelInstance& weaponModelInstance = Asset::modelInstances_.at(weapon_.modelIndex);
     ModelIdInt weaponModelId = weaponModelInstance.modelId_;
@@ -246,6 +286,8 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     for (const auto& mInstance : Asset::modelInstances_) {
+        if (!mInstance.drawInScenePass)
+            continue;
         drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
     }
 }
@@ -253,11 +295,15 @@ void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPU
 void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     for (const auto& entityCmd : entities_) {
-        if (entityCmd.modelIndex < 0 ) {
+        if (entityCmd.modelIndex < 0) {
             std::cout << "invalid modelIndex" << std::endl;
             break;
         }
+        if (static_cast<size_t>(entityCmd.modelIndex) >= Asset::modelInstances_.size())
+            continue;
         ModelIdInt modelId = Asset::modelInstances_.at(entityCmd.modelIndex).modelId_;
+        // TODO(graphics): pass entityCmd.tint into the per-mesh material UBO
+        // so tinted entities (e.g. team colors, hit flashes) render correctly.
         drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
     }
 }
@@ -287,18 +333,16 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture, sampler_);
         SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
 
-        // Material uniform.
         glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
         if (material != nullptr)
             materialDiffuse = glm::vec4(material->kDiffuse_, 1.0f);
         Uint32 useTextureUniform = useTexture ? 1u : 0u;
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         SDL_PushGPUFragmentUniformData(cmd, 1, &useTextureUniform, sizeof(useTextureUniform));
-        
-        // Bind model matrix
+
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
-        
+
         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
         drawMesh(renderPass, mesh);
     }
@@ -354,11 +398,12 @@ void NewRenderer::drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cm
     if (hudTexture_ != nullptr)
         drawHud(uiPass);
 
-    if (drawData)
+    if (drawData && imguiEnabled)
         ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
 
     SDL_EndGPURenderPass(uiPass);
 }
+
 void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
 {
     SDL_GPUTextureSamplerBinding hudTextureBinding = Boilerplate::makeTextureSamplerBinding(hudTexture_, hudSampler_);
@@ -392,10 +437,16 @@ void NewRenderer::quit()
             mesh.iBufferInfo_ = {};
         }
 
+        skinnedRenderer_.shutdown();
+
         if (geometryPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, geometryPipeline_);
+        if (hudPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, hudPipeline_);
         if (sampler_)
             SDL_ReleaseGPUSampler(device_, sampler_);
+        if (hudSampler_)
+            SDL_ReleaseGPUSampler(device_, hudSampler_);
         if (texture_)
             SDL_ReleaseGPUTexture(device_, texture_);
 
@@ -409,18 +460,23 @@ void NewRenderer::quit()
     shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
     geometryPipeline_ = nullptr;
+    hudPipeline_ = nullptr;
     depthTarget_.texture = nullptr;
     texture_ = nullptr;
     sampler_ = nullptr;
+    hudTexture_ = nullptr;
+    hudSampler_ = nullptr;
     depthWidth_ = 0;
     depthHeight_ = 0;
 }
+
+// ─── Static models ──────────────────────────────────────────────────────────
 
 int NewRenderer::loadSceneModel(
     const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& /*excludeNodesContaining*/)
 {
     ModelIdInt modelId = Asset::getIdFromString(filename);
-    bool flatten = false;
+    const bool flatten = false;
     const std::vector<std::string> texFileNames;
 
     const char* const base = SDL_GetBasePath();
@@ -448,39 +504,28 @@ int NewRenderer::loadSceneModel(
     Asset::modelInstances_.push_back(sceneInstance);
 
     std::vector<Boilerplate::BufferUpload> uploads;
-
     for (auto& element : model.modelElements_) {
         createMeshBuffers(element.meshId_);
         Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
         uploads.push_back({mesh.vBufferInfo_.gpuBuff, mesh.vBufferInfo_.srcData, mesh.vBufferInfo_.bufferSize});
         uploads.push_back({mesh.iBufferInfo_.gpuBuff, mesh.iBufferInfo_.srcData, mesh.iBufferInfo_.bufferSize});
 
-       MaterialIdInt matId = element.materialId_;
-        if (!Asset::materials_.contains(matId)) {
+        MaterialIdInt matId = element.materialId_;
+        if (!Asset::materials_.contains(matId))
             continue;
-        }
 
         Asset::Material& mat = Asset::materials_.at(matId);
         TexIdInt texId = mat.texId_[0];
 
-        if (texId == 0 || !Asset::textures_.contains(texId)) {
+        if (texId == 0 || !Asset::textures_.contains(texId))
             continue;
-        }
 
         Asset::Texture& tex = Asset::textures_.at(texId);
-
-        if (tex.tex == nullptr &&
-            tex.tex_raw != nullptr &&
-            tex.width > 0 &&
-            tex.height > 0)
-        {
-            tex.tex = Boilerplate::createTextureRGBA8(
-                device_,
-                static_cast<Uint32>(tex.width),
-                static_cast<Uint32>(tex.height),
-                tex.tex_raw
-            );
-
+        if (tex.tex == nullptr && tex.tex_raw != nullptr && tex.width > 0 && tex.height > 0) {
+            tex.tex = Boilerplate::createTextureRGBA8(device_,
+                                                     static_cast<Uint32>(tex.width),
+                                                     static_cast<Uint32>(tex.height),
+                                                     tex.tex_raw);
             stbi_image_free(tex.tex_raw);
             tex.tex_raw = nullptr;
         }
@@ -496,8 +541,15 @@ int NewRenderer::loadSceneModel(
     SDL_SubmitGPUCommandBuffer(cmd);
     SDL_WaitForGPUIdle(device_);
 
-    return Asset::modelInstances_.size() - 1;
+    return static_cast<int>(Asset::modelInstances_.size() - 1);
 }
+
+int NewRenderer::modelCount() const
+{
+    return static_cast<int>(Asset::models_.size());
+}
+
+// ─── Per-frame data-capture stubs ────────────────────────────────────────────
 
 void NewRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
 {
@@ -506,14 +558,82 @@ void NewRenderer::setWeaponViewmodel(const WeaponViewmodel& vm)
 
 void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
 {
-    return;
+    // TODO(graphics): consume `pointLights_` inside the geometry / skinned
+    // passes by pushing a light-array UBO to the fragment shader.  Cap at the
+    // shader's array size and silently drop the rest.
+    pointLights_ = std::move(pointLights);
 }
+
 void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)
 {
     entities_ = std::move(entityList);
-    return;
 }
+
 void NewRenderer::setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor)
 {
-    return;
+    // TODO(graphics): read this side-table inside `drawModel` when composing
+    // the material UBO.  Emissive should add (not multiply) into the lit
+    // colour so glowing bodies (beam cylinders, sphere lights) still pop in
+    // dark areas.
+    g_emissiveOverrides[modelIdUnsanitized] = emissiveColor;
+}
+
+void NewRenderer::setModelScenePass(int32_t modelIndex, bool drawInScene)
+{
+    if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= Asset::modelInstances_.size())
+        return;
+    Asset::modelInstances_.at(modelIndex).drawInScenePass = drawInScene;
+}
+
+void NewRenderer::setParticleSystem(ParticleSystem* ps)
+{
+    // TODO(graphics): inside `drawFrame`, before BeginRenderPass call
+    //   particleSystem_->uploadToGpu(cmd);
+    // and inside the main HDR pass call
+    //   particleSystem_->render(pass, cmd);
+    // See ParticleSystem.hpp doc-comment for the lifecycle (init/update/quit).
+    particleSystem_ = ps;
+}
+
+bool NewRenderer::setVSync(bool enabled)
+{
+    // TODO(graphics): apply via SDL_SetGPUSwapchainParameters with
+    //   SDL_GPU_PRESENTMODE_VSYNC (or MAILBOX) when enabled, and
+    //   SDL_GPU_PRESENTMODE_IMMEDIATE when disabled.  Check the format
+    //   you currently use for the swapchain so you preserve it.
+    vsyncEnabled_ = enabled;
+    return true;
+}
+
+void NewRenderer::requestScreenshot(const std::string& path)
+{
+    // TODO(graphics): after `SubmitGPUCommandBuffer` in `drawFrame`, copy the
+    // swapchain texture into a download transfer buffer, map CPU-side, write
+    // `path` as a PNG via `stbi_write_png` (4 channels, R8G8B8A8).  Clear
+    // `pendingScreenshotPath_` after writing.
+    pendingScreenshotPath_ = path;
+}
+
+void NewRenderer::updateModelMeshVertices(int /*modelIndex*/,
+                                          int /*meshIndex*/,
+                                          const Vertex* /*vertices*/,
+                                          Uint32 /*vertexCount*/)
+{
+    // TODO(graphics): legacy used this for CPU-skinning (now superseded by
+    // setSkinnedFrame).  Leave as a no-op unless a new caller emerges.
+}
+
+bool NewRenderer::loadHDRSkybox(const std::string& /*path*/)
+{
+    // TODO(graphics): load via stb_image float, upload as a 2D HDR texture,
+    // equirect→cubemap convolution, derive irradiance + prefilter mips.
+    // Set `useHDRSkybox = true` and `currentHDRName = stem-of(path)` on success.
+    return false;
+}
+
+void NewRenderer::scanHDRFiles()
+{
+    // TODO(graphics): iterate `assets/hdr/*.hdr` via std::filesystem and fill
+    // `availableHDRFiles` with absolute paths.  Called once at init.
+    availableHDRFiles.clear();
 }
