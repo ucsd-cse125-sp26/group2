@@ -108,7 +108,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
 
 /// @brief Create a full graphics pipeline from vertex/fragment shaders and vertex layout.
 /// @param device The GPU device.
-/// @param window The SDL window (used to query swapchain format).
+/// @param colorFormat
 /// @param shaderFormat The shader binary format.
 /// @param vertexShaderInfo Vertex shader descriptor.
 /// @param fragmentShaderInfo Fragment shader descriptor.
@@ -117,7 +117,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
 /// @param overBlending
 /// @return The created pipeline, or nullptr on failure.
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
-                                                SDL_Window* window,
+                                                SDL_GPUTextureFormat& colorFormat,
                                                 SDL_GPUShaderFormat shaderFormat,
                                                 const ShaderInfo& vertexShaderInfo,
                                                 const ShaderInfo& fragmentShaderInfo,

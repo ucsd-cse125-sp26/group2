@@ -334,6 +334,7 @@ private:
 
     bool createGeometryPipeline();
     bool createHudPipeline();
+    bool createSkinningPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
@@ -341,6 +342,7 @@ private:
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
+    void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
@@ -357,6 +359,7 @@ private:
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
 
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 depthWidth_ = 0;

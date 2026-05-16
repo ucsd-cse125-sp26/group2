@@ -43,10 +43,10 @@ void SkinnedRenderer::shutdown()
     }
     skinnedMeshes_.clear();
 
-    if (palettesSsbo_)
-        SDL_ReleaseGPUBuffer(device_, palettesSsbo_);
-    if (instancesSsbo_)
-        SDL_ReleaseGPUBuffer(device_, instancesSsbo_);
+    if (palettesSsboInfo_.ssbo_)
+        SDL_ReleaseGPUBuffer(device_, palettesSsboInfo_.ssbo_);
+    if (instancesSsboInfo_.ssbo_)
+        SDL_ReleaseGPUBuffer(device_, instancesSsboInfo_.ssbo_);
     if (paletteXfer_)
         SDL_ReleaseGPUTransferBuffer(device_, paletteXfer_);
     if (instanceXfer_)
@@ -54,13 +54,13 @@ void SkinnedRenderer::shutdown()
     if (pipeline_)
         SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
 
-    palettesSsbo_ = nullptr;
-    instancesSsbo_ = nullptr;
+    palettesSsboInfo_.ssbo_ = nullptr;
+    instancesSsboInfo_.ssbo_ = nullptr;
     paletteXfer_ = nullptr;
     instanceXfer_ = nullptr;
     pipeline_ = nullptr;
-    palettesCapacityBytes_ = 0;
-    instancesCapacityBytes_ = 0;
+    palettesSsboInfo_.palettesCapacityBytes_ = 0;
+    instancesSsboInfo_.capacityBytes_ = 0;
     paletteXferCapacityBytes_ = 0;
     instanceXferCapacityBytes_ = 0;
 
@@ -217,9 +217,9 @@ bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
         }
         return true;
     };
-    if (!growBuf(palettesSsbo_, palettesCapacityBytes_, paletteBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+    if (!growBuf(palettesSsboInfo_.ssbo_, palettesSsboInfo_.palettesCapacityBytes_, paletteBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
         return false;
-    if (!growBuf(instancesSsbo_, instancesCapacityBytes_, instanceBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+    if (!growBuf(instancesSsboInfo_.ssbo_, instancesSsboInfo_.capacityBytes_, instanceBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
         return false;
     if (!growXfer(paletteXfer_, paletteXferCapacityBytes_, paletteBytes))
         return false;
@@ -255,8 +255,8 @@ void SkinnedRenderer::uploadFrame(SDL_GPUCommandBuffer* /*cmd*/, SDL_GPUCopyPass
         d.size = bytes;
         SDL_UploadToGPUBuffer(copyPass, &s, &d, /*cycle=*/false);
     };
-    upload(paletteXfer_, palettesSsbo_, framePalette_.data(), paletteBytes);
-    upload(instanceXfer_, instancesSsbo_, frameInstances_.data(), instanceBytes);
+    upload(paletteXfer_, palettesSsboInfo_.ssbo_, framePalette_.data(), paletteBytes);
+    upload(instanceXfer_, instancesSsboInfo_.ssbo_, frameInstances_.data(), instanceBytes);
 }
 
 // ─── Per-frame: draw ─────────────────────────────────────────────────────────
@@ -267,7 +267,7 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* /*renderPass*/, SDL_GPUCommandBuff
     // doc-block for the data layout and shader pseudocode.  Sketch:
     //
     //   if (!rigInstalled_ || !pipeline_ || frameInstances_.empty()
-    //       || !palettesSsbo_ || !instancesSsbo_)
+    //       || !palettesSsboInfo_.ssbo_ || !instancesSsboInfo_.ssbo_)
     //       return;
     //
     //   SDL_BindGPUGraphicsPipeline(renderPass, pipeline_);
@@ -275,7 +275,7 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* /*renderPass*/, SDL_GPUCommandBuff
     //   // The geometry pass already pushed view+projection at vertex UBO
     //   // slot 0 in NewRenderer::drawGeometryPass — no need to push again.
     //
-    //   SDL_GPUBuffer* ssbos[2] = {palettesSsbo_, instancesSsbo_};
+    //   SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     //   SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
     //
     //   const Uint32 numInstances = static_cast<Uint32>(frameInstances_.size());
@@ -314,3 +314,4 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* /*renderPass*/, SDL_GPUCommandBuff
     //   vec4 worldPos = inst.worldTransform * skin * vec4(inPosition, 1.0);
     //   gl_Position   = viewProjection * worldPos;
 }
+

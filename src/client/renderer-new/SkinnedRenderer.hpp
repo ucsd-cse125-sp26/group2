@@ -142,6 +142,11 @@ private:
         Uint32 indexCount = 0;
         Uint32 vertexCount = 0;
     };
+    struct SsboInfo
+    {
+        SDL_GPUBuffer* ssbo_;
+        Uint32 capacityBytes_ = 0;
+    };
 
     /// @brief Grow palette/instance SSBOs (and their transfer buffers) to at least these byte sizes.
     bool ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes);
@@ -162,14 +167,18 @@ private:
     std::vector<SkinnedMesh> skinnedMeshes_;
 
     // ─── Owned: per-frame GPU resources (grow on demand) ─────────────────────
-    SDL_GPUBuffer* palettesSsbo_ = nullptr;  ///< STORAGE_READ, mat4[numInstances * numJoints].
-    SDL_GPUBuffer* instancesSsbo_ = nullptr; ///< STORAGE_READ, SkinnedInstance[numInstances].
-    Uint32 palettesCapacityBytes_ = 0;
-    Uint32 instancesCapacityBytes_ = 0;
+    // SDL_GPUBuffer* palettesSsbo_ = nullptr;  ///< STORAGE_READ, mat4[numInstances * numJoints].
+    // SDL_GPUBuffer* instancesSsbo_ = nullptr; ///< STORAGE_READ, SkinnedInstance[numInstances].
+    // Uint32 palettesCapacityBytes_ = 0;
+    // Uint32 instancesCapacityBytes_ = 0;
+    SsboInfo palettesSsboInfo_;
+    SsboInfo instancesSsboInfo_;
+
     SDL_GPUTransferBuffer* paletteXfer_ = nullptr;
     SDL_GPUTransferBuffer* instanceXfer_ = nullptr;
     Uint32 paletteXferCapacityBytes_ = 0;
     Uint32 instanceXferCapacityBytes_ = 0;
+
 
     // ─── CPU staging (filled by setFrame, drained by uploadFrame) ────────────
     std::vector<glm::mat4> framePalette_;

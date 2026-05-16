@@ -150,7 +150,7 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
 }
 
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
-                                                SDL_Window* window,
+                                                SDL_GPUTextureFormat& colorFormat,
                                                 SDL_GPUShaderFormat shaderFormat,
                                                 const ShaderInfo& vertexShaderInfo,
                                                 const ShaderInfo& fragmentShaderInfo,
@@ -180,7 +180,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
     vertexInputState.vertex_attributes = vertexInputLayout.attributes.data();
 
     SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
+    colorTarget.format = colorFormat;
     if (overBlending) {
         SDL_GPUColorTargetBlendState overBlendState{};
         overBlendState.enable_blend = true;

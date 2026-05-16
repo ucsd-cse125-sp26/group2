@@ -125,8 +125,9 @@ bool NewRenderer::createHudPipeline()
 
     const Boilerplate::VertexInputLayout vertexLayout{};
 
+   SDL_GPUTextureFormat colorTarget = SDL_GetGPUSwapchainTextureFormat(device_, window_);
     hudPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
+        device_, colorTarget, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
 
     return hudPipeline_ != nullptr;
 }
@@ -152,10 +153,41 @@ bool NewRenderer::createGeometryPipeline()
         Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
     };
 
+
+    SDL_GPUTextureFormat colorTarget = SDL_GetGPUSwapchainTextureFormat(device_, window_);
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, false);
+        device_, colorTarget, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return geometryPipeline_ != nullptr;
+}
+
+bool NewRenderer::createSkinningPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/skinned.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShader.uniformBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/geometry.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 1;
+    fragmentShader.uniformBufferCount = 2;
+
+    Boilerplate::VertexInputLayout vertexLayout{};
+    vertexLayout.vertexPitch = sizeof(Vertex);
+    vertexLayout.attributes = {
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
+    };
+
+    SDL_GPUTextureFormat colorTarget = SDL_GetGPUSwapchainTextureFormat(device_, window_);
+
+    skinnedPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, colorTarget, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
+
+    return skinnedPipeline_ != nullptr;
 }
 
 void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
@@ -281,6 +313,11 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     }
 
     drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
+}
+
+void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+{
+    skinnedRenderer_.draw(geometryPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
@@ -569,71 +606,71 @@ void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)
     entities_ = std::move(entityList);
 }
 
-void NewRenderer::setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor)
-{
-    // TODO(graphics): read this side-table inside `drawModel` when composing
-    // the material UBO.  Emissive should add (not multiply) into the lit
-    // colour so glowing bodies (beam cylinders, sphere lights) still pop in
-    // dark areas.
-    g_emissiveOverrides[modelIdUnsanitized] = emissiveColor;
-}
+// void NewRenderer::setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor)
+// {
+//     // TODO(graphics): read this side-table inside `drawModel` when composing
+//     // the material UBO.  Emissive should add (not multiply) into the lit
+//     // colour so glowing bodies (beam cylinders, sphere lights) still pop in
+//     // dark areas.
+//     g_emissiveOverrides[modelIdUnsanitized] = emissiveColor;
+// }
+//
+// void NewRenderer::setModelScenePass(int32_t modelIndex, bool drawInScene)
+// {
+//     if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= Asset::modelInstances_.size())
+//         return;
+//     Asset::modelInstances_.at(modelIndex).drawInScenePass = drawInScene;
+// }
 
-void NewRenderer::setModelScenePass(int32_t modelIndex, bool drawInScene)
-{
-    if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= Asset::modelInstances_.size())
-        return;
-    Asset::modelInstances_.at(modelIndex).drawInScenePass = drawInScene;
-}
+// void NewRenderer::setParticleSystem(ParticleSystem* ps)
+// {
+//     // TODO(graphics): inside `drawFrame`, before BeginRenderPass call
+//     //   particleSystem_->uploadToGpu(cmd);
+//     // and inside the main HDR pass call
+//     //   particleSystem_->render(pass, cmd);
+//     // See ParticleSystem.hpp doc-comment for the lifecycle (init/update/quit).
+//     particleSystem_ = ps;
+// }
 
-void NewRenderer::setParticleSystem(ParticleSystem* ps)
-{
-    // TODO(graphics): inside `drawFrame`, before BeginRenderPass call
-    //   particleSystem_->uploadToGpu(cmd);
-    // and inside the main HDR pass call
-    //   particleSystem_->render(pass, cmd);
-    // See ParticleSystem.hpp doc-comment for the lifecycle (init/update/quit).
-    particleSystem_ = ps;
-}
+// bool NewRenderer::setVSync(bool enabled)
+// {
+//     // TODO(graphics): apply via SDL_SetGPUSwapchainParameters with
+//     //   SDL_GPU_PRESENTMODE_VSYNC (or MAILBOX) when enabled, and
+//     //   SDL_GPU_PRESENTMODE_IMMEDIATE when disabled.  Check the format
+//     //   you currently use for the swapchain so you preserve it.
+//     vsyncEnabled_ = enabled;
+//     return true;
+// }
 
-bool NewRenderer::setVSync(bool enabled)
-{
-    // TODO(graphics): apply via SDL_SetGPUSwapchainParameters with
-    //   SDL_GPU_PRESENTMODE_VSYNC (or MAILBOX) when enabled, and
-    //   SDL_GPU_PRESENTMODE_IMMEDIATE when disabled.  Check the format
-    //   you currently use for the swapchain so you preserve it.
-    vsyncEnabled_ = enabled;
-    return true;
-}
+// void NewRenderer::requestScreenshot(const std::string& path)
+// {
+//     // TODO(graphics): after `SubmitGPUCommandBuffer` in `drawFrame`, copy the
+//     // swapchain texture into a download transfer buffer, map CPU-side, write
+//     // `path` as a PNG via `stbi_write_png` (4 channels, R8G8B8A8).  Clear
+//     // `pendingScreenshotPath_` after writing.
+//     pendingScreenshotPath_ = path;
+// }
 
-void NewRenderer::requestScreenshot(const std::string& path)
-{
-    // TODO(graphics): after `SubmitGPUCommandBuffer` in `drawFrame`, copy the
-    // swapchain texture into a download transfer buffer, map CPU-side, write
-    // `path` as a PNG via `stbi_write_png` (4 channels, R8G8B8A8).  Clear
-    // `pendingScreenshotPath_` after writing.
-    pendingScreenshotPath_ = path;
-}
+// void NewRenderer::updateModelMeshVertices(int /*modelIndex*/,
+//                                           int /*meshIndex*/,
+//                                           const Vertex* /*vertices*/,
+//                                           Uint32 /*vertexCount*/)
+// {
+//     // TODO(graphics): legacy used this for CPU-skinning (now superseded by
+//     // setSkinnedFrame).  Leave as a no-op unless a new caller emerges.
+// }
 
-void NewRenderer::updateModelMeshVertices(int /*modelIndex*/,
-                                          int /*meshIndex*/,
-                                          const Vertex* /*vertices*/,
-                                          Uint32 /*vertexCount*/)
-{
-    // TODO(graphics): legacy used this for CPU-skinning (now superseded by
-    // setSkinnedFrame).  Leave as a no-op unless a new caller emerges.
-}
+// bool NewRenderer::loadHDRSkybox(const std::string& /*path*/)
+// {
+//     // TODO(graphics): load via stb_image float, upload as a 2D HDR texture,
+//     // equirect→cubemap convolution, derive irradiance + prefilter mips.
+//     // Set `useHDRSkybox = true` and `currentHDRName = stem-of(path)` on success.
+//     return false;
+// }
 
-bool NewRenderer::loadHDRSkybox(const std::string& /*path*/)
-{
-    // TODO(graphics): load via stb_image float, upload as a 2D HDR texture,
-    // equirect→cubemap convolution, derive irradiance + prefilter mips.
-    // Set `useHDRSkybox = true` and `currentHDRName = stem-of(path)` on success.
-    return false;
-}
-
-void NewRenderer::scanHDRFiles()
-{
-    // TODO(graphics): iterate `assets/hdr/*.hdr` via std::filesystem and fill
-    // `availableHDRFiles` with absolute paths.  Called once at init.
-    availableHDRFiles.clear();
-}
+// void NewRenderer::scanHDRFiles()
+// {
+//     // TODO(graphics): iterate `assets/hdr/*.hdr` via std::filesystem and fill
+//     // `availableHDRFiles` with absolute paths.  Called once at init.
+//     availableHDRFiles.clear();
+// }
