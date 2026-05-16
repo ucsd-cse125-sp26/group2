@@ -175,49 +175,87 @@ player walks across without seam catches (already true via Phase 2 welding;
 preserved by capsule path).  Phase D acceptance — wallrun edge traversal —
 will exercise the new data structures end-to-end.
 
-### Phase C — Sub-stepping for high-velocity stability (independent)
+### Phase C — Conservative-advancement player integration (independent)
 
-Goal: ensure the player can never tunnel through thin geometry even at
-extreme velocities (grapple yank, explosion knockback, scripted teleports).
+Goal: a tunneling-free, production-grade integrator for player motion at
+any velocity.  Combines closest-point clearance queries with sweep TOI in
+a Mirtich-2000 hybrid; preserves determinism; converges in ≤ 8 iterations
+for any plausible scenario.
 
 **Implementation outcome (as shipped).**
 
-- `physics::k_enableSubstepping` (default on), `k_substepSafetyRatio = 0.5`,
-  `k_maxSubsteps = 8` in `PhysicsConstants.hpp`.
-- `CollisionSystem::runCollision` wraps the bump loop in an N-substep
-  loop where `N = ceil(|v|·dt / (k_substepSafetyRatio · min_shape_radius))`,
-  clamped to `[1, k_maxSubsteps]`.  Each substep runs the existing
-  4-clip bump loop with `subDt = dt/N`.  Depen, slope-stick, and
-  ground-probe run once per tick as before.
-- Determinism preserved: client and server compute the same `N` from
-  the same inputs.
+*Per-primitive capsule clearance queries* in `SweptCollision.hpp/.cpp`:
 
-**What was skipped and why.**
+- `clearanceCapsuleVsPlanes` — exact, takes min over plane Minkowski
+  extents.
+- `clearanceCapsuleVsBrush` — max-of-positive-clearances over the brush's
+  half-spaces (valid lower bound on brush-surface distance).
+- `clearanceCapsuleVsSphere` — exact via segment-to-point closest distance.
+- `clearanceCapsuleVsBox`, `clearanceCapsuleVsCylinder` — conservative via
+  capsule's enclosing AABB.  Bounded over-approximation at corner
+  curvature only; CA iterates a corner in extra passes rather than
+  penetrating.
+- `clearanceCapsuleVsTriMesh` — wraps Phase B's `closestPointOnMesh`,
+  subtracting the capsule radius for surface-to-surface distance.
+- `clearanceCapsuleVsWorld` — scene-wide minimum across all primitives.
 
-The original Phase-C scope also called for replacing the bump loop with a
-textbook "conservative advancement using clearance query" inner loop
-(Mirtich 2000 / Bullet `btContinuousConvexCollision`).  Implementation
-analysis showed:
+*Hybrid CA inner loop* in `CollisionSystem::runCollision`:
 
-1. Our existing bump loop is *already* conservative-advancement-via-sweep-TOI:
-   each clip iteration advances to the swept time-of-impact, never
-   penetrating past the swept shape's safety margin.  This is exact for
-   plane / brush / triangle queries and bounded-conservative for box /
-   cylinder / sphere with a capsule.
-2. A true clearance-query CA would need `closestPointOnX` for *every*
-   primitive type.  Phase B added `closestPointOnMesh` for trimesh
-   only; the others would be deferred work disproportionate to the
-   remaining gap.
-3. Sub-stepping alone closes the high-velocity tunneling gap (≥ 2000 u/s
-   grapple → N ≥ 2 substeps → per-substep sweep distance stays under
-   the safety margin).
+```
+for substep in 0..N:
+  for iter in 0..k_maxCAIterations:
+    clr = clearanceCapsuleVsWorld(shape, pos, world)
+    if clr.contact:                 // touching / penetrating
+      clip + pushback                // use clr.normal directly
+    else if clr.distance > motion + ε:  // open space
+      pos += vel * remainingTime    // FULL advance, sweep skipped
+      break
+    else:                            // close but not touching
+      hit = sweepShape(...)          // exact directional TOI
+      advance to TOI; clip + pushback
+```
 
-The full clearance-CA rewrite is left for a future phase if a real-world
-case demands it.
+Each oracle does what it dominates: omnidirectional clearance handles
+the contact resolve and the open-space fast-reject without ever calling
+sweep; sweep TOI handles the close-but-approaching cases where the
+clearance is too small to fast-reject but too large to call contact.
 
-Acceptance: grapple-hook yank at ≥ 2000 u/s never clips through a wall;
-determinism hash matches client/server.  Normal-speed gameplay is
-behaviourally identical to pre-Phase-C (`N = 1`).
+*Sub-stepping* (independent safety floor): when `|v|·dt > 0.5·r`, split
+the tick into N substeps so each CA loop runs over a bounded distance.
+Constants in `PhysicsConstants.hpp`:
+
+```
+k_enableSubstepping    = true
+k_substepSafetyRatio   = 0.5
+k_maxSubsteps          = 8
+```
+
+**Why hybrid, not pure omnidirectional CA.**  Pure omnidirectional CA
+collapses to ε-steps on tangent slides — when the player is hugging a
+wall, the omni clearance is just the pushback margin, so each iteration
+advances by ε.  Sliding across a 1000-unit room would take 32 000
+iterations.  The hybrid does an omni-clearance check first; if the
+result fast-rejects (open space) or fires the contact branch (use the
+clr.normal to clip), we're done.  Only when the answer is "close but
+not touching" do we pay for a sweep — exactly the case the sweep is
+made for.
+
+**Convergence (typical).**
+
+| Scenario | Iterations |
+|---|---|
+| Cruise motion (open space) | 1 (fast-reject) |
+| Sliding along a wall | 2 (clip-then-fast-reject) |
+| Sweep-collision into a wall | 3 (sweep-advance, clip, fast-reject) |
+| Corner squeeze (floor + wall) | 4–6 |
+| Pathological (k_maxCAIterations cap) | 8 |
+
+**Determinism.**  Client and server compute identical clearance + sweep
+results from identical inputs — no source of non-determinism introduced.
+
+Acceptance: grapple-hook yank at ≥ 2000 u/s never clips; player slides
+smoothly along walls and floors at all velocities; determinism hash
+matches client/server.
 
 ### Phase D — Wall-attached kinematic frame
 
