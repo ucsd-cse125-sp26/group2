@@ -141,21 +141,39 @@ inward-drift correction firing.
 
 ### Phase B — Active edge filtering on sweep + closest-point BVH
 
-With capsule contacts having unambiguous closest features, enable welded-edge
-swap on `sweepCapsuleVsTriangle`. When the closest point is on an inactive
-edge or vertex, look up the adjacent triangle and use *its* face normal as the
-contact normal. Adjacency requires an edge → neighbor-triangle map, which is
-already implicit in the welding pass (`EdgeRecord` at
-`TriMeshCollision.cpp:473`); promote it to a stored mesh field.
+Goal: provide the per-edge neighbour data and the closest-point query that
+Phase D wallrun needs to walk the surface as a manifold.
 
-Also add a `closestPointOnMesh(capsule.axis, maxRadius) → { point, normal,
-tri_id, region }` BVH query. This becomes the source of truth for wallrun's
-"what wall am I on" rather than sphere raycasts. Same BVH walk; track closest
-distance instead of first hit.
+**Implementation outcome (as shipped).**
+
+- `WorldTriMesh::edgeNeighbor` — 3 uint32 per triangle (UINT32_MAX = boundary
+  or non-manifold) — populated as a side-product of `weldTriMesh()`.  The
+  cooked-mesh format bumps to v2 to include the new array.
+- `physics::closestPointOnMesh(segA, segB, maxDist, mesh)` — BVH-accelerated
+  segment-to-mesh closest-point query.  Returns `{ found, dist,
+  pointOnSegment, pointOnMesh, normal, triId, region }` with a capsule-axis
+  convenience overload.  Built on `closestPointSegmentSegment` (Ericson
+  §5.1.9) and `closestPointSegmentTriangle`.  `TriRegion` is promoted from
+  the `.cpp` anonymous namespace to the public header so callers can branch
+  on face / edge / vertex hits.
+- Active-edge swap on the sweep path: **intentionally a no-op** in this
+  architecture and documented as such in
+  `TriMeshCollision.cpp:sweepCapsuleVsTriangle`.  The swap is the Bullet
+  `btInternalEdgeUtility` recipe to snap an "in-between" contact normal to
+  the closer adjacent face normal, but our sweep already returns the
+  tested triangle's face normal as the contact normal — by construction
+  there is no in-between direction to snap from.  A naive swap would also
+  be unsafe for two-sided coplanar mesh hacks (separate-index reverse-
+  winding escapes the welder's topological pair-up, but shared-index pairs
+  welded together could see `dot(nA, nB) ≈ -1`, flipping the contact
+  normal into the solid).  The neighbour data exists for Phase D's
+  *direct* consumer — manifold edge crossings, not contact-normal
+  correction.
 
 Acceptance: a tessellated flat floor (8×8 quad grid, 128 triangles) — the
-player walks across without seam catches. A faceted cylinder — the player
-slides around it smoothly.
+player walks across without seam catches (already true via Phase 2 welding;
+preserved by capsule path).  Phase D acceptance — wallrun edge traversal —
+will exercise the new data structures end-to-end.
 
 ### Phase C — Conservative advancement + sub-stepping (independent)
 

@@ -539,9 +539,28 @@ bool capsuleVsTriVoronoi(glm::vec3 center,
 /// As with the AABB version, we deliberately do NOT discard contacts on
 /// inactive (welded) edges or vertices here — the bump loop relies on
 /// both adjacent coplanar triangles reporting the same hit time to
-/// produce a stable contact.  The active-edge swap (replace contact
-/// normal with neighbour's face normal on welded-edge contacts) is
-/// Phase B of the future-path plan; this function lays the groundwork.
+/// produce a stable contact.
+///
+/// **Phase B — active-edge swap is intentionally a no-op on this path.**
+/// Bullet's `btInternalEdgeUtility` snaps an "in-between" contact normal
+/// (one that's not aligned with either adjacent face) to the closer of
+/// the two adjacent face normals.  Our function returns the face normal
+/// of the triangle being tested as the contact normal (the `n = faceN`
+/// line at the top of this function) — i.e., the contact normal is
+/// *already* one of the two adjacent face normals by construction, so
+/// there is no in-between direction to snap from.
+///
+/// A naive "swap to neighbour normal on welded edge" would also be
+/// dangerous: two-sided mesh hacks (reverse-winded coplanar duplicates
+/// with separate vertex indices) escape the welder's topological pair-
+/// up, but coplanar pairs that *do* share indices welded together with
+/// opposite winding would see `dot(nA, nB) ≈ -1` — swapping would flip
+/// the contact normal into the solid.
+///
+/// The `edgeNeighbor` data populated by `weldTriMesh()` is exposed for
+/// Phase D wallrun, which walks the surface manifold by hopping between
+/// adjacent triangles at edge crossings — a direct consumer that needs
+/// the adjacency, unlike this sweep path which doesn't.
 HitResult sweepCapsuleVsTriangle(CapsuleShape capsule,
                                  glm::vec3 start,
                                  glm::vec3 end,
