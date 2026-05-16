@@ -155,19 +155,8 @@ bool sweptAABBOverlapsAABB(
 }
 
 // Voronoi-region helpers
-
-/// @brief Which Voronoi region of a triangle a query point's closest projection
-/// falls into.  Used to clip contacts against inactive (welded) features.
-enum class TriRegion : uint8_t
-{
-    Face = 0,
-    Edge0 = 1, ///< Edge v0→v1
-    Edge1 = 2, ///< Edge v1→v2
-    Edge2 = 3, ///< Edge v2→v0
-    Vert0 = 4,
-    Vert1 = 5,
-    Vert2 = 6,
-};
+// (`TriRegion` enum is declared in TriMeshCollision.hpp — promoted from this
+//  anonymous namespace in Phase B so closestPointOnMesh can return it.)
 
 /// @brief Closest point on triangle (a, b, c) to query point p, plus the
 /// Voronoi region tag for the chosen feature.  Ericson, *RTCD* §5.1.5.
@@ -605,6 +594,155 @@ HitResult sweepCapsuleVsTriangle(CapsuleShape capsule,
     result.tFirst = t;
     result.normal = n;
     return result;
+}
+
+// Closest-point geometric helpers (Phase B foundation for closestPointOnMesh)
+
+/// @brief Closest point pair on two line segments (p1→q1) and (p2→q2).
+/// Ericson, *Real-Time Collision Detection* §5.1.9.
+void closestPointSegmentSegment(glm::vec3 p1,
+                                glm::vec3 q1,
+                                glm::vec3 p2,
+                                glm::vec3 q2,
+                                glm::vec3& outC1,
+                                glm::vec3& outC2)
+{
+    constexpr float k_eps = 1e-12f;
+
+    const glm::vec3 d1 = q1 - p1;
+    const glm::vec3 d2 = q2 - p2;
+    const glm::vec3 r = p1 - p2;
+    const float a = glm::dot(d1, d1);
+    const float e = glm::dot(d2, d2);
+    const float f = glm::dot(d2, r);
+
+    float s = 0.0f;
+    float t = 0.0f;
+
+    if (a <= k_eps && e <= k_eps) {
+        // Both segments degenerate to points.
+        s = 0.0f;
+        t = 0.0f;
+    } else if (a <= k_eps) {
+        // First segment is a point.
+        s = 0.0f;
+        t = glm::clamp(f / e, 0.0f, 1.0f);
+    } else {
+        const float c = glm::dot(d1, r);
+        if (e <= k_eps) {
+            // Second segment is a point.
+            t = 0.0f;
+            s = glm::clamp(-c / a, 0.0f, 1.0f);
+        } else {
+            const float b = glm::dot(d1, d2);
+            const float denom = a * e - b * b;
+            if (denom != 0.0f)
+                s = glm::clamp((b * f - c * e) / denom, 0.0f, 1.0f);
+            else
+                s = 0.0f;
+            t = (b * s + f) / e;
+            if (t < 0.0f) {
+                t = 0.0f;
+                s = glm::clamp(-c / a, 0.0f, 1.0f);
+            } else if (t > 1.0f) {
+                t = 1.0f;
+                s = glm::clamp((b - c) / a, 0.0f, 1.0f);
+            }
+        }
+    }
+
+    outC1 = p1 + d1 * s;
+    outC2 = p2 + d2 * t;
+}
+
+/// @brief Closest pair (point on segment, point on triangle) plus the
+/// Voronoi region of the triangle's closest point.  Distance² is written
+/// to `outDistSq`.
+///
+/// Algorithm:
+///   1. If the segment crosses the triangle plane and the crossing point
+///      lies inside the bounded triangle → distance is zero.
+///   2. Otherwise the minimum is one of five candidates:
+///        * segment endpoint A vs triangle
+///        * segment endpoint B vs triangle
+///        * segment vs each of the three triangle edges
+///      Take the minimum.
+TriRegion closestPointSegmentTriangle(glm::vec3 segA,
+                                      glm::vec3 segB,
+                                      glm::vec3 v0,
+                                      glm::vec3 v1,
+                                      glm::vec3 v2,
+                                      glm::vec3& outOnSegment,
+                                      glm::vec3& outOnTriangle,
+                                      float& outDistSq)
+{
+    // Stage 1: segment vs plane crossing.
+    const glm::vec3 e1 = v1 - v0;
+    const glm::vec3 e2 = v2 - v0;
+    const glm::vec3 n = glm::cross(e1, e2);
+    const float nLenSq = glm::dot(n, n);
+    if (nLenSq > 1e-12f) {
+        const float dA = glm::dot(n, segA - v0);
+        const float dB = glm::dot(n, segB - v0);
+        if (dA * dB <= 0.0f) {
+            const float denom = dA - dB;
+            if (std::abs(denom) > 1e-12f) {
+                const float t = dA / denom;
+                const glm::vec3 p = segA + (segB - segA) * t;
+                glm::vec3 closestOnTri;
+                const TriRegion regionAtCross = closestPointOnTriangle(p, v0, v1, v2, closestOnTri);
+                if (regionAtCross == TriRegion::Face) {
+                    outOnSegment = p;
+                    outOnTriangle = p;
+                    outDistSq = 0.0f;
+                    return TriRegion::Face;
+                }
+            }
+        }
+    }
+
+    // Stage 2: enumerate the five candidate closest-point pairs.
+    float bestDistSq = 1e30f;
+    glm::vec3 bestOnSeg{0.0f};
+    glm::vec3 bestOnTri{0.0f};
+    TriRegion bestRegion = TriRegion::Face;
+
+    auto considerEndpoint = [&](glm::vec3 ep) {
+        glm::vec3 onTri;
+        const TriRegion region = closestPointOnTriangle(ep, v0, v1, v2, onTri);
+        const glm::vec3 d = ep - onTri;
+        const float distSq = glm::dot(d, d);
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestOnSeg = ep;
+            bestOnTri = onTri;
+            bestRegion = region;
+        }
+    };
+    considerEndpoint(segA);
+    considerEndpoint(segB);
+
+    auto considerEdge = [&](glm::vec3 ea, glm::vec3 eb, TriRegion region) {
+        glm::vec3 c1;
+        glm::vec3 c2;
+        closestPointSegmentSegment(segA, segB, ea, eb, c1, c2);
+        const glm::vec3 d = c1 - c2;
+        const float distSq = glm::dot(d, d);
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestOnSeg = c1;
+            bestOnTri = c2;
+            bestRegion = region;
+        }
+    };
+    considerEdge(v0, v1, TriRegion::Edge0);
+    considerEdge(v1, v2, TriRegion::Edge1);
+    considerEdge(v2, v0, TriRegion::Edge2);
+
+    outOnSegment = bestOnSeg;
+    outOnTriangle = bestOnTri;
+    outDistSq = bestDistSq;
+    return bestRegion;
 }
 
 // Welding helpers
@@ -1215,6 +1353,92 @@ void depenetrateCapsuleVsTriMesh(
         if (into < 0.0f)
             vel -= dir * into;
     }
+}
+
+ClosestPointOnMeshResult closestPointOnMesh(
+    glm::vec3 segA, glm::vec3 segB, float maxDist, const WorldTriMesh& mesh)
+{
+    ClosestPointOnMeshResult result;
+    result.dist = maxDist;
+
+    if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
+        return result;
+
+    // Broad-phase: segment AABB expanded by maxDist must overlap the whole-mesh AABB.
+    const glm::vec3 segMin = glm::min(segA, segB);
+    const glm::vec3 segMax = glm::max(segA, segB);
+    {
+        const glm::vec3 expMin = segMin - glm::vec3(maxDist);
+        const glm::vec3 expMax = segMax + glm::vec3(maxDist);
+        if (expMax.x < mesh.boundsMin.x || expMin.x > mesh.boundsMax.x ||
+            expMax.y < mesh.boundsMin.y || expMin.y > mesh.boundsMax.y ||
+            expMax.z < mesh.boundsMin.z || expMin.z > mesh.boundsMax.z)
+            return result;
+    }
+
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+
+        // Cull: shrink the search radius as we find closer triangles.
+        const float currentMaxDist = result.dist;
+        const glm::vec3 curExpMin = segMin - glm::vec3(currentMaxDist);
+        const glm::vec3 curExpMax = segMax + glm::vec3(currentMaxDist);
+        if (curExpMax.x < node.boundsMin.x || curExpMin.x > node.boundsMax.x ||
+            curExpMax.y < node.boundsMin.y || curExpMin.y > node.boundsMax.y ||
+            curExpMax.z < node.boundsMin.z || curExpMin.z > node.boundsMax.z)
+            continue;
+
+        if (node.count > 0) {
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+
+                glm::vec3 onSeg;
+                glm::vec3 onTri;
+                float distSq;
+                const TriRegion region =
+                    closestPointSegmentTriangle(segA, segB, v0, v1, v2, onSeg, onTri, distSq);
+                const float dist = std::sqrt(distSq);
+
+                if (dist < result.dist) {
+                    result.found = true;
+                    result.dist = dist;
+                    result.pointOnSegment = onSeg;
+                    result.pointOnMesh = onTri;
+                    result.triId = ti;
+                    result.region = region;
+                    // Orient face normal toward the segment side.  For non-zero
+                    // distance, "segment side" is the half-space onSeg lives in;
+                    // for zero-distance (segment punctures triangle), the cooked
+                    // normal direction is left as-is.
+                    result.normal = mesh.faceNormals[ti];
+                    if (distSq > 1e-12f) {
+                        const glm::vec3 segDir = onSeg - onTri;
+                        if (glm::dot(result.normal, segDir) < 0.0f)
+                            result.normal = -result.normal;
+                    }
+                }
+            }
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
+
+    return result;
+}
+
+ClosestPointOnMeshResult closestPointOnMesh(
+    CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh)
+{
+    return closestPointOnMesh(capsule.segA(center), capsule.segB(center), maxDist, mesh);
 }
 
 } // namespace physics

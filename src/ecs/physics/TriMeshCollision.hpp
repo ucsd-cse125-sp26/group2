@@ -11,10 +11,28 @@
 
 #include "SweptCollision.hpp"
 
+#include <cstdint>
 #include <glm/glm.hpp>
 
 namespace physics
 {
+
+/// @brief Voronoi region of a triangle.  Identifies which feature (face,
+/// one of three edges, or one of three vertices) a closest-point query
+/// landed on.  Used by depenetration / sweep / closest-point queries that
+/// need to clip contacts against the cooked welding-active masks, and by
+/// the Phase D wallrun manifold walk to decide whether an edge crossing
+/// hops to a neighbour triangle.
+enum class TriRegion : uint8_t
+{
+    Face = 0,
+    Edge0 = 1, ///< Edge v0 → v1
+    Edge1 = 2, ///< Edge v1 → v2
+    Edge2 = 3, ///< Edge v2 → v0
+    Vert0 = 4,
+    Vert1 = 5,
+    Vert2 = 6,
+};
 
 /// @brief Build the BVH for a WorldTriMesh.
 ///
@@ -103,5 +121,42 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
 /// the capsule Minkowski extent in place of the AABB sum.
 void depenetrateCapsuleVsTriMesh(
     glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldTriMesh& mesh, float pushback = 0.03125f);
+
+/// @brief Result of a closest-point-on-mesh query.  Phase B foundation for
+/// the Phase D wallrun manifold walk.
+///
+/// When `found` is true, `dist` is the unsigned distance from the query
+/// segment to `pointOnMesh`, which lies in the indicated `region` of
+/// triangle `triId`.  `normal` is the face normal of that triangle,
+/// oriented so it points toward the query segment (away from the solid).
+struct ClosestPointOnMeshResult
+{
+    bool found{false};
+    float dist{1e30f};
+    glm::vec3 pointOnSegment{0.0f};
+    glm::vec3 pointOnMesh{0.0f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    uint32_t triId{UINT32_MAX};
+    TriRegion region{TriRegion::Face};
+};
+
+/// @brief Find the closest point on the mesh's surface to a query segment,
+/// considering only points within `maxDist`.  BVH-accelerated.
+///
+/// For wallrun (Phase D) the query segment is the capsule's inner axis
+/// (`capsule.segA(pos)` to `capsule.segB(pos)`).  The result identifies
+/// "what wall am I on" without the heuristic dot-product reassignment
+/// that the current sphere-cast-based WallDetection uses.  At edges and
+/// vertices, `region` plus `triId` plus the mesh's `edgeNeighbor` array
+/// is enough to walk the surface manifold across triangle seams.
+///
+/// Returns `found = false` if no triangle is within `maxDist`.
+ClosestPointOnMeshResult closestPointOnMesh(
+    glm::vec3 segA, glm::vec3 segB, float maxDist, const WorldTriMesh& mesh);
+
+/// @brief Convenience overload — uses the capsule's inner axis as the query
+/// segment at the given centre position.
+ClosestPointOnMeshResult closestPointOnMesh(
+    CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh);
 
 } // namespace physics
