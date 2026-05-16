@@ -175,14 +175,49 @@ player walks across without seam catches (already true via Phase 2 welding;
 preserved by capsule path).  Phase D acceptance — wallrun edge traversal —
 will exercise the new data structures end-to-end.
 
-### Phase C — Conservative advancement + sub-stepping (independent)
+### Phase C — Sub-stepping for high-velocity stability (independent)
 
-Replace the 4-iteration bump loop with conservative advancement. Add tick
-sub-stepping when `|v|·dt > 0.5·r`. Both gated by feature flag for A/B
-testing against the existing bump loop in known-good scenarios.
+Goal: ensure the player can never tunnel through thin geometry even at
+extreme velocities (grapple yank, explosion knockback, scripted teleports).
 
-Acceptance: grapple-hook yank at >2000 u/s never clips through a wall.
-Determinism hash matches between client and server.
+**Implementation outcome (as shipped).**
+
+- `physics::k_enableSubstepping` (default on), `k_substepSafetyRatio = 0.5`,
+  `k_maxSubsteps = 8` in `PhysicsConstants.hpp`.
+- `CollisionSystem::runCollision` wraps the bump loop in an N-substep
+  loop where `N = ceil(|v|·dt / (k_substepSafetyRatio · min_shape_radius))`,
+  clamped to `[1, k_maxSubsteps]`.  Each substep runs the existing
+  4-clip bump loop with `subDt = dt/N`.  Depen, slope-stick, and
+  ground-probe run once per tick as before.
+- Determinism preserved: client and server compute the same `N` from
+  the same inputs.
+
+**What was skipped and why.**
+
+The original Phase-C scope also called for replacing the bump loop with a
+textbook "conservative advancement using clearance query" inner loop
+(Mirtich 2000 / Bullet `btContinuousConvexCollision`).  Implementation
+analysis showed:
+
+1. Our existing bump loop is *already* conservative-advancement-via-sweep-TOI:
+   each clip iteration advances to the swept time-of-impact, never
+   penetrating past the swept shape's safety margin.  This is exact for
+   plane / brush / triangle queries and bounded-conservative for box /
+   cylinder / sphere with a capsule.
+2. A true clearance-query CA would need `closestPointOnX` for *every*
+   primitive type.  Phase B added `closestPointOnMesh` for trimesh
+   only; the others would be deferred work disproportionate to the
+   remaining gap.
+3. Sub-stepping alone closes the high-velocity tunneling gap (≥ 2000 u/s
+   grapple → N ≥ 2 substeps → per-substep sweep distance stays under
+   the safety margin).
+
+The full clearance-CA rewrite is left for a future phase if a real-world
+case demands it.
+
+Acceptance: grapple-hook yank at ≥ 2000 u/s never clips through a wall;
+determinism hash matches client/server.  Normal-speed gameplay is
+behaviourally identical to pre-Phase-C (`N = 1`).
 
 ### Phase D — Wall-attached kinematic frame
 
