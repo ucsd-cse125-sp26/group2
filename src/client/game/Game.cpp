@@ -91,6 +91,19 @@ glm::quat assetRotation(const AssetEntry& asset)
            glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
 }
 
+WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
+{
+    return getWeaponSpawnerModelParams(type);
+}
+
+glm::quat spawnerModelRotation(const WeaponSpawnerModelParams& params, float timeSeconds, bool active)
+{
+    const glm::vec3 r = glm::radians(glm::vec3{params.pitchOffset, params.yawOffset, params.rollOffset});
+    const float spin = active ? glm::radians(params.spinDegreesPerSecond) * timeSeconds : 0.0f;
+    return glm::angleAxis(spin + r.y, glm::vec3{0.0f, 1.0f, 0.0f}) *
+           glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) * glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
+}
+
 /// @brief Resolve a `ClientId` to its display nickname.
 ///
 /// Reads the replicated `PlayerName` component (set server-side from the
@@ -499,8 +512,10 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
     client->onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
 
     // Initialize runtime 3P weapon params from defaults
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 4; ++i) {
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
+        spawnerWeaponParams_[i] = defaultSpawnerModelParams(static_cast<WeaponType>(i));
+    }
 
     // Grab the mouse into relative mode so camera look works immediately.
     SDL_SetWindowRelativeMouseMode(window, true);
@@ -2613,6 +2628,7 @@ SDL_AppResult Game::iterate()
             {"HUD Tweaker", &showHudDebug_},
             {"Viewmodel Tweaker", &showViewmodelUI},
             {"3P Weapon Tweaker", &showTPWeaponUI_},
+            {"Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_},
             {"Dynamic Lighting", &showDynLightUI_},
             {"Animation Tester", &animUI_.show},
         });
@@ -2843,6 +2859,64 @@ SDL_AppResult Game::iterate()
         ImGui::End();
     }
 
+    // Weapon spawner model tweaker — per-weapon tuning for world pickup models.
+    if (showWeaponSpawnerModelUI_) {
+        if (ImGui::Begin("Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_)) {
+            const char* spawnerWeaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
+            ImGui::Combo("Weapon", &spawnerTuneWeaponIdx_, spawnerWeaponNames, 4);
+
+            auto& params = spawnerWeaponParams_[spawnerTuneWeaponIdx_];
+
+            ImGui::SeparatorText("Translation");
+            ImGui::DragFloat("Right", &params.translation.x, 0.5f, -200.0f, 200.0f, "%.1f");
+            ImGui::DragFloat("Up", &params.translation.y, 0.5f, -200.0f, 200.0f, "%.1f");
+            ImGui::DragFloat("Forward", &params.translation.z, 0.5f, -200.0f, 200.0f, "%.1f");
+
+            ImGui::SeparatorText("Rotation (degrees)");
+            ImGui::DragFloat("Yaw", &params.yawOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Pitch", &params.pitchOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Roll", &params.rollOffset, 1.0f, -180.0f, 180.0f, "%.1f");
+
+            ImGui::SeparatorText("Scale");
+            ImGui::DragFloat("Scale X", &params.scale.x, 0.1f, 0.001f, 200.0f, "%.3f");
+            ImGui::DragFloat("Scale Y", &params.scale.y, 0.1f, 0.001f, 200.0f, "%.3f");
+            ImGui::DragFloat("Scale Z", &params.scale.z, 0.1f, 0.001f, 200.0f, "%.3f");
+            if (ImGui::Button("Uniform from X")) {
+                params.scale.y = params.scale.x;
+                params.scale.z = params.scale.x;
+            }
+
+            ImGui::SeparatorText("Idle Motion");
+            ImGui::DragFloat("Spin Deg/Sec", &params.spinDegreesPerSecond, 1.0f, -720.0f, 720.0f, "%.1f");
+            ImGui::DragFloat("Bob Amplitude", &params.bobAmplitude, 0.25f, 0.0f, 100.0f, "%.2f");
+            ImGui::DragFloat("Bob Hz", &params.bobHz, 0.01f, 0.0f, 10.0f, "%.2f");
+
+            ImGui::Separator();
+            if (ImGui::Button("Reset to spawner defaults")) {
+                params = defaultSpawnerModelParams(static_cast<WeaponType>(spawnerTuneWeaponIdx_));
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Save as new defaults")) {
+                SDL_Log("[client] spawner weapon %d: scale=(%.3f,%.3f,%.3f) translation=(%.1f,%.1f,%.1f) "
+                        "yaw=%.1f pitch=%.1f roll=%.1f spin=%.1f bobAmp=%.2f bobHz=%.2f",
+                        spawnerTuneWeaponIdx_,
+                        static_cast<double>(params.scale.x),
+                        static_cast<double>(params.scale.y),
+                        static_cast<double>(params.scale.z),
+                        static_cast<double>(params.translation.x),
+                        static_cast<double>(params.translation.y),
+                        static_cast<double>(params.translation.z),
+                        static_cast<double>(params.yawOffset),
+                        static_cast<double>(params.pitchOffset),
+                        static_cast<double>(params.rollOffset),
+                        static_cast<double>(params.spinDegreesPerSecond),
+                        static_cast<double>(params.bobAmplitude),
+                        static_cast<double>(params.bobHz));
+            }
+        }
+        ImGui::End();
+    }
+
     // Dynamic Lighting debug panel.
     if (showDynLightUI_) {
         ImGui::SetNextWindowPos({10.f, 400.f}, ImGuiCond_FirstUseEver);
@@ -3029,13 +3103,6 @@ SDL_AppResult Game::iterate()
                 hudMinimapDots.push_back({pos.value.x, pos.value.z});
             });
         hudState.enemyDots = hudMinimapDots;
-
-        static int minimapLogTimer = 0;
-        if (++minimapLogTimer % 300 == 1) // Log every ~5 seconds at 60fps
-            SDL_Log("Minimap: localPos=(%.0f,%.0f) enemyDots=%zu",
-                    static_cast<double>(hudState.localPlayerX),
-                    static_cast<double>(hudState.localPlayerZ),
-                    hudMinimapDots.size());
 
         // ── Screen dimensions ──
         int winW = 0, winH = 0;
@@ -3484,31 +3551,24 @@ void Game::refreshRemoteRespawnRenderables()
 
             const int assetId = weaponAssetIds_[weaponIndex];
             const AssetEntry& asset = assets_.entry(assetId);
+            const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIndex];
 
             rend.modelIndex = asset.modelIndex;
-            rend.scale = asset.renderScale;
-
-            // Weapon bob and rotate
-            static constexpr float k_spawnerSpinRadiansPerSec = glm::radians(45.0f);
-            static constexpr float k_spawnerBobAmplitude = 6.0f;
-            static constexpr float k_spawnerBobHz = 0.6f;
-            static constexpr float k_twoPi = 6.28318530718f;
+            rend.scale = params.scale;
 
             const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
             rend.visible = spawner.hasWeapon;
 
             if (spawner.hasWeapon) {
-                rend.orientation =
-                    glm::angleAxis(t * k_spawnerSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
+                static constexpr float k_twoPi = 6.28318530718f;
 
                 rend.translation =
-                    asset.renderTranslation +
-                    glm::vec3{0.0f, std::sin(t * k_twoPi * k_spawnerBobHz) * k_spawnerBobAmplitude, 0.0f};
+                    params.translation + glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
             } else {
-                rend.orientation = assetRotation(asset);
-                rend.translation = asset.renderTranslation;
+                rend.translation = params.translation;
             }
+            rend.orientation = spawnerModelRotation(params, t, spawner.hasWeapon);
         });
 }
 

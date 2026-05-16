@@ -82,7 +82,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .explosive = false,
             .isCharge = true,
             .chargeDamage = 150.0f,
-        }, // RailGun (charge sniper)
+        }, // RailGun
         WeaponConfig{
             .fireCooldown = 0.0f,
             .magazineSize = 200,
@@ -94,7 +94,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .isBeam = true,
             .dps = 80.0f,
             .ammoPerSecond = 20.0f,
-        }, // EnergyGun (Zarya beam)
+        }, // EnergyGun
         WeaponConfig{
             .fireCooldown = 0.4f,
             .magazineSize = 1,
