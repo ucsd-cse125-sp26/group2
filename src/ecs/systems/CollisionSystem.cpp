@@ -548,6 +548,20 @@ static float shapeMinkowskiExtent(const CollisionShape& shape, glm::vec3 n)
            std::abs(n.z) * shape.halfExtents.z;
 }
 
+/// @brief Minimum cross-section radius of the shape, used by Phase-C
+/// sub-stepping to size the per-tick safety budget.
+///
+/// For a capsule, this is `radius` — the smallest direction-independent
+/// half-extent of the swept shape.  For an AABB, the smallest half-extent
+/// component (the AABB's "thinnest axis").  Sub-stepping kicks in when the
+/// projected per-tick motion exceeds `this · k_substepSafetyRatio`.
+static float shapeMinCrossSection(const CollisionShape& shape)
+{
+    if (shape.type == CollisionShapeType::Capsule)
+        return shape.radius;
+    return std::min({shape.halfExtents.x, shape.halfExtents.y, shape.halfExtents.z});
+}
+
 void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world)
 {
     // CollisionSystem only reads/writes the replicated half (grounded /
@@ -603,63 +617,93 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     diagFrame.flags |= physics::diag::PhaseFlag::DeepPenetration;
             }
 
-            // Phase 1 — Bump loop (collision response + stair stepping)
-            float remainingTime = dt;
+            // Phase C — Sub-step count for high-velocity stability.
+            //
+            // When projected motion this tick exceeds `0.5 · min_shape_radius`,
+            // split into N equal substeps so each substep's swept distance
+            // stays comfortably below the swept shape's safety margin.  At
+            // normal player speeds (≤ 800 u/s, fullStep ≈ 6.25 u vs cap
+            // 8 u for our 16 u capsule) N = 1; grapple at 2000+ u/s gives
+            // N ≥ 2.  Both client and server compute the same N from the
+            // same inputs, so determinism is preserved.
+            const float fullStep = glm::length(vel.value) * dt;
+            const float maxSafeStep = shapeMinCrossSection(shape) * physics::k_substepSafetyRatio;
+            const int numSubsteps =
+                (physics::k_enableSubstepping && maxSafeStep > 1e-6f && fullStep > maxSafeStep)
+                    ? std::min(physics::k_maxSubsteps,
+                               static_cast<int>(std::ceil(fullStep / maxSafeStep)))
+                    : 1;
+            const float subDt = dt / static_cast<float>(numSubsteps);
 
-            int clip = 0;
-            for (; clip < 4 && remainingTime > 1e-5f; ++clip) {
-                const glm::vec3 k_target = pos.value + vel.value * remainingTime;
-                const physics::HitResult k_hit = sweepShape(shape, pos.value, k_target, world);
+            // Phase 1 — Bump loop (sub-stepped collision response + stair stepping).
+            //
+            // `bumpExhaustedAnySubstep` records whether ANY substep blew through
+            // its 4-clip budget; it propagates to the diag frame after the loop.
+            bool bumpExhaustedAnySubstep = false;
+            int lastClipCount = 0;
 
-                if (!k_hit.hit) {
-                    pos.value = k_target;
-                    break;
-                }
+            for (int sub = 0; sub < numSubsteps; ++sub) {
+                float remainingTime = subDt;
 
-                if (diagOn) {
-                    ++diagFrame.bumpHits;
-                    diagFrame.lastHitNormal = k_hit.normal;
-                }
+                int clip = 0;
+                for (; clip < 4 && remainingTime > 1e-5f; ++clip) {
+                    const glm::vec3 k_target = pos.value + vel.value * remainingTime;
+                    const physics::HitResult k_hit = sweepShape(shape, pos.value, k_target, world);
 
-                pos.value += vel.value * k_hit.tFirst * remainingTime;
-                remainingTime *= (1.0f - k_hit.tFirst);
-
-                if (physics::debug::isEnabled()) {
-                    // Mark the contact at the surface point (centre offset back along the
-                    // surface normal by the shape's projected half-extent).  `sweepAll` doesn't
-                    // distinguish the source primitive in `HitResult`, so we tag it as a generic
-                    // sweep contact for now; per-primitive tagging arrives with Phase 2.
-                    const float r = shapeMinkowskiExtent(shape, k_hit.normal);
-                    physics::debug::pushSweepContact(pos.value - k_hit.normal * r,
-                                                     k_hit.normal,
-                                                     physics::debug::ContactSource::PlaneSweep);
-                }
-
-                // Floor detection: normal.y > 0.7 for normal gravity,
-                // normal.y < -0.7 for flipped (ceilings become floors).
-                const bool k_isFloor = state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
-
-                if (k_isFloor) {
-                    pos.value += k_hit.normal * k_pushback;
-                    if (state.grappleActive) {
-                        // During grapple: slide along floor but don't ground or kill pull velocity.
-                        // Just push out of the surface, keep the grapple velocity intact.
-                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
-                    } else {
-                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
-                        state.grounded = true;
-                        state.groundNormal = k_hit.normal;
-                    }
-                } else {
-                    if (k_wasGrounded && !state.gravityFlipped &&
-                        tryStepUp(pos.value, vel.value, shape, remainingTime, world))
-                    {
-                        state.grounded = true;
+                    if (!k_hit.hit) {
+                        pos.value = k_target;
                         break;
                     }
-                    pos.value += k_hit.normal * k_pushback;
-                    vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceWall);
+
+                    if (diagOn) {
+                        ++diagFrame.bumpHits;
+                        diagFrame.lastHitNormal = k_hit.normal;
+                    }
+
+                    pos.value += vel.value * k_hit.tFirst * remainingTime;
+                    remainingTime *= (1.0f - k_hit.tFirst);
+
+                    if (physics::debug::isEnabled()) {
+                        // Mark the contact at the surface point (centre offset back along the
+                        // surface normal by the shape's projected half-extent).  `sweepAll` doesn't
+                        // distinguish the source primitive in `HitResult`, so we tag it as a generic
+                        // sweep contact for now; per-primitive tagging arrives with Phase 2.
+                        const float r = shapeMinkowskiExtent(shape, k_hit.normal);
+                        physics::debug::pushSweepContact(pos.value - k_hit.normal * r,
+                                                         k_hit.normal,
+                                                         physics::debug::ContactSource::PlaneSweep);
+                    }
+
+                    // Floor detection: normal.y > 0.7 for normal gravity,
+                    // normal.y < -0.7 for flipped (ceilings become floors).
+                    const bool k_isFloor = state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
+
+                    if (k_isFloor) {
+                        pos.value += k_hit.normal * k_pushback;
+                        if (state.grappleActive) {
+                            // During grapple: slide along floor but don't ground or kill pull velocity.
+                            // Just push out of the surface, keep the grapple velocity intact.
+                            vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
+                        } else {
+                            vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
+                            state.grounded = true;
+                            state.groundNormal = k_hit.normal;
+                        }
+                    } else {
+                        if (k_wasGrounded && !state.gravityFlipped &&
+                            tryStepUp(pos.value, vel.value, shape, remainingTime, world))
+                        {
+                            state.grounded = true;
+                            break;
+                        }
+                        pos.value += k_hit.normal * k_pushback;
+                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceWall);
+                    }
                 }
+
+                lastClipCount = clip;
+                if (remainingTime > 1e-5f && clip >= 4)
+                    bumpExhaustedAnySubstep = true;
             }
 
             // Phase 2 — Slope sticking (skip during grapple — player must fly freely)
@@ -700,7 +744,8 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             if (diagOn) {
                 diagFrame.posAfter = pos.value;
                 diagFrame.velAfter = vel.value;
-                if (remainingTime > 1e-5f && clip >= 4)
+                (void)lastClipCount; // recorded per-substep; aggregated below.
+                if (bumpExhaustedAnySubstep)
                     diagFrame.flags |= physics::diag::PhaseFlag::BumpExhausted;
                 if (state.grounded)
                     diagFrame.flags |= physics::diag::PhaseFlag::Grounded;

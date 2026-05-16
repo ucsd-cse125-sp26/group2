@@ -53,4 +53,31 @@ constexpr float k_stepHeight = 18.0f; ///< Maximum obstacle height auto-stepped 
 // Gravity flip
 constexpr float k_gravityFlipCooldown = 0.5f; ///< Minimum time between gravity flips (s).
 
+// Sub-stepping (Phase C of physics-future-path.md)
+//
+// The 128 Hz bump loop is conservative-advancement-via-sweep-TOI: each clip
+// iteration advances to the swept time-of-impact, never penetrating past
+// the swept-shape's safety margin.  This is exact for our plane / brush
+// queries and the capsule-vs-triangle Voronoi sweep, and bounded
+// conservative for capsule-vs-box/cyl/sphere.
+//
+// At normal player speeds (≤ 800 u/s, ≤ 6.25 u/tick at 128 Hz) and a 16 u
+// capsule radius, one sweep per tick comfortably catches any thin feature.
+// The failure mode shows up at extreme velocities (grapple-hook yank,
+// explosion knockback, scripted teleports): when `|v|·dt` exceeds the
+// shape's safety margin, the sweep's per-tick swept distance can exceed
+// the size of thin geometry features, risking tunneling.
+//
+// Sub-stepping splits the tick into N equal substeps when the projected
+// motion exceeds `k_substepSafetyRatio · min_shape_radius`.  Each
+// substep runs the full bump loop with `dt/N`.  Determinism is preserved
+// because both client and server compute the same `N` from the same
+// inputs.  Depen runs once per tick (its idempotence + the bump loop's
+// pushback handle the rest); slope-stick and ground-probe also run once
+// at the end of the tick.
+
+constexpr bool k_enableSubstepping = true; ///< Master toggle for Phase-C sub-stepping.
+constexpr float k_substepSafetyRatio = 0.5f; ///< Sub-step when `|v|·dt > min_shape_radius · this`.
+constexpr int k_maxSubsteps = 8;             ///< Clamp on sub-step count to bound worst-case cost.
+
 } // namespace physics
