@@ -25,6 +25,19 @@ struct ThirdPersonWeaponParams
     float yawOffset, pitchOffset, rollOffset; // degrees
 };
 
+/// @brief World weapon spawner model params.
+struct WeaponSpawnerModelParams
+{
+    glm::vec3 scale{1.0f};
+    glm::vec3 translation{0.0f};
+    float yawOffset = 0.0f;
+    float pitchOffset = 0.0f;
+    float rollOffset = 0.0f;
+    float spinDegreesPerSecond = 45.0f;
+    float bobAmplitude = 6.0f;
+    float bobHz = 0.6f;
+};
+
 /// @brief Asset filename + load flags for a weapon model.
 struct WeaponModelInfo
 {
@@ -102,6 +115,51 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
         {.scale = 1.0f, .handOffset = {7.5f, 7.5f, 15.0f}, .yawOffset = 0.0f, .pitchOffset = 96.0f, .rollOffset = 2.0f},
         // EnergyGun
         {.scale = 1.0f, .handOffset = {7.5f, 7.0f, 6.0f}, .yawOffset = 6.0f, .pitchOffset = 94.0f, .rollOffset = 0.0f},
+    }};
+
+    return k_params[static_cast<std::size_t>(type)];
+}
+
+/// @brief Returns world weapon pickup/spawner model params for a weapon type.
+inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType type)
+{
+    static const std::array<WeaponSpawnerModelParams, 4> k_params{{
+        // Rifle
+        {.scale = {16.0f, 16.0f, 16.0f},
+         .translation = {0.0f, 16.0f, 0.0f},
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f,
+         .spinDegreesPerSecond = 45.0f,
+         .bobAmplitude = 6.0f,
+         .bobHz = 0.6f},
+        // Rocket
+        {.scale = {15.0f, 15.0f, 15.0f},
+         .translation = {0.0f, -25.0f, -4.0f},
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f,
+         .spinDegreesPerSecond = 45.0f,
+         .bobAmplitude = 6.0f,
+         .bobHz = 0.6f},
+        // RailGun
+        {.scale = {15.0f, 15.0f, 15.0f},
+         .translation = {0.0f, -5.0f, 0.0f},
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f,
+         .spinDegreesPerSecond = 45.0f,
+         .bobAmplitude = 6.0f,
+         .bobHz = 0.6f},
+        // EnergyGun
+        {.scale = {10.0f, 10.0f, 10.0f},
+         .translation = {0.0f, 2.0f, 0.0f},
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f,
+         .spinDegreesPerSecond = 45.0f,
+         .bobAmplitude = 6.0f,
+         .bobHz = 0.6f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];

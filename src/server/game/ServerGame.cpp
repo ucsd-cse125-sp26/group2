@@ -162,9 +162,13 @@ void ServerGame::run()
         const entt::entity spawner = registry.create();
         registry.emplace<WeaponSpawner>(
             spawner,
-            WeaponSpawner{.type = weaponType, .spawnCooldown = systems::weaponCooldownTime, .hasWeapon = true});
-        registry.emplace<Position>(spawner, pos);
-        registry.emplace<CollisionShape>(spawner);
+            WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
+        );
+        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
+
+        registry.emplace<Position>(spawner, centeredPos);
+        registry.emplace<CollisionShape>(spawner, shape);
     }
 
     // Respawn points (with cooldown state)
@@ -183,8 +187,14 @@ void ServerGame::run()
 
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
-            spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
-        registry.emplace<Position>(spawner, pos);
+            spawner,
+            PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false}
+        );
+        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
+
+        registry.emplace<Position>(spawner, centeredPos);
+        registry.emplace<CollisionShape>(spawner, shape);
         registry.emplace<CollisionShape>(spawner);
     }
 
