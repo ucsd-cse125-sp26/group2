@@ -72,31 +72,36 @@ constexpr int k_slideFatigueMax = 4;                 ///< Max fatigue levels (bo
 
 // Wallrunning
 
-constexpr float k_wallrunCheckDist = 35.0f;        ///< Sphere-cast distance for side walls (u).
-constexpr float k_wallrunSphereRadius = 12.0f;     ///< Sphere-cast radius for wall detection (u).
-constexpr float k_wallrunMinGroundDist = 50.0f;    ///< Min height above ground to wallrun (u).
-constexpr float k_wallrunMaxSpeed = 800.0f;        ///< Max speed while wallrunning (u/s).
-constexpr float k_wallrunAccel = 500.0f;           ///< Forward acceleration along wall (u/s^2).
-constexpr float k_wallrunPushForce = 800.0f;       ///< Force pushing player toward wall (u/s^2).
-constexpr float k_wallrunKickoffDuration = 1.75f;  ///< Max time on same wall before kickoff (s).
-constexpr float k_wallrunSpeedLossDelay = 0.2f;    ///< Delay before clamping speed on wall (s).
-constexpr float k_wallrunIntentThreshold = 0.1f;   ///< Min dot(wishDir, -wallNormal) to ENTER a wallrun.
-                                                   ///< 0.1 ≈ 84° off-axis tolerance.
-constexpr float k_wallrunDetachThreshold = -0.26f; ///< Min dot(wishDir, -wallNormal) to STAY on the wall.
-                                                   ///< Negative = 15° grace past the wall plane, so the
-                                                   ///< player can start looking away before detaching.
-                                                   ///< cos(105°) ≈ -0.26.
-constexpr float k_wallrunGripTime = 1.0f;          ///< Initial zero-gravity "grip" phase on a wall (s).
-                                                   ///< During this window the player is pinned (vel.y = 0);
-                                                   ///< after it, gravity leaks in gradually.
-constexpr float k_wallrunGravityRampTime = 2.0f;   ///< Time to ramp gravity 0 → full after grip ends (s).
-                                                   ///< Produces a natural slide-off so the player can't
-                                                   ///< wallrun indefinitely even before the hard kickoff.
-constexpr float k_wallJumpUpForce = 320.0f;        ///< Upward velocity on wall jump (u/s).
-constexpr float k_wallJumpSideForce = 350.0f;      ///< Sideways velocity on wall jump (away from wall) (u/s).
-constexpr float k_wallrunExitTime = 0.2f;          ///< Duration of "exiting wall" flag after leaving (s).
-constexpr float k_wallrunCameraTilt = 7.5f;        ///< Camera roll when wallrunning (degrees).
-constexpr float k_wallrunCameraTiltSpeed = 10.0f;  ///< Interpolation speed for camera tilt.
+constexpr float k_wallrunCheckDist = 35.0f;                ///< Sphere-cast distance for side walls (u).
+constexpr float k_wallrunSphereRadius = 12.0f;             ///< Sphere-cast radius for wall detection (u).
+constexpr float k_wallrunMinGroundDist = 50.0f;            ///< Min height above ground to wallrun (u).
+constexpr float k_wallrunMaxSpeed = 800.0f;                ///< Max speed while wallrunning (u/s).
+constexpr float k_wallrunAccel = 500.0f;                   ///< Forward acceleration along wall (u/s^2).
+constexpr float k_wallrunPushForce = 800.0f;               ///< Force pushing player toward wall (u/s^2).
+constexpr float k_wallrunKickoffDuration = 1.75f;          ///< Max time on same wall before kickoff (s).
+constexpr float k_wallrunSpeedLossDelay = 0.2f;            ///< Delay before clamping speed on wall (s).
+constexpr float k_wallrunIntentThreshold = 0.1f;           ///< Min dot(wishDir, -wallNormal) to ENTER a wallrun.
+                                                           ///< 0.1 ≈ 84° off-axis tolerance.
+constexpr float k_wallrunDetachThreshold = -0.26f;         ///< Min dot(wishDir, -wallNormal) to STAY on the wall.
+                                                           ///< Negative = 15° grace past the wall plane, so the
+                                                           ///< player can start looking away before detaching.
+                                                           ///< cos(105°) ≈ -0.26.
+constexpr float k_wallrunGripTime = 1.0f;                  ///< Initial zero-gravity "grip" phase on a wall (s).
+                                                           ///< During this window the player is pinned (vel.y = 0);
+                                                           ///< after it, gravity leaks in gradually.
+constexpr float k_wallrunGravityRampTime = 2.0f;           ///< Time to ramp gravity 0 → full after grip ends (s).
+                                                           ///< Produces a natural slide-off so the player can't
+                                                           ///< wallrun indefinitely even before the hard kickoff.
+constexpr float k_wallJumpUpForce = 320.0f;                ///< Upward velocity on wall jump (u/s).
+constexpr float k_wallJumpSideForce = 350.0f;              ///< Sideways velocity on wall jump (away from wall) (u/s).
+constexpr float k_wallrunExitTime = 0.2f;                  ///< Duration of "exiting wall" flag after leaving (s).
+constexpr float k_wallrunCameraTilt = 7.5f;                ///< Camera roll when wallrunning (degrees).
+constexpr float k_wallrunCameraTiltSpeed = 10.0f;          ///< Interpolation speed for camera tilt.
+constexpr float k_wallrunEntryVerticalImpulse = 220.0f;    ///< Lucio-style upward kick when attaching (u/s).
+constexpr float k_wallrunEntryVerticalCeiling = 320.0f;    ///< Maximum vertical speed after the entry kick (u/s).
+constexpr float k_wallrunEntryHorizSnap = 1.0f;            ///< Horizontal speed retention on wallrun entry.
+constexpr float k_wallrunVerticalDecayTau = 0.45f;         ///< Exponential vertical decay while attached (s).
+constexpr float k_wallrunMaxFaceRedirect = 1.57079632679f; ///< Max face-normal rotation accepted per tick (rad).
 
 // Climbing
 

@@ -15,6 +15,7 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
+#include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/physics/WallDetection.hpp"
 
 #include <algorithm>
@@ -583,6 +584,8 @@ void handleSliding(
 namespace
 {
 
+constexpr float k_wallrunAttachPushback = 0.03125f;
+
 /// @brief Check if a wall normal matches the blacklist (same wall).
 /// @param normal    Wall normal to test.
 /// @param height    Current entity height.
@@ -600,6 +603,87 @@ bool isBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNor
     return false;
 }
 
+physics::CapsuleShape capsuleQueryForWallrun(const CollisionShape& shape)
+{
+    return {.radius = shape.radius, .halfHeight = shape.halfHeight, .up = glm::vec3{0.0f, 1.0f, 0.0f}};
+}
+
+struct WallAttachmentProbe
+{
+    bool found{false};
+    glm::vec3 anchor{0.0f};
+    glm::vec3 normal{0.0f};
+    uint32_t triId{UINT32_MAX};
+    physics::TriRegion region{physics::TriRegion::Face};
+};
+
+WallAttachmentProbe findWallAttachment(glm::vec3 pos,
+                                       const CollisionShape& shape,
+                                       const physics::WorldGeometry& world,
+                                       glm::vec3 continuityNormal,
+                                       glm::vec3 travelDir = glm::vec3{0.0f},
+                                       float lookaheadDist = 0.0f)
+{
+    WallAttachmentProbe best;
+    float bestScore = 1e30f;
+
+    if (shape.type == CollisionShapeType::Capsule) {
+        const physics::CapsuleShape capsule = capsuleQueryForWallrun(shape);
+        const float maxAxisDist = capsule.radius + tms::k_wallrunCheckDist + 8.0f;
+
+        for (const physics::WorldTriMesh& mesh : world.triMeshes) {
+            const physics::ClosestPointOnMeshResult cp = physics::closestPointOnMesh(capsule, pos, maxAxisDist, mesh);
+            if (!cp.found || !physics::isWallNormal(cp.normal))
+                continue;
+
+            const float continuity =
+                (glm::length(continuityNormal) > 0.5f) ? glm::dot(cp.normal, continuityNormal) : 1.0f;
+            if (continuity < -0.05f)
+                continue;
+
+            const float blocking = (glm::length(travelDir) > 0.5f)
+                                       ? std::max(0.0f, -glm::dot(glm::normalize(travelDir), cp.normal))
+                                       : 0.0f;
+            const float surfaceDist = std::abs(cp.dist - capsule.minkowskiExtent(cp.normal));
+            const float score = surfaceDist + (1.0f - continuity) * 2.0f - blocking * lookaheadDist * 2.0f;
+            if (score < bestScore) {
+                bestScore = score;
+                best.found = true;
+                best.anchor = cp.pointOnMesh;
+                best.normal = cp.normal;
+                best.triId = cp.triId;
+                best.region = cp.region;
+            }
+        }
+    }
+
+    return best;
+}
+
+void seedWallAttachmentFromProbe(PlayerStateRef state, const glm::vec3& point, const glm::vec3& normal)
+{
+    state.sim.wallAnchor = point;
+    state.sim.wallNormal = normal;
+    state.sim.wallTriId = UINT32_MAX;
+    state.sim.wallRegion = physics::TriRegion::Face;
+    state.sim.wallAttachmentValid = true;
+}
+
+glm::vec3 redirectWallForward(glm::vec3 oldForward, glm::vec3 oldNormal, glm::vec3 newNormal)
+{
+    glm::vec3 redirected = oldForward + oldNormal;
+    redirected -= newNormal * glm::dot(redirected, newNormal);
+
+    if (glm::length(redirected) < 0.001f) {
+        redirected = glm::cross(glm::vec3{0.0f, 1.0f, 0.0f}, newNormal);
+        if (glm::dot(redirected, oldNormal) < 0.0f)
+            redirected = -redirected;
+    }
+
+    const float len = glm::length(redirected);
+    return (len > 0.001f) ? redirected / len : oldForward;
+}
+
 /// @brief Attempt to enter wallrun mode when airborne near a wall.
 /// @param vel    Velocity (modified in place).
 /// @param state  Player state (modified in place).
@@ -610,6 +694,9 @@ void tryEnterWallrun(glm::vec3& vel,
                      PlayerStateRef state,
                      const InputSnapshot& input,
                      const physics::WallDetectionResult& walls,
+                     const CollisionShape& shape,
+                     const physics::WorldGeometry& world,
+                     glm::vec3 pos,
                      float posY)
 {
     if (state.vis.moveMode != MoveMode::OnFoot)
@@ -631,7 +718,7 @@ void tryEnterWallrun(glm::vec3& vel,
     const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
 
     // Check each side.
-    auto tryWall = [&](bool hasWall, const glm::vec3& wallNorm, WallSide side) {
+    auto tryWall = [&](bool hasWall, const glm::vec3& wallNorm, const glm::vec3& wallPoint, WallSide side) {
         if (!hasWall)
             return false;
         if (isBlacklisted(wallNorm,
@@ -661,17 +748,39 @@ void tryEnterWallrun(glm::vec3& vel,
         state.sim.wallForward = wallFwd;
         state.sim.wallRunTimer = 0.0f;
         state.sim.wallRunSpeedTimer = 0.0f;
+        seedWallAttachmentFromProbe(state, wallPoint, wallNorm);
+
+        const WallAttachmentProbe attachment = findWallAttachment(pos, shape, world, wallNorm);
+        if (attachment.found) {
+            state.sim.wallAnchor = attachment.anchor;
+            state.sim.wallNormal = attachment.normal;
+            state.sim.wallTriId = attachment.triId;
+            state.sim.wallRegion = attachment.region;
+            state.sim.wallAttachmentValid = true;
+
+            wallFwd = glm::cross(glm::vec3{0.0f, 1.0f, 0.0f}, state.sim.wallNormal);
+            if (side == WallSide::Left)
+                wallFwd = -wallFwd;
+            if (glm::length(k_hv) > 0.001f && glm::dot(glm::normalize(k_hv), wallFwd) < 0.0f)
+                wallFwd = -wallFwd;
+            state.sim.wallForward = glm::normalize(wallFwd);
+        }
+
         // DJ no longer refreshes from entering wallrun — only from ground time.
         state.vis.jumpCount = 0;
 
-        // Reduce vertical velocity to near-zero for a smooth wall-grab feel.
-        vel.y = std::clamp(vel.y, -25.0f, 25.0f);
+        vel.x *= tms::k_wallrunEntryHorizSnap;
+        vel.z *= tms::k_wallrunEntryHorizSnap;
+        const float k_gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+        vel.y = std::clamp(vel.y + tms::k_wallrunEntryVerticalImpulse * k_gravDir,
+                           -tms::k_wallrunEntryVerticalCeiling,
+                           tms::k_wallrunEntryVerticalCeiling);
 
         return true;
     };
 
-    if (!tryWall(walls.wallRight, walls.rightNormal, WallSide::Right))
-        tryWall(walls.wallLeft, walls.leftNormal, WallSide::Left);
+    if (!tryWall(walls.wallRight, walls.rightNormal, walls.rightPoint, WallSide::Right))
+        tryWall(walls.wallLeft, walls.leftNormal, walls.leftPoint, WallSide::Left);
 }
 
 /// @brief Exit wallrun mode and start cooldown timers.
@@ -687,6 +796,8 @@ void exitWallrun(PlayerStateRef state, float posY)
     state.sim.wallBlacklistActive = true;
     state.sim.wallBlacklistNormal = state.sim.wallNormal;
     state.sim.wallBlacklistHeight = posY;
+    state.sim.wallAttachmentValid = false;
+    state.sim.wallTriId = UINT32_MAX;
 }
 
 /// @brief Process wallrunning movement, exit conditions, and camera tilt.
@@ -695,7 +806,8 @@ void exitWallrun(PlayerStateRef state, float posY)
 /// @param state        Player state (modified in place).
 /// @param input        Current input snapshot.
 /// @param walls        Wall detection result from this tick.
-/// @param halfExtents  Player AABB half-extents (for standoff distance).
+/// @param shape        Player collision shape used for wall standoff.
+/// @param world        World collision geometry used to refresh attachment.
 /// @param posY         Current vertical position of the entity.
 /// @param dt           Fixed physics delta time in seconds.
 void handleWallRunning(glm::vec3& pos,
@@ -703,7 +815,8 @@ void handleWallRunning(glm::vec3& pos,
                        PlayerStateRef state,
                        const InputSnapshot& input,
                        const physics::WallDetectionResult& walls,
-                       const glm::vec3& halfExtents,
+                       const CollisionShape& shape,
+                       const physics::WorldGeometry& world,
                        float posY,
                        float dt)
 {
@@ -723,95 +836,58 @@ void handleWallRunning(glm::vec3& pos,
         return;
     }
 
-    // Exit: lost wall contact
-    const bool k_stillOnWall = (state.vis.wallRunSide == WallSide::Right && walls.wallRight) ||
-                               (state.vis.wallRunSide == WallSide::Left && walls.wallLeft);
-    if (!k_stillOnWall) {
-        exitWallrun(state, posY);
-        return;
-    }
-
     // No look-away detach: Lucio glide stays attached regardless of where the
     // player looks. The only ways out are jump release (above) or losing wall
     // contact (e.g. the wall ends).
 
-    // --- Update wall normal from latest detection (curved surface tracking) ---
-    if (state.vis.wallRunSide == WallSide::Right)
-        state.sim.wallNormal = walls.rightNormal;
-    else
-        state.sim.wallNormal = walls.leftNormal;
+    const glm::vec3 oldNormal = state.sim.wallNormal;
+    const glm::vec3 oldForward = state.sim.wallForward;
+    const float preAttachHorizSpeed = glm::length(horizVel(vel));
+    const float handoffLookahead = std::clamp(preAttachHorizSpeed * dt + 4.0f, 4.0f, shape.radius);
 
-    // --- Curved surface: constrained motion ---
-    // On a flat wall, tangential velocity is parallel to the surface.
-    // On a curved surface (cylinder), the tangent rotates, so velocity must
-    // be re-projected onto the new tangent plane each tick.  Without this,
-    // the player flies off tangentially — the push force (300 u/s²) can't
-    // overcome the centripetal acceleration needed (v²/r ≈ 2000+ u/s²).
-
-    // 1. Preserve speed, re-project velocity onto the new wall tangent plane.
-    //    This is the key step — it rotates the velocity to follow curvature.
-    {
-        const float k_normalVel = glm::dot(vel, state.sim.wallNormal);
-        // Remove the outward component (only if pointing away from wall).
-        // Keep inward component so the push force can press the player in.
-        if (k_normalVel > 0.0f)
-            vel -= state.sim.wallNormal * k_normalVel;
+    WallAttachmentProbe attachment = findWallAttachment(pos, shape, world, oldNormal, oldForward, handoffLookahead);
+    if (!attachment.found) {
+        const bool fallbackRight = walls.wallRight && glm::dot(walls.rightNormal, oldNormal) > -0.05f;
+        const bool fallbackLeft = walls.wallLeft && glm::dot(walls.leftNormal, oldNormal) > -0.05f;
+        if (fallbackRight || fallbackLeft) {
+            const bool useRight = fallbackRight && (!fallbackLeft || glm::dot(walls.rightNormal, oldNormal) >=
+                                                                         glm::dot(walls.leftNormal, oldNormal));
+            attachment.found = true;
+            attachment.anchor = useRight ? walls.rightPoint : walls.leftPoint;
+            attachment.normal = useRight ? walls.rightNormal : walls.leftNormal;
+        } else {
+            exitWallrun(state, posY);
+            return;
+        }
     }
 
-    // 2. Standoff correction.  Two architectural rules:
-    //
-    //    (a) The desired standoff must equal the Minkowski half-radius of
-    //        the player AABB along the wall normal, plus a 1u slack —
-    //        NOT `max(halfExtents.x, halfExtents.z) + 1`.  The latter is
-    //        only correct for axis-aligned walls.  For a 45° wall the
-    //        true envelope radius is `|n.x|*halfExtents.x + |n.z|*halfExtents.z`
-    //        ≈ 22.6u, so the old 17u standoff placed the player ~5.6u
-    //        INSIDE the Minkowski envelope every wallrun on a diagonal
-    //        surface — the capsule visually clipped through the wall,
-    //        and CollisionSystem couldn't catch the player when they
-    //        slid past the bounded triangle's footprint.
-    //
-    //    (b) The correction must NOT directly mutate `pos`.  MovementSystem
-    //        sets velocity; CollisionSystem owns position.  Direct pos
-    //        mutation bypasses depen/sweep/bump entirely, so the corrected
-    //        position can land inside geometry (or past a bounded
-    //        triangle's footprint) without CollisionSystem ever knowing.
-    //        Express the correction as an inward velocity component
-    //        instead — the bump loop's sweep will clip it at the wall
-    //        surface (placing the player at R + pushback), and if there
-    //        is no actual collision geometry at the contact point (open-
-    //        mesh / finite-triangle case), the wallrun probe will
-    //        eventually lose the wall and disengage normally rather than
-    //        teleporting the player through.
-    {
-        const glm::vec3 wallPt = (state.vis.wallRunSide == WallSide::Right) ? walls.rightPoint : walls.leftPoint;
-        const float k_currentDist = glm::dot(pos - wallPt, state.sim.wallNormal);
-        // True Minkowski radius for the AABB along this wall's normal.
-        const float k_R = std::abs(state.sim.wallNormal.x) * halfExtents.x +
-                          std::abs(state.sim.wallNormal.y) * halfExtents.y +
-                          std::abs(state.sim.wallNormal.z) * halfExtents.z;
-        const float k_desiredDist = k_R + 1.0f;
-        const float k_drift = k_currentDist - k_desiredDist;
-        if (k_drift > 0.5f) {
-            // Replace (not accumulate) the inward velocity component.  We
-            // want the player heading toward the wall at speed
-            // proportional to drift, but capped to avoid runaway when the
-            // bump loop can't catch the motion (e.g., past bounded-tri
-            // footprint).  Setting the component rather than adding makes
-            // the per-tick correction one-shot — drift recomputes next
-            // tick from the new pos and the new value applies.
-            constexpr float k_correctGain = 10.0f;   // 1/τ; matches original exp-decay rate.
-            constexpr float k_maxCorrectSpeed = 100.0f;
-            const float k_desiredInwardSpeed = std::min(k_drift * k_correctGain, k_maxCorrectSpeed);
-            // Current inward speed (positive = moving toward wall).
-            const float k_currentInwardSpeed = -glm::dot(vel, state.sim.wallNormal);
-            // Only INCREASE inward speed toward the desired; never reduce
-            // below current (avoids fighting CollisionSystem's bump clip,
-            // which leaves vel·faceN ≤ 0 after a wall contact).
-            if (k_desiredInwardSpeed > k_currentInwardSpeed) {
-                vel -= state.sim.wallNormal * (k_desiredInwardSpeed - k_currentInwardSpeed);
-            }
-        }
+    const float normalTurn = std::acos(std::clamp(glm::dot(oldNormal, attachment.normal), -1.0f, 1.0f));
+    if (normalTurn > tms::k_wallrunMaxFaceRedirect + 1e-4f) {
+        exitWallrun(state, posY);
+        return;
+    }
+
+    state.sim.wallAnchor = attachment.anchor;
+    state.sim.wallNormal = attachment.normal;
+    state.sim.wallTriId = attachment.triId;
+    state.sim.wallRegion = attachment.region;
+    state.sim.wallAttachmentValid = true;
+
+    const float desiredStandoff =
+        (shape.type == CollisionShapeType::Capsule)
+            ? capsuleQueryForWallrun(shape).minkowskiExtent(state.sim.wallNormal) + k_wallrunAttachPushback
+            : shape.minkowskiExtent(state.sim.wallNormal) + k_wallrunAttachPushback;
+    const float currentStandoff = glm::dot(pos - state.sim.wallAnchor, state.sim.wallNormal);
+    pos += state.sim.wallNormal * (desiredStandoff - currentStandoff);
+
+    const float normalVel = glm::dot(vel, state.sim.wallNormal);
+    vel -= state.sim.wallNormal * normalVel;
+
+    if (normalTurn > 0.05f) {
+        state.sim.wallForward = redirectWallForward(oldForward, oldNormal, state.sim.wallNormal);
+        const float verticalVel = vel.y;
+        vel = state.sim.wallForward * preAttachHorizSpeed;
+        vel.y = verticalVel;
     }
 
     // --- Compute wall-tangent acceleration direction ---
@@ -851,13 +927,11 @@ void handleWallRunning(glm::vec3& pos,
     if (state.sim.wallRunSpeedTimer > tms::k_wallrunSpeedLossDelay)
         clampHorizSpeed(vel, tms::k_wallrunMaxSpeed);
 
-    // Push toward wall to keep player stuck.
-    vel -= state.sim.wallNormal * tms::k_wallrunPushForce * dt;
+    vel.y *= std::exp(-dt / tms::k_wallrunVerticalDecayTau);
+    vel -= state.sim.wallNormal * glm::dot(vel, state.sim.wallNormal);
 
-    // Pure Lucio glide: gravity never applies while attached. The player can
-    // ride for as long as they hold jump and the wall continues. Vertical
-    // movement only resumes after detach (release or lost contact).
-    vel.y = 0.0f;
+    const float sideDot = glm::dot(state.sim.wallNormal, glm::vec3{std::cos(input.yaw), 0.0f, -std::sin(input.yaw)});
+    state.vis.wallRunSide = (sideDot < 0.0f) ? WallSide::Right : WallSide::Left;
 
     // Camera tilt.
     state.vis.targetCameraTilt =
@@ -1351,7 +1425,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             if (state.vis.moveMode == MoveMode::OnFoot)
                 tryEnterClimb(vel.value, state, input, walls, pos.value.y);
             if (state.vis.moveMode == MoveMode::OnFoot)
-                tryEnterWallrun(vel.value, state, input, walls, pos.value.y);
+                tryEnterWallrun(vel.value, state, input, walls, shape, world, pos.value, pos.value.y);
             if (state.vis.moveMode == MoveMode::OnFoot)
                 tryEnterSlide(vel.value, state, shape, pos, input);
 
@@ -1414,7 +1488,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             }
 
             case MoveMode::WallRunning:
-                handleWallRunning(pos.value, vel.value, state, input, walls, shape.halfExtents, pos.value.y, dt);
+                handleWallRunning(pos.value, vel.value, state, input, walls, shape, world, pos.value.y, dt);
                 break;
 
             case MoveMode::Climbing:

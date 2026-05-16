@@ -16,7 +16,9 @@
 #pragma once
 
 #include "PlayerVisState.hpp" // for PlayerStateRef + transitively PlayerStateEnums
+#include "ecs/physics/TriMeshCollision.hpp"
 
+#include <cstdint>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
@@ -55,12 +57,16 @@ struct PlayerSimState
     bool canEnterSlide{true};       ///< Cleared when in air, set on landing.
 
     // ── Wallrunning ────────────────────────────────────────────────────────
-    glm::vec3 wallNormal{0.0f};    ///< Normal of the wall being run on.
-    glm::vec3 wallForward{0.0f};   ///< Direction of travel along the wall.
-    float wallRunTimer{0.0f};      ///< Time on current wall (s).
-    float wallRunSpeedTimer{0.0f}; ///< Timer for the speed-loss delay.
-    float exitWallTimer{0.0f};     ///< Remaining exit-wall grace time (s).
-    bool wasWallRunning{false};    ///< Set briefly after leaving wallrun (coyote wall jump).
+    glm::vec3 wallNormal{0.0f};     ///< Normal of the wall being run on.
+    glm::vec3 wallForward{0.0f};    ///< Direction of travel along the wall.
+    glm::vec3 wallAnchor{0.0f};     ///< Closest point on the attached wall surface.
+    float wallRunTimer{0.0f};       ///< Time on current wall (s).
+    float wallRunSpeedTimer{0.0f};  ///< Timer for the speed-loss delay.
+    float exitWallTimer{0.0f};      ///< Remaining exit-wall grace time (s).
+    uint32_t wallTriId{UINT32_MAX}; ///< Current mesh triangle under the wall attachment, if any.
+    physics::TriRegion wallRegion{physics::TriRegion::Face}; ///< Closest feature on `wallTriId`.
+    bool wallAttachmentValid{false}; ///< True while the wallrun has a collision-backed attachment.
+    bool wasWallRunning{false};      ///< Set briefly after leaving wallrun (coyote wall jump).
 
     // Wall blacklist: stores the last wall's normal + height to prevent regrab.
     glm::vec3 wallBlacklistNormal{0.0f};

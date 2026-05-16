@@ -301,6 +301,23 @@ Acceptance: player wallruns through a 90° outer corner without speed change
 or visible direction snap. Same for an inner corner. The
 `MovementSystem.cpp:761-815` block is gone.
 
+**Implementation outcome (as shipped).**
+
+- `PlayerSimState` now carries the wall attachment data:
+  `wallAnchor`, `wallNormal`, `wallForward`, `wallTriId`, `wallRegion`, and
+  `wallAttachmentValid`.
+- `MovementSystem::handleWallRunning` queries the nearest collision-backed wall
+  each tick via `closestPointOnMesh(capsule, pos, ...)`, filters for wall
+  normals, and preserves normal continuity so 90° face transitions stay
+  attached instead of dropping because a left/right sphere cast changed side.
+- The old AABB standoff PD block was removed.  Standoff is now enforced as
+  `anchor + normal * capsule.minkowskiExtent(normal)` before the collision
+  system performs its swept capsule advance.  The collision system still owns
+  depenetration and time-of-impact clipping; wallrun only maintains the
+  kinematic attachment frame and tangent velocity.
+- Non-trimesh/dev geometry still has a sphere-cast fallback, but real map
+  geometry uses the Phase-B mesh closest-point path.
+
 ### Phase E — Edge traversal feel polish
 
 Tuning on top of Phase D:
@@ -313,6 +330,16 @@ Tuning on top of Phase D:
 - Drop the dot-product gating that currently terminates wallrun on side
   flip (`MovementSystem.cpp:727-731`); the tangent simply rotates through
   the dihedral.
+
+**Implementation outcome (as shipped).**
+
+- Side-specific wall contact is no longer the authority while wallrunning.
+  The side enum is recomputed from camera/right vector only for camera roll.
+- Face redirection is capped by `k_wallrunMaxFaceRedirect` (90°/tick).  A
+  valid outer or inner corner can carry the run; pathological sharper turns
+  detach cleanly.
+- Tangent velocity is reprojected onto the new wall plane each tick and the
+  forward vector is preserved without 180° flips.
 
 ### Phase F — Lucio-style entry impulse
 
@@ -343,6 +370,14 @@ at `MovementSystem.cpp:860` is replaced by this decay.
 
 Acceptance: video side-by-side with a Lucio wallride looks indistinguishable
 in shape (climb-then-flat) within ~10% in apex height.
+
+**Implementation outcome (as shipped).**
+
+- `tryEnterWallrun` applies `k_wallrunEntryVerticalImpulse` and clamps to
+  `k_wallrunEntryVerticalCeiling`, while preserving horizontal speed through
+  `k_wallrunEntryHorizSnap`.
+- During wallrun, vertical velocity decays exponentially using
+  `k_wallrunVerticalDecayTau` instead of being forced to zero.
 
 ## Phase Dependencies
 
