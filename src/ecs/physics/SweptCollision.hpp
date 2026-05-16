@@ -278,6 +278,58 @@ HitResult sweepCapsuleVsSphere(CapsuleShape capsule, glm::vec3 start, glm::vec3 
 /// @brief Sweep a capsule against all world geometry, returning the earliest hit.
 HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
 
+/// @brief Result of a shape-vs-geometry closest-point clearance query.
+///
+/// Used by Phase-C conservative-advancement integration (Mirtich 2000):
+/// the CA inner loop alternates closest-point queries with velocity-
+/// projected advances, guaranteeing no penetration regardless of motion
+/// magnitude.  Also consumed by Phase-D wallrun, which uses it to anchor
+/// the player to the nearest wall surface across any primitive type.
+///
+/// Sign convention: `distance > 0` means the shape's surface is `distance`
+/// away from the geometry's surface in 3D.  `distance == 0` is grazing
+/// contact.  `distance < 0` is penetration (depth = -distance) — depen
+/// handles the recovery; CA treats this as "in contact" and clips
+/// velocity into the surface.
+///
+/// `normal` always points AWAY from the geometry into free space — i.e.,
+/// pushing the shape along `+normal` moves it out of the obstacle.
+struct ClearanceResult
+{
+    bool contact{false};                 ///< True when `distance <= contactEpsilon`.
+    float distance{1e30f};               ///< Signed distance shape-surface → geometry-surface.
+    glm::vec3 pointOnGeometry{0.0f};     ///< World-space closest point on the geometry side.
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};  ///< Unit-length, points from geometry into free space.
+    SurfaceType surfaceType{SurfaceType::Concrete}; ///< Material tag at the closest feature.
+};
+
+// Capsule-vs-primitive closest-point queries (Phase C clearance CA).
+//
+// Each query returns the directed distance from the capsule's surface to
+// the nearest point on the primitive (positive = outside, zero = touching,
+// negative = penetrating) and the contact normal pointing into free space.
+//
+// EXACT for planes, brushes, and spheres.  For boxes, cylinders, and
+// trimeshes the query uses the underlying segment-vs-primitive geometry
+// where exact (capsule axis as the moving feature), falling back to
+// capsule's enclosing AABB where exact would require disproportionate
+// per-feature math (boxes — exact would need full SAT-vs-segment).
+//
+// All results are conservative: the reported `distance` is always
+// ≤ the true distance, so an advance of `distance / velIntoSurface`
+// along the velocity direction never penetrates.
+
+ClearanceResult clearanceCapsuleVsPlanes(CapsuleShape capsule, glm::vec3 pos, std::span<const Plane> planes);
+ClearanceResult clearanceCapsuleVsBox(CapsuleShape capsule, glm::vec3 pos, const WorldAABB& box);
+ClearanceResult clearanceCapsuleVsBrush(CapsuleShape capsule, glm::vec3 pos, const WorldBrush& brush);
+ClearanceResult clearanceCapsuleVsCylinder(CapsuleShape capsule, glm::vec3 pos, const WorldCylinder& cyl);
+ClearanceResult clearanceCapsuleVsSphere(CapsuleShape capsule, glm::vec3 pos, const WorldSphere& sph);
+
+/// @brief Scene-wide minimum clearance.  Returns the nearest geometry
+/// feature in any direction.  This is the closest-point query the
+/// conservative-advancement integrator drives off of every iteration.
+ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, const WorldGeometry& world);
+
 // Sphere cast
 
 /// @brief Result of a sphere-cast query (includes world-space hit point).

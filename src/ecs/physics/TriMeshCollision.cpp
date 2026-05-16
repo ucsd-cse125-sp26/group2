@@ -1460,4 +1460,24 @@ ClosestPointOnMeshResult closestPointOnMesh(
     return closestPointOnMesh(capsule.segA(center), capsule.segB(center), maxDist, mesh);
 }
 
+ClearanceResult clearanceCapsuleVsTriMesh(
+    CapsuleShape capsule, glm::vec3 pos, float maxReach, const WorldTriMesh& mesh)
+{
+    ClearanceResult clr;
+    // Capsule axis to mesh: maxReach must already cover capsule.radius + motion.
+    const ClosestPointOnMeshResult cp = closestPointOnMesh(capsule, pos, maxReach, mesh);
+    if (!cp.found)
+        return clr;
+
+    // Surface-to-surface clearance = axis-to-mesh distance − capsule radius.
+    clr.distance = cp.dist - capsule.radius;
+    clr.normal = cp.normal;
+    clr.pointOnGeometry = cp.pointOnMesh;
+    if (cp.triId < mesh.triangleMaterials.size())
+        clr.surfaceType = static_cast<SurfaceType>(mesh.triangleMaterials[cp.triId]);
+    else
+        clr.surfaceType = mesh.defaultSurface;
+    return clr;
+}
+
 } // namespace physics

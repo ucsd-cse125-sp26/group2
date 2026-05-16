@@ -159,4 +159,15 @@ ClosestPointOnMeshResult closestPointOnMesh(
 ClosestPointOnMeshResult closestPointOnMesh(
     CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh);
 
+/// @brief Capsule-vs-trimesh clearance.  Wraps `closestPointOnMesh` and
+/// converts axis-to-mesh distance into surface-to-surface clearance by
+/// subtracting `capsule.radius`.
+///
+/// Used by the Phase-C scene-wide `clearanceCapsuleVsWorld` aggregator.
+/// `maxReach` bounds the BVH search radius — pass at least the per-tick
+/// motion magnitude plus `capsule.radius` to ensure no contacts are
+/// missed within the integration step.
+ClearanceResult clearanceCapsuleVsTriMesh(
+    CapsuleShape capsule, glm::vec3 pos, float maxReach, const WorldTriMesh& mesh);
+
 } // namespace physics

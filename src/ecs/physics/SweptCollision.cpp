@@ -7,10 +7,30 @@
 
 #include <algorithm>
 #include <cmath>
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
 namespace physics
 {
+
+namespace
+{
+
+constexpr float k_contactEpsilon = 0.03125f; // 1/32 unit — matches Quake DIST_EPSILON.
+
+/// @brief Closest point on segment `[a, b]` to point `p`.  Standard
+/// parametric clamp; degenerate (zero-length) segments collapse to `a`.
+glm::vec3 closestPointSegmentPoint(glm::vec3 a, glm::vec3 b, glm::vec3 p)
+{
+    const glm::vec3 ab = b - a;
+    const float abLenSq = glm::dot(ab, ab);
+    if (abLenSq < 1e-12f)
+        return a;
+    const float t = glm::clamp(glm::dot(p - a, ab) / abLenSq, 0.0f, 1.0f);
+    return a + ab * t;
+}
+
+} // namespace
 
 HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::span<const Plane> planes)
 {
@@ -715,6 +735,198 @@ HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const W
             best = k_hr;
     }
 
+    return best;
+}
+
+// Capsule clearance queries (Phase C clearance-CA)
+
+ClearanceResult clearanceCapsuleVsPlanes(CapsuleShape capsule, glm::vec3 pos, std::span<const Plane> planes)
+{
+    ClearanceResult best;
+    for (const Plane& plane : planes) {
+        const float s = glm::dot(plane.normal, pos) - plane.distance;
+        const float r = capsule.minkowskiExtent(plane.normal);
+        const float clearance = s - r;
+        if (clearance < best.distance) {
+            best.distance = clearance;
+            best.normal = plane.normal;
+            best.pointOnGeometry = pos - plane.normal * s; // foot of perpendicular
+            best.surfaceType = plane.surfaceType;
+        }
+    }
+    best.contact = best.distance < k_contactEpsilon;
+    return best;
+}
+
+ClearanceResult clearanceCapsuleVsBox(CapsuleShape capsule, glm::vec3 pos, const WorldAABB& box)
+{
+    // Conservative: capsule's enclosing AABB vs the world AABB.  Exact would
+    // require segment-vs-AABB closest-point (~30 LoC); the conservative
+    // version over-approximates the capsule at corner curvature only,
+    // shortening the reported clearance there — CA simply takes more
+    // iterations to wrap a corner, but never penetrates.
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+    const glm::vec3 capMin = pos - he;
+    const glm::vec3 capMax = pos + he;
+
+    glm::vec3 gapVec{0.0f};
+    for (int axis = 0; axis < 3; ++axis) {
+        if (capMax[axis] < box.min[axis])
+            gapVec[axis] = box.min[axis] - capMax[axis];
+        else if (capMin[axis] > box.max[axis])
+            gapVec[axis] = -(capMin[axis] - box.max[axis]);
+        // else axis-overlap, gapVec[axis] = 0
+    }
+    const float gapLen = glm::length(gapVec);
+
+    ClearanceResult clr;
+    clr.surfaceType = box.surfaceType;
+
+    if (gapLen > 1e-6f) {
+        // Outside box.  Normal points from box surface toward capsule centre.
+        clr.distance = gapLen;
+        clr.normal = -gapVec / gapLen; // gapVec is from cap to box; normal is reverse
+        clr.pointOnGeometry = glm::clamp(pos, box.min, box.max);
+    } else {
+        // Penetrating: least-pen face MTV, exactly as `depenetrateBox`.
+        const glm::vec3 expMin = box.min - he;
+        const glm::vec3 expMax = box.max + he;
+        float minPen = 1e30f;
+        glm::vec3 pushDir{0.0f, 1.0f, 0.0f};
+        const struct
+        {
+            float pen;
+            glm::vec3 dir;
+        } faces[] = {
+            {pos.x - expMin.x, {-1, 0, 0}},
+            {expMax.x - pos.x, {1, 0, 0}},
+            {pos.y - expMin.y, {0, -1, 0}},
+            {expMax.y - pos.y, {0, 1, 0}},
+            {pos.z - expMin.z, {0, 0, -1}},
+            {expMax.z - pos.z, {0, 0, 1}},
+        };
+        for (const auto& f : faces) {
+            if (f.pen < minPen) {
+                minPen = f.pen;
+                pushDir = f.dir;
+            }
+        }
+        clr.distance = -minPen; // negative — penetrating
+        clr.normal = pushDir;
+        clr.pointOnGeometry = glm::clamp(pos, box.min, box.max);
+    }
+    clr.contact = clr.distance < k_contactEpsilon;
+    return clr;
+}
+
+ClearanceResult clearanceCapsuleVsBrush(CapsuleShape capsule, glm::vec3 pos, const WorldBrush& brush)
+{
+    // Plane-by-plane.  If shape is outside ANY plane, the brush is at
+    // least that-plane's clearance away → take MAX of positive clearances.
+    // If shape is inside ALL planes, it's penetrating; take MAX of negative
+    // (least negative = closest exit plane).
+    float maxPos = -1e30f;
+    int maxPosPlane = -1;
+    float maxNeg = -1e30f; // closest to zero from below
+    int maxNegPlane = -1;
+
+    for (int i = 0; i < brush.planeCount; ++i) {
+        const Plane& p = brush.planes[i];
+        const float r = capsule.minkowskiExtent(p.normal);
+        const float s = glm::dot(p.normal, pos) - p.distance;
+        const float clearance = s - r;
+        if (clearance > 0.0f) {
+            if (clearance > maxPos) {
+                maxPos = clearance;
+                maxPosPlane = i;
+            }
+        } else {
+            if (clearance > maxNeg) {
+                maxNeg = clearance;
+                maxNegPlane = i;
+            }
+        }
+    }
+
+    ClearanceResult clr;
+    int chosenPlane = (maxPosPlane >= 0) ? maxPosPlane : maxNegPlane;
+    if (chosenPlane < 0)
+        return clr; // empty brush — return default (distance=1e30)
+
+    const Plane& p = brush.planes[chosenPlane];
+    clr.distance = (maxPosPlane >= 0) ? maxPos : maxNeg;
+    clr.normal = p.normal;
+    clr.pointOnGeometry = pos - p.normal * (glm::dot(p.normal, pos) - p.distance);
+    clr.surfaceType = p.surfaceType;
+    clr.contact = clr.distance < k_contactEpsilon;
+    return clr;
+}
+
+ClearanceResult clearanceCapsuleVsCylinder(CapsuleShape capsule, glm::vec3 pos, const WorldCylinder& cyl)
+{
+    // Conservative via the cylinder's enclosing AABB.  Cylinder side
+    // curvature is the only thing this approximation loses, and only at
+    // the rim; CA's iterative nature handles the resulting longer
+    // wrap-around in extra iterations.
+    WorldAABB cylAABB;
+    cylAABB.min = glm::vec3(cyl.base.x - cyl.radius, cyl.base.y, cyl.base.z - cyl.radius);
+    cylAABB.max = glm::vec3(cyl.base.x + cyl.radius, cyl.base.y + cyl.height, cyl.base.z + cyl.radius);
+    cylAABB.surfaceType = cyl.surfaceType;
+    return clearanceCapsuleVsBox(capsule, pos, cylAABB);
+}
+
+ClearanceResult clearanceCapsuleVsSphere(CapsuleShape capsule, glm::vec3 pos, const WorldSphere& sph)
+{
+    // Exact: closest point on capsule axis (segment) to sphere centre.
+    const glm::vec3 segA = capsule.segA(pos);
+    const glm::vec3 segB = capsule.segB(pos);
+    const glm::vec3 closestAxis = closestPointSegmentPoint(segA, segB, sph.center);
+    const glm::vec3 fromSphereToAxis = closestAxis - sph.center;
+    const float axisDist = glm::length(fromSphereToAxis);
+
+    ClearanceResult clr;
+    clr.distance = axisDist - capsule.radius - sph.radius;
+    if (axisDist > 1e-6f) {
+        clr.normal = fromSphereToAxis / axisDist;
+        clr.pointOnGeometry = sph.center + clr.normal * sph.radius;
+    } else {
+        // Capsule axis coincides with sphere centre — degenerate.
+        clr.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        clr.pointOnGeometry = sph.center + clr.normal * sph.radius;
+    }
+    clr.surfaceType = sph.surfaceType;
+    clr.contact = clr.distance < k_contactEpsilon;
+    return clr;
+}
+
+ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, const WorldGeometry& world)
+{
+    ClearanceResult best;
+    auto consider = [&](const ClearanceResult& c) {
+        if (c.distance < best.distance)
+            best = c;
+    };
+
+    consider(clearanceCapsuleVsPlanes(capsule, pos, world.planes));
+    for (const WorldAABB& box : world.boxes)
+        consider(clearanceCapsuleVsBox(capsule, pos, box));
+    for (const WorldBrush& brush : world.brushes)
+        consider(clearanceCapsuleVsBrush(capsule, pos, brush));
+    for (const WorldCylinder& cyl : world.cylinders)
+        consider(clearanceCapsuleVsCylinder(capsule, pos, cyl));
+    for (const WorldSphere& sph : world.spheres)
+        consider(clearanceCapsuleVsSphere(capsule, pos, sph));
+
+    // Trimesh search radius: at least capsule.radius (to find any contact),
+    // bounded by current best clearance plus margin (BVH cull won't process
+    // triangles further than this).  If best is still huge (1e30) — no
+    // convex primitive is close — fall back to a generous 1024 u search.
+    const float meshSearchRadius =
+        (best.distance < 1024.0f) ? (best.distance + capsule.radius + 16.0f) : 1024.0f;
+    for (const WorldTriMesh& tm : world.triMeshes)
+        consider(clearanceCapsuleVsTriMesh(capsule, pos, meshSearchRadius, tm));
+
+    best.contact = best.distance < k_contactEpsilon;
     return best;
 }
 
