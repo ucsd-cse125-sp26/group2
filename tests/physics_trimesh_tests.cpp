@@ -2054,6 +2054,19 @@ bool climbSameWallReattachRequiresMeaningfulDrop()
     return ok;
 }
 
+bool climbSpaceDefaultsAreDeterministic()
+{
+    PlayerSimState state;
+    bool ok = true;
+    ok &= expect(state.climbAttachHeight == 0.0f, "climb attach height should default deterministically");
+    ok &= expect(state.climbBaseline == 0.0f, "climb baseline should default deterministically");
+    ok &= expect(state.climbSpaceCutoff == 0.0f, "climb cutoff should default deterministically");
+    ok &= expect(state.climbAttachOffsetLimit == 0.0f, "climb attach offset limit should default deterministically");
+    ok &= expect(state.climbPreviousAttachHeight <= -1e9f, "previous attach height should default to none");
+    ok &= expect(!state.climbEndBoostQueued, "end boost should not default active");
+    return ok;
+}
+
 bool triMeshValidationReportsCookerIssues()
 {
     WorldTriMesh mesh;
@@ -2329,6 +2342,7 @@ int main()
     ok &= climbNeutralInputSlipsBeforeDetach();
     ok &= climbNeutralInputDetachesAfterGrace();
     ok &= climbSameWallReattachRequiresMeaningfulDrop();
+    ok &= climbSpaceDefaultsAreDeterministic();
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshValidationTotalsAggregateAuthoredSet();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();

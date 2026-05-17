@@ -121,6 +121,16 @@ constexpr float k_climbJumpBackForce = 350.0f;      ///< Backward velocity on cl
 constexpr float k_climbMinGroundDist = 40.0f;       ///< Min height above ground to start climbing (u).
 constexpr float k_climbExitTime = 0.5f;             ///< Duration of "exiting climb" flag (s).
 constexpr float k_climbRegrabLowerHeight = 400.0f;  ///< Must be this much lower to regrab same wall (u).
+constexpr float k_climbLookAngleLimit = 45.572995f; ///< Apex-style max climb look angle from wall normal (deg).
+constexpr float k_climbSurfaceMinDotUp = 0.7f;      ///< Max |dot(normal, localUp)| for a climbable steep wall.
+constexpr float k_climbSpaceHeight = 147.0f;        ///< Local-up height budget for one climb attach (u).
+constexpr float k_climbAttachOffset = 100.0f;       ///< Local-up attach offset that can trigger end boost (u).
+constexpr float k_climbMiniZoneHeight = 19.0f;      ///< Low climb-space zone for weak wall push (u).
+constexpr float k_climbGreenZoneHeight = 28.0f;     ///< Middle climb-space zone for stronger wallbounce (u).
+constexpr float k_climbReattachDifferentWallAngle = 25.842f; ///< Angle that counts as a distinct wall (deg).
+constexpr float k_climbNormalDetachPenalty = 128.0f;         ///< Climb-space penalty after normal detach (u).
+constexpr float k_climbJumpDetachPenalty = 256.0f;           ///< Climb-space penalty after climb jump (u).
+constexpr float k_climbEndBoostUp = 28.0f;                   ///< Local-up velocity added by climb end boost (u/s).
 
 // Ledge grabbing
 
