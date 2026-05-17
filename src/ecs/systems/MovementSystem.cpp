@@ -305,8 +305,10 @@ namespace
 /// @param input   Current input snapshot.
 /// @param state   Player state (modified in place).
 /// @param dt      Fixed physics delta time in seconds (unused).
+/// @param posY    Current world Y for traversal blacklist heights.
 /// @param gravDir +1.0 for normal gravity, -1.0 for flipped (inverts all vertical impulses).
-void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/, float gravDir = 1.0f)
+void handleJump(
+    glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/, float posY, float gravDir = 1.0f)
 {
     if (!input.jump)
         return;
@@ -349,6 +351,7 @@ void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state
 
         state.sim.climbBlacklistActive = true;
         state.sim.climbBlacklistNormal = state.sim.climbWallNormal;
+        state.sim.climbBlacklistHeight = posY;
         return;
     }
 
@@ -654,6 +657,15 @@ bool isBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNor
     if (glm::dot(normal, blNormal) > 0.9f && height >= blHeight)
         return true;
     return false;
+}
+
+bool isClimbBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNormal, float blHeight, bool active)
+{
+    if (!active)
+        return false;
+    if (glm::dot(normal, blNormal) <= 0.9f)
+        return false;
+    return height > blHeight - tms::k_climbRegrabLowerHeight;
 }
 
 physics::CapsuleShape capsuleQueryForWallrun(const CollisionShape& shape)
@@ -1090,8 +1102,6 @@ void tryEnterClimb(glm::vec3& vel,
         return;
     if (state.vis.grounded || state.vis.exitingClimb)
         return;
-    if (!input.forward)
-        return;
     if (walls.groundDistance < tms::k_climbMinGroundDist)
         return;
     if (!walls.wallFront)
@@ -1109,18 +1119,26 @@ void tryEnterClimb(glm::vec3& vel,
     if (k_lookAngle > k_maxAngleRad)
         return;
 
+    const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+    if (glm::dot(wishDir, -wallNormal) < tms::k_climbIntentThreshold)
+        return;
+
     // Blacklist check.
-    if (isBlacklisted(wallNormal,
-                      posY,
-                      state.sim.climbBlacklistNormal,
-                      state.sim.climbBlacklistHeight,
-                      state.sim.climbBlacklistActive))
+    if (isClimbBlacklisted(wallNormal,
+                           posY,
+                           state.sim.climbBlacklistNormal,
+                           state.sim.climbBlacklistHeight,
+                           state.sim.climbBlacklistActive))
         return;
 
     // Enter climbing.
     state.vis.moveMode = MoveMode::Climbing;
     state.sim.climbWallNormal = wallNormal;
+    state.sim.climbAttachPoint = walls.frontPoint;
+    state.sim.climbAttachHeight = posY;
     state.sim.climbTimer = 0.0f;
+    state.sim.climbNonUpTimer = 0.0f;
+    state.sim.climbHadUpwardMotion = false;
     // DJ no longer refreshes from entering climb — only from ground time.
     state.vis.jumpCount = 0;
 
@@ -1164,26 +1182,51 @@ void handleClimbing(glm::vec3& vel,
     state.sim.climbTimer += dt;
 
     // Exit conditions
-    if (state.sim.climbTimer >= tms::k_climbKickoffDuration || !walls.wallFront || !input.forward) {
+    if (!walls.wallFront || input.crouch || input.back) {
         exitClimb(state, posY);
         return;
     }
+
+    const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
+    if (glm::dot(climbNormal, climbNormal) <= 0.0f) {
+        exitClimb(state, posY);
+        return;
+    }
+
+    const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+    const bool hasUpIntent = glm::dot(wishDir, -climbNormal) >= tms::k_climbIntentThreshold;
+    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+
+    if (!hasUpIntent) {
+        state.sim.climbNonUpTimer += dt;
+        if (state.sim.climbNonUpTimer >= tms::k_climbNonUpDetachTime) {
+            exitClimb(state, posY);
+            return;
+        }
+
+        vel.y = -tms::k_climbSlipSpeed * gravDir;
+        vel.x *= tms::k_climbSidewaysMultiplier;
+        vel.z *= tms::k_climbSidewaysMultiplier;
+        vel -= climbNormal * tms::k_wallrunPushForce * dt;
+        state.vis.targetCameraTilt = 0.0f;
+        return;
+    }
+
+    state.sim.climbNonUpTimer = 0.0f;
 
     // Climbing movement (upward with speed decay)
     const float k_decayAlpha = std::clamp(state.sim.climbTimer / tms::k_climbKickoffDuration, 0.0f, 1.0f);
     const float k_climbSpeed = std::lerp(tms::k_climbMaxSpeed, tms::k_climbMinSpeed, k_decayAlpha);
 
-    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
     vel.y = k_climbSpeed * gravDir;
+    state.sim.climbHadUpwardMotion = (vel.y * gravDir) >= tms::k_climbUpVelocityThreshold;
 
     // Minimal sideways movement.
     vel.x *= tms::k_climbSidewaysMultiplier;
     vel.z *= tms::k_climbSidewaysMultiplier;
 
     // Push toward wall.
-    const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
-    if (glm::dot(climbNormal, climbNormal) > 0.0f)
-        vel -= climbNormal * tms::k_wallrunPushForce * dt;
+    vel -= climbNormal * tms::k_wallrunPushForce * dt;
 
     state.vis.targetCameraTilt = 0.0f;
 }
@@ -1620,7 +1663,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             //     grapple-rising-edge + jump same-tick is a rare edge case and
             //     handleGrapple's velocity override wins anyway.
             if (!state.vis.grappleActive)
-                handleJump(vel.value, input, state, dt, gravDir);
+                handleJump(vel.value, input, state, dt, pos.value.y, gravDir);
 
             // 5. Mode-specific movement
             switch (state.vis.moveMode) {

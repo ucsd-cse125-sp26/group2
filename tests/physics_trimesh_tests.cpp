@@ -126,6 +126,25 @@ WorldTriMesh makeThinDepthWall()
         });
 }
 
+WorldTriMesh makeTallFrontWall(float y0 = -500.0f, float y1 = 500.0f)
+{
+    return makeCookedMesh(
+        {
+            {-80.0f, y0, 0.0f},
+            {80.0f, y0, 0.0f},
+            {80.0f, y1, 0.0f},
+            {-80.0f, y1, 0.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+}
+
 WorldTriMesh makeThinDepthWallAt(float z)
 {
     return makeCookedMesh(
@@ -1261,6 +1280,167 @@ bool flippedGravityLedgeMantleMovesAlongLocalUp()
     return ok;
 }
 
+bool climbNeutralInputSlipsBeforeDetach()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::Climbing, "neutral climb input should briefly stay attached");
+    ok &= expect(outVel.value.y < 0.0f, "neutral climb input should slip downward instead of forcing upward climb");
+    return ok;
+}
+
+bool climbNeutralInputDetachesAfterGrace()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    bool stayedInitially = false;
+    for (int frame = 0; frame < 40; ++frame) {
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+        if (frame == 0)
+            stayedInitially = registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing;
+    }
+
+    bool ok = true;
+    ok &= expect(stayedInitially, "neutral climb should not detach on the first non-upward frame");
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::OnFoot,
+                 "neutral climb should detach after the non-upward grace window");
+    return ok;
+}
+
+bool climbSameWallReattachRequiresMeaningfulDrop()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    auto makePlayer = [](float y, glm::vec3 blacklistNormal) {
+        Registry registry;
+        const entt::entity player = registry.create();
+        registry.emplace<Position>(player, glm::vec3{0.0f, y, -24.0f});
+        registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+        CollisionShape shape;
+        shape.type = CollisionShapeType::Capsule;
+        shape.radius = 10.0f;
+        shape.halfHeight = 20.0f;
+        shape.halfExtents = {10.0f, 30.0f, 10.0f};
+        registry.emplace<CollisionShape>(player, shape);
+
+        PlayerVisState vis;
+        vis.grounded = false;
+        registry.emplace<PlayerVisState>(player, vis);
+
+        PlayerSimState sim;
+        sim.climbBlacklistActive = true;
+        sim.climbBlacklistNormal = blacklistNormal;
+        sim.climbBlacklistHeight = 100.0f;
+        registry.emplace<PlayerSimState>(player, sim);
+
+        InputSnapshot input;
+        input.forward = true;
+        input.yaw = 0.0f;
+        registry.emplace<InputSnapshot>(player, input);
+
+        return std::pair<Registry, entt::entity>{std::move(registry), player};
+    };
+
+    auto [nearRegistry, nearPlayer] = makePlayer(80.0f, {0.0f, 0.0f, -1.0f});
+    systems::runMovement(nearRegistry, 1.0f / 128.0f, world);
+
+    auto [lowRegistry, lowPlayer] = makePlayer(-350.0f, {0.0f, 0.0f, -1.0f});
+    systems::runMovement(lowRegistry, 1.0f / 128.0f, world);
+
+    auto [differentRegistry, differentPlayer] = makePlayer(80.0f, {1.0f, 0.0f, 0.0f});
+    systems::runMovement(differentRegistry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(nearRegistry.get<PlayerVisState>(nearPlayer).moveMode == MoveMode::OnFoot,
+                 "same climb wall should stay blacklisted until the player drops meaningfully below it");
+    ok &= expect(lowRegistry.get<PlayerVisState>(lowPlayer).moveMode == MoveMode::Climbing,
+                 "same climb wall should be regrabbable after a meaningful drop");
+    ok &= expect(differentRegistry.get<PlayerVisState>(differentPlayer).moveMode == MoveMode::Climbing,
+                 "different climb wall normals should not inherit the same-wall regrab blacklist");
+    return ok;
+}
+
 bool triMeshValidationReportsCookerIssues()
 {
     WorldTriMesh mesh;
@@ -1526,6 +1706,9 @@ int main()
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= flippedGravityClimbMovesAlongLocalUp();
     ok &= flippedGravityLedgeMantleMovesAlongLocalUp();
+    ok &= climbNeutralInputSlipsBeforeDetach();
+    ok &= climbNeutralInputDetachesAfterGrace();
+    ok &= climbSameWallReattachRequiresMeaningfulDrop();
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshValidationTotalsAggregateAuthoredSet();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();

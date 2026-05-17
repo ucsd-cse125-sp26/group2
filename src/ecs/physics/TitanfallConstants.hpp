@@ -105,18 +105,22 @@ constexpr float k_wallrunMaxFaceRedirect = 1.57079632679f; ///< Max face-normal 
 
 // Climbing
 
-constexpr float k_climbCheckDist = 35.0f;          ///< Forward sphere-cast distance (u).
-constexpr float k_climbSphereRadius = 12.0f;       ///< Sphere-cast radius for climb detection (u).
-constexpr float k_climbMaxSpeed = 280.0f;          ///< Max upward climbing speed (u/s).
-constexpr float k_climbMinSpeed = 180.0f;          ///< Min climbing speed (after decay) (u/s).
-constexpr float k_climbKickoffDuration = 2.0f;     ///< Max climb time on same wall (s).
-constexpr float k_climbMaxWallLookAngle = 30.0f;   ///< Max angle (degrees) between look dir and wall normal.
-constexpr float k_climbSidewaysMultiplier = 0.1f;  ///< Sideways movement reduction while climbing.
-constexpr float k_climbJumpUpForce = 320.0f;       ///< Upward velocity on climb jump (u/s).
-constexpr float k_climbJumpBackForce = 350.0f;     ///< Backward velocity on climb jump (u/s).
-constexpr float k_climbMinGroundDist = 40.0f;      ///< Min height above ground to start climbing (u).
-constexpr float k_climbExitTime = 0.5f;            ///< Duration of "exiting climb" flag (s).
-constexpr float k_climbRegrabLowerHeight = 400.0f; ///< Must be this much lower to regrab same wall (u).
+constexpr float k_climbCheckDist = 35.0f;           ///< Forward sphere-cast distance (u).
+constexpr float k_climbSphereRadius = 12.0f;        ///< Sphere-cast radius for climb detection (u).
+constexpr float k_climbMaxSpeed = 280.0f;           ///< Max upward climbing speed (u/s).
+constexpr float k_climbMinSpeed = 180.0f;           ///< Min climbing speed (after decay) (u/s).
+constexpr float k_climbKickoffDuration = 2.0f;      ///< Max climb time on same wall (s).
+constexpr float k_climbMaxWallLookAngle = 30.0f;    ///< Max angle (degrees) between look dir and wall normal.
+constexpr float k_climbSidewaysMultiplier = 0.1f;   ///< Sideways movement reduction while climbing.
+constexpr float k_climbIntentThreshold = 0.1f;      ///< Min dot(wishDir, -wallNormal) for active upward climb.
+constexpr float k_climbSlipSpeed = 90.0f;           ///< Local-down slip speed while attached without up intent (u/s).
+constexpr float k_climbNonUpDetachTime = 0.25f;     ///< Grace time before slipping/no-up climb detaches (s).
+constexpr float k_climbUpVelocityThreshold = 25.0f; ///< Local-up velocity that counts as committed climb motion (u/s).
+constexpr float k_climbJumpUpForce = 320.0f;        ///< Upward velocity on climb jump (u/s).
+constexpr float k_climbJumpBackForce = 350.0f;      ///< Backward velocity on climb jump (u/s).
+constexpr float k_climbMinGroundDist = 40.0f;       ///< Min height above ground to start climbing (u).
+constexpr float k_climbExitTime = 0.5f;             ///< Duration of "exiting climb" flag (s).
+constexpr float k_climbRegrabLowerHeight = 400.0f;  ///< Must be this much lower to regrab same wall (u).
 
 // Ledge grabbing
 

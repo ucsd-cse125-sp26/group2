@@ -75,8 +75,12 @@ struct PlayerSimState
     bool wallBlacklistActive{false};
 
     // ── Climbing ───────────────────────────────────────────────────────────
-    glm::vec3 climbWallNormal{0.0f}; ///< Normal of the wall being climbed.
-    float climbTimer{0.0f};          ///< Time on current climb (s).
+    glm::vec3 climbWallNormal{0.0f};  ///< Normal of the wall being climbed.
+    glm::vec3 climbAttachPoint{0.0f}; ///< Surface point where the current climb attached.
+    float climbAttachHeight{0.0f};    ///< World Y at climb attach; used for same-wall regrab gating.
+    float climbNonUpTimer{0.0f};      ///< Time spent attached without upward climb intent/motion (s).
+    float climbTimer{0.0f};           ///< Time on current climb (s).
+    bool climbHadUpwardMotion{false}; ///< True once this climb produces local-up velocity.
     float exitClimbTimer{0.0f};
     bool wasClimbing{false};
 
