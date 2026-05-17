@@ -371,4 +371,3 @@ PATH="/tmp/group2-clang-format-18:$PATH" git ls-files '*.cpp' '*.hpp' '*.h' '*.c
   - repeated in-air reattach.
 
 - [ ] Commit final fixes.
-

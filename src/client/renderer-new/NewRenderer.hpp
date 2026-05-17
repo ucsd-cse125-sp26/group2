@@ -312,6 +312,9 @@ public:
     /// to populate its dropdown.
     void scanHDRFiles();
 
+    bool setRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+
+    void setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
     // ─── Public settings members (mutable directly from Game / debug UI) ─────
     //
     // The legacy renderer exposed these as direct member access.  Keep the
@@ -336,8 +339,10 @@ private:
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
     void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
+    void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
@@ -354,7 +359,9 @@ private:
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
 
+    SDL_GPUTextureFormat colorTarget_;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;

@@ -208,4 +208,3 @@ Required tests:
 - mantle transition does not apply normal detach penalty;
 - wall push from neutral zone gives mostly horizontal velocity;
 - wallrun-to-climb and climb-to-wallrun transitions do not fight each other.
-

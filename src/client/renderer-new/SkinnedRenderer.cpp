@@ -14,10 +14,13 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
-void SkinnedRenderer::init(SDL_GPUDevice* device)
+void SkinnedRenderer::init(SDL_GPUDevice* device,
+                           SDL_GPUTextureFormat& colorTarget,
+                           const SDL_GPUShaderFormat& shaderFormat)
 {
     device_ = device;
     // No GPU allocations here — buffers and pipeline are created on demand
@@ -26,6 +29,7 @@ void SkinnedRenderer::init(SDL_GPUDevice* device)
     // TODO(graphics): if you want the skinned pipeline created up-front, do
     // it here.  Otherwise leave it null and create it the first time
     // `draw()` would actually issue draws.
+    createSkinningPipeline(colorTarget, shaderFormat);
 }
 
 void SkinnedRenderer::shutdown()
@@ -43,10 +47,10 @@ void SkinnedRenderer::shutdown()
     }
     skinnedMeshes_.clear();
 
-    if (palettesSsbo_)
-        SDL_ReleaseGPUBuffer(device_, palettesSsbo_);
-    if (instancesSsbo_)
-        SDL_ReleaseGPUBuffer(device_, instancesSsbo_);
+    if (palettesSsboInfo_.ssbo_)
+        SDL_ReleaseGPUBuffer(device_, palettesSsboInfo_.ssbo_);
+    if (instancesSsboInfo_.ssbo_)
+        SDL_ReleaseGPUBuffer(device_, instancesSsboInfo_.ssbo_);
     if (paletteXfer_)
         SDL_ReleaseGPUTransferBuffer(device_, paletteXfer_);
     if (instanceXfer_)
@@ -54,13 +58,13 @@ void SkinnedRenderer::shutdown()
     if (pipeline_)
         SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
 
-    palettesSsbo_ = nullptr;
-    instancesSsbo_ = nullptr;
+    palettesSsboInfo_.ssbo_ = nullptr;
+    instancesSsboInfo_.ssbo_ = nullptr;
     paletteXfer_ = nullptr;
     instanceXfer_ = nullptr;
     pipeline_ = nullptr;
-    palettesCapacityBytes_ = 0;
-    instancesCapacityBytes_ = 0;
+    palettesSsboInfo_.capacityBytes_ = 0;
+    instancesSsboInfo_.capacityBytes_ = 0;
     paletteXferCapacityBytes_ = 0;
     instanceXferCapacityBytes_ = 0;
 
@@ -139,7 +143,7 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
         d.buffer = dst;
         d.offset = 0;
         d.size = bytes;
-        SDL_UploadToGPUBuffer(cp, &s, &d, /*cycle=*/false);
+        SDL_UploadToGPUBuffer(cp, &s, &d, /*cycle=*/true);
     };
 
     for (const auto& m : meshes) {
@@ -217,9 +221,15 @@ bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
         }
         return true;
     };
-    if (!growBuf(palettesSsbo_, palettesCapacityBytes_, paletteBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+    if (!growBuf(palettesSsboInfo_.ssbo_,
+                 palettesSsboInfo_.capacityBytes_,
+                 paletteBytes,
+                 SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
         return false;
-    if (!growBuf(instancesSsbo_, instancesCapacityBytes_, instanceBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+    if (!growBuf(instancesSsboInfo_.ssbo_,
+                 instancesSsboInfo_.capacityBytes_,
+                 instanceBytes,
+                 SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
         return false;
     if (!growXfer(paletteXfer_, paletteXferCapacityBytes_, paletteBytes))
         return false;
@@ -253,42 +263,64 @@ void SkinnedRenderer::uploadFrame(SDL_GPUCommandBuffer* /*cmd*/, SDL_GPUCopyPass
         d.buffer = dst;
         d.offset = 0;
         d.size = bytes;
-        SDL_UploadToGPUBuffer(copyPass, &s, &d, /*cycle=*/false);
+        SDL_UploadToGPUBuffer(copyPass, &s, &d, /*cycle=*/true);
     };
-    upload(paletteXfer_, palettesSsbo_, framePalette_.data(), paletteBytes);
-    upload(instanceXfer_, instancesSsbo_, frameInstances_.data(), instanceBytes);
+    upload(paletteXfer_, palettesSsboInfo_.ssbo_, framePalette_.data(), paletteBytes);
+    upload(instanceXfer_, instancesSsboInfo_.ssbo_, frameInstances_.data(), instanceBytes);
 }
 
 // ─── Per-frame: draw ─────────────────────────────────────────────────────────
 
-void SkinnedRenderer::draw(SDL_GPURenderPass* /*renderPass*/, SDL_GPUCommandBuffer* /*cmd*/)
+void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     // TODO(graphics): instanced GPU skinning draw call.  See `setFrame`
     // doc-block for the data layout and shader pseudocode.  Sketch:
     //
-    //   if (!rigInstalled_ || !pipeline_ || frameInstances_.empty()
-    //       || !palettesSsbo_ || !instancesSsbo_)
-    //       return;
-    //
-    //   SDL_BindGPUGraphicsPipeline(renderPass, pipeline_);
-    //
+    if (!rigInstalled_ || !pipeline_ || frameInstances_.empty() || !palettesSsboInfo_.ssbo_ ||
+        !instancesSsboInfo_.ssbo_)
+    {
+        std::cout << "frameInstances_.empty()" << std::endl;
+        return;
+    }
+
+    SDL_BindGPUGraphicsPipeline(renderPass, pipeline_);
+
     //   // The geometry pass already pushed view+projection at vertex UBO
     //   // slot 0 in NewRenderer::drawGeometryPass — no need to push again.
     //
-    //   SDL_GPUBuffer* ssbos[2] = {palettesSsbo_, instancesSsbo_};
-    //   SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
-    //
-    //   const Uint32 numInstances = static_cast<Uint32>(frameInstances_.size());
-    //   for (const auto& sm : skinnedMeshes_) {
-    //       const SDL_GPUBufferBinding vbs[2] = {
-    //           {.buffer = sm.vb,     .offset = 0},
-    //           {.buffer = sm.boneVb, .offset = 0},
-    //       };
-    //       SDL_BindGPUVertexBuffers(renderPass, 0, vbs, 2);
-    //       const SDL_GPUBufferBinding ib = {.buffer = sm.ib, .offset = 0};
-    //       SDL_BindGPUIndexBuffer(renderPass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-    //       SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, numInstances, 0, 0, 0);
-    //   }
+
+    SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
+    SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
+    for (auto sm : skinnedMeshes_) {
+        if (!sm.vb || !sm.boneVb || !sm.ib) {
+            continue;
+        }
+        std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
+
+        SDL_GPUBufferBinding palleteBufferBinding{
+            .buffer = sm.vb,
+            .offset = 0,
+        };
+        vertexBufferBindings.push_back(palleteBufferBinding);
+
+        SDL_GPUBufferBinding instanceBufferBinding{
+            .buffer = sm.boneVb,
+            .offset = 0,
+        };
+        vertexBufferBindings.push_back(instanceBufferBinding);
+
+        SDL_BindGPUVertexBuffers(renderPass, 0, vertexBufferBindings.data(), 2);
+
+        SDL_GPUBufferBinding indexBufferBinding{
+            .buffer = sm.ib,
+            .offset = 0,
+        };
+
+        SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, frameInstances_.size(), 0, 0, 0);
+    }
+
     //
     // Pipeline (`pipeline_`) needs:
     //   - vertex buffer 0: ModelVertex
@@ -313,4 +345,49 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* /*renderPass*/, SDL_GPUCommandBuff
     //             + palette[inst.paletteBase + uint(inBoneIndices.w)] * inBoneWeights.w;
     //   vec4 worldPos = inst.worldTransform * skin * vec4(inPosition, 1.0);
     //   gl_Position   = viewProjection * worldPos;
+}
+
+bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat)
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/skinned_geometry.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShader.uniformBufferCount = 1;
+    vertexShader.storageBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/debug.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = (sizeof(ModelVertex));
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDescription.instance_step_rate = 0;
+
+    SDL_GPUVertexBufferDescription vertexBoneInfluenceBufferDescription{};
+    vertexBoneInfluenceBufferDescription.slot = 1;
+    vertexBoneInfluenceBufferDescription.pitch = (sizeof(BoneInfluence));
+    vertexBoneInfluenceBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBoneInfluenceBufferDescription.instance_step_rate = 0;
+
+    Boilerplate::VertexInputLayout vertexLayout{};
+    vertexLayout.bufferDescriptions.push_back(vertexBufferDescription);
+    vertexLayout.bufferDescriptions.push_back(vertexBoneInfluenceBufferDescription);
+    vertexLayout.attributes = {
+        // Mesh Vertex
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, position), 0),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, normal), 0),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(ModelVertex, texCoord), 0),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(ModelVertex, tangent), 0),
+
+        // Bone Influence
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_INT4, offsetof(BoneInfluence, boneIndices), 1),
+        Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
+    };
+
+    pipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, colorTarget, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, true);
+
+    return pipeline_ != nullptr;
 }

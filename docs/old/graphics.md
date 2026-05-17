@@ -1,6 +1,6 @@
 # Graphics / Rendering Pipeline
 
-Reference documentation for the forward PBR renderer.  
+Reference documentation for the forward PBR renderer.
 Source files live under `src/client/renderer/`.
 
 ---
@@ -55,7 +55,7 @@ Within each cascade's viewport/scissor:
 
 ### Pass 1: Main HDR Colour Pass
 
-**Render target:** `hdrTarget` (`RGBA16F`, screen resolution).  
+**Render target:** `hdrTarget` (`RGBA16F`, screen resolution).
 **Depth buffer:** `depthTexture` (`D32_FLOAT`, stored for post-processing reads).
 
 All sub-passes share a single `SDL_GPURenderPass`.  Draw order matters for correctness:

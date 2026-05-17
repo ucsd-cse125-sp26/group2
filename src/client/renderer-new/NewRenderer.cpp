@@ -68,6 +68,7 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    colorTarget_ = SDL_GetGPUSwapchainTextureFormat(device_, window_);
     shaderFormat_ = Boilerplate::selectShaderFormat(device_);
     if (shaderFormat_ == SDL_GPU_SHADERFORMAT_INVALID) {
         SDL_Log("NewRenderer: no supported shader format (got 0x%x)",
@@ -106,7 +107,7 @@ bool NewRenderer::init(SDL_Window* window)
 
     camera_ = NewCamera();
 
-    skinnedRenderer_.init(device_);
+    skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
     return true;
 }
@@ -126,7 +127,7 @@ bool NewRenderer::createHudPipeline()
     const Boilerplate::VertexInputLayout vertexLayout{};
 
     hudPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
+        device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
 
     return hudPipeline_ != nullptr;
 }
@@ -144,8 +145,15 @@ bool NewRenderer::createGeometryPipeline()
     fragmentShader.samplerCount = 1;
     fragmentShader.uniformBufferCount = 2;
 
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = (sizeof(Vertex));
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDescription.instance_step_rate = 0;
+
     Boilerplate::VertexInputLayout vertexLayout{};
-    vertexLayout.vertexPitch = sizeof(Vertex);
+    // vertexLayout.vertexPitch = sizeof(Vertex);
+    vertexLayout.bufferDescriptions.push_back(vertexBufferDescription);
     vertexLayout.attributes = {
         Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
         Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
@@ -153,7 +161,7 @@ bool NewRenderer::createGeometryPipeline()
     };
 
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, window_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, false);
+        device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return geometryPipeline_ != nullptr;
 }
@@ -178,6 +186,7 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
+
     const Uint64 freq = SDL_GetPerformanceFrequency();
     const Uint64 t0 = SDL_GetPerformanceCounter();
 
@@ -223,6 +232,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     drawGeometryPass(swapchain, cmd);
+    drawWeaponPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
@@ -258,7 +268,26 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);
 
-    skinnedRenderer_.draw(geometryPass, cmd);
+    drawSkinnedModels(geometryPass, cmd);
+
+    // drawWeapon(geometryPass, cmd);
+
+    SDL_EndGPURenderPass(geometryPass);
+}
+
+void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
+
+    SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_; // copy
+    depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;               // override to clear
+    depthInfo.clear_depth = 1.0f;
+
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthInfo);
+    SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
+
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
 
     drawWeapon(geometryPass, cmd);
 
@@ -283,6 +312,11 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
 }
 
+void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+{
+    skinnedRenderer_.draw(renderPass, cmd);
+}
+
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     for (const auto& mInstance : Asset::modelInstances_) {
@@ -297,7 +331,7 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
     for (const auto& entityCmd : entities_) {
         if (entityCmd.modelIndex < 0) {
             std::cout << "invalid modelIndex" << std::endl;
-            break;
+            continue;
         }
         if (static_cast<size_t>(entityCmd.modelIndex) >= Asset::modelInstances_.size())
             continue;
@@ -634,4 +668,14 @@ void NewRenderer::scanHDRFiles()
     // TODO(graphics): iterate `assets/hdr/*.hdr` via std::filesystem and fill
     // `availableHDRFiles` with absolute paths.  Called once at init.
     availableHDRFiles.clear();
+}
+
+bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return skinnedRenderer_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+{
+    skinnedRenderer_.setFrame(palette, instances);
 }
