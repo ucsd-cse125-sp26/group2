@@ -351,7 +351,7 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
     vertexShader.uniformBufferCount = 1;
 
     Boilerplate::ShaderInfo fragmentShader{};
-    fragmentShader.path = "shaders-new/geometry.frag";
+    fragmentShader.path = "shaders-new/debug.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
     fragmentShader.samplerCount = 1;
     fragmentShader.uniformBufferCount = 2;
