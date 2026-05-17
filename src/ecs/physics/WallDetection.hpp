@@ -97,7 +97,10 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
                                            glm::vec3 continuityNormal,
                                            glm::vec3 travelDir = glm::vec3{0.0f},
                                            float lookaheadDist = 0.0f,
-                                           float checkDist = 24.0f);
+                                           float checkDist = 24.0f,
+                                           uint32_t previousMeshIndex = UINT32_MAX,
+                                           uint32_t previousTriId = UINT32_MAX,
+                                           TriRegion previousRegion = TriRegion::Face);
 
 /// @brief Check if a surface normal represents a wall (not floor/ceiling).
 ///

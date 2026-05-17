@@ -26,6 +26,34 @@ struct MeshWallProbe
     TriRegion region{TriRegion::Face};
 };
 
+int edgeIndexForRegion(TriRegion region)
+{
+    switch (region) {
+    case TriRegion::Edge0:
+        return 0;
+    case TriRegion::Edge1:
+        return 1;
+    case TriRegion::Edge2:
+        return 2;
+    default:
+        return -1;
+    }
+}
+
+int incidentEdgeForVertex(TriRegion vertexRegion, int slot)
+{
+    switch (vertexRegion) {
+    case TriRegion::Vert0:
+        return slot == 0 ? 2 : 0;
+    case TriRegion::Vert1:
+        return slot == 0 ? 0 : 1;
+    case TriRegion::Vert2:
+        return slot == 0 ? 1 : 2;
+    default:
+        return -1;
+    }
+}
+
 WorldAABB wallProbeBounds(glm::vec3 segA, glm::vec3 segB, glm::vec3 dir, float checkDist, float sphereRadius)
 {
     const glm::vec3 endA = segA + dir * checkDist;
@@ -102,46 +130,104 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
                                            glm::vec3 continuityNormal,
                                            glm::vec3 travelDir,
                                            float lookaheadDist,
-                                           float checkDist)
+                                           float checkDist,
+                                           uint32_t previousMeshIndex,
+                                           uint32_t previousTriId,
+                                           TriRegion previousRegion)
 {
     WallAttachmentResult best;
     float bestScore = 1e30f;
     const float maxAxisDist = capsule.radius + checkDist + 8.0f;
     const bool hasContinuity = glm::length(continuityNormal) > 0.5f;
-    const bool hasTravel = glm::length(travelDir) > 0.5f && lookaheadDist > 0.0f;
+    const bool hasTravel = glm::length(travelDir) > 0.5f;
+    const bool hasLookahead = hasTravel && lookaheadDist > 0.0f;
     const glm::vec3 travel = hasTravel ? glm::normalize(travelDir) : glm::vec3{0.0f};
-    const glm::vec3 lookaheadPos = hasTravel ? pos + travel * lookaheadDist : pos;
+    const glm::vec3 lookaheadPos = hasLookahead ? pos + travel * lookaheadDist : pos;
 
-    auto considerClosest = [&](uint32_t meshIndex, const ClosestPointOnMeshResult& cp, bool lookaheadSample) {
-        if (!cp.found || !isWallNormal(cp.normal))
+    auto considerClosest =
+        [&](uint32_t meshIndex, const ClosestPointOnMeshResult& cp, bool lookaheadSample, float scoreBias = 0.0f) {
+            if (!cp.found || !isWallNormal(cp.normal))
+                return;
+            if (cp.dist > maxAxisDist)
+                return;
+
+            const float continuity = hasContinuity ? glm::dot(cp.normal, continuityNormal) : 1.0f;
+            if (continuity < -0.05f)
+                return;
+
+            const float blocking = hasTravel ? std::max(0.0f, -glm::dot(travel, cp.normal)) : 0.0f;
+            const float surfaceDist = std::abs(cp.dist - capsule.minkowskiExtent(cp.normal));
+            const float continuityPenalty = (1.0f - continuity) * 2.0f;
+            const float lookaheadBonus = lookaheadSample ? lookaheadDist * 0.5f : 0.0f;
+            const float blockingScale = std::max(lookaheadDist, capsule.radius * 0.5f);
+            const float blockingBonus = blocking * blockingScale * 2.0f;
+            const float score = surfaceDist + continuityPenalty - lookaheadBonus - blockingBonus + scoreBias;
+            if (score >= bestScore)
+                return;
+
+            bestScore = score;
+            best.found = true;
+            best.anchor = cp.pointOnMesh;
+            best.normal = cp.normal;
+            best.meshIndex = meshIndex;
+            best.triId = cp.triId;
+            best.region = cp.region;
+        };
+
+    auto considerNeighbor = [&](uint32_t meshIndex, const WorldTriMesh& mesh, uint32_t neighborTri) {
+        if (neighborTri == UINT32_MAX || neighborTri == previousTriId)
             return;
 
-        const float continuity = hasContinuity ? glm::dot(cp.normal, continuityNormal) : 1.0f;
-        if (continuity < -0.05f)
+        const ClosestPointOnMeshResult cp = closestPointOnMeshTriangle(capsule, pos, maxAxisDist, mesh, neighborTri);
+        if (!cp.found)
+            return;
+        if (hasTravel && glm::dot(travel, cp.normal) > 0.25f)
+            return;
+        considerClosest(meshIndex, cp, false, -capsule.radius);
+
+        if (hasLookahead) {
+            const ClosestPointOnMeshResult lookaheadCp =
+                closestPointOnMeshTriangle(capsule, lookaheadPos, maxAxisDist, mesh, neighborTri);
+            considerClosest(meshIndex, lookaheadCp, true, -capsule.radius);
+        }
+    };
+
+    auto considerPreviousTriangleAdjacency = [&](uint32_t meshIndex, const WorldTriMesh& mesh) {
+        if (meshIndex != previousMeshIndex || previousTriId == UINT32_MAX)
             return;
 
-        const float blocking = hasTravel ? std::max(0.0f, -glm::dot(travel, cp.normal)) : 0.0f;
-        const float surfaceDist = std::abs(cp.dist - capsule.minkowskiExtent(cp.normal));
-        const float continuityPenalty = (1.0f - continuity) * 2.0f;
-        const float lookaheadBonus = lookaheadSample ? lookaheadDist * 0.5f : 0.0f;
-        const float blockingBonus = blocking * lookaheadDist * 2.0f;
-        const float score = surfaceDist + continuityPenalty - lookaheadBonus - blockingBonus;
-        if (score >= bestScore)
+        const ClosestPointOnMeshResult prevCp =
+            closestPointOnMeshTriangle(capsule, pos, maxAxisDist, mesh, previousTriId);
+        if (!prevCp.found)
             return;
 
-        bestScore = score;
-        best.found = true;
-        best.anchor = cp.pointOnMesh;
-        best.normal = cp.normal;
-        best.meshIndex = meshIndex;
-        best.triId = cp.triId;
-        best.region = cp.region;
+        TriRegion seamRegion = prevCp.region;
+        if (edgeIndexForRegion(seamRegion) < 0 && incidentEdgeForVertex(seamRegion, 0) < 0)
+            seamRegion = previousRegion;
+
+        const int edge = edgeIndexForRegion(seamRegion);
+        if (edge >= 0) {
+            const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(edge);
+            if (neighborIndex < mesh.edgeNeighbor.size())
+                considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
+            return;
+        }
+
+        for (int slot = 0; slot < 2; ++slot) {
+            const int vertexEdge = incidentEdgeForVertex(seamRegion, slot);
+            if (vertexEdge < 0)
+                continue;
+            const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(vertexEdge);
+            if (neighborIndex < mesh.edgeNeighbor.size())
+                considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
+        }
     };
 
     auto considerMesh = [&](uint32_t meshIndex, const WorldTriMesh& mesh) {
         considerClosest(meshIndex, closestPointOnMesh(capsule, pos, maxAxisDist, mesh), false);
-        if (hasTravel)
+        if (hasLookahead)
             considerClosest(meshIndex, closestPointOnMesh(capsule, lookaheadPos, maxAxisDist, mesh), true);
+        considerPreviousTriangleAdjacency(meshIndex, mesh);
     };
 
     const glm::vec3 queryMin = glm::min(pos, lookaheadPos) - capsule.enclosingHalfExtents() - glm::vec3(maxAxisDist);

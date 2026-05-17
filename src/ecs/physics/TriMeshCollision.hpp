@@ -205,6 +205,14 @@ ClosestPointOnMeshResult closestPointOnMesh(glm::vec3 segA, glm::vec3 segB, floa
 ClosestPointOnMeshResult
 closestPointOnMesh(CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh);
 
+/// @brief Closest point from a capsule axis to one specific cooked triangle.
+///
+/// Used by systems that already track triangle identity, such as wallrun
+/// manifold traversal. Returns `found=false` for invalid triangle ids,
+/// degenerate triangles, or distances beyond `maxDist`.
+ClosestPointOnMeshResult closestPointOnMeshTriangle(
+    CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh, uint32_t triId);
+
 /// @brief Capsule-vs-trimesh clearance.  Wraps `closestPointOnMesh` and
 /// converts axis-to-mesh distance into surface-to-surface clearance by
 /// subtracting `capsule.radius`.

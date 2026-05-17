@@ -1717,6 +1717,44 @@ closestPointOnMesh(CapsuleShape capsule, glm::vec3 center, float maxDist, const 
     return closestPointOnMesh(capsule.segA(center), capsule.segB(center), maxDist, mesh);
 }
 
+ClosestPointOnMeshResult closestPointOnMeshTriangle(
+    CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh, uint32_t triId)
+{
+    ClosestPointOnMeshResult result;
+    const size_t triBase = static_cast<size_t>(triId) * 3u;
+    if (triBase + 2u >= mesh.indices.size() || triId >= mesh.faceNormals.size() || maxDist <= 0.0f)
+        return result;
+
+    const glm::vec3& v0 = mesh.vertices[mesh.indices[triBase + 0u]];
+    const glm::vec3& v1 = mesh.vertices[mesh.indices[triBase + 1u]];
+    const glm::vec3& v2 = mesh.vertices[mesh.indices[triBase + 2u]];
+    if (!validTriangleArea(v0, v1, v2))
+        return result;
+
+    glm::vec3 onSeg;
+    glm::vec3 onTri;
+    float distSq;
+    const TriRegion region =
+        closestPointSegmentTriangle(capsule.segA(center), capsule.segB(center), v0, v1, v2, onSeg, onTri, distSq);
+    const float maxDistSq = maxDist * maxDist;
+    if (!std::isfinite(distSq) || distSq > maxDistSq || !finiteVec3(onSeg) || !finiteVec3(onTri))
+        return result;
+
+    result.found = true;
+    result.dist = std::sqrt(distSq);
+    result.pointOnSegment = onSeg;
+    result.pointOnMesh = onTri;
+    result.triId = triId;
+    result.region = region;
+    result.normal = mesh.faceNormals[triId];
+    if (distSq > 1e-12f) {
+        const glm::vec3 segDir = onSeg - onTri;
+        if (glm::dot(result.normal, segDir) < 0.0f)
+            result.normal = -result.normal;
+    }
+    return result;
+}
+
 ClearanceResult clearanceCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 pos, float maxReach, const WorldTriMesh& mesh)
 {
     ClearanceResult clr;

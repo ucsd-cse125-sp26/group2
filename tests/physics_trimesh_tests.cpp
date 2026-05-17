@@ -126,6 +126,32 @@ WorldTriMesh makeThinDepthWallAt(float z)
         });
 }
 
+WorldTriMesh makeSingleMeshOutsideWallCorner()
+{
+    // Two thin wall quads authored as one mesh and sharing the vertical seam
+    // at x=0,z=20. This is the real adjacency case: no mesh-to-mesh handoff,
+    // just a neighbour triangle across a cooked edge.
+    return makeCookedMesh(
+        {
+            {0.0f, 0.0f, -20.0f},
+            {0.0f, 40.0f, -20.0f},
+            {0.0f, 40.0f, 20.0f},
+            {0.0f, 0.0f, 20.0f},
+            {-40.0f, 0.0f, 20.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+            4,
+            2,
+            3,
+        });
+}
+
 WorldTriMesh makeTwoTriangleFloor()
 {
     return makeCookedMesh(
@@ -812,6 +838,38 @@ bool wallAttachmentLookaheadFindsOuterCornerContinuation()
     return ok;
 }
 
+bool wallAttachmentWalksSingleMeshAdjacencyAtCorner()
+{
+    const WorldTriMesh mesh = makeSingleMeshOutsideWallCorner();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&mesh, 1),
+    };
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 20.0f, .up = {0.0f, 1.0f, 0.0f}};
+
+    const physics::WallAttachmentResult result = physics::findWallRunAttachment(capsule,
+                                                                                {-10.0f, 20.0f, 18.0f},
+                                                                                world,
+                                                                                {-1.0f, 0.0f, 0.0f},
+                                                                                {0.0f, 0.0f, 1.0f},
+                                                                                0.0f,
+                                                                                24.0f,
+                                                                                0u,
+                                                                                1u,
+                                                                                physics::TriRegion::Edge1);
+
+    bool ok = true;
+    ok &= expect(result.found, "wallrun adjacency should find a single-mesh outside-corner continuation");
+    ok &= expect(result.meshIndex == 0u, "wallrun adjacency should stay on the same cooked mesh");
+    ok &= expect(result.triId == 2u, "wallrun adjacency should hop to the neighbour triangle across the seam");
+    ok &= expect(result.normal.z < -0.9f, "single-mesh corner continuation should use the new wall normal");
+    return ok;
+}
+
 bool climbMantleToTopFloorKeepsFiniteState()
 {
     const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
@@ -1017,6 +1075,7 @@ int main()
     ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
     ok &= wallDetectionTracksOverlappingThinTriMeshWall();
     ok &= wallAttachmentLookaheadFindsOuterCornerContinuation();
+    ok &= wallAttachmentWalksSingleMeshAdjacencyAtCorner();
     ok &= climbMantleToTopFloorKeepsFiniteState();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= triMeshValidationReportsCookerIssues();

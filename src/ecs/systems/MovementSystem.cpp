@@ -676,14 +676,25 @@ WallAttachmentProbe findWallAttachment(glm::vec3 pos,
                                        const physics::WorldGeometry& world,
                                        glm::vec3 continuityNormal,
                                        glm::vec3 travelDir = glm::vec3{0.0f},
-                                       float lookaheadDist = 0.0f)
+                                       float lookaheadDist = 0.0f,
+                                       uint32_t previousMeshIndex = UINT32_MAX,
+                                       uint32_t previousTriId = UINT32_MAX,
+                                       physics::TriRegion previousRegion = physics::TriRegion::Face)
 {
     WallAttachmentProbe best;
     if (shape.type != CollisionShapeType::Capsule)
         return best;
 
-    const physics::WallAttachmentResult attachment = physics::findWallRunAttachment(
-        capsuleQueryForWallrun(shape), pos, world, continuityNormal, travelDir, lookaheadDist, tms::k_wallrunCheckDist);
+    const physics::WallAttachmentResult attachment = physics::findWallRunAttachment(capsuleQueryForWallrun(shape),
+                                                                                    pos,
+                                                                                    world,
+                                                                                    continuityNormal,
+                                                                                    travelDir,
+                                                                                    lookaheadDist,
+                                                                                    tms::k_wallrunCheckDist,
+                                                                                    previousMeshIndex,
+                                                                                    previousTriId,
+                                                                                    previousRegion);
     if (!attachment.found)
         return best;
 
@@ -908,7 +919,15 @@ void handleWallRunning(glm::vec3& pos,
     const float preAttachHorizSpeed = glm::length(horizVel(vel));
     const float handoffLookahead = std::clamp(preAttachHorizSpeed * dt + 4.0f, 4.0f, shape.radius);
 
-    WallAttachmentProbe attachment = findWallAttachment(pos, shape, world, oldNormal, oldForward, handoffLookahead);
+    WallAttachmentProbe attachment = findWallAttachment(pos,
+                                                        shape,
+                                                        world,
+                                                        oldNormal,
+                                                        oldForward,
+                                                        handoffLookahead,
+                                                        state.sim.wallMeshIndex,
+                                                        state.sim.wallTriId,
+                                                        state.sim.wallRegion);
     if (!attachment.found) {
         const bool fallbackRight = walls.wallRight && glm::dot(walls.rightNormal, oldNormal) > -0.05f;
         const bool fallbackLeft = walls.wallLeft && glm::dot(walls.leftNormal, oldNormal) > -0.05f;
