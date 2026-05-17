@@ -2,9 +2,9 @@
 /// @brief Assimp-based collision extraction from map GLB files.
 ///
 /// Production separated maps preserve authored collision meshes as static
-/// triangle surfaces. Primitive fitting and V-HACD remain compatibility paths
-/// for prototype maps, explicitly-forced debug collections, and standalone
-/// props.
+/// triangle surfaces. Primitive fitting remains a compatibility path for
+/// prototype maps, explicitly-forced debug collections, and standalone props.
+/// V-HACD is build-time opt-in only and is disabled in normal game builds.
 
 #include "MapLoader.hpp"
 
@@ -12,6 +12,7 @@
 
 #include <SDL3/SDL_log.h>
 
+#if defined(GROUP2_ENABLE_VHACD) && GROUP2_ENABLE_VHACD
 // V-HACD (header-only).  Implementation is compiled in VHACDImpl.cpp via
 // `#define ENABLE_VHACD_IMPLEMENTATION` — this site only needs the API.
 #ifdef __GNUC__
@@ -24,6 +25,7 @@
 #include <VHACD.h>
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif
 #endif
 
 #ifdef __GNUC__
@@ -651,6 +653,8 @@ bool extractConvexBrush(
     return true;
 }
 
+#if defined(GROUP2_ENABLE_VHACD) && GROUP2_ENABLE_VHACD
+
 // Convex decomposition (V-HACD)
 
 /// @brief Convert one V-HACD output hull to a `WorldBrush`.
@@ -883,6 +887,21 @@ size_t decomposeIntoBrushes(
     SDL_Log("MapLoader: V-HACD failed for '%s' (all fill modes produced 0 hulls); falling back to triMesh", nodeName);
     return 0;
 }
+
+#else
+
+size_t decomposeIntoBrushes(
+    const aiMesh* mesh, const glm::mat4& world, float scale, const char* nodeName, MapCollisionData& out)
+{
+    (void)mesh;
+    (void)world;
+    (void)scale;
+    (void)out;
+    SDL_Log("MapLoader: V-HACD requested for '%s', but GROUP2_ENABLE_VHACD is OFF; falling back to triMesh", nodeName);
+    return 0;
+}
+
+#endif
 
 // Triangle mesh construction
 

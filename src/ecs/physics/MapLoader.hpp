@@ -11,8 +11,9 @@
 /// visual geometry is already simple enough to collide against.
 ///
 /// Production separated maps load collision meshes as authored triangle
-/// surfaces. Primitive guessing and V-HACD are opt-in compatibility paths for
-/// prototype/debug content and standalone props.
+/// surfaces. Primitive guessing is an opt-in compatibility path for
+/// prototype/debug content and standalone props. V-HACD is disabled in normal
+/// builds and only exists behind the `GROUP2_ENABLE_VHACD` build option.
 
 #pragma once
 
@@ -123,6 +124,8 @@ struct MapLoadOptions
     ///
     /// This is a compatibility/prototype option. Production map collision is
     /// authored as simplified triangle surfaces and should keep this false.
+    /// Normal builds also compile without V-HACD; setting this true only has
+    /// an effect when CMake is configured with GROUP2_ENABLE_VHACD=ON.
     ///
     /// Has no effect when `guessShapesProcessed = false` or when
     /// `allMeshesAreCollision = true`.
@@ -160,13 +163,10 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
 /// @param position World-space position of the prop.
 /// @param scale    Uniform scale factor.
 /// @param decomposeNonConvex
-///                 When true, non-convex meshes inside the prop are run through
-///                 V-HACD convex decomposition (each becomes a small set of
-///                 `WorldBrush`es) instead of falling back to `WorldTriMesh`.
-///                 Smoother runtime collision on irregular shapes (a bottle, a
-///                 bent metal pallet) at the cost of seconds-per-mesh load time.
-///                 Default false because a prop GLB can hold dozens of sub-
-///                 meshes and decomposing every one of them blows up startup.
+///                 Legacy opt-in: when true and GROUP2_ENABLE_VHACD is enabled
+///                 at configure time, non-convex meshes inside the prop are run
+///                 through V-HACD convex decomposition. In normal builds this
+///                 request logs and falls back to `WorldTriMesh`.
 /// @return True on success.
 bool loadPropCollision(
     const std::string& path, MapCollisionData& out, glm::vec3 position, float scale, bool decomposeNonConvex = false);

@@ -3,9 +3,12 @@
 ///
 /// V-HACD is a header-only library (`VHACD.h`).  Its header gates the actual
 /// algorithm behind the `ENABLE_VHACD_IMPLEMENTATION` macro — exactly like
-/// `stb_image` and `dr_libs` style single-headers.  Defining the macro in
-/// *one* compilation unit (this file) compiles the implementation; every
-/// other site just `#include <VHACD.h>` for the public API.
+/// `stb_image` and `dr_libs` style single-headers.  The implementation is
+/// compiled only when GROUP2_ENABLE_VHACD is explicitly enabled. Production
+/// map collision is authored as static triangle meshes and does not use this
+/// path.
+
+#if defined(GROUP2_ENABLE_VHACD) && GROUP2_ENABLE_VHACD
 
 // V-HACD uses a few constructs that fire warnings under our strict warning
 // configuration (-Wconversion, -Wshadow, etc.).  Suppress them around the
@@ -40,4 +43,6 @@
 #endif
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif
+
 #endif

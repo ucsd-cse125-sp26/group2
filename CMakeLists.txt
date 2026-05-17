@@ -24,6 +24,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Doxygen.cmake")
 option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
+option(GROUP2_ENABLE_VHACD "Build legacy V-HACD decomposition support for prototype props" OFF)
 
 # ---- Build acceleration ----
 
@@ -334,20 +335,21 @@ FetchContent_MakeAvailable(minimp3)
 add_library(minimp3 INTERFACE)
 target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
 
-# V-HACD — Volumetric Hierarchical Approximate Convex Decomposition.
-# Header-only library used by MapLoader to split non-convex collision meshes
-# into a small set of convex hulls (WorldBrushes), avoiding triMesh-edge
-# jitter on curved surfaces.  Implementation lives in
-# src/ecs/physics/VHACDImpl.cpp via the ENABLE_VHACD_IMPLEMENTATION define.
-FetchContent_Declare(
-    vhacd
-    GIT_REPOSITORY https://github.com/kmammou/v-hacd.git
-    GIT_TAG        v4.1.0
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(vhacd)
 add_library(vhacd INTERFACE)
-target_include_directories(vhacd SYSTEM INTERFACE ${vhacd_SOURCE_DIR}/include)
+if(GROUP2_ENABLE_VHACD)
+    # V-HACD — legacy opt-in convex decomposition for prototype props.
+    # Production map collision is authored as simplified triangle meshes, so
+    # default builds do not fetch or compile V-HACD.
+    FetchContent_Declare(
+        vhacd_src
+        GIT_REPOSITORY https://github.com/kmammou/v-hacd.git
+        GIT_TAG        v4.1.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(vhacd_src)
+    target_include_directories(vhacd SYSTEM INTERFACE ${vhacd_src_SOURCE_DIR}/include)
+    target_compile_definitions(vhacd INTERFACE GROUP2_ENABLE_VHACD=1)
+endif()
 
 # ozz-animation — runtime skeletal animation (CPU skinning, sampling, blending).
 # We only need the runtime + offline builders; disable all extras.
@@ -1458,8 +1460,8 @@ target_include_directories(clientbot PRIVATE
 )
 
 # Bot links the same map/prop collision loader dependencies as the client.
-# V-HACD remains linked for legacy non-map prop experiments; production map
-# collision stays on authored trimeshes.
+# The `vhacd` target is empty unless GROUP2_ENABLE_VHACD is explicitly enabled;
+# production map collision stays on authored trimeshes.
 target_link_libraries(clientbot PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
