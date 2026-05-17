@@ -180,8 +180,6 @@ jobs:
     if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
-      # Google Drive file ID for the shared assets zip.
-      ASSETS_GDRIVE_ID: "1_Xafht6-R_E8-gVglYFDAHvjZA8msfE4"
     strategy:
       fail-fast: false
       matrix:
@@ -320,24 +318,15 @@ jobs:
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --target group2 server clientbot --parallel
 
-      # Download the shared assets zip from Google Drive (cached across runs).
-      - name: Cache assets
-        id: assets-cache
-        uses: actions/cache@v4
-        with:
-          path: assets.zip
-          key: assets-${{ env.ASSETS_GDRIVE_ID }}
-
-      - name: Download assets
-        if: steps.assets-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          pip install --quiet gdown
-          gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
-
       # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
         shell: bash
+        env:
+          # Drive folder containing the current game assets (maps, animations,
+          # prop GLBs). Fetched fresh on every release — no cache — so releases
+          # always reflect the latest art the team has uploaded.
+          # Folder must remain "Anyone with the link can view".
+          ASSETS_FOLDER_ID: "1nUGE1_tfFNQcl5-UDkjys0XjE8OLxd28"
         run: |
           DIR="group2-${{ matrix.archive_suffix }}"
           STAGE="staging/$DIR"
@@ -354,8 +343,15 @@ jobs:
           cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
           cp -r "${{ matrix.build_dir }}/shaders-new" "$STAGE/"
 
-          # Assets from Google Drive (cross-platform extraction via Python)
-          python3 -c "import zipfile; zipfile.ZipFile('assets.zip').extractall('$STAGE')"
+          # Live assets from Google Drive — fresh on every release.
+          # --folder       : recursive folder download (gdown >= 5.0)
+          # Note: --remaining-ok was removed in gdown 6.x; gdown >= 6.0 has
+          #       no file-count limit for folder downloads by default.
+          # -O             : output directory
+          pip install --quiet 'gdown>=5.0.0'
+          gdown --folder \
+                -O "$STAGE/assets" \
+                "https://drive.google.com/drive/folders/${ASSETS_FOLDER_ID}"
 
           # Create release zip.
           # Linux/macOS have zip pre-installed; Windows has 7z instead.
