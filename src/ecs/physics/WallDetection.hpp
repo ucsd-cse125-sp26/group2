@@ -51,6 +51,17 @@ struct WallDetectionResult
     float groundDistance{1e10f}; ///< Distance to ground below the player (u).
 };
 
+/// @brief Stable wallrun attachment target on authored triangle meshes.
+struct WallAttachmentResult
+{
+    bool found{false};
+    glm::vec3 anchor{0.0f};
+    glm::vec3 normal{0.0f};
+    uint32_t meshIndex{UINT32_MAX};
+    uint32_t triId{UINT32_MAX};
+    TriRegion region{TriRegion::Face};
+};
+
 /// @brief Detect walls to the left, right, and front of the player.
 ///
 /// Also probes downward to measure ground distance (used for wallrun/climb min height).
@@ -73,6 +84,20 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                                 float checkDist,
                                 float sphereRadius,
                                 glm::vec3 prevWallNormal = glm::vec3(0.0f));
+
+/// @brief Find the best triangle-mesh wallrun attachment, with optional
+/// lookahead along the current travel direction.
+///
+/// Current-position attachment keeps ordinary wallruns stable. The lookahead
+/// sample lets convex/outside corners select the upcoming perpendicular wall
+/// before the old wall's closest point flips the tangent backward.
+WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
+                                           glm::vec3 pos,
+                                           const WorldGeometry& world,
+                                           glm::vec3 continuityNormal,
+                                           glm::vec3 travelDir = glm::vec3{0.0f},
+                                           float lookaheadDist = 0.0f,
+                                           float checkDist = 24.0f);
 
 /// @brief Check if a surface normal represents a wall (not floor/ceiling).
 ///

@@ -94,6 +94,25 @@ WorldTriMesh makeThinDepthWall()
         });
 }
 
+WorldTriMesh makeThinDepthWallAt(float z)
+{
+    return makeCookedMesh(
+        {
+            {-32.0f, 0.0f, z},
+            {8.0f, 0.0f, z},
+            {8.0f, 40.0f, z},
+            {-32.0f, 40.0f, z},
+        },
+        {
+            0,
+            2,
+            1,
+            0,
+            3,
+            2,
+        });
+}
+
 WorldTriMesh makeTwoTriangleFloor()
 {
     return makeCookedMesh(
@@ -580,6 +599,29 @@ bool wallDetectionTracksOverlappingThinTriMeshWall()
     return ok;
 }
 
+bool wallAttachmentLookaheadFindsOuterCornerContinuation()
+{
+    std::array<WorldTriMesh, 2> meshes{makeThinWall(), makeThinDepthWallAt(20.0f)};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 20.0f, .up = {0.0f, 1.0f, 0.0f}};
+
+    const physics::WallAttachmentResult result = physics::findWallRunAttachment(
+        capsule, {-10.0f, 20.0f, 8.0f}, world, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, 12.0f, 24.0f);
+
+    bool ok = true;
+    ok &= expect(result.found, "wallrun lookahead should find an outer-corner continuation wall");
+    ok &= expect(result.meshIndex == 1u, "wallrun lookahead should prefer the upcoming outside-corner wall");
+    ok &= expect(result.normal.z < -0.9f, "outside-corner wall normal should preserve forward wallrun continuation");
+    return ok;
+}
+
 bool triMeshValidationReportsCookerIssues()
 {
     WorldTriMesh mesh;
@@ -663,6 +705,7 @@ int main()
     ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();
     ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
     ok &= wallDetectionTracksOverlappingThinTriMeshWall();
+    ok &= wallAttachmentLookaheadFindsOuterCornerContinuation();
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();
     ok &= playerWallAttachmentStateHasStableMeshIdentity();

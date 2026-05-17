@@ -124,7 +124,9 @@ void resizePlayerCapsule(Position& pos, CollisionShape& shape, float newAabbHalf
 /// @brief Test whether the player can fit at `pos` with a candidate AABB
 /// half-height, by checking capsule clearance against world geometry.
 /// Used to validate uncrouch before committing to the larger shape.
-bool playerFitsAt(const Position& pos, const CollisionShape& shape, float candidateAabbHalfHeight,
+bool playerFitsAt(const Position& pos,
+                  const CollisionShape& shape,
+                  float candidateAabbHalfHeight,
                   const physics::WorldGeometry& world)
 {
     physics::CapsuleShape probe{
@@ -660,51 +662,20 @@ WallAttachmentProbe findWallAttachment(glm::vec3 pos,
                                        float lookaheadDist = 0.0f)
 {
     WallAttachmentProbe best;
-    float bestScore = 1e30f;
+    if (shape.type != CollisionShapeType::Capsule)
+        return best;
 
-    if (shape.type == CollisionShapeType::Capsule) {
-        const physics::CapsuleShape capsule = capsuleQueryForWallrun(shape);
-        const float maxAxisDist = capsule.radius + tms::k_wallrunCheckDist + 8.0f;
+    const physics::WallAttachmentResult attachment = physics::findWallRunAttachment(
+        capsuleQueryForWallrun(shape), pos, world, continuityNormal, travelDir, lookaheadDist, tms::k_wallrunCheckDist);
+    if (!attachment.found)
+        return best;
 
-        auto considerMesh = [&](uint32_t meshIndex, const physics::WorldTriMesh& mesh) {
-            const physics::ClosestPointOnMeshResult cp = physics::closestPointOnMesh(capsule, pos, maxAxisDist, mesh);
-            if (!cp.found || !physics::isWallNormal(cp.normal))
-                return;
-
-            const float continuity =
-                (glm::length(continuityNormal) > 0.5f) ? glm::dot(cp.normal, continuityNormal) : 1.0f;
-            if (continuity < -0.05f)
-                return;
-
-            const float blocking = (glm::length(travelDir) > 0.5f)
-                                       ? std::max(0.0f, -glm::dot(glm::normalize(travelDir), cp.normal))
-                                       : 0.0f;
-            const float surfaceDist = std::abs(cp.dist - capsule.minkowskiExtent(cp.normal));
-            const float score = surfaceDist + (1.0f - continuity) * 2.0f - blocking * lookaheadDist * 2.0f;
-            if (score < bestScore) {
-                bestScore = score;
-                best.found = true;
-                best.anchor = cp.pointOnMesh;
-                best.normal = cp.normal;
-                best.meshIndex = meshIndex;
-                best.triId = cp.triId;
-                best.region = cp.region;
-            }
-        };
-
-        const glm::vec3 queryHalfExtents = capsule.enclosingHalfExtents() + glm::vec3(maxAxisDist);
-        const physics::WorldAABB query{.min = pos - queryHalfExtents, .max = pos + queryHalfExtents};
-        if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
-            physics::queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
-                if (meshIndex < world.triMeshes.size())
-                    considerMesh(meshIndex, world.triMeshes[meshIndex]);
-                return true;
-            });
-        } else {
-            for (uint32_t i = 0; i < static_cast<uint32_t>(world.triMeshes.size()); ++i)
-                considerMesh(i, world.triMeshes[i]);
-        }
-    }
+    best.found = true;
+    best.anchor = attachment.anchor;
+    best.normal = attachment.normal;
+    best.meshIndex = attachment.meshIndex;
+    best.triId = attachment.triId;
+    best.region = attachment.region;
 
     return best;
 }

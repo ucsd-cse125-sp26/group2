@@ -96,6 +96,71 @@ MeshWallProbe probeTriMeshWalls(glm::vec3 pos,
 
 } // namespace
 
+WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
+                                           glm::vec3 pos,
+                                           const WorldGeometry& world,
+                                           glm::vec3 continuityNormal,
+                                           glm::vec3 travelDir,
+                                           float lookaheadDist,
+                                           float checkDist)
+{
+    WallAttachmentResult best;
+    float bestScore = 1e30f;
+    const float maxAxisDist = capsule.radius + checkDist + 8.0f;
+    const bool hasContinuity = glm::length(continuityNormal) > 0.5f;
+    const bool hasTravel = glm::length(travelDir) > 0.5f && lookaheadDist > 0.0f;
+    const glm::vec3 travel = hasTravel ? glm::normalize(travelDir) : glm::vec3{0.0f};
+    const glm::vec3 lookaheadPos = hasTravel ? pos + travel * lookaheadDist : pos;
+
+    auto considerClosest = [&](uint32_t meshIndex, const ClosestPointOnMeshResult& cp, bool lookaheadSample) {
+        if (!cp.found || !isWallNormal(cp.normal))
+            return;
+
+        const float continuity = hasContinuity ? glm::dot(cp.normal, continuityNormal) : 1.0f;
+        if (continuity < -0.05f)
+            return;
+
+        const float blocking = hasTravel ? std::max(0.0f, -glm::dot(travel, cp.normal)) : 0.0f;
+        const float surfaceDist = std::abs(cp.dist - capsule.minkowskiExtent(cp.normal));
+        const float continuityPenalty = (1.0f - continuity) * 2.0f;
+        const float lookaheadBonus = lookaheadSample ? lookaheadDist * 0.5f : 0.0f;
+        const float blockingBonus = blocking * lookaheadDist * 2.0f;
+        const float score = surfaceDist + continuityPenalty - lookaheadBonus - blockingBonus;
+        if (score >= bestScore)
+            return;
+
+        bestScore = score;
+        best.found = true;
+        best.anchor = cp.pointOnMesh;
+        best.normal = cp.normal;
+        best.meshIndex = meshIndex;
+        best.triId = cp.triId;
+        best.region = cp.region;
+    };
+
+    auto considerMesh = [&](uint32_t meshIndex, const WorldTriMesh& mesh) {
+        considerClosest(meshIndex, closestPointOnMesh(capsule, pos, maxAxisDist, mesh), false);
+        if (hasTravel)
+            considerClosest(meshIndex, closestPointOnMesh(capsule, lookaheadPos, maxAxisDist, mesh), true);
+    };
+
+    const glm::vec3 queryMin = glm::min(pos, lookaheadPos) - capsule.enclosingHalfExtents() - glm::vec3(maxAxisDist);
+    const glm::vec3 queryMax = glm::max(pos, lookaheadPos) + capsule.enclosingHalfExtents() + glm::vec3(maxAxisDist);
+    const WorldAABB query{.min = queryMin, .max = queryMax};
+    if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
+        queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+            if (meshIndex < world.triMeshes.size())
+                considerMesh(meshIndex, world.triMeshes[meshIndex]);
+            return true;
+        });
+    } else {
+        for (uint32_t i = 0; i < static_cast<uint32_t>(world.triMeshes.size()); ++i)
+            considerMesh(i, world.triMeshes[i]);
+    }
+
+    return best;
+}
+
 WallDetectionResult detectWalls(glm::vec3 pos,
                                 float yaw,
                                 glm::vec3 halfExtents,
