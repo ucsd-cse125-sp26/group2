@@ -440,12 +440,14 @@ WallDetectionResult detectWalls(glm::vec3 pos,
 
     // Ground distance probe
     {
-        const glm::vec3 k_feetPos = pos - worldUp * halfExtents.y;
-        const glm::vec3 k_downEnd = k_feetPos - worldUp * 500.0f;
-        const SphereHitResult k_hr = sphereCast(2.0f, k_feetPos, k_downEnd, world);
-        if (k_hr.hit) {
-            result.groundDistance = k_hr.t * 500.0f;
-        }
+        const CapsuleShape groundProbeCapsule{
+            .radius = sphereRadius,
+            .halfHeight = std::max(halfExtents.y - sphereRadius, 0.0f),
+            .up = worldUp,
+        };
+        const GroundProbeResult ground = probeGround(groundProbeCapsule, pos, 500.0f, world);
+        if (ground.hit)
+            result.groundDistance = ground.distance;
     }
 
     return result;
