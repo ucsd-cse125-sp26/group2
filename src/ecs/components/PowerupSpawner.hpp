@@ -4,7 +4,6 @@
 #pragma once
 #include "glm/fwd.hpp"
 
-
 enum class PowerupType : uint8_t
 {
     Damage,
@@ -15,7 +14,6 @@ enum class PowerupType : uint8_t
 struct PowerupSpawner
 {
     PowerupType type = PowerupType::Damage; ///< Type of powerup this spawner provides.
-    float spawnCooldown = 0;             ///< Seconds remaining before the powerup reappears.
-    bool hasPowerup = false;             ///< True if powerup is available for pickup.
+    float spawnCooldown = 0;                ///< Seconds remaining before the powerup reappears.
+    bool hasPowerup = false;                ///< True if powerup is available for pickup.
 };
-

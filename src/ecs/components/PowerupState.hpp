@@ -4,9 +4,9 @@
 #pragma once
 #include "PowerupSpawner.hpp"
 
-#include <vector>
 #include <array>
 #include <cstddef>
+#include <vector>
 
 struct ActivePowerup
 {
@@ -41,7 +41,7 @@ inline const PowerupConfig& getPowerupConfig(PowerupType type)
             .duration = 30.0f,
             .spawnCooldown = 240.0f,
             .amount = 200.0f, // amount of over shield
-        }, // Shield
+        },                    // Shield
     }};
 
     return k_kPowerupConfigs[static_cast<std::size_t>(type)];

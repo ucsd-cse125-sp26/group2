@@ -220,7 +220,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
 SDL_GPUBuffer* createBuffer(SDL_GPUDevice* device, size_t bufferSize, SDL_GPUBufferUsageFlags usage)
 {
     SDL_GPUBufferCreateInfo info{};
-    info.size = bufferSize;
+    info.size = static_cast<Uint32>(bufferSize);
     info.usage = usage;
 
     return SDL_CreateGPUBuffer(device, &info);
@@ -229,7 +229,7 @@ SDL_GPUBuffer* createBuffer(SDL_GPUDevice* device, size_t bufferSize, SDL_GPUBuf
 SDL_GPUTransferBuffer* createTransferBuffer(SDL_GPUDevice* device, size_t transferBufferSize, bool upload)
 {
     SDL_GPUTransferBufferCreateInfo info{};
-    info.size = transferBufferSize;
+    info.size = static_cast<Uint32>(transferBufferSize);
     info.usage = upload ? SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD : SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 
     return SDL_CreateGPUTransferBuffer(device, &info);
@@ -281,7 +281,7 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
         SDL_GPUBufferRegion dest{};
         dest.buffer = upload.buffer;
         dest.offset = 0;
-        dest.size = upload.size;
+        dest.size = static_cast<Uint32>(upload.size);
 
         SDL_UploadToGPUBuffer(copyPass, &source, &dest, true);
         offset += upload.size;

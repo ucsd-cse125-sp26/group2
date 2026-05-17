@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.7
+#
+# Runtime image for the group2 dedicated game server.
+#
+# This Dockerfile is consumed by the CI `publish` job: the build context
+# is the unpacked group2-linux-x86_64.zip artifact, so `server`,
+# `config.toml`, and `assets/` are expected to exist at the context root.
+# It is NOT designed for `docker build .` from a clean checkout.
+#
+# Base image matches the CI build runner (ubuntu-24.04) so glibc symbol
+# versions line up exactly.
+FROM ubuntu:24.04
+
+# Runtime libraries.
+#
+# The server calls SDL_Init(0) (src/server/main/main.cpp:164) with no
+# subsystem flags, so SDL3's video/audio/input backends are never
+# initialised and we don't ship X11/Wayland/audio libs.
+#
+# libtbb12: required when the build linked TBB for std::execution::par_unseq
+#           (see CMakeLists.txt around line 1238).
+# ca-certificates: harmless, future-proofs any TLS callout we might add.
+#
+# Final cleanup removes apt lists to keep the layer small.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         libtbb12 \
+         ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin group2
+
+WORKDIR /app
+
+# Copy artifacts from the unpacked release zip in the build context.
+# --chown so the non-root `group2` user can read everything.
+COPY --chown=group2:group2 server ./
+COPY --chown=group2:group2 config.toml ./
+COPY --chown=group2:group2 assets/ ./assets/
+
+USER group2:group2
+
+# SDL3_net uses both UDP (game traffic) and TCP (handshake / lobby).
+# Defaults match config.template.toml [server-network] port=9999.
+EXPOSE 9999/udp 9999/tcp
+
+ENTRYPOINT ["./server"]

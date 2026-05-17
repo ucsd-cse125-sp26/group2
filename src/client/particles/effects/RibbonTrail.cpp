@@ -49,9 +49,11 @@ void RibbonTrail::update(float dt, Registry& registry, glm::vec3 camPos)
             float age;
         };
         std::vector<SnapNode> sorted;
-        sorted.reserve(ribbon.count);
-        for (int i = 0; i < ribbon.count; ++i)
-            sorted.push_back({ribbon.nodes[i].pos, ribbon.nodes[i].age});
+        sorted.reserve(static_cast<size_t>(ribbon.count));
+        for (int i = 0; i < ribbon.count; ++i) {
+            const auto& node = ribbon.nodes[static_cast<size_t>(i)];
+            sorted.push_back({node.pos, node.age});
+        }
         std::sort(sorted.begin(), sorted.end(), [](const SnapNode& a, const SnapNode& b) { return a.age < b.age; });
 
         // Always prepend current position as tip (age=0)

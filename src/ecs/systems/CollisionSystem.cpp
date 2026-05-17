@@ -19,6 +19,7 @@
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
+#include "ecs/systems/KinematicCharacterController.hpp"
 
 #include <glm/geometric.hpp>
 
@@ -71,8 +72,7 @@ void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3
 
 } // namespace
 
-static constexpr float k_pushback = 0.03125f;                         // Quake DIST_EPSILON
-static constexpr float k_groundProbeDistance = physics::k_stepHeight; // also used for slope snap
+static constexpr float k_pushback = 0.03125f; // Quake DIST_EPSILON
 
 // Depenetration
 
@@ -158,8 +158,7 @@ static void depenetrateBox(glm::vec3& pos, glm::vec3& vel, const glm::vec3& half
         const glm::vec3 boxCentre = (box.min + box.max) * 0.5f;
         const glm::vec3 contactPoint = pos - pushDir * std::abs(glm::dot(halfExtents, glm::abs(pushDir)));
         (void)boxCentre;
-        physics::debug::pushDepenContact(
-            contactPoint, pushDir, minPen, physics::debug::ContactSource::BoxDepen, 0);
+        physics::debug::pushDepenContact(contactPoint, pushDir, minPen, physics::debug::ContactSource::BoxDepen, 0);
     }
 }
 
@@ -304,20 +303,23 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
 
 /// @brief Push the entity out of a triangle mesh it currently overlaps.
 ///
-/// Delegates to `physics::depenetrateAABBvsTriMesh`, which uses per-triangle
-/// SAT MTV — accurate enough that curved surfaces (cylinders, spheres) feel
-/// curved instead of cubical.  Trade-off: at sharp triangle edges where
-/// adjacent normals fight, per-triangle pushes can briefly disagree.  In
-/// practice the pushback bias keeps the entity off the surface and the swept
-/// collision (which still does precise per-triangle hits) is the primary path
-/// for normal motion; this depenetration is only a safety net.
+/// Delegates to `physics::depenetrateAABBvsTriMesh`, the legacy projectile
+/// AABB safety-net path. Player movement uses capsule depenetration in
+/// `physics::depenetrateCapsuleVsWorld`; this remains for small projectile
+/// bodies that still use AABB sweeps.
 static void
 depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
 {
     physics::depenetrateAABBvsTriMesh(pos, vel, halfExtents, mesh, k_pushback);
 }
 
-/// @brief Run all depenetration passes (planes, boxes, brushes, cylinders, spheres).
+static bool overlapsAabb(const physics::WorldAABB& a, const physics::WorldAABB& b)
+{
+    return a.max.x >= b.min.x && a.min.x <= b.max.x && a.max.y >= b.min.y && a.min.y <= b.max.y && a.max.z >= b.min.z &&
+           a.min.z <= b.max.z;
+}
+
+/// @brief Run all depenetration passes for legacy AABB bodies.
 /// @param pos          Entity position (modified in place).
 /// @param vel          Entity velocity (modified in place).
 /// @param halfExtents  AABB half-extents of the entity.
@@ -339,67 +341,21 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
     for (const physics::WorldSphere& sph : world.spheres)
         depenetrateSphere(pos, vel, halfExtents, sph);
 
-    for (const physics::WorldTriMesh& tm : world.triMeshes)
-        depenetrateTriMesh(pos, vel, halfExtents, tm);
-}
-
-/// @brief Attempt to step over a low obstacle when a wall is hit.
-/// @param pos            Entity position (modified in place on success).
-/// @param vel            Entity velocity (modified in place on success).
-/// @param halfExtents    AABB half-extents of the entity.
-/// @param remainingTime  Time remaining in the current bump iteration.
-/// @param world          World collision geometry.
-/// @return True if the step succeeded and position/velocity were updated.
-static bool tryStepUp(glm::vec3& pos,
-                      glm::vec3& vel,
-                      const glm::vec3& halfExtents,
-                      float remainingTime,
-                      const physics::WorldGeometry& world)
-{
-    const glm::vec3 k_stepVec{0.0f, physics::k_stepHeight, 0.0f};
-
-    // 1. Lift straight up — abort if ceiling blocks.
-    const glm::vec3 k_liftEnd = pos + k_stepVec;
-    const physics::HitResult k_lift = physics::sweepAll(halfExtents, pos, k_liftEnd, world);
-    if (k_lift.hit)
-        return false;
-
-    // 2. Sweep horizontally at step height — abort if still blocked.
-    const glm::vec3 k_horizEnd = k_liftEnd + glm::vec3{vel.x * remainingTime, 0.0f, vel.z * remainingTime};
-    const physics::HitResult k_horiz = physics::sweepAll(halfExtents, k_liftEnd, k_horizEnd, world);
-    if (k_horiz.hit)
-        return false;
-
-    // 3. Drop back down — must land on a floor-like surface.
-    const glm::vec3 k_dropEnd = k_horizEnd - k_stepVec;
-    const physics::HitResult k_drop = physics::sweepAll(halfExtents, k_horizEnd, k_dropEnd, world);
-
-    if (!k_drop.hit || k_drop.normal.y <= 0.7f)
-        return false;
-
-    pos = k_horizEnd - k_stepVec * k_drop.tFirst;
-    pos += k_drop.normal * k_pushback;
-    vel.y = 0.0f;
-    return true;
-}
-
-/// @brief Keep the entity glued to descending slopes and step-downs.
-/// @param pos          Entity position (modified in place).
-/// @param vel          Entity velocity (modified in place).
-/// @param halfExtents  AABB half-extents of the entity.
-/// @param world        World collision geometry.
-static void
-snapToGround(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldGeometry& world)
-{
-    const glm::vec3 k_probeTarget = pos - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
-    const physics::HitResult k_snap = physics::sweepAll(halfExtents, pos, k_probeTarget, world);
-
-    if (!k_snap.hit || k_snap.normal.y <= 0.7f)
+    const physics::WorldAABB query{.min = pos - halfExtents, .max = pos + halfExtents};
+    if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
+        physics::queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+            if (meshIndex < world.triMeshes.size())
+                depenetrateTriMesh(pos, vel, halfExtents, world.triMeshes[meshIndex]);
+            return true;
+        });
         return;
+    }
 
-    pos = pos - glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
-    pos += k_snap.normal * k_pushback;
-    vel.y = 0.0f;
+    for (const physics::WorldTriMesh& tm : world.triMeshes) {
+        const physics::WorldAABB meshAabb{.min = tm.boundsMin, .max = tm.boundsMax};
+        if (overlapsAabb(meshAabb, query))
+            depenetrateTriMesh(pos, vel, halfExtents, tm);
+    }
 }
 
 void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world)
@@ -428,162 +384,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
         auto& vel = registry.get<Velocity>(e);
         const auto& shape = registry.get<CollisionShape>(e);
         auto& state = registry.get<PlayerVisState>(e);
-        {
-            const bool k_wasGrounded = state.grounded;
-            state.grounded = false;
-
-            // Gravity-flip direction: +1 normal (floors below), -1 flipped (ceilings as floors).
-            const float gravDir = state.gravityFlipped ? -1.0f : 1.0f;
-
-            // --- Phase-diagnostic capture (off unless enabled via DebugUI) ---
-            // Snapshot pre-depen state so we can compare against post-depen and
-            // post-bump-loop later this tick.  Records every player every tick
-            // into phase-diag-<timestamp>.csv when the toggle is on.
-            const bool diagOn = physics::diag::isEnabled();
-            physics::diag::PlayerFrame diagFrame{};
-            if (diagOn) {
-                diagFrame.entity = e;
-                diagFrame.posBefore = pos.value;
-                diagFrame.velBefore = vel.value;
-            }
-
-            // Phase 0 — Depenetration
-            depenetrate(pos.value, vel.value, shape.halfExtents, world);
-
-            if (diagOn) {
-                diagFrame.posAfterDepen = pos.value;
-                diagFrame.depenPushDistance = glm::length(pos.value - diagFrame.posBefore);
-                if (diagFrame.depenPushDistance > 20.0f)
-                    diagFrame.flags |= physics::diag::PhaseFlag::DeepPenetration;
-            }
-
-            // Phase 1 — Bump loop (collision response + stair stepping)
-            float remainingTime = dt;
-
-            int clip = 0;
-            for (; clip < 4 && remainingTime > 1e-5f; ++clip) {
-                const glm::vec3 k_target = pos.value + vel.value * remainingTime;
-                const physics::HitResult k_hit = physics::sweepAll(shape.halfExtents, pos.value, k_target, world);
-
-                if (!k_hit.hit) {
-                    pos.value = k_target;
-                    break;
-                }
-
-                if (diagOn) {
-                    ++diagFrame.bumpHits;
-                    diagFrame.lastHitNormal = k_hit.normal;
-                }
-
-                pos.value += vel.value * k_hit.tFirst * remainingTime;
-                remainingTime *= (1.0f - k_hit.tFirst);
-
-                if (physics::debug::isEnabled()) {
-                    // Mark the contact at the surface point (AABB centre offset back along the
-                    // surface normal by the AABB's projected half-extent).  `sweepAll` doesn't
-                    // distinguish the source primitive in `HitResult`, so we tag it as a generic
-                    // sweep contact for now; per-primitive tagging arrives with Phase 2.
-                    const float r = std::abs(k_hit.normal.x) * shape.halfExtents.x +
-                                    std::abs(k_hit.normal.y) * shape.halfExtents.y +
-                                    std::abs(k_hit.normal.z) * shape.halfExtents.z;
-                    physics::debug::pushSweepContact(pos.value - k_hit.normal * r,
-                                                     k_hit.normal,
-                                                     physics::debug::ContactSource::PlaneSweep);
-                }
-
-                // Floor detection: normal.y > 0.7 for normal gravity,
-                // normal.y < -0.7 for flipped (ceilings become floors).
-                const bool k_isFloor = state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
-
-                if (k_isFloor) {
-                    pos.value += k_hit.normal * k_pushback;
-                    if (state.grappleActive) {
-                        // During grapple: slide along floor but don't ground or kill pull velocity.
-                        // Just push out of the surface, keep the grapple velocity intact.
-                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
-                    } else {
-                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
-                        state.grounded = true;
-                        state.groundNormal = k_hit.normal;
-                    }
-                } else {
-                    if (k_wasGrounded && !state.gravityFlipped &&
-                        tryStepUp(pos.value, vel.value, shape.halfExtents, remainingTime, world))
-                    {
-                        state.grounded = true;
-                        break;
-                    }
-                    pos.value += k_hit.normal * k_pushback;
-                    vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceWall);
-                }
-            }
-
-            // Phase 2 — Slope sticking (skip during grapple — player must fly freely)
-            // When gravity is flipped, snap toward ceiling instead of floor.
-            if (k_wasGrounded && !state.grappleActive) {
-                const float k_horizSpeed = glm::length(glm::vec3{vel.value.x, 0.0f, vel.value.z});
-                if (k_horizSpeed > 0.001f) {
-                    if (state.gravityFlipped) {
-                        // Snap upward toward ceiling.
-                        const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
-                        const physics::HitResult k_snap =
-                            physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
-                        if (k_snap.hit && k_snap.normal.y < -0.7f) {
-                            pos.value = pos.value + glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
-                            pos.value += k_snap.normal * k_pushback;
-                            vel.value.y = 0.0f;
-                        }
-                    } else {
-                        snapToGround(pos.value, vel.value, shape.halfExtents, world);
-                    }
-                }
-            }
-
-            // Phase 3 — Ground probe (skip during grapple)
-            if (!state.grappleActive) {
-                // Probe in the direction of gravity: downward normally, upward when flipped.
-                const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, -gravDir * k_groundProbeDistance, 0.0f};
-                const physics::HitResult k_probe =
-                    physics::sweepAll(shape.halfExtents, pos.value, k_probeTarget, world);
-
-                const bool k_isGroundProbe =
-                    state.gravityFlipped ? (k_probe.normal.y < -0.7f) : (k_probe.normal.y > 0.7f);
-                if (k_probe.hit && k_isGroundProbe) {
-                    state.grounded = true;
-                    state.groundNormal = k_probe.normal;
-                }
-            }
-
-            // --- Phase-diagnostic finalize ---
-            if (diagOn) {
-                diagFrame.posAfter = pos.value;
-                diagFrame.velAfter = vel.value;
-                if (remainingTime > 1e-5f && clip >= 4)
-                    diagFrame.flags |= physics::diag::PhaseFlag::BumpExhausted;
-                if (state.grounded)
-                    diagFrame.flags |= physics::diag::PhaseFlag::Grounded;
-                if (state.grappleActive)
-                    diagFrame.flags |= physics::diag::PhaseFlag::GrappleActive;
-                if (state.gravityFlipped)
-                    diagFrame.flags |= physics::diag::PhaseFlag::GravityFlipped;
-                diagFrame.moveMode = static_cast<int>(state.moveMode);
-                diagFrame.wallrunSide = static_cast<int>(state.wallRunSide);
-                diagFrame.jumpCount = state.jumpCount;
-                if (diagFrame.moveMode == 2) // WallRunning
-                    diagFrame.flags |= physics::diag::PhaseFlag::WallRunning;
-                if (diagFrame.moveMode == 1) // Sliding
-                    diagFrame.flags |= physics::diag::PhaseFlag::Sliding;
-                if (diagFrame.moveMode == 3) // Climbing
-                    diagFrame.flags |= physics::diag::PhaseFlag::Climbing;
-                if (diagFrame.moveMode == 4) // LedgeGrabbing
-                    diagFrame.flags |= physics::diag::PhaseFlag::LedgeGrabbing;
-                if (auto* sim = registry.try_get<PlayerSimState>(e); sim != nullptr) {
-                    if (sim->jumpedThisTick)
-                        diagFrame.flags |= physics::diag::PhaseFlag::DoubleJumped;
-                }
-                physics::diag::recordFrame(diagFrame);
-            }
-        }
+        const PlayerSimState* sim = registry.try_get<PlayerSimState>(e);
+        const bool jumpedThisTick = sim != nullptr && sim->jumpedThisTick;
+        runKinematicCharacterController(pos.value, vel.value, shape, state, dt, world, e, jumpedThisTick);
     };
 
 #if GROUP2_COLLISION_HAS_PARALLEL

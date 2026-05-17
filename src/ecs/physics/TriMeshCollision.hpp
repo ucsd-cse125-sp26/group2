@@ -1,20 +1,38 @@
 /// @file TriMeshCollision.hpp
-/// @brief Triangle-mesh collision with BVH acceleration and Voronoi welding.
+/// @brief Triangle-mesh collision with BVH acceleration and seam welding.
 ///
 /// Provides a BVH builder + welding pass (called once at load time) and
-/// swept-AABB / depenetration queries against triangle meshes.  The BVH is a
-/// flat-array binary tree where each leaf holds up to 4 triangles.  Welding
-/// data on the mesh drives Voronoi-region contact clipping at runtime — see
-/// `WorldTriMesh` for the data layout.
+/// swept-AABB / capsule-surface queries against triangle meshes. The BVH is a
+/// flat-array binary tree where each leaf holds up to 4 triangles. Welding
+/// data stabilizes seams for AABB/dev paths and exposes adjacency for systems
+/// such as wallrun surface tracking.
 
 #pragma once
 
 #include "SweptCollision.hpp"
 
+#include <cstdint>
 #include <glm/glm.hpp>
 
 namespace physics
 {
+
+/// @brief Voronoi region of a triangle.  Identifies which feature (face,
+/// one of three edges, or one of three vertices) a closest-point query
+/// landed on.  Used by depenetration / sweep / closest-point queries that
+/// need to clip contacts against the cooked welding-active masks, and by
+/// the Phase D wallrun manifold walk to decide whether an edge crossing
+/// hops to a neighbour triangle.
+enum class TriRegion : uint8_t
+{
+    Face = 0,
+    Edge0 = 1, ///< Edge v0 → v1
+    Edge1 = 2, ///< Edge v1 → v2
+    Edge2 = 3, ///< Edge v2 → v0
+    Vert0 = 4,
+    Vert1 = 5,
+    Vert2 = 6,
+};
 
 /// @brief Build the BVH for a WorldTriMesh.
 ///
@@ -46,6 +64,73 @@ void buildTriMeshBVH(WorldTriMesh& mesh);
 ///                            internal-edge utility and Jolt's MeshShape
 ///                            default.
 void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance = 0.0349065850f /* 2° */);
+
+/// @brief Map-cooking validation counters for authored collision triangle meshes.
+struct TriMeshValidationReport
+{
+    uint32_t triangleCount{0};
+    uint32_t degenerateTriangles{0};
+    uint32_t duplicatedOppositeWindingFaces{0};
+    uint32_t nonManifoldEdges{0};
+    uint32_t invalidIndices{0};
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        return degenerateTriangles == 0 && duplicatedOppositeWindingFaces == 0 && nonManifoldEdges == 0 &&
+               invalidIndices == 0;
+    }
+};
+
+/// @brief Aggregate validation counters across a whole authored collision set.
+struct TriMeshValidationTotals
+{
+    uint32_t meshCount{0};
+    uint32_t invalidMeshCount{0};
+    uint32_t triangleCount{0};
+    uint32_t degenerateTriangles{0};
+    uint32_t duplicatedOppositeWindingFaces{0};
+    uint32_t nonManifoldEdges{0};
+    uint32_t invalidIndices{0};
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        return invalidMeshCount == 0 && degenerateTriangles == 0 && duplicatedOppositeWindingFaces == 0 &&
+               nonManifoldEdges == 0 && invalidIndices == 0;
+    }
+};
+
+/// @brief Validate authored collision mesh topology before/after cooking.
+///
+/// This does not mutate the mesh and only inspects `vertices` / `indices`, so
+/// it can run before BVH construction or after load. It catches the map
+/// pipeline issues that destabilize thin-surface KCC contacts: degenerate
+/// triangles, duplicated opposite-winding faces, non-manifold edges, and
+/// out-of-range indices.
+TriMeshValidationReport validateTriMesh(const WorldTriMesh& mesh, float positionEpsilon = 1e-4f);
+
+/// @brief Validate every triangle mesh in an authored collision set.
+TriMeshValidationTotals validateTriMeshes(std::span<const WorldTriMesh> meshes, float positionEpsilon = 1e-4f);
+
+/// @brief Runtime/cook summary for authored static collision triangle meshes.
+struct TriMeshCookStats
+{
+    uint32_t meshCount{0};
+    uint32_t vertexCount{0};
+    uint32_t triangleCount{0};
+    uint32_t meshBvhNodeCount{0};
+    uint32_t meshBvhLeafCount{0};
+    uint32_t maxMeshBvhDepth{0};
+    uint32_t activeHalfEdges{0};
+    uint32_t weldedHalfEdges{0};
+    uint32_t boundaryHalfEdges{0};
+    uint32_t invalidNormals{0};
+};
+
+/// @brief Collect aggregate map-cooking diagnostics for already-cooked meshes.
+///
+/// Intended for load-time logging and tests. `weldedHalfEdges` counts inactive
+/// manifold half-edges, so a flat seam shared by two triangles contributes two.
+TriMeshCookStats collectTriMeshCookStats(std::span<const WorldTriMesh> meshes);
 
 /// @brief Sweep an AABB against a triangle mesh using Voronoi-clipped per-triangle tests.
 ///
@@ -86,5 +171,88 @@ HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 e
 ///                     contact (matches Quake's DIST_EPSILON of 1/32 unit).
 void depenetrateAABBvsTriMesh(
     glm::vec3& pos, glm::vec3& vel, glm::vec3 halfExtents, const WorldTriMesh& mesh, float pushback = 0.03125f);
+
+/// @brief Sweep a capsule against a triangle mesh.
+///
+/// Uses capsule-axis vs bounded-triangle closest-point queries with
+/// conservative advancement. Finite face, edge, and vertex features block the
+/// capsule, and triangles are treated as two-sided thin surfaces by default.
+HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh);
+
+/// @brief Single deepest surface contact of a capsule against any triangle
+/// in this mesh. BVH-accelerated. Used by the world-level
+/// `depenetrateCapsuleVsWorld` to pick the deepest violator per pass.
+///
+/// Reports capsule surface penetration depth: `capsule.radius - distance`
+/// where `distance` is the closest distance from the capsule axis segment to
+/// the bounded triangle. The normal points from the triangle feature toward
+/// the capsule, with the face normal used only for exactly coincident pairs.
+DepenContact
+deepestCapsuleContactVsTriMesh(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldTriMesh& mesh);
+
+/// @brief Result of a closest-point-on-mesh query.  Phase B foundation for
+/// the Phase D wallrun manifold walk.
+///
+/// When `found` is true, `dist` is the unsigned distance from the query
+/// segment to `pointOnMesh`, which lies in the indicated `region` of
+/// triangle `triId`. `normal` is the face normal of that triangle, oriented
+/// so it points toward the query segment when the distance is non-zero.
+struct ClosestPointOnMeshResult
+{
+    bool found{false};
+    float dist{1e30f};
+    glm::vec3 pointOnSegment{0.0f};
+    glm::vec3 pointOnMesh{0.0f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    uint32_t triId{UINT32_MAX};
+    TriRegion region{TriRegion::Face};
+};
+
+/// @brief Find the closest point on the mesh's surface to a query segment,
+/// considering only points within `maxDist`.  BVH-accelerated.
+///
+/// For wallrun (Phase D) the query segment is the capsule's inner axis
+/// (`capsule.segA(pos)` to `capsule.segB(pos)`).  The result identifies
+/// "what wall am I on" without the heuristic dot-product reassignment
+/// that the current sphere-cast-based WallDetection uses.  At edges and
+/// vertices, `region` plus `triId` plus the mesh's `edgeNeighbor` array
+/// is enough to walk the surface manifold across triangle seams.
+///
+/// Returns `found = false` if no triangle is within `maxDist`.
+ClosestPointOnMeshResult closestPointOnMesh(glm::vec3 segA, glm::vec3 segB, float maxDist, const WorldTriMesh& mesh);
+
+/// @brief Convenience overload — uses the capsule's inner axis as the query
+/// segment at the given centre position.
+ClosestPointOnMeshResult
+closestPointOnMesh(CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh);
+
+/// @brief Closest point from a capsule axis to one specific cooked triangle.
+///
+/// Used by systems that already track triangle identity, such as wallrun
+/// manifold traversal. Returns `found=false` for invalid triangle ids,
+/// degenerate triangles, or distances beyond `maxDist`.
+ClosestPointOnMeshResult closestPointOnMeshTriangle(
+    CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh, uint32_t triId);
+
+/// @brief Capsule-vs-trimesh clearance.  Wraps `closestPointOnMesh` and
+/// converts axis-to-mesh distance into surface-to-surface clearance by
+/// subtracting `capsule.radius`.
+///
+/// Used by the Phase-C scene-wide `clearanceCapsuleVsWorld` aggregator.
+/// `maxReach` bounds the BVH search radius — pass at least the per-tick
+/// motion magnitude plus `capsule.radius` to ensure no contacts are
+/// missed within the integration step.
+ClearanceResult
+clearanceCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 pos, float maxReach, const WorldTriMesh& mesh);
+
+/// @brief Downward ground probe against walkable triangle faces only.
+///
+/// This is stricter than general capsule CCD: finite edges and vertices block
+/// movement, but they are not valid ground support by themselves. The support
+/// point of the capsule must project onto a walkable triangle face, preventing
+/// stair treads from launching the player upward while the capsule is still in
+/// front of the tread edge.
+GroundProbeResult groundProbeCapsuleVsTriMesh(
+    CapsuleShape capsule, glm::vec3 pos, float maxDistance, float minWalkableDot, const WorldTriMesh& mesh);
 
 } // namespace physics

@@ -19,7 +19,7 @@ void DamageNumberWidget::update(float dt, const HudGameState& state, HudTweenPoo
     screenH_ = state.screenH;
 
     // Age existing entries, remove dead ones.
-    for (int i = 0; i < count_;) {
+    for (size_t i = 0; i < count_;) {
         entries_[i].life -= dt;
         entries_[i].driftY += 60.f * dt; // drift upward in world units
         if (entries_[i].life <= 0.f) {
@@ -56,7 +56,7 @@ void DamageNumberWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
 {
     char buf[16];
 
-    for (int i = 0; i < count_; ++i) {
+    for (size_t i = 0; i < count_; ++i) {
         const Entry& e = entries_[i];
 
         // Project world position to clip space.

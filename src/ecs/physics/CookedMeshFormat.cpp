@@ -64,8 +64,8 @@ std::vector<uint8_t> serialize(const WorldTriMesh& mesh)
     const uint32_t bvhNodeCount = static_cast<uint32_t>(mesh.bvhNodes.size());
 
     // Reserve a generous upper bound to avoid reallocs.
-    blob.reserve(sizeof(Header) + vertCount * sizeof(glm::vec3) + triCount * (sizeof(uint32_t) * 3 + sizeof(glm::vec3) + 3) +
-                 bvhNodeCount * sizeof(BVHNode));
+    blob.reserve(sizeof(Header) + vertCount * sizeof(glm::vec3) +
+                 triCount * (sizeof(uint32_t) * 3 + sizeof(glm::vec3) + 3) + bvhNodeCount * sizeof(BVHNode));
 
     Header h;
     h.magic = k_magic;
@@ -84,6 +84,7 @@ std::vector<uint8_t> serialize(const WorldTriMesh& mesh)
     appendArray(blob, mesh.faceNormals.data(), mesh.faceNormals.size());
     appendArray(blob, mesh.edgeActive.data(), mesh.edgeActive.size());
     appendArray(blob, mesh.vertActive.data(), mesh.vertActive.size());
+    appendArray(blob, mesh.edgeNeighbor.data(), mesh.edgeNeighbor.size());
 
     // Triangle materials: serialize the whole vector (caller decides size).
     // Empty vector means "use defaultSurface for every triangle"; we encode
@@ -123,6 +124,8 @@ bool deserialize(std::span<const uint8_t> blob, WorldTriMesh& out)
     if (!readArray(blob, out.edgeActive, h.triCount))
         return false;
     if (!readArray(blob, out.vertActive, h.triCount))
+        return false;
+    if (!readArray(blob, out.edgeNeighbor, static_cast<size_t>(h.triCount) * 3u))
         return false;
 
     uint32_t matCount = 0;

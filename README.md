@@ -171,6 +171,42 @@ LSAN_OPTIONS=suppressions=sanitizers/lsan.supp ./build/debug/group2
 .\build\debug-win\server  # Windows
 ```
 
+### Running Server in Docker
+
+Published images live at `ghcr.io/ucsd-cse125-sp26/group2-server` (Linux / amd64). Image tags: `latest` tracks the most recent release; `vX.Y.Z` pins to a specific release.
+
+````bash
+# Pull and run on the default port (9999, UDP + TCP).
+docker pull ghcr.io/ucsd-cse125-sp26/group2-server:latest
+docker run --rm \
+  -p 9999:9999/udp -p 9999:9999/tcp \
+  ghcr.io/ucsd-cse125-sp26/group2-server:latest
+
+# Pin to a specific release.
+docker run --rm \
+  -p 9999:9999/udp -p 9999:9999/tcp \
+  ghcr.io/ucsd-cse125-sp26/group2-server:vX.Y.Z   # any tag from the Packages tab
+
+# Override config.toml without rebuilding.
+docker run --rm \
+  -p 9999:9999/udp -p 9999:9999/tcp \
+  -v "$PWD/config.toml":/app/config.toml \
+  ghcr.io/ucsd-cse125-sp26/group2-server:latest
+````
+
+The container runs as non-root (UID 10001). If you enable shot logging by setting `GROUP2_SERVER_SHOTS_CSV`, mount the output dir and make sure UID 10001 can write to it:
+
+````bash
+mkdir -p ./logs && chown 10001 ./logs   # or chmod 777 ./logs for quick local use
+docker run --rm \
+  -p 9999:9999/udp -p 9999:9999/tcp \
+  -v "$PWD/logs":/var/log/group2 \
+  -e GROUP2_SERVER_SHOTS_CSV=/var/log/group2/shots.csv \
+  ghcr.io/ucsd-cse125-sp26/group2-server:latest
+````
+
+> **First-time setup (maintainers only).** GHCR creates new packages as private by default. After the very first CI publish, an admin needs to flip the package to public once — Repo → Packages → `group2-server` → Package settings → **Change package visibility** → Public. Until then, `docker pull` requires `docker login ghcr.io -u <user> -p <github-pat-with-read:packages>`.
+
 ---
 
 ## CMake options

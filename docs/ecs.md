@@ -1,666 +1,294 @@
-# ECS Architecture
+# ECS
 
-## 1. Architecture Overview
+EnTT v3.14 used directly (no abstraction). Plain components, free-function systems, shared code compiled into both client and server. The same ~47 components and ~25 systems back local prediction and authoritative simulation.
 
-The engine uses [EnTT](https://github.com/skypjack/entt) as its Entity-Component-System framework. A single type alias provides the shared registry type used throughout both client and server:
+Last verified against source: branch `core/collisions+wallrun` (2026-05-16).
+
+---
+
+## 1. The registry
+
+`src/ecs/registry/Registry.hpp` — one line:
 
 ```cpp
-// src/ecs/registry/Registry.hpp
 using Registry = entt::registry;
 ```
 
-### Design principles
+There is **no stub**; the README description claiming a roll-your-own minimal Registry is out of date. EnTT is fetched in `CMakeLists.txt:267-271`.
 
-- **Shared physics code.** `MovementSystem` and `CollisionSystem` are compiled identically on client and server. Any divergence between the two builds is a bug because it breaks client-side prediction.
-- **Components are plain structs.** No inheritance, no virtual functions, no methods beyond default constructors. Systems operate on components by querying the registry with `registry.view<...>()`.
-- **Free-function systems.** Every system is a free function (or inline function) inside the `systems` namespace. Each receives the `Registry&` plus whatever per-frame state it needs (delta time, world geometry, network connection).
-
-### Source layout
-
-```
-src/ecs/
-  registry/Registry.hpp          Registry typedef
-  components/                    14 component headers (shared)
-  systems/
-    Systems.hpp                  Namespace + placeholder update()
-    MovementSystem.hpp/.cpp      Titanfall-style movement state machine
-    CollisionSystem.hpp/.cpp     Swept-AABB collision + position integration
-  physics/
-    SweptCollision.hpp           Swept AABB queries
-    WorldData.hpp                WorldGeometry (planes, boxes, brushes)
-
-src/client/systems/              Client-only systems
-  InputSampleSystem.hpp          Mouse look + keyboard sampling
-  InputSendSystem.hpp            Serialise & send InputSnapshot to server
-
-src/server/systems/              Server-only systems
-  InputReceiveSystem.hpp         Deserialise client InputSnapshot into Event
-  BroadcastSystem.hpp            Broadcast state to clients (stub)
-```
+Entity IDs are `entt::entity`. Server and client maintain independent ID spaces — the client's `Loader::map(serverEntity)` translates incoming snapshot IDs to local handles.
 
 ---
 
-## 2. Component Catalog
+## 2. Components
 
-All components live in `src/ecs/components/`. They are plain, default-constructible structs.
+47 components, grouped below. Files in `src/ecs/components/`.
 
-### Position
-
-```cpp
-struct Position {
-    glm::vec3 value{0.0f, 0.0f, 0.0f};  // Y-up, Quake-unit scale
-};
-```
-
-World-space position of an entity. Written by `CollisionSystem` (position integration lives there, not in `MovementSystem`).
-
-### PreviousPosition
-
-```cpp
-struct PreviousPosition {
-    glm::vec3 value{0.0f, 0.0f, 0.0f};
-};
-```
-
-Copy of `Position` captured at the start of each physics tick, used by the client renderer for inter-tick interpolation. The game loop writes it immediately before stepping physics:
-
-```cpp
-registry.view<Position, PreviousPosition>().each(
-    [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
-```
-
-Only the client needs this component. The server has no renderer and does not attach it.
-
-### Velocity
-
-```cpp
-struct Velocity {
-    glm::vec3 value{0.0f, 0.0f, 0.0f};  // units/second, Y-up
-};
-```
-
-Linear velocity. Written by `MovementSystem`; consumed by `CollisionSystem` for swept integration (`pos + vel * dt`).
-
-### CollisionShape
-
-```cpp
-struct CollisionShape {
-    glm::vec3 halfExtents{16.0f, 36.0f, 16.0f};  // AABB half-dimensions
-};
-```
-
-Axis-aligned bounding box centred on the entity's `Position`. The full box spans `[pos - halfExtents, pos + halfExtents]`. Defaults match a standing Quake-scale player: 32 wide, 72 tall, 32 deep.
-
-### PlayerState
-
-The largest component -- a full locomotion state machine state block. Read and written by `MovementSystem` and `CollisionSystem`.
-
-```cpp
-struct PlayerState {
-    // ── Core state ──
-    MoveMode moveMode{MoveMode::OnFoot};   // OnFoot | Sliding | WallRunning | Climbing | LedgeGrabbing
-    bool grounded{false};
-    bool crouching{false};
-    bool sprinting{false};
-    bool pendingUncrouch{false};           // deferred uncrouch after slidehop
-    glm::vec3 groundNormal{0, 1, 0};
-
-    // ── Jump state ──
-    bool canDoubleJump{true};
-    bool jumpedThisTick{false};            // set during the tick a jump occurs (lurch setup)
-    int jumpCount{0};                      // 0 = ground, 1 = first jump, 2 = double jumped
-    bool jumpHeldLastTick{false};          // edge detection
-    float jumpCooldown{0.0f};
-
-    // ── Coyote time ──
-    float coyoteTimer{0.0f};               // grace time after leaving ground/wall
-    bool wasGroundedLastTick{false};
-
-    // ── Jump lurch ──
-    bool jumpLurchEnabled{false};
-    float jumpLurchTimer{0.0f};
-    glm::vec2 moveInputsOnJump{0.0f};      // WASD direction when jump started
-
-    // ── Sliding ──
-    float slideTimer{0.0f};
-    int slideFatigueCounter{0};            // diminishing returns on consecutive slidehops
-    float slideBoostCooldown{0.0f};
-    int slideFatigueDecayAccum{0};
-    bool canEnterSlide{true};
-
-    // ── Wallrunning ──
-    WallSide wallRunSide{WallSide::None};  // None | Left | Right
-    glm::vec3 wallNormal{0.0f};
-    glm::vec3 wallForward{0.0f};           // direction of travel along wall
-    float wallRunTimer{0.0f};
-    float wallRunSpeedTimer{0.0f};
-    bool exitingWall{false};
-    float exitWallTimer{0.0f};
-    bool wasWallRunning{false};
-
-    // Wall blacklist: prevents immediate regrab of the same wall.
-    glm::vec3 wallBlacklistNormal{0.0f};
-    float wallBlacklistHeight{-1e10f};
-    bool wallBlacklistActive{false};
-
-    // ── Climbing ──
-    glm::vec3 climbWallNormal{0.0f};
-    float climbTimer{0.0f};
-    bool exitingClimb{false};
-    float exitClimbTimer{0.0f};
-    bool wasClimbing{false};
-
-    // Climb blacklist
-    glm::vec3 climbBlacklistNormal{0.0f};
-    float climbBlacklistHeight{-1e10f};
-    bool climbBlacklistActive{false};
-
-    // ── Ledge grabbing ──
-    glm::vec3 ledgePoint{0.0f};
-    glm::vec3 ledgeNormal{0.0f};
-    float ledgeHoldTimer{0.0f};
-    bool exitingLedge{false};
-    float exitLedgeTimer{0.0f};
-
-    // ── Grappling hook ──
-    bool grappleActive{false};             // true when hook is attached and pulling
-    bool grappleCooldownActive{false};
-    float grappleCooldownTimer{0.0f};
-    float grapplePullTimer{0.0f};
-    glm::vec3 grapplePoint{0.0f};          // world-space hook anchor
-    bool grappleInputLastTick{false};      // edge detection
-
-    // ── Camera effects ──
-    float targetCameraTilt{0.0f};          // target roll for wallrun lean (degrees)
-};
-```
-
-**Movement mode enum:**
-
-| Mode | Description |
-|------|-------------|
-| `OnFoot` | Normal ground/air movement (walk, sprint, crouch, airborne) |
-| `Sliding` | Momentum slide on the ground |
-| `WallRunning` | Running along a wall surface |
-| `Climbing` | Climbing vertically up a wall |
-| `LedgeGrabbing` | Holding onto a ledge at the top of a wall |
-
-### InputSnapshot
-
-```cpp
-struct InputSnapshot {
-    uint32_t tick{0};           // physics tick this snapshot was sampled on
-
-    // Movement keys
-    bool forward{false};        // W
-    bool back{false};           // S
-    bool left{false};           // A
-    bool right{false};          // D
-    bool jump{false};           // Space
-    bool crouch{false};         // Left Ctrl
-    bool sprint{false};         // Left Shift
-    bool grapple{false};        // E
-    bool shooting{false};
-
-    float yaw{0.0f};           // horizontal look (radians, absolute)
-    float pitch{0.0f};         // vertical look (radians, clamped to [-89 deg, +89 deg])
-    float roll{0.0f};          // reserved for movement tilt
-
-    // Previous-tick values for render interpolation of orientation
-    float prevTickYaw{0.0f};
-    float prevTickPitch{0.0f};
-};
-```
-
-Sent from client to server each tick as a raw memcpy-serialised packet. `yaw`/`pitch` are absolute orientations (not deltas) so the server can compute `wishDir` correctly. `prevTickYaw`/`prevTickPitch` allow the renderer to interpolate orientation on the same timebase as position.
-
-### WeaponState
-
-```cpp
-struct WeaponState {
-    WeaponType current = WeaponType::Rifle;
-    float fireCooldown = 0.f;   // counts down toward 0 each frame (seconds)
-    int ammo = 30;
-};
-```
-
-Attached to armed entities (players, bots). `WeaponType` is defined in `Projectile.hpp`.
-
-### Renderable
-
-```cpp
-struct Renderable {
-    int32_t modelIndex = -1;               // index into Renderer::models[]
-    glm::vec3 scale{1.0f};                 // per-entity scale
-    glm::quat orientation{1, 0, 0, 0};    // per-entity rotation (identity default)
-    bool visible = true;                   // false to skip rendering
-};
-```
-
-Handle into the renderer's model instance array. Attached to any entity that should be drawn in the world.
-
-### ClientId
-
-```cpp
-struct ClientId {
-    int value = -1;   // network client ID, -1 = unassigned
-};
-```
-
-Associates an entity with a connected network client on the server side.
-
-### LocalPlayer
-
-```cpp
-struct LocalPlayer {};
-```
-
-Empty marker (tag) component. Exactly one entity per client has this. `InputSampleSystem` uses it to distinguish the local player from remote player entities, ensuring remote entities' `InputSnapshot` is never overwritten by local keyboard/mouse state.
-
-### Projectile
-
-```cpp
-enum class WeaponType : uint8_t {
-    Rifle, Shotgun, Rocket, EnergyRifle, EnergySMG
-};
-
-enum class SurfaceType : uint8_t {
-    Metal, Concrete, Flesh, Wood, Energy
-};
-
-struct Projectile {
-    WeaponType type = WeaponType::Rifle;
-    float damage = 15.f;
-    entt::entity owner = entt::null;   // entity that fired this projectile
-};
-```
-
-Velocity and position come from the entity's `Velocity` and `Position` components.
-
-### ParticleEmitterTag
-
-```cpp
-enum class EmitterType : uint8_t { Smoke, Fire, Steam };
-
-struct ParticleEmitterTag {
-    EmitterType type = EmitterType::Smoke;
-    float ratePerSecond = 8.f;
-    float accumulator = 0.f;       // internal timer for emission spacing
-    float radius = 40.f;           // spawn radius around entity position
-};
-```
-
-Tag for world entities that continuously emit particles (smoke plumes, fires, steam vents). The particle system queries entities with this component each frame.
-
-### RibbonEmitter
-
-```cpp
-struct RibbonEmitter {
-    static constexpr int MaxNodes = 32;
-    struct Node { glm::vec3 pos{}; float age = 0.f; };
-
-    Node nodes[MaxNodes]{};
-    int count = 0;
-    int head = 0;                      // ring-buffer insertion index
-
-    float width = 4.f;                 // half-width in world units
-    float maxAge = 0.4f;               // node lifetime (seconds)
-    float recordInterval = 0.016f;     // ~60 Hz recording rate
-    float recordAccumulator = 0.f;
-
-    glm::vec4 tipColor{1, 0.6, 0.1, 1};    // newest node (rocket tip)
-    glm::vec4 tailColor{1, 0.3, 0.0, 0};   // oldest node (fades to transparent)
-};
-```
-
-Attached to slow/arcing projectiles (rockets, slow bolts). Records a ring-buffer of historical positions. The particle system expands consecutive node pairs into camera-facing ribbon quads each frame.
-
-### TracerEmitter
-
-```cpp
-struct TracerEmitter {
-    glm::vec3 prevPos{};                               // tail anchor from previous frame
-    float radius = 0.6f;                               // cross-section half-width
-    glm::vec4 coreColor{1.f, 0.95f, 0.7f, 1.f};       // bright yellow-white core
-    glm::vec4 edgeColor{1.f, 0.40f, 0.05f, 0.f};      // orange glow, alpha=0 at edge
-};
-```
-
-Attached to fast-bullet projectile entities. The particle system reads this each frame to render an oriented-capsule streak (tip = current position, tail = `prevPos`).
-
----
-
-## 3. System Execution Order
-
-Physics runs at a fixed 128 Hz tick rate on both client and server. The client renders at an independent (usually higher) frame rate.
-
-### Client per-tick pipeline
-
-```
-iterate() called at render frame rate
-  |
-  |-- runMouseLook()              [every iterate() call -- smooth camera at any FPS]
-  |-- runMovementKeys()           [once per physics tick group, when synced with physics]
-  |-- runInputSend()              [every iterate() call]
-  |
-  +-- while (accumulator >= dt):  [128 Hz fixed step, up to 8 ticks per frame]
-        |
-        |-- snapshot PreviousPosition = Position   [for interpolation]
-        |-- runMovement(registry, dt, world)       [shared physics]
-        |-- runCollision(registry, dt, world)       [shared physics]
-        |
-  |-- dispatcher.update()         [flush queued particle events]
-  |-- particleSystem.update()     [VFX, at render rate]
-  |-- render with interpolation   [alpha = accumulator / dt]
-```
-
-### Server per-tick pipeline
-
-```
-run() loop at tickRateHz (configurable, typically 128 Hz)
-  |
-  |-- server.poll()                                [receive network packets]
-  |-- dequeue events -> eventHandler()             [write InputSnapshot from client packets]
-  |-- runMovement(registry, dt, world)             [shared physics]
-  |-- runCollision(registry, dt, world)            [shared physics]
-  |-- (future: runBroadcast)                       [send state to clients]
-```
-
-### System call summary
-
-| Step | Client | Server |
-|------|--------|--------|
-| 1 | `runMouseLook` | `runInputReceive` (via event queue) |
-| 2 | `runMovementKeys` | -- |
-| 3 | `runInputSend` | -- |
-| 4 | `runMovement` | `runMovement` |
-| 5 | `runCollision` | `runCollision` |
-| 6 | `dispatcher.update` | -- |
-| 7 | Render (interpolated) | `runBroadcast` (stub) |
-
----
-
-## 4. Shared vs Client-Only vs Server-Only
-
-### Shared systems (compiled identically on both sides)
-
-| System | File | Description |
-|--------|------|-------------|
-| `runMovement` | `src/ecs/systems/MovementSystem.hpp` | Full Titanfall-inspired movement state machine. Computes velocity from input + state, but does NOT integrate position. |
-| `runCollision` | `src/ecs/systems/CollisionSystem.hpp` | Swept-AABB collision. Integrates position (`pos + vel * dt`), clips velocity on contact, sets `grounded` flag. Quake-style multi-surface bumping (up to 4 iterations). |
-
-Any divergence between client and server builds of these systems is a prediction-breaking bug.
-
-### Client-only systems
-
-| System | File | Description |
-|--------|------|-------------|
-| `runMouseLook` | `InputSampleSystem.hpp` | Samples SDL mouse delta, accumulates into `yaw`/`pitch`. Called every `iterate()` for smooth camera. |
-| `runMovementKeys` | `InputSampleSystem.hpp` | Samples SDL keyboard state into `InputSnapshot` movement flags. Called once per physics tick group. |
-| `runInputSend` | `InputSendSystem.hpp` | Serialises `InputSnapshot` and sends to server via UDP. |
-| `runPrediction` | `PredictionSystem.hpp` | (Stub) Client-side prediction with ring buffer. |
-| `runReconciliation` | `ReconciliationSystem.hpp` | (Stub) Rewind-and-replay on server correction. |
-
-### Server-only systems
-
-| System | File | Description |
-|--------|------|-------------|
-| `runInputReceive` | `InputReceiveSystem.hpp` | Deserialises incoming `InputSnapshot` packets into an `Event` struct for the server game loop. |
-| `runBroadcast` | `BroadcastSystem.hpp` | (Stub) Serialise and broadcast ECS state to all connected clients. |
-
-### Client-only components
-
-| Component | Reason |
-|-----------|--------|
-| `PreviousPosition` | Only needed for render interpolation. |
-| `LocalPlayer` | Tags the locally-controlled entity (no meaning on server). |
-| `Renderable` | Links to renderer model instances. |
-| `ParticleEmitterTag` | Client-side VFX. |
-| `RibbonEmitter` | Client-side VFX. |
-| `TracerEmitter` | Client-side VFX. |
-
----
-
-## 5. Entity Archetypes
-
-### Player entity (client)
-
-Spawned in `Game::init()`:
-
-```cpp
-registry.emplace<Position>(player, startPos);
-registry.emplace<PreviousPosition>(player, startPos);
-registry.emplace<Velocity>(player);
-registry.emplace<CollisionShape>(player);
-registry.emplace<PlayerState>(player);
-registry.emplace<InputSnapshot>(player);
-registry.emplace<LocalPlayer>(player);
-registry.emplace<WeaponState>(player);
-registry.emplace<Renderable>(player, Renderable{.modelIndex = wraithModelIdx, .scale = glm::vec3(8.0f)});
-```
+### Player core / identity
 
 | Component | Purpose |
-|-----------|---------|
-| `Position` | World-space location |
-| `PreviousPosition` | Last-tick position for render interpolation |
-| `Velocity` | Linear velocity |
-| `CollisionShape` | AABB for swept collision (32x72x32 standing player) |
-| `PlayerState` | Full locomotion state machine |
-| `InputSnapshot` | Current tick's input |
-| `LocalPlayer` | Marks as the locally controlled entity |
-| `WeaponState` | Weapon type, cooldown, ammo |
-| `Renderable` | Model handle for third-person rendering |
+|---|---|
+| `Player` | Empty tag |
+| `LocalPlayer` | Empty tag — exactly one entity per client |
+| `Controllable` | Client-side tag — entity may receive local input. Removed on death |
+| `ClientId` | `{int value=-1}` + std::hash specialisation |
+| `PlayerName` | Fixed-size 24-byte buffer, `isCustom` flag — trivially copyable |
+| `PlayerColor` | `{glm::vec3 rgb, int paletteIdx}` — server assigns from `player_colors::k_palette` |
+| `DeathInfo` | Killer's ClientId + Health snapshot at moment of death |
 
-### Player entity (server)
-
-Spawned in `ServerGame::initNewPlayer()`:
-
-```cpp
-registry.emplace<InputSnapshot>(player);
-registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
-registry.emplace<Velocity>(player);
-registry.emplace<CollisionShape>(player);
-registry.emplace<PlayerState>(player);
-```
+### Movement / locomotion state
 
 | Component | Purpose |
-|-----------|---------|
-| `Position` | Authoritative world-space location |
-| `Velocity` | Linear velocity |
-| `CollisionShape` | AABB for swept collision |
-| `PlayerState` | Full locomotion state machine |
-| `InputSnapshot` | Last received client input |
+|---|---|
+| `Position` | `glm::vec3` Quake units, Y-up |
+| `Velocity` | `glm::vec3` u/s |
+| `PreviousPosition` | Render interp source — client-only |
+| `Orientation` | `glm::quat` (for dynamic rigid bodies) |
+| `AngularVelocity` | body-space ω rad/s |
+| `CollisionShape` | `{type=AABB\|Capsule, halfExtents, radius, halfHeight}` |
+| `PlayerVisState` | **Replicated** locomotion (moveMode, wallRunSide, jumpCount, grounded, crouching, isDead, grappleActive, gravityFlipped, groundNormal, grapplePoint, targetCameraTilt) |
+| `PlayerSimState` | **Server-only** locomotion timers + wall/climb/ledge/grapple/jump-lurch state (~150 B) |
+| `PlayerStateEnums` | `MoveMode {OnFoot, Sliding, WallRunning, Climbing, LedgeGrabbing}`, `WallSide {None, Left, Right}` |
 
-Note: no `PreviousPosition`, `LocalPlayer`, `Renderable`, or `WeaponState`. The server has no renderer and does not distinguish a "local" player.
-
-### Animated entity (client)
-
-Spawned in `Game::init()` for Mixamo skeletal animation display:
-
-```cpp
-registry.emplace<Position>(animEntity, animPos);
-registry.emplace<PreviousPosition>(animEntity, animPos);
-registry.emplace<Renderable>(animEntity, Renderable{.modelIndex = animatedModelIdx, .scale = glm::vec3(1.0f)});
-```
+### Input
 
 | Component | Purpose |
-|-----------|---------|
-| `Position` | World-space location |
-| `PreviousPosition` | Interpolation |
-| `Renderable` | Model handle (animated mesh) |
+|---|---|
+| `InputSnapshot` | u32 tick, all key/button booleans, yaw/pitch/roll (absolute radians), prevTickYaw/prevTickPitch |
 
-No physics components -- purely a visual entity.
-
-### Projectile entity
-
-Expected archetype (assembled from the component definitions):
+### Combat
 
 | Component | Purpose |
-|-----------|---------|
-| `Position` | World-space location |
-| `Velocity` | Projectile travel direction and speed |
-| `Projectile` | Weapon type, damage, owner entity |
-| `CollisionShape` | Hit detection AABB |
-| `TracerEmitter` | (client, fast bullets) Capsule-streak VFX |
-| `RibbonEmitter` | (client, rockets/slow bolts) Ribbon trail VFX |
+|---|---|
+| `Health` | health=100, armor=100, healTimer |
+| `WeaponState` | array<GunInstance,3> slots PRIMARY/SECONDARY/GRENADE + current |
+| `BeamState` | replicated continuous beam {active, type, origin, hitPoint} |
+| `Projectile` | {type, damage, owner, explosive, lifetime, fuseTimer, bounceRestitution, sticky, tint} |
+| `Explosion` | transient pending explosion request |
+| `FireField` | persistent AoE (Molotov) {position, radius, remaining, dps, owner} |
+| `Hitbox` family | `HitboxDef` (bone-local), `WorldCapsule`, `HitboxInstance` (component, vector<WorldCapsule>), `JointMatrices`, `DamageProfile`, `HitboxRig::buildMixamoDefault` (12 capsules) |
+| `HitboxHistory` | **Server-only** 64-slot ring of `{tick, capsules, anim}` |
+| `LagCompTarget` | `{targetServerTick, lagTicks, rttMs}` — written every tick by `updateLagCompTargets` |
+| `AnimSnapshot` | 5 × `AnimSlot{clipIdRaw, timeRatio, weight}` — wire payload AND ECS component |
+| `PendingShotIntent` | Transient: `{received, targetClientId, targetAnim}` (PR-27) |
 
-### World particle source entity
+### Weapons / pickups
 
 | Component | Purpose |
-|-----------|---------|
-| `Position` | Emission origin |
-| `ParticleEmitterTag` | Emission type (Smoke/Fire/Steam), rate, radius |
+|---|---|
+| `WeaponSpawner` | `{type, spawnCooldown, hasWeapon}` |
+| `DroppedWeapon` | `{type, totalAmmo, currentMagAmmo, despawnTimer}` |
+| `PowerupSpawner` | `{type, spawnCooldown, hasPowerup}` — `PowerupType {Damage, Shield}` |
+| `PowerupState` | `vector<ActivePowerup>` |
+| `RespawnPoint` | `{cooldown, available}` |
+| `RespawnTimer` | `{timeRemaining}` — presence = dead state |
+
+### Networking / replication
+
+| Component | Purpose |
+|---|---|
+| `InterpolationBuffer` | Client-only 8-slot ring `{captureNs, position, velocity, yaw, pitch, vis-flags, anim}` |
+
+### Abilities
+
+| Component | Purpose |
+|---|---|
+| `AbilityState` | `{level, accumDamage, pendingLevel1/2, primary, secondary, *Cooldown, *Active}` (most fields dead — see *potential-issues*) |
+
+### Rendering
+
+| Component | Purpose |
+|---|---|
+| `Renderable` | `{modelIndex, translation, scale, orientation, visible}` |
+| `AnimatedCharacter` | `unique_ptr<CharacterAnimator>` + modelIndex + animationAccumulator — **move-only** |
+| `ParticleEmitterTag` | `{type=Smoke\|Fire\|Steam, ratePerSecond, accumulator, radius}` |
+| `TracerEmitter` | Fast-bullet streak |
+| `RibbonEmitter` | 32-node ring for rockets/slow projectiles |
+| `ViewmodelConfig` family | Per-weapon params (compile-time tables) |
+
+### Triggers / dynamics
+
+| Component | Purpose |
+|---|---|
+| `TriggerVolume` | `{layerMask, fireOnPredictedClient}` — events emitted but currently consumed by nothing |
+| `RigidBody` | invMass, inertia, force/impulse accumulators, damping, sleep state |
+| `Ragdoll` family | `enum RagdollBone[15]`, `RagdollBoneTag`, `Ragdoll{bodies[15], joints[14], age}` |
+
+### Match / stats
+
+| Component | Purpose |
+|---|---|
+| `PlayerMatchStats` | `{score, kills, deaths, hasWon, rttMs}` — replicated |
 
 ---
 
-## 6. Data Flow
+## 3. Systems
 
-### Client frame data flow
+All systems are free functions taking `Registry&` (no system objects). Source under `src/ecs/systems/` (shared) and `src/{client,server}/systems/` (side-specific).
 
-```
-  SDL keyboard/mouse
-        |
-        v
-  InputSampleSystem
-   - runMouseLook: mouse delta -> InputSnapshot.yaw/pitch
-   - runMovementKeys: keyboard -> InputSnapshot.forward/back/left/right/jump/crouch/sprint/grapple
-        |
-        v
-  InputSendSystem
-   - memcpy-serialise InputSnapshot -> UDP packet to server
-        |
-        v
-  [Physics tick loop -- 128 Hz]
-        |
-        |  PreviousPosition <- Position  (snapshot for interpolation)
-        |
-        v
-  MovementSystem (runMovement)
-   - Reads: InputSnapshot, PlayerState, Velocity, CollisionShape
-   - Writes: Velocity, PlayerState (mode transitions, timers, camera tilt)
-   - Does NOT write Position
-        |
-        v
-  CollisionSystem (runCollision)
-   - Reads: Position, Velocity, CollisionShape, PlayerState
-   - Writes: Position (pos += vel * dt, clipped), PlayerState.grounded
-   - Quake-style 4-iteration bump on multi-surface contact
-        |
-        v
-  [End tick loop]
-        |
-        v
-  Renderer
-   - Reads: Position, PreviousPosition, InputSnapshot (yaw/pitch), CollisionShape, PlayerState
-   - Interpolates: renderPos = mix(prev.value, pos.value, alpha)
-   - alpha = accumulator / physicsDt
-```
+### Shared (compiled into both binaries)
 
-### Server tick data flow
+| System | Side | Purpose |
+|---|---|---|
+| `runMovement` | both | Titanfall state machine (12-step per-entity tick — see [physics.md](physics.md)) |
+| `runCollision` | both | Capsule sweep + projectile bump path |
+| `runWeapon` | both* | Weapon switch/fire/beam/charge, hitscan with lag-comp guard |
+| `updateHitboxes` | both | Build world-space capsules from `JointMatrices` |
+| `runExplosion` | both | Radial damage + knockback via `physics::forces::applyImpulse` |
+| `runFireField` / `spawnFireField` | both | Tick FireFields, apply DoT |
+| `runPlayerStatus` | both | Respawn, healing, killSelf |
+| `runSpawnPointCooldowns` | both | |
+| `runWeaponSpawners` | both | Pickup + cooldown |
+| `runDroppedWeapons` | both | Pickup + despawn |
+| `runPowerupSpawners` | both | |
+| `runPowerups` | both | **Buggy — see *potential-issues*** |
+| `runTriggers` | both | Overlap diff, emit Enter/Stay/Exit (consumed by nothing today) |
+| `runDynamics` | both (server today) | Integrate force accumulators, PGS solver, sleep |
+| `runRagdolls` / `spawnRagdoll` | both | Build 15-body humanoid; tick age |
+| `runAbility` | both (server) | Dispatch to `Ability::activate` |
+| `rewindHitboxes` / `RewindHitboxesGuard` | both (server inputs only) | RAII rewind |
+| `handleWinCondition` / `resetStats` | server | Win check, match reset |
+| `update` (placeholder) | — | Stub |
 
-```
-  Network packets (UDP)
-        |
-        v
-  InputReceiveSystem (runInputReceive)
-   - Deserialises InputSnapshot from raw bytes -> Event struct
-        |
-        v
-  ServerGame::eventHandler
-   - Writes Event fields into entity's InputSnapshot component
-        |
-        v
-  MovementSystem (runMovement)       [identical to client]
-   - Reads: InputSnapshot, PlayerState, Velocity, CollisionShape
-   - Writes: Velocity, PlayerState
-        |
-        v
-  CollisionSystem (runCollision)     [identical to client]
-   - Reads: Position, Velocity, CollisionShape, PlayerState
-   - Writes: Position, PlayerState.grounded
-        |
-        v
-  (future) BroadcastSystem
-   - Would serialise Position/Velocity/PlayerState -> broadcast to all clients
-```
+`*` WeaponSystem is shared so prediction can run it locally, but the client doesn't authoritatively fire — it just animates VFX and sends `SHOT_INTENT`.
+
+### Client-only (`src/client/systems/`)
+
+| System | Purpose |
+|---|---|
+| `runMouseLook` | Reads `SDL_GetRelativeMouseState`, writes yaw/pitch |
+| `runMovementKeys` | Reads keyboard into InputSnapshot |
+| `runWeaponKeys` | Mouse-buttons + 1/2/3/R/F |
+| `runDeadInput` | Dead: only `skipRespawn = SPACE` |
+| `runGamepad*` | OR-into InputSnapshot from gamepad |
+| `runGamepadAimAssist` | Two-stage (asymmetric slowdown + movement-tracking pull) |
+| `runInputSend` | `client.sendInputSnapshot` for local player |
+| `runPrediction` | `runMovement + runCollision` (filter narrows to local player automatically) |
+| `runReconciliation` | Replay inputs from `ackedTick+1` through `currentTick` |
+| `InputRingBuffer` | 256-slot ring of `{tick, snap, valid}` |
+
+### Server-only (`src/server/systems/`)
+
+| System | Purpose |
+|---|---|
+| `pushHitboxHistory` | Capture capsules + AnimSnapshot into next ring slot |
+| `updateLagCompTargets` | Per-tick LagCompTarget (full-RTT formula) |
+| `updateAnimationAndHitboxes` | Parallel animator update + updateHitboxes |
+| `runInputReceive` | Deserialise raw bytes → `Event{Input}` |
+| `EventQueue` | Self-mutexed FIFO of `Event` |
+| `MatchController` | LOBBY → COUNTDOWN → IN_PROGRESS → FINISHED state machine |
 
 ---
 
-## 7. Event Bus
+## 4. Per-tick system order
 
-The client uses `entt::dispatcher` as a decoupled event bus for particle/VFX events. The dispatcher is owned by the `Game` class:
+### Server (`ServerGame::tick`)
 
-```cpp
-// Game.hpp
-entt::dispatcher dispatcher;
+```mermaid
+flowchart TD
+  Drain[eventDrain] --> Anim[animation]
+  Anim --> Hist[hitboxHistoryPush]
+  Hist --> Lag[updateLagCompTargets]
+  Lag --> Wp[weapon]
+  Wp --> Ab[ability]
+  Ab --> Mv[movement]
+  Mv --> Col[collision]
+  Col --> Tg[triggers]
+  Tg --> Dyn[dynamics]
+  Dyn --> Rg[ragdolls]
+  Rg --> Ex[explosion]
+  Ex --> Fi[fireField]
+  Fi --> PS[playerStatus]
+  PS --> Sp[spawn cooldowns / weapon&powerup spawners / dropped weapons / powerups]
+  Sp --> Mc[matchController]
+  Mc --> Bc{snapshot tick?}
+  Bc -- yes --> Brd[broadcastRegistry + events]
+  Bc -- no --> NB[skip]
+  Brd --> End[++tickCount, perf::tickEnd]
+  NB --> End
 ```
 
-### Event types
+Key fact: **`runMovement` runs BEFORE `runCollision`**. Movement reads stale (last-tick) `grounded`/`groundNormal`, writes velocity; Collision then sweeps position and overwrites `grounded`/`groundNormal`. This is canonical Quake pmove ordering.
 
-All defined in `src/client/particles/ParticleEvents.hpp`:
+### Client (per `Game::iterate`)
 
-| Event | Fields | Trigger |
-|-------|--------|---------|
-| `WeaponFiredEvent` | `shooter`, `type`, `origin`, `direction`, `isHitscan`, `hitPos` | Left-click fires weapon |
-| `ProjectileImpactEvent` | `pos`, `normal`, `surface`, `weaponType` | Projectile/hitscan hits a surface |
-| `ExplosionEvent` | `pos`, `blastRadius` | Rocket/grenade detonation |
+See [architecture.md §6](architecture.md#6-per-frame-sequence--client) for the full per-frame sequence.
 
-### Wiring
+Within a physics tick:
+1. Stamp `clientPredictTick` on local InputSnapshot
+2. `inputRing_.push(tick, snap)`
+3. `prev.value = pos.value` (for tick-rate interp)
+4. **`runPrediction = runMovement + runCollision`** (local player only — filtered by `PlayerSimState`)
+5. `++tickCount`
 
-During `Game::init()`, event sinks are connected to `ParticleSystem` handler methods:
-
-```cpp
-dispatcher.sink<WeaponFiredEvent>().connect<&ParticleSystem::onWeaponFired>(particleSystem);
-dispatcher.sink<ProjectileImpactEvent>().connect<&ParticleSystem::onImpact>(particleSystem);
-dispatcher.sink<ExplosionEvent>().connect<&ParticleSystem::onExplosion>(particleSystem);
-```
-
-### Dispatch flow
-
-1. Game code enqueues events: `dispatcher.enqueue(wfe);`
-2. After physics ticks, the game flushes all queued events: `dispatcher.update();`
-3. Connected handlers on `ParticleSystem` execute, spawning the appropriate VFX (tracers, impact sparks, explosions).
-
-The event bus is client-only. The server has no particle system and no dispatcher.
+After the tick group: `runInputSend`, then `client.poll()`, then **`runReconciliation`** if a snapshot just applied.
 
 ---
 
-## 8. Interpolation
+## 5. Component-write map (selected)
 
-### Problem
+| System | Writes |
+|---|---|
+| `runWeapon` | WeaponState, BeamState, Projectile spawns (Position/Velocity/Projectile/CollisionShape), Health (via applyDamage), Velocity (via knockback) |
+| `runAbility` | ability-specific (Velocity for Dash; PlayerSimState for Grapple) |
+| `runMovement` | Velocity, PlayerVisState, PlayerSimState; Position (only crouch resize) |
+| `runCollision` | Position, Velocity, PlayerVisState.grounded/groundNormal |
+| `runTriggers` | TriggerVolume internal state, pushes events (dead end) |
+| `runDynamics` | RigidBody Position/Orientation/Velocity/AngularVelocity, sleep state |
+| `runExplosion` | destroys Explosion, applyDamage, applyImpulse |
+| `runFireField` | FireField timers, applyDamage |
+| `runPlayerStatus` | Health, RespawnTimer, DeathInfo, full respawn-state |
+| `pushHitboxHistory` | HitboxHistory |
+| `updateLagCompTargets` | LagCompTarget, PlayerMatchStats.rttMs |
+| `updateHitboxes` | HitboxInstance |
+| `runWeaponSpawners` | WeaponSpawner state, modifies WeaponState |
+| `runDroppedWeapons` | destroys entities, modifies WeaponState |
+| `runPowerupSpawners` | PowerupSpawner state, modifies PowerupState |
+| `runPowerups` | (intended) PowerupState.active timers — **broken, see issue** |
+| `applyInterpolatedTransforms` (client) | Position.value, InputSnapshot.yaw/pitch for non-local |
 
-Physics runs at a fixed 128 Hz, but the renderer runs at the monitor's refresh rate (often 144+ Hz or uncapped). Without interpolation, entities visibly stutter because their positions only update every ~7.8 ms while frames render every ~4-7 ms.
+---
 
-### Solution: PreviousPosition + alpha blending
+## 6. RAII / ownership
 
-Each physics tick, immediately before stepping physics, the game loop snapshots the current position:
+Most components are POD value types.
 
-```cpp
-registry.view<Position, PreviousPosition>().each(
-    [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
+- `AnimatedCharacter` owns `unique_ptr<CharacterAnimator>` — move-only; EnTT supports move-only components.
+- `Ragdoll` carries entity handles (not entities); caller must destroy the bones — **currently no caller does** (see *potential-issues*).
+- `PowerupState`, `HitboxInstance`, `HitboxHistorySample::capsules` use `std::vector` — allocating but small.
+- `InterpolationBuffer`, `HitboxHistory`, `InputRingBuffer` are fixed-size `std::array`-based rings.
+- `RewindHitboxesGuard` is move-only with `noexcept` destructor — restores live capsules on scope exit.
+
+---
+
+## 7. Replication tuple
+
+The wire format is defined by `Synced` in `src/network/RegistrySerialization.cpp:142-163`. **Wire order is significant**:
+
+```
+entt::entity → Position → Velocity → PlayerVisState → CollisionShape →
+WeaponState → Health → AbilityState → PlayerMatchStats → Projectile →
+BeamState → ClientId → DeathInfo → RespawnTimer → WeaponSpawner →
+DroppedWeapon → RespawnPoint → AnimSnapshot → FireField → PlayerColor →
+PlayerName → PowerupSpawner
 ```
 
-At render time, the interpolation alpha is computed from the leftover accumulator:
+**Not replicated**: `PlayerSimState`, `HitboxHistory`, `LagCompTarget`, `JointMatrices`, `HitboxInstance`, `Renderable`, `Controllable`, `LocalPlayer`, `PreviousPosition`, `InputSnapshot` (has its own remote-input wire path inside the snapshot), `Player` (tag).
 
-```cpp
-float alpha = std::clamp(accumulator / physicsDt, 0.0f, 1.0f);
-```
+See [networking.md](networking.md) for the full snapshot/delta protocol.
 
-- `alpha = 0.0` means a tick just ran (render the previous tick's position).
-- `alpha = 1.0` means the next tick is about to fire (render the current position).
+---
 
-The render position is then:
+## 8. Key files
 
-```cpp
-glm::vec3 renderPos = glm::mix(prev.value, pos.value, alpha);
-```
-
-### Camera orientation interpolation
-
-`InputSnapshot` stores `prevTickYaw` and `prevTickPitch` alongside the current `yaw`/`pitch`. This allows the renderer to interpolate orientation on the same timebase as position, preventing a visual mismatch where yaw snaps to the newest value while the eye position lags behind by up to one tick. Without this, objects jitter on screen when strafing and rotating simultaneously.
-
-In practice, the current implementation reads `yaw`/`pitch` directly from the latest `InputSnapshot` because mouse look runs every `iterate()` call (not just at physics tick boundaries), keeping camera rotation smooth regardless.
-
-### Sequential mode fallback
-
-When `renderSeparateFromPhysics` is set to `false` (an ImGui toggle), the game only renders after a physics tick and uses `Position` directly with no interpolation. This caps visual frame rate at 128 Hz but eliminates any interpolation-related artifacts for debugging.
+| File | Role |
+|---|---|
+| `src/ecs/registry/Registry.hpp` | Type alias for `entt::registry` |
+| `src/ecs/components/*.hpp` | All 47 components |
+| `src/ecs/systems/*` | Shared systems |
+| `src/ecs/systems/Systems.hpp` | Placeholder/stub |
+| `src/client/systems/*` | Client-only systems |
+| `src/server/systems/*` | Server-only systems |
+| `src/ecs/AssetCatalog.hpp` | Compile-time `AssetDefinition`s |
+| `src/ecs/AssetRegistry.hpp` | Runtime name → modelIndex registry |
+| `src/ecs/MapConfig.hpp` | `loadConfiguredMap` — single map-load entry point |

@@ -6,6 +6,7 @@
 #include "hud/HudWidget.hpp"
 
 #include <array>
+#include <cstddef>
 #include <glm/mat4x4.hpp>
 
 /// @brief Displays floating damage numbers at world-space hit positions.
@@ -31,9 +32,9 @@ private:
         float maxLife = 0.f; ///< Initial lifetime (for alpha calc).
     };
 
-    static constexpr int k_maxEntries = 32;
+    static constexpr size_t k_maxEntries = 32;
     std::array<Entry, k_maxEntries> entries_{};
-    int count_ = 0;
+    size_t count_ = 0;
 
     glm::mat4 viewProj_{1.f};
     float screenW_ = 1280.f;

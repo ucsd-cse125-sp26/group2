@@ -271,8 +271,8 @@ public:
     /// @param screenHeight Viewport height in pixels.
     void buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight);
 
-    bool showContactDebugWindow = false;  ///< Show the Contact Debug ImGui window.
-    bool drawContactOverlay = false;      ///< Draw contact-point + normal overlay in 3D.
+    bool showContactDebugWindow = false; ///< Show the Contact Debug ImGui window.
+    bool drawContactOverlay = false;     ///< Draw contact-point + normal overlay in 3D.
 
     // Per-source visibility toggles for the contact overlay.
     bool drawContactPlaneSweep = true;

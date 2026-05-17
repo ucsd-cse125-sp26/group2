@@ -1,7 +1,6 @@
 /// @file WeaponSpawnerSystem.cpp
 /// @brief Weapon spawner manager system.
 
-#pragma once
 #include "WeaponSpawnerSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
@@ -28,7 +27,7 @@ inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner& spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState, PlayerVisState>();
-    view.each([&](entt::entity player,
+    view.each([&](entt::entity /*player*/,
                   const Position& pos,
                   const CollisionShape& shape,
                   const InputSnapshot& input,

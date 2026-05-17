@@ -180,8 +180,11 @@ jobs:
     if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
-      # Google Drive file ID for the shared assets zip.
-      ASSETS_GDRIVE_ID: "1_Xafht6-R_E8-gVglYFDAHvjZA8msfE4"
+      # Google Drive file ID for the shared assets zip.  Refreshed by a
+      # maintainer when new art lands — gdown's per-file rate limit makes
+      # the folder-download approach unreliable for 50+ files on shared
+      # public links, so we go back to a single archive download here.
+      ASSETS_GDRIVE_ID: "132BZgV26Gc2N-kx5urCRz2pH8q0AkYEI"
     strategy:
       fail-fast: false
       matrix:
@@ -321,6 +324,8 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }} --target group2 server clientbot --parallel
 
       # Download the shared assets zip from Google Drive (cached across runs).
+      # The cache key is the file ID, so a maintainer refreshing the Drive
+      # zip should also bump ASSETS_GDRIVE_ID above to invalidate the cache.
       - name: Cache assets
         id: assets-cache
         uses: actions/cache@v4
@@ -338,6 +343,7 @@ jobs:
       # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
         shell: bash
+        timeout-minutes: 10
         run: |
           DIR="group2-${{ matrix.archive_suffix }}"
           STAGE="staging/$DIR"
@@ -389,6 +395,7 @@ jobs:
     if: github.event_name == 'push'
     permissions:
       contents: write
+      packages: write
 
     steps:
       # Full history + tags needed to compute the next semantic version.
@@ -654,3 +661,52 @@ jobs:
             group2-linux-x86_64.zip \
             group2-macos.zip \
             group2-windows-x86_64.zip
+
+      # ---------------- Docker image: ghcr.io/<owner>/group2-server ----------------
+      #
+      # Reuses the Linux release artifact that release-build just produced;
+      # no recompile inside Docker. The Dockerfile (docker/Dockerfile.server)
+      # consumes server + config.toml + assets/ from the unpacked zip.
+      - name: Prepare Docker build context
+        shell: bash
+        run: |
+          mkdir -p docker-context
+          unzip -q group2-linux-x86_64.zip -d docker-context-tmp
+          # The zip's top-level dir is `group2-linux-x86_64/`; flatten it.
+          mv docker-context-tmp/group2-linux-x86_64/* docker-context/
+          rm -rf docker-context-tmp
+          cp docker/Dockerfile.server   docker-context/Dockerfile
+          cp docker/.dockerignore       docker-context/.dockerignore
+          # Fail loud and early if the artifact didn't actually contain
+          # the binary — otherwise the downstream `docker build` would
+          # emit a confusing `COPY server` error.
+          test -f docker-context/server      || { echo "ERROR: server binary missing from context"; exit 1; }
+          test -f docker-context/config.toml || { echo "ERROR: config.toml missing from context"; exit 1; }
+          test -d docker-context/assets      || { echo "ERROR: assets/ directory missing from context"; exit 1; }
+          # Sanity print so a CI log reader can confirm the layout.
+          ls -la docker-context
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/group2-server
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.tag }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: docker-context
+          platforms: linux/amd64
+          push: true
+          tags:   ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
