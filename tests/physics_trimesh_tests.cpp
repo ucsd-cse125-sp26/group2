@@ -406,6 +406,52 @@ bool kccAscendsThinTrimeshStaircaseSmoothly()
     return ok;
 }
 
+bool kccAscendsThinTrimeshStaircaseAtSprintSpeed()
+{
+    const WorldTriMesh stairs = makeThinStaircase(20, 12.0f, 28.0f);
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&stairs, 1),
+    };
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+
+    PlayerVisState state;
+    state.grounded = true;
+
+    glm::vec3 pos{0.0f, 30.03125f, -40.0f};
+    glm::vec3 vel{0.0f, 0.0f, 720.0f};
+    float maxFrameRise = 0.0f;
+    float minForwardDelta = 1e30f;
+    bool groundedEveryFrame = true;
+
+    for (int frame = 0; frame < 80; ++frame) {
+        const glm::vec3 before = pos;
+        vel = {0.0f, 0.0f, 720.0f};
+        systems::runKinematicCharacterController(pos, vel, shape, state, 1.0f / 128.0f, world, entt::null, false);
+        maxFrameRise = std::max(maxFrameRise, pos.y - before.y);
+        minForwardDelta = std::min(minForwardDelta, pos.z - before.z);
+        groundedEveryFrame &= state.grounded;
+    }
+
+    bool ok = true;
+    ok &= expect(pos.z > 380.0f, "sprint-speed KCC should keep moving up authored thin stairs");
+    ok &=
+        expectNear(pos.y, 210.03125f, 0.75f, "sprint-speed KCC should settle on the expected stair without launching");
+    ok &= expect(maxFrameRise <= 13.0f, "sprint-speed KCC should not rise by more than one thin step per frame");
+    ok &= expect(minForwardDelta > 0.5f, "sprint-speed KCC should not stall on thin stair risers");
+    ok &= expect(groundedEveryFrame, "sprint-speed KCC should remain grounded while ascending thin stairs");
+    return ok;
+}
+
 bool thinCeilingPlaneBlocksUpwardCapsuleMotion()
 {
     const WorldTriMesh ceiling = makeThinCeiling();
@@ -698,6 +744,7 @@ int main()
     ok &= walkCapsuleStepsOntoThinTrimeshTread();
     ok &= kccClimbsThinTrimeshStep();
     ok &= kccAscendsThinTrimeshStaircaseSmoothly();
+    ok &= kccAscendsThinTrimeshStaircaseAtSprintSpeed();
     ok &= thinCeilingPlaneBlocksUpwardCapsuleMotion();
     ok &= rampGroundProbeKeepsAuthoredNormal();
     ok &= staticCapsuleDepenUsesSurfaceFeatureNormal();
