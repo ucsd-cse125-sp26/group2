@@ -1393,7 +1393,7 @@ void handleClimbing(glm::vec3& vel,
     state.sim.climbTimer += dt;
 
     // Exit conditions
-    if (!walls.wallFront || input.crouch || input.back) {
+    if (!walls.wallFront || input.crouch) {
         exitClimb(state, posY);
         return;
     }
@@ -1405,41 +1405,66 @@ void handleClimbing(glm::vec3& vel,
     }
 
     const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    const bool hasUpIntent = glm::dot(wishDir, -climbNormal) >= tms::k_climbIntentThreshold;
+    const float wallIntent = glm::dot(wishDir, -climbNormal);
+    const bool hasUpIntent = wallIntent >= tms::k_climbIntentThreshold;
+    const bool hasDownIntent = wallIntent <= -tms::k_climbIntentThreshold;
     const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+    const glm::vec3 localUp{0.0f, gravDir, 0.0f};
+    const float localUpSpeed = glm::dot(vel, localUp);
 
-    if (!hasUpIntent) {
-        state.sim.climbNonUpTimer += dt;
-        if (state.sim.climbNonUpTimer >= tms::k_climbNonUpDetachTime) {
-            exitClimb(state, posY);
-            return;
-        }
+    glm::vec3 tangentVel = vel - climbNormal * glm::dot(vel, climbNormal) - localUp * localUpSpeed;
+    glm::vec3 sideWish = wishDir - climbNormal * glm::dot(wishDir, climbNormal);
+    sideWish -= localUp * glm::dot(sideWish, localUp);
+    const float sideWishLenSq = glm::dot(sideWish, sideWish);
+    const bool hasSideIntent = sideWishLenSq > 1e-5f;
+    if (hasSideIntent) {
+        const glm::vec3 sideDir = sideWish / std::sqrt(sideWishLenSq);
+        tangentVel += sideDir * (tms::k_climbSidewaysAccel * dt);
+    }
 
-        vel.y = -tms::k_climbSlipSpeed * gravDir;
-        vel.x *= tms::k_climbSidewaysMultiplier;
-        vel.z *= tms::k_climbSidewaysMultiplier;
+    const float tangentSpeedSq = glm::dot(tangentVel, tangentVel);
+    const float maxTangentSpeedSq = tms::k_climbSidewaysMaxSpeed * tms::k_climbSidewaysMaxSpeed;
+    if (tangentSpeedSq > maxTangentSpeedSq && tangentSpeedSq > 1e-5f)
+        tangentVel *= tms::k_climbSidewaysMaxSpeed / std::sqrt(tangentSpeedSq);
+
+    const auto applyClimbVelocity = [&](float localVerticalSpeed, bool hadUpwardMotion) {
+        vel = tangentVel + localUp * localVerticalSpeed;
         vel -= climbNormal * tms::k_wallrunPushForce * dt;
+        state.sim.climbHadUpwardMotion = hadUpwardMotion;
         state.vis.targetCameraTilt = 0.0f;
+    };
+
+    if (hasUpIntent) {
+        state.sim.climbNonUpTimer = 0.0f;
+
+        // Climbing movement (upward with speed decay).
+        const float k_decayAlpha = std::clamp(state.sim.climbTimer / tms::k_climbKickoffDuration, 0.0f, 1.0f);
+        const float k_climbSpeed = std::lerp(tms::k_climbMaxSpeed, tms::k_climbMinSpeed, k_decayAlpha);
+        applyClimbVelocity(k_climbSpeed, k_climbSpeed >= tms::k_climbUpVelocityThreshold);
         return;
     }
 
-    state.sim.climbNonUpTimer = 0.0f;
+    if (localUpSpeed >= tms::k_climbUpVelocityThreshold)
+        state.sim.climbNonUpTimer = 0.0f;
+    else
+        state.sim.climbNonUpTimer += dt;
 
-    // Climbing movement (upward with speed decay)
-    const float k_decayAlpha = std::clamp(state.sim.climbTimer / tms::k_climbKickoffDuration, 0.0f, 1.0f);
-    const float k_climbSpeed = std::lerp(tms::k_climbMaxSpeed, tms::k_climbMinSpeed, k_decayAlpha);
+    if (state.sim.climbNonUpTimer >= tms::k_climbNonUpDetachTime) {
+        exitClimb(state, posY);
+        return;
+    }
 
-    vel.y = k_climbSpeed * gravDir;
-    state.sim.climbHadUpwardMotion = (vel.y * gravDir) >= tms::k_climbUpVelocityThreshold;
+    if (hasDownIntent) {
+        applyClimbVelocity(-tms::k_climbDownwardSpeed, false);
+        return;
+    }
 
-    // Minimal sideways movement.
-    vel.x *= tms::k_climbSidewaysMultiplier;
-    vel.z *= tms::k_climbSidewaysMultiplier;
+    if (hasSideIntent) {
+        applyClimbVelocity(-tms::k_climbSlipSpeed * tms::k_climbSidewaysSlipScale, false);
+        return;
+    }
 
-    // Push toward wall.
-    vel -= climbNormal * tms::k_wallrunPushForce * dt;
-
-    state.vis.targetCameraTilt = 0.0f;
+    applyClimbVelocity(-tms::k_climbSlipSpeed, false);
 }
 
 } // namespace

@@ -1924,6 +1924,210 @@ bool climbAttachRejectsExcessLookAngle()
     return ok;
 }
 
+bool upwardClimbTimerDoesNotExpireWhileMovingUp()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    for (int frame = 0; frame < 160; ++frame)
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::Climbing, "upward climb should not expire through non-up timer");
+    ok &= expect(outSim.climbNonUpTimer == 0.0f, "upward climb should keep non-up timer reset");
+    ok &= expect(outVel.value.y > tms::k_climbUpVelocityThreshold, "upward climb should maintain local-up velocity");
+    return ok;
+}
+
+bool nonUpwardClimbExpiresAfterOneSecond()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    registry.emplace<InputSnapshot>(player);
+
+    for (int frame = 0; frame < 90; ++frame)
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const bool stillAttachedBeforeOneSecond = registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing;
+
+    for (int frame = 0; frame < 50; ++frame)
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(stillAttachedBeforeOneSecond, "non-upward climb should stay attached before one-second grace expires");
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::OnFoot,
+                 "non-upward climb should detach after one-second grace expires");
+    return ok;
+}
+
+bool downwardClimbIsFasterThanPassiveSlip()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    auto runWithInput = [&](bool backInput) {
+        Registry registry;
+        const entt::entity player = registry.create();
+        registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+        registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+        CollisionShape shape;
+        shape.type = CollisionShapeType::Capsule;
+        shape.radius = 10.0f;
+        shape.halfHeight = 20.0f;
+        shape.halfExtents = {10.0f, 30.0f, 10.0f};
+        registry.emplace<CollisionShape>(player, shape);
+
+        PlayerVisState vis;
+        vis.moveMode = MoveMode::Climbing;
+        vis.grounded = false;
+        registry.emplace<PlayerVisState>(player, vis);
+
+        PlayerSimState sim;
+        sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+        registry.emplace<PlayerSimState>(player, sim);
+
+        InputSnapshot input;
+        input.back = backInput;
+        input.yaw = 0.0f;
+        registry.emplace<InputSnapshot>(player, input);
+
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+        return std::pair{registry.get<PlayerVisState>(player).moveMode, registry.get<Velocity>(player).value.y};
+    };
+
+    const auto [slipMode, slipY] = runWithInput(false);
+    const auto [downMode, downY] = runWithInput(true);
+
+    bool ok = true;
+    ok &= expect(slipMode == MoveMode::Climbing, "passive slip should remain attached during grace");
+    ok &= expect(downMode == MoveMode::Climbing, "downward climb input should not immediately detach");
+    ok &= expect(downY < slipY - 30.0f, "intentional downward climb should move down faster than passive slip");
+    return ok;
+}
+
+bool sidewaysClimbPreservesWallTangentSpeed()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{-220.0f, 0.0f, 0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.right = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "sideways climb should remain attached during non-up grace");
+    ok &= expect(outVel.value.x < -160.0f, "sideways climb should preserve useful wall-tangent speed");
+    return ok;
+}
+
 bool ledgeMantleRejectsInvalidStoredNormal()
 {
     Registry registry;
@@ -2152,14 +2356,19 @@ bool climbNeutralInputDetachesAfterGrace()
     registry.emplace<InputSnapshot>(player, input);
 
     bool stayedInitially = false;
-    for (int frame = 0; frame < 40; ++frame) {
+    for (int frame = 0; frame < 90; ++frame) {
         systems::runMovement(registry, 1.0f / 128.0f, world);
         if (frame == 0)
             stayedInitially = registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing;
     }
+    const bool stayedBeforeGraceExpired = registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing;
+
+    for (int frame = 0; frame < 50; ++frame)
+        systems::runMovement(registry, 1.0f / 128.0f, world);
 
     bool ok = true;
     ok &= expect(stayedInitially, "neutral climb should not detach on the first non-upward frame");
+    ok &= expect(stayedBeforeGraceExpired, "neutral climb should remain attached during the non-upward grace window");
     ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::OnFoot,
                  "neutral climb should detach after the non-upward grace window");
     return ok;
@@ -2513,6 +2722,10 @@ int main()
     ok &= climbAttachAllowsApexWideLookAngle();
     ok &= climbAttachRejectsShallowSurface();
     ok &= climbAttachRejectsExcessLookAngle();
+    ok &= upwardClimbTimerDoesNotExpireWhileMovingUp();
+    ok &= nonUpwardClimbExpiresAfterOneSecond();
+    ok &= downwardClimbIsFasterThanPassiveSlip();
+    ok &= sidewaysClimbPreservesWallTangentSpeed();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= flippedGravityClimbMovesAlongLocalUp();
     ok &= flippedGravityLedgeMantleMovesAlongLocalUp();
