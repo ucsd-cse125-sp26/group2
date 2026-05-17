@@ -321,6 +321,7 @@ jobs:
       # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
         shell: bash
+        timeout-minutes: 10
         env:
           # Drive folder containing the current game assets (maps, animations,
           # prop GLBs). Fetched fresh on every release — no cache — so releases
@@ -351,6 +352,16 @@ jobs:
           # caps at 50 files unless `--remaining-ok` is passed; the flag
           # was removed in 6.x and the limit was lifted, so the modern
           # invocation is simply `--folder` with no extra flag.
+          #
+          # Observed Drive folder layout (verified 2026-05-16):
+          #   assets/animations/  (fbx, incl. nested crouch/, male_locomotion_pack/)
+          #   assets/hud_icons/   (svg + README.md)
+          #   assets/maps/        (glb map files, e.g. map1.glb)
+          #   assets/sounds/      (wav, mp3)
+          #   assets/uploads_files_812442_FreePresets/  (atm presets)
+          #   assets/uploads_files_812442_HdriFree/     (hdr environment maps)
+          # The Dockerfile and CMake post-build copy assume `assets/maps/`,
+          # `assets/animations/`, and `assets/*.glb` exist at these paths.
           pip install --quiet 'gdown>=6.0.0'
           gdown --folder \
                 -O "$STAGE/assets" \
