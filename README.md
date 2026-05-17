@@ -185,7 +185,7 @@ docker run --rm \
 # Pin to a specific release.
 docker run --rm \
   -p 9999:9999/udp -p 9999:9999/tcp \
-  ghcr.io/ucsd-cse125-sp26/group2-server:v0.1.0
+  ghcr.io/ucsd-cse125-sp26/group2-server:vX.Y.Z   # any tag from the Packages tab
 
 # Override config.toml without rebuilding.
 docker run --rm \
@@ -204,6 +204,8 @@ docker run --rm \
   -e GROUP2_SERVER_SHOTS_CSV=/var/log/group2/shots.csv \
   ghcr.io/ucsd-cse125-sp26/group2-server:latest
 ````
+
+> **First-time setup (maintainers only).** GHCR creates new packages as private by default. After the very first CI publish, an admin needs to flip the package to public once — Repo → Packages → `group2-server` → Package settings → **Change package visibility** → Public. Until then, `docker pull` requires `docker login ghcr.io -u <user> -p <github-pat-with-read:packages>`.
 
 ---
 
