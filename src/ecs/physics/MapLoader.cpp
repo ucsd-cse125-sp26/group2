@@ -1,8 +1,10 @@
 /// @file MapLoader.cpp
 /// @brief Assimp-based collision extraction from map GLB files.
 ///
-/// Auto-detects the best collision primitive for each mesh:
-///   sphere → cylinder → axis-aligned box → convex brush (fallback).
+/// Production separated maps preserve authored collision meshes as static
+/// triangle surfaces. Primitive fitting and V-HACD remain compatibility paths
+/// for prototype maps, explicitly-forced debug collections, and standalone
+/// props.
 
 #include "MapLoader.hpp"
 
@@ -944,6 +946,21 @@ SurfaceType resolveMeshSurfaceType(const aiMesh* mesh, const aiScene* scene)
     return surfaceTypeFromMaterialName(std::string_view{name.C_Str(), name.length});
 }
 
+void logTriMeshValidation(const char* nodeName, const TriMeshValidationReport& report)
+{
+    if (report.valid())
+        return;
+
+    SDL_Log("MapLoader: TriMesh validation warning '%s' — tris=%u degenerate=%u opposite-winding-duplicates=%u "
+            "non-manifold-edges=%u invalid-indices=%u",
+            nodeName,
+            report.triangleCount,
+            report.degenerateTriangles,
+            report.duplicatedOppositeWindingFaces,
+            report.nonManifoldEdges,
+            report.invalidIndices);
+}
+
 void extractMeshCollision(const aiMesh* mesh,
                           const aiScene* scene,
                           const glm::mat4& world,
@@ -1047,6 +1064,8 @@ void extractMeshCollision(const aiMesh* mesh,
     if (forceType == "meshes") {
         WorldTriMesh tm;
         buildTriMeshFromAiMesh(mesh, world, scale, tm);
+        const TriMeshValidationReport validation = validateTriMesh(tm);
+        logTriMeshValidation(nodeName, validation);
         buildTriMeshBVH(tm);
         weldTriMesh(tm);
         tm.defaultSurface = meshSurface;
@@ -1181,6 +1200,8 @@ void extractMeshCollision(const aiMesh* mesh,
         WorldTriMesh tm;
         buildTriMeshFromAiMesh(mesh, world, scale, tm);
         if (tm.indices.size() >= 3) {
+            const TriMeshValidationReport validation = validateTriMesh(tm);
+            logTriMeshValidation(nodeName, validation);
             buildTriMeshBVH(tm);
             weldTriMesh(tm);
             tm.defaultSurface = meshSurface;

@@ -237,6 +237,42 @@ bool wallDetectionTracksOverlappingThinTriMeshWall()
     return ok;
 }
 
+bool triMeshValidationReportsCookerIssues()
+{
+    WorldTriMesh mesh;
+    mesh.vertices = {
+        {0.0f, 0.0f, 0.0f},
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 0.0f}, // Duplicate position used to form a degenerate triangle.
+    };
+    mesh.indices = {
+        0,
+        1,
+        2, // Base triangle.
+        0,
+        2,
+        1, // Opposite winding duplicate of the base triangle.
+        0,
+        1,
+        3, // Shares edge 0-1.
+        1,
+        0,
+        4, // Degenerate and also a third face on edge 0-1.
+    };
+
+    const physics::TriMeshValidationReport report = physics::validateTriMesh(mesh);
+
+    bool ok = true;
+    ok &= expect(report.triangleCount == 4u, "validation should report triangle count");
+    ok &= expect(report.degenerateTriangles == 1u, "validation should count degenerate triangles");
+    ok &= expect(report.duplicatedOppositeWindingFaces == 1u, "validation should count opposite-winding duplicates");
+    ok &= expect(report.nonManifoldEdges == 1u, "validation should count non-manifold edges");
+    ok &= expect(!report.valid(), "validation report should mark problematic meshes invalid");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -248,5 +284,6 @@ int main()
     ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();
     ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
     ok &= wallDetectionTracksOverlappingThinTriMeshWall();
+    ok &= triMeshValidationReportsCookerIssues();
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

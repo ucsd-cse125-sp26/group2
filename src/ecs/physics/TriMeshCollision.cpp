@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdint>
 #include <glm/geometric.hpp>
+#include <limits>
 #include <unordered_map>
 
 namespace physics
@@ -750,6 +751,100 @@ struct EdgeRecord
     uint8_t count = 0;
 };
 
+struct QuantizedVertexKey
+{
+    int64_t x{0};
+    int64_t y{0};
+    int64_t z{0};
+
+    bool operator==(const QuantizedVertexKey& other) const noexcept
+    {
+        return x == other.x && y == other.y && z == other.z;
+    }
+};
+
+struct QuantizedVertexKeyHash
+{
+    size_t operator()(const QuantizedVertexKey& key) const noexcept
+    {
+        const uint64_t x = static_cast<uint64_t>(key.x);
+        const uint64_t y = static_cast<uint64_t>(key.y);
+        const uint64_t z = static_cast<uint64_t>(key.z);
+        return static_cast<size_t>(x * 73856093ull ^ y * 19349663ull ^ z * 83492791ull);
+    }
+};
+
+struct FaceKey
+{
+    QuantizedVertexKey v[3];
+
+    bool operator==(const FaceKey& other) const noexcept
+    {
+        return v[0] == other.v[0] && v[1] == other.v[1] && v[2] == other.v[2];
+    }
+};
+
+struct FaceKeyHash
+{
+    size_t operator()(const FaceKey& key) const noexcept
+    {
+        QuantizedVertexKeyHash hash;
+        size_t h = 1469598103934665603ull;
+        for (const QuantizedVertexKey& v : key.v) {
+            h ^= hash(v);
+            h *= 1099511628211ull;
+        }
+        return h;
+    }
+};
+
+QuantizedVertexKey quantizeVertex(glm::vec3 v, float epsilon)
+{
+    const float safeEps = std::max(epsilon, std::numeric_limits<float>::epsilon());
+    return {
+        .x = static_cast<int64_t>(std::llround(v.x / safeEps)),
+        .y = static_cast<int64_t>(std::llround(v.y / safeEps)),
+        .z = static_cast<int64_t>(std::llround(v.z / safeEps)),
+    };
+}
+
+FaceKey canonicalFaceKey(QuantizedVertexKey a, QuantizedVertexKey b, QuantizedVertexKey c)
+{
+    FaceKey key{{a, b, c}};
+    std::sort(std::begin(key.v), std::end(key.v), [](const QuantizedVertexKey& lhs, const QuantizedVertexKey& rhs) {
+        if (lhs.x != rhs.x)
+            return lhs.x < rhs.x;
+        if (lhs.y != rhs.y)
+            return lhs.y < rhs.y;
+        return lhs.z < rhs.z;
+    });
+    return key;
+}
+
+int windingSignInCanonicalFace(const QuantizedVertexKey original[3], const FaceKey& canonical)
+{
+    int perm[3] = {0, 0, 0};
+    bool used[3] = {false, false, false};
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            if (!used[j] && original[i] == canonical.v[j]) {
+                perm[i] = j;
+                used[j] = true;
+                break;
+            }
+        }
+    }
+
+    int inversions = 0;
+    for (int i = 0; i < 3; ++i) {
+        for (int j = i + 1; j < 3; ++j) {
+            if (perm[i] > perm[j])
+                ++inversions;
+        }
+    }
+    return (inversions % 2 == 0) ? 1 : -1;
+}
+
 } // namespace
 
 // Public API
@@ -909,6 +1004,70 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
             vMask |= static_cast<uint8_t>((1u << 2) | (1u << 0));
         mesh.vertActive[t] = vMask;
     }
+}
+
+TriMeshValidationReport validateTriMesh(const WorldTriMesh& mesh, float positionEpsilon)
+{
+    TriMeshValidationReport report;
+    report.triangleCount = static_cast<uint32_t>(mesh.indices.size() / 3u);
+
+    struct FaceRecord
+    {
+        int positiveWindings{0};
+        int negativeWindings{0};
+    };
+
+    std::unordered_map<FaceKey, FaceRecord, FaceKeyHash> faces;
+    std::unordered_map<uint64_t, uint32_t> edges;
+    faces.reserve(report.triangleCount);
+    edges.reserve(static_cast<size_t>(report.triangleCount) * 3u);
+
+    for (uint32_t t = 0; t < report.triangleCount; ++t) {
+        const uint32_t i0 = mesh.indices[t * 3u + 0u];
+        const uint32_t i1 = mesh.indices[t * 3u + 1u];
+        const uint32_t i2 = mesh.indices[t * 3u + 2u];
+        if (i0 >= mesh.vertices.size() || i1 >= mesh.vertices.size() || i2 >= mesh.vertices.size()) {
+            ++report.invalidIndices;
+            continue;
+        }
+
+        const glm::vec3& v0 = mesh.vertices[i0];
+        const glm::vec3& v1 = mesh.vertices[i1];
+        const glm::vec3& v2 = mesh.vertices[i2];
+        const glm::vec3 rawNormal = glm::cross(v1 - v0, v2 - v0);
+        const bool degenerate = glm::dot(rawNormal, rawNormal) <= positionEpsilon * positionEpsilon;
+        if (degenerate)
+            ++report.degenerateTriangles;
+
+        const QuantizedVertexKey q[3] = {
+            quantizeVertex(v0, positionEpsilon),
+            quantizeVertex(v1, positionEpsilon),
+            quantizeVertex(v2, positionEpsilon),
+        };
+        const FaceKey faceKey = canonicalFaceKey(q[0], q[1], q[2]);
+        FaceRecord& face = faces[faceKey];
+        const int winding = windingSignInCanonicalFace(q, faceKey);
+        if (winding > 0) {
+            if (face.negativeWindings > 0)
+                ++report.duplicatedOppositeWindingFaces;
+            ++face.positiveWindings;
+        } else {
+            if (face.positiveWindings > 0)
+                ++report.duplicatedOppositeWindingFaces;
+            ++face.negativeWindings;
+        }
+
+        ++edges[edgeKey(i0, i1)];
+        ++edges[edgeKey(i1, i2)];
+        ++edges[edgeKey(i2, i0)];
+    }
+
+    for (const auto& [_, count] : edges) {
+        if (count > 2u)
+            ++report.nonManifoldEdges;
+    }
+
+    return report;
 }
 
 HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)

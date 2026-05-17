@@ -65,6 +65,31 @@ void buildTriMeshBVH(WorldTriMesh& mesh);
 ///                            default.
 void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance = 0.0349065850f /* 2° */);
 
+/// @brief Map-cooking validation counters for authored collision triangle meshes.
+struct TriMeshValidationReport
+{
+    uint32_t triangleCount{0};
+    uint32_t degenerateTriangles{0};
+    uint32_t duplicatedOppositeWindingFaces{0};
+    uint32_t nonManifoldEdges{0};
+    uint32_t invalidIndices{0};
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        return degenerateTriangles == 0 && duplicatedOppositeWindingFaces == 0 && nonManifoldEdges == 0 &&
+               invalidIndices == 0;
+    }
+};
+
+/// @brief Validate authored collision mesh topology before/after cooking.
+///
+/// This does not mutate the mesh and only inspects `vertices` / `indices`, so
+/// it can run before BVH construction or after load. It catches the map
+/// pipeline issues that destabilize thin-surface KCC contacts: degenerate
+/// triangles, duplicated opposite-winding faces, non-manifold edges, and
+/// out-of-range indices.
+TriMeshValidationReport validateTriMesh(const WorldTriMesh& mesh, float positionEpsilon = 1e-4f);
+
 /// @brief Sweep an AABB against a triangle mesh using Voronoi-clipped per-triangle tests.
 ///
 /// Returns the earliest contact whose closest feature on the hit triangle is
