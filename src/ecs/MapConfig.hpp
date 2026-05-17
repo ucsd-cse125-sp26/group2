@@ -73,8 +73,10 @@ inline constexpr bool k_guessShapesProcessed = false;
 /// authored simplified triangle surfaces and stay triangle surfaces at
 /// runtime. This switch only exists for non-map prop experimentation.
 ///
-/// When `false` (default), V-HACD is bypassed and non-convex props fall
-/// back to triMesh.  Disable to:
+/// Normal builds also compile without V-HACD; this flag only has an effect
+/// when CMake is configured with GROUP2_ENABLE_VHACD=ON. When `false`
+/// (default), V-HACD is bypassed and non-convex props fall back to triMesh.
+/// Disable to:
 ///   * skip the multi-second V-HACD step during map iteration,
 ///   * sidestep V-HACD regressions on a particular asset, or
 ///   * keep parity with bot/headless tooling that doesn't need smooth

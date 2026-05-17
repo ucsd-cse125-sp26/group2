@@ -113,15 +113,9 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
         gamemap::loadConfiguredMap(mapCollision_, "server");
 
         // Load prop collision — must match client for prediction parity.
-        // Props with `decomposeCollision = true` (pallet, bottle) are non-convex,
-        // so V-HACD turns each sub-mesh into a few `WorldBrush`es instead of a
-        // `WorldTriMesh`.  Server pays a one-shot startup cost but runtime
-        // collision is much smoother (no per-triangle jitter).
-        //
-        // PR-30: gated on `gamemap::k_useVhacd` so the team can flip the
-        // behaviour project-wide from `ecs/MapConfig.hpp` without editing
-        // per-call-site flags.  Must AND with the per-asset
-        // `decomposeCollision` flag — both must agree before V-HACD runs.
+        // Non-convex props fall back to triMesh in normal builds. Legacy V-HACD
+        // only runs when both the asset/config opt in and CMake enables
+        // GROUP2_ENABLE_VHACD.
         const char* const base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
         for (const AssetDefinition& def : kPropAssets) {

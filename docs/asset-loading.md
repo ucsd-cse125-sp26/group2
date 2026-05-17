@@ -131,9 +131,11 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  Call["gamemap::loadConfiguredMap(out, tag)"] --> Phys["physics::loadMapCollision<br/>(extract collision primitives)"]
-  Phys --> Pri["per type-prefix or auto-detect:<br/>BOX → AABB<br/>CYL → cylinder<br/>SPHERE → sphere<br/>BRUSH → convex<br/>MESH → triMesh<br/>AUTO → AABB→cyl→sphere→brush→VHACD→triMesh"]
-  Pri --> Cook[buildTriMeshBVH + weldTriMesh]
+  Call["gamemap::loadConfiguredMap(out, tag)"] --> Phys["physics::loadMapCollision<br/>(extract authored collision trimeshes)"]
+  Phys --> Mesh["COL_* production nodes<br/>preserved as WorldTriMesh"]
+  Phys --> Legacy["legacy/debug opt-in:<br/>primitive fitting or prop V-HACD<br/>(GROUP2_ENABLE_VHACD only)"]
+  Mesh --> Cook[buildTriMeshBVH + weldTriMesh]
+  Legacy --> Cook
   Call --> ReImport[Re-import GLB without flags]
   ReImport --> Meta[Walk aiNode metadata for entity_type:<br/>0 = spawn point<br/>1 = weapon spawner<br/>2 = powerup spawner]
   Meta --> Globals["gamemap::spawnPoints_ etc.<br/>mutable inline globals"]
@@ -149,7 +151,7 @@ flowchart TD
 inline constexpr bool k_separatedCollisionMap = true;    // collision nodes prefixed COL_ in GLB
 inline constexpr const char* k_collisionPattern = "COL_";
 inline constexpr bool k_guessShapesProcessed = false;    // don't auto-fit
-inline constexpr bool k_useVhacd = false;                // V-HACD on props disabled project-wide
+inline constexpr bool k_useVhacd = false;                // also requires GROUP2_ENABLE_VHACD=ON
 ```
 
 ### Spawn/powerup/weapon spawner globals
@@ -230,7 +232,7 @@ Sound clips are loaded by `SfxSystem::loadClip` from `assets/sounds/` at init. W
 | `src/ecs/AssetCatalog.hpp` | Compile-time `AssetDefinition`s |
 | `src/ecs/AssetRegistry.hpp` | Runtime name→modelIndex registry |
 | `src/ecs/MapConfig.hpp` | `loadConfiguredMap` (single entry, both sides) |
-| `src/ecs/physics/MapLoader.cpp` | Collision primitive extraction + V-HACD |
+| `src/ecs/physics/MapLoader.cpp` | Authored collision trimesh extraction + legacy primitive opt-ins |
 | `src/client/animation/CharacterRig.cpp` | Skeletal rig from FBX |
 | `src/client/animation/AnimationLibrary.cpp` | Animation clip loading |
 | `src/client/sfx/SfxSystem.cpp` | Sound clip loading (WAV + MP3) |

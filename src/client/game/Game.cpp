@@ -271,17 +271,9 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         const char* base = SDL_GetBasePath();
         const std::string basePath = base ? base : "";
 
-        // Helper: load a prop with render + collision in one call.
-        // `def.decomposeCollision = true` runs V-HACD on each non-convex sub-mesh
-        // so organic/detailed shapes (a bottle, a metallic pallet) end up as a
-        // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
-        // a few seconds of load time per prop but kills triMesh edge-jitter.
-        //
-        // PR-30: V-HACD is gated on `gamemap::k_useVhacd` (single source of
-        // truth in `ecs/MapConfig.hpp`) so the team can disable it for
-        // map-iteration runs without editing per-call-site flags.  When
-        // `k_useVhacd == false`, non-convex props fall back to triMesh —
-        // correct, just visibly jittery on curved contacts.
+        // Helper: load a prop with render + collision in one call. Non-convex
+        // props fall back to triMesh in normal builds. Legacy V-HACD only runs
+        // when both the asset/config opt in and CMake enables GROUP2_ENABLE_VHACD.
         auto loadProp = [&](const AssetDefinition& def) {
             const int id = addAssetDefinition(assets_, def);
             const int modelIdx =

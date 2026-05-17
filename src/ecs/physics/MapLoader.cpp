@@ -942,8 +942,9 @@ bool shouldSkipNode(const char* nodeName)
 
 /// @brief Determine the best collision primitive for a mesh and add it to `out`.
 /// @param decomposeNonConvex  If true and the mesh fails the single-hull
-///        convex-brush check, run V-HACD convex decomposition before falling
-///        back to triMesh.
+///        convex-brush check, try legacy V-HACD before falling back to
+///        triMesh. Normal builds have V-HACD compiled out, so this simply
+///        logs and falls back.
 /// @brief Look up the dominant `SurfaceType` for a mesh by reading its
 /// assigned Blender material name.  Falls back to `Concrete` if the scene has
 /// no materials, the mesh has no index, or the name doesn't match.
@@ -1226,10 +1227,8 @@ void extractMeshCollision(const aiMesh* mesh,
         }
     }
 
-    // 4.5. Try V-HACD convex decomposition: split the non-convex mesh into a
-    //     handful of convex brushes.  Smoother runtime collision than triMesh
-    //     (no per-triangle MTV jitter on curved surfaces) and the cost is paid
-    //     only once at load time.
+    // 4.5. Legacy opt-in V-HACD. Disabled in normal builds and never used for
+    //     production `COL_` map meshes; those are authored triangle surfaces.
     if (decomposeNonConvex) {
         const size_t k_brushesBefore = out.brushes.size();
         if (decomposeIntoBrushes(mesh, world, scale, nodeName, out) > 0) {
@@ -1367,7 +1366,14 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     const size_t total =
         out.boxes.size() + out.brushes.size() + out.cylinders.size() + out.spheres.size() + out.triMeshes.size();
     if (total == 0) {
-        SDL_Log("MapLoader: WARNING — no collision geometry extracted from '%s'", path.c_str());
+        if (opts.allMeshesAreCollision) {
+            SDL_Log("MapLoader: WARNING — no prototype collision geometry extracted from '%s'", path.c_str());
+        } else {
+            SDL_Log("MapLoader: WARNING — no authored collision geometry extracted from '%s' (expected nodes under or "
+                    "named like '%s')",
+                    path.c_str(),
+                    opts.collisionCollection.c_str());
+        }
     }
 
     // Optionally add an infinite floor plane at the lowest Y across all geometry.
@@ -1432,9 +1438,8 @@ bool loadPropCollision(
     // We can't use extractCollision directly because it computes the transform
     // from the node hierarchy.  Instead, use a simple recursive walk that
     // multiplies our prop transform with each node's accumulated transform.
-    // decomposeNonConvex is captured by the walker so non-convex sub-meshes
-    // either go through V-HACD (smoother runtime collision, slower load) or
-    // fall back to triMesh (instant load, jittery on curved contacts).
+    // decomposeNonConvex is captured by the walker for legacy prop experiments.
+    // Normal builds compile V-HACD out, so non-convex props fall back to triMesh.
     struct Walker
     {
         bool decompose;

@@ -60,14 +60,14 @@ flowchart TD
   GLB[.glb file] --> Imp[Assimp import]
   Imp --> AuthMode{author mode}
   AuthMode -- "prototype: every mesh is collision" --> Type
-  AuthMode -- "named: prefix COL_*" --> Type[type-prefix parse]
+  AuthMode -- "production: prefix COL_*" --> Mesh[COL_* → authored triMesh]
+  AuthMode -- "legacy/debug opt-in" --> Type[type-prefix parse]
   Type --> Box[COL_BOX_* → AABB]
   Type --> Ramp[COL_RAMP_* → brush]
   Type --> Brush[COL_BRUSH_* → brush]
   Type --> Cyl[COL_CYL_* → cylinder]
   Type --> Sphere[COL_SPHERE_* → sphere]
-  Type --> Mesh[COL_MESH_* → triMesh]
-  Type --> Auto[COL_AUTO_* / no prefix → auto-detect:<br/>AABB → cyl → sphere → convex brush →<br/>V-HACD decomposition → triMesh]
+  Type --> Auto[COL_AUTO_* / no prefix → auto-detect:<br/>AABB → cyl → sphere → convex brush → triMesh]
   Mesh --> Cook[buildTriMeshBVH +<br/>weldTriMesh +<br/>edgeNeighbor adjacency]
   Auto --> Cook
   Cook --> World[WorldGeometry singleton<br/>via physics::setActiveWorld]
@@ -307,12 +307,12 @@ Full breakdown with `path:line` references in [potential-issues.md](potential-is
 | `src/ecs/systems/CollisionSystem.cpp` | Per-tick driver, player kernel, projectile kernel |
 | `src/ecs/physics/SweptCollision.cpp` | Sweep + depen + clearance primitives |
 | `src/ecs/physics/TriMeshCollision.cpp` | BVH + welding + per-tri Voronoi MTV + closest-point |
-| `src/ecs/physics/MapLoader.cpp` | Assimp + auto-detect + V-HACD + cook |
+| `src/ecs/physics/MapLoader.cpp` | Assimp + authored triMesh extraction + legacy primitive opt-ins + cook |
 | `src/ecs/physics/CookedMeshFormat.cpp` | On-disk format `'g2cm'` v2 |
 | `src/ecs/physics/BroadphaseTree.cpp` | Dynamic AABB tree (no live consumer in player path) |
 | `src/ecs/physics/ContactCache.cpp` | Warm-start cache |
 | `src/ecs/physics/Raycast.hpp` | Hitscan ray queries |
-| `src/ecs/physics/WallDetection.cpp` | Sphere-cast wallrun/climb/ledge probes |
+| `src/ecs/physics/WallDetection.cpp` | Trimesh closest-point wallrun/climb/ledge probes |
 | `src/ecs/physics/WorldData.hpp` | Global `WorldGeometry` singleton |
 | `src/ecs/physics/PhysicsConstants.hpp` | Tunables |
 | `src/ecs/components/CollisionShape.hpp` | `CollisionShapeType` + capsule params |
