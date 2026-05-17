@@ -1485,6 +1485,7 @@ add_executable(physics_trimesh_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/physics_trimesh_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SweptCollision.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/PhaseDiagnostic.cpp"
 )

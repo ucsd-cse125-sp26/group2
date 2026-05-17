@@ -1,7 +1,9 @@
 #include "ecs/physics/TriMeshCollision.hpp"
+#include "ecs/physics/WallDetection.hpp"
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <span>
@@ -207,6 +209,34 @@ bool staticBroadphaseReturnsOnlyOverlappingTriMeshes()
     return ok;
 }
 
+bool wallDetectionTracksOverlappingThinTriMeshWall()
+{
+    const WorldTriMesh wall = makeThinWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    // The player is already inside the wall probe radius. A pure swept sphere
+    // cast can miss this because it starts overlapped with the inflated
+    // wall. Wallrun attachment should instead use a segment/capsule
+    // closest-point query and keep the mesh/triangle identity stable.
+    const physics::WallDetectionResult result =
+        physics::detectWalls({-8.0f, 20.0f, 0.0f}, 0.0f, {10.0f, 30.0f, 10.0f}, world, 24.0f, 10.0f);
+
+    bool ok = true;
+    ok &= expect(result.wallRight, "wall detection should keep an overlapping thin trimesh wall attached");
+    ok &= expect(result.rightNormal.x < -0.9f, "right wall normal should point from the wall toward the player");
+    ok &= expectNear(result.rightPoint.x, 0.0f, 0.05f, "right wall point should lie on the authored wall surface");
+    ok &= expect(result.rightMeshIndex == 0u, "right wall detection should report the trimesh index");
+    ok &= expect(result.rightTriId != UINT32_MAX, "right wall detection should report the triangle id");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -217,5 +247,6 @@ int main()
     ok &= twoTriangleFloorHasStableSurfaceOverlap();
     ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();
     ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
+    ok &= wallDetectionTracksOverlappingThinTriMeshWall();
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
