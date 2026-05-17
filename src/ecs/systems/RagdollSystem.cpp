@@ -31,7 +31,7 @@ struct BoneDesc
     RagdollBone bone;
     glm::vec3 centerOffset; ///< Bone centre offset from character centre.
     float radius;
-    float halfHeight; ///< Cylinder portion; total bone height = 2*(halfHeight+radius).
+    float halfHeight;       ///< Cylinder portion; total bone height = 2*(halfHeight+radius).
     float mass;
 };
 
@@ -39,21 +39,21 @@ struct BoneDesc
 /// 72-unit-tall character with mass distribution roughly matching a
 /// human (head ~5 %, torso ~40 %, arms ~10 %, legs ~30 %).
 constexpr BoneDesc k_bones[] = {
-    {RagdollBone::Head,      {0, 32, 0}, 7, 3, 4},
-    {RagdollBone::Torso,     {0, 18, 0}, 11, 10, 30},
-    {RagdollBone::Pelvis,    {0, 0, 0}, 11, 4, 8},
+    {RagdollBone::Head, {0, 32, 0}, 7, 3, 4},
+    {RagdollBone::Torso, {0, 18, 0}, 11, 10, 30},
+    {RagdollBone::Pelvis, {0, 0, 0}, 11, 4, 8},
     {RagdollBone::UpperArmL, {-14, 22, 0}, 4, 8, 4},
     {RagdollBone::UpperArmR, {14, 22, 0}, 4, 8, 4},
-    {RagdollBone::ForearmL,  {-22, 12, 0}, 3, 7, 2.5f},
-    {RagdollBone::ForearmR,  {22, 12, 0}, 3, 7, 2.5f},
-    {RagdollBone::HandL,     {-26, 4, 0}, 3, 2, 1},
-    {RagdollBone::HandR,     {26, 4, 0}, 3, 2, 1},
+    {RagdollBone::ForearmL, {-22, 12, 0}, 3, 7, 2.5f},
+    {RagdollBone::ForearmR, {22, 12, 0}, 3, 7, 2.5f},
+    {RagdollBone::HandL, {-26, 4, 0}, 3, 2, 1},
+    {RagdollBone::HandR, {26, 4, 0}, 3, 2, 1},
     {RagdollBone::UpperLegL, {-6, -8, 0}, 5, 10, 9},
     {RagdollBone::UpperLegR, {6, -8, 0}, 5, 10, 9},
     {RagdollBone::LowerLegL, {-6, -22, 0}, 4, 8, 5},
     {RagdollBone::LowerLegR, {6, -22, 0}, 4, 8, 5},
-    {RagdollBone::FootL,     {-6, -34, 4}, 4, 2, 1},
-    {RagdollBone::FootR,     {6, -34, 4}, 4, 2, 1},
+    {RagdollBone::FootL, {-6, -34, 4}, 4, 2, 1},
+    {RagdollBone::FootR, {6, -34, 4}, 4, 2, 1},
 };
 
 /// @brief One joint in the ragdoll skeleton.  Phase 13 follow-up: each
@@ -77,46 +77,158 @@ struct JointDesc
     glm::vec3 anchorLocalToChild;
     Kind kind = Kind::Point;
     glm::vec3 axisInParent{0, 0, 1};
-    float swingLimit = 0.6f;       ///< Cone-twist only — radians.
-    float twistLimit = 0.5f;       ///< Cone-twist only.
-    float hingeMin = -1.5f;        ///< Hinge only.
-    float hingeMax = 0.05f;        ///< Hinge only.
+    float swingLimit = 0.6f; ///< Cone-twist only — radians.
+    float twistLimit = 0.5f; ///< Cone-twist only.
+    float hingeMin = -1.5f;  ///< Hinge only.
+    float hingeMax = 0.05f;  ///< Hinge only.
 };
 
 constexpr JointDesc k_joints[] = {
-    {RagdollBone::Torso, RagdollBone::Head, {0, 14, 0}, {0, -10, 0},
-     JointDesc::Kind::ConeTwist, {1, 0, 0}, 0.7f, 0.6f, 0, 0},                  ///< Neck — moderate cone, twist
-    {RagdollBone::Torso, RagdollBone::Pelvis, {0, -14, 0}, {0, 6, 0},
-     JointDesc::Kind::ConeTwist, {1, 0, 0}, 0.4f, 0.3f, 0, 0},                  ///< Spine — small
-    {RagdollBone::Torso, RagdollBone::UpperArmL, {-12, 6, 0}, {2, 8, 0},
-     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.4f, 1.0f, 0, 0},                 ///< Shoulder L — wide cone
-    {RagdollBone::Torso, RagdollBone::UpperArmR, {12, 6, 0}, {-2, 8, 0},
-     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.4f, 1.0f, 0, 0},                 ///< Shoulder R
-    {RagdollBone::UpperArmL, RagdollBone::ForearmL, {0, -10, 0}, {0, 9, 0},
-     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, -2.0f, 0.05f},                    ///< Elbow L (flex only)
-    {RagdollBone::UpperArmR, RagdollBone::ForearmR, {0, -10, 0}, {0, 9, 0},
-     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, -2.0f, 0.05f},                    ///< Elbow R
-    {RagdollBone::ForearmL, RagdollBone::HandL, {0, -9, 0}, {0, 4, 0},
-     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Wrist L
-    {RagdollBone::ForearmR, RagdollBone::HandR, {0, -9, 0}, {0, 4, 0},
-     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Wrist R
-    {RagdollBone::Pelvis, RagdollBone::UpperLegL, {-6, -4, 0}, {0, 12, 0},
-     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.0f, 0.4f, 0, 0},                 ///< Hip L
-    {RagdollBone::Pelvis, RagdollBone::UpperLegR, {6, -4, 0}, {0, 12, 0},
-     JointDesc::Kind::ConeTwist, {0, -1, 0}, 1.0f, 0.4f, 0, 0},                 ///< Hip R
-    {RagdollBone::UpperLegL, RagdollBone::LowerLegL, {0, -12, 0}, {0, 10, 0},
-     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, 0.0f, 2.2f},                      ///< Knee L (flex back only)
-    {RagdollBone::UpperLegR, RagdollBone::LowerLegR, {0, -12, 0}, {0, 10, 0},
-     JointDesc::Kind::Hinge, {1, 0, 0}, 0, 0, 0.0f, 2.2f},                      ///< Knee R
-    {RagdollBone::LowerLegL, RagdollBone::FootL, {0, -10, 0}, {0, 2, 0},
-     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Ankle L
-    {RagdollBone::LowerLegR, RagdollBone::FootR, {0, -10, 0}, {0, 2, 0},
-     JointDesc::Kind::Point, {0, 0, 1}, 0, 0, 0, 0},                            ///< Ankle R
+    {RagdollBone::Torso,
+     RagdollBone::Head,
+     {0, 14, 0},
+     {0, -10, 0},
+     JointDesc::Kind::ConeTwist,
+     {1, 0, 0},
+     0.7f,
+     0.6f,
+     0,
+     0}, ///< Neck — moderate cone, twist
+    {RagdollBone::Torso,
+     RagdollBone::Pelvis,
+     {0, -14, 0},
+     {0, 6, 0},
+     JointDesc::Kind::ConeTwist,
+     {1, 0, 0},
+     0.4f,
+     0.3f,
+     0,
+     0}, ///< Spine — small
+    {RagdollBone::Torso,
+     RagdollBone::UpperArmL,
+     {-12, 6, 0},
+     {2, 8, 0},
+     JointDesc::Kind::ConeTwist,
+     {0, -1, 0},
+     1.4f,
+     1.0f,
+     0,
+     0}, ///< Shoulder L — wide cone
+    {RagdollBone::Torso,
+     RagdollBone::UpperArmR,
+     {12, 6, 0},
+     {-2, 8, 0},
+     JointDesc::Kind::ConeTwist,
+     {0, -1, 0},
+     1.4f,
+     1.0f,
+     0,
+     0}, ///< Shoulder R
+    {RagdollBone::UpperArmL,
+     RagdollBone::ForearmL,
+     {0, -10, 0},
+     {0, 9, 0},
+     JointDesc::Kind::Hinge,
+     {1, 0, 0},
+     0,
+     0,
+     -2.0f,
+     0.05f}, ///< Elbow L (flex only)
+    {RagdollBone::UpperArmR,
+     RagdollBone::ForearmR,
+     {0, -10, 0},
+     {0, 9, 0},
+     JointDesc::Kind::Hinge,
+     {1, 0, 0},
+     0,
+     0,
+     -2.0f,
+     0.05f}, ///< Elbow R
+    {RagdollBone::ForearmL,
+     RagdollBone::HandL,
+     {0, -9, 0},
+     {0, 4, 0},
+     JointDesc::Kind::Point,
+     {0, 0, 1},
+     0,
+     0,
+     0,
+     0}, ///< Wrist L
+    {RagdollBone::ForearmR,
+     RagdollBone::HandR,
+     {0, -9, 0},
+     {0, 4, 0},
+     JointDesc::Kind::Point,
+     {0, 0, 1},
+     0,
+     0,
+     0,
+     0}, ///< Wrist R
+    {RagdollBone::Pelvis,
+     RagdollBone::UpperLegL,
+     {-6, -4, 0},
+     {0, 12, 0},
+     JointDesc::Kind::ConeTwist,
+     {0, -1, 0},
+     1.0f,
+     0.4f,
+     0,
+     0}, ///< Hip L
+    {RagdollBone::Pelvis,
+     RagdollBone::UpperLegR,
+     {6, -4, 0},
+     {0, 12, 0},
+     JointDesc::Kind::ConeTwist,
+     {0, -1, 0},
+     1.0f,
+     0.4f,
+     0,
+     0}, ///< Hip R
+    {RagdollBone::UpperLegL,
+     RagdollBone::LowerLegL,
+     {0, -12, 0},
+     {0, 10, 0},
+     JointDesc::Kind::Hinge,
+     {1, 0, 0},
+     0,
+     0,
+     0.0f,
+     2.2f}, ///< Knee L (flex back only)
+    {RagdollBone::UpperLegR,
+     RagdollBone::LowerLegR,
+     {0, -12, 0},
+     {0, 10, 0},
+     JointDesc::Kind::Hinge,
+     {1, 0, 0},
+     0,
+     0,
+     0.0f,
+     2.2f}, ///< Knee R
+    {RagdollBone::LowerLegL,
+     RagdollBone::FootL,
+     {0, -10, 0},
+     {0, 2, 0},
+     JointDesc::Kind::Point,
+     {0, 0, 1},
+     0,
+     0,
+     0,
+     0}, ///< Ankle L
+    {RagdollBone::LowerLegR,
+     RagdollBone::FootR,
+     {0, -10, 0},
+     {0, 2, 0},
+     JointDesc::Kind::Point,
+     {0, 0, 1},
+     0,
+     0,
+     0,
+     0}, ///< Ankle R
 };
 static_assert(std::size(k_joints) == 14u, "14 joints expected for 15-body tree");
 
-entt::entity createBone(Registry& registry, entt::entity character, const BoneDesc& bd, glm::vec3 charCenter,
-                       glm::vec3 charLinearVel)
+entt::entity createBone(
+    Registry& registry, entt::entity character, const BoneDesc& bd, glm::vec3 charCenter, glm::vec3 charLinearVel)
 {
     entt::entity body = registry.create();
     registry.emplace<Position>(body, Position{.value = charCenter + bd.centerOffset});

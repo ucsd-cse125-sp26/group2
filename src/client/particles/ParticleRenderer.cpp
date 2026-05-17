@@ -249,10 +249,10 @@ void ParticleRenderer::buildSmokeNoise()
     };
     // Bilinear interpolation of grid noise
     auto smoothNoise = [&](float fx, float fy) -> float {
-        const int x0 = static_cast<int>(fx) & (W - 1);
-        const int y0 = static_cast<int>(fy) & (H - 1);
-        const int x1 = (x0 + 1) & (W - 1);
-        const int y1 = (y0 + 1) & (H - 1);
+        const uint32_t x0 = static_cast<uint32_t>(static_cast<int>(fx) & (W - 1));
+        const uint32_t y0 = static_cast<uint32_t>(static_cast<int>(fy) & (H - 1));
+        const uint32_t x1 = static_cast<uint32_t>((static_cast<int>(x0) + 1) & (W - 1));
+        const uint32_t y1 = static_cast<uint32_t>((static_cast<int>(y0) + 1) & (H - 1));
         const float tx = fx - std::floor(fx);
         const float ty = fy - std::floor(fy);
         const float sx = tx * tx * (3.f - 2.f * tx); // smoothstep
@@ -266,11 +266,13 @@ void ParticleRenderer::buildSmokeNoise()
 
     for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
-            float n = smoothNoise(x * 0.0625f, y * 0.0625f) * 0.50f;
-            n += smoothNoise(x * 0.125f, y * 0.125f) * 0.25f;
-            n += smoothNoise(x * 0.25f, y * 0.25f) * 0.125f;
-            n += smoothNoise(x * 0.5f, y * 0.5f) * 0.0625f;
-            pixels[y * W + x] = static_cast<uint8_t>(std::clamp(n, 0.f, 1.f) * 255.f);
+            const float xf = static_cast<float>(x);
+            const float yf = static_cast<float>(y);
+            float n = smoothNoise(xf * 0.0625f, yf * 0.0625f) * 0.50f;
+            n += smoothNoise(xf * 0.125f, yf * 0.125f) * 0.25f;
+            n += smoothNoise(xf * 0.25f, yf * 0.25f) * 0.125f;
+            n += smoothNoise(xf * 0.5f, yf * 0.5f) * 0.0625f;
+            pixels[static_cast<size_t>(y * W + x)] = static_cast<uint8_t>(std::clamp(n, 0.f, 1.f) * 255.f);
         }
     }
 
@@ -367,7 +369,7 @@ void ParticleRenderer::buildDecalTexture()
             const float n = noise(static_cast<float>(x) * 0.35f, static_cast<float>(y) * 0.35f);
             const float roughR = r - n * 5.f; // wiggle up to 5 px
 
-            uint8_t* p = &pixels[(y * W + x) * 4];
+            uint8_t* p = &pixels[static_cast<size_t>((y * W + x) * 4)];
 
             if (roughR > outerR) {
                 // Fully transparent outside the decal circle

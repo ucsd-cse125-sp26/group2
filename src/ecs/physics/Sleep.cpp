@@ -28,8 +28,8 @@ void updateSleep(Registry& registry, const SleepConfig& cfg)
         const float linMag2 = glm::dot(vel.value, vel.value);
         const float angMag2 = (angVel != nullptr) ? glm::dot(angVel->value, angVel->value) : 0.0f;
 
-        const bool stillEnough = linMag2 < cfg.linearThresh * cfg.linearThresh &&
-                                 angMag2 < cfg.angularThresh * cfg.angularThresh;
+        const bool stillEnough =
+            linMag2 < cfg.linearThresh * cfg.linearThresh && angMag2 < cfg.angularThresh * cfg.angularThresh;
 
         if (stillEnough) {
             if (rb.sleepCounter < UINT16_MAX)

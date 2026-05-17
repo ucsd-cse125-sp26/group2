@@ -272,6 +272,10 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
     case WeaponType::EnergyGun:
         // Beam weapon — sound is handled in Game::iterate() via BeamState.
         break;
+    case WeaponType::HEGrenade:
+    case WeaponType::Molotov:
+    case WeaponType::Impulse:
+        break;
     }
 }
 
@@ -713,7 +717,8 @@ void SfxSystem::preconvertClips()
         clip.spec = deviceSpec;
 
         // Recalculate duration from the new format.
-        const int bytesPerFrame = (SDL_AUDIO_BITSIZE(deviceSpec.format) / 8) * deviceSpec.channels;
+        const int bitsPerSample = static_cast<int>(SDL_AUDIO_BITSIZE(deviceSpec.format));
+        const int bytesPerFrame = (bitsPerSample / 8) * static_cast<int>(deviceSpec.channels);
         if (bytesPerFrame > 0 && deviceSpec.freq > 0) {
             const size_t frames = static_cast<size_t>(dstLen) / static_cast<size_t>(bytesPerFrame);
             clip.durationSeconds = static_cast<float>(frames) / static_cast<float>(deviceSpec.freq);

@@ -27,8 +27,10 @@ namespace
 /// resolving immediate collisions against the static world by a single
 /// swept-AABB hit.  Penetrations from over-pushed bodies are resolved by
 /// the position-correction pass in `solveContacts`.
-void integrateAndCollide(Registry& registry, float dt, const physics::WorldGeometry& world,
-                       physics::ContactCache& cache)
+void integrateAndCollide(Registry& registry,
+                         float dt,
+                         const physics::WorldGeometry& world,
+                         physics::ContactCache& cache)
 {
     auto view = registry.view<RigidBody, Position, Velocity, CollisionShape>();
     for (auto e : view) {
@@ -67,7 +69,7 @@ void integrateAndCollide(Registry& registry, float dt, const physics::WorldGeome
         // multi-point clipping (Phase 9 has the data structure ready; the
         // generator is single-point for now).
         physics::ContactManifold mf;
-        mf.a = entt::null;  // null = the static world
+        mf.a = entt::null; // null = the static world
         mf.b = e;
         mf.aIsStatic = true;
         mf.bIsStatic = false;

@@ -1,749 +1,405 @@
-# Networking Architecture
+# Networking
 
-## Table of Contents
+Authoritative server, UDP-preferred transport with a TCP control sidecar, client-side prediction with full input replay, lag-compensated hitscan, and snapshot delta-RLE over a single keyframe baseline.
 
-1. [Architecture Overview](#1-architecture-overview)
-2. [MessageStream -- Length-Prefixed Framing Protocol](#2-messagestream----length-prefixed-framing-protocol)
-3. [Client](#3-client)
-4. [Server](#4-server)
-5. [Packet Format](#5-packet-format)
-6. [Event System](#6-event-system)
-7. [Server Game Loop](#7-server-game-loop)
-8. [Client Game Loop](#8-client-game-loop)
-9. [Input Pipeline](#9-input-pipeline)
-10. [Current Limitations and TODOs](#10-current-limitations-and-todos)
-11. [Data Flow Diagram](#11-data-flow-diagram)
-12. [Connection Lifecycle](#12-connection-lifecycle)
+Last verified against source: branch `core/collisions+wallrun` (2026-05-16).
 
 ---
 
-## 1. Architecture Overview
+## 1. Overview
 
-The project uses a **client-authoritative-input / server-authoritative-state** model over
-**TCP** (stream sockets). The networking layer is built on top of **SDL3_net**
-(`SDL_net.h` / `NET_*` functions), which provides cross-platform socket
-abstraction with non-blocking I/O.
+```mermaid
+flowchart LR
+  subgraph Client["Client process"]
+    CGame["Game thread<br/>(ECS · prediction · render)"]
+    CNet["Network thread<br/>(~1 kHz pump)"]
+    CRing["InputRingBuffer<br/>(256 ticks)"]
+    CInterp["InterpolationBuffer<br/>(8 samples/entity)"]
+  end
+  subgraph Server["Server process"]
+    SGame["Game thread<br/>(ECS · 128 Hz)"]
+    SNet["Network thread<br/>(~1 kHz pump)"]
+    SQueue["EventQueue<br/>(thread-safe)"]
+    SHist["HitboxHistory<br/>(64 ticks/entity)"]
+  end
 
-Key properties:
+  CGame -- "INPUT (UDP, redundant ring)" --> SNet
+  SNet --> SQueue --> SGame
+  SGame -- "UPDATE_REGISTRY / DELTA<br/>(UDP fragmented)" --> CNet
+  CNet --> CGame
+  SGame -- "PARTICLE_SPAWN / KILL / MATCH_STATE<br/>(reliable, ×3 redundant)" --> CNet
+  CGame -.local prediction.-> CGame
+  CGame -.reconcile on ack.-> CRing
+```
 
-- **Transport:** TCP stream sockets -- reliable, ordered delivery. No UDP path
-  exists yet.
-- **Library:** SDL3_net (`NET_CreateServer`, `NET_CreateClient`,
-  `NET_StreamSocket`, `NET_ReadFromStreamSocket`, `NET_WriteToStreamSocket`).
-- **Topology:** Single dedicated server, multiple clients. The server binds to
-  `127.0.0.1:9999` by default. Each client connects to that address.
-- **Framing:** A custom `MessageStream` class adds length-prefixed message
-  framing on top of the raw TCP byte stream.
-- **Current data flow:** Client sends `InputSnapshot` structs to the server.
-  The server deserialises them, runs physics, but does **not** yet broadcast
-  state back to clients (see [Section 10](#10-current-limitations-and-todos)).
-
-### Source files
-
-| Role | Header | Implementation |
-|------|--------|----------------|
-| Framing layer | `src/network/MessageStream.hpp` | `src/network/MessageStream.cpp` |
-| Client | `src/client/network/Client.hpp` | `src/client/network/Client.cpp` |
-| Server | `src/server/network/Server.hpp` | `src/server/network/Server.cpp` |
-| Server game loop | `src/server/game/ServerGame.hpp` | `src/server/game/ServerGame.cpp` |
-| Event queue | `src/server/systems/EventQueue.hpp` | `src/server/systems/EventQueue.cpp` |
-| Input receive | `src/server/systems/InputReceiveSystem.hpp` | (inline) |
-| Broadcast (stub) | `src/server/systems/BroadcastSystem.hpp` | -- |
-| Input send | `src/client/systems/InputSendSystem.hpp` | (inline) |
-| Input sample | `src/client/systems/InputSampleSystem.hpp` | (inline) |
-| Prediction (stub) | `src/client/systems/PredictionSystem.hpp` | -- |
-| Reconciliation (stub) | `src/client/systems/ReconciliationSystem.hpp` | -- |
-| Packet struct | `src/ecs/components/InputSnapshot.hpp` | -- |
+The server holds the authoritative ECS registry; the client mirrors a subset (the **Synced tuple**) and additionally runs the same `runMovement + runCollision` locally for the local player only.
 
 ---
 
-## 2. MessageStream -- Length-Prefixed Framing Protocol
+## 2. Transport
 
-`MessageStream` (`src/network/MessageStream.hpp/cpp`) wraps a raw
-`NET_StreamSocket*` and splits the continuous TCP byte stream into discrete
-messages using a **4-byte length prefix** protocol.
+### 2.1 Sockets
 
-### Wire format
+| Channel | Library | Use |
+|---|---|---|
+| TCP stream | `SDL3_net` `NET_StreamSocket` | Reliable control: handshake, lobby, snapshot fallback when UDP unavailable |
+| UDP datagram | `SDL3_net` `NET_DatagramSocket` | Hot path: snapshots, inputs, ping, particle/kill events |
 
-```
-+-------------------+-----------------------------+
-| length (4 bytes)  |  payload (length bytes)     |
-+-------------------+-----------------------------+
-```
+The TCP socket is established first (`NET_CreateClient` + `NET_SetStreamSocketNoDelay`), then the client opens a UDP socket on any free local port. The server binds UDP to the same port as TCP.
 
-- **Length header:** 4 bytes, `Uint32`, written in **host byte order** (not
-  network/big-endian -- see note below). Represents the number of payload bytes
-  that follow.
-- **Payload:** Arbitrary bytes of exactly `length` size.
+Both sides run a dedicated **network thread** that pumps at ~1 kHz (`SDL_Delay(1)`). The game thread never touches sockets directly.
 
-> **Note on byte order:** The code does `std::memcpy(&len, recvBuf.data(),
-> sizeof(Uint32))` without any `ntohl` conversion. This means the protocol
-> currently assumes both endpoints share the same endianness (which is true for
-> x86/x64 builds). A cross-architecture deployment would require adding
-> byte-order conversion.
+### 2.2 Packet header — 16 bytes, packed, little-endian
 
-### Sending (`MessageStream::send`)
-
-1. Check that `socket` is non-null.
-2. Write the 4-byte `size` value to the socket.
-3. Write the `size` bytes of payload data to the socket.
-4. Return whether the payload write succeeded.
-
-### Receiving (`MessageStream::poll`)
-
-1. Read up to 4096 bytes from the socket into a stack buffer.
-2. If `n < 0`, the socket has errored -- return `false`.
-3. If `n > 0`, append the bytes to the persistent `recvBuf` accumulation
-   buffer (`std::vector<Uint8>`).
-4. Enter a **drain loop**: while `recvBuf` contains at least 4 bytes (the
-   length header):
-   - `memcpy` the length from the front of `recvBuf`.
-   - If the buffer does not yet contain `4 + length` bytes, break (wait for
-     more data on the next poll).
-   - Otherwise, invoke the callback with a pointer to the payload and the
-     length.
-   - Erase the consumed `4 + length` bytes from the front of `recvBuf`.
-5. Return `true`.
-
-The callback signature is:
-```cpp
-std::function<void(const void* data, Uint32 size)>
+```text
++--------+--------+--------+--------+--------+--------+--------+--------+
+| magic (u16)     | ver(u8)| kind(u8)| connectionId (u32)             |
++--------+--------+--------+--------+--------+--------+--------+--------+
+| sequence(u16)   | chan(u8)| flags(u8)| fragInfo (u16) | _pad (u16)  |
++--------+--------+--------+--------+--------+--------+--------+--------+
 ```
 
-This pattern allows processing multiple complete messages per poll call if
-they arrived in the same TCP segment, while correctly handling partial
-messages that span multiple reads.
+| Field | Type | Meaning |
+|---|---|---|
+| `magic` | u16 | `0x3247` — protocol signature (note: header comment claims `0x4732`; the constant is correct, the comment is wrong — see *potential-issues* §N-1) |
+| `version` | u8 | `1` |
+| `kind` | u8 | `PacketKind` — only `Payload` is actually used (handshake is over TCP) |
+| `connectionId` | u32 | Server-minted random per connection. `0` pre-handshake |
+| `sequence` | u16 | Per-`(connection, channel)` monotonic |
+| `channel` | u8 | `Unreliable=0`, `UnreliableSequenced=1`, `ReliableOrdered=2`, `ReliableUnordered=3` |
+| `flags` | u8 | bit 0 = fragmented, bit 1 = encrypted (unused) |
+| `fragmentInfo` | u16 | `(index << 8) | count`. Caps at 256 fragments (8-bit count). |
+
+Caps: `k_maxPacketBytes = 1200`, `k_maxPayloadBytes = 1184`.
+
+### 2.3 Fragmentation & reassembly
+
+`UdpEndpoint::sendFragmented(redundancy)`:
+
+- payload ≤ 1184 B: single-datagram fast path (still honors `redundancy`)
+- payload > 1184 B: splits into N fragments with same `(connection, channel, sequence)`, varying `fragmentInfo`. Iteration order is **fragment-major** across redundancy copies — better cache behavior + decorrelates from burst loss.
+
+`FragmentReassembler` holds **one in-progress set per connection**. New sequence arrives → resets and starts fresh. Same sequence with mismatched count → resets. Duplicate slots are idempotent. When all slots filled, payload is concatenated in index order.
+
+### 2.4 TCP framing — `MessageStream`
+
+Wire format on TCP: `[u32 length][payload]`. The length prefix is **host-endian** — both sides must share endianness.
+
+`pumpReads` drains the kernel buffer fully in 16 KB chunks. `drainComplete` walks `recvBuf` from `recvHead`, invoking a callback per complete message. Head-offset compaction kicks in above 64 KB head or 50 % wasted prefix.
+
+**Caveat**: `recvBuf` is unbounded, and the length prefix is read without an upper bound — a malicious peer can DoS by sending `[length=0xFFFFFFFF]` then withholding payload. See *potential-issues*.
 
 ---
 
-## 3. Client
+## 3. Packet types
 
-`Client` (`src/client/network/Client.hpp/cpp`) manages the TCP connection
-from the game client to the server.
+All packets are tagged with a `PacketType` enum byte at the start of payload (after the header).
 
-### Connection flow (`Client::init`)
-
-1. **DNS resolution:** `NET_ResolveHostname(addr)` resolves the hostname or IP
-   address string. `NET_WaitUntilResolved(serverAddr, -1)` blocks until
-   resolution completes (timeout of `-1` = infinite wait).
-2. **Socket creation:** `NET_CreateClient(serverAddr, port)` creates a TCP
-   stream socket and begins connecting.
-3. **Connection wait:** `NET_WaitUntilConnected(sock, -1)` blocks until the
-   TCP handshake completes. On failure, the socket is destroyed and `false` is
-   returned.
-4. **Assignment:** The connected socket is stored in `msgStream.socket`.
-5. A log line prints the resolved server address string.
-
-Default connection target: `127.0.0.1:9999` (hardcoded in `Game::init`).
-
-### Sending (`Client::send`)
-
-```cpp
-bool send(const void* data, int len);
-```
-
-Sends a length-prefixed message. The implementation manually writes the 4-byte
-length followed by the payload bytes directly through SDL_net, bypassing
-`MessageStream::send`. (This is functionally equivalent but duplicates the
-framing logic.)
-
-### Polling (`Client::poll`)
-
-```cpp
-bool poll();
-```
-
-Calls `msgStream.poll()` with a callback that logs received messages. The
-callback currently **only logs** the data -- it does not deserialise or apply
-any server state. This is a placeholder for future state reconciliation.
-
-Returns `false` always (the return value is not used meaningfully yet).
-
-### Shutdown (`Client::shutdown`)
-
-Destroys the stream socket and unrefs the resolved address, nulling both
-pointers.
+| Type | Direction | Channel | Purpose |
+|---|---|---|---|
+| `INPUT` | C→S | UDP unreliable | Input snapshot ring (up to 5 ticks redundant) |
+| `ASSIGN_CLIENT_ID` | S→C | TCP | Assigns `entt::entity` + `connectionId` on accept |
+| `UPDATE_REGISTRY` | S→C | UDP unreliable | Full ECS snapshot keyframe |
+| `UPDATE_REGISTRY_DELTA` | S→C | UDP unreliable | RLE patch against last keyframe |
+| `PARTICLE_SPAWN` | S→C | Reliable (×3) | `NetParticleEvent[]` |
+| `PING` / `PONG` | C↔S | UDP unreliable | RTT measurement (u64 timestamp echo) |
+| `MATCH_STATE` | S→C | Reliable (×3) | Match phase transitions |
+| `KILL_EVENT` | S→C | Reliable (×3) | `NetKillEvent[]` |
+| `SHOT_DEBUG_REPORT` | S→shooter | Reliable (×3) | sv_showimpacts-style lag-comp visualizer |
+| `SHOT_INTENT` | C→S | UDP unreliable | Client's view of target anim state at fire moment (PR-27) |
+| `PLAYER_READY` / `PLAYER_UNREADY` | C→S | TCP | Lobby ready toggle |
+| `LOBBY_UPDATE` / `LOBBY_STATE` | S→C | TCP | Lobby roster |
+| `START_MATCH` | C→S | TCP | Host-initiated start |
+| `JOIN_LOBBY` / `JOIN_FAILED` / `HOST_READY` | — | — | **Declared but never sent or handled** — see *potential-issues* |
 
 ---
 
-## 4. Server
+## 4. Connection lifecycle
 
-`Server` (`src/server/network/Server.hpp/cpp`) manages the listening socket,
-accepts incoming client connections, and dispatches received messages into the
-event queue.
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant S as Server
+  participant LM as LobbyManager
 
-### Binding (`Server::init`)
-
-1. Resolve the bind address via `NET_ResolveHostname` + `NET_WaitUntilResolved`.
-2. Create the server socket with `NET_CreateServer(netAddr, port)`.
-3. Unreference the resolved address (the server socket retains its own copy).
-4. Initialise a fresh `EventQueue`.
-5. Reset `nextClientId` to 0.
-
-Default bind: `127.0.0.1:9999`, set in `src/server/main/main.cpp`.
-
-### Per-client Connection struct
-
-```cpp
-struct Connection {
-    MessageStream msgStream;  // Framed message stream for this client
-    uint8_t clientId;         // Unique identifier assigned on accept
-};
+  C->>S: TCP NET_WaitUntilConnected
+  S->>S: acceptClients() → mint connectionId (u32 random)
+  S->>S: enqueue Event{Connected}
+  S->>+C: TCP ASSIGN_CLIENT_ID [entity, connectionId]
+  S->>LM: addPlayer(clientId) → assign host if first
+  S-->>C: TCP LOBBY_STATE (full roster)
+  S-->>All: TCP LOBBY_UPDATE{PlayerJoined}
+  Note over C: stores localPlayerEntity, connectionId
+  Note over C: now eligible for UDP path
+  C->>S: UDP INPUT (first datagram)
+  S->>S: handleUdpUnreliable refreshes conn.udpAddr
+  Note over C,S: handshake complete — UDP hot path active
 ```
 
-Clients are stored in `std::vector<Connection> clients`. Each connection has
-its own `MessageStream` with an independent `recvBuf`, so partial message
-reassembly is per-client.
-
-### Accepting clients (`Server::acceptClients`)
-
-Called once per `poll()`. Accepts **at most one** new client per tick via
-`NET_AcceptClient`. On success:
-
-1. Assigns `nextClientId++` as the client ID.
-2. Pushes a new `Connection` onto the `clients` vector.
-3. Sets the new connection's `msgStream.socket` and `clientId`.
-
-### Reading clients (`Server::readClients`)
-
-Iterates over all connections. For each one, calls `msgStream.poll()` with a
-callback that invokes `handleMessage`. If `poll()` returns `false` (socket
-error / disconnect):
-
-1. Logs "client dead".
-2. Destroys the stream socket.
-3. Erases the connection from the vector.
-
-### Message dispatch (`Server::handleMessage`)
-
-```cpp
-void handleMessage(Connection& conn, const void* data, Uint32 len);
-```
-
-1. **Size validation:** If `len != sizeof(InputSnapshot)`, logs an error and
-   returns. This is the only packet type currently accepted.
-2. **Deserialisation:** Calls `systems::runInputReceive(data)` which
-   reinterpret-casts the raw bytes to `InputSnapshot*` and copies fields into
-   an `Event` struct.
-3. **Client ID:** Sets `event.clientId = conn.clientId`.
-4. **Enqueue:** Pushes the event into the `EventQueue`.
-5. **Acknowledgement:** Sends the ASCII string `"Message received"` (16 bytes)
-   back to the client.
-6. **Logging:** Logs all input fields (forward/back/left/right/jump/crouch/yaw/
-   pitch/roll).
-
-### Event access
-
-The `Server` exposes `isEmpty()` and `dequeueEvent()` so `ServerGame` can
-drain the event queue each tick.
-
-### Shutdown
-
-Destroys the `NET_Server`, then destroys all client stream sockets and clears
-the client vector.
+**Disconnect detection** is purely socket-error driven. There is no application-layer keep-alive ping. When `MessageStream::poll` or `OutboundQueue::flushTo` returns `false`, the side latches the connection dead, destroys the socket, and enqueues a `Disconnected` event.
 
 ---
 
-## 5. Packet Format
+## 5. Snapshots
 
-### InputSnapshot (Client -> Server)
+### 5.1 The Synced tuple
 
-The only packet currently sent over the network is the `InputSnapshot` struct
-(`src/ecs/components/InputSnapshot.hpp`), transmitted as a **raw binary struct**
-with no serialisation or versioning.
+Defined at `src/network/RegistrySerialization.cpp:142` — the **wire order is significant**:
 
 ```
-Offset  Size    Type      Field
-──────  ──────  ────────  ─────────────
-0       4       uint32_t  tick           Physics tick number
-4       1       bool      forward        W key
-5       1       bool      back           S key
-6       1       bool      left           A key
-7       1       bool      right          D key
-8       1       bool      jump           Space key
-9       1       bool      crouch         Left Ctrl
-10      1       bool      sprint         Left Shift
-11      1       bool      grapple        E / Middle mouse
-12      1       bool      shooting       Fire button
-13      3       --        (padding)      Compiler alignment padding (to 4-byte boundary)
-16      4       float     yaw            Horizontal look (radians)
-20      4       float     pitch          Vertical look (radians, clamped [-89deg, +89deg])
-24      4       float     roll           Reserved (always 0)
-28      4       float     prevTickYaw    Yaw at start of last physics tick
-32      4       float     prevTickPitch  Pitch at start of last physics tick
-──────  ──────
-Total   36 bytes (approximate -- actual size depends on compiler struct packing)
+entt::entity → Position → Velocity → PlayerVisState → CollisionShape →
+WeaponState → Health → AbilityState → PlayerMatchStats → Projectile →
+BeamState → ClientId → DeathInfo → RespawnTimer → WeaponSpawner →
+DroppedWeapon → RespawnPoint → AnimSnapshot → FireField → PlayerColor →
+PlayerName → PowerupSpawner
 ```
 
-> **Note:** The exact byte layout depends on the compiler's struct packing and
-> alignment rules. `sizeof(InputSnapshot)` is checked at runtime by the server
-> (`len != sizeof(InputSnapshot)`). Both client and server must be compiled with
-> the same compiler and settings for this to work. No padding pragma or
-> `__attribute__((packed))` is applied.
+`InputSnapshot` and `PlayerSimState` are **server-only** (not in the tuple). Inputs are echoed back inside a separate `remoteInputs` section so the client can render input-derived state for remote players.
 
-### Server -> Client
-
-The server currently sends the ASCII string `"Message received"` (16 bytes) as
-an acknowledgement after processing each input packet. This is a debug
-placeholder -- no game state is transmitted back yet.
-
----
-
-## 6. Event System
-
-The event system bridges the network layer and the ECS game simulation on the
-server side.
-
-### MovementIntent
-
-```cpp
-class MovementIntent {
-    bool forward, back, left, right, jump, crouch;
-    float yaw, pitch, roll;
-};
+Serialization output:
+```text
+[u32 snapshotSize][snapshotBytes][u32 remoteInputCount][RemoteInputRecord × N]
 ```
 
-A decoded movement command extracted from a client's `InputSnapshot`. Contains
-the same movement fields but lives in the server's event domain, decoupled from
-the network packet format.
+Per-component-type serialization runs **in parallel** via `perf/Parallel.hpp` when available; concatenated in tuple order at the end.
 
-### Event
+### 5.2 Keyframe vs delta
 
-```cpp
-class Event {
-    int clientId;                   // Originating client
-    MovementIntent movementIntent;  // Decoded movement fields
-    bool shootIntent;               // Firing state
-};
+```mermaid
+flowchart TD
+  S["serialize()"] --> Decide{First call,<br/>(snapCnt % 8)==0,<br/>or size mismatch?}
+  Decide -- yes --> FK[FULL keyframe<br/>UPDATE_REGISTRY<br/>UDP redundancy ×2]
+  Decide -- no --> Encode[encodeDelta<br/>vs last keyframe]
+  Encode -- "patch×4 < full×3" --> DK[DELTA<br/>UPDATE_REGISTRY_DELTA<br/>UDP redundancy ×1]
+  Encode -- "patch too big" --> FK
+  FK --> Store[Update keyframe baseline]
+  DK --> NoStore[Keep last keyframe<br/>baseline unchanged]
 ```
 
-A single gameplay event. Each received `InputSnapshot` packet produces exactly
-one `Event`.
+**Key design**: deltas reference the **last full keyframe**, not the previous delta. A single lost delta does not cascade. The keyframe rotates every 8 snapshots (`k_keyframeInterval = 8`), ≈62 ms at 128 Hz.
 
-### EventQueue
-
-```cpp
-class EventQueue {
-    std::queue<Event> events;
-    bool isEmpty();
-    void enqueue(Event event);
-    Event dequeue();  // throws if empty
-    int size();
-};
+The delta is a **byte-level RLE patch**:
+```text
+repeat: [u32 skipLen][u32 copyLen][copyBytes...]
 ```
+`applyDelta` validates the baseline size, walks triples, copies skipped runs from the baseline already in the output buffer and `copy` runs from the patch.
 
-A simple FIFO queue backed by `std::queue<Event>`. **Not thread-safe** -- the
-current design runs networking and game logic on the same thread, so no mutex
-is needed. `dequeue()` throws `std::runtime_error` if called on an empty queue.
+### 5.3 Client apply path
 
-### How messages become events
+```mermaid
+sequenceDiagram
+  participant CN as Client net thread
+  participant CG as Client game thread
+  participant Reg as ECS Registry
+  participant IB as InterpolationBuffer
 
-1. `Server::readClients()` polls each client's `MessageStream`.
-2. Complete messages trigger `Server::handleMessage()`.
-3. `handleMessage` validates the size, calls `systems::runInputReceive(data)`
-   which casts the raw bytes to `InputSnapshot*` and copies fields into a new
-   `Event`.
-4. The client ID is set on the event.
-5. The event is pushed into the `EventQueue`.
-6. `ServerGame::tick()` drains the queue via `server.dequeueEvent()`.
-
-### InputReceiveSystem
-
-`systems::runInputReceive` (`src/server/systems/InputReceiveSystem.hpp`) is an
-inline function that performs a `static_cast<const InputSnapshot*>` on the raw
-data pointer and maps each field to the corresponding `Event` /
-`MovementIntent` field. No validation beyond the size check in `handleMessage`.
-
----
-
-## 7. Server Game Loop
-
-`ServerGame` (`src/server/game/ServerGame.hpp/cpp`) owns the `Server`, the ECS
-`Registry`, and the client-to-entity mapping.
-
-### Initialisation (`ServerGame::init`)
-
-1. Sets `tickRateHz` (default 128 Hz).
-2. Clears client-entity mapping and registry.
-3. Calls `server.init(addr, port)` to bind the listening socket.
-4. Previously spawned a test entity at y=200 (now commented out -- entities are
-   created dynamically via `initNewPlayer`).
-
-### Main loop (`ServerGame::run`)
-
-```
-running = true
-dt        = 1.0 / tickRateHz          (e.g. 1/128 = 0.0078125 s)
-perfFreq  = SDL_GetPerformanceFrequency()
-tickDur   = perfFreq / tickRateHz      (counter ticks per game tick)
-nextTick  = SDL_GetPerformanceCounter()
-
-while (running):
-    server.poll()              // accept clients + read all messages
-    nextTick += tickDur        // advance the tick deadline
-    tick(dt, nextTick)         // drain events + run physics
-
-    // Sleep + spin-wait until nextTick
-    now = SDL_GetPerformanceCounter()
-    if now < nextTick:
-        sleepMs = ((nextTick - now) * 1000 / perfFreq) - 1
-        if sleepMs > 0:
-            SDL_Delay(sleepMs)           // coarse sleep
-        while SDL_GetPerformanceCounter() < nextTick:
-            pass                         // spin-wait remainder
-```
-
-The timing strategy is **sleep + spin-wait**: the server sleeps for the bulk of
-the remaining time (minus 1 ms safety margin), then spin-waits for the
-sub-millisecond remainder to hit the exact tick boundary. This provides
-accurate 128 Hz ticking without burning a full CPU core.
-
-### Tick (`ServerGame::tick`)
-
-1. **Event drain:** Dequeues all pending events from the server's `EventQueue`
-   and passes each to `eventHandler`. If event handling exceeds the tick time
-   budget (`now >= nextTick`), the remaining events are dropped with a log
-   warning (TODO: this overflow handling needs refinement).
-2. **Physics:** Runs `systems::runMovement` and `systems::runCollision` with
-   the fixed `dt` and `physics::testWorld()`.
-3. Increments `tickCount`.
-
-### Event handler (`ServerGame::eventHandler`)
-
-1. Looks up the `entt::entity` for the event's `clientId` in `clientEntities`.
-2. If not found or the entity is invalid, returns silently.
-3. Gets or creates an `InputSnapshot` component on the entity.
-4. Copies all `MovementIntent` fields and `shootIntent` into the component.
-
-### Player spawning (`ServerGame::initNewPlayer`)
-
-Creates a new entity with `InputSnapshot`, `Position` (at `(0, 200, 0)`),
-`Velocity`, `CollisionShape`, and `PlayerState`. Maps the entity to the given
-`clientId` in `clientEntities`.
-
-> **Note:** `initNewPlayer` is defined but is not yet called automatically when
-> a client connects. The connection-to-entity lifecycle is incomplete.
-
----
-
-## 8. Client Game Loop
-
-The client uses SDL3's application-callback API:
-
-- `SDL_AppInit` -- creates and initialises the `Game` object.
-- `SDL_AppEvent` -- forwards SDL events (keyboard, mouse, window).
-- `SDL_AppIterate` -- called as fast as possible (or VSync-capped); drives the
-  game loop.
-- `SDL_AppQuit` -- shuts down and deletes the `Game`.
-
-### Fixed-timestep accumulator pattern (`Game::iterate`)
-
-```
-Constants:
-    k_physicsHz        = 128
-    k_physicsDt        = 1/128 s
-    k_maxTicksPerFrame = 8     (spiral-of-death guard)
-
-Each iterate() call:
-    1. Compute frameTime = (now - prevTime) / perfFreq
-       Cap frameTime to 0.25 s to prevent spiral-of-death
-       accumulator += frameTime
-
-    2. Refresh FPS / physics rate stats every 0.5 s
-
-    3. Input:
-       - Mouse look (yaw/pitch): ALWAYS sampled every iterate()
-         for smooth camera at any FPS
-       - Movement keys (WASD/jump/crouch): sampled once per physics
-         tick group when inputSyncedWithPhysics is true (default)
-       - InputSendSystem: sends InputSnapshot to server every iterate()
-
-    4. Physics (when accumulator >= k_physicsDt):
-       - Sample movement keys once for the tick group (if synced)
-       - While accumulator >= k_physicsDt and ticksThisFrame < 8:
-           - Save PreviousPosition for interpolation
-           - Run MovementSystem
-           - Run CollisionSystem
-           - Decrement accumulator by k_physicsDt
-       - Poll server for responses (client.poll())
-
-    5. Skip rendering if renderSeparateFromPhysics is false and
-       no physics ran this frame
-
-    6. Render:
-       - Interpolate position: alpha = accumulator / k_physicsDt
-       - renderPos = lerp(previousPos, currentPos, alpha)
-       - Camera yaw/pitch use latest values directly (never interpolated)
-       - Draw the scene
-```
-
-### Physics vs render separation
-
-| Setting | Behaviour |
-|---------|-----------|
-| `renderSeparateFromPhysics = true` (default) | Render every `iterate()` call with position interpolation between last two physics ticks. FPS is uncapped (or VSync). |
-| `renderSeparateFromPhysics = false` | Only render after a physics tick ran. Caps visual FPS to 128 Hz. |
-| `inputSyncedWithPhysics = true` (default) | Movement keys sampled once per physics tick group (server-consistent). Mouse look still per-frame. |
-| `inputSyncedWithPhysics = false` | Movement keys also sampled every iterate() call. |
-| `limitFPSToMonitor = false` (default) | VSync off. |
-
----
-
-## 9. Input Pipeline
-
-The full path of a player input from key press to physics effect:
-
-### Client side
-
-1. **InputSampleSystem** (`src/client/systems/InputSampleSystem.hpp`)
-   - `runMouseLook()`: Called every `iterate()`. Reads `SDL_GetRelativeMouseState`,
-     accumulates yaw/pitch on the local player's `InputSnapshot`. Wraps yaw to
-     [-pi, pi], clamps pitch to [-89deg, +89deg].
-   - `runMovementKeys()`: Called once per physics tick group (or every iterate if
-     `inputSyncedWithPhysics` is off). Reads `SDL_GetKeyboardState`, sets
-     `forward/back/left/right/jump/crouch/sprint/grapple` booleans.
-
-2. **InputSendSystem** (`src/client/systems/InputSendSystem.hpp`)
-   - `runInputSend()`: Called every `iterate()`. Iterates entities with
-     `<InputSnapshot, LocalPlayer>`, sends each snapshot to the server as
-     `sizeof(InputSnapshot)` raw bytes via `Client::send`.
-
-3. **Network transport:** `Client::send` writes a 4-byte length prefix +
-   `sizeof(InputSnapshot)` payload bytes over the TCP socket.
-
-### Server side
-
-4. **Server::readClients()**: Polls each client's `MessageStream`. Complete
-   messages are passed to `handleMessage`.
-
-5. **Server::handleMessage()**: Validates size == `sizeof(InputSnapshot)`.
-   Calls `systems::runInputReceive(data)` to produce an `Event`.
-
-6. **InputReceiveSystem** (`src/server/systems/InputReceiveSystem.hpp`):
-   `runInputReceive()` casts the raw data to `const InputSnapshot*` and copies
-   movement fields + shoot intent into a new `Event` struct.
-
-7. **EventQueue**: The event is enqueued with the originating `clientId`.
-
-8. **ServerGame::tick()**: Drains the event queue. For each event, calls
-   `eventHandler`.
-
-9. **ServerGame::eventHandler()**: Looks up the player entity by `clientId`,
-   writes the `MovementIntent` fields into the entity's `InputSnapshot`
-   component.
-
-10. **Physics**: `systems::runMovement` and `systems::runCollision` read the
-    `InputSnapshot` component to compute velocity, position, and collisions.
-
-### Summary
-
-```
-[Client]                              [Server]
-SDL input  ->  InputSampleSystem      |
-           ->  InputSendSystem -------+-> Server::readClients
-                                      |   -> handleMessage
-                                      |   -> InputReceiveSystem
-                                      |   -> EventQueue
-                                      |   -> eventHandler
-                                      |   -> InputSnapshot component
-                                      |   -> MovementSystem
-                                      |   -> CollisionSystem
+  CN->>CN: tryReceive UDP → FragmentReassembler
+  CN->>CN: Complete → udpRecvQueue_
+  CG->>CG: client.poll() drains udpRecvQueue_
+  CG->>CG: dispatchMessage(payload)
+  alt UPDATE_REGISTRY
+    CG->>CG: cache as keyframePayload_ / keyframeTick_
+  else UPDATE_REGISTRY_DELTA
+    CG->>CG: applyDelta(keyframePayload_, patch) → bytes<br/>(NOT cached as new keyframe)
+  end
+  CG->>Reg: snapshotApplyFn_ → Loader::apply<br/>(entt::continuous_loader + orphans())
+  CG->>CG: extract serverAckedClientTick_
+  CG->>IB: recordInterpolationSamples(captureNs=now)
 ```
 
 ---
 
-## 10. Current Limitations and TODOs
+## 6. Input pipeline
 
-### Not yet implemented
+```mermaid
+sequenceDiagram
+  participant Phys as Game thread (client)
+  participant Ring as InputRingBuffer[256]
+  participant Pred as PredictionSystem
+  participant Net as Net thread
+  participant SrvNet as Server net thread
+  participant Q as EventQueue
+  participant SrvGame as Server game thread
 
-| Component | File | Status |
-|-----------|------|--------|
-| **BroadcastSystem** | `src/server/systems/BroadcastSystem.hpp` | Empty stub. Contains only `// TODO: implement runBroadcast()`. No server-to-client state broadcast exists. |
-| **PredictionSystem** | `src/client/systems/PredictionSystem.hpp` | Empty stub. Contains only `// TODO: implement runPrediction()`. Planned to apply local input immediately without waiting for server confirmation, storing snapshots in a ring buffer. |
-| **ReconciliationSystem** | `src/client/systems/ReconciliationSystem.hpp` | Empty stub. Contains only `// TODO: implement runReconciliation()`. Planned to rewind and re-simulate when the server sends corrections. |
+  Phys->>Phys: runInputSample → tick = clientPredictTick
+  Phys->>Ring: push(tick, snap)
+  Phys->>Pred: runMovement + runCollision (local player only)
+  Phys->>Net: sendInputSnapshot
+  Note over Net: pack last 5 snapshots oldest-first<br/>+ rttMs + interpDelaySnapshots
+  Net->>SrvNet: UDP INPUT (TCP fallback if no connectionId)
+  SrvNet->>SrvNet: validate count ≤ 16, exact size
+  loop per snapshot
+    SrvNet->>Q: enqueue Event{Input} if tick > lastAppliedInputTick
+  end
+  SrvGame->>Q: drainEvents at top of iterate()
+  SrvGame->>SrvGame: emplace_or_replace<InputSnapshot>(player, snap)
+  SrvGame->>SrvGame: runMovement + runCollision (all players)
+```
 
-### Known issues and gaps
-
-- **No state broadcast:** The server processes input and runs physics but never
-  sends game state (positions, velocities, etc.) back to clients. Each client
-  runs its own local simulation with no server correction. This is the most
-  critical missing piece for multiplayer.
-
-- **No player spawn on connect:** `ServerGame::initNewPlayer()` exists but is
-  never called automatically when a client connects. There is no
-  connect/disconnect event from the network layer to the game layer -- the
-  server just starts receiving packets.
-
-- **Client::send duplicates framing:** `Client::send` manually writes the
-  4-byte length + payload instead of delegating to `MessageStream::send`. This
-  works but duplicates logic.
-
-- **Client::poll ignores data:** The poll callback only logs received data. No
-  deserialisation or state application occurs.
-
-- **No packet type discrimination:** The server only handles one packet type
-  (`InputSnapshot`, validated by size). There is no message type header or
-  protocol versioning. Adding more packet types will require a type
-  discriminator.
-
-- **Raw struct serialisation:** `InputSnapshot` is sent as a raw memory copy.
-  This is fragile: any struct layout change, compiler difference, or
-  endianness mismatch will break the protocol silently.
-
-- **Host byte order for length prefix:** The `MessageStream` 4-byte length
-  header is written in host byte order. Cross-platform deployment (e.g.
-  x86 server + ARM client) would silently corrupt framing.
-
-- **EventQueue not thread-safe:** The queue uses `std::queue` with no mutex.
-  Safe only because networking and game logic run on the same thread.
-
-- **Event overflow handling:** If event processing exceeds the tick time budget,
-  remaining events are dropped. The TODO in `ServerGame::tick` notes this needs
-  proper handling.
-
-- **Single-read limit:** `MessageStream::poll` reads at most 4096 bytes per
-  call. Under high throughput this may cause message processing to lag behind
-  arrival rate.
-
-- **No heartbeat or keep-alive:** Dead connections are only detected when a
-  `read` fails. There is no periodic ping/pong to detect silent disconnects.
-
-- **No reconnection:** If the client connection fails during `init`, the client
-  exits. There is no retry logic or reconnection mechanism.
+Input redundancy: every `INPUT` packet carries the last `k_inputRedundancy = 5` snapshots (~40 ms at 128 Hz). The server's `lastAppliedInputTick` filter discards duplicates.
 
 ---
 
-## 11. Data Flow Diagram
+## 7. Prediction & reconciliation
 
-### Current (implemented)
+### 7.1 Prediction
 
-```
-+------------------+                          +-------------------+
-|     CLIENT       |                          |      SERVER       |
-|                  |                          |                   |
-|  SDL Input       |                          |                   |
-|    |             |                          |                   |
-|    v             |                          |                   |
-|  InputSample     |                          |                   |
-|  System          |                          |                   |
-|    |             |                          |                   |
-|    v             |                          |                   |
-|  InputSnapshot   |                          |                   |
-|    |             |                          |                   |
-|    v             |     TCP (port 9999)      |                   |
-|  InputSend  -----+--- [4B len | payload] --+-> readClients()   |
-|  System          |                          |    |              |
-|                  |                          |    v              |
-|                  |                          |  handleMessage()  |
-|                  |                          |    |              |
-|                  |                          |    v              |
-|                  |                          |  InputReceive     |
-|                  |                          |  System           |
-|                  |                          |    |              |
-|                  |                          |    v              |
-|                  |                          |  EventQueue       |
-|                  |                          |    |              |
-|                  |                          |    v              |
-|                  |                          |  eventHandler()   |
-|                  |                          |    |              |
-|                  |                          |    v              |
-|  Local physics   |                          |  InputSnapshot    |
-|  (independent)   |                          |  component        |
-|    |             |                          |    |              |
-|    v             |                          |    v              |
-|  Movement +      |                          |  MovementSystem   |
-|  Collision       |                          |  CollisionSystem  |
-|    |             |                          |    |              |
-|    v             |    "Message received"    |    v              |
-|  client.poll() <-+--- [4B len | ASCII] ----+  (ack only)      |
-|  (logs only)     |                          |                   |
-+------------------+                          +-------------------+
+Every client physics tick:
+
+1. `runInputSample` writes a fresh `InputSnapshot` on the local player at `clientPredictTick`.
+2. `runPrediction(registry, dt, world) = runMovement + runCollision`. The `PlayerSimState` filter ensures only the local player is touched (remote players have no `PlayerSimState`).
+3. `InputRingBuffer::push(tick, snap)`.
+4. `runInputSend` → `client.sendInputSnapshot(snap)`.
+
+### 7.2 Reconciliation
+
+When a snapshot arrives, the server's authoritative state overwrites the local player's `Position`/`Velocity`/etc. as of `serverAckedClientTick_`. Reconciliation re-runs the simulation from `ackedTick + 1` through `clientPredictTick`:
+
+```mermaid
+flowchart LR
+  Snap[Snapshot applied<br/>local player = server state at ackedTick] --> Replay
+  Replay["for tick in ackedTick+1..currentTick:<br/>  replace(InputSnapshot, ring[tick])<br/>  runMovement + runCollision"]
+  Replay --> Done[Local player = predicted state<br/>at currentTick]
 ```
 
-### Planned (future)
+**Drift caveat**: `PlayerSimState` (coyote-time timers, jump cooldown, slide fatigue) is **not** replicated. On long replay windows the timers desync slightly from the server's view. Documented in `ReconciliationSystem.hpp`.
 
-```
-+------------------+                          +-------------------+
-|     CLIENT       |                          |      SERVER       |
-|                  |                          |                   |
-|  InputSample     |     InputSnapshot        |                   |
-|  InputSend  -----+------------------------>|  InputReceive     |
-|                  |                          |  EventQueue       |
-|                  |                          |  Physics          |
-|                  |                          |    |              |
-|                  |     State Snapshot        |    v              |
-|  Reconciliation  |<------------------------+  Broadcast        |
-|  System          |                          |  System           |
-|    |             |                          |                   |
-|    v             |                          +-------------------+
-|  Prediction      |
-|  System          |
-|    |             |
-|    v             |
-|  Render          |
-+------------------+
-```
+**Stall hazard**: if the oldest ring entry > `ackedTick`, replay silently skips the gap and only resumes at the oldest available tick. Local player position will appear correct (server-authoritative), but predicted velocity/state will be wrong for the gap.
 
 ---
 
-## 12. Connection Lifecycle
+## 8. Entity interpolation
 
-### Current implementation
+Remote entities are rendered in the **past** to mask jitter:
 
-```
-CLIENT                                    SERVER
-  |                                         |
-  |  NET_ResolveHostname("127.0.0.1")       |  NET_ResolveHostname("127.0.0.1")
-  |  NET_WaitUntilResolved (blocking)       |  NET_WaitUntilResolved (blocking)
-  |                                         |  NET_CreateServer(addr, 9999)
-  |                                         |  <listening>
-  |                                         |
-  |  NET_CreateClient(addr, 9999)           |
-  |  NET_WaitUntilConnected (blocking)      |
-  |  <connected>                            |
-  |                                         |  NET_AcceptClient() -> socket
-  |                                         |  assign clientId = nextClientId++
-  |                                         |  create Connection{socket, clientId}
-  |                                         |
-  | ---- InputSnapshot (every iterate) ---> |  readClients() -> handleMessage()
-  |                                         |  enqueue Event
-  | <--- "Message received" (16 bytes) ---- |  (ack)
-  |                                         |
-  | ---- InputSnapshot ------------------> |  ...
-  | <--- "Message received" -------------- |  ...
-  |                                         |
-  |         ... (loop continues) ...        |
-  |                                         |
-  |  <socket error or disconnect>           |  poll() returns false
-  |                                         |  log "client dead"
-  |                                         |  destroy socket
-  |                                         |  erase from clients vector
-  |                                         |
-  |  Client::shutdown()                     |  Server::shutdown()
-  |  NET_DestroyStreamSocket                |  NET_DestroyServer
-  |  NET_UnrefAddress                       |  destroy all client sockets
+```text
+renderTime = now − interpDelaySnapshots × snapshotIntervalEma
 ```
 
-### Gaps in the lifecycle
+| Knob | Default | Source |
+|---|---|---|
+| `interpDelaySnapshots` | 2 | env var `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS`, clamped [0, 8] |
+| `snapshotIntervalEma` | 1/128 s init | single-pole `(3*ema + interval)/4` per apply |
 
-- **No connect event:** When a client connects, the server assigns a client ID
-  and adds it to the connection list, but there is no event dispatched to the
-  game layer. `ServerGame::initNewPlayer()` is not called. The game only
-  becomes aware of a client when it first sends an `InputSnapshot` -- but if
-  there is no entity mapped to that `clientId`, the `eventHandler` silently
-  drops the event.
+`InterpolationBuffer` is an 8-sample ring per non-local entity. Samples are appended at every snapshot-apply with `captureNs = SDL_GetTicksNS()`.
 
-- **No disconnect event:** When a client socket errors, the server removes the
-  connection from `clients` but does not notify `ServerGame`. The player entity
-  remains in the registry with its last known state.
+`sample()` lookup:
 
-- **No graceful disconnect:** There is no disconnect packet or handshake.
-  Disconnection is detected only by TCP socket read failure.
+- `renderTime ≤ oldest` → snap to oldest
+- `renderTime ≥ newest` → **freeze** (no extrapolation — Source-engine policy)
+- otherwise: bracket scan, lerp continuous fields, snap discrete fields (e.g. `grounded`, `moveMode`, `wallRunSide`) to the older sample, lerp anim ratio when clips match else snap
 
-- **No client-side disconnect handling:** `Client::poll()` does not check the
-  return value of `msgStream.poll()`. If the server drops, the client has no
-  mechanism to detect it or reconnect.
+`applyInterpolatedTransforms` writes interpolated values back into `Position`, `InputSnapshot.yaw/pitch`, `Velocity`, `PlayerVisState`, `AnimSnapshot`. Everything visual (renderer, tracers, ribbons, smoke, beams, sfx) reads from `pos.value` directly, so a single overwrite covers them all.
 
-- **Client ID overflow:** `nextClientId` is `uint8_t`, so it wraps after 255
-  connections. If client IDs are reused while old entities still exist in the
-  registry, the mapping will collide.
+---
+
+## 9. Lag compensation
+
+```mermaid
+sequenceDiagram
+  participant Tick as ServerGame::iterate
+  participant Anim as updateHitboxes
+  participant Hist as HitboxHistory[64]
+  participant Wpn as WeaponSystem
+  participant Guard as RewindHitboxesGuard
+
+  Tick->>Anim: rebuild capsules from AnimSnapshot
+  Tick->>Hist: pushHitboxHistory(serverTick)<br/>head = (head+1) % 64
+  Tick->>Wpn: handleFire(...)
+  Wpn->>Wpn: read shooter.LagCompTarget
+  Wpn->>Guard: rewindHitboxes(reg, shooter, ray*)
+  loop per entity with HitboxInstance + HitboxHistory
+    Guard->>Guard: motion-extruded AABB ray test (broad)
+    Guard->>Guard: linear scan for largest tick ≤ target
+    Guard->>Guard: std::move live capsules into saved_<br/>copy historical capsules into inst
+  end
+  Wpn->>Wpn: raycast against rewound capsules
+  Note over Guard: destructor restores live capsules
+```
+
+**Rewind target** (`ServerGame.cpp:881-979`):
+
+```
+rttTicks         = (rttMs * 128 + 500) / 1000
+interpDelayTicks = interpDelaySnapshots * snapshotEveryNTicks
+lagTicks         = min(rttTicks + interpDelayTicks, 64)
+targetTick       = (lagTicks == 0 || lagTicks >= currentServerTick) ? 0 : currentServerTick - lagTicks
+```
+
+Note: it is **full RTT**, not RTT/2. The client renders enemies at `most_recent_snapshot_apply − cl_interp`, not at `serverNow − cl_interp`, so the server compensates for both legs.
+
+Per-entity history depth: 64 samples × ~12 capsules × 24 B ≈ **18 KB/entity**.
+
+`RewindHitboxesGuard` is move-only RAII. Its destructor moves the saved capsules back into the live `HitboxInstance` regardless of how the raycast scope exits.
+
+---
+
+## 10. Reliable channel
+
+There is no ACK/retransmit. Instead, every reliable event is sent **`k_reliableRedundancy = 3` times across consecutive network cycles**:
+
+- Each event gets a per-client `reliableNextSequence++` and joins the client's `reliableQueue`.
+- Per cycle, the loop pushes each pending event once and decrements `remainingSends`.
+- Client dedups via a **64-bit sliding-window bitmask** keyed on sequence (`acceptReliableSequence`). Handles 16-bit wrap with Glenn-Fiedler semantics.
+
+Used by: `KILL_EVENT`, `PARTICLE_SPAWN`, `MATCH_STATE`, `SHOT_DEBUG_REPORT`.
+
+When a client has no UDP address yet, reliable events fall back to TCP via `OutboundQueue` with `replaceKey = type` for replace-on-stale.
+
+---
+
+## 11. Configuration
+
+`config.template.toml` keys:
+
+| Section | Key | Default | Note |
+|---|---|---|---|
+| `[client-network]` | `host`, `port` | `127.0.0.1`, `9999` | |
+| `[server-network]` | `host`, `port` | `0.0.0.0`, `9999` | |
+| `[server-replication]` | `snapshotHz` | **128** | Clamped to [1, 256] |
+| `[transport]` | `enableUdpSidecar` | `true` | |
+| `[transport]` | `inputsOverUdp` | `true` | |
+| `[transport]` | `pingOverUdp` | `true` | |
+| `[transport]` | `snapshotsOverUdp` | `true` | |
+| `[transport]` | `eventsOverUdp` | `true` | |
+
+⚠ `ServerGame::init` defaults `snapshotHz` to **32** in its signature. The runtime path always passes the TOML-derived value, but the default mismatch is a footgun for test harnesses (see *potential-issues*).
+
+---
+
+## 12. Threading
+
+| Side | Game thread | Network thread | Sync |
+|---|---|---|---|
+| **Server** | 128 Hz; owns ECS, drains `EventQueue`, calls `broadcastRegistry` | ~1 kHz; owns sockets, `acceptClients`, `readClients`, UDP recv, snapshot fanout, `flushAllOutbound`, reliable drain | `std::shared_mutex stateMutex_` — most reads on shared lock, structural changes on unique |
+| **Client** | per-frame; owns ECS, calls `client.poll`, runs sim+prediction+reconcile | ~1 kHz; owns sockets, `pumpReads`, drain outbound, UDP recv + reassembly | `std::mutex stateMutex_` — protects `outbound_`, `udpRecvQueue_`, latency sim |
+
+**Receive happens before simulation** on both sides. The network thread fills queues continuously; the game thread drains at the top of each tick.
+
+**The ECS registry is never touched by the network thread.** All registry mutations go through `EventQueue` (server) or `udpRecvQueue_` + `dispatchMessage` (client).
+
+---
+
+## 13. Key files
+
+| File | Role |
+|---|---|
+| `src/network/transport/PacketHeader.hpp` | Wire header, magic, version, channel/flags |
+| `src/network/transport/UdpEndpoint.cpp` | UDP send/recv, fragmentation |
+| `src/network/transport/FragmentReassembler.hpp` | Per-connection reassembly |
+| `src/network/MessageStream.cpp` | TCP length-prefixed framing |
+| `src/network/OutboundQueue.cpp` | Per-client send queue with replace-on-stale |
+| `src/network/PacketType.hpp` | Full packet enum |
+| `src/network/NetworkConfig.cpp` | TOML-driven rates / flags |
+| `src/network/RegistrySerialization.cpp` | Synced tuple + RLE delta codec |
+| `src/server/network/Server.cpp` | Accept, snapshot fanout, lag-comp orchestration |
+| `src/server/systems/HitboxHistorySystem.cpp` | Ring of capsule poses per entity |
+| `src/server/systems/EventQueue.cpp` | Network→game crossing |
+| `src/server/game/ServerGame.cpp:881-979` | Lag-comp target tick formula |
+| `src/client/network/Client.cpp` | Symmetric client side |
+| `src/client/network/EntityInterpolation.cpp` | 8-sample ring + bracketed lerp |
+| `src/client/systems/PredictionSystem.hpp` | `runMovement + runCollision` for local player |
+| `src/client/systems/ReconciliationSystem.hpp` | Replay from acked tick |
+| `src/client/systems/InputRingBuffer.hpp` | 256-tick history for replay |
+| `src/ecs/systems/LagCompensation.hpp` | RAII rewind guard |

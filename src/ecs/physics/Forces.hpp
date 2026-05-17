@@ -41,13 +41,11 @@ void applyForce(Registry& registry, entt::entity entity, glm::vec3 force) noexce
 /// RigidBody (no rotation yet).
 ///
 /// @param worldPoint  World-space point where the impulse is applied.
-void applyImpulseAtPoint(
-    Registry& registry, entt::entity entity, glm::vec3 impulse, glm::vec3 worldPoint) noexcept;
+void applyImpulseAtPoint(Registry& registry, entt::entity entity, glm::vec3 impulse, glm::vec3 worldPoint) noexcept;
 
 /// @brief Apply an off-centre continuous force.  Same semantics as
 /// `applyImpulseAtPoint` but as a force, integrated by `dt`.
-void applyForceAtPoint(
-    Registry& registry, entt::entity entity, glm::vec3 force, glm::vec3 worldPoint) noexcept;
+void applyForceAtPoint(Registry& registry, entt::entity entity, glm::vec3 force, glm::vec3 worldPoint) noexcept;
 
 /// @brief Apply a torque (Phase 7).  No-op for entities without a RigidBody.
 void applyTorque(Registry& registry, entt::entity entity, glm::vec3 torque) noexcept;

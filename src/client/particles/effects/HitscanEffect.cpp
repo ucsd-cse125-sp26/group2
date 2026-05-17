@@ -350,8 +350,9 @@ void HitscanEffect::update(float dt, glm::vec3 camForward)
             const auto& br = beam.branches[b];
 
             // Root point: sample main arc at tStart, then the branch tip
-            const int rootIdx = static_cast<int>(br.tStart * static_cast<float>(k_bezierSegs) + 0.5f);
-            const glm::vec3 root = mainPts[std::min(rootIdx, k_bezierSegs)];
+            const int rootIdx =
+                std::clamp(static_cast<int>(br.tStart * static_cast<float>(k_bezierSegs) + 0.5f), 0, k_bezierSegs);
+            const glm::vec3 root = mainPts[static_cast<size_t>(rootIdx)];
 
             // Tangent at tStart -- the branch diverges from the main bolt direction
             const glm::vec3 tang = evalBezierTangent(beam.origin, cp1, cp2, beam.hitPos, br.tStart);

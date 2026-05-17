@@ -165,11 +165,11 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
     const size_t vertexBufferSize = mesh.vertexData_.size() * sizeof(Vertex);
     const size_t indexBufferSize = mesh.indexData_.size() * sizeof(Uint32);
 
-    mesh.vBufferInfo_.bufferSize = vertexBufferSize;
+    mesh.vBufferInfo_.bufferSize = static_cast<Uint32>(vertexBufferSize);
     mesh.vBufferInfo_.gpuBuff = Boilerplate::createBuffer(device_, vertexBufferSize, SDL_GPU_BUFFERUSAGE_VERTEX);
     mesh.vBufferInfo_.srcData = mesh.vertexData_.data();
 
-    mesh.iBufferInfo_.bufferSize = indexBufferSize;
+    mesh.iBufferInfo_.bufferSize = static_cast<Uint32>(indexBufferSize);
     mesh.iBufferInfo_.gpuBuff = Boilerplate::createBuffer(device_, indexBufferSize, SDL_GPU_BUFFERUSAGE_INDEX);
     mesh.iBufferInfo_.srcData = mesh.indexData_.data();
 }
@@ -272,7 +272,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     if (weapon_.modelIndex < 0 || static_cast<size_t>(weapon_.modelIndex) >= Asset::modelInstances_.size())
         return;
 
-    Asset::ModelInstance& weaponModelInstance = Asset::modelInstances_.at(weapon_.modelIndex);
+    Asset::ModelInstance& weaponModelInstance = Asset::modelInstances_.at(static_cast<size_t>(weapon_.modelIndex));
     ModelIdInt weaponModelId = weaponModelInstance.modelId_;
 
     if (!Asset::models_.contains(weaponModelId)) {
@@ -301,7 +301,7 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
         }
         if (static_cast<size_t>(entityCmd.modelIndex) >= Asset::modelInstances_.size())
             continue;
-        ModelIdInt modelId = Asset::modelInstances_.at(entityCmd.modelIndex).modelId_;
+        ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(entityCmd.modelIndex)).modelId_;
         // TODO(graphics): pass entityCmd.tint into the per-mesh material UBO
         // so tinted entities (e.g. team colors, hit flashes) render correctly.
         drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
@@ -522,10 +522,8 @@ int NewRenderer::loadSceneModel(
 
         Asset::Texture& tex = Asset::textures_.at(texId);
         if (tex.tex == nullptr && tex.tex_raw != nullptr && tex.width > 0 && tex.height > 0) {
-            tex.tex = Boilerplate::createTextureRGBA8(device_,
-                                                     static_cast<Uint32>(tex.width),
-                                                     static_cast<Uint32>(tex.height),
-                                                     tex.tex_raw);
+            tex.tex = Boilerplate::createTextureRGBA8(
+                device_, static_cast<Uint32>(tex.width), static_cast<Uint32>(tex.height), tex.tex_raw);
             stbi_image_free(tex.tex_raw);
             tex.tex_raw = nullptr;
         }
@@ -582,7 +580,7 @@ void NewRenderer::setModelScenePass(int32_t modelIndex, bool drawInScene)
 {
     if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= Asset::modelInstances_.size())
         return;
-    Asset::modelInstances_.at(modelIndex).drawInScenePass = drawInScene;
+    Asset::modelInstances_.at(static_cast<size_t>(modelIndex)).drawInScenePass = drawInScene;
 }
 
 void NewRenderer::setParticleSystem(ParticleSystem* ps)

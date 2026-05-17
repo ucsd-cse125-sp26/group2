@@ -73,6 +73,27 @@ void drawArrow(ImDrawList* dl, ImVec2 start, ImVec2 end, ImU32 color, float thic
         color);
 }
 
+const char* weaponTypeName(WeaponType type)
+{
+    switch (type) {
+    case WeaponType::Rifle:
+        return "Rifle";
+    case WeaponType::Rocket:
+        return "Rocket";
+    case WeaponType::RailGun:
+        return "RailGun";
+    case WeaponType::EnergyGun:
+        return "EnergyGun";
+    case WeaponType::HEGrenade:
+        return "HEGrenade";
+    case WeaponType::Molotov:
+        return "Molotov";
+    case WeaponType::Impulse:
+        return "Impulse";
+    }
+    return "Unknown";
+}
+
 } // namespace
 
 // DebugUI methods
@@ -1111,21 +1132,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     const WeaponState& weapon = registry.get<WeaponState>(localPlayer);
     const GunInstance& gun = getEquippedGun(weapon);
 
-    const char* currentGunName = "?";
-    switch (gun.type) {
-    case WeaponType::Rifle:
-        currentGunName = "Rifle";
-        break;
-    case WeaponType::Rocket:
-        currentGunName = "Rocket";
-        break;
-    case WeaponType::RailGun:
-        currentGunName = "RailGun";
-        break;
-    case WeaponType::EnergyGun:
-        currentGunName = "EnergyGun (Beam)";
-        break;
-    }
+    const char* currentGunName = weaponTypeName(gun.type);
 
     ImGui::SeparatorText("Weapon");
     ImGui::Text("Current: %s", currentGunName);
@@ -1724,19 +1731,32 @@ ImU32 contactSourceColor(physics::debug::ContactSource src)
 {
     using Src = physics::debug::ContactSource;
     switch (src) {
-    case Src::PlaneSweep:    return IM_COL32(120, 220, 255, 230);
-    case Src::BoxSweep:      return IM_COL32(50, 150, 255, 230);
-    case Src::BrushSweep:    return IM_COL32(60, 240, 90, 230);
-    case Src::CylinderSweep: return IM_COL32(255, 200, 80, 230);
-    case Src::SphereSweep:   return IM_COL32(255, 110, 200, 230);
-    case Src::TriMeshSweep:  return IM_COL32(210, 80, 255, 230);
-    case Src::PlaneDepen:    return IM_COL32(255, 90, 90, 230);
-    case Src::BoxDepen:      return IM_COL32(255, 130, 60, 230);
-    case Src::BrushDepen:    return IM_COL32(255, 220, 50, 230);
-    case Src::CylinderDepen: return IM_COL32(255, 90, 40, 230);
-    case Src::SphereDepen:   return IM_COL32(255, 50, 130, 230);
-    case Src::TriMeshDepen:  return IM_COL32(255, 50, 50, 230);
-    case Src::Count: break;
+    case Src::PlaneSweep:
+        return IM_COL32(120, 220, 255, 230);
+    case Src::BoxSweep:
+        return IM_COL32(50, 150, 255, 230);
+    case Src::BrushSweep:
+        return IM_COL32(60, 240, 90, 230);
+    case Src::CylinderSweep:
+        return IM_COL32(255, 200, 80, 230);
+    case Src::SphereSweep:
+        return IM_COL32(255, 110, 200, 230);
+    case Src::TriMeshSweep:
+        return IM_COL32(210, 80, 255, 230);
+    case Src::PlaneDepen:
+        return IM_COL32(255, 90, 90, 230);
+    case Src::BoxDepen:
+        return IM_COL32(255, 130, 60, 230);
+    case Src::BrushDepen:
+        return IM_COL32(255, 220, 50, 230);
+    case Src::CylinderDepen:
+        return IM_COL32(255, 90, 40, 230);
+    case Src::SphereDepen:
+        return IM_COL32(255, 50, 130, 230);
+    case Src::TriMeshDepen:
+        return IM_COL32(255, 50, 50, 230);
+    case Src::Count:
+        break;
     }
     return IM_COL32(255, 255, 255, 220);
 }
@@ -1746,19 +1766,32 @@ bool contactSourceVisible(const DebugUI& ui, physics::debug::ContactSource src)
 {
     using Src = physics::debug::ContactSource;
     switch (src) {
-    case Src::PlaneSweep:    return ui.drawContactPlaneSweep;
-    case Src::BoxSweep:      return ui.drawContactBoxSweep;
-    case Src::BrushSweep:    return ui.drawContactBrushSweep;
-    case Src::CylinderSweep: return ui.drawContactCylinderSweep;
-    case Src::SphereSweep:   return ui.drawContactSphereSweep;
-    case Src::TriMeshSweep:  return ui.drawContactTriMeshSweep;
-    case Src::PlaneDepen:    return ui.drawContactPlaneDepen;
-    case Src::BoxDepen:      return ui.drawContactBoxDepen;
-    case Src::BrushDepen:    return ui.drawContactBrushDepen;
-    case Src::CylinderDepen: return ui.drawContactCylinderDepen;
-    case Src::SphereDepen:   return ui.drawContactSphereDepen;
-    case Src::TriMeshDepen:  return ui.drawContactTriMeshDepen;
-    case Src::Count: break;
+    case Src::PlaneSweep:
+        return ui.drawContactPlaneSweep;
+    case Src::BoxSweep:
+        return ui.drawContactBoxSweep;
+    case Src::BrushSweep:
+        return ui.drawContactBrushSweep;
+    case Src::CylinderSweep:
+        return ui.drawContactCylinderSweep;
+    case Src::SphereSweep:
+        return ui.drawContactSphereSweep;
+    case Src::TriMeshSweep:
+        return ui.drawContactTriMeshSweep;
+    case Src::PlaneDepen:
+        return ui.drawContactPlaneDepen;
+    case Src::BoxDepen:
+        return ui.drawContactBoxDepen;
+    case Src::BrushDepen:
+        return ui.drawContactBrushDepen;
+    case Src::CylinderDepen:
+        return ui.drawContactCylinderDepen;
+    case Src::SphereDepen:
+        return ui.drawContactSphereDepen;
+    case Src::TriMeshDepen:
+        return ui.drawContactTriMeshDepen;
+    case Src::Count:
+        break;
     }
     return true;
 }
@@ -1798,10 +1831,8 @@ void drawArrow(ImDrawList* dl,
     // Two perpendicular offsets for the head wings.
     const float px = -uy;
     const float py = ux;
-    const ImVec2 wingA{sTip.x - ux * headLen + px * headLen * 0.5f,
-                       sTip.y - uy * headLen + py * headLen * 0.5f};
-    const ImVec2 wingB{sTip.x - ux * headLen - px * headLen * 0.5f,
-                       sTip.y - uy * headLen - py * headLen * 0.5f};
+    const ImVec2 wingA{sTip.x - ux * headLen + px * headLen * 0.5f, sTip.y - uy * headLen + py * headLen * 0.5f};
+    const ImVec2 wingB{sTip.x - ux * headLen - px * headLen * 0.5f, sTip.y - uy * headLen - py * headLen * 0.5f};
     dl->AddLine(sTip, wingA, color, thickness);
     dl->AddLine(sTip, wingB, color, thickness);
 }
@@ -1821,19 +1852,32 @@ const char* contactSourceLabel(physics::debug::ContactSource src)
 {
     using Src = physics::debug::ContactSource;
     switch (src) {
-    case Src::PlaneSweep:    return "Plane sweep";
-    case Src::BoxSweep:      return "Box sweep";
-    case Src::BrushSweep:    return "Brush sweep";
-    case Src::CylinderSweep: return "Cylinder sweep";
-    case Src::SphereSweep:   return "Sphere sweep";
-    case Src::TriMeshSweep:  return "TriMesh sweep";
-    case Src::PlaneDepen:    return "Plane depen";
-    case Src::BoxDepen:      return "Box depen";
-    case Src::BrushDepen:    return "Brush depen";
-    case Src::CylinderDepen: return "Cylinder depen";
-    case Src::SphereDepen:   return "Sphere depen";
-    case Src::TriMeshDepen:  return "TriMesh depen";
-    case Src::Count: break;
+    case Src::PlaneSweep:
+        return "Plane sweep";
+    case Src::BoxSweep:
+        return "Box sweep";
+    case Src::BrushSweep:
+        return "Brush sweep";
+    case Src::CylinderSweep:
+        return "Cylinder sweep";
+    case Src::SphereSweep:
+        return "Sphere sweep";
+    case Src::TriMeshSweep:
+        return "TriMesh sweep";
+    case Src::PlaneDepen:
+        return "Plane depen";
+    case Src::BoxDepen:
+        return "Box depen";
+    case Src::BrushDepen:
+        return "Brush depen";
+    case Src::CylinderDepen:
+        return "Cylinder depen";
+    case Src::SphereDepen:
+        return "Sphere depen";
+    case Src::TriMeshDepen:
+        return "TriMesh depen";
+    case Src::Count:
+        break;
     }
     return "?";
 }
@@ -1900,10 +1944,18 @@ void DebugUI::buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, 
                 physics::debug::ContactSource::TriMeshDepen,
             };
             bool* toggles[] = {
-                &drawContactPlaneSweep, &drawContactBoxSweep, &drawContactBrushSweep,
-                &drawContactCylinderSweep, &drawContactSphereSweep, &drawContactTriMeshSweep,
-                &drawContactPlaneDepen, &drawContactBoxDepen, &drawContactBrushDepen,
-                &drawContactCylinderDepen, &drawContactSphereDepen, &drawContactTriMeshDepen,
+                &drawContactPlaneSweep,
+                &drawContactBoxSweep,
+                &drawContactBrushSweep,
+                &drawContactCylinderSweep,
+                &drawContactSphereSweep,
+                &drawContactTriMeshSweep,
+                &drawContactPlaneDepen,
+                &drawContactBoxDepen,
+                &drawContactBrushDepen,
+                &drawContactCylinderDepen,
+                &drawContactSphereDepen,
+                &drawContactTriMeshDepen,
             };
             int sIdx = 0;
             for (physics::debug::ContactSource s : sources) {
@@ -1966,12 +2018,9 @@ void DebugUI::buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, 
                     drawWorldLine(dl, v2, v0, viewProj, screenWidth, screenHeight, (e & 4u) ? active : welded, 1.5f);
                 }
                 if (drawMeshVertexOverlay) {
-                    drawPointMarker(
-                        dl, v0, viewProj, screenWidth, screenHeight, (vMask & 1u) ? active : welded, 3.0f);
-                    drawPointMarker(
-                        dl, v1, viewProj, screenWidth, screenHeight, (vMask & 2u) ? active : welded, 3.0f);
-                    drawPointMarker(
-                        dl, v2, viewProj, screenWidth, screenHeight, (vMask & 4u) ? active : welded, 3.0f);
+                    drawPointMarker(dl, v0, viewProj, screenWidth, screenHeight, (vMask & 1u) ? active : welded, 3.0f);
+                    drawPointMarker(dl, v1, viewProj, screenWidth, screenHeight, (vMask & 2u) ? active : welded, 3.0f);
+                    drawPointMarker(dl, v2, viewProj, screenWidth, screenHeight, (vMask & 4u) ? active : welded, 3.0f);
                 }
             }
         }
@@ -2014,33 +2063,22 @@ void DebugUI::buildWeaponSpawnerUI(const Registry& registry,
                 const auto& pos = spawnerView.get<Position>(e);
                 const auto& shape = spawnerView.get<CollisionShape>(e);
 
-                const char* typeName = "Unknown";
-                switch (spawner.type) {
-                case WeaponType::Rifle:
-                    typeName = "Rifle";
-                    break;
-                case WeaponType::Rocket:
-                    typeName = "Rocket";
-                    break;
-                case WeaponType::RailGun:
-                    typeName = "RailGun";
-                    break;
-                case WeaponType::EnergyGun:
-                    typeName = "EnergyGun";
-                    break;
-                }
+                const char* typeName = weaponTypeName(spawner.type);
 
                 char label[64];
                 std::snprintf(label, sizeof(label), "Spawner #%d (%s)", idx, typeName);
                 if (ImGui::TreeNode(label)) {
-                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)",
+                                static_cast<double>(pos.value.x),
+                                static_cast<double>(pos.value.y),
+                                static_cast<double>(pos.value.z));
                     ImGui::Text("Box half-extents: (%.0f, %.0f, %.0f)",
-                                shape.halfExtents.x,
-                                shape.halfExtents.y,
-                                shape.halfExtents.z);
+                                static_cast<double>(shape.halfExtents.x),
+                                static_cast<double>(shape.halfExtents.y),
+                                static_cast<double>(shape.halfExtents.z));
                     ImGui::Text("Has weapon: %s", spawner.hasWeapon ? "YES" : "no");
                     if (!spawner.hasWeapon)
-                        ImGui::Text("Cooldown: %.1fs", spawner.spawnCooldown);
+                        ImGui::Text("Cooldown: %.1fs", static_cast<double>(spawner.spawnCooldown));
                     ImGui::TreePop();
                 }
                 ++idx;
@@ -2105,21 +2143,7 @@ void DebugUI::buildWeaponSpawnerUI(const Registry& registry,
             dl->AddCircle(sp, k_crossLen, markerColor, 12, 1.5f);
 
             // Label with weapon type name.
-            const char* typeName = "?";
-            switch (spawner.type) {
-            case WeaponType::Rifle:
-                typeName = "Rifle";
-                break;
-            case WeaponType::Rocket:
-                typeName = "Rocket";
-                break;
-            case WeaponType::RailGun:
-                typeName = "RailGun";
-                break;
-            case WeaponType::EnergyGun:
-                typeName = "EnergyGun";
-                break;
-            }
+            const char* typeName = weaponTypeName(spawner.type);
             dl->AddText({sp.x + k_crossLen + 4.0f, sp.y - 6.0f}, markerColor, typeName);
         }
     }
@@ -2163,11 +2187,15 @@ void DebugUI::buildSpawnPointUI(const Registry& registry,
                 char label[64];
                 std::snprintf(label, sizeof(label), "Spawn #%d", idx);
                 if (ImGui::TreeNode(label)) {
-                    ImGui::Text("Position: (%.0f, %.0f, %.0f)", pos.value.x, pos.value.y, pos.value.z);
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)",
+                                static_cast<double>(pos.value.x),
+                                static_cast<double>(pos.value.y),
+                                static_cast<double>(pos.value.z));
                     if (sp.available) {
                         ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Available");
                     } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "Cooldown: %.1fs", sp.cooldown);
+                        ImGui::TextColored(
+                            ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "Cooldown: %.1fs", static_cast<double>(sp.cooldown));
                     }
                     ImGui::TreePop();
                 }
@@ -2215,7 +2243,7 @@ void DebugUI::buildSpawnPointUI(const Registry& registry,
             if (sp.available) {
                 std::snprintf(text, sizeof(text), "Spawn #%d", idx);
             } else {
-                std::snprintf(text, sizeof(text), "Spawn #%d (%.1fs)", idx, sp.cooldown);
+                std::snprintf(text, sizeof(text), "Spawn #%d (%.1fs)", idx, static_cast<double>(sp.cooldown));
             }
             dl->AddText({center.x + k_size + 4.0f, center.y - 6.0f}, IM_COL32(255, 255, 255, 220), text);
         }
@@ -2242,7 +2270,8 @@ int findShotPairByTick(const std::array<DebugUI::ShotDebugPair, DebugUI::k_shotR
 {
     const int n = std::min(liveCount, DebugUI::k_shotRingMax);
     for (int i = 0; i < n; ++i) {
-        if (ring[i].shotInputTick == tick && (ring[i].hasClient || ring[i].hasServer))
+        const auto& pair = ring[static_cast<size_t>(i)];
+        if (pair.shotInputTick == tick && (pair.hasClient || pair.hasServer))
             return i;
     }
     return -1;
@@ -2378,14 +2407,14 @@ void DebugUI::pushClientShot(const net::shotdebug::ShotDebugCapture& cap)
     if (idx < 0) {
         // New entry — claim the head slot, advance.
         idx = shotRingHead;
-        shotRing[idx] = {};
-        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRing[static_cast<size_t>(idx)] = {};
+        shotRing[static_cast<size_t>(idx)].shotInputTick = cap.shotInputTick;
         shotRingHead = (shotRingHead + 1) % k_shotRingMax;
         if (shotRingCount < k_shotRingMax)
             ++shotRingCount;
     }
-    shotRing[idx].clientView = cap;
-    shotRing[idx].hasClient = true;
+    shotRing[static_cast<size_t>(idx)].clientView = cap;
+    shotRing[static_cast<size_t>(idx)].hasClient = true;
 }
 
 void DebugUI::pushServerShot(const net::shotdebug::ShotDebugCapture& cap)
@@ -2393,14 +2422,14 @@ void DebugUI::pushServerShot(const net::shotdebug::ShotDebugCapture& cap)
     int idx = findShotPairByTick(shotRing, shotRingCount, cap.shotInputTick);
     if (idx < 0) {
         idx = shotRingHead;
-        shotRing[idx] = {};
-        shotRing[idx].shotInputTick = cap.shotInputTick;
+        shotRing[static_cast<size_t>(idx)] = {};
+        shotRing[static_cast<size_t>(idx)].shotInputTick = cap.shotInputTick;
         shotRingHead = (shotRingHead + 1) % k_shotRingMax;
         if (shotRingCount < k_shotRingMax)
             ++shotRingCount;
     }
-    shotRing[idx].serverView = cap;
-    shotRing[idx].hasServer = true;
+    shotRing[static_cast<size_t>(idx)].serverView = cap;
+    shotRing[static_cast<size_t>(idx)].hasServer = true;
 }
 
 void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, float screenHeight)
@@ -2437,7 +2466,7 @@ void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, flo
                 const int show = std::min(shotRingCount, shotDebugVisibleCount);
                 for (int i = 0; i < show; ++i) {
                     const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
-                    const auto& p = shotRing[idx];
+                    const auto& p = shotRing[static_cast<size_t>(idx)];
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
                     ImGui::Text("%d", i + 1);
@@ -2477,7 +2506,7 @@ void DebugUI::buildShotDebugUI(const glm::mat4& viewProj, float screenWidth, flo
     const bool showServer = (shotDebugViewMode == 0 || shotDebugViewMode == 2);
     for (int i = 0; i < show; ++i) {
         const int idx = (shotRingHead + k_shotRingMax - 1 - i) % k_shotRingMax;
-        const auto& p = shotRing[idx];
+        const auto& p = shotRing[static_cast<size_t>(idx)];
 
         // Dim non-highlighted shots so the user can pick out the
         // selected one without losing context of recent ones.

@@ -39,6 +39,7 @@
 #include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/DebugCollisionDraw.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
@@ -189,6 +190,9 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         countdownTimer = latestMatchState->countdownTimer;
     }
 
+    physics::diag::setEnabled(true);
+    SDL_Log("[client] physics diagnostic ENABLED - writing phase-diag-*.csv and movement-diag-*.csv");
+
     // Particle system needs the device + formats from the renderer.
     // colorFmt is the format particles draw into (RGBA16F was the legacy
     // renderer's HDR target); kept here so the particle pipelines compile,
@@ -271,17 +275,9 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         const char* base = SDL_GetBasePath();
         const std::string basePath = base ? base : "";
 
-        // Helper: load a prop with render + collision in one call.
-        // `def.decomposeCollision = true` runs V-HACD on each non-convex sub-mesh
-        // so organic/detailed shapes (a bottle, a metallic pallet) end up as a
-        // handful of `WorldBrush`es instead of a giant triangle mesh.  Costs
-        // a few seconds of load time per prop but kills triMesh edge-jitter.
-        //
-        // PR-30: V-HACD is gated on `gamemap::k_useVhacd` (single source of
-        // truth in `ecs/MapConfig.hpp`) so the team can disable it for
-        // map-iteration runs without editing per-call-site flags.  When
-        // `k_useVhacd == false`, non-convex props fall back to triMesh —
-        // correct, just visibly jittery on curved contacts.
+        // Helper: load a prop with render + collision in one call. Non-convex
+        // props fall back to triMesh in normal builds. Legacy V-HACD only runs
+        // when both the asset/config opt in and CMake enables GROUP2_ENABLE_VHACD.
         auto loadProp = [&](const AssetDefinition& def) {
             const int id = addAssetDefinition(assets_, def);
             const int modelIdx =
@@ -305,7 +301,6 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         // Update the active world with the new collision data (map + all props).
         physics::setActiveWorld(mapCollision_.geometry());
     }
-
 
     // Load all weapon models (per WeaponType)
     {
@@ -1630,12 +1625,7 @@ SDL_AppResult Game::iterate()
     // Grapple cable visual
     registry.view<LocalPlayer, PlayerVisState>().each([&](const PlayerVisState& pstate) {
         if (pstate.grappleActive) {
-            // Draw cable from player hand to hook point every frame.
-            const float cosPi = std::cos(renderPitch);
-            const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
-            const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
-            const float gSign = pstate.gravityFlipped ? -1.0f : 1.0f;
-            const glm::vec3 hand = renderEye + right * (gSign * 15.f) - glm::vec3{0, 1, 0} * (gSign * 8.f) + fwd * 5.f;
+            (void)pstate;
             // particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
         }
     });
@@ -2262,12 +2252,6 @@ SDL_AppResult Game::iterate()
 
         renderer->setEntityRenderList(std::move(entityCmds));
         /////////////////////////////////////////// Entity Render List ///////////////////////////////////////////
-
-
-
-
-
-
 
         ////////////////////////////////////// Point Lights ///////////////////////////////////////////
         // Build dynamic point lights list.
@@ -3457,7 +3441,7 @@ void Game::refreshRemotePlayerRenderables()
 void Game::refreshRemoteProjectileRenderables()
 {
     registry.view<Position, Projectile, Velocity, CollisionShape>().each(
-        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& shape) {
+        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& /*shape*/) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             rend.modelIndex = rocketProjectileModelIdx_;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);

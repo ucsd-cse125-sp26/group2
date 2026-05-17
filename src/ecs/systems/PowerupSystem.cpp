@@ -44,7 +44,6 @@ void runPowerups(Registry& registry, float dt)
 {
     auto view = registry.view<Player, PowerupState>();
     view.each([&](PowerupState& powerups) {
-
         for (ActivePowerup powerup : powerups.active) {
             powerup.timeRemaining -= dt;
             if (powerup.timeRemaining <= 0) {

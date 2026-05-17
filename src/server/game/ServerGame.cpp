@@ -32,25 +32,25 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/CollisionEvents.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
+#include "ecs/physics/Sleep.hpp"
+#include "ecs/physics/Solver.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/DroppedWeaponSystem.hpp"
+#include "ecs/systems/DynamicsSystem.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
-#include "ecs/physics/CollisionEvents.hpp"
-#include "ecs/physics/PhaseDiagnostic.hpp"
-#include "ecs/physics/Sleep.hpp"
-#include "ecs/physics/Solver.hpp"
-#include "ecs/systems/DynamicsSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
-#include "ecs/systems/RagdollSystem.hpp"
-#include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
+#include "ecs/systems/RagdollSystem.hpp"
+#include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/PacketType.hpp"
@@ -92,7 +92,7 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     // Writes phase-diag-<timestamp>.csv next to the server binary; flip off
     // with `--no-phase-diag` once the bug is fixed (TODO: CLI plumb).
     physics::diag::setEnabled(true);
-    SDL_Log("[server] phase-through diagnostic ENABLED — writing phase-diag-*.csv");
+    SDL_Log("[server] physics diagnostic ENABLED - writing phase-diag-*.csv and movement-diag-*.csv");
 
     clientEntities.clear(); // For safety
     registry.clear();
@@ -113,15 +113,9 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
         gamemap::loadConfiguredMap(mapCollision_, "server");
 
         // Load prop collision — must match client for prediction parity.
-        // Props with `decomposeCollision = true` (pallet, bottle) are non-convex,
-        // so V-HACD turns each sub-mesh into a few `WorldBrush`es instead of a
-        // `WorldTriMesh`.  Server pays a one-shot startup cost but runtime
-        // collision is much smoother (no per-triangle jitter).
-        //
-        // PR-30: gated on `gamemap::k_useVhacd` so the team can flip the
-        // behaviour project-wide from `ecs/MapConfig.hpp` without editing
-        // per-call-site flags.  Must AND with the per-asset
-        // `decomposeCollision` flag — both must agree before V-HACD runs.
+        // Non-convex props fall back to triMesh in normal builds. Legacy V-HACD
+        // only runs when both the asset/config opt in and CMake enables
+        // GROUP2_ENABLE_VHACD.
         const char* const base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
         for (const AssetDefinition& def : kPropAssets) {
@@ -159,38 +153,35 @@ void ServerGame::run()
     Uint64 nextTick = SDL_GetPerformanceCounter();
 
     // Weapon spawners
-    for (int i = 0; i < gamemap::weaponSpawner_.size(); i++) {
-        WeaponType weaponType = gamemap::weaponSpawner_[i].type;
-        glm::vec3 pos = gamemap::weaponSpawner_[i].pos;
-        
+    for (const gamemap::WeaponSpawner& weaponSpawner : gamemap::weaponSpawner_) {
+        WeaponType weaponType = weaponSpawner.type;
+        glm::vec3 pos = weaponSpawner.pos;
+
         const entt::entity spawner = registry.create();
         registry.emplace<WeaponSpawner>(
-            spawner, 
-            WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
-        );
+            spawner,
+            WeaponSpawner{.type = weaponType, .spawnCooldown = systems::weaponCooldownTime, .hasWeapon = true});
         registry.emplace<Position>(spawner, pos);
         registry.emplace<CollisionShape>(spawner);
     }
 
     // Respawn points (with cooldown state)
-    for (int i = 0; i < gamemap::spawnPoints_.size(); i++) {
+    for (const glm::vec3& spawnPos : gamemap::spawnPoints_) {
         const entt::entity spawnPoint = registry.create();
         registry.emplace<RespawnPoint>(spawnPoint, RespawnPoint{});
-        registry.emplace<Position>(spawnPoint, gamemap::spawnPoints_[i]);
+        registry.emplace<Position>(spawnPoint, spawnPos);
     }
 
     // Powerup spawners
-    for (int i = 0; i < gamemap::powerupSpawner_.size(); i++) {
-        PowerupType powerupType = gamemap::powerupSpawner_[i].type;
-        glm::vec3 pos = gamemap::powerupSpawner_[i].pos;
+    for (const gamemap::PowerupSpawner& powerupSpawner : gamemap::powerupSpawner_) {
+        PowerupType powerupType = powerupSpawner.type;
+        glm::vec3 pos = powerupSpawner.pos;
 
         PowerupConfig config = getPowerupConfig(powerupType);
 
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
-            spawner, 
-            PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false}
-        );
+            spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
         registry.emplace<Position>(spawner, pos);
         registry.emplace<CollisionShape>(spawner);
     }

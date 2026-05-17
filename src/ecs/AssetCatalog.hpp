@@ -47,7 +47,6 @@ inline const std::array<AssetDefinition, 2> kPropAssets{{
      .decomposeCollision = true},
 }};
 
-
 inline const AssetDefinition kRocketProjectile{
     .name = "rocket_projectile",
     .filename = "rocket_projectile.glb", // update with rocket projectile asset

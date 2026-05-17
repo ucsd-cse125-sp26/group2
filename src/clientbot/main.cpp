@@ -274,8 +274,8 @@ int main(int argc, char* argv[])
     physics::MapCollisionData mapCollision;
     {
         gamemap::loadConfiguredMap(mapCollision, "clientbot");
-        // PR-30: V-HACD gated on `gamemap::k_useVhacd`.  See the comment
-        // in `MapConfig.hpp` for the rationale.
+        // Non-convex props fall back to triMesh in normal builds. Legacy
+        // V-HACD only runs when MapConfig and CMake both opt in.
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
         for (const AssetDefinition& def : kPropAssets) {
             const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;

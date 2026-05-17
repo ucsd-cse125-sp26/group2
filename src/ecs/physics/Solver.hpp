@@ -23,13 +23,13 @@ namespace physics
 
 struct SolverConfig
 {
-    int positionIterations = 3;        ///< NGS passes to push out residual penetration.
-    int velocityIterations = 8;        ///< PGS passes for impulse solving.
-    float baumgarteScale = 0.2f;       ///< Position-bias factor for Baumgarte stabilisation.
-    float linearSlop = 0.005f;         ///< Allowed penetration before bias activates (units).
-    float maxLinearCorrection = 0.2f;  ///< Cap per-iter NGS push to avoid jitter.
-    float defaultFriction = 0.7f;      ///< Coulomb friction coefficient if not on surface table.
-    float defaultRestitution = 0.0f;   ///< Bounce coefficient.
+    int positionIterations = 3;           ///< NGS passes to push out residual penetration.
+    int velocityIterations = 8;           ///< PGS passes for impulse solving.
+    float baumgarteScale = 0.2f;          ///< Position-bias factor for Baumgarte stabilisation.
+    float linearSlop = 0.005f;            ///< Allowed penetration before bias activates (units).
+    float maxLinearCorrection = 0.2f;     ///< Cap per-iter NGS push to avoid jitter.
+    float defaultFriction = 0.7f;         ///< Coulomb friction coefficient if not on surface table.
+    float defaultRestitution = 0.0f;      ///< Bounce coefficient.
     float velThreshForRestitution = 1.0f; ///< Below this, restitution is suppressed (resting contact).
 };
 

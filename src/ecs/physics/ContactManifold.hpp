@@ -42,12 +42,12 @@ struct ContactFeatureId
 /// @brief One sub-contact in a multi-point manifold.
 struct ContactPoint
 {
-    glm::vec3 worldPositionA{0.0f}; ///< World-space hit point on body A.
-    glm::vec3 worldPositionB{0.0f}; ///< World-space hit point on body B.
-    glm::vec3 localA{0.0f};         ///< Body-A-local offset for warm-start matching.
-    glm::vec3 localB{0.0f};         ///< Body-B-local offset.
-    float depth = 0.0f;             ///< Penetration depth (positive = overlapping).
-    float normalImpulse = 0.0f;     ///< Accumulated normal impulse, carried across frames.
+    glm::vec3 worldPositionA{0.0f};         ///< World-space hit point on body A.
+    glm::vec3 worldPositionB{0.0f};         ///< World-space hit point on body B.
+    glm::vec3 localA{0.0f};                 ///< Body-A-local offset for warm-start matching.
+    glm::vec3 localB{0.0f};                 ///< Body-B-local offset.
+    float depth = 0.0f;                     ///< Penetration depth (positive = overlapping).
+    float normalImpulse = 0.0f;             ///< Accumulated normal impulse, carried across frames.
     float tangentImpulse[2] = {0.0f, 0.0f}; ///< Two friction tangents.
     ContactFeatureId featureId{};
 };

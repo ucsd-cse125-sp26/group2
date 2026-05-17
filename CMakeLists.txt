@@ -24,6 +24,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Doxygen.cmake")
 option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
+option(GROUP2_ENABLE_VHACD "Build legacy V-HACD decomposition support for prototype props" OFF)
 
 # ---- Build acceleration ----
 
@@ -334,20 +335,21 @@ FetchContent_MakeAvailable(minimp3)
 add_library(minimp3 INTERFACE)
 target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
 
-# V-HACD — Volumetric Hierarchical Approximate Convex Decomposition.
-# Header-only library used by MapLoader to split non-convex collision meshes
-# into a small set of convex hulls (WorldBrushes), avoiding triMesh-edge
-# jitter on curved surfaces.  Implementation lives in
-# src/ecs/physics/VHACDImpl.cpp via the ENABLE_VHACD_IMPLEMENTATION define.
-FetchContent_Declare(
-    vhacd
-    GIT_REPOSITORY https://github.com/kmammou/v-hacd.git
-    GIT_TAG        v4.1.0
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(vhacd)
 add_library(vhacd INTERFACE)
-target_include_directories(vhacd SYSTEM INTERFACE ${vhacd_SOURCE_DIR}/include)
+if(GROUP2_ENABLE_VHACD)
+    # V-HACD — legacy opt-in convex decomposition for prototype props.
+    # Production map collision is authored as simplified triangle meshes, so
+    # default builds do not fetch or compile V-HACD.
+    FetchContent_Declare(
+        vhacd_src
+        GIT_REPOSITORY https://github.com/kmammou/v-hacd.git
+        GIT_TAG        v4.1.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(vhacd_src)
+    target_include_directories(vhacd SYSTEM INTERFACE ${vhacd_src_SOURCE_DIR}/include)
+    target_compile_definitions(vhacd INTERFACE GROUP2_ENABLE_VHACD=1)
+endif()
 
 # ozz-animation — runtime skeletal animation (CPU skinning, sampling, blending).
 # We only need the runtime + offline builders; disable all extras.
@@ -378,6 +380,7 @@ if(TARGET assimp)
     if(_assimp_inc)
         target_include_directories(assimp SYSTEM INTERFACE ${_assimp_inc})
     endif()
+    target_compile_options(assimp PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-nontrivial-memcall>)
 endif()
 
 # Suppress warnings from ozz-animation headers and its own compilation.
@@ -819,6 +822,8 @@ add_executable(group2
         src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/KinematicCharacterController.hpp
+        src/ecs/systems/KinematicCharacterController.cpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/systems/CollisionSystem.cpp
         src/client/systems/InputSampleSystem.hpp
@@ -1107,6 +1112,8 @@ add_executable(server
         src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/KinematicCharacterController.hpp
+        src/ecs/systems/KinematicCharacterController.cpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/systems/CollisionSystem.cpp
         src/server/systems/EventQueue.hpp
@@ -1410,6 +1417,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TitanfallConstants.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/MovementSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/MovementSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/KinematicCharacterController.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/KinematicCharacterController.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/CollisionSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/CollisionSystem.hpp"
     # `runCollision` calls `queueExplosion` for projectile impacts even
@@ -1451,9 +1460,9 @@ target_include_directories(clientbot PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
 )
 
-# PR-23: bot now needs assimp (map glb load) + V-HACD (convex
-# decomposition for non-convex collision props).  Same set the
-# real client uses — no animation/render libs.
+# Bot links the same map/prop collision loader dependencies as the client.
+# The `vhacd` target is empty unless GROUP2_ENABLE_VHACD is explicitly enabled;
+# production map collision stays on authored trimeshes.
 target_link_libraries(clientbot PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
@@ -1479,15 +1488,40 @@ add_custom_command(
 add_custom_target(copy_clientbot_config DEPENDS "${CMAKE_BINARY_DIR}/config_clientbot.stamp")
 add_dependencies(clientbot copy_clientbot_config)
 
+enable_testing()
+
+add_executable(physics_trimesh_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/physics_trimesh_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/SweptCollision.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/WallDetection.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Movement.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/MovementSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/KinematicCharacterController.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/PhaseDiagnostic.cpp"
+)
+target_include_directories(physics_trimesh_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(physics_trimesh_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
+
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
 set_compiler_warnings(server)
 set_compiler_warnings(clientbot)
+set_compiler_warnings(physics_trimesh_tests)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
 enable_sanitizers(server)
 enable_sanitizers(clientbot)
+enable_sanitizers(physics_trimesh_tests)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
 # without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on
