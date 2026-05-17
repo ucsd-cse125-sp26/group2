@@ -175,7 +175,7 @@ WorldTriMesh makeSingleMeshOutsideWallCorner()
             {0.0f, 40.0f, -20.0f},
             {0.0f, 40.0f, 20.0f},
             {0.0f, 0.0f, 20.0f},
-            {-40.0f, 0.0f, 20.0f},
+            {-120.0f, 0.0f, 20.0f},
         },
         {
             0,
@@ -1067,6 +1067,168 @@ bool wallrunOuterCornerKeepsForwardVelocity()
     ok &= expect(outSim.wallNormal.z < -0.7f, "outer corner should hand off to the forward continuation wall");
     ok &= expect(glm::dot(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}, outSim.wallForward) >= 0.0f,
                  "outer corner handoff should not reverse horizontal velocity");
+    return ok;
+}
+
+bool wallrunSingleMeshExternalLCornerContinuesAroundCorner()
+{
+    const WorldTriMesh mesh = makeSingleMeshOutsideWallCorner();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&mesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-10.0f, 20.0f, 16.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {0.0f, 20.0f, 16.0f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 1u;
+    sim.wallRegion = physics::TriRegion::Edge1;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    bool wallrunningEveryFrame = true;
+    float minHorizSpeed = 1e30f;
+    for (int frame = 0; frame < 16; ++frame) {
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+        systems::runKinematicCharacterController(registry.get<Position>(player).value,
+                                                 registry.get<Velocity>(player).value,
+                                                 registry.get<CollisionShape>(player),
+                                                 registry.get<PlayerVisState>(player),
+                                                 1.0f / 128.0f,
+                                                 world,
+                                                 player,
+                                                 registry.get<PlayerSimState>(player).jumpedThisTick);
+
+        const auto& stepVis = registry.get<PlayerVisState>(player);
+        const auto& stepVel = registry.get<Velocity>(player);
+        wallrunningEveryFrame &= stepVis.moveMode == MoveMode::WallRunning;
+        minHorizSpeed = std::min(minHorizSpeed, glm::length(glm::vec3{stepVel.value.x, 0.0f, stepVel.value.z}));
+    }
+
+    const auto& outPos = registry.get<Position>(player);
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(wallrunningEveryFrame, "external L corner should not drop wallrun during the handoff");
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning, "external L corner should still be wallrunning");
+    ok &= expect(outSim.wallNormal.z < -0.7f, "external L corner should attach to the perpendicular wall");
+    ok &= expect(outSim.wallForward.x < -0.7f, "external L corner should continue around the outside corner");
+    ok &= expect(outPos.value.x < -20.0f, "external L corner should move along the new wall");
+    ok &= expect(minHorizSpeed > 300.0f, "external L corner should not stall during transition");
+    ok &= expect(outVel.value.x < -300.0f, "external L corner should preserve speed into the new wall direction");
+    return ok;
+}
+
+bool wallrunMapExternalLCornerContinuesWithKcc()
+{
+    std::array<WorldTriMesh, 3> meshes = makeAuthoredMapWallrunCorridorSegment();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{671.530f, 80.0f, 577.639f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {687.566f, 80.0f, 577.639f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 0u;
+    sim.wallRegion = physics::TriRegion::Face;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    bool wallrunningEveryFrame = true;
+    float minHorizSpeed = 1e30f;
+    for (int frame = 0; frame < 24; ++frame) {
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+        systems::runKinematicCharacterController(registry.get<Position>(player).value,
+                                                 registry.get<Velocity>(player).value,
+                                                 registry.get<CollisionShape>(player),
+                                                 registry.get<PlayerVisState>(player),
+                                                 1.0f / 128.0f,
+                                                 world,
+                                                 player,
+                                                 registry.get<PlayerSimState>(player).jumpedThisTick);
+
+        const auto& stepVis = registry.get<PlayerVisState>(player);
+        const auto& stepVel = registry.get<Velocity>(player);
+        wallrunningEveryFrame &= stepVis.moveMode == MoveMode::WallRunning;
+        minHorizSpeed = std::min(minHorizSpeed, glm::length(glm::vec3{stepVel.value.x, 0.0f, stepVel.value.z}));
+    }
+
+    const auto& outPos = registry.get<Position>(player);
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(wallrunningEveryFrame, "map external L corner should not drop during KCC simulation");
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning, "map external L corner should stay in wallrun");
+    ok &= expect(outSim.wallNormal.z < -0.7f, "map external L corner should attach to the corridor wall");
+    ok &= expect(outSim.wallForward.x > 0.7f, "map external L corner should redirect into the corridor");
+    ok &= expect(outPos.value.x > 760.0f, "map external L corner should make progress along the corridor wall");
+    ok &= expect(minHorizSpeed > 300.0f, "map external L corner should not stall during transition");
+    ok &= expect(outVel.value.x > 300.0f, "map external L corner should preserve speed into the corridor direction");
     return ok;
 }
 
@@ -2043,8 +2205,10 @@ int main()
     ok &= wallAttachmentLookaheadFindsOuterCornerContinuation();
     ok &= wallAttachmentWalksSingleMeshAdjacencyAtCorner();
     ok &= wallrunOuterCornerKeepsForwardVelocity();
+    ok &= wallrunSingleMeshExternalLCornerContinuesAroundCorner();
     ok &= wallrunGapDropsWithoutReversingVelocity();
     ok &= wallrunMapCorridorTurnsIntoCorridor();
+    ok &= wallrunMapExternalLCornerContinuesWithKcc();
     ok &= wallrunInternalCornerKeepsMoving();
     ok &= wallrunRollScalesWithViewAngle();
     ok &= wallrunMapCorridorEndDoesNotAttachToAirSide();

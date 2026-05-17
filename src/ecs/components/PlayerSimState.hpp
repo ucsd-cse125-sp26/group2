@@ -66,8 +66,10 @@ struct PlayerSimState
     uint32_t wallMeshIndex{UINT32_MAX}; ///< Current static collision mesh under the wall attachment, if any.
     uint32_t wallTriId{UINT32_MAX};     ///< Current mesh triangle under the wall attachment, if any.
     physics::TriRegion wallRegion{physics::TriRegion::Face}; ///< Closest feature on `wallMeshIndex` / `wallTriId`.
-    bool wallAttachmentValid{false}; ///< True while the wallrun has a collision-backed attachment.
-    bool wasWallRunning{false};      ///< Set briefly after leaving wallrun (coyote wall jump).
+    bool wallAttachmentValid{false};             ///< True while the wallrun has a collision-backed attachment.
+    glm::vec3 wallRecentHandoffFromNormal{0.0f}; ///< Previous wall normal briefly blocked to avoid corner ping-pong.
+    float wallRecentHandoffTimer{0.0f};          ///< Remaining time to suppress immediate handoff backtracks (s).
+    bool wasWallRunning{false};                  ///< Set briefly after leaving wallrun (coyote wall jump).
 
     // Wall blacklist: stores the last wall's normal + height to prevent regrab.
     glm::vec3 wallBlacklistNormal{0.0f};

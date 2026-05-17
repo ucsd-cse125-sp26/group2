@@ -641,6 +641,7 @@ namespace
 {
 
 constexpr float k_wallrunAttachPushback = 0.03125f;
+constexpr float k_wallrunReturnHandoffCooldown = 0.14f;
 
 /// @brief Check if a wall normal matches the blacklist (same wall).
 /// @param normal    Wall normal to test.
@@ -874,6 +875,8 @@ void tryEnterWallrun(glm::vec3& vel,
         state.sim.wallForward = wallFwd;
         state.sim.wallRunTimer = 0.0f;
         state.sim.wallRunSpeedTimer = 0.0f;
+        state.sim.wallRecentHandoffTimer = 0.0f;
+        state.sim.wallRecentHandoffFromNormal = glm::vec3{0.0f};
         seedWallAttachmentFromProbe(state, wallPoint, wallNorm, meshIndex, triId, region);
 
         const WallAttachmentProbe attachment = findWallAttachment(pos, shape, world, wallNorm);
@@ -938,6 +941,8 @@ void exitWallrun(PlayerStateRef state, float posY)
     state.sim.wallAttachmentValid = false;
     state.sim.wallMeshIndex = UINT32_MAX;
     state.sim.wallTriId = UINT32_MAX;
+    state.sim.wallRecentHandoffTimer = 0.0f;
+    state.sim.wallRecentHandoffFromNormal = glm::vec3{0.0f};
 }
 
 /// @brief Process wallrunning movement, exit conditions, and camera tilt.
@@ -962,6 +967,7 @@ void handleWallRunning(glm::vec3& pos,
 {
     state.sim.wallRunTimer += dt;
     state.sim.wallRunSpeedTimer += dt;
+    state.sim.wallRecentHandoffTimer = std::max(0.0f, state.sim.wallRecentHandoffTimer - dt);
 
     // Lucio-style detach: jump released → fire the full wall-jump impulse
     // away from the wall, then exit. Holding jump is what kept the player
@@ -1012,7 +1018,28 @@ void handleWallRunning(glm::vec3& pos,
         }
     }
 
-    const float normalTurn = std::acos(std::clamp(glm::dot(oldNormal, attachment.normal), -1.0f, 1.0f));
+    float normalTurn = std::acos(std::clamp(glm::dot(oldNormal, attachment.normal), -1.0f, 1.0f));
+    if (normalTurn > 0.05f && state.sim.wallRecentHandoffTimer > 0.0f &&
+        glm::dot(attachment.normal, state.sim.wallRecentHandoffFromNormal) > 0.95f)
+    {
+        const WallAttachmentProbe stickyAttachment = findWallAttachment(pos,
+                                                                        shape,
+                                                                        world,
+                                                                        oldNormal,
+                                                                        glm::vec3{0.0f},
+                                                                        0.0f,
+                                                                        state.sim.wallMeshIndex,
+                                                                        state.sim.wallTriId,
+                                                                        state.sim.wallRegion);
+        if (stickyAttachment.found && glm::dot(stickyAttachment.normal, oldNormal) > 0.95f) {
+            attachment = stickyAttachment;
+            normalTurn = std::acos(std::clamp(glm::dot(oldNormal, attachment.normal), -1.0f, 1.0f));
+        } else {
+            exitWallrun(state, posY);
+            return;
+        }
+    }
+
     if (normalTurn > tms::k_wallrunMaxFaceRedirect + 1e-4f) {
         exitWallrun(state, posY);
         return;
@@ -1055,6 +1082,8 @@ void handleWallRunning(glm::vec3& pos,
         }
 
         state.sim.wallForward = redirectedForward;
+        state.sim.wallRecentHandoffFromNormal = oldNormal;
+        state.sim.wallRecentHandoffTimer = k_wallrunReturnHandoffCooldown;
         const float verticalVel = vel.y;
         vel = state.sim.wallForward * preAttachHorizSpeed;
         vel.y = verticalVel;
