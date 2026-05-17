@@ -270,6 +270,14 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(EnTT)
+if(TARGET EnTT)
+    get_target_property(_entt_include_dirs EnTT INTERFACE_INCLUDE_DIRECTORIES)
+    if(_entt_include_dirs)
+        set_target_properties(EnTT PROPERTIES
+            INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_entt_include_dirs}"
+        )
+    endif()
+endif()
 
 # toml++ - TOML parsing library
 FetchContent_Declare(

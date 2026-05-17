@@ -201,26 +201,28 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
         if (!prevCp.found)
             return;
 
-        TriRegion seamRegion = prevCp.region;
-        if (edgeIndexForRegion(seamRegion) < 0 && incidentEdgeForVertex(seamRegion, 0) < 0)
-            seamRegion = previousRegion;
+        auto considerSeamRegion = [&](TriRegion seamRegion) {
+            const int edge = edgeIndexForRegion(seamRegion);
+            if (edge >= 0) {
+                const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(edge);
+                if (neighborIndex < mesh.edgeNeighbor.size())
+                    considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
+                return;
+            }
 
-        const int edge = edgeIndexForRegion(seamRegion);
-        if (edge >= 0) {
-            const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(edge);
-            if (neighborIndex < mesh.edgeNeighbor.size())
-                considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
-            return;
-        }
+            for (int slot = 0; slot < 2; ++slot) {
+                const int vertexEdge = incidentEdgeForVertex(seamRegion, slot);
+                if (vertexEdge < 0)
+                    continue;
+                const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(vertexEdge);
+                if (neighborIndex < mesh.edgeNeighbor.size())
+                    considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
+            }
+        };
 
-        for (int slot = 0; slot < 2; ++slot) {
-            const int vertexEdge = incidentEdgeForVertex(seamRegion, slot);
-            if (vertexEdge < 0)
-                continue;
-            const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(vertexEdge);
-            if (neighborIndex < mesh.edgeNeighbor.size())
-                considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
-        }
+        considerSeamRegion(prevCp.region);
+        if (previousRegion != prevCp.region)
+            considerSeamRegion(previousRegion);
     };
 
     auto considerMesh = [&](uint32_t meshIndex, const WorldTriMesh& mesh) {
