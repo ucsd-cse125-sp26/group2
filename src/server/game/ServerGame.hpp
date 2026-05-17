@@ -134,11 +134,16 @@ private:
     /// `runWeapon`.
     void updateLagCompTargets();
 
+    /// @brief Select the subset of abilities for new match.
+    void selectMatchAbilityPool();
+
     physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
 
     Server* server = nullptr;                ///< Non-owning pointer; main() owns and shuts down the socket.
     Registry registry;                       ///< ECS entity/component store.
     AbilityRegistry abilityRegistry;         ///< Registry of abilities via type idx.
+    std::vector<AbilityType> matchPrimaryAbilities; ///< list of abilities available during the match
+    std::vector<AbilityType> matchSecondaryAbilities;
     LobbyManager lobbyManager;               ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;         ///< Manages match flow and state.
     bool lobbyStartCountdownActive = false;  ///< True while lobby is counting down before entering match countdown.
