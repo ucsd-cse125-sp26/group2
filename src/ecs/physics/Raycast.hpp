@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
 namespace physics
@@ -457,20 +458,33 @@ inline HitscanHit raycastWorld(glm::vec3 origin, glm::vec3 direction, const Worl
         bestHit.surface = sph.surfaceType;
     }
 
-    for (const WorldTriMesh& tm : world.triMeshes) {
+    auto testTriMesh = [&](const WorldTriMesh& tm) {
         float distance = bestHit.distance;
         glm::vec3 normal{0.0f};
         uint32_t hitTriIdx = 0;
         if (!raycastTriMeshIndexed(origin, direction, tm, bestHit.distance, distance, normal, hitTriIdx))
-            continue;
+            return;
         bestHit.hit = true;
         bestHit.distance = distance;
         bestHit.point = origin + direction * distance;
         bestHit.normal = normal;
         // Per-triangle material if cooked, else mesh default.
-        bestHit.surface =
-            (hitTriIdx < tm.triangleMaterials.size()) ? static_cast<SurfaceType>(tm.triangleMaterials[hitTriIdx])
-                                                       : tm.defaultSurface;
+        bestHit.surface = (hitTriIdx < tm.triangleMaterials.size())
+                              ? static_cast<SurfaceType>(tm.triangleMaterials[hitTriIdx])
+                              : tm.defaultSurface;
+    };
+
+    const glm::vec3 triQueryEnd = origin + direction * bestHit.distance;
+    const WorldAABB triQuery{.min = glm::min(origin, triQueryEnd), .max = glm::max(origin, triQueryEnd)};
+    if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
+        queryStaticWorldBroadphase(*world.staticBroadphase, triQuery, [&](uint32_t meshIndex) {
+            if (meshIndex < world.triMeshes.size())
+                testTriMesh(world.triMeshes[meshIndex]);
+            return true;
+        });
+    } else {
+        for (const WorldTriMesh& tm : world.triMeshes)
+            testTriMesh(tm);
     }
 
     return bestHit;

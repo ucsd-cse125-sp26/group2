@@ -1,9 +1,12 @@
 #include "ecs/physics/TriMeshCollision.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <span>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -11,6 +14,9 @@ namespace
 using physics::CapsuleShape;
 using physics::DepenContact;
 using physics::HitResult;
+using physics::SphereHitResult;
+using physics::StaticWorldBroadphase;
+using physics::WorldAABB;
 using physics::WorldTriMesh;
 
 bool expect(bool condition, std::string_view message)
@@ -138,6 +144,69 @@ bool twoTriangleFloorHasStableSurfaceOverlap()
     return ok;
 }
 
+bool sphereCastAgainstTriMeshUsesSurfaceFeatureNormal()
+{
+    const WorldTriMesh wall = makeThinWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    // Same geometry as the capsule CCD test, reduced to a sphere. The sphere
+    // starts outside the finite wall edge, even though it is inside the
+    // infinite wall plane's radius slab. AABB-expanded trimesh casts miss this
+    // or report a face-only normal; sphere/trimesh must use the edge feature.
+    const SphereHitResult hit = physics::sphereCast(10.0f, {8.0f, 20.0f, 36.0f}, {8.0f, 20.0f, 0.0f}, world);
+
+    bool ok = true;
+    ok &= expect(hit.hit, "sphere cast should hit a finite thin-wall edge");
+    ok &= expect(hit.t > 0.0f && hit.t < 0.5f, "sphere edge hit should occur early in the cast");
+    ok &= expect(hit.normal.x > 0.6f, "sphere edge normal should push away from the wall plane");
+    ok &= expect(hit.normal.z > 0.3f, "sphere edge normal should include the finite-edge direction");
+    return ok;
+}
+
+bool staticBroadphaseReturnsOnlyOverlappingTriMeshes()
+{
+    std::array<WorldTriMesh, 2> meshes{
+        makeThinWall(),
+        makeCookedMesh(
+            {
+                {1000.0f, 0.0f, -20.0f},
+                {1000.0f, 40.0f, -20.0f},
+                {1000.0f, 40.0f, 20.0f},
+                {1000.0f, 0.0f, 20.0f},
+            },
+            {
+                0,
+                1,
+                2,
+                0,
+                2,
+                3,
+            }),
+    };
+
+    StaticWorldBroadphase broadphase;
+    physics::buildStaticWorldBroadphase(broadphase, meshes);
+
+    std::vector<uint32_t> hits;
+    physics::queryStaticWorldBroadphase(
+        broadphase, WorldAABB{.min = {-20.0f, -1.0f, -30.0f}, .max = {20.0f, 50.0f, 30.0f}}, [&](uint32_t meshIndex) {
+            hits.push_back(meshIndex);
+            return true;
+        });
+
+    bool ok = true;
+    ok &= expect(hits.size() == 1, "static broadphase should cull non-overlapping mesh bounds");
+    ok &= expect(!hits.empty() && hits.front() == 0u, "static broadphase should return the overlapping mesh index");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -146,5 +215,7 @@ int main()
     ok &= sweptCapsuleHitsFiniteWallEdge();
     ok &= staticCapsuleDepenUsesSurfaceFeatureNormal();
     ok &= twoTriangleFloorHasStableSurfaceOverlap();
+    ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();
+    ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

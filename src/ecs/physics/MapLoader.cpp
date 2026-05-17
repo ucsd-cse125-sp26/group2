@@ -1287,6 +1287,7 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     out.cylinders.clear();
     out.spheres.clear();
     out.triMeshes.clear();
+    out.staticBroadphase = {};
 
     extractCollision(scene->mRootNode,
                      scene,
@@ -1318,6 +1319,8 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
         out.planes.push_back(Plane{.normal = {0.0f, 1.0f, 0.0f}, .distance = lowestY});
         SDL_Log("MapLoader: added floor plane at y=%.1f", static_cast<double>(lowestY));
     }
+
+    buildStaticWorldBroadphase(out.staticBroadphase, out.triMeshes);
 
     SDL_Log("MapLoader: loaded '%s' — %zu plane(s), %zu box(es), %zu brush(es), %zu cylinder(s), %zu sphere(s), %zu "
             "trimesh(es)",
@@ -1401,6 +1404,8 @@ bool loadPropCollision(
             newSpheres,
             newBrushes,
             newTri);
+
+    buildStaticWorldBroadphase(out.staticBroadphase, out.triMeshes);
 
     return true;
 }

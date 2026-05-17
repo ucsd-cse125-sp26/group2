@@ -10,10 +10,9 @@
 /// used for *both* rendering and collision.  Handy for blockout maps where the
 /// visual geometry is already simple enough to collide against.
 ///
-/// Each collision mesh is **auto-detected** as the best-fitting primitive:
-///   sphere → cylinder → axis-aligned box → convex brush (fallback).
-/// Sub-collections (`Boxes/`, `Cylinders/`, `Spheres/`, `Brushes/`) can override
-/// the auto-detection to force a specific type.
+/// Production separated maps load collision meshes as authored triangle
+/// surfaces. Primitive guessing and V-HACD are opt-in compatibility paths for
+/// prototype/debug content and standalone props.
 
 #pragma once
 
@@ -40,6 +39,7 @@ struct MapCollisionData
     std::vector<WorldCylinder> cylinders;
     std::vector<WorldSphere> spheres;
     std::vector<WorldTriMesh> triMeshes;
+    StaticWorldBroadphase staticBroadphase;
 
     /// @brief Return a non-owning `WorldGeometry` view into this data.
     ///
@@ -53,7 +53,8 @@ struct MapCollisionData
                 .brushes = brushes,
                 .cylinders = cylinders,
                 .spheres = spheres,
-                .triMeshes = triMeshes};
+                .triMeshes = triMeshes,
+                .staticBroadphase = &staticBroadphase};
     }
 };
 
@@ -83,16 +84,17 @@ struct MapLoadOptions
 
     /// In separated mode (`allMeshesAreCollision = false`), should the loader
     /// auto-detect/guess each collision mesh's best-fitting primitive
-    /// (AABB / cylinder / sphere / convex brush), or load it raw?
+    /// (AABB / cylinder / sphere / convex brush), or load it as an authored
+    /// triangle mesh?
     ///
-    ///   true (default)  — run the auto-detection pipeline
+    ///   true            — run the legacy auto-detection pipeline
     ///                     (AABB → cylinder → sphere → convex brush → triMesh)
     ///                     plus sub-collection / name forcing.  Convex shapes
     ///                     end up as cheap primitives or brushes; only truly
     ///                     non-convex meshes fall back to triMesh.  Convex
     ///                     primitives are dramatically cheaper at runtime and
     ///                     don't suffer triMesh edge-jitter on contact.
-    ///   false           — preserve exactly what Blender's collision section
+    ///   false (default) — preserve exactly what Blender's collision section
     ///                     contains: every collision mesh becomes a triangle
     ///                     mesh, vertex-for-vertex.  Sub-collection name
     ///                     overrides ("Boxes/", "Cylinders/", …) and Blender
@@ -104,19 +106,19 @@ struct MapLoadOptions
     /// Has no effect in prototype mode (`allMeshesAreCollision = true`):
     /// every mesh is collision there, and forcing all of them to triMesh
     /// would be prohibitively expensive.
-    bool guessShapesProcessed = true;
+    bool guessShapesProcessed = false;
 
     /// In separated mode with shape-guessing on, when a collision mesh is
     /// non-convex (so it can't be a single `WorldBrush`), should the loader
     /// run V-HACD convex decomposition to split it into multiple brushes?
     ///
-    ///   true  (default) — non-convex meshes go through V-HACD; the resulting
+    ///   true            — non-convex meshes go through V-HACD; the resulting
     ///                     hulls are appended as `WorldBrush`es.  Smoother
     ///                     collision than triMesh (no per-triangle MTV
     ///                     jitter) and cheaper at runtime.  Costs a few
     ///                     hundred milliseconds to a few seconds at *load*
     ///                     time per non-convex mesh, depending on size.
-    ///   false           — skip decomposition; non-convex meshes fall through
+    ///   false (default) — skip decomposition; non-convex meshes fall through
     ///                     to `WorldTriMesh`.
     ///
     /// V-HACD tries `FLOOD_FILL` first (closed solid meshes), falling back
@@ -126,7 +128,7 @@ struct MapLoadOptions
     ///
     /// Has no effect when `guessShapesProcessed = false` or when
     /// `allMeshesAreCollision = true`.
-    bool decomposeNonConvex = true;
+    bool decomposeNonConvex = false;
 };
 
 /// API

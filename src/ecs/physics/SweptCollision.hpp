@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 #include <span>
@@ -138,6 +139,28 @@ struct WorldTriMesh
     SurfaceType defaultSurface = SurfaceType::Concrete; ///< Fallback for triangles without per-face material data.
 };
 
+/// @brief Immutable world-level BVH over `WorldTriMesh` bounds.
+///
+/// Built once after map/prop collision loading. Query functions return mesh
+/// indices whose whole-mesh AABBs overlap a requested world-space AABB, letting
+/// KCC casts/probes avoid scanning every mesh before entering each per-mesh BVH.
+struct StaticWorldBroadphase
+{
+    std::vector<BVHNode> nodes;
+    std::vector<uint32_t> meshIndices;
+    std::vector<WorldAABB> meshBounds;
+};
+
+/// @brief Rebuild the immutable broadphase over all static triangle meshes.
+void buildStaticWorldBroadphase(StaticWorldBroadphase& broadphase, std::span<const WorldTriMesh> triMeshes);
+
+/// @brief Visit triangle-mesh indices whose mesh bounds overlap `query`.
+///
+/// The visitor returns `false` to stop early, `true` to continue.
+void queryStaticWorldBroadphase(const StaticWorldBroadphase& broadphase,
+                                const WorldAABB& query,
+                                const std::function<bool(uint32_t meshIndex)>& visit);
+
 /// @brief All world collision geometry for one tick.
 struct WorldGeometry
 {
@@ -147,6 +170,7 @@ struct WorldGeometry
     std::span<const WorldCylinder> cylinders;
     std::span<const WorldSphere> spheres;
     std::span<const WorldTriMesh> triMeshes;
+    const StaticWorldBroadphase* staticBroadphase{nullptr};
 };
 
 /// @brief Capsule shape input for swept-collision queries.
