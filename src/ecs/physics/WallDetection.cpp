@@ -421,14 +421,24 @@ WallDetectionResult detectWalls(glm::vec3 pos,
 
     // Ledge detection
     if (result.wallFront) {
+        const CapsuleShape ledgeProbeCapsule{
+            .radius = sphereRadius,
+            .halfHeight = 0.0f,
+            .up = worldUp,
+        };
         const glm::vec3 k_headTop = pos + worldUp * (halfExtents.y + 10.0f);
         const glm::vec3 k_headTopFwd = k_headTop + k_forward * checkDist;
-        const SphereHitResult k_topFwd = sphereCast(sphereRadius, k_headTop, k_headTopFwd, world);
+        const HitResult k_topFwd = sweepAll(ledgeProbeCapsule, k_headTop, k_headTopFwd, world);
 
         if (!k_topFwd.hit) {
             const glm::vec3 k_probeStart = k_headTopFwd;
-            const glm::vec3 k_probeEnd = k_probeStart - worldUp * (halfExtents.y * 2.0f + 40.0f);
-            const SphereHitResult k_downHit = sphereCast(sphereRadius * 0.5f, k_probeStart, k_probeEnd, world);
+            const CapsuleShape topProbeCapsule{
+                .radius = sphereRadius * 0.5f,
+                .halfHeight = 0.0f,
+                .up = worldUp,
+            };
+            const GroundProbeResult k_downHit =
+                probeGround(topProbeCapsule, k_probeStart, halfExtents.y * 2.0f + 40.0f, world);
 
             if (k_downHit.hit && glm::dot(k_downHit.normal, worldUp) > 0.7f) {
                 result.ledgeDetected = true;

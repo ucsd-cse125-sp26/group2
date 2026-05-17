@@ -211,14 +211,11 @@ sphere-cast fallback for prototype/primitive worlds:
 | Right/left wall | segment closest-point against static triMeshes, fallback sphere-cast | `isWallNormal` |
 | Forward wall | segment closest-point against static triMeshes, fallback sphere-cast | `isWallNormal` |
 | Wallrun sustain | `findWallRunAttachment` closest-point + lookahead + triangle adjacency | preserves mesh/triangle/feature identity |
-| Ledge | sphere-cast from head-top forward, then downward | requires `normal.y > 0.7` |
+| Ledge | zero-height capsule sweep for top clearance, then KCC ground probe downward | requires `dot(normal, up) > 0.7` |
 | Ground distance | full capsule KCC ground probe, 500u down | reports `groundDistance` for wallrun/climb min-height gates |
 
 Wallrun attachment stores `meshIndex`, `triId`, and `TriRegion`, and `findWallRunAttachment` can walk across welded
 triangle adjacency. This is what allows continuity across inside and outside 90-degree mesh seams.
-
-Known limitation: ledge detection still uses sphere-casts rather than the full capsule KCC surface query. It follows
-flipped gravity direction, but it remains less authoritative than the KCC path.
 
 `findWallAttachment` is intentionally triMesh-first. Boxes/brushes/cylinders/spheres are kept as fallback/prototype
 geometry, not the production map surface-tracking path.
