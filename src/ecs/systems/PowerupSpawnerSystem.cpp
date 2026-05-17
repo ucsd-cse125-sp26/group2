@@ -55,9 +55,11 @@ inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, PowerupSpawner& spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, PowerupState>();
-    view.each([&](const Position& pos, const CollisionShape& shape, PowerupState& powerups) {
-        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) &&
-            spawner.hasPowerup)
+    view.each([&](entt::entity player,
+                  const Position& pos,
+                  const CollisionShape& shape,
+                  PowerupState& powerups){
+        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasPowerup)
         {
             const PowerupConfig config = getPowerupConfig(spawner.type);
             addOrRefreshPowerup(powerups, spawner.type, config.duration);

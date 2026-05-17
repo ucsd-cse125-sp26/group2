@@ -43,6 +43,7 @@ namespace systems
 void runPowerups(Registry& registry, float dt)
 {
     auto view = registry.view<Player, PowerupState, Health>();
+
     view.each([&](PowerupState& powerups, Health& health) {
         for (auto it = powerups.active.begin(); it != powerups.active.end(); ) {
             it->timeRemaining -= dt;

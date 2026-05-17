@@ -92,7 +92,7 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     // Writes phase-diag-<timestamp>.csv next to the server binary; flip off
     // with `--no-phase-diag` once the bug is fixed (TODO: CLI plumb).
     physics::diag::setEnabled(true);
-    SDL_Log("[server] physics diagnostic ENABLED - writing phase-diag-*.csv and movement-diag-*.csv");
+    SDL_Log("[server] phase-through diagnostic ENABLED — writing phase-diag-*.csv");
 
     clientEntities.clear(); // For safety
     registry.clear();
@@ -103,7 +103,6 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
 
     // Register abilities
     abilityRegistry.registerAbility(std::make_unique<GrappleAbility>());
-    abilityRegistry.registerAbility(std::make_unique<GravityAbility>());
 
     // ── Load map collision ──────────────────────────────────────────────
     // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
