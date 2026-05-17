@@ -114,8 +114,12 @@ bool SdfAtlas::init(SDL_GPUDevice* dev, const char* ttfPath)
         }
 
         // Copy SDF into atlas
-        for (int row = 0; row < ph; ++row)
-            std::memcpy(&atlas[(ay + row) * k_atlasW + ax], &sdf[row * pw], pw);
+        for (int row = 0; row < ph; ++row) {
+            const size_t dstOffset =
+                static_cast<size_t>(ay + row) * static_cast<size_t>(k_atlasW) + static_cast<size_t>(ax);
+            const size_t srcOffset = static_cast<size_t>(row) * static_cast<size_t>(pw);
+            std::memcpy(&atlas[dstOffset], &sdf[srcOffset], static_cast<size_t>(pw));
+        }
         stbtt_FreeSDF(sdf, nullptr);
 
         // Glyph metrics.  xoff/yoff from stbtt_GetCodepointSDF already include

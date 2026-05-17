@@ -64,8 +64,8 @@ std::vector<uint8_t> serialize(const WorldTriMesh& mesh)
     const uint32_t bvhNodeCount = static_cast<uint32_t>(mesh.bvhNodes.size());
 
     // Reserve a generous upper bound to avoid reallocs.
-    blob.reserve(sizeof(Header) + vertCount * sizeof(glm::vec3) + triCount * (sizeof(uint32_t) * 3 + sizeof(glm::vec3) + 3) +
-                 bvhNodeCount * sizeof(BVHNode));
+    blob.reserve(sizeof(Header) + vertCount * sizeof(glm::vec3) +
+                 triCount * (sizeof(uint32_t) * 3 + sizeof(glm::vec3) + 3) + bvhNodeCount * sizeof(BVHNode));
 
     Header h;
     h.magic = k_magic;

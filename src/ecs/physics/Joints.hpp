@@ -31,10 +31,10 @@ struct PointJoint
 {
     entt::entity bodyA{entt::null};
     entt::entity bodyB{entt::null};
-    glm::vec3 localAnchorA{0.0f};   ///< Anchor in body A's local frame.
-    glm::vec3 localAnchorB{0.0f};   ///< Anchor in body B's local frame.
+    glm::vec3 localAnchorA{0.0f};       ///< Anchor in body A's local frame.
+    glm::vec3 localAnchorB{0.0f};       ///< Anchor in body B's local frame.
     glm::vec3 accumulatedImpulse{0.0f}; ///< Warm-started across frames.
-    float breakForce = 0.0f;        ///< If > 0, joint detaches when impulse exceeds.
+    float breakForce = 0.0f;            ///< If > 0, joint detaches when impulse exceeds.
 };
 
 /// @brief Single-axis hinge — locks the bodies' anchors together AND

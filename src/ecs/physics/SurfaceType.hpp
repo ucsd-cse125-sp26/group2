@@ -77,12 +77,18 @@ enum class SurfaceType : uint8_t
 [[nodiscard]] constexpr std::string_view surfaceTypeName(SurfaceType s) noexcept
 {
     switch (s) {
-    case SurfaceType::Metal:    return "Metal";
-    case SurfaceType::Concrete: return "Concrete";
-    case SurfaceType::Flesh:    return "Flesh";
-    case SurfaceType::Wood:     return "Wood";
-    case SurfaceType::Energy:   return "Energy";
-    case SurfaceType::Count:    break;
+    case SurfaceType::Metal:
+        return "Metal";
+    case SurfaceType::Concrete:
+        return "Concrete";
+    case SurfaceType::Flesh:
+        return "Flesh";
+    case SurfaceType::Wood:
+        return "Wood";
+    case SurfaceType::Energy:
+        return "Energy";
+    case SurfaceType::Count:
+        break;
     }
     return "?";
 }

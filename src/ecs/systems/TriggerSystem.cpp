@@ -28,8 +28,8 @@ struct TriggerOverlapSet
 };
 
 /// @brief AABB-vs-AABB overlap test (used for both static & moving entities).
-[[nodiscard]] inline bool overlapsAABB(
-    const glm::vec3& aPos, const glm::vec3& aHE, const glm::vec3& bPos, const glm::vec3& bHE) noexcept
+[[nodiscard]] inline bool
+overlapsAABB(const glm::vec3& aPos, const glm::vec3& aHE, const glm::vec3& bPos, const glm::vec3& bHE) noexcept
 {
     if (std::abs(aPos.x - bPos.x) > aHE.x + bHE.x)
         return false;
@@ -117,14 +117,12 @@ void runTriggers(Registry& registry, bool isPredictedClient)
             const auto b = entt::to_integral(currentOverlap[j]);
             if (a == b) {
                 if (!suppress)
-                    physics::events::pushTriggerEvent(
-                        {tr, currentOverlap[j], physics::events::TriggerEventType::Stay});
+                    physics::events::pushTriggerEvent({tr, currentOverlap[j], physics::events::TriggerEventType::Stay});
                 ++i;
                 ++j;
             } else if (a < b) {
                 if (!suppress)
-                    physics::events::pushTriggerEvent(
-                        {tr, state.entities[i], physics::events::TriggerEventType::Exit});
+                    physics::events::pushTriggerEvent({tr, state.entities[i], physics::events::TriggerEventType::Exit});
                 ++i;
             } else {
                 if (!suppress)
@@ -135,13 +133,11 @@ void runTriggers(Registry& registry, bool isPredictedClient)
         }
         for (; i < state.entities.size(); ++i) {
             if (!suppress)
-                physics::events::pushTriggerEvent(
-                    {tr, state.entities[i], physics::events::TriggerEventType::Exit});
+                physics::events::pushTriggerEvent({tr, state.entities[i], physics::events::TriggerEventType::Exit});
         }
         for (; j < currentOverlap.size(); ++j) {
             if (!suppress)
-                physics::events::pushTriggerEvent(
-                    {tr, currentOverlap[j], physics::events::TriggerEventType::Enter});
+                physics::events::pushTriggerEvent({tr, currentOverlap[j], physics::events::TriggerEventType::Enter});
         }
 
         // Swap into persistent state — moves the storage so we don't reallocate.

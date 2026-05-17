@@ -57,8 +57,7 @@ void ContactCache::endFrame() noexcept
     // Erase entries that weren't refreshed this frame — they no longer
     // represent overlapping pairs.  Using erase_if + lambda for stable
     // performance in MSVC and libstdc++.
-    std::erase_if(cache_,
-                  [this](const auto& kv) { return kv.second.lastTouchedFrame != currentFrame_; });
+    std::erase_if(cache_, [this](const auto& kv) { return kv.second.lastTouchedFrame != currentFrame_; });
     ++currentFrame_;
 }
 

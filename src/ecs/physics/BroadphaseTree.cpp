@@ -34,8 +34,8 @@ float Tree::aabbArea(const WorldAABB& a)
 
 bool Tree::aabbOverlap(const WorldAABB& a, const WorldAABB& b)
 {
-    return a.max.x >= b.min.x && a.min.x <= b.max.x && a.max.y >= b.min.y && a.min.y <= b.max.y &&
-           a.max.z >= b.min.z && a.min.z <= b.max.z;
+    return a.max.x >= b.min.x && a.min.x <= b.max.x && a.max.y >= b.min.y && a.min.y <= b.max.y && a.max.z >= b.min.z &&
+           a.min.z <= b.max.z;
 }
 
 bool Tree::aabbContains(const WorldAABB& container, const WorldAABB& inside)
@@ -145,8 +145,7 @@ void Tree::insertLeaf(int32_t leaf)
         auto childCost = [&](int32_t child) -> float {
             const WorldAABB childAabb = nodes_[static_cast<size_t>(child)].aabb;
             const float c = isLeaf(child) ? aabbArea(combine(leafAabb, childAabb))
-                                          : aabbArea(combine(leafAabb, childAabb)) -
-                                                aabbArea(childAabb);
+                                          : aabbArea(combine(leafAabb, childAabb)) - aabbArea(childAabb);
             return c + inheritanceCost;
         };
 

@@ -2,6 +2,7 @@
 /// @brief Implementation of AssetLoader — Assimp scene import and mesh extraction.
 
 #include "AssetLoader.hpp"
+
 #include "Asset.hpp"
 
 #include <filesystem>
@@ -96,7 +97,7 @@ static bool hasMetadataKey(const aiNode& node, const std::string& keyToFind)
 
 bool AssetLoader::loadModel(const ModelIdInt id,
                             const std::string& modelFileName,
-                            const std::vector<std::string>& texFileNames,
+                            const std::vector<std::string>& /*texFileNames*/,
                             const bool k_flatten,
                             const bool flipUVs)
 {
@@ -162,12 +163,12 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
         pushAiNodeMeshesToModelElements(assetIdNameSpace, currentNode, sceneAi, id, currentModelNodeIndex);
 
-        for (int i = 0; i < currentNode.mNumChildren; i++) {
+        for (unsigned int i = 0; i < currentNode.mNumChildren; i++) {
             sceneAiDFSStack.push(currentNode.mChildren[i]);
 
             Asset::ModelNode newNode_i;
             newModel.modelNodes_.push_back(newNode_i);
-            uint32_t childNodeIndex = newModel.modelNodes_.size() - 1;
+            uint32_t childNodeIndex = static_cast<uint32_t>(newModel.modelNodes_.size() - 1);
             nodeTraversalStack.push(childNodeIndex);
             newModel.modelNodes_[currentModelNodeIndex].childIndices_.push_back(
                 childNodeIndex); // Can't use existing reference because it may be invalidated when std::vector
@@ -186,8 +187,7 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     if (asimpSceneStructurePtr->HasMaterials()) {
         for (unsigned int i = 0; i < asimpSceneStructurePtr->mNumMaterials; i++) {
             aiMaterial* mat = asimpSceneStructurePtr->mMaterials[i];
-            MaterialIdInt matId =
-                Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
+            MaterialIdInt matId = Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
 
             Asset::Material& mat_ = Asset::materials_[matId];
 
@@ -215,8 +215,7 @@ bool AssetLoader::loadModel(const ModelIdInt id,
                 continue; // no texture for this material
             }
 
-            TexIdInt texId =
-                Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
+            TexIdInt texId = Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
 
             mat_.texId_[0] = texId;
 
@@ -237,18 +236,14 @@ bool AssetLoader::loadModel(const ModelIdInt id,
             }
 
             stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
-                                                   static_cast<int>(embeddedTexture->mWidth),
-                                                   &tex_.width,
-                                                   &tex_.height,
-                                                   &tex_.channels,
-                                                   4);
+                                                    static_cast<int>(embeddedTexture->mWidth),
+                                                    &tex_.width,
+                                                    &tex_.height,
+                                                    &tex_.channels,
+                                                    4);
 
             if (!pixels) {
-                std::cout << "stbi failed for "
-                        << texPath.C_Str()
-                        << ": "
-                        << stbi_failure_reason()
-                        << std::endl;
+                std::cout << "stbi failed for " << texPath.C_Str() << ": " << stbi_failure_reason() << std::endl;
                 continue;
             }
 
@@ -275,7 +270,7 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
     const aiString nodeAiName = nodeAi.mName;
     const std::string nodeNameStr(nodeAiName.C_Str());
 
-    for (int j = 0; j < nodeAi.mNumMeshes; j++) {
+    for (unsigned int j = 0; j < nodeAi.mNumMeshes; j++) {
         uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
         if (mesh_j_IdAi >= sceneAi.mNumMeshes) {
             std::cout << debugPrefix << "given aiNode is not in aiScene!!!:" << std::endl;
@@ -283,13 +278,14 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
         }
     }
 
-    for (int j = 0; j < nodeAi.mNumMeshes; j++) {
+    for (unsigned int j = 0; j < nodeAi.mNumMeshes; j++) {
         Asset::ModelElement me_j;
         uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
 
         const aiMesh& mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
 
-        MaterialIdInt matId = Asset::getMaterialIdFromString(meshNameSpace + "material_" + std::to_string(mesh_j_Ai.mMaterialIndex));
+        MaterialIdInt matId =
+            Asset::getMaterialIdFromString(meshNameSpace + "material_" + std::to_string(mesh_j_Ai.mMaterialIndex));
 
         me_j.materialId_ = matId;
 
@@ -302,7 +298,7 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
 
         loadMesh(meshNameId, mesh_j_Ai);
         newModel.modelElements_.push_back(me_j);
-        uint32_t childModelElementIndex = newModel.modelElements_.size() - 1;
+        uint32_t childModelElementIndex = static_cast<uint32_t>(newModel.modelElements_.size() - 1);
         currentModelNode.modelElementsIndices_.push_back(childModelElementIndex);
     }
 }

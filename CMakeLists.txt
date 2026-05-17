@@ -380,6 +380,7 @@ if(TARGET assimp)
     if(_assimp_inc)
         target_include_directories(assimp SYSTEM INTERFACE ${_assimp_inc})
     endif()
+    target_compile_options(assimp PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-nontrivial-memcall>)
 endif()
 
 # Suppress warnings from ozz-animation headers and its own compilation.

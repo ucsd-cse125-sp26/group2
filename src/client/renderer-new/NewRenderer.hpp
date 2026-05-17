@@ -225,11 +225,8 @@ public:
     /// See cpp.
     ///
     /// DATA SOURCE: Game.cpp's init phase, once per map asset.
-    int loadSceneModel(const char* filename,
-                       glm::vec3 pos,
-                       float scale,
-                       bool flipUVs,
-                       const std::string& excludeNodesContaining = "");
+    int loadSceneModel(
+        const char* filename, glm::vec3 pos, float scale, bool flipUVs, const std::string& excludeNodesContaining = "");
 
     /// @brief Set the HUD overlay texture to blit after the geometry pass.
     /// @param hudTexture  HUD's final colour texture (RGBA8 swap-chain-format).  May be null = no HUD.
@@ -321,13 +318,13 @@ public:
     // pattern so Game.cpp and the debug UI can read/write without a getter
     // ceremony.
 
-    AAMode aaMode = AAMode::SMAA_T2x;          ///< Anti-aliasing mode.  Re-applied at the start of each frame.
-    float renderScale = 1.0f;                  ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
-    bool imguiEnabled = true;                  ///< Master toggle for the ImGui debug overlay.
-    RenderToggles toggles{};                   ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
-    std::vector<std::string> availableHDRFiles;///< Filled by `scanHDRFiles()`; consumed by debug UI.
+    AAMode aaMode = AAMode::SMAA_T2x;            ///< Anti-aliasing mode.  Re-applied at the start of each frame.
+    float renderScale = 1.0f;                    ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
+    bool imguiEnabled = true;                    ///< Master toggle for the ImGui debug overlay.
+    RenderToggles toggles{};                     ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
+    std::vector<std::string> availableHDRFiles;  ///< Filled by `scanHDRFiles()`; consumed by debug UI.
     std::string currentHDRName = "(procedural)"; ///< Display name of the currently-loaded HDR.
-    bool useHDRSkybox = false;                 ///< True after a successful `loadHDRSkybox()`.
+    bool useHDRSkybox = false;                   ///< True after a successful `loadHDRSkybox()`.
 
 private:
     // ─── Existing internal helpers ───────────────────────────────────────────

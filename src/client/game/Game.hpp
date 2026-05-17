@@ -249,8 +249,6 @@ private:
 
     // Legacy model index aliases (for code that still uses raw indices).
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
-    int glowSphereModelIdx_ = -1;
-    int movableSphereModelIdx_ = -1;
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
     int weaponAssetIds_[4] = {-1, -1, -1, -1};
 
@@ -267,7 +265,6 @@ private:
     float sphereFollowDist_ = 150.0f;                    ///< Distance ahead of player.
     float sphereIntensity_ = 5.0f;                       ///< Point light intensity of movable sphere.
     float sphereRange_ = 500.0f;                         ///< Point light range of movable sphere.
-    int glowCylinderModelIdx_ = -1;                      ///< Glow cylinder (beam) model index.
     bool beamEnabled_ = false;                           ///< Show the bloom beam.
     glm::vec3 beamStartOff_{30.0f, -5.0f, 10.0f};        ///< Beam start offset (fwd, up, right) from eye.
     glm::vec3 beamEndOff_{200.0f, -5.0f, 10.0f};         ///< Beam end offset (fwd, up, right) from eye.

@@ -1625,12 +1625,7 @@ SDL_AppResult Game::iterate()
     // Grapple cable visual
     registry.view<LocalPlayer, PlayerVisState>().each([&](const PlayerVisState& pstate) {
         if (pstate.grappleActive) {
-            // Draw cable from player hand to hook point every frame.
-            const float cosPi = std::cos(renderPitch);
-            const glm::vec3 fwd{std::sin(renderYaw) * cosPi, -std::sin(renderPitch), std::cos(renderYaw) * cosPi};
-            const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3{0, 1, 0}));
-            const float gSign = pstate.gravityFlipped ? -1.0f : 1.0f;
-            const glm::vec3 hand = renderEye + right * (gSign * 15.f) - glm::vec3{0, 1, 0} * (gSign * 8.f) + fwd * 5.f;
+            (void)pstate;
             // particleSystem.spawnHitscanBeam(hand, pstate.grapplePoint, WeaponType::EnergyRifle);
         }
     });
@@ -3446,7 +3441,7 @@ void Game::refreshRemotePlayerRenderables()
 void Game::refreshRemoteProjectileRenderables()
 {
     registry.view<Position, Projectile, Velocity, CollisionShape>().each(
-        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& shape) {
+        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& /*shape*/) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             rend.modelIndex = rocketProjectileModelIdx_;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);

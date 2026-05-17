@@ -119,7 +119,7 @@ struct WeaponViewmodel
 /// expected.  Keep it 32 bytes — changes here require shader updates.
 struct BoneInfluence
 {
-    int boneIndices[4] = {0, 0, 0, 0};         ///< Joint indices into the bone palette.
+    int boneIndices[4] = {0, 0, 0, 0};               ///< Joint indices into the bone palette.
     float boneWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f}; ///< Skinning weights (should sum to ~1.0).
 };
 
@@ -134,9 +134,9 @@ struct BoneInfluence
 /// multiple of 16 and `tint` lands at byte offset 80.
 struct SkinnedInstance
 {
-    glm::mat4 worldTransform{1.0f};         ///< Rig-local → world.  Composed CPU-side as T * R * S.
-    uint32_t paletteBase = 0;               ///< First joint slot in the palette = instanceIndex * numJoints.
-    uint32_t materialId = 0;                ///< Reserved; ignore for now (will index a material table later).
+    glm::mat4 worldTransform{1.0f}; ///< Rig-local → world.  Composed CPU-side as T * R * S.
+    uint32_t paletteBase = 0;       ///< First joint slot in the palette = instanceIndex * numJoints.
+    uint32_t materialId = 0;        ///< Reserved; ignore for now (will index a material table later).
     uint32_t _pad0 = 0;
     uint32_t _pad1 = 0;
     glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< rgb = per-player color, a = blend factor (0 = no tint).
@@ -157,7 +157,7 @@ struct SkinnedInstance
 ///   - `indices` is a 32-bit triangle list (every 3 indices = 1 triangle).
 struct RigMeshSource
 {
-    std::vector<ModelVertex> bindPoseVertices;   ///< Bind-pose vertices (never deformed CPU-side).
-    std::vector<BoneInfluence> boneInfluences;   ///< Parallel to `bindPoseVertices`.  Must be same size.
-    std::vector<uint32_t> indices;               ///< Triangle list (3 indices per triangle).
+    std::vector<ModelVertex> bindPoseVertices; ///< Bind-pose vertices (never deformed CPU-side).
+    std::vector<BoneInfluence> boneInfluences; ///< Parallel to `bindPoseVertices`.  Must be same size.
+    std::vector<uint32_t> indices;             ///< Triangle list (3 indices per triangle).
 };

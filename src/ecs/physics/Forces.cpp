@@ -36,8 +36,7 @@ void applyForce(Registry& registry, entt::entity entity, glm::vec3 force) noexce
     // legacy-compatible mutation should use `applyImpulse` instead.
 }
 
-void applyImpulseAtPoint(
-    Registry& registry, entt::entity entity, glm::vec3 impulse, glm::vec3 worldPoint) noexcept
+void applyImpulseAtPoint(Registry& registry, entt::entity entity, glm::vec3 impulse, glm::vec3 worldPoint) noexcept
 {
     // Linear component unchanged.
     applyImpulse(registry, entity, impulse);
@@ -51,8 +50,7 @@ void applyImpulseAtPoint(
     rb->angImpulseAccum += glm::cross(r, impulse);
 }
 
-void applyForceAtPoint(
-    Registry& registry, entt::entity entity, glm::vec3 force, glm::vec3 worldPoint) noexcept
+void applyForceAtPoint(Registry& registry, entt::entity entity, glm::vec3 force, glm::vec3 worldPoint) noexcept
 {
     applyForce(registry, entity, force);
 

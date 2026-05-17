@@ -150,9 +150,7 @@ void solveContacts(Registry& registry, ContactCache& cache, const SolverConfig& 
     for (auto& [k, entry] : cache) {
         ordered.push_back({k, &entry.manifold});
     }
-    std::sort(ordered.begin(), ordered.end(), [](const PairOrder& a, const PairOrder& b) {
-        return a.key < b.key;
-    });
+    std::sort(ordered.begin(), ordered.end(), [](const PairOrder& a, const PairOrder& b) { return a.key < b.key; });
 
     std::vector<ContactRow> rows;
     rows.reserve(ordered.size() * 4);
@@ -164,7 +162,7 @@ void solveContacts(Registry& registry, ContactCache& cache, const SolverConfig& 
         BodyRef bb = gatherBody(registry, mf.b);
 
         for (int p = 0; p < mf.pointCount; ++p) {
-            const ContactPoint& cp = mf.points[p];
+            const ContactPoint& cp = mf.points[static_cast<size_t>(p)];
             ContactRow row;
             row.manifold = &mf;
             row.pointIndex = p;
@@ -179,8 +177,7 @@ void solveContacts(Registry& registry, ContactCache& cache, const SolverConfig& 
 
             // Baumgarte bias to push out residual penetration.
             const float pen = std::max(0.0f, cp.depth - cfg.linearSlop);
-            row.bias = -(cfg.baumgarteScale / dt) *
-                       std::min(pen, cfg.maxLinearCorrection);
+            row.bias = -(cfg.baumgarteScale / dt) * std::min(pen, cfg.maxLinearCorrection);
 
             // Restitution from closing velocity at start of tick.
             const glm::vec3 vRel = relativeVelocity(ba, bb, row.rA, row.rB);
@@ -192,8 +189,8 @@ void solveContacts(Registry& registry, ContactCache& cache, const SolverConfig& 
             row.friction = cfg.defaultFriction;
 
             // Warm-start: apply the cached impulses.
-            const glm::vec3 P =
-                row.normal * cp.normalImpulse + row.tangent0 * cp.tangentImpulse[0] + row.tangent1 * cp.tangentImpulse[1];
+            const glm::vec3 P = row.normal * cp.normalImpulse + row.tangent0 * cp.tangentImpulse[0] +
+                                row.tangent1 * cp.tangentImpulse[1];
             applyImpulse(ba, bb, P, row.rA, row.rB);
 
             rows.push_back(row);
@@ -246,8 +243,7 @@ void solveContacts(Registry& registry, ContactCache& cache, const SolverConfig& 
             ContactManifold& mf = *po.manifold;
             BodyRef ba = gatherBody(registry, mf.a);
             BodyRef bb = gatherBody(registry, mf.b);
-            const float invMassSum =
-                (ba.isStatic ? 0.0f : ba.rb->invMass) + (bb.isStatic ? 0.0f : bb.rb->invMass);
+            const float invMassSum = (ba.isStatic ? 0.0f : ba.rb->invMass) + (bb.isStatic ? 0.0f : bb.rb->invMass);
             if (invMassSum <= 0.0f)
                 continue;
 
@@ -256,8 +252,7 @@ void solveContacts(Registry& registry, ContactCache& cache, const SolverConfig& 
                 const float pen = std::max(0.0f, cp.depth - cfg.linearSlop);
                 if (pen <= 0.0f)
                     continue;
-                const float corr =
-                    std::min(cfg.baumgarteScale * pen, cfg.maxLinearCorrection) / invMassSum;
+                const float corr = std::min(cfg.baumgarteScale * pen, cfg.maxLinearCorrection) / invMassSum;
                 const glm::vec3 push = mf.normal * corr;
                 if (!ba.isStatic && ba.pos != nullptr)
                     ba.pos->value -= push * ba.rb->invMass;

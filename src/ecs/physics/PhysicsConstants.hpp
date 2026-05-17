@@ -94,7 +94,7 @@ constexpr float k_gravityFlipCooldown = 0.5f; ///< Minimum time between gravity 
 // pushback handle the rest); slope-stick and ground-probe also run once
 // at the end of the tick.
 
-constexpr bool k_enableSubstepping = true; ///< Master toggle for Phase-C sub-stepping.
+constexpr bool k_enableSubstepping = true;   ///< Master toggle for Phase-C sub-stepping.
 constexpr float k_substepSafetyRatio = 0.5f; ///< Sub-step when `|v|·dt > min_shape_radius · this`.
 constexpr int k_maxSubsteps = 8;             ///< Clamp on sub-step count to bound worst-case cost.
 

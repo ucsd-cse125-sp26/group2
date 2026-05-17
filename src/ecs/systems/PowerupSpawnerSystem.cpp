@@ -1,7 +1,6 @@
 /// @file PowerupSpawnerSystem.cpp
 /// @brief Powerup spawner manager system.
 
-#pragma once
 #include "PowerupSpawnerSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
@@ -19,18 +18,15 @@ namespace systems
 
 bool hasPowerup(const PowerupState& state, PowerupType type)
 {
-    return std::ranges::find_if(state.active,
-                        [type](const ActivePowerup& powerup) {
-                            return powerup.type == type;
-                        }) != state.active.end();
+    return std::ranges::find_if(state.active, [type](const ActivePowerup& powerup) { return powerup.type == type; }) !=
+           state.active.end();
 }
 
 void addOrRefreshPowerup(PowerupState& state, PowerupType type, float duration)
 {
-    auto it = std::find_if(state.active.begin(), state.active.end(),
-                           [type](const ActivePowerup& powerup) {
-                               return powerup.type == type;
-                           });
+    auto it = std::find_if(state.active.begin(), state.active.end(), [type](const ActivePowerup& powerup) {
+        return powerup.type == type;
+    });
 
     if (it != state.active.end()) {
         it->timeRemaining = duration;
@@ -45,9 +41,7 @@ void addOrRefreshPowerup(PowerupState& state, PowerupType type, float duration)
 
 void removePowerup(PowerupState& state, PowerupType type)
 {
-    std::erase_if(state.active, [type](const ActivePowerup& powerup) {
-        return powerup.type == type;
-    });
+    std::erase_if(state.active, [type](const ActivePowerup& powerup) { return powerup.type == type; });
 }
 
 /// @brief Check if any player overlaps the spawner and transfer the powerup on collision.
@@ -59,10 +53,9 @@ inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, PowerupSpawner& spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, PowerupState>();
-    view.each([&](const Position& pos,
-                  const CollisionShape& shape,
-                  PowerupState& powerups){
-        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasPowerup)
+    view.each([&](const Position& pos, const CollisionShape& shape, PowerupState& powerups) {
+        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) &&
+            spawner.hasPowerup)
         {
             const PowerupConfig config = getPowerupConfig(spawner.type);
             addOrRefreshPowerup(powerups, spawner.type, config.duration);

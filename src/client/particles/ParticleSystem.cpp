@@ -67,10 +67,7 @@ void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
     decals_.update(dt);
     explosions_.update(dt);
 
-    // Flush deferred explosion smoke
-    for (int i = 0; i < explosions_.ringCount(); ++i) {
-        // Handled inside explosions_.update — smoke spawns via pending list
-    }
+    // Deferred explosion smoke is emitted inside explosions_.update().
 
     // Clear SDF queues for this frame (re-filled by drawWorldText/drawScreenText calls)
     sdf_.clear();

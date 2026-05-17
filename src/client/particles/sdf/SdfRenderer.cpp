@@ -34,8 +34,8 @@ void SdfRenderer::drawWorldText(
     const float scale = worldHeight / static_cast<float>(SdfAtlas::k_renderPx);
     float cursorX = 0.f;
 
-    for (unsigned char ch : text) {
-        const GlyphInfo* g = atlas_.glyph(static_cast<uint32_t>(ch));
+    for (char ch : text) {
+        const GlyphInfo* g = atlas_.glyph(static_cast<uint32_t>(static_cast<unsigned char>(ch)));
         if (!g) {
             cursorX += worldHeight * 0.5f;
             continue;
@@ -76,8 +76,8 @@ void SdfRenderer::drawScreenText(glm::vec2 pixelPos, std::string_view text, glm:
     const float scale = pixelHeight / static_cast<float>(SdfAtlas::k_renderPx);
     float cursorX = 0.f;
 
-    for (unsigned char ch : text) {
-        const GlyphInfo* g = atlas_.glyph(static_cast<uint32_t>(ch));
+    for (char ch : text) {
+        const GlyphInfo* g = atlas_.glyph(static_cast<uint32_t>(static_cast<unsigned char>(ch)));
         if (!g) {
             cursorX += pixelHeight * 0.5f;
             continue;

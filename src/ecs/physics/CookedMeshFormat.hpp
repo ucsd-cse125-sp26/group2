@@ -35,7 +35,7 @@ namespace physics::cook
 {
 
 inline constexpr uint32_t k_magic = 0x6D63'3267u; // 'g2cm'
-inline constexpr uint32_t k_version = 2u; // v2 adds edgeNeighbor (Phase B)
+inline constexpr uint32_t k_version = 2u;         // v2 adds edgeNeighbor (Phase B)
 
 /// @brief 32-byte fixed-size header that opens every cooked-mesh blob.
 struct Header

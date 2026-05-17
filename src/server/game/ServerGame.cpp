@@ -153,9 +153,9 @@ void ServerGame::run()
     Uint64 nextTick = SDL_GetPerformanceCounter();
 
     // Weapon spawners
-    for (int i = 0; i < gamemap::weaponSpawner_.size(); i++) {
-        WeaponType weaponType = gamemap::weaponSpawner_[i].type;
-        glm::vec3 pos = gamemap::weaponSpawner_[i].pos;
+    for (const gamemap::WeaponSpawner& weaponSpawner : gamemap::weaponSpawner_) {
+        WeaponType weaponType = weaponSpawner.type;
+        glm::vec3 pos = weaponSpawner.pos;
 
         const entt::entity spawner = registry.create();
         registry.emplace<WeaponSpawner>(
@@ -166,16 +166,16 @@ void ServerGame::run()
     }
 
     // Respawn points (with cooldown state)
-    for (int i = 0; i < gamemap::spawnPoints_.size(); i++) {
+    for (const glm::vec3& spawnPos : gamemap::spawnPoints_) {
         const entt::entity spawnPoint = registry.create();
         registry.emplace<RespawnPoint>(spawnPoint, RespawnPoint{});
-        registry.emplace<Position>(spawnPoint, gamemap::spawnPoints_[i]);
+        registry.emplace<Position>(spawnPoint, spawnPos);
     }
 
     // Powerup spawners
-    for (int i = 0; i < gamemap::powerupSpawner_.size(); i++) {
-        PowerupType powerupType = gamemap::powerupSpawner_[i].type;
-        glm::vec3 pos = gamemap::powerupSpawner_[i].pos;
+    for (const gamemap::PowerupSpawner& powerupSpawner : gamemap::powerupSpawner_) {
+        PowerupType powerupType = powerupSpawner.type;
+        glm::vec3 pos = powerupSpawner.pos;
 
         PowerupConfig config = getPowerupConfig(powerupType);
 
