@@ -8,7 +8,7 @@
 /// Now both call `gamemap::loadConfiguredMap()` and read the same constants from this header.
 ///
 /// **What lives here.**
-///   1. The "how to load it" toggles (`k_separatedCollisionMap`, `k_guessShapesProcessed`).
+///   1. The production collision-map contract (`k_separatedCollisionMap`, `k_collisionPattern`).
 ///   2. The collision-pattern substring used in separated mode (`k_collisionPattern`).
 ///   3. Helpers to build `MapLoadOptions` and resolve the absolute map path.
 ///   4. `loadConfiguredMap()` — fills a `MapCollisionData` using the configured options.
@@ -21,20 +21,19 @@
 #pragma once
 
 #include "ecs/AssetCatalog.hpp"
-#include "ecs/physics/MapLoader.hpp"
 #include "ecs/components/PowerupState.hpp"
-
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
+#include "ecs/physics/MapLoader.hpp"
 
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_log.h>
 
-#include <functional>
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 #include <fstream>
-#include <string>
+#include <functional>
 #include <iostream>
+#include <string>
 
 namespace gamemap
 {
@@ -56,15 +55,12 @@ inline constexpr bool k_separatedCollisionMap = true;
 /// Matched case-insensitively against Assimp node names.
 inline constexpr const char* k_collisionPattern = "COL_";
 
-/// @brief Should collision meshes be auto-fit to primitive shapes, or kept
-/// as raw triMeshes (the exact artist-authored Blender geometry)?
+/// @brief Should separated collision meshes be auto-fit to primitive shapes?
 ///
-///   true  (default) → run the auto-detection pipeline (AABB → cylinder →
-///                     sphere → convex brush → triMesh). Convex meshes
-///                     become cheap primitives or brushes; only truly
-///                     non-convex meshes fall back to triMesh.
-///   false           → trust the artist: every collision mesh stays a
-///                     triMesh, vertex-for-vertex.
+/// Production maps keep this false: `COL_` Blender collision nodes are loaded
+/// as `WorldTriMesh` vertex-for-vertex after export triangulation. The old
+/// auto-detection pipeline remains available only for prototype/debug maps
+/// that deliberately opt into primitive guessing.
 ///
 /// Has no effect in prototype mode (`k_separatedCollisionMap = false`):
 /// every mesh is collision there, and forcing all of them to triMesh would
@@ -73,11 +69,9 @@ inline constexpr bool k_guessShapesProcessed = false;
 
 /// @brief Run V-HACD convex decomposition on non-convex prop meshes?
 ///
-/// When `true`, prop meshes flagged with `decomposeCollision = true` in
-/// `AssetCatalog.hpp` (currently the bottle and metallic pallet) are split
-/// into a small set of convex `WorldBrush`es by V-HACD.  Smoother runtime
-/// collision than triMesh (no per-triangle MTV jitter on curved surfaces)
-/// at the cost of a few seconds of map-load time per affected prop.
+/// Production map collision does not use V-HACD. `COL_` map nodes are
+/// authored simplified triangle surfaces and stay triangle surfaces at
+/// runtime. This switch only exists for non-map prop experimentation.
 ///
 /// When `false` (default), V-HACD is bypassed and non-convex props fall
 /// back to triMesh.  Disable to:
@@ -86,9 +80,9 @@ inline constexpr bool k_guessShapesProcessed = false;
 ///   * keep parity with bot/headless tooling that doesn't need smooth
 ///     curved-contact collision.
 ///
-/// `WorldTriMesh` collision is correct, just visibly jittery on curved
-/// contacts because the mover's MTV flips between adjacent triangle
-/// normals.  Acceptable for the placeholder bottle/pallet props.
+/// `WorldTriMesh` collision is the primary map path. Curved prop contact may
+/// still benefit from authored simplified collision or a future dedicated prop
+/// solution; V-HACD should not be reintroduced into map loading.
 ///
 /// Call sites that pass `decomposeCollision` to `physics::loadPropCollision`
 /// must AND that argument with this flag — see `client/game/Game.cpp`,
@@ -125,19 +119,22 @@ inline constexpr bool k_useVhacd = false;
 
 inline std::vector<glm::vec3> spawnPoints_;
 
-struct WeaponSpawner {
+struct WeaponSpawner
+{
     WeaponType type;
     glm::vec3 pos;
 };
 inline std::vector<WeaponSpawner> weaponSpawner_;
 
-struct PowerupSpawner {
+struct PowerupSpawner
+{
     PowerupType type;
     glm::vec3 pos;
 };
 inline std::vector<PowerupSpawner> powerupSpawner_;
 
-void traverseNodeTree(const aiNode* node, int depth = 0) {
+void traverseNodeTree(const aiNode* node, int depth = 0)
+{
     if (node == nullptr) {
         return;
     }
@@ -153,9 +150,7 @@ void traverseNodeTree(const aiNode* node, int depth = 0) {
     }
 }
 
-void* getMetadataValue(
-    const aiMetadata* metadata,
-    const std::string& key)
+void* getMetadataValue(const aiMetadata* metadata, const std::string& key)
 {
     if (metadata == nullptr) {
         return nullptr;
@@ -190,24 +185,24 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
     }
 
     SDL_Log("[%s] map collision loaded (%s): %zu planes, %zu boxes, %zu brushes, %zu cylinders, %zu spheres, "
-                "%zu trimeshes",
-                tag,
-                kMapAsset.filename,
-                out.planes.size(),
-                out.boxes.size(),
-                out.brushes.size(),
-                out.cylinders.size(),
-                out.spheres.size(),
-                out.triMeshes.size());
-                
+            "%zu trimeshes",
+            tag,
+            kMapAsset.filename,
+            out.planes.size(),
+            out.boxes.size(),
+            out.brushes.size(),
+            out.cylinders.size(),
+            out.spheres.size(),
+            out.triMeshes.size());
+
     // Load gameplay entities from map
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(path, 0 /* no flags */);
 
-    if (scene == nullptr) return false;
+    if (scene == nullptr)
+        return false;
 
-    std::function<void(const aiNode*, int)> traverse =
-    [&](const aiNode* node, int depth) {
+    std::function<void(const aiNode*, int)> traverse = [&](const aiNode* node, int depth) {
         if (node == nullptr) {
             return;
         }
@@ -216,8 +211,7 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
             for (unsigned int i = 0; i < node->mMetaData->mNumProperties; i++) {
                 if (std::string(node->mMetaData->mKeys[i].C_Str()) == "entity_type") {
                     int32_t entity_type = *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "entity_type"));
-                    switch (entity_type)
-                    {
+                    switch (entity_type) {
                     case 0: // Player spawn point
                     {
                         const aiMatrix4x4& t = node->mTransformation;
@@ -229,17 +223,19 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
                     {
                         const aiMatrix4x4& t = node->mTransformation;
 
-                        WeaponType weapon_type = static_cast<WeaponType>(*static_cast<int32_t*>(getMetadataValue(node->mMetaData, "weapon_type")));
+                        WeaponType weapon_type = static_cast<WeaponType>(
+                            *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "weapon_type")));
                         glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        weaponSpawner_.push_back(WeaponSpawner{.type=weapon_type, .pos=pos});
+                        weaponSpawner_.push_back(WeaponSpawner{.type = weapon_type, .pos = pos});
                         break;
                     }
                     case 2: // Power up spawn point
                     {
                         const aiMatrix4x4& t = node->mTransformation;
-                        PowerupType powerup_type = static_cast<PowerupType>(*static_cast<int32_t*>(getMetadataValue(node->mMetaData, "powerup_type")));
+                        PowerupType powerup_type = static_cast<PowerupType>(
+                            *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "powerup_type")));
                         glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        powerupSpawner_.push_back(PowerupSpawner{.type=powerup_type, .pos=pos});
+                        powerupSpawner_.push_back(PowerupSpawner{.type = powerup_type, .pos = pos});
                         break;
                     }
                     default:
@@ -265,11 +261,7 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
         for (size_t i = 0; i < spawnPoints_.size(); i++) {
             const glm::vec3& p = spawnPoints_[i];
 
-            out_file << i
-                    << ": ("
-                    << p.x << ", "
-                    << p.y << ", "
-                    << p.z << ")\n";
+            out_file << i << ": (" << p.x << ", " << p.y << ", " << p.z << ")\n";
         }
     }
 

@@ -1,6 +1,5 @@
 /// @file TriMeshCollision.cpp
-/// @brief BVH builder, edge-welding cooker, and Voronoi-clipped runtime
-///        primitives for AABB-vs-triangle-mesh collision.
+/// @brief BVH builder, edge-welding cooker, and runtime triangle-mesh queries.
 ///
 /// Phase 2 of the physics roadmap.  Replaces the older SAT-MTV per-triangle
 /// path (which produced "ghost contacts" on internal edges of triangulated
@@ -8,11 +7,11 @@
 ///   1. A cook-time welding pass (`weldTriMesh`) that classifies every
 ///      shared edge as convex / concave / coplanar, marking only convex
 ///      edges and their incident vertices as "active".
-///   2. Runtime primitives that find the closest Voronoi feature on a
-///      triangle to the AABB centre, discard contacts on inactive features,
-///      and otherwise produce a face-normal MTV.  See Ericson, *Real-Time
-///      Collision Detection* §5.1.5 for the closest-feature algorithm, and
-///      Jolt's `MeshShape::sCollideConvex` for the discard logic.
+///   2. Legacy AABB primitives that use Voronoi feature clipping for debug
+///      geometry.
+///   3. Capsule primitives that treat authored map triangles as two-sided
+///      blocking surfaces and solve against bounded face / edge / vertex
+///      features via segment-triangle closest points.
 
 #include "TriMeshCollision.hpp"
 
@@ -284,15 +283,15 @@ TriRegion closestPointOnTriangle(glm::vec3 p, glm::vec3 a, glm::vec3 b, glm::vec
 // the legitimate "eject from solid material" behavior that the rest of
 // the game relies on.
 bool aabbVsTriVoronoi(glm::vec3 center,
-                     glm::vec3 vel,
-                     glm::vec3 he,
-                     glm::vec3 v0,
-                     glm::vec3 v1,
-                     glm::vec3 v2,
-                     glm::vec3 faceN,
-                     uint8_t edgeFlags,
-                     uint8_t vertFlags,
-                     glm::vec3& outMtv)
+                      glm::vec3 vel,
+                      glm::vec3 he,
+                      glm::vec3 v0,
+                      glm::vec3 v1,
+                      glm::vec3 v2,
+                      glm::vec3 faceN,
+                      uint8_t edgeFlags,
+                      uint8_t vertFlags,
+                      glm::vec3& outMtv)
 {
     // 1. Plane test: is the AABB even straddling the triangle's plane?
     //    `r` is the AABB's projected half-extent on the normal (Minkowski radius).
@@ -347,13 +346,27 @@ bool aabbVsTriVoronoi(glm::vec3 center,
     if (s < 0.0f) {
         bool inactive = false;
         switch (region) {
-        case TriRegion::Face:  inactive = (edgeFlags == 0u); break;
-        case TriRegion::Edge0: inactive = (edgeFlags & 0x1u) == 0u; break;
-        case TriRegion::Edge1: inactive = (edgeFlags & 0x2u) == 0u; break;
-        case TriRegion::Edge2: inactive = (edgeFlags & 0x4u) == 0u; break;
-        case TriRegion::Vert0: inactive = (vertFlags & 0x1u) == 0u; break;
-        case TriRegion::Vert1: inactive = (vertFlags & 0x2u) == 0u; break;
-        case TriRegion::Vert2: inactive = (vertFlags & 0x4u) == 0u; break;
+        case TriRegion::Face:
+            inactive = (edgeFlags == 0u);
+            break;
+        case TriRegion::Edge0:
+            inactive = (edgeFlags & 0x1u) == 0u;
+            break;
+        case TriRegion::Edge1:
+            inactive = (edgeFlags & 0x2u) == 0u;
+            break;
+        case TriRegion::Edge2:
+            inactive = (edgeFlags & 0x4u) == 0u;
+            break;
+        case TriRegion::Vert0:
+            inactive = (vertFlags & 0x1u) == 0u;
+            break;
+        case TriRegion::Vert1:
+            inactive = (vertFlags & 0x2u) == 0u;
+            break;
+        case TriRegion::Vert2:
+            inactive = (vertFlags & 0x4u) == 0u;
+            break;
         }
         if (inactive)
             return false;
@@ -432,8 +445,8 @@ HitResult sweepAABBvsTriangle(glm::vec3 halfExtents,
         if (dLenSq > 1e-12f) {
             const float dLen = std::sqrt(dLenSq);
             const glm::vec3 unitD = d / dLen;
-            const float rD =
-                std::abs(unitD.x) * halfExtents.x + std::abs(unitD.y) * halfExtents.y + std::abs(unitD.z) * halfExtents.z;
+            const float rD = std::abs(unitD.x) * halfExtents.x + std::abs(unitD.y) * halfExtents.y +
+                             std::abs(unitD.z) * halfExtents.z;
             if (dLen > rD + 1e-3f)
                 return result;
         }
@@ -449,118 +462,80 @@ HitResult sweepAABBvsTriangle(glm::vec3 halfExtents,
 
 // Capsule-vs-triangle primitives
 //
-// The capsule version mirrors the AABB Voronoi pipeline above, replacing the
-// AABB's anisotropic Minkowski half-extent
-//     r = |n.x|*hx + |n.y|*hy + |n.z|*hz                      (AABB)
-// with the capsule's isotropic-plus-axis half-extent
-//     r = radius + halfHeight * |dot(up, n)|                  (capsule)
-//
-// This is the single line of math that kills the standoff bug at
-// MovementSystem.cpp:761-815: for a capsule, the half-extent along ANY
-// horizontal wall normal is just `radius` (no `|n.x|*hx + |n.z|*hz`
-// rotation-dependent term).  All other guards (velocity-coherent culling,
-// welded-feature rejection, bounded-reach check) carry over unchanged.
+// Runtime map collision is authored as simplified triangle surfaces. These
+// queries therefore treat triangles as two-sided blocking surfaces, not as
+// faces of a closed solid volume. The contact normal comes from the closest
+// capsule-axis point to the closest triangle feature; face normals are only a
+// fallback when the axis lies exactly on the surface.
 
-/// @brief Capsule depenetration core.  Returns an MTV pushing a capsule
-/// centred at `center` out of triangle `(v0, v1, v2)` along its face normal.
-///
-/// Architecture matches `aabbVsTriVoronoi` above — see that function's
-/// preamble for the rationale on velocity-coherent culling and welded-
-/// feature rejection.  Both guards are *required* for robustness against
-/// non-manifold / two-sided mesh hacks; do not remove them without also
-/// fixing the meshes.
-bool capsuleVsTriVoronoi(glm::vec3 center,
+TriRegion closestPointSegmentTriangle(glm::vec3 segA,
+                                      glm::vec3 segB,
+                                      glm::vec3 v0,
+                                      glm::vec3 v1,
+                                      glm::vec3 v2,
+                                      glm::vec3& outOnSegment,
+                                      glm::vec3& outOnTriangle,
+                                      float& outDistSq);
+
+struct CapsuleTriQuery
+{
+    float axisDistance{1e30f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    glm::vec3 pointOnSegment{0.0f};
+    glm::vec3 pointOnTriangle{0.0f};
+    TriRegion region{TriRegion::Face};
+};
+
+CapsuleTriQuery queryCapsuleTriangleSurface(
+    CapsuleShape capsule, glm::vec3 center, glm::vec3 v0, glm::vec3 v1, glm::vec3 v2, glm::vec3 faceN)
+{
+    CapsuleTriQuery q;
+    float distSq = 1e30f;
+    q.region = closestPointSegmentTriangle(
+        capsule.segA(center), capsule.segB(center), v0, v1, v2, q.pointOnSegment, q.pointOnTriangle, distSq);
+    q.axisDistance = std::sqrt(std::max(distSq, 0.0f));
+
+    if (distSq > 1e-12f) {
+        q.normal = (q.pointOnSegment - q.pointOnTriangle) / q.axisDistance;
+        return q;
+    }
+
+    q.normal = faceN;
+    if (glm::dot(q.normal, center - v0) < 0.0f)
+        q.normal = -q.normal;
+    return q;
+}
+
+bool capsuleVsTriSurface(glm::vec3 center,
                          glm::vec3 vel,
                          CapsuleShape capsule,
                          glm::vec3 v0,
                          glm::vec3 v1,
                          glm::vec3 v2,
                          glm::vec3 faceN,
-                         uint8_t edgeFlags,
-                         uint8_t vertFlags,
                          glm::vec3& outMtv)
 {
-    // 1. Plane test.  Capsule Minkowski extent along the face normal.
-    const float r = capsule.minkowskiExtent(faceN);
-    const float s = glm::dot(faceN, center - v0);
-    if (std::abs(s) > r)
-        return false;
-
-    // 2. Closest Voronoi feature on the bounded triangle to the capsule centre.
-    glm::vec3 closest;
-    const TriRegion region = closestPointOnTriangle(center, v0, v1, v2, closest);
-
-    // 3. Bounded-reach check for non-face features.  Same logic as AABB,
-    //    but the capsule extent depends on |dot(up, unitD)| rather than
-    //    the AABB's anisotropic sum.
-    if (region != TriRegion::Face) {
-        const glm::vec3 d = closest - center;
-        const float dLenSq = glm::dot(d, d);
-        if (dLenSq > 1e-12f) {
-            const float dLen = std::sqrt(dLenSq);
-            const glm::vec3 unitD = d / dLen;
-            const float rD = capsule.minkowskiExtent(unitD);
-            if (dLen > rD + 1e-4f)
-                return false;
-        }
-    }
-
-    // 4. Velocity-coherent culling.
-    if (glm::dot(vel, faceN) > 0.0f)
-        return false;
-
-    // 5. Welded-feature rejection on back-side contacts.
-    if (s < 0.0f) {
-        bool inactive = false;
-        switch (region) {
-        case TriRegion::Face:  inactive = (edgeFlags == 0u); break;
-        case TriRegion::Edge0: inactive = (edgeFlags & 0x1u) == 0u; break;
-        case TriRegion::Edge1: inactive = (edgeFlags & 0x2u) == 0u; break;
-        case TriRegion::Edge2: inactive = (edgeFlags & 0x4u) == 0u; break;
-        case TriRegion::Vert0: inactive = (vertFlags & 0x1u) == 0u; break;
-        case TriRegion::Vert1: inactive = (vertFlags & 0x2u) == 0u; break;
-        case TriRegion::Vert2: inactive = (vertFlags & 0x4u) == 0u; break;
-        }
-        if (inactive)
-            return false;
-    }
-
-    // 6. Face-normal MTV at depth `r - s`.
-    const float depth = r - s;
+    const CapsuleTriQuery q = queryCapsuleTriangleSurface(capsule, center, v0, v1, v2, faceN);
+    const float depth = capsule.radius - q.axisDistance;
     if (depth <= 0.0f)
         return false;
-    outMtv = faceN * depth;
+
+    // If motion is already moving away from the actual closest surface
+    // feature, let integration clear the residual instead of adding a push.
+    if (glm::dot(vel, q.normal) > 0.0f)
+        return false;
+
+    outMtv = q.normal * depth;
     return true;
 }
 
-/// @brief Capsule swept-collision against a single triangle.  Mirror of
-/// `sweepAABBvsTriangle` with capsule Minkowski extent.
+/// @brief Capsule swept-collision against a single triangle.
 ///
-/// As with the AABB version, we deliberately do NOT discard contacts on
-/// inactive (welded) edges or vertices here — the bump loop relies on
-/// both adjacent coplanar triangles reporting the same hit time to
-/// produce a stable contact.
-///
-/// **Phase B — active-edge swap is intentionally a no-op on this path.**
-/// Bullet's `btInternalEdgeUtility` snaps an "in-between" contact normal
-/// (one that's not aligned with either adjacent face) to the closer of
-/// the two adjacent face normals.  Our function returns the face normal
-/// of the triangle being tested as the contact normal (the `n = faceN`
-/// line at the top of this function) — i.e., the contact normal is
-/// *already* one of the two adjacent face normals by construction, so
-/// there is no in-between direction to snap from.
-///
-/// A naive "swap to neighbour normal on welded edge" would also be
-/// dangerous: two-sided mesh hacks (reverse-winded coplanar duplicates
-/// with separate vertex indices) escape the welder's topological pair-
-/// up, but coplanar pairs that *do* share indices welded together with
-/// opposite winding would see `dot(nA, nB) ≈ -1` — swapping would flip
-/// the contact normal into the solid.
-///
-/// The `edgeNeighbor` data populated by `weldTriMesh()` is exposed for
-/// Phase D wallrun, which walks the surface manifold by hopping between
-/// adjacent triangles at edge crossings — a direct consumer that needs
-/// the adjacency, unlike this sweep path which doesn't.
+/// Uses conservative advancement over the capsule axis against the bounded
+/// triangle surface, so finite edges and vertices are blocking even when the
+/// motion is parallel to the triangle plane. This is intentionally two-sided:
+/// authored map triangles are thin surfaces unless material tags later opt
+/// into one-sided behaviour.
 HitResult sweepCapsuleVsTriangle(CapsuleShape capsule,
                                  glm::vec3 start,
                                  glm::vec3 end,
@@ -572,46 +547,42 @@ HitResult sweepCapsuleVsTriangle(CapsuleShape capsule,
                                  uint8_t vertFlags)
 {
     HitResult result;
-
-    // Orient the face normal toward the start of the sweep.
-    glm::vec3 n = faceN;
-    if (glm::dot(n, start - v0) < 0.0f)
-        n = -n;
-
-    const float r = capsule.minkowskiExtent(n);
-    const float distStart = glm::dot(n, start - v0);
-    const float distEnd = glm::dot(n, end - v0);
-
-    if (distStart < r)
-        return result;
-    if (distEnd >= distStart)
-        return result;
-
-    const float t = (distStart - r) / (distStart - distEnd);
-    if (t < 0.0f || t >= 1.0f)
-        return result;
-
-    const glm::vec3 contactPos = start + (end - start) * t;
-
-    glm::vec3 closest;
-    const TriRegion region = closestPointOnTriangle(contactPos, v0, v1, v2, closest);
-    if (region != TriRegion::Face) {
-        const glm::vec3 d = closest - contactPos;
-        const float dLenSq = glm::dot(d, d);
-        if (dLenSq > 1e-12f) {
-            const float dLen = std::sqrt(dLenSq);
-            const glm::vec3 unitD = d / dLen;
-            const float rD = capsule.minkowskiExtent(unitD);
-            if (dLen > rD + 1e-3f)
-                return result;
-        }
-    }
     (void)edgeFlags;
     (void)vertFlags;
 
-    result.hit = true;
-    result.tFirst = t;
-    result.normal = n;
+    const glm::vec3 delta = end - start;
+    if (glm::dot(delta, delta) < 1e-12f)
+        return result;
+
+    const CapsuleTriQuery startQ = queryCapsuleTriangleSurface(capsule, start, v0, v1, v2, faceN);
+    if (startQ.axisDistance <= capsule.radius + 1e-4f)
+        return result;
+
+    float t = 0.0f;
+    constexpr int k_maxIterations = 24;
+    constexpr float k_hitSlop = 1e-3f;
+    constexpr float k_minAdvance = 1e-5f;
+
+    for (int iter = 0; iter < k_maxIterations && t < 1.0f; ++iter) {
+        const glm::vec3 center = start + delta * t;
+        const CapsuleTriQuery q = queryCapsuleTriangleSurface(capsule, center, v0, v1, v2, faceN);
+        const float clearance = q.axisDistance - capsule.radius;
+
+        if (clearance <= k_hitSlop && t > 0.0f) {
+            result.hit = true;
+            result.tFirst = glm::clamp(t, 0.0f, 1.0f);
+            result.normal = q.normal;
+            return result;
+        }
+
+        const float closingSpeed = -glm::dot(delta, q.normal);
+        if (closingSpeed <= 1e-6f)
+            return result;
+
+        const float rawStep = std::max((clearance - k_hitSlop) / closingSpeed, k_minAdvance);
+        t += rawStep;
+    }
+
     return result;
 }
 
@@ -619,12 +590,8 @@ HitResult sweepCapsuleVsTriangle(CapsuleShape capsule,
 
 /// @brief Closest point pair on two line segments (p1→q1) and (p2→q2).
 /// Ericson, *Real-Time Collision Detection* §5.1.9.
-void closestPointSegmentSegment(glm::vec3 p1,
-                                glm::vec3 q1,
-                                glm::vec3 p2,
-                                glm::vec3 q2,
-                                glm::vec3& outC1,
-                                glm::vec3& outC2)
+void closestPointSegmentSegment(
+    glm::vec3 p1, glm::vec3 q1, glm::vec3 p2, glm::vec3 q2, glm::vec3& outC1, glm::vec3& outC2)
 {
     constexpr float k_eps = 1e-12f;
 
@@ -993,8 +960,7 @@ HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 e
                     best = hr;
                     if (debug::isEnabled()) {
                         const glm::vec3 hitPos = start + (end - start) * hr.tFirst;
-                        const float r = std::abs(hr.normal.x) * halfExtents.x +
-                                        std::abs(hr.normal.y) * halfExtents.y +
+                        const float r = std::abs(hr.normal.x) * halfExtents.x + std::abs(hr.normal.y) * halfExtents.y +
                                         std::abs(hr.normal.z) * halfExtents.z;
                         debug::pushSweepContact(
                             hitPos - hr.normal * r, hr.normal, debug::ContactSource::TriMeshSweep, ti);
@@ -1069,8 +1035,8 @@ void depenetrateAABBvsTriMesh(
 
             const glm::vec3 expMin = node.boundsMin - halfExtents;
             const glm::vec3 expMax = node.boundsMax + halfExtents;
-            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y ||
-                pos.z < expMin.z || pos.z > expMax.z)
+            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+                pos.z > expMax.z)
                 continue;
 
             if (node.count > 0) {
@@ -1120,9 +1086,8 @@ void depenetrateAABBvsTriMesh(
                     // and any sub-tick overshoot is tiny).
                     if (diag::isEnabled()) {
                         const glm::vec3& fn = mesh.faceNormals[ti];
-                        const float rTri = std::abs(fn.x) * halfExtents.x +
-                                            std::abs(fn.y) * halfExtents.y +
-                                            std::abs(fn.z) * halfExtents.z;
+                        const float rTri = std::abs(fn.x) * halfExtents.x + std::abs(fn.y) * halfExtents.y +
+                                           std::abs(fn.z) * halfExtents.z;
                         if (depth > rTri * 0.75f) {
                             const float sTri = glm::dot(fn, pos - v0);
                             glm::vec3 closestTri;
@@ -1203,12 +1168,11 @@ void depenetrateAABBvsTriMesh(
     }
 }
 
-// Capsule trimesh queries (Phase A of physics-future-path.md)
+// Capsule trimesh queries
 //
 // Structure mirrors the AABB versions above.  Broad-phase BVH culling uses
 // the capsule's enclosing AABB (`capsule.enclosingHalfExtents()`); per-
-// triangle work calls the capsule Voronoi helpers added in the anonymous
-// namespace.
+// triangle work uses surface-based capsule-axis vs bounded-triangle queries.
 
 HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)
 {
@@ -1240,15 +1204,8 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
                 const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
                 const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
 
-                HitResult hr = sweepCapsuleVsTriangle(capsule,
-                                                     start,
-                                                     end,
-                                                     v0,
-                                                     v1,
-                                                     v2,
-                                                     mesh.faceNormals[ti],
-                                                     mesh.edgeActive[ti],
-                                                     mesh.vertActive[ti]);
+                HitResult hr = sweepCapsuleVsTriangle(
+                    capsule, start, end, v0, v1, v2, mesh.faceNormals[ti], mesh.edgeActive[ti], mesh.vertActive[ti]);
                 if (hr.hit && hr.tFirst < best.tFirst) {
                     if (ti < mesh.triangleMaterials.size())
                         hr.surfaceType = static_cast<SurfaceType>(mesh.triangleMaterials[ti]);
@@ -1272,8 +1229,8 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
     return best;
 }
 
-DepenContact deepestCapsuleContactVsTriMesh(
-    CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldTriMesh& mesh)
+DepenContact
+deepestCapsuleContactVsTriMesh(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldTriMesh& mesh)
 {
     DepenContact best;
     if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
@@ -1281,9 +1238,8 @@ DepenContact deepestCapsuleContactVsTriMesh(
 
     const glm::vec3 he = capsule.enclosingHalfExtents();
 
-    if (pos.x + he.x < mesh.boundsMin.x || pos.x - he.x > mesh.boundsMax.x ||
-        pos.y + he.y < mesh.boundsMin.y || pos.y - he.y > mesh.boundsMax.y ||
-        pos.z + he.z < mesh.boundsMin.z || pos.z - he.z > mesh.boundsMax.z)
+    if (pos.x + he.x < mesh.boundsMin.x || pos.x - he.x > mesh.boundsMax.x || pos.y + he.y < mesh.boundsMin.y ||
+        pos.y - he.y > mesh.boundsMax.y || pos.z + he.z < mesh.boundsMin.z || pos.z - he.z > mesh.boundsMax.z)
         return best;
 
     SurfaceType bestSurface = mesh.defaultSurface;
@@ -1299,8 +1255,8 @@ DepenContact deepestCapsuleContactVsTriMesh(
 
         const glm::vec3 expMin = node.boundsMin - he;
         const glm::vec3 expMax = node.boundsMax + he;
-        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y ||
-            pos.z < expMin.z || pos.z > expMax.z)
+        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+            pos.z > expMax.z)
             continue;
 
         if (node.count > 0) {
@@ -1311,16 +1267,7 @@ DepenContact deepestCapsuleContactVsTriMesh(
                 const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
 
                 glm::vec3 mtv;
-                if (!capsuleVsTriVoronoi(pos,
-                                         vel,
-                                         capsule,
-                                         v0,
-                                         v1,
-                                         v2,
-                                         mesh.faceNormals[ti],
-                                         mesh.edgeActive[ti],
-                                         mesh.vertActive[ti],
-                                         mtv))
+                if (!capsuleVsTriSurface(pos, vel, capsule, v0, v1, v2, mesh.faceNormals[ti], mtv))
                     continue;
 
                 const float depth = glm::length(mtv);
@@ -1348,8 +1295,7 @@ DepenContact deepestCapsuleContactVsTriMesh(
     return best;
 }
 
-ClosestPointOnMeshResult closestPointOnMesh(
-    glm::vec3 segA, glm::vec3 segB, float maxDist, const WorldTriMesh& mesh)
+ClosestPointOnMeshResult closestPointOnMesh(glm::vec3 segA, glm::vec3 segB, float maxDist, const WorldTriMesh& mesh)
 {
     ClosestPointOnMeshResult result;
     result.dist = maxDist;
@@ -1363,9 +1309,8 @@ ClosestPointOnMeshResult closestPointOnMesh(
     {
         const glm::vec3 expMin = segMin - glm::vec3(maxDist);
         const glm::vec3 expMax = segMax + glm::vec3(maxDist);
-        if (expMax.x < mesh.boundsMin.x || expMin.x > mesh.boundsMax.x ||
-            expMax.y < mesh.boundsMin.y || expMin.y > mesh.boundsMax.y ||
-            expMax.z < mesh.boundsMin.z || expMin.z > mesh.boundsMax.z)
+        if (expMax.x < mesh.boundsMin.x || expMin.x > mesh.boundsMax.x || expMax.y < mesh.boundsMin.y ||
+            expMin.y > mesh.boundsMax.y || expMax.z < mesh.boundsMin.z || expMin.z > mesh.boundsMax.z)
             return result;
     }
 
@@ -1381,9 +1326,8 @@ ClosestPointOnMeshResult closestPointOnMesh(
         const float currentMaxDist = result.dist;
         const glm::vec3 curExpMin = segMin - glm::vec3(currentMaxDist);
         const glm::vec3 curExpMax = segMax + glm::vec3(currentMaxDist);
-        if (curExpMax.x < node.boundsMin.x || curExpMin.x > node.boundsMax.x ||
-            curExpMax.y < node.boundsMin.y || curExpMin.y > node.boundsMax.y ||
-            curExpMax.z < node.boundsMin.z || curExpMin.z > node.boundsMax.z)
+        if (curExpMax.x < node.boundsMin.x || curExpMin.x > node.boundsMax.x || curExpMax.y < node.boundsMin.y ||
+            curExpMin.y > node.boundsMax.y || curExpMax.z < node.boundsMin.z || curExpMin.z > node.boundsMax.z)
             continue;
 
         if (node.count > 0) {
@@ -1396,8 +1340,7 @@ ClosestPointOnMeshResult closestPointOnMesh(
                 glm::vec3 onSeg;
                 glm::vec3 onTri;
                 float distSq;
-                const TriRegion region =
-                    closestPointSegmentTriangle(segA, segB, v0, v1, v2, onSeg, onTri, distSq);
+                const TriRegion region = closestPointSegmentTriangle(segA, segB, v0, v1, v2, onSeg, onTri, distSq);
                 const float dist = std::sqrt(distSq);
 
                 if (dist < result.dist) {
@@ -1428,14 +1371,13 @@ ClosestPointOnMeshResult closestPointOnMesh(
     return result;
 }
 
-ClosestPointOnMeshResult closestPointOnMesh(
-    CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh)
+ClosestPointOnMeshResult
+closestPointOnMesh(CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh)
 {
     return closestPointOnMesh(capsule.segA(center), capsule.segB(center), maxDist, mesh);
 }
 
-ClearanceResult clearanceCapsuleVsTriMesh(
-    CapsuleShape capsule, glm::vec3 pos, float maxReach, const WorldTriMesh& mesh)
+ClearanceResult clearanceCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 pos, float maxReach, const WorldTriMesh& mesh)
 {
     ClearanceResult clr;
     // Capsule axis to mesh: maxReach must already cover capsule.radius + motion.

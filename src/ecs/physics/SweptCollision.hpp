@@ -27,8 +27,8 @@ namespace physics
 /// @brief An infinite plane dividing free space from solid geometry.
 struct Plane
 {
-    glm::vec3 normal;                              ///< Unit vector pointing into free (non-solid) space.
-    float distance;                                ///< Signed offset: `dot(normal, p) == distance` for points on the plane.
+    glm::vec3 normal; ///< Unit vector pointing into free (non-solid) space.
+    float distance;   ///< Signed offset: `dot(normal, p) == distance` for points on the plane.
     SurfaceType surfaceType = SurfaceType::Concrete; ///< Material tag for impact VFX / SFX (Phase 3).
 };
 
@@ -96,13 +96,12 @@ struct BVHNode
 /// array mapping BVH leaf ranges to triangle indices in `indices`.
 ///
 /// **Phase 2 welding data** (`faceNormals`, `edgeActive`, `vertActive`):
-/// produced by `weldTriMesh()` after `buildTriMeshBVH()`.  Drives Voronoi-
-/// region contact clipping in the runtime collision primitives: per-triangle
+/// produced by `weldTriMesh()` after `buildTriMeshBVH()`. Per-triangle
 /// `edgeActive` bits mark genuine boundary edges; `vertActive` marks corners
-/// touched by an active edge.  Internal edges (welded coplanar / concave
-/// edges shared between adjacent triangles) are cleared so the depenetration
-/// path discards ghost contacts on them, matching the behaviour of Havok /
-/// Bullet / Jolt mesh shapes.
+/// touched by an active edge. Internal edges (welded coplanar / concave edges
+/// shared between adjacent triangles) are cleared for legacy AABB contact
+/// clipping. Capsule queries use bounded triangle closest points directly and
+/// keep these arrays as adjacency / feature metadata for traversal systems.
 struct WorldTriMesh
 {
     std::vector<glm::vec3> vertices;  ///< All vertex positions (world space, scaled).
@@ -114,8 +113,8 @@ struct WorldTriMesh
 
     // Welding data (one entry per canonical triangle index in `indices`).
     std::vector<glm::vec3> faceNormals; ///< CCW face normal (unit length) per triangle.
-    std::vector<uint8_t> edgeActive;    ///< Bit i set ⇔ edge i of this triangle is an active (boundary or convex) edge.
-    std::vector<uint8_t> vertActive;    ///< Bit i set ⇔ vertex i of this triangle is touched by an active edge.
+    std::vector<uint8_t> edgeActive; ///< Bit i set ⇔ edge i of this triangle is an active (boundary or convex) edge.
+    std::vector<uint8_t> vertActive; ///< Bit i set ⇔ vertex i of this triangle is touched by an active edge.
 
     /// @brief Phase B — edge → neighbour triangle adjacency.
     ///
@@ -135,7 +134,7 @@ struct WorldTriMesh
     // Phase 3 material data.  If `triangleMaterials` is empty, every triangle
     // falls back to `defaultSurface`.  Authored by `MapLoader` from Blender
     // per-face materials.
-    std::vector<uint8_t> triangleMaterials;            ///< One `SurfaceType` index per triangle (empty = use default).
+    std::vector<uint8_t> triangleMaterials;             ///< One `SurfaceType` index per triangle (empty = use default).
     SurfaceType defaultSurface = SurfaceType::Concrete; ///< Fallback for triangles without per-face material data.
 };
 
@@ -163,21 +162,15 @@ struct WorldGeometry
 /// AABB family that takes a centre + halfExtents.
 struct CapsuleShape
 {
-    float radius{16.0f};                    ///< Cylinder cross-section radius.
-    float halfHeight{20.0f};                ///< Half the segment length (excludes spherical caps).
-    glm::vec3 up{0.0f, 1.0f, 0.0f};         ///< Unit-length axis direction.
+    float radius{16.0f};            ///< Cylinder cross-section radius.
+    float halfHeight{20.0f};        ///< Half the segment length (excludes spherical caps).
+    glm::vec3 up{0.0f, 1.0f, 0.0f}; ///< Unit-length axis direction.
 
     /// @brief Top endpoint of the inner segment at `center`.
-    [[nodiscard]] glm::vec3 segA(glm::vec3 center) const noexcept
-    {
-        return center + up * halfHeight;
-    }
+    [[nodiscard]] glm::vec3 segA(glm::vec3 center) const noexcept { return center + up * halfHeight; }
 
     /// @brief Bottom endpoint of the inner segment at `center`.
-    [[nodiscard]] glm::vec3 segB(glm::vec3 center) const noexcept
-    {
-        return center - up * halfHeight;
-    }
+    [[nodiscard]] glm::vec3 segB(glm::vec3 center) const noexcept { return center - up * halfHeight; }
 
     /// @brief Tight half-extents of the AABB that encloses the capsule at `center`.
     ///
@@ -288,10 +281,10 @@ HitResult sweepAABBvsSphere(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 en
 /// @brief Sweep an AABB against all world geometry, returning the earliest hit.
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world);
 
-// Capsule swept-collision against convex primitives (Phase A of physics-future-path.md).
-// EXACT for planes and brushes; CONSERVATIVE (uses capsule's enclosing AABB) for box,
-// cylinder, sphere — the dev-arena primitives.  Real map geometry is trimesh and has
-// an exact capsule path in TriMeshCollision.hpp.
+// Capsule swept-collision against convex primitives. Planes and brushes use
+// per-plane capsule extents; box, cylinder, and sphere keep conservative
+// dev-arena approximations. Production map geometry is expected to use the
+// trimesh capsule path in TriMeshCollision.hpp.
 
 /// @brief Sweep a capsule along [start, end] against a list of infinite planes.
 HitResult sweepCapsuleVsPlanes(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, std::span<const Plane> planes);
@@ -329,10 +322,10 @@ HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const W
 /// pushing the shape along `+normal` moves it out of the obstacle.
 struct ClearanceResult
 {
-    bool contact{false};                 ///< True when `distance <= contactEpsilon`.
-    float distance{1e30f};               ///< Signed distance shape-surface → geometry-surface.
-    glm::vec3 pointOnGeometry{0.0f};     ///< World-space closest point on the geometry side.
-    glm::vec3 normal{0.0f, 1.0f, 0.0f};  ///< Unit-length, points from geometry into free space.
+    bool contact{false};                            ///< True when `distance <= contactEpsilon`.
+    float distance{1e30f};                          ///< Signed distance shape-surface → geometry-surface.
+    glm::vec3 pointOnGeometry{0.0f};                ///< World-space closest point on the geometry side.
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};             ///< Unit-length, points from geometry into free space.
     SurfaceType surfaceType{SurfaceType::Concrete}; ///< Material tag at the closest feature.
 };
 
@@ -374,12 +367,12 @@ ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, con
 ///   *  < 0  → feet are below the ground (penetrating — depen needs to recover)
 struct GroundProbeResult
 {
-    bool hit{false};                                 ///< True if any surface was found within the probe range.
-    bool walkable{false};                            ///< True if the surface normal makes it standable per `k_floorAngleCos`.
-    float distance{1e30f};                           ///< Foot-to-surface signed distance along the probe axis.
-    glm::vec3 point{0.0f};                           ///< World-space contact point on the surface.
-    glm::vec3 normal{0.0f, 1.0f, 0.0f};              ///< Outward-pointing surface normal (toward free space).
-    SurfaceType surfaceType{SurfaceType::Concrete};  ///< Material at the hit surface.
+    bool hit{false};                    ///< True if any surface was found within the probe range.
+    bool walkable{false};               ///< True if the surface normal makes it standable per `k_floorAngleCos`.
+    float distance{1e30f};              ///< Foot-to-surface signed distance along the probe axis.
+    glm::vec3 point{0.0f};              ///< World-space contact point on the surface.
+    glm::vec3 normal{0.0f, 1.0f, 0.0f}; ///< Outward-pointing surface normal (toward free space).
+    SurfaceType surfaceType{SurfaceType::Concrete}; ///< Material at the hit surface.
 };
 
 /// @brief Downward sweep that classifies the ground under a capsule.
@@ -400,15 +393,13 @@ struct GroundProbeResult
 /// @param world         World collision geometry.
 GroundProbeResult probeGround(CapsuleShape capsule, glm::vec3 pos, float maxDistance, const WorldGeometry& world);
 
-/// @brief Single deepest Voronoi contact from a capsule against a primitive
-/// or the world.  Distinct from `ClearanceResult` in two important ways:
-///   * `depth` is the *full Minkowski overlap* (face-normal MTV magnitude),
-///     not the surface-to-surface clearance — for an axis-crosses-triangle
-///     overlap the clearance is `-radius` but the MTV depth is
-///     `radius + halfHeight·|dot(up,n)|`, the actual distance the capsule
-///     centre must move to fully exit the plane's slab.
-///   * `normal` is the face / Minkowski normal pointing into free space,
-///     so `pos += normal * depth` is the exact one-shot ejection vector.
+/// @brief Single deepest contact from a capsule against a primitive or the world.
+///
+/// For authored triangle meshes, `depth` is the capsule surface penetration
+/// depth from closest capsule-axis point to closest bounded triangle feature.
+/// For legacy plane / brush / primitive paths it may still be a projected
+/// primitive MTV. `normal` always points from geometry toward the capsule side
+/// selected by the query.
 ///
 /// `valid = false` when no penetration; `depth > 0` otherwise.
 struct DepenContact
@@ -421,15 +412,15 @@ struct DepenContact
 
 /// @brief Scene-wide deepest single contact (per-primitive, per-feature).
 /// Used by the modern depen as the per-pass oracle: pick the deepest
-/// violation across the whole world, push exactly out of it, re-probe.
+/// violation across the whole world, push out of it, re-probe.
 DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldGeometry& world);
 
 /// @brief Per-pass-deepest-first capsule depenetration against the whole world.
 ///
 /// Replaces the legacy AABB depen + per-feature MTV summation.  Each pass:
-///   1. Find the single deepest Voronoi contact via `deepestCapsuleContact`.
-///   2. Push by the full MTV depth (no per-tick cap — the loop converges
-///      in O(touched-features) passes).
+///   1. Find the single deepest contact via `deepestCapsuleContact`.
+///   2. Push by that contact's depth (no per-tick cap — the loop converges
+///      in O(touched-features) passes for normal shallow overlaps).
 ///   3. Clip velocity component into the surface, repeat.
 ///
 /// Oscillation detector: if pass N's contact normal points opposite to
@@ -461,9 +452,9 @@ bool emergencyUnstick(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, cons
 struct SphereHitResult
 {
     bool hit{false};
-    float t{1.0f};                      ///< Fraction along path [0..1].
-    glm::vec3 normal{0.0f, 1.0f, 0.0f}; ///< Surface normal at contact.
-    glm::vec3 point{0.0f};              ///< World-space contact point on the surface.
+    float t{1.0f};                                  ///< Fraction along path [0..1].
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};             ///< Surface normal at contact.
+    glm::vec3 point{0.0f};                          ///< World-space contact point on the surface.
     SurfaceType surfaceType{SurfaceType::Concrete}; ///< Material at the hit surface (Phase 3).
 };
 

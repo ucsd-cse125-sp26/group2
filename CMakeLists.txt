@@ -1451,9 +1451,9 @@ target_include_directories(clientbot PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
 )
 
-# PR-23: bot now needs assimp (map glb load) + V-HACD (convex
-# decomposition for non-convex collision props).  Same set the
-# real client uses — no animation/render libs.
+# Bot links the same map/prop collision loader dependencies as the client.
+# V-HACD remains linked for legacy non-map prop experiments; production map
+# collision stays on authored trimeshes.
 target_link_libraries(clientbot PRIVATE
     SDL3::SDL3-static
     SDL3_net::SDL3_net
@@ -1479,15 +1479,34 @@ add_custom_command(
 add_custom_target(copy_clientbot_config DEPENDS "${CMAKE_BINARY_DIR}/config_clientbot.stamp")
 add_dependencies(clientbot copy_clientbot_config)
 
+enable_testing()
+
+add_executable(physics_trimesh_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/physics_trimesh_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TriMeshCollision.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/DebugCollisionDraw.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/PhaseDiagnostic.cpp"
+)
+target_include_directories(physics_trimesh_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(physics_trimesh_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
+
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
 set_compiler_warnings(server)
 set_compiler_warnings(clientbot)
+set_compiler_warnings(physics_trimesh_tests)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
 enable_sanitizers(server)
 enable_sanitizers(clientbot)
+enable_sanitizers(physics_trimesh_tests)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
 # without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on
