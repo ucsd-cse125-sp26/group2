@@ -738,6 +738,41 @@ glm::vec3 redirectWallForward(glm::vec3 oldForward, glm::vec3 oldNormal, glm::ve
     return (len > 0.001f) ? redirected / len : oldForward;
 }
 
+bool isBoundaryFeature(physics::TriRegion region)
+{
+    return region != physics::TriRegion::Face;
+}
+
+bool isTrailingSameWallBoundary(const WallAttachmentProbe& attachment,
+                                glm::vec3 pos,
+                                glm::vec3 oldForward,
+                                glm::vec3 oldNormal,
+                                float normalTurn,
+                                float radius)
+{
+    if (!isBoundaryFeature(attachment.region) || normalTurn >= 0.05f)
+        return false;
+    if (glm::dot(attachment.normal, oldNormal) < 0.98f)
+        return false;
+
+    const float alongTravel = glm::dot(attachment.anchor - pos, oldForward);
+    return alongTravel < -std::max(radius * 0.25f, 1.0f);
+}
+
+bool isForwardCompatibleWallHandoff(glm::vec3 oldForward, glm::vec3 oldNormal, glm::vec3 newNormal, glm::vec3 velocity)
+{
+    const glm::vec3 redirected = redirectWallForward(oldForward, oldNormal, newNormal);
+    if (glm::dot(redirected, oldForward) < -0.05f)
+        return false;
+
+    const glm::vec3 horizontalVelocity = horizVel(velocity);
+    const float horizontalSpeed = glm::length(horizontalVelocity);
+    if (horizontalSpeed > 1.0f && glm::dot(horizontalVelocity / horizontalSpeed, redirected) < -0.05f)
+        return false;
+
+    return true;
+}
+
 /// @brief Attempt to enter wallrun mode when airborne near a wall.
 /// @param vel    Velocity (modified in place).
 /// @param state  Player state (modified in place).
@@ -948,6 +983,14 @@ void handleWallRunning(glm::vec3& pos,
 
     const float normalTurn = std::acos(std::clamp(glm::dot(oldNormal, attachment.normal), -1.0f, 1.0f));
     if (normalTurn > tms::k_wallrunMaxFaceRedirect + 1e-4f) {
+        exitWallrun(state, posY);
+        return;
+    }
+    if (isTrailingSameWallBoundary(attachment, pos, oldForward, oldNormal, normalTurn, shape.radius)) {
+        exitWallrun(state, posY);
+        return;
+    }
+    if (normalTurn > 0.05f && !isForwardCompatibleWallHandoff(oldForward, oldNormal, attachment.normal, vel)) {
         exitWallrun(state, posY);
         return;
     }

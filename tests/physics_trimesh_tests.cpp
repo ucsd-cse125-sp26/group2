@@ -88,6 +88,25 @@ WorldTriMesh makeThinWall()
         });
 }
 
+WorldTriMesh makeThinWallSegment(float z0, float z1)
+{
+    return makeCookedMesh(
+        {
+            {0.0f, 0.0f, z0},
+            {0.0f, 40.0f, z0},
+            {0.0f, 40.0f, z1},
+            {0.0f, 0.0f, z1},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+}
+
 WorldTriMesh makeThinDepthWall()
 {
     return makeCookedMesh(
@@ -912,6 +931,124 @@ bool wallAttachmentWalksSingleMeshAdjacencyAtCorner()
     return ok;
 }
 
+bool wallrunOuterCornerKeepsForwardVelocity()
+{
+    std::array<WorldTriMesh, 2> meshes{makeThinWall(), makeThinDepthWallAt(20.0f)};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-10.0f, 20.0f, 16.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {0.0f, 20.0f, 16.0f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 1u;
+    sim.wallRegion = physics::TriRegion::Edge1;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning, "outer corner should continue wallrun");
+    ok &= expect(outSim.wallNormal.z < -0.7f, "outer corner should hand off to the forward continuation wall");
+    ok &= expect(glm::dot(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}, outSim.wallForward) >= 0.0f,
+                 "outer corner handoff should not reverse horizontal velocity");
+    return ok;
+}
+
+bool wallrunGapDropsWithoutReversingVelocity()
+{
+    const WorldTriMesh wall = makeThinWallSegment(-60.0f, 0.0f);
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-10.0f, 20.0f, 8.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {0.0f, 20.0f, 0.0f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 1u;
+    sim.wallRegion = physics::TriRegion::Edge1;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::OnFoot,
+                 "wallrun should drop when a wall segment ends without continuation");
+    ok &= expect(outVel.value.z > 0.0f, "wallrun drop should preserve forward velocity instead of reversing");
+    return ok;
+}
+
 bool climbMantleToTopFloorKeepsFiniteState()
 {
     const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
@@ -1383,6 +1520,8 @@ int main()
     ok &= wallDetectionGroundDistanceUsesFlippedGravityDirection();
     ok &= wallAttachmentLookaheadFindsOuterCornerContinuation();
     ok &= wallAttachmentWalksSingleMeshAdjacencyAtCorner();
+    ok &= wallrunOuterCornerKeepsForwardVelocity();
+    ok &= wallrunGapDropsWithoutReversingVelocity();
     ok &= climbMantleToTopFloorKeepsFiniteState();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= flippedGravityClimbMovesAlongLocalUp();
