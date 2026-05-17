@@ -1157,7 +1157,31 @@ GroundProbeResult probeGround(CapsuleShape capsule, glm::vec3 pos, float maxDist
     if (maxDistance <= 0.0f)
         return result;
 
-    const ClearanceResult overlap = clearanceCapsuleVsWorld(capsule, pos, world);
+    auto considerGround = [&](const GroundProbeResult& candidate) {
+        if (candidate.hit && candidate.walkable && candidate.distance < result.distance)
+            result = candidate;
+    };
+
+    forTriMeshCandidates(world,
+                         sweptBounds(capsule.enclosingHalfExtents(), pos, pos - capsule.up * maxDistance),
+                         [&](const WorldTriMesh& tm) {
+                             considerGround(
+                                 groundProbeCapsuleVsTriMesh(capsule, pos, maxDistance, k_floorAngleCos, tm));
+                         });
+    if (result.hit)
+        return result;
+
+    const WorldGeometry primitiveWorld{
+        .planes = world.planes,
+        .boxes = world.boxes,
+        .brushes = world.brushes,
+        .cylinders = world.cylinders,
+        .spheres = world.spheres,
+        .triMeshes = {},
+        .staticBroadphase = nullptr,
+    };
+
+    const ClearanceResult overlap = clearanceCapsuleVsWorld(capsule, pos, primitiveWorld);
     if (overlap.contact && glm::dot(overlap.normal, capsule.up) >= k_floorAngleCos) {
         result.hit = true;
         result.distance = overlap.distance;
@@ -1170,7 +1194,7 @@ GroundProbeResult probeGround(CapsuleShape capsule, glm::vec3 pos, float maxDist
 
     const glm::vec3 footDir = -capsule.up;
     const glm::vec3 end = pos + footDir * maxDistance;
-    const HitResult hit = sweepAll(capsule, pos, end, world);
+    const HitResult hit = sweepAll(capsule, pos, end, primitiveWorld);
 
     if (!hit.hit)
         return result;

@@ -216,4 +216,14 @@ closestPointOnMesh(CapsuleShape capsule, glm::vec3 center, float maxDist, const 
 ClearanceResult
 clearanceCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 pos, float maxReach, const WorldTriMesh& mesh);
 
+/// @brief Downward ground probe against walkable triangle faces only.
+///
+/// This is stricter than general capsule CCD: finite edges and vertices block
+/// movement, but they are not valid ground support by themselves. The support
+/// point of the capsule must project onto a walkable triangle face, preventing
+/// stair treads from launching the player upward while the capsule is still in
+/// front of the tread edge.
+GroundProbeResult groundProbeCapsuleVsTriMesh(
+    CapsuleShape capsule, glm::vec3 pos, float maxDistance, float minWalkableDot, const WorldTriMesh& mesh);
+
 } // namespace physics

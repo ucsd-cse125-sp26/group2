@@ -86,7 +86,14 @@ void runKinematicCharacterController(glm::vec3& pos,
         diagFrame.velBefore = vel;
     }
 
-    physics::depenetrateCapsuleVsWorld(pos, vel, capsule, world);
+    const bool useWalkCapsule = k_wasGrounded && !state.grappleActive;
+    const physics::CapsuleShape sweepCapsule = useWalkCapsule ? capsule.walkShape(physics::k_stepHeight) : capsule;
+    const glm::vec3 sweepCenterOffset =
+        useWalkCapsule ? capsule.walkCenterOffset(physics::k_stepHeight) : glm::vec3{0.0f};
+
+    glm::vec3 recoveryPos = pos + sweepCenterOffset;
+    physics::depenetrateCapsuleVsWorld(recoveryPos, vel, sweepCapsule, world);
+    pos = recoveryPos - sweepCenterOffset;
 
     if (diagOn) {
         diagFrame.posAfterDepen = pos;
@@ -94,11 +101,6 @@ void runKinematicCharacterController(glm::vec3& pos,
         if (diagFrame.depenPushDistance > 20.0f)
             diagFrame.flags |= physics::diag::PhaseFlag::DeepPenetration;
     }
-
-    const bool useWalkCapsule = k_wasGrounded && !state.grappleActive;
-    const physics::CapsuleShape sweepCapsule = useWalkCapsule ? capsule.walkShape(physics::k_stepHeight) : capsule;
-    const glm::vec3 sweepCenterOffset =
-        useWalkCapsule ? capsule.walkCenterOffset(physics::k_stepHeight) : glm::vec3{0.0f};
 
     glm::vec3 phaseVel = vel;
     if (useWalkCapsule)
@@ -135,6 +137,11 @@ void runKinematicCharacterController(glm::vec3& pos,
             const glm::vec3 sweepEnd = sweepStart + phaseVel * remainingTime;
             const physics::HitResult hit = physics::sweepAll(sweepCapsule, sweepStart, sweepEnd, world);
             if (!hit.hit) {
+                pos += phaseVel * remainingTime;
+                remainingTime = 0.0f;
+                break;
+            }
+            if (useWalkCapsule && glm::dot(hit.normal, worldUp) > 0.05f) {
                 pos += phaseVel * remainingTime;
                 remainingTime = 0.0f;
                 break;

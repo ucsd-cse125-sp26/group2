@@ -1680,4 +1680,76 @@ ClearanceResult clearanceCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 pos, f
     return clr;
 }
 
+GroundProbeResult groundProbeCapsuleVsTriMesh(
+    CapsuleShape capsule, glm::vec3 pos, float maxDistance, float minWalkableDot, const WorldTriMesh& mesh)
+{
+    GroundProbeResult best;
+    if (mesh.bvhNodes.empty() || mesh.faceNormals.empty() || maxDistance <= 0.0f)
+        return best;
+
+    const glm::vec3 up = capsule.up;
+    const glm::vec3 end = pos - up * maxDistance;
+    if (!sweptAABBOverlapsAABB(capsule.enclosingHalfExtents(), pos, end - pos, mesh.boundsMin, mesh.boundsMax, 1.0f))
+        return best;
+
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+        if (!sweptAABBOverlapsAABB(
+                capsule.enclosingHalfExtents(), pos, end - pos, node.boundsMin, node.boundsMax, 1.0f))
+            continue;
+
+        if (node.count > 0) {
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                glm::vec3 n = mesh.faceNormals[ti];
+                if (glm::dot(n, up) < 0.0f)
+                    n = -n;
+
+                const float upDot = glm::dot(n, up);
+                if (upDot < minWalkableDot)
+                    continue;
+
+                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+                const float planeDist = glm::dot(n, v0);
+                const float clearance = glm::dot(n, pos) - planeDist - capsule.minkowskiExtent(n);
+                const float probeDistance = clearance / upDot;
+                if (probeDistance > maxDistance || probeDistance > best.distance)
+                    continue;
+
+                const glm::vec3 centerAtSupport = pos - up * std::max(probeDistance, 0.0f);
+                const float axisSign = (glm::dot(capsule.up, n) >= 0.0f) ? 1.0f : -1.0f;
+                const glm::vec3 support =
+                    centerAtSupport - n * capsule.radius - capsule.up * (capsule.halfHeight * axisSign);
+                const glm::vec3 planePoint = support - n * (glm::dot(n, support) - planeDist);
+
+                glm::vec3 closest;
+                closestPointOnTriangle(planePoint, v0, v1, v2, closest);
+                if (glm::dot(closest - planePoint, closest - planePoint) > 0.25f * 0.25f)
+                    continue;
+
+                best.hit = true;
+                best.walkable = true;
+                best.distance = probeDistance;
+                best.point = closest;
+                best.normal = n;
+                best.surfaceType = (ti < mesh.triangleMaterials.size())
+                                       ? static_cast<SurfaceType>(mesh.triangleMaterials[ti])
+                                       : mesh.defaultSurface;
+            }
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
+        }
+    }
+
+    return best;
+}
+
 } // namespace physics
