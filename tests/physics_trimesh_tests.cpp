@@ -510,6 +510,35 @@ WorldTriMesh makeClimbWallWithTopFloor()
     return mesh;
 }
 
+WorldTriMesh makeFloorAndClimbWallSameMesh()
+{
+    std::vector<glm::vec3> vertices;
+    std::vector<uint32_t> indices;
+    auto addQuad = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d) {
+        const uint32_t base = static_cast<uint32_t>(vertices.size());
+        vertices.push_back(a);
+        vertices.push_back(b);
+        vertices.push_back(c);
+        vertices.push_back(d);
+        indices.push_back(base + 0u);
+        indices.push_back(base + 2u);
+        indices.push_back(base + 1u);
+        indices.push_back(base + 0u);
+        indices.push_back(base + 3u);
+        indices.push_back(base + 2u);
+    };
+
+    addQuad({-96.0f, 0.0f, -96.0f}, {96.0f, 0.0f, -96.0f}, {96.0f, 0.0f, 96.0f}, {-96.0f, 0.0f, 96.0f});
+    addQuad({-96.0f, 0.0f, 0.0f}, {96.0f, 0.0f, 0.0f}, {96.0f, 220.0f, 0.0f}, {-96.0f, 220.0f, 0.0f});
+
+    WorldTriMesh mesh;
+    mesh.vertices = std::move(vertices);
+    mesh.indices = std::move(indices);
+    physics::buildTriMeshBVH(mesh);
+    physics::weldTriMesh(mesh);
+    return mesh;
+}
+
 bool thinWallPlaneBlocksFromBothSides()
 {
     const WorldTriMesh wall = makeThinWall();
@@ -2245,6 +2274,212 @@ bool climbAttachFollowsGroundJumpIntoWall()
     return ok;
 }
 
+bool climbAttachFindsWallWhenSameMeshFloorIsCloser()
+{
+    const WorldTriMesh mesh = makeFloorAndClimbWallSameMesh();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&mesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 36.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 160.0f, 180.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "climb attach should find a wall triangle even when a same-mesh floor is closer");
+    ok &= expect(registry.get<PlayerSimState>(player).climbWallNormal.z < -0.9f,
+                 "same-mesh climb attach should use the wall normal, not the closer floor normal");
+    return ok;
+}
+
+bool climbStayUsesWallWhenSameMeshFloorIsCloser()
+{
+    const WorldTriMesh mesh = makeFloorAndClimbWallSameMesh();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&mesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 36.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    sim.climbAttachPoint = {0.0f, 36.0f, 0.0f};
+    sim.climbAttachHeight = 36.0f;
+    sim.climbBaseline = 36.0f;
+    sim.climbSpaceCutoff = 36.0f + tms::k_climbSpaceHeight;
+    sim.climbAttachOffsetLimit = 36.0f + tms::k_climbAttachOffset;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "climb stay should not drop because a same-mesh floor is closer than the wall");
+    ok &= expect(registry.get<Velocity>(player).value.y > 0.0f,
+                 "same-mesh climb stay should still apply upward climb movement");
+    return ok;
+}
+
+bool climbLostContactCanImmediatelyRestick()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry wallWorld{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+    const physics::WorldGeometry emptyWorld{};
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 120.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 120.0f, 80.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    sim.climbAttachPoint = {0.0f, 120.0f, 0.0f};
+    sim.climbAttachHeight = 120.0f;
+    sim.climbBaseline = 120.0f;
+    sim.climbSpaceCutoff = 120.0f + tms::k_climbSpaceHeight;
+    sim.climbAttachOffsetLimit = 120.0f + tms::k_climbAttachOffset;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, emptyWorld);
+    const bool droppedFromLostContact = registry.get<PlayerVisState>(player).moveMode == MoveMode::OnFoot;
+    const bool noExitCooldown = !registry.get<PlayerVisState>(player).exitingClimb;
+    const bool noReattachPenalty = registry.get<PlayerSimState>(player).climbPreviousAttachHeight <= -1e9f;
+
+    systems::runMovement(registry, 1.0f / 128.0f, wallWorld);
+
+    bool ok = true;
+    ok &= expect(droppedFromLostContact, "lost climb contact should drop to OnFoot");
+    ok &= expect(noExitCooldown, "lost climb contact should not start a long climb exit cooldown");
+    ok &= expect(noReattachPenalty, "lost climb contact should not consume same-wall reattach height");
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "lost climb contact should allow immediate restick when the wall is detected again");
+    return ok;
+}
+
+bool climbFreshAttachWithJumpHeldDoesNotImmediatelyClimbJump()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 120.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 40.0f, 180.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.jumpHeldLastTick = false;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.jump = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "fresh climb attach should not be consumed by same-tick jump handling");
+    ok &= expect(registry.get<Velocity>(player).value.y > tms::k_climbUpVelocityThreshold,
+                 "fresh climb attach should proceed into climb movement instead of firing a climb jump");
+    return ok;
+}
+
 bool upwardClimbTimerDoesNotExpireWhileMovingUp()
 {
     const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
@@ -2492,6 +2727,7 @@ ClimbJumpResult runClimbJumpAtOffset(float heightOffset)
     sim.climbBaseline = baseline;
     sim.climbSpaceCutoff = baseline + tms::k_climbSpaceHeight;
     sim.climbAttachOffsetLimit = baseline + tms::k_climbAttachOffset;
+    sim.climbTimer = 0.1f;
     registry.emplace<PlayerSimState>(player, sim);
 
     InputSnapshot input;
@@ -3340,6 +3576,10 @@ int main()
     ok &= climbAttachAllowsNearGroundJumpIntoWall();
     ok &= climbAttachAllowsNearGroundMomentumStickWithoutForward();
     ok &= climbAttachFollowsGroundJumpIntoWall();
+    ok &= climbAttachFindsWallWhenSameMeshFloorIsCloser();
+    ok &= climbStayUsesWallWhenSameMeshFloorIsCloser();
+    ok &= climbLostContactCanImmediatelyRestick();
+    ok &= climbFreshAttachWithJumpHeldDoesNotImmediatelyClimbJump();
     ok &= upwardClimbTimerDoesNotExpireWhileMovingUp();
     ok &= nonUpwardClimbExpiresAfterOneSecond();
     ok &= downwardClimbIsFasterThanPassiveSlip();

@@ -427,7 +427,7 @@ void handleJump(
 
     // Climb jump
     if (state.vis.moveMode == MoveMode::Climbing) {
-        if (state.sim.jumpHeldLastTick)
+        if (state.sim.jumpHeldLastTick || state.sim.climbTimer <= 0.0f)
             return;
 
         const ClimbJumpImpulse impulse = climbJumpImpulseForZone(state, posY);
@@ -1651,6 +1651,18 @@ void exitClimb(PlayerStateRef state, float posY, float detachPenalty = tms::k_cl
     state.sim.climbBlacklistHeight = posY;
 }
 
+void dropClimbLostContact(PlayerStateRef state)
+{
+    state.vis.moveMode = MoveMode::OnFoot;
+    state.vis.exitingClimb = false;
+    state.sim.exitClimbTimer = 0.0f;
+    state.sim.wasClimbing = false;
+    state.sim.climbBlacklistActive = false;
+    state.sim.climbDetachPenalty = 0.0f;
+    state.sim.climbPreviousWallNormal = glm::vec3{0.0f};
+    state.sim.climbPreviousAttachHeight = -1e10f;
+}
+
 void exitClimbWithEndBoost(glm::vec3& vel, PlayerStateRef state, float posY)
 {
     const glm::vec3 localUp{0.0f, localUpSign(state.vis), 0.0f};
@@ -1679,14 +1691,18 @@ void handleClimbing(glm::vec3& vel,
     state.sim.climbTimer += dt;
 
     // Exit conditions
-    if (!walls.wallFront || input.crouch) {
+    if (input.crouch) {
         exitClimb(state, posY);
+        return;
+    }
+    if (!walls.wallFront) {
+        dropClimbLostContact(state);
         return;
     }
 
     const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
     if (glm::dot(climbNormal, climbNormal) <= 0.0f) {
-        exitClimb(state, posY);
+        dropClimbLostContact(state);
         return;
     }
 
