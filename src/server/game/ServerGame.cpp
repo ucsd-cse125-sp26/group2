@@ -65,7 +65,6 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cstring>
 
 namespace
 {
@@ -365,6 +364,25 @@ void ServerGame::eventHandler(Event event)
     }
 }
 
+void ServerGame::selectMatchAbilityPool()
+{
+    // Clear old abilities
+    matchPrimaryAbilities.clear();
+    matchSecondaryAbilities.clear();
+
+    auto idx1 = std::rand() % primaryAbilityTypes.size();
+    auto idx2 = std::rand() % primaryAbilityTypes.size();
+
+    matchPrimaryAbilities.push_back(primaryAbilityTypes[idx1]);
+    matchPrimaryAbilities.push_back(primaryAbilityTypes[idx2]);
+
+    idx1 = std::rand() % secondaryAbilityTypes.size();
+    idx2 = std::rand() % secondaryAbilityTypes.size();
+
+    matchSecondaryAbilities.push_back(secondaryAbilityTypes[idx1]);
+    matchSecondaryAbilities.push_back(secondaryAbilityTypes[idx2]);
+}
+
 void ServerGame::tick(float dt, Uint64 nextTick)
 {
     // PR-1: per-tick wall clock. Recorded into the Profiler at end-of-tick
@@ -541,6 +559,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 lobbyStartCountdownActive = false;
                 lobbyStartCountdownTimer = 0.0f;
                 if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
+                    selectMatchAbilityPool();
                     matchController.hostStartedMatch();
                     matchController.update(dt, registry, *server);
                 } else {
