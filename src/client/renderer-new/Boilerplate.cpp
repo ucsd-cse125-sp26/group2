@@ -167,15 +167,9 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
         return nullptr;
     }
 
-    SDL_GPUVertexBufferDescription vertexBufferDescription{};
-    vertexBufferDescription.slot = 0;
-    vertexBufferDescription.pitch = vertexInputLayout.vertexPitch;
-    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-    vertexBufferDescription.instance_step_rate = 0;
-
     SDL_GPUVertexInputState vertexInputState{};
-    vertexInputState.num_vertex_buffers = 1;
-    vertexInputState.vertex_buffer_descriptions = &vertexBufferDescription;
+    vertexInputState.num_vertex_buffers = static_cast<Uint32>(vertexInputLayout.bufferDescriptions.size());
+    vertexInputState.vertex_buffer_descriptions = vertexInputLayout.bufferDescriptions.data();
     vertexInputState.num_vertex_attributes = static_cast<Uint32>(vertexInputLayout.attributes.size());
     vertexInputState.vertex_attributes = vertexInputLayout.attributes.data();
 
@@ -289,7 +283,7 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
         dest.offset = 0;
         dest.size = upload.size;
 
-        SDL_UploadToGPUBuffer(copyPass, &source, &dest, false);
+        SDL_UploadToGPUBuffer(copyPass, &source, &dest, true);
         offset += upload.size;
     }
 

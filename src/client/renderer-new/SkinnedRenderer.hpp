@@ -50,7 +50,7 @@ public:
     /// the device exists.  Does NOT allocate any GPU resources yet; those
     /// are created lazily on the first `setRig` / `setFrame` call.
     /// @param device  Borrowed; the device must outlive this SkinnedRenderer.
-    void init(SDL_GPUDevice* device);
+    void init(SDL_GPUDevice* device,SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
 
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
@@ -142,14 +142,17 @@ private:
         Uint32 indexCount = 0;
         Uint32 vertexCount = 0;
     };
+
     struct SsboInfo
     {
-        SDL_GPUBuffer* ssbo_;
+        SDL_GPUBuffer* ssbo_{};
         Uint32 capacityBytes_ = 0;
     };
 
     /// @brief Grow palette/instance SSBOs (and their transfer buffers) to at least these byte sizes.
     bool ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes);
+
+    bool createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
 
     // ─── Borrowed ────────────────────────────────────────────────────────────
     SDL_GPUDevice* device_ = nullptr;

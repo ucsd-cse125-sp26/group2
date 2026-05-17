@@ -340,6 +340,7 @@ private:
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
     void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
@@ -361,6 +362,7 @@ private:
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
 
+    SDL_GPUTextureFormat colorTarget_;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;

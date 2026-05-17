@@ -26,7 +26,8 @@ struct ShaderInfo
 /// @brief Vertex buffer layout: stride (pitch) and per-attribute descriptions.
 struct VertexInputLayout
 {
-    Uint32 vertexPitch = 0;
+    //Uint32 vertexPitch = 0;
+    std::vector<SDL_GPUVertexBufferDescription> bufferDescriptions;
     std::vector<SDL_GPUVertexAttribute> attributes;
 };
 

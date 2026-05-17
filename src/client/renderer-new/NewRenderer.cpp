@@ -105,8 +105,9 @@ bool NewRenderer::init(SDL_Window* window)
     }
 
     camera_ = NewCamera();
+    colorTarget_ = SDL_GetGPUSwapchainTextureFormat(device_, window_);
 
-    skinnedRenderer_.init(device_);
+    skinnedRenderer_.init(device_,colorTarget_,shaderFormat_);
 
     return true;
 }
@@ -125,9 +126,8 @@ bool NewRenderer::createHudPipeline()
 
     const Boilerplate::VertexInputLayout vertexLayout{};
 
-   SDL_GPUTextureFormat colorTarget = SDL_GetGPUSwapchainTextureFormat(device_, window_);
     hudPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, colorTarget, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
+        device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
 
     return hudPipeline_ != nullptr;
 }
@@ -145,49 +145,25 @@ bool NewRenderer::createGeometryPipeline()
     fragmentShader.samplerCount = 1;
     fragmentShader.uniformBufferCount = 2;
 
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = (sizeof(Vertex));
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDescription.instance_step_rate = 0;
+
     Boilerplate::VertexInputLayout vertexLayout{};
-    vertexLayout.vertexPitch = sizeof(Vertex);
+    //vertexLayout.vertexPitch = sizeof(Vertex);
+    vertexLayout.bufferDescriptions.push_back(vertexBufferDescription);
     vertexLayout.attributes = {
         Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
         Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
         Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
     };
 
-
-    SDL_GPUTextureFormat colorTarget = SDL_GetGPUSwapchainTextureFormat(device_, window_);
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, colorTarget, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
+        device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return geometryPipeline_ != nullptr;
-}
-
-bool NewRenderer::createSkinningPipeline()
-{
-    Boilerplate::ShaderInfo vertexShader{};
-    vertexShader.path = "shaders-new/skinned.vert";
-    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
-    vertexShader.uniformBufferCount = 2;
-
-    Boilerplate::ShaderInfo fragmentShader{};
-    fragmentShader.path = "shaders-new/geometry.frag";
-    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fragmentShader.samplerCount = 1;
-    fragmentShader.uniformBufferCount = 2;
-
-    Boilerplate::VertexInputLayout vertexLayout{};
-    vertexLayout.vertexPitch = sizeof(Vertex);
-    vertexLayout.attributes = {
-        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
-        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
-        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
-    };
-
-    SDL_GPUTextureFormat colorTarget = SDL_GetGPUSwapchainTextureFormat(device_, window_);
-
-    skinnedPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, colorTarget, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
-
-    return skinnedPipeline_ != nullptr;
 }
 
 void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
@@ -210,6 +186,8 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
+
+    SDL_Log("DRAW FRAME");
     const Uint64 freq = SDL_GetPerformanceFrequency();
     const Uint64 t0 = SDL_GetPerformanceCounter();
 
@@ -236,6 +214,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
+    SDL_Log("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+
     if (!ensureDepthTextureSize(width, height)) {
         SDL_Log("NewRenderer::drawFrame: ensureDepthTextureSize failed");
         SDL_CancelGPUCommandBuffer(cmd);
@@ -255,6 +235,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     drawGeometryPass(swapchain, cmd);
+    //drawWeaponPass(swapchain,cmd);
     drawUIPass(swapchain, cmd);
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
@@ -290,7 +271,28 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);
 
-    skinnedRenderer_.draw(geometryPass, cmd);
+    //drawSkinnedModels(geometryPass,cmd);
+
+    //drawWeapon(geometryPass, cmd);
+
+    SDL_EndGPURenderPass(geometryPass);
+
+}
+
+void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetLoad(swapchain);
+
+    SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_;  // copy
+    depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;                // override to clear
+    depthInfo.clear_depth = 1.0f;
+
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthInfo);
+    SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
+
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
 
     drawWeapon(geometryPass, cmd);
 
@@ -317,7 +319,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    skinnedRenderer_.draw(geometryPass, cmd);
+    skinnedRenderer_.draw(renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
@@ -334,7 +336,7 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
     for (const auto& entityCmd : entities_) {
         if (entityCmd.modelIndex < 0) {
             std::cout << "invalid modelIndex" << std::endl;
-            break;
+            continue;
         }
         if (static_cast<size_t>(entityCmd.modelIndex) >= Asset::modelInstances_.size())
             continue;
