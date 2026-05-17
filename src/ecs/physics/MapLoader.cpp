@@ -883,6 +883,24 @@ void logTriMeshCookStats(const char* label,
             stats.invalidNormals);
 }
 
+void logTriMeshValidationTotals(const char* label, const char* path, const TriMeshValidationTotals& totals)
+{
+    if (totals.meshCount == 0)
+        return;
+
+    SDL_Log("MapLoader: %s '%s' trimesh validation — meshes=%u invalid-meshes=%u tris=%u degenerate=%u "
+            "opposite-winding-duplicates=%u non-manifold-edges=%u invalid-indices=%u",
+            label,
+            path,
+            totals.meshCount,
+            totals.invalidMeshCount,
+            totals.triangleCount,
+            totals.degenerateTriangles,
+            totals.duplicatedOppositeWindingFaces,
+            totals.nonManifoldEdges,
+            totals.invalidIndices);
+}
+
 void extractMeshCollision(const aiMesh* mesh,
                           const aiScene* scene,
                           const glm::mat4& world,
@@ -1243,7 +1261,9 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     }
 
     buildStaticWorldBroadphase(out.staticBroadphase, out.triMeshes);
+    const TriMeshValidationTotals validationTotals = validateTriMeshes(out.triMeshes);
     const TriMeshCookStats cookStats = collectTriMeshCookStats(out.triMeshes);
+    logTriMeshValidationTotals("loaded", path.c_str(), validationTotals);
     logTriMeshCookStats("loaded", path.c_str(), cookStats, out.staticBroadphase.nodes.size());
 
     SDL_Log("MapLoader: loaded '%s' — %zu plane(s), %zu box(es), %zu brush(es), %zu cylinder(s), %zu sphere(s), %zu "
@@ -1329,7 +1349,9 @@ bool loadPropCollision(
             newTri);
 
     buildStaticWorldBroadphase(out.staticBroadphase, out.triMeshes);
+    const TriMeshValidationTotals validationTotals = validateTriMeshes(out.triMeshes);
     const TriMeshCookStats cookStats = collectTriMeshCookStats(out.triMeshes);
+    logTriMeshValidationTotals("prop", path.c_str(), validationTotals);
     logTriMeshCookStats("prop", path.c_str(), cookStats, out.staticBroadphase.nodes.size());
 
     return true;

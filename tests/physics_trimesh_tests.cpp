@@ -1066,6 +1066,41 @@ bool triMeshValidationReportsCookerIssues()
     return ok;
 }
 
+bool triMeshValidationTotalsAggregateAuthoredSet()
+{
+    WorldTriMesh badMesh;
+    badMesh.vertices = {
+        {0.0f, 0.0f, 0.0f},
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 0.0f},
+    };
+    badMesh.indices = {
+        0,
+        1,
+        2,
+        0,
+        2,
+        1,
+        0,
+        1,
+        3,
+    };
+    std::array<WorldTriMesh, 2> meshes{makeTwoTriangleFloor(), badMesh};
+
+    const physics::TriMeshValidationTotals totals = physics::validateTriMeshes(std::span<const WorldTriMesh>(meshes));
+
+    bool ok = true;
+    ok &= expect(totals.meshCount == 2u, "validation totals should report mesh count");
+    ok &= expect(totals.invalidMeshCount == 1u, "validation totals should count invalid meshes");
+    ok &= expect(totals.triangleCount == 5u, "validation totals should aggregate triangle count");
+    ok &= expect(totals.degenerateTriangles == 1u, "validation totals should aggregate degenerates");
+    ok &= expect(totals.duplicatedOppositeWindingFaces == 1u,
+                 "validation totals should aggregate opposite-winding duplicates");
+    ok &= expect(!totals.valid(), "validation totals should mark problematic authored sets invalid");
+    return ok;
+}
+
 bool triMeshCookStatsReportWeldAndBvhQuality()
 {
     const WorldTriMesh floor = makeTwoTriangleFloor();
@@ -1257,6 +1292,7 @@ int main()
     ok &= climbMantleToTopFloorKeepsFiniteState();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= triMeshValidationReportsCookerIssues();
+    ok &= triMeshValidationTotalsAggregateAuthoredSet();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();
     ok &= duplicatedSeamVerticesStillWeldCoplanarFloor();
     ok &= predictionReplayMatchesDirectKccOnThinStairs();

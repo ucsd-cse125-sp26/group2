@@ -81,6 +81,24 @@ struct TriMeshValidationReport
     }
 };
 
+/// @brief Aggregate validation counters across a whole authored collision set.
+struct TriMeshValidationTotals
+{
+    uint32_t meshCount{0};
+    uint32_t invalidMeshCount{0};
+    uint32_t triangleCount{0};
+    uint32_t degenerateTriangles{0};
+    uint32_t duplicatedOppositeWindingFaces{0};
+    uint32_t nonManifoldEdges{0};
+    uint32_t invalidIndices{0};
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        return invalidMeshCount == 0 && degenerateTriangles == 0 && duplicatedOppositeWindingFaces == 0 &&
+               nonManifoldEdges == 0 && invalidIndices == 0;
+    }
+};
+
 /// @brief Validate authored collision mesh topology before/after cooking.
 ///
 /// This does not mutate the mesh and only inspects `vertices` / `indices`, so
@@ -89,6 +107,9 @@ struct TriMeshValidationReport
 /// triangles, duplicated opposite-winding faces, non-manifold edges, and
 /// out-of-range indices.
 TriMeshValidationReport validateTriMesh(const WorldTriMesh& mesh, float positionEpsilon = 1e-4f);
+
+/// @brief Validate every triangle mesh in an authored collision set.
+TriMeshValidationTotals validateTriMeshes(std::span<const WorldTriMesh> meshes, float positionEpsilon = 1e-4f);
 
 /// @brief Runtime/cook summary for authored static collision triangle meshes.
 struct TriMeshCookStats

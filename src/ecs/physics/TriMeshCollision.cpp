@@ -1240,6 +1240,25 @@ TriMeshValidationReport validateTriMesh(const WorldTriMesh& mesh, float position
     return report;
 }
 
+TriMeshValidationTotals validateTriMeshes(std::span<const WorldTriMesh> meshes, float positionEpsilon)
+{
+    TriMeshValidationTotals totals;
+    totals.meshCount = static_cast<uint32_t>(meshes.size());
+
+    for (const WorldTriMesh& mesh : meshes) {
+        const TriMeshValidationReport report = validateTriMesh(mesh, positionEpsilon);
+        totals.triangleCount += report.triangleCount;
+        totals.degenerateTriangles += report.degenerateTriangles;
+        totals.duplicatedOppositeWindingFaces += report.duplicatedOppositeWindingFaces;
+        totals.nonManifoldEdges += report.nonManifoldEdges;
+        totals.invalidIndices += report.invalidIndices;
+        if (!report.valid())
+            ++totals.invalidMeshCount;
+    }
+
+    return totals;
+}
+
 TriMeshCookStats collectTriMeshCookStats(std::span<const WorldTriMesh> meshes)
 {
     TriMeshCookStats stats;

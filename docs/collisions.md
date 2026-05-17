@@ -231,6 +231,10 @@ geometry, not the production map surface-tracking path.
 built after map/prop loading and queried by KCC sweeps, depenetration, ground probes, wall probes, sphere-casts, and
 world raycasts before entering each mesh's per-triangle BVH.
 
+Map loading now emits aggregate trimesh validation totals alongside cook stats: mesh/triangle count, invalid mesh count,
+degenerate triangles, opposite-winding duplicate faces, non-manifold edges, invalid indices, BVH quality, seam weld
+counts, and invalid cooked normals.
+
 `BroadphaseTree` (`src/ecs/physics/BroadphaseTree.cpp`) is a separate Box2D-style fat-AABB BVH for future dynamic rigid
 bodies. It still has no live player/projectile consumers.
 
