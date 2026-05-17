@@ -18,7 +18,9 @@
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
-void SkinnedRenderer::init(SDL_GPUDevice* device,SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat)
+void SkinnedRenderer::init(SDL_GPUDevice* device,
+                           SDL_GPUTextureFormat& colorTarget,
+                           const SDL_GPUShaderFormat& shaderFormat)
 {
     device_ = device;
     // No GPU allocations here — buffers and pipeline are created on demand
@@ -27,7 +29,7 @@ void SkinnedRenderer::init(SDL_GPUDevice* device,SDL_GPUTextureFormat& colorTarg
     // TODO(graphics): if you want the skinned pipeline created up-front, do
     // it here.  Otherwise leave it null and create it the first time
     // `draw()` would actually issue draws.
-    createSkinningPipeline(colorTarget,shaderFormat);
+    createSkinningPipeline(colorTarget, shaderFormat);
 }
 
 void SkinnedRenderer::shutdown()
@@ -219,9 +221,15 @@ bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
         }
         return true;
     };
-    if (!growBuf(palettesSsboInfo_.ssbo_, palettesSsboInfo_.capacityBytes_, paletteBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+    if (!growBuf(palettesSsboInfo_.ssbo_,
+                 palettesSsboInfo_.capacityBytes_,
+                 paletteBytes,
+                 SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
         return false;
-    if (!growBuf(instancesSsboInfo_.ssbo_, instancesSsboInfo_.capacityBytes_, instanceBytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+    if (!growBuf(instancesSsboInfo_.ssbo_,
+                 instancesSsboInfo_.capacityBytes_,
+                 instanceBytes,
+                 SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
         return false;
     if (!growXfer(paletteXfer_, paletteXferCapacityBytes_, paletteBytes))
         return false;
@@ -268,8 +276,9 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     // TODO(graphics): instanced GPU skinning draw call.  See `setFrame`
     // doc-block for the data layout and shader pseudocode.  Sketch:
     //
-    if (!rigInstalled_ || !pipeline_ || frameInstances_.empty()
-        || !palettesSsboInfo_.ssbo_ || !instancesSsboInfo_.ssbo_) {
+    if (!rigInstalled_ || !pipeline_ || frameInstances_.empty() || !palettesSsboInfo_.ssbo_ ||
+        !instancesSsboInfo_.ssbo_)
+    {
         std::cout << "frameInstances_.empty()" << std::endl;
         return;
     }
@@ -280,13 +289,10 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     //   // slot 0 in NewRenderer::drawGeometryPass — no need to push again.
     //
 
-    SDL_GPUBuffer* ssbos[2] = {
-        palettesSsboInfo_.ssbo_,
-        instancesSsboInfo_.ssbo_
-    };
-    SDL_BindGPUVertexStorageBuffers(renderPass,0,ssbos,2);
+    SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
+    SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
     for (auto sm : skinnedMeshes_) {
-        if ( !sm.vb  || !sm.boneVb || !sm.ib ) {
+        if (!sm.vb || !sm.boneVb || !sm.ib) {
             continue;
         }
         std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
@@ -303,17 +309,16 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
         };
         vertexBufferBindings.push_back(instanceBufferBinding);
 
-        SDL_BindGPUVertexBuffers(renderPass,0,vertexBufferBindings.data(),2);
+        SDL_BindGPUVertexBuffers(renderPass, 0, vertexBufferBindings.data(), 2);
 
         SDL_GPUBufferBinding indexBufferBinding{
             .buffer = sm.ib,
             .offset = 0,
         };
 
-        SDL_BindGPUIndexBuffer(renderPass,&indexBufferBinding,SDL_GPU_INDEXELEMENTSIZE_32BIT);
+        SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        SDL_DrawGPUIndexedPrimitives(renderPass,sm.indexCount,frameInstances_.size(),0,0,0);
-
+        SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, frameInstances_.size(), 0, 0, 0);
     }
 
     //
@@ -341,7 +346,6 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     //   vec4 worldPos = inst.worldTransform * skin * vec4(inPosition, 1.0);
     //   gl_Position   = viewProjection * worldPos;
 }
-
 
 bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat)
 {
@@ -372,14 +376,14 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
     vertexLayout.bufferDescriptions.push_back(vertexBoneInfluenceBufferDescription);
     vertexLayout.attributes = {
         // Mesh Vertex
-        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, position),0),
-        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, normal),0),
-        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(ModelVertex, texCoord),0),
-        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(ModelVertex, tangent ),0),
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, position), 0),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, normal), 0),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(ModelVertex, texCoord), 0),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(ModelVertex, tangent), 0),
 
         // Bone Influence
-        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_INT4, offsetof(BoneInfluence, boneIndices),1),
-        Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights ),1),
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_INT4, offsetof(BoneInfluence, boneIndices), 1),
+        Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
     };
 
     pipeline_ = Boilerplate::createGraphicsPipeline(

@@ -50,7 +50,7 @@ public:
     /// the device exists.  Does NOT allocate any GPU resources yet; those
     /// are created lazily on the first `setRig` / `setFrame` call.
     /// @param device  Borrowed; the device must outlive this SkinnedRenderer.
-    void init(SDL_GPUDevice* device,SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
+    void init(SDL_GPUDevice* device, SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
 
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
@@ -181,7 +181,6 @@ private:
     SDL_GPUTransferBuffer* instanceXfer_ = nullptr;
     Uint32 paletteXferCapacityBytes_ = 0;
     Uint32 instanceXferCapacityBytes_ = 0;
-
 
     // ─── CPU staging (filled by setFrame, drained by uploadFrame) ────────────
     std::vector<glm::mat4> framePalette_;

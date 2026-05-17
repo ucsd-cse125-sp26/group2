@@ -107,7 +107,7 @@ bool NewRenderer::init(SDL_Window* window)
 
     camera_ = NewCamera();
 
-    skinnedRenderer_.init(device_,colorTarget_,shaderFormat_);
+    skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
     return true;
 }
@@ -152,7 +152,7 @@ bool NewRenderer::createGeometryPipeline()
     vertexBufferDescription.instance_step_rate = 0;
 
     Boilerplate::VertexInputLayout vertexLayout{};
-    //vertexLayout.vertexPitch = sizeof(Vertex);
+    // vertexLayout.vertexPitch = sizeof(Vertex);
     vertexLayout.bufferDescriptions.push_back(vertexBufferDescription);
     vertexLayout.attributes = {
         Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
@@ -232,7 +232,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     drawGeometryPass(swapchain, cmd);
-    drawWeaponPass(swapchain,cmd);
+    drawWeaponPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
@@ -268,21 +268,19 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);
 
-    drawSkinnedModels(geometryPass,cmd);
+    drawSkinnedModels(geometryPass, cmd);
 
-    //drawWeapon(geometryPass, cmd);
+    // drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
-
 }
 
 void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUColorTargetInfo colorTarget =
-        Boilerplate::makeColorTargetLoad(swapchain);
+    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
 
-    SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_;  // copy
-    depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;                // override to clear
+    SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_; // copy
+    depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;               // override to clear
     depthInfo.clear_depth = 1.0f;
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthInfo);

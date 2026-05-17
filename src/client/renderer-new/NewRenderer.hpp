@@ -351,7 +351,6 @@ private:
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
 
-
     // ─── Member state ────────────────────────────────────────────────────────
 
     SDL_Window* window_ = nullptr;
