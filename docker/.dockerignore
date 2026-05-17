@@ -1,0 +1,9 @@
+# Excludes from the docker build context (the unpacked release zip).
+# The server doesn't render — shaders are dead weight in the image.
+shaders/
+shaders-new/
+
+# group2 is the client binary — same release zip carries it, but the
+# server image has no use for it.
+group2
+group2.exe
