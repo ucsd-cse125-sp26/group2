@@ -1,11 +1,13 @@
 #include "ecs/components/PlayerSimState.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/physics/WallDetection.hpp"
+#include "ecs/systems/KinematicCharacterController.hpp"
 
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <entt/entity/entity.hpp>
 #include <iostream>
 #include <span>
 #include <string_view>
@@ -150,6 +152,40 @@ bool walkCapsuleStepsOntoThinTrimeshTread()
     ok &= expect(ground.distance < 0.0f, "ground probe should report overlapping tread as negative distance");
     ok &= expectNear(ground.point.y, 16.0f, 0.05f, "ground probe should report the authored tread surface");
     ok &= expect(ground.normal.y > 0.99f, "ground probe should keep the tread normal stable");
+    return ok;
+}
+
+bool kccClimbsThinTrimeshStep()
+{
+    const WorldTriMesh step = makeThinSingleStep();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&step, 1),
+    };
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+
+    PlayerVisState state;
+    state.grounded = true;
+
+    glm::vec3 pos{0.0f, 30.0f, -24.0f};
+    glm::vec3 vel{0.0f, 0.0f, 480.0f};
+
+    systems::runKinematicCharacterController(pos, vel, shape, state, 0.1f, world, entt::null, false);
+
+    bool ok = true;
+    ok &= expect(pos.z > 20.0f, "KCC should carry the player horizontally onto the step tread");
+    ok &= expectNear(pos.y, 46.03125f, 0.1f, "KCC should settle the full capsule onto the raised tread");
+    ok &= expect(state.grounded, "KCC should remain grounded after stepping onto a thin trimesh tread");
+    ok &= expect(state.groundNormal.y > 0.99f, "KCC should keep the tread ground normal stable");
     return ok;
 }
 
@@ -372,6 +408,7 @@ int main()
     bool ok = true;
     ok &= sweptCapsuleHitsFiniteWallEdge();
     ok &= walkCapsuleStepsOntoThinTrimeshTread();
+    ok &= kccClimbsThinTrimeshStep();
     ok &= staticCapsuleDepenUsesSurfaceFeatureNormal();
     ok &= twoTriangleFloorHasStableSurfaceOverlap();
     ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();
