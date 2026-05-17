@@ -121,7 +121,6 @@ constexpr float k_climbNonUpDetachTime = 1.0f;      ///< Grace time before slipp
 constexpr float k_climbUpVelocityThreshold = 25.0f; ///< Local-up velocity that counts as committed climb motion (u/s).
 constexpr float k_climbJumpUpForce = 320.0f;        ///< Upward velocity on climb jump (u/s).
 constexpr float k_climbJumpBackForce = 350.0f;      ///< Backward velocity on climb jump (u/s).
-constexpr float k_climbMinGroundDist = 40.0f;       ///< Min height above ground to start climbing (u).
 constexpr float k_climbExitTime = 0.5f;             ///< Duration of "exiting climb" flag (s).
 constexpr float k_climbRegrabLowerHeight = 400.0f;  ///< Must be this much lower to regrab same wall (u).
 constexpr float k_climbLookAngleLimit = 45.572995f; ///< Apex-style max climb look angle from wall normal (deg).

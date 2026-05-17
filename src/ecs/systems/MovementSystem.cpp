@@ -1594,8 +1594,6 @@ void tryEnterClimb(glm::vec3& vel,
         return;
     if (state.vis.grounded || state.vis.exitingClimb)
         return;
-    if (walls.groundDistance < tms::k_climbMinGroundDist)
-        return;
     if (!walls.wallFront)
         return;
     const glm::vec3 wallNormal = normalizedOrZero(walls.frontNormal);

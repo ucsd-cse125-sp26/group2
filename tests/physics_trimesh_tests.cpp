@@ -2110,6 +2110,141 @@ bool climbAttachRejectsExcessLookAngle()
     return ok;
 }
 
+bool climbAttachAllowsNearGroundJumpIntoWall()
+{
+    std::array<WorldTriMesh, 2> meshes{makeTwoTriangleFloor(), makeClimbWallWithTopFloor()};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 36.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, tms::k_jumpSpeed, 0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    const physics::WallDetectionResult walls =
+        physics::detectWalls({0.0f, 36.0f, -24.0f}, 0.0f, shape.halfExtents, world, 35.0f, 12.0f);
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(walls.wallFront, "near-ground jump setup should detect the wall in front");
+    ok &= expect(walls.groundDistance < 40.0f,
+                 "near-ground jump setup should reproduce the old climb ground-distance gate");
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "near-ground jump into a faced wall should attach to climb");
+    return ok;
+}
+
+bool climbAttachAllowsNearGroundMomentumStickWithoutForward()
+{
+    std::array<WorldTriMesh, 2> meshes{makeTwoTriangleFloor(), makeClimbWallWithTopFloor()};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 36.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 120.0f, 260.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "near-ground wallward momentum should allow a brief climb stick without forward input");
+    return ok;
+}
+
+bool climbAttachFollowsGroundJumpIntoWall()
+{
+    std::array<WorldTriMesh, 2> meshes{makeTwoTriangleFloor(), makeClimbWallWithTopFloor()};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 36.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = true;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.jump = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "holding jump and forward into a wall should attach on the first airborne follow-up tick");
+    return ok;
+}
+
 bool upwardClimbTimerDoesNotExpireWhileMovingUp()
 {
     const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
@@ -3202,6 +3337,9 @@ int main()
     ok &= climbAttachAllowsApexWideLookAngle();
     ok &= climbAttachRejectsShallowSurface();
     ok &= climbAttachRejectsExcessLookAngle();
+    ok &= climbAttachAllowsNearGroundJumpIntoWall();
+    ok &= climbAttachAllowsNearGroundMomentumStickWithoutForward();
+    ok &= climbAttachFollowsGroundJumpIntoWall();
     ok &= upwardClimbTimerDoesNotExpireWhileMovingUp();
     ok &= nonUpwardClimbExpiresAfterOneSecond();
     ok &= downwardClimbIsFasterThanPassiveSlip();
