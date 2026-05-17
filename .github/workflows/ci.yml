@@ -678,8 +678,15 @@ jobs:
           unzip -q group2-linux-x86_64.zip -d docker-context-tmp
           # The zip's top-level dir is `group2-linux-x86_64/`; flatten it.
           mv docker-context-tmp/group2-linux-x86_64/* docker-context/
+          rm -rf docker-context-tmp
           cp docker/Dockerfile.server   docker-context/Dockerfile
           cp docker/.dockerignore       docker-context/.dockerignore
+          # Fail loud and early if the artifact didn't actually contain
+          # the binary — otherwise the downstream `docker build` would
+          # emit a confusing `COPY server` error.
+          test -f docker-context/server      || { echo "ERROR: server binary missing from context"; exit 1; }
+          test -f docker-context/config.toml || { echo "ERROR: config.toml missing from context"; exit 1; }
+          test -d docker-context/assets      || { echo "ERROR: assets/ directory missing from context"; exit 1; }
           # Sanity print so a CI log reader can confirm the layout.
           ls -la docker-context
 
