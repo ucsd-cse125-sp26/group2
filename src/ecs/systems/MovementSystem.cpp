@@ -785,6 +785,22 @@ bool isForwardCompatibleWallHandoff(glm::vec3 oldForward, glm::vec3 oldNormal, g
     return true;
 }
 
+glm::vec3 redirectWallForwardTowardAnchor(
+    glm::vec3 oldForward, glm::vec3 oldNormal, glm::vec3 newNormal, glm::vec3 pos, glm::vec3 anchor)
+{
+    glm::vec3 anchorTangent = anchor - pos;
+    anchorTangent -= newNormal * glm::dot(anchorTangent, newNormal);
+
+    const float anchorLen = glm::length(anchorTangent);
+    if (anchorLen > 0.25f) {
+        anchorTangent /= anchorLen;
+        if (glm::dot(anchorTangent, oldForward) >= -0.05f)
+            return anchorTangent;
+    }
+
+    return redirectWallForward(oldForward, oldNormal, newNormal);
+}
+
 /// @brief Attempt to enter wallrun mode when airborne near a wall.
 /// @param vel    Velocity (modified in place).
 /// @param state  Player state (modified in place).
@@ -1025,7 +1041,8 @@ void handleWallRunning(glm::vec3& pos,
     vel -= state.sim.wallNormal * normalVel;
 
     if (normalTurn > 0.05f) {
-        state.sim.wallForward = redirectWallForward(oldForward, oldNormal, state.sim.wallNormal);
+        state.sim.wallForward =
+            redirectWallForwardTowardAnchor(oldForward, oldNormal, state.sim.wallNormal, pos, state.sim.wallAnchor);
         const float verticalVel = vel.y;
         vel = state.sim.wallForward * preAttachHorizSpeed;
         vel.y = verticalVel;
@@ -1073,10 +1090,8 @@ void handleWallRunning(glm::vec3& pos,
 
     const float sideDot = glm::dot(state.sim.wallNormal, glm::vec3{std::cos(input.yaw), 0.0f, -std::sin(input.yaw)});
     state.vis.wallRunSide = (sideDot < 0.0f) ? WallSide::Right : WallSide::Left;
-
-    // Camera tilt.
     state.vis.targetCameraTilt =
-        (state.vis.wallRunSide == WallSide::Right) ? tms::k_wallrunCameraTilt : -tms::k_wallrunCameraTilt;
+        std::clamp(-sideDot * tms::k_wallrunCameraTilt, -tms::k_wallrunCameraTilt, tms::k_wallrunCameraTilt);
 }
 
 } // namespace

@@ -190,6 +190,66 @@ WorldTriMesh makeSingleMeshOutsideWallCorner()
         });
 }
 
+std::array<WorldTriMesh, 3> makeAuthoredMapWallrunCorridorSegment()
+{
+    constexpr float xWall = 687.566f;
+    constexpr float zLowerWall = 386.311f;
+    constexpr float zUpperWall = 593.671f;
+    constexpr float yMin = 12.853f;
+    constexpr float yMax = 252.853f;
+    constexpr float corridorEndX = 964.046f;
+
+    WorldTriMesh mainWall = makeCookedMesh(
+        {
+            {xWall, yMin, zUpperWall},
+            {xWall, yMin, 2131.591f},
+            {xWall, yMax, 2131.591f},
+            {xWall, yMax, zUpperWall},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+
+    WorldTriMesh upperCorridorWall = makeCookedMesh(
+        {
+            {xWall, yMin, zUpperWall},
+            {corridorEndX, yMin, zUpperWall},
+            {corridorEndX, yMax, zUpperWall},
+            {xWall, yMax, zUpperWall},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+
+    WorldTriMesh lowerCorridorWall = makeCookedMesh(
+        {
+            {corridorEndX, yMin, zLowerWall},
+            {xWall, yMin, zLowerWall},
+            {xWall, yMax, zLowerWall},
+            {corridorEndX, yMax, zLowerWall},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+
+    return {mainWall, upperCorridorWall, lowerCorridorWall};
+}
+
 WorldTriMesh makeTwoTriangleFloor()
 {
     return makeCookedMesh(
@@ -1068,6 +1128,190 @@ bool wallrunGapDropsWithoutReversingVelocity()
     return ok;
 }
 
+bool wallrunMapCorridorTurnsIntoCorridor()
+{
+    std::array<WorldTriMesh, 3> meshes = makeAuthoredMapWallrunCorridorSegment();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{671.530f, 80.0f, 577.639f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {687.566f, 80.0f, 577.639f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 0u;
+    sim.wallRegion = physics::TriRegion::Face;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning,
+                 "map corridor outside corner should keep wallrunning onto the corridor wall");
+    ok &= expect(outSim.wallNormal.z < -0.7f, "map corridor handoff should attach to the upper corridor wall");
+    ok &= expect(outVel.value.x > 0.0f, "map corridor handoff should turn into the corridor instead of away from it");
+    return ok;
+}
+
+bool wallrunRollScalesWithViewAngle()
+{
+    std::array<WorldTriMesh, 3> meshes = makeAuthoredMapWallrunCorridorSegment();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    auto runAtYaw = [&](float yaw) {
+        Registry registry;
+        const entt::entity player = registry.create();
+        registry.emplace<Position>(player, glm::vec3{671.530f, 80.0f, 1200.0f});
+        registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+        CollisionShape shape;
+        shape.type = CollisionShapeType::Capsule;
+        shape.radius = 10.0f;
+        shape.halfHeight = 20.0f;
+        shape.halfExtents = {10.0f, 30.0f, 10.0f};
+        registry.emplace<CollisionShape>(player, shape);
+
+        PlayerVisState vis;
+        vis.moveMode = MoveMode::WallRunning;
+        vis.wallRunSide = WallSide::Right;
+        vis.grounded = false;
+        registry.emplace<PlayerVisState>(player, vis);
+
+        PlayerSimState sim;
+        sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+        sim.wallForward = {0.0f, 0.0f, 1.0f};
+        sim.wallAnchor = {687.566f, 80.0f, 1200.0f};
+        sim.wallMeshIndex = 0u;
+        sim.wallTriId = 0u;
+        sim.wallRegion = physics::TriRegion::Face;
+        sim.wallAttachmentValid = true;
+        registry.emplace<PlayerSimState>(player, sim);
+
+        InputSnapshot input;
+        input.jump = true;
+        input.forward = true;
+        input.yaw = yaw;
+        registry.emplace<InputSnapshot>(player, input);
+
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+        return registry.get<PlayerVisState>(player).targetCameraTilt;
+    };
+
+    const float parallelRoll = runAtYaw(0.0f);
+    const float wallFacingRoll = runAtYaw(1.57079632679f);
+
+    bool ok = true;
+    ok &= expect(parallelRoll > tms::k_wallrunCameraTilt * 0.9f,
+                 "wallrun roll should be strongest when looking along the wall");
+    ok &= expect(std::abs(wallFacingRoll) < std::abs(parallelRoll) * 0.5f,
+                 "wallrun roll should soften when looking toward or away from the wall normal");
+    return ok;
+}
+
+bool wallrunMapCorridorEndDoesNotAttachToAirSide()
+{
+    std::array<WorldTriMesh, 3> meshes = makeAuthoredMapWallrunCorridorSegment();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{703.597f, 80.0f, 577.639f});
+    registry.emplace<Velocity>(player, glm::vec3{-500.0f, 0.0f, 0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {0.0f, 0.0f, -1.0f};
+    sim.wallForward = {-1.0f, 0.0f, 0.0f};
+    sim.wallAnchor = {703.597f, 80.0f, 593.671f};
+    sim.wallMeshIndex = 1u;
+    sim.wallTriId = 0u;
+    sim.wallRegion = physics::TriRegion::Face;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = -1.57079632679f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    for (int i = 0; i < 12; ++i)
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    if (outVis.moveMode == MoveMode::WallRunning) {
+        ok &= expect(outSim.wallNormal.x < 0.7f,
+                     "corridor end should not attach to the east/air side of the main-room wall");
+        ok &= expect(outVel.value.x <= 0.0f, "corridor end should not reverse back into the corridor");
+    }
+    return ok;
+}
+
 bool climbMantleToTopFloorKeepsFiniteState()
 {
     const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
@@ -1702,6 +1946,9 @@ int main()
     ok &= wallAttachmentWalksSingleMeshAdjacencyAtCorner();
     ok &= wallrunOuterCornerKeepsForwardVelocity();
     ok &= wallrunGapDropsWithoutReversingVelocity();
+    ok &= wallrunMapCorridorTurnsIntoCorridor();
+    ok &= wallrunRollScalesWithViewAngle();
+    ok &= wallrunMapCorridorEndDoesNotAttachToAirSide();
     ok &= climbMantleToTopFloorKeepsFiniteState();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= flippedGravityClimbMovesAlongLocalUp();
