@@ -16,6 +16,7 @@ namespace
 
 using physics::CapsuleShape;
 using physics::DepenContact;
+using physics::GroundProbeResult;
 using physics::HitResult;
 using physics::SphereHitResult;
 using physics::StaticWorldBroadphase;
@@ -89,6 +90,67 @@ WorldTriMesh makeTwoTriangleFloor()
             3,
             2,
         });
+}
+
+WorldTriMesh makeThinSingleStep()
+{
+    return makeCookedMesh(
+        {
+            {-64.0f, 16.0f, 0.0f},
+            {64.0f, 16.0f, 0.0f},
+            {64.0f, 16.0f, 48.0f},
+            {-64.0f, 16.0f, 48.0f},
+            {-64.0f, 0.0f, 0.0f},
+            {64.0f, 0.0f, 0.0f},
+            {64.0f, 16.0f, 0.0f},
+            {-64.0f, 16.0f, 0.0f},
+        },
+        {
+            0,
+            2,
+            1,
+            0,
+            3,
+            2,
+            4,
+            6,
+            5,
+            4,
+            7,
+            6,
+        });
+}
+
+bool walkCapsuleStepsOntoThinTrimeshTread()
+{
+    const WorldTriMesh step = makeThinSingleStep();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&step, 1),
+    };
+
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 20.0f, .up = {0.0f, 1.0f, 0.0f}};
+    const CapsuleShape walkCapsule = capsule.walkShape(18.0f);
+    const glm::vec3 walkOffset = capsule.walkCenterOffset(18.0f);
+
+    const glm::vec3 start{0.0f, 30.0f, -24.0f};
+    const glm::vec3 end{0.0f, 30.0f, 24.0f};
+
+    const HitResult horizontal = physics::sweepAll(walkCapsule, start + walkOffset, end + walkOffset, world);
+    const GroundProbeResult ground = physics::probeGround(capsule, end, 26.0f, world);
+
+    bool ok = true;
+    ok &= expect(!horizontal.hit, "walk capsule should ignore a thin riser within step height");
+    ok &= expect(ground.hit, "ground probe should recover an overlapping authored tread after horizontal step motion");
+    ok &= expect(ground.walkable, "step tread should classify as walkable");
+    ok &= expect(ground.distance < 0.0f, "ground probe should report overlapping tread as negative distance");
+    ok &= expectNear(ground.point.y, 16.0f, 0.05f, "ground probe should report the authored tread surface");
+    ok &= expect(ground.normal.y > 0.99f, "ground probe should keep the tread normal stable");
+    return ok;
 }
 
 bool sweptCapsuleHitsFiniteWallEdge()
@@ -309,6 +371,7 @@ int main()
 {
     bool ok = true;
     ok &= sweptCapsuleHitsFiniteWallEdge();
+    ok &= walkCapsuleStepsOntoThinTrimeshTread();
     ok &= staticCapsuleDepenUsesSurfaceFeatureNormal();
     ok &= twoTriangleFloorHasStableSurfaceOverlap();
     ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();

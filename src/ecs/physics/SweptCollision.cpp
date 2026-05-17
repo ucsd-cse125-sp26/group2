@@ -1118,6 +1118,17 @@ GroundProbeResult probeGround(CapsuleShape capsule, glm::vec3 pos, float maxDist
     if (maxDistance <= 0.0f)
         return result;
 
+    const ClearanceResult overlap = clearanceCapsuleVsWorld(capsule, pos, world);
+    if (overlap.contact && glm::dot(overlap.normal, capsule.up) >= k_floorAngleCos) {
+        result.hit = true;
+        result.distance = overlap.distance;
+        result.normal = overlap.normal;
+        result.surfaceType = overlap.surfaceType;
+        result.walkable = true;
+        result.point = overlap.pointOnGeometry;
+        return result;
+    }
+
     const glm::vec3 footDir = -capsule.up;
     const glm::vec3 end = pos + footDir * maxDistance;
     const HitResult hit = sweepAll(capsule, pos, end, world);
