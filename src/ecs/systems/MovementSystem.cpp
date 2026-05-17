@@ -57,6 +57,22 @@ glm::vec3 horizVel(const glm::vec3& v)
     return {v.x, 0.0f, v.z};
 }
 
+bool finiteVec3(glm::vec3 v)
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+bool usableNormal(glm::vec3 n)
+{
+    const float lenSq = glm::dot(n, n);
+    return finiteVec3(n) && std::isfinite(lenSq) && lenSq > 1e-8f;
+}
+
+glm::vec3 normalizedOrZero(glm::vec3 n)
+{
+    return usableNormal(n) ? n / glm::length(n) : glm::vec3{0.0f};
+}
+
 /// @brief Clamp horizontal speed without affecting Y.
 /// @param v         Velocity vector to clamp (modified in place).
 /// @param maxSpeed  Maximum allowed horizontal speed.
@@ -1017,18 +1033,21 @@ void tryEnterClimb(glm::vec3& vel,
         return;
     if (!walls.wallFront)
         return;
+    const glm::vec3 wallNormal = normalizedOrZero(walls.frontNormal);
+    if (glm::dot(wallNormal, wallNormal) <= 0.0f)
+        return;
 
     // Check look angle: player must be facing the wall.
     const float k_sinYaw = std::sin(input.yaw);
     const float k_cosYaw = std::cos(input.yaw);
     const glm::vec3 k_lookDir{k_sinYaw, 0.0f, k_cosYaw};
-    const float k_lookAngle = std::acos(std::clamp(glm::dot(-k_lookDir, walls.frontNormal), -1.0f, 1.0f));
+    const float k_lookAngle = std::acos(std::clamp(glm::dot(-k_lookDir, wallNormal), -1.0f, 1.0f));
     const float k_maxAngleRad = glm::radians(tms::k_climbMaxWallLookAngle);
     if (k_lookAngle > k_maxAngleRad)
         return;
 
     // Blacklist check.
-    if (isBlacklisted(walls.frontNormal,
+    if (isBlacklisted(wallNormal,
                       posY,
                       state.sim.climbBlacklistNormal,
                       state.sim.climbBlacklistHeight,
@@ -1037,7 +1056,7 @@ void tryEnterClimb(glm::vec3& vel,
 
     // Enter climbing.
     state.vis.moveMode = MoveMode::Climbing;
-    state.sim.climbWallNormal = walls.frontNormal;
+    state.sim.climbWallNormal = wallNormal;
     state.sim.climbTimer = 0.0f;
     // DJ no longer refreshes from entering climb — only from ground time.
     state.vis.jumpCount = 0;
@@ -1096,7 +1115,9 @@ void handleClimbing(glm::vec3& vel,
     vel.z *= tms::k_climbSidewaysMultiplier;
 
     // Push toward wall.
-    vel -= state.sim.climbWallNormal * tms::k_wallrunPushForce * dt;
+    const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
+    if (glm::dot(climbNormal, climbNormal) > 0.0f)
+        vel -= climbNormal * tms::k_wallrunPushForce * dt;
 
     state.vis.targetCameraTilt = 0.0f;
 }
@@ -1118,12 +1139,15 @@ void tryEnterLedgeGrab(PlayerStateRef state, const physics::WallDetectionResult&
         return;
     if (!walls.ledgeDetected)
         return;
+    const glm::vec3 ledgeNormal = normalizedOrZero(walls.ledgeNormal);
+    if (!finiteVec3(walls.ledgePoint) || glm::dot(ledgeNormal, ledgeNormal) <= 0.0f)
+        return;
     if (state.sim.exitingLedge)
         return;
 
     state.vis.moveMode = MoveMode::LedgeGrabbing;
     state.sim.ledgePoint = walls.ledgePoint;
-    state.sim.ledgeNormal = walls.ledgeNormal;
+    state.sim.ledgeNormal = ledgeNormal;
     state.sim.ledgeHoldTimer = 0.0f;
     // DJ no longer refreshes from entering ledge grab — only from ground time.
     state.vis.jumpCount = 0;
@@ -1144,7 +1168,9 @@ void handleLedgeGrab(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& 
     // Auto-mantle: if holding movement keys past min hold time.
     if (state.sim.ledgeHoldTimer >= tms::k_ledgeMinHoldTime && anyMoveInput(input)) {
         vel.y = tms::k_ledgeJumpUpForce;
-        vel += state.sim.ledgeNormal * tms::k_ledgeJumpBackForce;
+        const glm::vec3 ledgeNormal = normalizedOrZero(state.sim.ledgeNormal);
+        if (glm::dot(ledgeNormal, ledgeNormal) > 0.0f)
+            vel += ledgeNormal * tms::k_ledgeJumpBackForce;
         state.vis.moveMode = MoveMode::OnFoot;
         state.sim.exitingLedge = true;
         state.sim.exitLedgeTimer = tms::k_ledgeExitTime;

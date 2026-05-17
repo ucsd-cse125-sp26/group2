@@ -1,7 +1,14 @@
+#include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerSimState.hpp"
+#include "ecs/components/Position.hpp"
+#include "ecs/components/Velocity.hpp"
+#include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/physics/WallDetection.hpp"
+#include "ecs/registry/Registry.hpp"
 #include "ecs/systems/KinematicCharacterController.hpp"
+#include "ecs/systems/MovementSystem.hpp"
 
 #include <array>
 #include <cmath>
@@ -9,6 +16,7 @@
 #include <cstdlib>
 #include <entt/entity/entity.hpp>
 #include <iostream>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -42,6 +50,11 @@ bool expectNear(float actual, float expected, float epsilon, std::string_view me
     std::cerr << "FAILED: " << message << " (actual=" << actual << ", expected=" << expected << ", epsilon=" << epsilon
               << ")\n";
     return false;
+}
+
+bool finiteVec3(glm::vec3 value)
+{
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
 WorldTriMesh makeCookedMesh(std::initializer_list<glm::vec3> vertices, std::initializer_list<uint32_t> indices)
@@ -233,6 +246,35 @@ WorldTriMesh makeThinRamp()
             3,
             2,
         });
+}
+
+WorldTriMesh makeClimbWallWithTopFloor()
+{
+    std::vector<glm::vec3> vertices;
+    std::vector<uint32_t> indices;
+    auto addQuad = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d) {
+        const uint32_t base = static_cast<uint32_t>(vertices.size());
+        vertices.push_back(a);
+        vertices.push_back(b);
+        vertices.push_back(c);
+        vertices.push_back(d);
+        indices.push_back(base + 0u);
+        indices.push_back(base + 2u);
+        indices.push_back(base + 1u);
+        indices.push_back(base + 0u);
+        indices.push_back(base + 3u);
+        indices.push_back(base + 2u);
+    };
+
+    addQuad({-64.0f, 0.0f, 0.0f}, {64.0f, 0.0f, 0.0f}, {64.0f, 160.0f, 0.0f}, {-64.0f, 160.0f, 0.0f});
+    addQuad({-64.0f, 160.0f, 0.0f}, {64.0f, 160.0f, 0.0f}, {64.0f, 160.0f, 160.0f}, {-64.0f, 160.0f, 160.0f});
+
+    WorldTriMesh mesh;
+    mesh.vertices = std::move(vertices);
+    mesh.indices = std::move(indices);
+    physics::buildTriMeshBVH(mesh);
+    physics::weldTriMesh(mesh);
+    return mesh;
 }
 
 bool thinWallPlaneBlocksFromBothSides()
@@ -668,6 +710,124 @@ bool wallAttachmentLookaheadFindsOuterCornerContinuation()
     return ok;
 }
 
+bool climbMantleToTopFloorKeepsFiniteState()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, tms::k_climbMaxSpeed, 0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    bool finiteEveryFrame = true;
+    bool reachedTopOrExitedClimb = false;
+    for (int frame = 0; frame < 260; ++frame) {
+        systems::runMovement(registry, 1.0f / 128.0f, world);
+        systems::runKinematicCharacterController(registry.get<Position>(player).value,
+                                                 registry.get<Velocity>(player).value,
+                                                 registry.get<CollisionShape>(player),
+                                                 registry.get<PlayerVisState>(player),
+                                                 1.0f / 128.0f,
+                                                 world,
+                                                 player,
+                                                 registry.get<PlayerSimState>(player).jumpedThisTick);
+
+        const auto& pos = registry.get<Position>(player);
+        const auto& vel = registry.get<Velocity>(player);
+        const auto& state = registry.get<PlayerVisState>(player);
+        finiteEveryFrame &= finiteVec3(pos.value) && finiteVec3(vel.value) && std::isfinite(state.groundNormal.x) &&
+                            std::isfinite(state.groundNormal.y) && std::isfinite(state.groundNormal.z);
+        reachedTopOrExitedClimb |= pos.value.y > 150.0f || state.moveMode != MoveMode::Climbing;
+    }
+
+    const auto& pos = registry.get<Position>(player);
+    const auto& vel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(finiteEveryFrame, "climb-to-top-floor handoff should never produce NaN position or velocity");
+    ok &= expect(reachedTopOrExitedClimb, "climb-to-top-floor simulation should reach the ledge/top transition");
+    ok &= expect(pos.value.y > -1000.0f, "climb-to-top-floor handoff should not enter runaway downward fall");
+    ok &= expect(vel.value.y > -1000.0f, "climb-to-top-floor handoff should not leave a huge downward velocity");
+    return ok;
+}
+
+bool ledgeMantleRejectsInvalidStoredNormal()
+{
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 160.0f, 0.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::LedgeGrabbing;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.ledgeHoldTimer = tms::k_ledgeMinHoldTime;
+    sim.ledgeNormal = {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    registry.emplace<InputSnapshot>(player, input);
+
+    const physics::WorldGeometry emptyWorld{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = {},
+    };
+
+    systems::runMovement(registry, 1.0f / 128.0f, emptyWorld);
+
+    const auto& pos = registry.get<Position>(player);
+    const auto& vel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(finiteVec3(pos.value), "invalid stored ledge normal should not poison position");
+    ok &= expect(finiteVec3(vel.value), "invalid stored ledge normal should not poison mantle velocity");
+    ok &= expect(vel.value.y > 0.0f, "invalid stored ledge normal should still allow the upward mantle impulse");
+    return ok;
+}
+
 bool triMeshValidationReportsCookerIssues()
 {
     WorldTriMesh mesh;
@@ -753,6 +913,8 @@ int main()
     ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
     ok &= wallDetectionTracksOverlappingThinTriMeshWall();
     ok &= wallAttachmentLookaheadFindsOuterCornerContinuation();
+    ok &= climbMantleToTopFloorKeepsFiniteState();
+    ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();
     ok &= playerWallAttachmentStateHasStableMeshIdentity();
