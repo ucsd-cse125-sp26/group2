@@ -201,30 +201,38 @@ flowchart LR
 
 ---
 
-## 8. Wall detection (sphere-cast)
+## 8. Wall Detection And Attachment
 
-`WallDetection::detectWalls` (`src/ecs/physics/WallDetection.cpp`) — 4 sphere-casts per tick + 1 ledge probe + 1 ground-distance probe:
+`WallDetection::detectWalls` (`src/ecs/physics/WallDetection.cpp`) uses triangle-mesh surface queries first and keeps
+sphere-cast fallback for prototype/primitive worlds:
 
 | Probe | Distance | Filter |
 |---|---|---|
-| Right wall | 35u, radius 12 | `|normal.y| < 0.3` |
-| Left wall | 35u, radius 12 | `|normal.y| < 0.3` |
-| Forward | 35u, radius 12 | `|normal.y| < 0.3` |
-| Curved-surface continuity | toward `-prevWallNormal` | resolves left/right ambiguity |
-| Ledge | from head-top forward, drop downward | requires `normal.y > 0.7` |
-| Ground distance | sphere-cast radius 2, 500u down | reports `groundDistance` |
+| Right/left wall | segment closest-point against static triMeshes, fallback sphere-cast | `isWallNormal` |
+| Forward wall | segment closest-point against static triMeshes, fallback sphere-cast | `isWallNormal` |
+| Wallrun sustain | `findWallRunAttachment` closest-point + lookahead + triangle adjacency | preserves mesh/triangle/feature identity |
+| Ledge | sphere-cast from head-top forward, then downward | requires `normal.y > 0.7` |
+| Ground distance | sphere-cast radius 2, 500u down | reports `groundDistance` for wallrun/climb min-height gates |
 
-**Uses AABB `halfExtents`, not capsule** — `k_feetPos = pos - (0, halfExtents.y, 0)` hardcodes Y-down. **Broken in flipped gravity.**
+Wallrun attachment stores `meshIndex`, `triId`, and `TriRegion`, and `findWallRunAttachment` can walk across welded
+triangle adjacency. This is what allows continuity across inside and outside 90-degree mesh seams.
 
-The **trimesh sphere-cast path is conservative** (treats sphere as `(r,r,r)` AABB), so walls detected on tri-mesh maps may be over-sized vs the exact capsule-vs-tri query. The wallrun *entry* gate uses this sphere-cast; the *sustain* uses `closestPointOnMesh`. Inconsistent — entry can fail where sustain would succeed.
+Known limitation: ledge detection and `groundDistance` still use sphere-casts and hardcode Y-down. That makes them less
+authoritative than the capsule KCC path and still suspect for flipped gravity.
 
-`findWallAttachment` (called from `MovementSystem` while wallrunning) **only iterates `world.triMeshes`** — boxes/brushes/cylinders/spheres are ignored. On `testWorld()` (all boxes), it returns `{found=false}` and the sphere-cast fallback carries the loop.
+`findWallAttachment` is intentionally triMesh-first. Boxes/brushes/cylinders/spheres are kept as fallback/prototype
+geometry, not the production map surface-tracking path.
 
 ---
 
-## 9. Broadphase (unused on hot path)
+## 9. Broadphase
 
-`BroadphaseTree` (`src/ecs/physics/BroadphaseTree.cpp`) is a Box2D-style fat-AABB BVH. **Has no live consumers in the player or projectile path.** Built for Phase 8 dynamic rigid bodies but currently `unordered_map`-of-trimesh-BVH + brute-loop over other primitives carries the actual work.
+`StaticWorldBroadphase` (`SweptCollision.cpp`) is the live immutable broadphase over static `WorldTriMesh` bounds. It is
+built after map/prop loading and queried by KCC sweeps, depenetration, ground probes, wall probes, sphere-casts, and
+world raycasts before entering each mesh's per-triangle BVH.
+
+`BroadphaseTree` (`src/ecs/physics/BroadphaseTree.cpp`) is a separate Box2D-style fat-AABB BVH for future dynamic rigid
+bodies. It still has no live player/projectile consumers.
 
 `SimdAabb::aabbBatchOverlap` is a 4-wide SSE2 batch test — no live call sites.
 
@@ -274,23 +282,26 @@ The PGS solver (`Solver.cpp`) is detailed in [physics.md §7](physics.md#7-dynam
 | Phase C-deep: two-capsule stair step | **Live** but **regressing** on box stairs |
 | Phase C-deep: per-pass-deepest depen | **Live** |
 | Phase C-deep: emergency unstick | **Live** but gated by `if (contact.valid)` — see issue |
-| Phase D: wall manifold walk | **Partial** — attachment stored, adjacency walking not wired (`wallTriId`/`wallRegion` written, never read) |
-| Phase E: edge-traversal polish | **Partial** |
+| Phase D: wall manifold walk | **Live** — attachment stores mesh/triangle/feature and walks neighbouring triangles across seams |
+| Phase E: edge-traversal polish | **Live for static triMeshes** |
 | Phase F: Lucio entry impulse | **Live** |
 
 ---
 
-## 13. Active regressions
+## 13. Recently Fixed Collision Regressions
 
-User reports on `core/collisions+wallrun`: **can't climb stairs**, **phase-through thin planes**, **stuck-in-thin-planes**. The investigation pinpointed:
+The following user-reported regressions on `core/collisions+wallrun` now have direct regression coverage in
+`tests/physics_trimesh_tests.cpp`:
 
-1. **Stair climb** — `sweepCapsuleVsBox` "starts inside expanded box" rejection (`SweptCollision.cpp:424`) returns no hit when the player is on top of a box. The downward `probeGround` for a player standing on a stair sees the floor plane below as the first hit, snaps the player *down through* the stair to the floor.
-2. **`clearanceCapsuleVsBox`** falsely reports "penetrating by 16u" for a player legitimately on top of a stair (the axis-aligned overlap test mistakes top-contact for penetration).
-3. **`probeGround` reach** is `maxDistance = 26` but `capsule.minkowskiExtent(up) = 36` — the foot only reaches 26u below the center, less than the capsule's own extent. Combined with bug 1, descending steps fails.
-4. **Phase-through** — `capsuleVsTriVoronoi` does **not** orient the face normal toward the start; for a one-sided triangle authored with normal pointing away, a player on the back side gets `s < 0` and welded-feature rejection drops the contact when the face has all-boundary edges (single isolated triangle).
-5. **Stuck-in-thin-planes** — when both sides of a coplanar pair reject (front and back), no contact is found and `emergencyUnstick` is gated off (`if (contact.valid)`).
+- Smooth ascent over authored thin trimesh stairs at walk and sprint speed.
+- Thin wall and ceiling planes blocking from both sides / high-speed casts.
+- Degenerate ground-probe triangles ignored without NaN state.
+- Sloped ceiling underside no longer used as a deep negative ground snap target.
+- Wallrun continuation across same-mesh and mesh-to-mesh 90-degree corners.
+- Climb/ledge handoff invalid normals guarded from poisoning position or velocity.
 
-Full breakdown with `path:line` references in [potential-issues.md](potential-issues.md#collisions).
+Open collision work should be tracked against fresh repros; older hypotheses in
+[potential-issues.md](potential-issues.md#collisions) may predate these fixes.
 
 ---
 
@@ -301,7 +312,7 @@ Full breakdown with `path:line` references in [potential-issues.md](potential-is
 | `src/ecs/systems/CollisionSystem.cpp` | Per-tick driver, player kernel, projectile kernel |
 | `src/ecs/physics/SweptCollision.cpp` | Sweep + depen + clearance primitives |
 | `src/ecs/physics/TriMeshCollision.cpp` | BVH + welding + per-tri Voronoi MTV + closest-point |
-| `src/ecs/physics/MapLoader.cpp` | Assimp + authored triMesh extraction + legacy primitive opt-ins + cook |
+| `src/ecs/physics/MapLoader.cpp` | Assimp + authored map triMesh extraction + prototype/prop primitive fitting + cook |
 | `src/ecs/physics/CookedMeshFormat.cpp` | On-disk format `'g2cm'` v2 |
 | `src/ecs/physics/BroadphaseTree.cpp` | Dynamic AABB tree (no live consumer in player path) |
 | `src/ecs/physics/ContactCache.cpp` | Warm-start cache |
