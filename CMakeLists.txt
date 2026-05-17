@@ -819,6 +819,8 @@ add_executable(group2
         src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/KinematicCharacterController.hpp
+        src/ecs/systems/KinematicCharacterController.cpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/systems/CollisionSystem.cpp
         src/client/systems/InputSampleSystem.hpp
@@ -1107,6 +1109,8 @@ add_executable(server
         src/ecs/physics/TitanfallConstants.hpp
         src/ecs/systems/MovementSystem.hpp
         src/ecs/systems/MovementSystem.cpp
+        src/ecs/systems/KinematicCharacterController.hpp
+        src/ecs/systems/KinematicCharacterController.cpp
         src/ecs/systems/CollisionSystem.hpp
         src/ecs/systems/CollisionSystem.cpp
         src/server/systems/EventQueue.hpp
@@ -1410,6 +1414,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/TitanfallConstants.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/MovementSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/MovementSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/KinematicCharacterController.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/KinematicCharacterController.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/CollisionSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/CollisionSystem.hpp"
     # `runCollision` calls `queueExplosion` for projectile impacts even
