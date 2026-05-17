@@ -217,8 +217,8 @@ sphere-cast fallback for prototype/primitive worlds:
 Wallrun attachment stores `meshIndex`, `triId`, and `TriRegion`, and `findWallRunAttachment` can walk across welded
 triangle adjacency. This is what allows continuity across inside and outside 90-degree mesh seams.
 
-Known limitation: ledge detection and `groundDistance` still use sphere-casts and hardcode Y-down. That makes them less
-authoritative than the capsule KCC path and still suspect for flipped gravity.
+Known limitation: ledge detection and `groundDistance` still use sphere-casts rather than the full capsule KCC ground
+probe. They now follow flipped gravity direction, but they remain less authoritative than the KCC path.
 
 `findWallAttachment` is intentionally triMesh-first. Boxes/brushes/cylinders/spheres are kept as fallback/prototype
 geometry, not the production map surface-tracking path.

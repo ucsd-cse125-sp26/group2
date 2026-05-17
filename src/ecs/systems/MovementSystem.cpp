@@ -1528,7 +1528,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                                              world,
                                              tms::k_wallrunCheckDist,
                                              tms::k_wallrunSphereRadius,
-                                             prevNormal);
+                                             prevNormal,
+                                             state.vis.gravityFlipped);
             }
             if (diagOn) {
                 movementDiag.wallFront = walls.wallFront;

@@ -836,6 +836,27 @@ bool wallDetectionTracksOverlappingThinTriMeshWall()
     return ok;
 }
 
+bool wallDetectionGroundDistanceUsesFlippedGravityDirection()
+{
+    const WorldTriMesh ceiling = makeThinCeiling();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&ceiling, 1),
+    };
+
+    const physics::WallDetectionResult result = physics::detectWalls(
+        {0.0f, 0.0f, 0.0f}, 0.0f, {10.0f, 30.0f, 10.0f}, world, 24.0f, 10.0f, glm::vec3{0.0f}, true);
+
+    bool ok = true;
+    ok &= expect(result.groundDistance < 20.0f, "flipped gravity ground distance should probe toward +Y");
+    ok &= expect(result.groundDistance > 8.0f, "flipped gravity ground distance should report surface distance");
+    return ok;
+}
+
 bool wallAttachmentLookaheadFindsOuterCornerContinuation()
 {
     std::array<WorldTriMesh, 2> meshes{makeThinWall(), makeThinDepthWallAt(20.0f)};
@@ -1230,6 +1251,7 @@ int main()
     ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();
     ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
     ok &= wallDetectionTracksOverlappingThinTriMeshWall();
+    ok &= wallDetectionGroundDistanceUsesFlippedGravityDirection();
     ok &= wallAttachmentLookaheadFindsOuterCornerContinuation();
     ok &= wallAttachmentWalksSingleMeshAdjacencyAtCorner();
     ok &= climbMantleToTopFloorKeepsFiniteState();

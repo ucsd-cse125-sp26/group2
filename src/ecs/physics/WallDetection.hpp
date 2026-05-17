@@ -76,6 +76,7 @@ struct WallAttachmentResult
 ///                       When non-zero, an additional trace is cast toward
 ///                       `-prevWallNormal` to track curved surfaces (cylinders,
 ///                       concave walls) whose normal rotates as the player moves.
+/// @param gravityFlipped True when the player's local up axis is -Y.
 /// @return               Detection results for all directions.
 WallDetectionResult detectWalls(glm::vec3 pos,
                                 float yaw,
@@ -83,7 +84,8 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                                 const WorldGeometry& world,
                                 float checkDist,
                                 float sphereRadius,
-                                glm::vec3 prevWallNormal = glm::vec3(0.0f));
+                                glm::vec3 prevWallNormal = glm::vec3(0.0f),
+                                bool gravityFlipped = false);
 
 /// @brief Find the best triangle-mesh wallrun attachment, with optional
 /// lookahead along the current travel direction.

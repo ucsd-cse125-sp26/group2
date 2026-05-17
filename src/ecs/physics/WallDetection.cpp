@@ -253,9 +253,11 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                                 const WorldGeometry& world,
                                 float checkDist,
                                 float sphereRadius,
-                                glm::vec3 prevWallNormal)
+                                glm::vec3 prevWallNormal,
+                                bool gravityFlipped)
 {
     WallDetectionResult result;
+    const glm::vec3 worldUp{0.0f, gravityFlipped ? -1.0f : 1.0f, 0.0f};
 
     // Player's local axes in world space.
     const float k_sinYaw = std::sin(yaw);
@@ -419,16 +421,16 @@ WallDetectionResult detectWalls(glm::vec3 pos,
 
     // Ledge detection
     if (result.wallFront) {
-        const glm::vec3 k_headTop = pos + glm::vec3(0.0f, halfExtents.y + 10.0f, 0.0f);
+        const glm::vec3 k_headTop = pos + worldUp * (halfExtents.y + 10.0f);
         const glm::vec3 k_headTopFwd = k_headTop + k_forward * checkDist;
         const SphereHitResult k_topFwd = sphereCast(sphereRadius, k_headTop, k_headTopFwd, world);
 
         if (!k_topFwd.hit) {
             const glm::vec3 k_probeStart = k_headTopFwd;
-            const glm::vec3 k_probeEnd = k_probeStart - glm::vec3(0.0f, halfExtents.y * 2.0f + 40.0f, 0.0f);
+            const glm::vec3 k_probeEnd = k_probeStart - worldUp * (halfExtents.y * 2.0f + 40.0f);
             const SphereHitResult k_downHit = sphereCast(sphereRadius * 0.5f, k_probeStart, k_probeEnd, world);
 
-            if (k_downHit.hit && k_downHit.normal.y > 0.7f) {
+            if (k_downHit.hit && glm::dot(k_downHit.normal, worldUp) > 0.7f) {
                 result.ledgeDetected = true;
                 result.ledgePoint = k_downHit.point;
                 result.ledgeNormal = result.frontNormal;
@@ -438,8 +440,8 @@ WallDetectionResult detectWalls(glm::vec3 pos,
 
     // Ground distance probe
     {
-        const glm::vec3 k_feetPos = pos - glm::vec3(0.0f, halfExtents.y, 0.0f);
-        const glm::vec3 k_downEnd = k_feetPos - glm::vec3(0.0f, 500.0f, 0.0f);
+        const glm::vec3 k_feetPos = pos - worldUp * halfExtents.y;
+        const glm::vec3 k_downEnd = k_feetPos - worldUp * 500.0f;
         const SphereHitResult k_hr = sphereCast(2.0f, k_feetPos, k_downEnd, world);
         if (k_hr.hit) {
             result.groundDistance = k_hr.t * 500.0f;
