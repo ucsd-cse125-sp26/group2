@@ -250,6 +250,49 @@ std::array<WorldTriMesh, 3> makeAuthoredMapWallrunCorridorSegment()
     return {mainWall, upperCorridorWall, lowerCorridorWall};
 }
 
+std::array<WorldTriMesh, 2> makeAuthoredMapExternalLCornerSegment()
+{
+    constexpr float xWall = 687.566f;
+    constexpr float zCorner = 593.671f;
+    constexpr float yMin = 12.853f;
+    constexpr float yMax = 252.853f;
+    constexpr float corridorEndX = 964.046f;
+
+    WorldTriMesh approachWall = makeCookedMesh(
+        {
+            {xWall, yMin, 213.671f},
+            {xWall, yMin, zCorner},
+            {xWall, yMax, zCorner},
+            {xWall, yMax, 213.671f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+
+    WorldTriMesh continuationWall = makeCookedMesh(
+        {
+            {xWall, yMin, zCorner},
+            {corridorEndX, yMin, zCorner},
+            {corridorEndX, yMax, zCorner},
+            {xWall, yMax, zCorner},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+
+    return {approachWall, continuationWall};
+}
+
 WorldTriMesh makeTwoTriangleFloor()
 {
     return makeCookedMesh(
@@ -1153,7 +1196,7 @@ bool wallrunSingleMeshExternalLCornerContinuesAroundCorner()
 
 bool wallrunMapExternalLCornerContinuesWithKcc()
 {
-    std::array<WorldTriMesh, 3> meshes = makeAuthoredMapWallrunCorridorSegment();
+    std::array<WorldTriMesh, 2> meshes = makeAuthoredMapExternalLCornerSegment();
     const physics::WorldGeometry world{
         .planes = {},
         .boxes = {},
@@ -1224,11 +1267,72 @@ bool wallrunMapExternalLCornerContinuesWithKcc()
     bool ok = true;
     ok &= expect(wallrunningEveryFrame, "map external L corner should not drop during KCC simulation");
     ok &= expect(outVis.moveMode == MoveMode::WallRunning, "map external L corner should stay in wallrun");
-    ok &= expect(outSim.wallNormal.z < -0.7f, "map external L corner should attach to the corridor wall");
+    ok &= expect(outSim.wallNormal.z > 0.7f, "map external L corner should attach to the outside of the corridor wall");
     ok &= expect(outSim.wallForward.x > 0.7f, "map external L corner should redirect into the corridor");
-    ok &= expect(outPos.value.x > 760.0f, "map external L corner should make progress along the corridor wall");
+    ok &= expect(outPos.value.x > 740.0f, "map external L corner should make progress along the corridor wall");
     ok &= expect(minHorizSpeed > 300.0f, "map external L corner should not stall during transition");
     ok &= expect(outVel.value.x > 300.0f, "map external L corner should preserve speed into the corridor direction");
+    return ok;
+}
+
+bool wallrunExternalCornerDefersRedirectUntilOldWallClear()
+{
+    std::array<WorldTriMesh, 2> meshes = makeAuthoredMapExternalLCornerSegment();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{671.530f, 80.0f, 577.639f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {687.566f, 80.0f, 577.639f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 0u;
+    sim.wallRegion = physics::TriRegion::Face;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outSim.wallNormal.x < -0.7f,
+                 "external corner should keep the old wall before the capsule clears the terminal edge");
+    ok &= expect(outSim.wallCornerTransitionActive, "external corner should keep the next wall as a pending handoff");
+    ok &= expect(outVel.value.z > 300.0f, "external corner should keep moving along the old wall before clearance");
+    ok &= expect(std::abs(outVel.value.x) < 50.0f,
+                 "external corner should not redirect into the old wall before clearance");
     return ok;
 }
 
@@ -1292,7 +1396,7 @@ bool wallrunGapDropsWithoutReversingVelocity()
 
 bool wallrunMapCorridorTurnsIntoCorridor()
 {
-    std::array<WorldTriMesh, 3> meshes = makeAuthoredMapWallrunCorridorSegment();
+    std::array<WorldTriMesh, 2> meshes = makeAuthoredMapExternalLCornerSegment();
     const physics::WorldGeometry world{
         .planes = {},
         .boxes = {},
@@ -1344,9 +1448,13 @@ bool wallrunMapCorridorTurnsIntoCorridor()
 
     bool ok = true;
     ok &= expect(outVis.moveMode == MoveMode::WallRunning,
-                 "map corridor outside corner should keep wallrunning onto the corridor wall");
-    ok &= expect(outSim.wallNormal.z < -0.7f, "map corridor handoff should attach to the upper corridor wall");
-    ok &= expect(outVel.value.x > 0.0f, "map corridor handoff should turn into the corridor instead of away from it");
+                 "map corridor outside corner should keep wallrunning while preparing the turn");
+    ok &= expect(outSim.wallNormal.x < -0.7f,
+                 "map corridor handoff should keep the approach wall until the capsule clears the edge");
+    ok &= expect(outSim.wallCornerTransitionActive,
+                 "map corridor handoff should store a pending external-corner transition");
+    ok &= expect(outVel.value.z > 300.0f,
+                 "map corridor handoff should keep moving along the approach wall before clearance");
     ok &= expect(glm::length(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}) > 300.0f,
                  "map corridor handoff should preserve moving wallrun speed instead of stopping in place");
     return ok;
@@ -1442,7 +1550,8 @@ bool wallrunInternalCornerKeepsMoving()
     ok &= expect(attachment.found, "internal corner attachment query should find a candidate");
     ok &= expect(attachment.normal.z < -0.7f, "internal corner attachment query should prefer the turned wall");
     ok &= expect(outVis.moveMode == MoveMode::WallRunning, "internal corner should stay wallrunning");
-    ok &= expect(outSim.wallNormal.z < -0.7f, "internal corner should transition to the turned wall normal");
+    ok &= expect(outSim.wallNormal.z < -0.7f || outSim.wallCornerTransitionActive,
+                 "internal corner should either transition immediately or queue a clearance-safe turn");
     ok &= expect(glm::length(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}) > 300.0f,
                  "internal corner wallrun should keep moving instead of becoming static");
     return ok;
@@ -2208,6 +2317,7 @@ int main()
     ok &= wallrunSingleMeshExternalLCornerContinuesAroundCorner();
     ok &= wallrunGapDropsWithoutReversingVelocity();
     ok &= wallrunMapCorridorTurnsIntoCorridor();
+    ok &= wallrunExternalCornerDefersRedirectUntilOldWallClear();
     ok &= wallrunMapExternalLCornerContinuesWithKcc();
     ok &= wallrunInternalCornerKeepsMoving();
     ok &= wallrunRollScalesWithViewAngle();

@@ -66,10 +66,20 @@ struct PlayerSimState
     uint32_t wallMeshIndex{UINT32_MAX}; ///< Current static collision mesh under the wall attachment, if any.
     uint32_t wallTriId{UINT32_MAX};     ///< Current mesh triangle under the wall attachment, if any.
     physics::TriRegion wallRegion{physics::TriRegion::Face}; ///< Closest feature on `wallMeshIndex` / `wallTriId`.
-    bool wallAttachmentValid{false};             ///< True while the wallrun has a collision-backed attachment.
-    glm::vec3 wallRecentHandoffFromNormal{0.0f}; ///< Previous wall normal briefly blocked to avoid corner ping-pong.
-    float wallRecentHandoffTimer{0.0f};          ///< Remaining time to suppress immediate handoff backtracks (s).
-    bool wasWallRunning{false};                  ///< Set briefly after leaving wallrun (coyote wall jump).
+    bool wallAttachmentValid{false};          ///< True while the wallrun has a collision-backed attachment.
+    bool wallCornerTransitionActive{false};   ///< True while carrying a pending external-corner handoff.
+    glm::vec3 wallCornerAnchor{0.0f};         ///< Corner/seam point used as the transition clearance origin.
+    glm::vec3 wallCornerFromNormal{0.0f};     ///< Wall normal held until the capsule clears the old wall edge.
+    glm::vec3 wallCornerFromForward{0.0f};    ///< Old wall tangent held during the corner approach.
+    glm::vec3 wallCornerToNormal{0.0f};       ///< Pending wall normal to attach after clearance.
+    glm::vec3 wallCornerToForward{0.0f};      ///< Pending wall tangent to use after clearance.
+    uint32_t wallCornerMeshIndex{UINT32_MAX}; ///< Pending wall mesh after corner clearance.
+    uint32_t wallCornerTriId{UINT32_MAX};     ///< Pending wall triangle after corner clearance.
+    physics::TriRegion wallCornerRegion{physics::TriRegion::Face}; ///< Pending wall feature after clearance.
+    float wallCornerTimer{0.0f};                                   ///< Time spent in the active corner transition (s).
+    glm::vec3 wallCornerIgnoreNormal{0.0f}; ///< Source wall briefly ignored after a corner commit.
+    float wallCornerIgnoreTimer{0.0f};      ///< Remaining time to suppress source-wall backtracking.
+    bool wasWallRunning{false};             ///< Set briefly after leaving wallrun (coyote wall jump).
 
     // Wall blacklist: stores the last wall's normal + height to prevent regrab.
     glm::vec3 wallBlacklistNormal{0.0f};
