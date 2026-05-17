@@ -1779,7 +1779,8 @@ GroundProbeResult groundProbeCapsuleVsTriMesh(
                 const float planeDist = glm::dot(n, v0);
                 const float clearance = glm::dot(n, pos) - planeDist - capsule.minkowskiExtent(n);
                 const float probeDistance = clearance / upDot;
-                if (!std::isfinite(probeDistance) || probeDistance > maxDistance || probeDistance > best.distance)
+                if (!std::isfinite(probeDistance) || probeDistance < -maxDistance - 1e-3f ||
+                    probeDistance > maxDistance || probeDistance > best.distance)
                     continue;
 
                 const glm::vec3 centerAtSupport = pos - up * std::max(probeDistance, 0.0f);

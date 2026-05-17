@@ -256,6 +256,24 @@ WorldTriMesh makeThinCeiling()
         });
 }
 
+WorldTriMesh makeSlopedCeiling()
+{
+    // A large, non-horizontal ceiling plane above the capsule. The raw
+    // winding points downward, matching common underside collision export;
+    // ground probing must not flip it into walkable support from below.
+    return makeCookedMesh(
+        {
+            {300.0f, -168.0f, 264.0f},
+            {-300.0f, -168.0f, 264.0f},
+            {0.0f, 192.0f, -216.0f},
+        },
+        {
+            0,
+            1,
+            2,
+        });
+}
+
 WorldTriMesh makeThinRamp()
 {
     return makeCookedMesh(
@@ -564,6 +582,39 @@ bool thinCeilingPlaneBlocksUpwardCapsuleMotion()
     ok &= expect(hit.hit, "thin ceiling plane should block upward capsule motion");
     ok &= expect(hit.normal.y < -0.99f, "ceiling hit normal should push the capsule downward");
     ok &= expect(hit.tFirst > 0.0f && hit.tFirst < 1.0f, "ceiling hit should occur during the upward sweep");
+    return ok;
+}
+
+bool airborneKccDoesNotSnapToSlopedCeiling()
+{
+    const WorldTriMesh ceiling = makeSlopedCeiling();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&ceiling, 1),
+    };
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 16.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {16.0f, 36.0f, 16.0f};
+
+    PlayerVisState state;
+    state.grounded = false;
+
+    glm::vec3 pos{0.0f, 0.0f, 0.0f};
+    glm::vec3 vel{20.0f, 8.0f, 5.0f};
+
+    systems::runKinematicCharacterController(pos, vel, shape, state, 1.0f / 128.0f, world, entt::null, false);
+
+    bool ok = true;
+    ok &= expect(finiteVec3(pos), "sloped ceiling snap regression should keep position finite");
+    ok &= expect(pos.y < 1.0f, "airborne KCC should not snap upward to the underside of a sloped ceiling");
+    ok &= expect(!state.grounded, "underside of a sloped ceiling should not classify as grounded support");
     return ok;
 }
 
@@ -958,6 +1009,7 @@ int main()
     ok &= kccAscendsThinTrimeshStaircaseSmoothly();
     ok &= kccAscendsThinTrimeshStaircaseAtSprintSpeed();
     ok &= thinCeilingPlaneBlocksUpwardCapsuleMotion();
+    ok &= airborneKccDoesNotSnapToSlopedCeiling();
     ok &= rampGroundProbeKeepsAuthoredNormal();
     ok &= staticCapsuleDepenUsesSurfaceFeatureNormal();
     ok &= twoTriangleFloorHasStableSurfaceOverlap();
