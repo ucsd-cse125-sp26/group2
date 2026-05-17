@@ -180,6 +180,11 @@ jobs:
     if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
+      # Google Drive file ID for the shared assets zip.  Refreshed by a
+      # maintainer when new art lands — gdown's per-file rate limit makes
+      # the folder-download approach unreliable for 50+ files on shared
+      # public links, so we go back to a single archive download here.
+      ASSETS_GDRIVE_ID: "132BZgV26Gc2N-kx5urCRz2pH8q0AkYEI"
     strategy:
       fail-fast: false
       matrix:
@@ -318,16 +323,27 @@ jobs:
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --target group2 server clientbot --parallel
 
+      # Download the shared assets zip from Google Drive (cached across runs).
+      # The cache key is the file ID, so a maintainer refreshing the Drive
+      # zip should also bump ASSETS_GDRIVE_ID above to invalidate the cache.
+      - name: Cache assets
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: assets.zip
+          key: assets-${{ env.ASSETS_GDRIVE_ID }}
+
+      - name: Download assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          pip install --quiet gdown
+          gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
+
       # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
         shell: bash
         timeout-minutes: 10
-        env:
-          # Drive folder containing the current game assets (maps, animations,
-          # prop GLBs). Fetched fresh on every release — no cache — so releases
-          # always reflect the latest art the team has uploaded.
-          # Folder must remain "Anyone with the link can view".
-          ASSETS_FOLDER_ID: "1nUGE1_tfFNQcl5-UDkjys0XjE8OLxd28"
         run: |
           DIR="group2-${{ matrix.archive_suffix }}"
           STAGE="staging/$DIR"
@@ -344,28 +360,8 @@ jobs:
           cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
           cp -r "${{ matrix.build_dir }}/shaders-new" "$STAGE/"
 
-          # Live assets from Google Drive — fresh on every release.
-          # --folder : recursive folder download.
-          # -O       : output directory.
-          #
-          # Pin to gdown >= 6.0 because gdown 5.x with `--folder` silently
-          # caps at 50 files unless `--remaining-ok` is passed; the flag
-          # was removed in 6.x and the limit was lifted, so the modern
-          # invocation is simply `--folder` with no extra flag.
-          #
-          # Observed Drive folder layout (verified 2026-05-16):
-          #   assets/animations/  (fbx, incl. nested crouch/, male_locomotion_pack/)
-          #   assets/hud_icons/   (svg + README.md)
-          #   assets/maps/        (glb map files, e.g. map1.glb)
-          #   assets/sounds/      (wav, mp3)
-          #   assets/uploads_files_812442_FreePresets/  (atm presets)
-          #   assets/uploads_files_812442_HdriFree/     (hdr environment maps)
-          # The Dockerfile and CMake post-build copy assume `assets/maps/`,
-          # `assets/animations/`, and `assets/*.glb` exist at these paths.
-          pip install --quiet 'gdown>=6.0.0'
-          gdown --folder \
-                -O "$STAGE/assets" \
-                "https://drive.google.com/drive/folders/${ASSETS_FOLDER_ID}"
+          # Assets from Google Drive (cross-platform extraction via Python)
+          python3 -c "import zipfile; zipfile.ZipFile('assets.zip').extractall('$STAGE')"
 
           # Create release zip.
           # Linux/macOS have zip pre-installed; Windows has 7z instead.
