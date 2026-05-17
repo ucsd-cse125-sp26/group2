@@ -399,6 +399,7 @@ jobs:
     if: github.event_name == 'push'
     permissions:
       contents: write
+      packages: write
 
     steps:
       # Full history + tags needed to compute the next semantic version.
@@ -664,3 +665,45 @@ jobs:
             group2-linux-x86_64.zip \
             group2-macos.zip \
             group2-windows-x86_64.zip
+
+      # ---------------- Docker image: ghcr.io/<owner>/group2-server ----------------
+      #
+      # Reuses the Linux release artifact that release-build just produced;
+      # no recompile inside Docker. The Dockerfile (docker/Dockerfile.server)
+      # consumes server + config.toml + assets/ from the unpacked zip.
+      - name: Prepare Docker build context
+        shell: bash
+        run: |
+          mkdir -p docker-context
+          unzip -q group2-linux-x86_64.zip -d docker-context-tmp
+          # The zip's top-level dir is `group2-linux-x86_64/`; flatten it.
+          mv docker-context-tmp/group2-linux-x86_64/* docker-context/
+          cp docker/Dockerfile.server   docker-context/Dockerfile
+          cp docker/.dockerignore       docker-context/.dockerignore
+          # Sanity print so a CI log reader can confirm the layout.
+          ls -la docker-context
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/group2-server
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.tag }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: docker-context
+          platforms: linux/amd64
+          push: true
+          tags:   ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
