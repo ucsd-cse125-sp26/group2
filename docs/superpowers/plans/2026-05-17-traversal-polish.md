@@ -170,7 +170,7 @@ cmake --build build/debug --target physics_trimesh_tests group2 server -j 4
 
 Expected: all traversal tests pass with no warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/ecs/components/PlayerSimState.hpp src/ecs/physics/TitanfallConstants.hpp src/ecs/systems/MovementSystem.cpp tests/physics_trimesh_tests.cpp
@@ -179,12 +179,12 @@ git commit -m "Add Apex-style climb phase foundation"
 
 ### Final Verification
 
-- [ ] Run `./build/debug/physics_trimesh_tests`.
-- [ ] Run `cmake --build build/debug --target group2 server -j 4`.
-- [ ] Run the CI format gate:
+- [x] Run `./build/debug/physics_trimesh_tests`.
+- [x] Run `cmake --build build/debug --target group2 server -j 4`.
+- [x] Run the CI format gate:
 
 ```bash
 PATH="/tmp/group2-clang-format-18:$PATH" git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' '*.cxx' '*.c' '*.hh' '*.ipp' | PATH="/tmp/group2-clang-format-18:$PATH" xargs clang-format-18 --dry-run --Werror
 ```
 
-- [ ] Commit any final fixes.
+- [x] Commit any final fixes.
