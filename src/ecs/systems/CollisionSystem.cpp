@@ -303,20 +303,23 @@ depenetrateSphere(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, 
 
 /// @brief Push the entity out of a triangle mesh it currently overlaps.
 ///
-/// Delegates to `physics::depenetrateAABBvsTriMesh`, which uses per-triangle
-/// SAT MTV — accurate enough that curved surfaces (cylinders, spheres) feel
-/// curved instead of cubical.  Trade-off: at sharp triangle edges where
-/// adjacent normals fight, per-triangle pushes can briefly disagree.  In
-/// practice the pushback bias keeps the entity off the surface and the swept
-/// collision (which still does precise per-triangle hits) is the primary path
-/// for normal motion; this depenetration is only a safety net.
+/// Delegates to `physics::depenetrateAABBvsTriMesh`, the legacy projectile
+/// AABB safety-net path. Player movement uses capsule depenetration in
+/// `physics::depenetrateCapsuleVsWorld`; this remains for small projectile
+/// bodies that still use AABB sweeps.
 static void
 depenetrateTriMesh(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const physics::WorldTriMesh& mesh)
 {
     physics::depenetrateAABBvsTriMesh(pos, vel, halfExtents, mesh, k_pushback);
 }
 
-/// @brief Run all depenetration passes (planes, boxes, brushes, cylinders, spheres).
+static bool overlapsAabb(const physics::WorldAABB& a, const physics::WorldAABB& b)
+{
+    return a.max.x >= b.min.x && a.min.x <= b.max.x && a.max.y >= b.min.y && a.min.y <= b.max.y && a.max.z >= b.min.z &&
+           a.min.z <= b.max.z;
+}
+
+/// @brief Run all depenetration passes for legacy AABB bodies.
 /// @param pos          Entity position (modified in place).
 /// @param vel          Entity velocity (modified in place).
 /// @param halfExtents  AABB half-extents of the entity.
@@ -338,8 +341,21 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
     for (const physics::WorldSphere& sph : world.spheres)
         depenetrateSphere(pos, vel, halfExtents, sph);
 
-    for (const physics::WorldTriMesh& tm : world.triMeshes)
-        depenetrateTriMesh(pos, vel, halfExtents, tm);
+    const physics::WorldAABB query{.min = pos - halfExtents, .max = pos + halfExtents};
+    if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
+        physics::queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+            if (meshIndex < world.triMeshes.size())
+                depenetrateTriMesh(pos, vel, halfExtents, world.triMeshes[meshIndex]);
+            return true;
+        });
+        return;
+    }
+
+    for (const physics::WorldTriMesh& tm : world.triMeshes) {
+        const physics::WorldAABB meshAabb{.min = tm.boundsMin, .max = tm.boundsMax};
+        if (overlapsAabb(meshAabb, query))
+            depenetrateTriMesh(pos, vel, halfExtents, tm);
+    }
 }
 
 // Modern two-capsule character controller (Havok / Jolt / Unity-KCC pattern)

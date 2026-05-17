@@ -4,7 +4,7 @@
 /// Maps are authored in Blender and exported as `.glb`.  Collision geometry is
 /// identified by **Blender collection hierarchy**: meshes whose Assimp scene-graph
 /// ancestor is named after the collision collection (default `"Collision"`) are
-/// extracted as physics primitives.  Everything else is treated as visual-only.
+/// extracted as collision geometry. Everything else is treated as visual-only.
 ///
 /// **Prototype mode** (`allMeshesAreCollision = true`): every mesh in the file is
 /// used for *both* rendering and collision.  Handy for blockout maps where the
@@ -26,7 +26,7 @@ namespace physics
 
 /// Collision data
 
-/// @brief Owns the collision primitives extracted from a map file.
+/// @brief Owns the collision geometry extracted from a map file.
 ///
 /// The vectors own their memory; `geometry()` returns lightweight spans into
 /// them, matching the `WorldGeometry` expected by the collision / movement /
@@ -68,7 +68,7 @@ struct MapLoadOptions
 
     /// Name of the Blender collection (= Assimp parent node) whose children
     /// are collision geometry.  Matching is case-insensitive.  Meshes under
-    /// this node are extracted as collision primitives and are **excluded**
+    /// this node are extracted as collision geometry and are **excluded**
     /// from the visual model (unless `allMeshesAreCollision` is also set).
     std::string collisionCollection = "Collision";
 
@@ -121,10 +121,8 @@ struct MapLoadOptions
     ///   false (default) — skip decomposition; non-convex meshes fall through
     ///                     to `WorldTriMesh`.
     ///
-    /// V-HACD tries `FLOOD_FILL` first (closed solid meshes), falling back
-    /// to `RAYCAST_FILL` and finally `SURFACE_ONLY` (hollow shells like a
-    /// tube without thickness) — so it works for both solid non-convex
-    /// objects and walkable hollow shells.
+    /// This is a compatibility/prototype option. Production map collision is
+    /// authored as simplified triangle surfaces and should keep this false.
     ///
     /// Has no effect when `guessShapesProcessed = false` or when
     /// `allMeshesAreCollision = true`.
@@ -137,14 +135,15 @@ struct MapLoadOptions
 ///
 /// Walks the Assimp scene graph.  For each mesh node, determines whether it
 /// belongs to the collision collection (by checking ancestor node names) or,
-/// in prototype mode, always.  Collision meshes are converted to per-object
-/// axis-aligned bounding boxes.
+/// in prototype mode, always. In separated production mode with
+/// `guessShapesProcessed = false`, collision meshes are preserved as
+/// `WorldTriMesh` vertex-for-vertex after Assimp triangulation.
 ///
 /// This function does **not** produce visual / renderable data — use the
 /// existing `Renderer::loadSceneModel()` path for that.
 ///
 /// @param path  Absolute or relative path to the `.glb` file.
-/// @param out   Filled with extracted collision primitives on success.
+/// @param out   Filled with extracted collision geometry on success.
 /// @param opts  Loading options (scale, collection name, prototype mode).
 /// @return True on success; false on any Assimp load error (logged via SDL_Log).
 bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapLoadOptions& opts = {});

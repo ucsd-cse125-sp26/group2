@@ -57,14 +57,15 @@ struct PlayerSimState
     bool canEnterSlide{true};       ///< Cleared when in air, set on landing.
 
     // ── Wallrunning ────────────────────────────────────────────────────────
-    glm::vec3 wallNormal{0.0f};     ///< Normal of the wall being run on.
-    glm::vec3 wallForward{0.0f};    ///< Direction of travel along the wall.
-    glm::vec3 wallAnchor{0.0f};     ///< Closest point on the attached wall surface.
-    float wallRunTimer{0.0f};       ///< Time on current wall (s).
-    float wallRunSpeedTimer{0.0f};  ///< Timer for the speed-loss delay.
-    float exitWallTimer{0.0f};      ///< Remaining exit-wall grace time (s).
-    uint32_t wallTriId{UINT32_MAX}; ///< Current mesh triangle under the wall attachment, if any.
-    physics::TriRegion wallRegion{physics::TriRegion::Face}; ///< Closest feature on `wallTriId`.
+    glm::vec3 wallNormal{0.0f};         ///< Normal of the wall being run on.
+    glm::vec3 wallForward{0.0f};        ///< Direction of travel along the wall.
+    glm::vec3 wallAnchor{0.0f};         ///< Closest point on the attached wall surface.
+    float wallRunTimer{0.0f};           ///< Time on current wall (s).
+    float wallRunSpeedTimer{0.0f};      ///< Timer for the speed-loss delay.
+    float exitWallTimer{0.0f};          ///< Remaining exit-wall grace time (s).
+    uint32_t wallMeshIndex{UINT32_MAX}; ///< Current static collision mesh under the wall attachment, if any.
+    uint32_t wallTriId{UINT32_MAX};     ///< Current mesh triangle under the wall attachment, if any.
+    physics::TriRegion wallRegion{physics::TriRegion::Face}; ///< Closest feature on `wallMeshIndex` / `wallTriId`.
     bool wallAttachmentValid{false}; ///< True while the wallrun has a collision-backed attachment.
     bool wasWallRunning{false};      ///< Set briefly after leaving wallrun (coyote wall jump).
 

@@ -90,6 +90,27 @@ struct TriMeshValidationReport
 /// out-of-range indices.
 TriMeshValidationReport validateTriMesh(const WorldTriMesh& mesh, float positionEpsilon = 1e-4f);
 
+/// @brief Runtime/cook summary for authored static collision triangle meshes.
+struct TriMeshCookStats
+{
+    uint32_t meshCount{0};
+    uint32_t vertexCount{0};
+    uint32_t triangleCount{0};
+    uint32_t meshBvhNodeCount{0};
+    uint32_t meshBvhLeafCount{0};
+    uint32_t maxMeshBvhDepth{0};
+    uint32_t activeHalfEdges{0};
+    uint32_t weldedHalfEdges{0};
+    uint32_t boundaryHalfEdges{0};
+    uint32_t invalidNormals{0};
+};
+
+/// @brief Collect aggregate map-cooking diagnostics for already-cooked meshes.
+///
+/// Intended for load-time logging and tests. `weldedHalfEdges` counts inactive
+/// manifold half-edges, so a flat seam shared by two triangles contributes two.
+TriMeshCookStats collectTriMeshCookStats(std::span<const WorldTriMesh> meshes);
+
 /// @brief Sweep an AABB against a triangle mesh using Voronoi-clipped per-triangle tests.
 ///
 /// Returns the earliest contact whose closest feature on the hit triangle is

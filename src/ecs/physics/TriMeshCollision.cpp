@@ -845,6 +845,34 @@ int windingSignInCanonicalFace(const QuantizedVertexKey original[3], const FaceK
     return (inversions % 2 == 0) ? 1 : -1;
 }
 
+void accumulateBvhStats(
+    const std::vector<BVHNode>& nodes, int nodeIndex, uint32_t depth, uint32_t& leafCount, uint32_t& maxDepth)
+{
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int>(nodes.size()))
+        return;
+
+    maxDepth = std::max(maxDepth, depth);
+
+    const BVHNode& node = nodes[static_cast<size_t>(nodeIndex)];
+    if (node.count > 0) {
+        ++leafCount;
+        return;
+    }
+
+    accumulateBvhStats(nodes, node.leftFirst, depth + 1u, leafCount, maxDepth);
+    accumulateBvhStats(nodes, node.leftFirst + 1, depth + 1u, leafCount, maxDepth);
+}
+
+uint32_t countActiveEdgeBits(uint8_t mask)
+{
+    uint32_t count = 0;
+    for (uint8_t bit = 0; bit < 3u; ++bit) {
+        if ((mask & (1u << bit)) != 0u)
+            ++count;
+    }
+    return count;
+}
+
 } // namespace
 
 // Public API
@@ -1068,6 +1096,56 @@ TriMeshValidationReport validateTriMesh(const WorldTriMesh& mesh, float position
     }
 
     return report;
+}
+
+TriMeshCookStats collectTriMeshCookStats(std::span<const WorldTriMesh> meshes)
+{
+    TriMeshCookStats stats;
+    stats.meshCount = static_cast<uint32_t>(meshes.size());
+
+    for (const WorldTriMesh& mesh : meshes) {
+        stats.vertexCount += static_cast<uint32_t>(mesh.vertices.size());
+        const uint32_t triCount = static_cast<uint32_t>(mesh.indices.size() / 3u);
+        stats.triangleCount += triCount;
+        stats.meshBvhNodeCount += static_cast<uint32_t>(mesh.bvhNodes.size());
+
+        if (!mesh.bvhNodes.empty()) {
+            uint32_t meshLeafCount = 0;
+            uint32_t meshMaxDepth = 0;
+            accumulateBvhStats(mesh.bvhNodes, 0, 1u, meshLeafCount, meshMaxDepth);
+            stats.meshBvhLeafCount += meshLeafCount;
+            stats.maxMeshBvhDepth = std::max(stats.maxMeshBvhDepth, meshMaxDepth);
+        }
+
+        for (uint32_t t = 0; t < triCount; ++t) {
+            if (t >= mesh.faceNormals.size()) {
+                ++stats.invalidNormals;
+            } else {
+                const glm::vec3 n = mesh.faceNormals[t];
+                const float lenSq = glm::dot(n, n);
+                if (!std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.z) || !std::isfinite(lenSq) ||
+                    lenSq < 1e-8f)
+                    ++stats.invalidNormals;
+            }
+
+            const uint8_t activeMask = (t < mesh.edgeActive.size()) ? mesh.edgeActive[t] : 0u;
+            stats.activeHalfEdges += countActiveEdgeBits(activeMask);
+            for (uint32_t e = 0; e < 3u; ++e) {
+                const bool active = (activeMask & (1u << e)) != 0u;
+                const size_t neighborIndex = static_cast<size_t>(t) * 3u + e;
+                const bool hasNeighbor =
+                    neighborIndex < mesh.edgeNeighbor.size() && mesh.edgeNeighbor[neighborIndex] != UINT32_MAX;
+                if (hasNeighbor) {
+                    if (!active)
+                        ++stats.weldedHalfEdges;
+                } else if (active) {
+                    ++stats.boundaryHalfEdges;
+                }
+            }
+        }
+    }
+
+    return stats;
 }
 
 HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)

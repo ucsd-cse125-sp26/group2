@@ -961,6 +961,32 @@ void logTriMeshValidation(const char* nodeName, const TriMeshValidationReport& r
             report.invalidIndices);
 }
 
+void logTriMeshCookStats(const char* label,
+                         const char* path,
+                         const TriMeshCookStats& stats,
+                         size_t staticBroadphaseNodes)
+{
+    if (stats.meshCount == 0)
+        return;
+
+    SDL_Log("MapLoader: %s '%s' trimesh cook — meshes=%u verts=%u tris=%u mesh-bvh-nodes=%u mesh-bvh-leaves=%u "
+            "mesh-bvh-max-depth=%u world-bvh-nodes=%zu active-half-edges=%u welded-half-edges=%u "
+            "boundary-half-edges=%u invalid-normals=%u",
+            label,
+            path,
+            stats.meshCount,
+            stats.vertexCount,
+            stats.triangleCount,
+            stats.meshBvhNodeCount,
+            stats.meshBvhLeafCount,
+            stats.maxMeshBvhDepth,
+            staticBroadphaseNodes,
+            stats.activeHalfEdges,
+            stats.weldedHalfEdges,
+            stats.boundaryHalfEdges,
+            stats.invalidNormals);
+}
+
 void extractMeshCollision(const aiMesh* mesh,
                           const aiScene* scene,
                           const glm::mat4& world,
@@ -1342,6 +1368,8 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     }
 
     buildStaticWorldBroadphase(out.staticBroadphase, out.triMeshes);
+    const TriMeshCookStats cookStats = collectTriMeshCookStats(out.triMeshes);
+    logTriMeshCookStats("loaded", path.c_str(), cookStats, out.staticBroadphase.nodes.size());
 
     SDL_Log("MapLoader: loaded '%s' — %zu plane(s), %zu box(es), %zu brush(es), %zu cylinder(s), %zu sphere(s), %zu "
             "trimesh(es)",
@@ -1427,6 +1455,8 @@ bool loadPropCollision(
             newTri);
 
     buildStaticWorldBroadphase(out.staticBroadphase, out.triMeshes);
+    const TriMeshCookStats cookStats = collectTriMeshCookStats(out.triMeshes);
+    logTriMeshCookStats("prop", path.c_str(), cookStats, out.staticBroadphase.nodes.size());
 
     return true;
 }

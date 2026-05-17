@@ -1,3 +1,4 @@
+#include "ecs/components/PlayerSimState.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/physics/WallDetection.hpp"
 
@@ -273,6 +274,35 @@ bool triMeshValidationReportsCookerIssues()
     return ok;
 }
 
+bool triMeshCookStatsReportWeldAndBvhQuality()
+{
+    const WorldTriMesh floor = makeTwoTriangleFloor();
+    const physics::TriMeshCookStats stats = physics::collectTriMeshCookStats(std::span<const WorldTriMesh>(&floor, 1));
+
+    bool ok = true;
+    ok &= expect(stats.meshCount == 1u, "cook stats should report mesh count");
+    ok &= expect(stats.vertexCount == 4u, "cook stats should report vertex count");
+    ok &= expect(stats.triangleCount == 2u, "cook stats should report triangle count");
+    ok &= expect(stats.meshBvhNodeCount == 1u, "cook stats should report mesh BVH nodes");
+    ok &= expect(stats.meshBvhLeafCount == 1u, "cook stats should report mesh BVH leaves");
+    ok &= expect(stats.maxMeshBvhDepth == 1u, "cook stats should report mesh BVH depth");
+    ok &= expect(stats.activeHalfEdges == 4u, "cook stats should keep boundary half-edges active");
+    ok &= expect(stats.boundaryHalfEdges == 4u, "cook stats should report boundary half-edges");
+    ok &= expect(stats.weldedHalfEdges == 2u, "cook stats should report welded planar seam half-edges");
+    ok &= expect(stats.invalidNormals == 0u, "cook stats should report invalid cooked normals");
+    return ok;
+}
+
+bool playerWallAttachmentStateHasStableMeshIdentity()
+{
+    PlayerSimState state;
+    bool ok = true;
+    ok &= expect(state.wallMeshIndex == UINT32_MAX, "wall attachment should default to no mesh identity");
+    ok &= expect(state.wallTriId == UINT32_MAX, "wall attachment should default to no triangle identity");
+    ok &= expect(!state.wallAttachmentValid, "wall attachment should default to invalid");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -285,5 +315,7 @@ int main()
     ok &= staticBroadphaseReturnsOnlyOverlappingTriMeshes();
     ok &= wallDetectionTracksOverlappingThinTriMeshWall();
     ok &= triMeshValidationReportsCookerIssues();
+    ok &= triMeshCookStatsReportWeldAndBvhQuality();
+    ok &= playerWallAttachmentStateHasStableMeshIdentity();
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

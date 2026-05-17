@@ -647,6 +647,7 @@ struct WallAttachmentProbe
     bool found{false};
     glm::vec3 anchor{0.0f};
     glm::vec3 normal{0.0f};
+    uint32_t meshIndex{UINT32_MAX};
     uint32_t triId{UINT32_MAX};
     physics::TriRegion region{physics::TriRegion::Face};
 };
@@ -665,15 +666,15 @@ WallAttachmentProbe findWallAttachment(glm::vec3 pos,
         const physics::CapsuleShape capsule = capsuleQueryForWallrun(shape);
         const float maxAxisDist = capsule.radius + tms::k_wallrunCheckDist + 8.0f;
 
-        for (const physics::WorldTriMesh& mesh : world.triMeshes) {
+        auto considerMesh = [&](uint32_t meshIndex, const physics::WorldTriMesh& mesh) {
             const physics::ClosestPointOnMeshResult cp = physics::closestPointOnMesh(capsule, pos, maxAxisDist, mesh);
             if (!cp.found || !physics::isWallNormal(cp.normal))
-                continue;
+                return;
 
             const float continuity =
                 (glm::length(continuityNormal) > 0.5f) ? glm::dot(cp.normal, continuityNormal) : 1.0f;
             if (continuity < -0.05f)
-                continue;
+                return;
 
             const float blocking = (glm::length(travelDir) > 0.5f)
                                        ? std::max(0.0f, -glm::dot(glm::normalize(travelDir), cp.normal))
@@ -685,21 +686,41 @@ WallAttachmentProbe findWallAttachment(glm::vec3 pos,
                 best.found = true;
                 best.anchor = cp.pointOnMesh;
                 best.normal = cp.normal;
+                best.meshIndex = meshIndex;
                 best.triId = cp.triId;
                 best.region = cp.region;
             }
+        };
+
+        const glm::vec3 queryHalfExtents = capsule.enclosingHalfExtents() + glm::vec3(maxAxisDist);
+        const physics::WorldAABB query{.min = pos - queryHalfExtents, .max = pos + queryHalfExtents};
+        if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
+            physics::queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+                if (meshIndex < world.triMeshes.size())
+                    considerMesh(meshIndex, world.triMeshes[meshIndex]);
+                return true;
+            });
+        } else {
+            for (uint32_t i = 0; i < static_cast<uint32_t>(world.triMeshes.size()); ++i)
+                considerMesh(i, world.triMeshes[i]);
         }
     }
 
     return best;
 }
 
-void seedWallAttachmentFromProbe(PlayerStateRef state, const glm::vec3& point, const glm::vec3& normal)
+void seedWallAttachmentFromProbe(PlayerStateRef state,
+                                 const glm::vec3& point,
+                                 const glm::vec3& normal,
+                                 uint32_t meshIndex,
+                                 uint32_t triId,
+                                 physics::TriRegion region)
 {
     state.sim.wallAnchor = point;
     state.sim.wallNormal = normal;
-    state.sim.wallTriId = UINT32_MAX;
-    state.sim.wallRegion = physics::TriRegion::Face;
+    state.sim.wallMeshIndex = meshIndex;
+    state.sim.wallTriId = triId;
+    state.sim.wallRegion = region;
     state.sim.wallAttachmentValid = true;
 }
 
@@ -752,7 +773,13 @@ void tryEnterWallrun(glm::vec3& vel,
     const glm::vec3 k_wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
 
     // Check each side.
-    auto tryWall = [&](bool hasWall, const glm::vec3& wallNorm, const glm::vec3& wallPoint, WallSide side) {
+    auto tryWall = [&](bool hasWall,
+                       const glm::vec3& wallNorm,
+                       const glm::vec3& wallPoint,
+                       uint32_t meshIndex,
+                       uint32_t triId,
+                       physics::TriRegion region,
+                       WallSide side) {
         if (!hasWall)
             return false;
         if (isBlacklisted(wallNorm,
@@ -782,12 +809,13 @@ void tryEnterWallrun(glm::vec3& vel,
         state.sim.wallForward = wallFwd;
         state.sim.wallRunTimer = 0.0f;
         state.sim.wallRunSpeedTimer = 0.0f;
-        seedWallAttachmentFromProbe(state, wallPoint, wallNorm);
+        seedWallAttachmentFromProbe(state, wallPoint, wallNorm, meshIndex, triId, region);
 
         const WallAttachmentProbe attachment = findWallAttachment(pos, shape, world, wallNorm);
         if (attachment.found) {
             state.sim.wallAnchor = attachment.anchor;
             state.sim.wallNormal = attachment.normal;
+            state.sim.wallMeshIndex = attachment.meshIndex;
             state.sim.wallTriId = attachment.triId;
             state.sim.wallRegion = attachment.region;
             state.sim.wallAttachmentValid = true;
@@ -813,8 +841,20 @@ void tryEnterWallrun(glm::vec3& vel,
         return true;
     };
 
-    if (!tryWall(walls.wallRight, walls.rightNormal, walls.rightPoint, WallSide::Right))
-        tryWall(walls.wallLeft, walls.leftNormal, walls.leftPoint, WallSide::Left);
+    if (!tryWall(walls.wallRight,
+                 walls.rightNormal,
+                 walls.rightPoint,
+                 walls.rightMeshIndex,
+                 walls.rightTriId,
+                 walls.rightRegion,
+                 WallSide::Right))
+        tryWall(walls.wallLeft,
+                walls.leftNormal,
+                walls.leftPoint,
+                walls.leftMeshIndex,
+                walls.leftTriId,
+                walls.leftRegion,
+                WallSide::Left);
 }
 
 /// @brief Exit wallrun mode and start cooldown timers.
@@ -831,6 +871,7 @@ void exitWallrun(PlayerStateRef state, float posY)
     state.sim.wallBlacklistNormal = state.sim.wallNormal;
     state.sim.wallBlacklistHeight = posY;
     state.sim.wallAttachmentValid = false;
+    state.sim.wallMeshIndex = UINT32_MAX;
     state.sim.wallTriId = UINT32_MAX;
 }
 
@@ -889,6 +930,9 @@ void handleWallRunning(glm::vec3& pos,
             attachment.found = true;
             attachment.anchor = useRight ? walls.rightPoint : walls.leftPoint;
             attachment.normal = useRight ? walls.rightNormal : walls.leftNormal;
+            attachment.meshIndex = useRight ? walls.rightMeshIndex : walls.leftMeshIndex;
+            attachment.triId = useRight ? walls.rightTriId : walls.leftTriId;
+            attachment.region = useRight ? walls.rightRegion : walls.leftRegion;
         } else {
             exitWallrun(state, posY);
             return;
@@ -903,6 +947,7 @@ void handleWallRunning(glm::vec3& pos,
 
     state.sim.wallAnchor = attachment.anchor;
     state.sim.wallNormal = attachment.normal;
+    state.sim.wallMeshIndex = attachment.meshIndex;
     state.sim.wallTriId = attachment.triId;
     state.sim.wallRegion = attachment.region;
     state.sim.wallAttachmentValid = true;
