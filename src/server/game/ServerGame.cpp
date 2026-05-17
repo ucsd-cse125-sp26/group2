@@ -32,25 +32,25 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/CollisionEvents.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
+#include "ecs/physics/Sleep.hpp"
+#include "ecs/physics/Solver.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/CollisionSystem.hpp"
 #include "ecs/systems/DroppedWeaponSystem.hpp"
+#include "ecs/systems/DynamicsSystem.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
-#include "ecs/physics/CollisionEvents.hpp"
-#include "ecs/physics/PhaseDiagnostic.hpp"
-#include "ecs/physics/Sleep.hpp"
-#include "ecs/physics/Solver.hpp"
-#include "ecs/systems/DynamicsSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
-#include "ecs/systems/RagdollSystem.hpp"
-#include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
+#include "ecs/systems/RagdollSystem.hpp"
+#include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/PacketType.hpp"
@@ -92,7 +92,7 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     // Writes phase-diag-<timestamp>.csv next to the server binary; flip off
     // with `--no-phase-diag` once the bug is fixed (TODO: CLI plumb).
     physics::diag::setEnabled(true);
-    SDL_Log("[server] phase-through diagnostic ENABLED — writing phase-diag-*.csv");
+    SDL_Log("[server] physics diagnostic ENABLED - writing phase-diag-*.csv and movement-diag-*.csv");
 
     clientEntities.clear(); // For safety
     registry.clear();
@@ -156,12 +156,11 @@ void ServerGame::run()
     for (int i = 0; i < gamemap::weaponSpawner_.size(); i++) {
         WeaponType weaponType = gamemap::weaponSpawner_[i].type;
         glm::vec3 pos = gamemap::weaponSpawner_[i].pos;
-        
+
         const entt::entity spawner = registry.create();
         registry.emplace<WeaponSpawner>(
-            spawner, 
-            WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
-        );
+            spawner,
+            WeaponSpawner{.type = weaponType, .spawnCooldown = systems::weaponCooldownTime, .hasWeapon = true});
         registry.emplace<Position>(spawner, pos);
         registry.emplace<CollisionShape>(spawner);
     }
@@ -182,9 +181,7 @@ void ServerGame::run()
 
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
-            spawner, 
-            PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false}
-        );
+            spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
         registry.emplace<Position>(spawner, pos);
         registry.emplace<CollisionShape>(spawner);
     }

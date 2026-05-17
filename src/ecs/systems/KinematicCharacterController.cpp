@@ -222,6 +222,12 @@ void runKinematicCharacterController(glm::vec3& pos,
     if (diagOn) {
         diagFrame.posAfter = pos;
         diagFrame.velAfter = vel;
+        const bool finiteState = std::isfinite(pos.x) && std::isfinite(pos.y) && std::isfinite(pos.z) &&
+                                 std::isfinite(vel.x) && std::isfinite(vel.y) && std::isfinite(vel.z) &&
+                                 std::isfinite(state.groundNormal.x) && std::isfinite(state.groundNormal.y) &&
+                                 std::isfinite(state.groundNormal.z);
+        if (!finiteState)
+            diagFrame.flags |= physics::diag::PhaseFlag::InvalidState;
         if (caExhaustedAnySubstep)
             diagFrame.flags |= physics::diag::PhaseFlag::BumpExhausted;
         if (state.grounded)

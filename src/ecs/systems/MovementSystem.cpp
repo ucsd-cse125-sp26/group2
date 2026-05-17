@@ -13,6 +13,7 @@
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/Forces.hpp"
 #include "ecs/physics/Movement.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
@@ -1455,6 +1456,25 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // Bundle the two halves into a single ref so the helper functions
             // below don't need a "(vis, sim)" pair on every call.
             PlayerStateRef state{vis, sim};
+            const bool diagOn = physics::diag::isEnabled();
+            physics::diag::MovementFrame movementDiag{};
+            if (diagOn) {
+                movementDiag.entity = e;
+                movementDiag.posBefore = pos.value;
+                movementDiag.velBefore = vel.value;
+                movementDiag.modeBefore = static_cast<int>(state.vis.moveMode);
+                movementDiag.groundedBefore = state.vis.grounded;
+                movementDiag.inputForward = input.forward;
+                movementDiag.inputBack = input.back;
+                movementDiag.inputLeft = input.left;
+                movementDiag.inputRight = input.right;
+                movementDiag.inputJump = input.jump;
+                movementDiag.inputCrouch = input.crouch;
+                movementDiag.inputGrapple = input.grapple;
+                movementDiag.yaw = input.yaw;
+                movementDiag.pitch = input.pitch;
+            }
+
             // 0. Tick timers
             tickTimers(state, dt);
 
@@ -1490,6 +1510,15 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                                              tms::k_wallrunCheckDist,
                                              tms::k_wallrunSphereRadius,
                                              prevNormal);
+            }
+            if (diagOn) {
+                movementDiag.wallFront = walls.wallFront;
+                movementDiag.ledgeDetected = walls.ledgeDetected;
+                movementDiag.groundDistance = walls.groundDistance;
+                movementDiag.frontNormal = walls.frontNormal;
+                movementDiag.frontPoint = walls.frontPoint;
+                movementDiag.ledgeNormal = walls.ledgeNormal;
+                movementDiag.ledgePoint = walls.ledgePoint;
             }
 
             // 2. Sprint update
@@ -1662,6 +1691,35 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
             // 12. Track jump key state for edge detection
             state.sim.jumpHeldLastTick = input.jump;
+
+            if (diagOn) {
+                movementDiag.posAfter = pos.value;
+                movementDiag.velAfter = vel.value;
+                movementDiag.modeAfter = static_cast<int>(state.vis.moveMode);
+                movementDiag.groundedAfter = state.vis.grounded;
+                movementDiag.climbWallNormal = state.sim.climbWallNormal;
+                movementDiag.storedLedgeNormal = state.sim.ledgeNormal;
+                movementDiag.storedLedgePoint = state.sim.ledgePoint;
+                movementDiag.climbTimer = state.sim.climbTimer;
+                movementDiag.ledgeHoldTimer = state.sim.ledgeHoldTimer;
+                if (state.vis.grounded)
+                    movementDiag.flags |= physics::diag::PhaseFlag::Grounded;
+                if (state.vis.grappleActive)
+                    movementDiag.flags |= physics::diag::PhaseFlag::GrappleActive;
+                if (state.vis.gravityFlipped)
+                    movementDiag.flags |= physics::diag::PhaseFlag::GravityFlipped;
+                if (state.vis.moveMode == MoveMode::WallRunning)
+                    movementDiag.flags |= physics::diag::PhaseFlag::WallRunning;
+                if (state.vis.moveMode == MoveMode::Sliding)
+                    movementDiag.flags |= physics::diag::PhaseFlag::Sliding;
+                if (state.vis.moveMode == MoveMode::Climbing)
+                    movementDiag.flags |= physics::diag::PhaseFlag::Climbing;
+                if (state.vis.moveMode == MoveMode::LedgeGrabbing)
+                    movementDiag.flags |= physics::diag::PhaseFlag::LedgeGrabbing;
+                if (state.sim.jumpedThisTick)
+                    movementDiag.flags |= physics::diag::PhaseFlag::DoubleJumped;
+                physics::diag::recordMovementFrame(movementDiag);
+            }
         }
     };
 

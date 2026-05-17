@@ -39,6 +39,7 @@
 #include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/DebugCollisionDraw.hpp"
+#include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
@@ -189,6 +190,9 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         countdownTimer = latestMatchState->countdownTimer;
     }
 
+    physics::diag::setEnabled(true);
+    SDL_Log("[client] physics diagnostic ENABLED - writing phase-diag-*.csv and movement-diag-*.csv");
+
     // Particle system needs the device + formats from the renderer.
     // colorFmt is the format particles draw into (RGBA16F was the legacy
     // renderer's HDR target); kept here so the particle pipelines compile,
@@ -297,7 +301,6 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         // Update the active world with the new collision data (map + all props).
         physics::setActiveWorld(mapCollision_.geometry());
     }
-
 
     // Load all weapon models (per WeaponType)
     {
@@ -2254,12 +2257,6 @@ SDL_AppResult Game::iterate()
 
         renderer->setEntityRenderList(std::move(entityCmds));
         /////////////////////////////////////////// Entity Render List ///////////////////////////////////////////
-
-
-
-
-
-
 
         ////////////////////////////////////// Point Lights ///////////////////////////////////////////
         // Build dynamic point lights list.

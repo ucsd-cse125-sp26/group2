@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -22,6 +23,9 @@ std::atomic<bool> enabledFlag{false};
 std::mutex logMutex;
 FILE* logFile = nullptr;
 bool wroteHeader = false;
+
+std::mutex movementLogMutex;
+FILE* movementLogFile = nullptr;
 
 std::mutex annotationMutex;
 std::unordered_map<entt::entity, std::string> pendingAnnotations;
@@ -55,39 +59,90 @@ void openLazily()
 
     // CSV header.  Columns chosen to be greppable by a human and
     // sortable / filterable in any spreadsheet program.
-    std::fprintf(
-        logFile,
-        "tick,entity,posBeforeX,posBeforeY,posBeforeZ,posAfterDepenX,posAfterDepenY,posAfterDepenZ,"
-        "posAfterX,posAfterY,posAfterZ,velBeforeX,velBeforeY,velBeforeZ,velAfterX,velAfterY,velAfterZ,"
-        "actualDelta,expectedDelta,depenPush,bumpHits,moveMode,wallrunSide,jumpCount,"
-        "lastNormalX,lastNormalY,lastNormalZ,flagsHex,grounded,wallrun,sliding,climbing,ledge,"
-        "grapple,doubleJumped,gravFlipped,depenCancelled,deepPenetration,bumpExhausted,suspectedPhase,note\n");
+    std::fprintf(logFile,
+                 "tick,entity,posBeforeX,posBeforeY,posBeforeZ,posAfterDepenX,posAfterDepenY,posAfterDepenZ,"
+                 "posAfterX,posAfterY,posAfterZ,velBeforeX,velBeforeY,velBeforeZ,velAfterX,velAfterY,velAfterZ,"
+                 "actualDelta,expectedDelta,depenPush,bumpHits,moveMode,wallrunSide,jumpCount,"
+                 "lastNormalX,lastNormalY,lastNormalZ,flagsHex,grounded,wallrun,sliding,climbing,ledge,"
+                 "grapple,doubleJumped,gravFlipped,depenCancelled,deepPenetration,bumpExhausted,suspectedPhase,"
+                 "invalidState,note\n");
     wroteHeader = true;
+}
+
+bool finiteVec3(glm::vec3 v) noexcept
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+void openMovementLazily()
+{
+    if (movementLogFile != nullptr)
+        return;
+
+    const auto now = std::chrono::system_clock::now();
+    const auto t = std::chrono::system_clock::to_time_t(now);
+    char nameBuf[64];
+    std::tm tmbuf{};
+#if defined(_WIN32)
+    ::localtime_s(&tmbuf, &t);
+#else
+    ::localtime_r(&t, &tmbuf);
+#endif
+    std::strftime(nameBuf, sizeof(nameBuf), "movement-diag-%Y%m%d-%H%M%S.csv", &tmbuf);
+    movementLogFile = std::fopen(nameBuf, "w");
+    if (movementLogFile == nullptr)
+        return;
+
+    std::fprintf(movementLogFile,
+                 "row,entity,modeBefore,modeAfter,groundedBefore,groundedAfter,"
+                 "posBeforeX,posBeforeY,posBeforeZ,posAfterX,posAfterY,posAfterZ,"
+                 "velBeforeX,velBeforeY,velBeforeZ,velAfterX,velAfterY,velAfterZ,"
+                 "inputF,inputB,inputL,inputR,inputJump,inputCrouch,inputGrapple,yaw,pitch,"
+                 "wallFront,ledgeDetected,groundDistance,"
+                 "frontNx,frontNy,frontNz,frontPx,frontPy,frontPz,"
+                 "ledgeNx,ledgeNy,ledgeNz,ledgePx,ledgePy,ledgePz,"
+                 "climbNx,climbNy,climbNz,storedLedgeNx,storedLedgeNy,storedLedgeNz,"
+                 "storedLedgePx,storedLedgePy,storedLedgePz,climbTimer,ledgeHoldTimer,"
+                 "flagsHex,invalidState,note\n");
 }
 
 const char* moveModeName(int m)
 {
     switch (m) {
-    case 0: return "OnFoot";
-    case 1: return "Sliding";
-    case 2: return "WallRunning";
-    case 3: return "Climbing";
-    case 4: return "LedgeGrabbing";
-    default: return "?";
+    case 0:
+        return "OnFoot";
+    case 1:
+        return "Sliding";
+    case 2:
+        return "WallRunning";
+    case 3:
+        return "Climbing";
+    case 4:
+        return "LedgeGrabbing";
+    default:
+        return "?";
     }
 }
 
 const char* triRegionName(int r)
 {
     switch (r) {
-    case 0: return "Face";
-    case 1: return "Edge0";
-    case 2: return "Edge1";
-    case 3: return "Edge2";
-    case 4: return "Vert0";
-    case 5: return "Vert1";
-    case 6: return "Vert2";
-    default: return "?";
+    case 0:
+        return "Face";
+    case 1:
+        return "Edge0";
+    case 2:
+        return "Edge1";
+    case 3:
+        return "Edge2";
+    case 4:
+        return "Vert0";
+    case 5:
+        return "Vert1";
+    case 6:
+        return "Vert2";
+    default:
+        return "?";
     }
 }
 
@@ -170,10 +225,10 @@ void recordFrame(const PlayerFrame& f) noexcept
 
     const glm::vec3 actualDelta = f.posAfter - f.posBefore;
     const glm::vec3 expectedDelta = f.velBefore * (1.0f / 128.0f); // assume 128 Hz; precise dt not exposed here
-    const float actualMag = std::sqrt(actualDelta.x * actualDelta.x + actualDelta.y * actualDelta.y +
-                                       actualDelta.z * actualDelta.z);
+    const float actualMag =
+        std::sqrt(actualDelta.x * actualDelta.x + actualDelta.y * actualDelta.y + actualDelta.z * actualDelta.z);
     const float expectedMag = std::sqrt(expectedDelta.x * expectedDelta.x + expectedDelta.y * expectedDelta.y +
-                                         expectedDelta.z * expectedDelta.z);
+                                        expectedDelta.z * expectedDelta.z);
 
     PhaseFlag flags = f.flags;
     // Auto-flag suspected-phase when actual delta significantly exceeds
@@ -197,20 +252,34 @@ void recordFrame(const PlayerFrame& f) noexcept
                  "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
                  "%.3f,%.3f,%.3f,%d,%s,%d,%d,"
                  "%.4f,%.4f,%.4f,0x%X,"
-                 "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
+                 "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
                  "%s\n",
                  static_cast<unsigned long>(tickForRow),
                  entt::to_integral(f.entity),
-                 static_cast<double>(f.posBefore.x), static_cast<double>(f.posBefore.y), static_cast<double>(f.posBefore.z),
-                 static_cast<double>(f.posAfterDepen.x), static_cast<double>(f.posAfterDepen.y),
+                 static_cast<double>(f.posBefore.x),
+                 static_cast<double>(f.posBefore.y),
+                 static_cast<double>(f.posBefore.z),
+                 static_cast<double>(f.posAfterDepen.x),
+                 static_cast<double>(f.posAfterDepen.y),
                  static_cast<double>(f.posAfterDepen.z),
-                 static_cast<double>(f.posAfter.x), static_cast<double>(f.posAfter.y), static_cast<double>(f.posAfter.z),
-                 static_cast<double>(f.velBefore.x), static_cast<double>(f.velBefore.y), static_cast<double>(f.velBefore.z),
-                 static_cast<double>(f.velAfter.x), static_cast<double>(f.velAfter.y), static_cast<double>(f.velAfter.z),
-                 static_cast<double>(actualMag), static_cast<double>(expectedMag),
+                 static_cast<double>(f.posAfter.x),
+                 static_cast<double>(f.posAfter.y),
+                 static_cast<double>(f.posAfter.z),
+                 static_cast<double>(f.velBefore.x),
+                 static_cast<double>(f.velBefore.y),
+                 static_cast<double>(f.velBefore.z),
+                 static_cast<double>(f.velAfter.x),
+                 static_cast<double>(f.velAfter.y),
+                 static_cast<double>(f.velAfter.z),
+                 static_cast<double>(actualMag),
+                 static_cast<double>(expectedMag),
                  static_cast<double>(f.depenPushDistance),
-                 f.bumpHits, moveModeName(f.moveMode), f.wallrunSide, f.jumpCount,
-                 static_cast<double>(f.lastHitNormal.x), static_cast<double>(f.lastHitNormal.y),
+                 f.bumpHits,
+                 moveModeName(f.moveMode),
+                 f.wallrunSide,
+                 f.jumpCount,
+                 static_cast<double>(f.lastHitNormal.x),
+                 static_cast<double>(f.lastHitNormal.y),
                  static_cast<double>(f.lastHitNormal.z),
                  flagBits,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::Grounded)) ? 1 : 0,
@@ -225,8 +294,107 @@ void recordFrame(const PlayerFrame& f) noexcept
                  (flagBits & static_cast<uint32_t>(PhaseFlag::DeepPenetration)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::BumpExhausted)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::SuspectedPhase)) ? 1 : 0,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::InvalidState)) ? 1 : 0,
                  note);
     std::fflush(logFile);
+}
+
+void recordMovementFrame(const MovementFrame& f) noexcept
+{
+    if (!enabledFlag.load(std::memory_order_relaxed))
+        return;
+
+    std::lock_guard<std::mutex> lk(movementLogMutex);
+    openMovementLazily();
+    if (movementLogFile == nullptr)
+        return;
+
+    static uint64_t rowIndex = 0;
+    ++rowIndex;
+
+    PhaseFlag flags = f.flags;
+    const bool finite = finiteVec3(f.posBefore) && finiteVec3(f.posAfter) && finiteVec3(f.velBefore) &&
+                        finiteVec3(f.velAfter) && finiteVec3(f.frontNormal) && finiteVec3(f.frontPoint) &&
+                        finiteVec3(f.ledgeNormal) && finiteVec3(f.ledgePoint) && finiteVec3(f.climbWallNormal) &&
+                        finiteVec3(f.storedLedgeNormal) && finiteVec3(f.storedLedgePoint) &&
+                        std::isfinite(f.groundDistance) && std::isfinite(f.yaw) && std::isfinite(f.pitch);
+    if (!finite)
+        flags |= PhaseFlag::InvalidState;
+
+    char note[64] = {0};
+    std::strncpy(note, f.note, sizeof(note) - 1);
+    if (note[0] == 0 && !finite)
+        std::strncpy(note, "invalid-movement-state", sizeof(note) - 1);
+
+    const uint32_t flagBits = static_cast<uint32_t>(flags);
+    std::fprintf(movementLogFile,
+                 "%lu,%u,%s,%s,%d,%d,"
+                 "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+                 "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+                 "%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,"
+                 "%d,%d,%.3f,"
+                 "%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,"
+                 "%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,"
+                 "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                 "%.3f,%.3f,%.3f,%.6f,%.6f,"
+                 "0x%X,%d,%s\n",
+                 static_cast<unsigned long>(rowIndex),
+                 entt::to_integral(f.entity),
+                 moveModeName(f.modeBefore),
+                 moveModeName(f.modeAfter),
+                 f.groundedBefore ? 1 : 0,
+                 f.groundedAfter ? 1 : 0,
+                 static_cast<double>(f.posBefore.x),
+                 static_cast<double>(f.posBefore.y),
+                 static_cast<double>(f.posBefore.z),
+                 static_cast<double>(f.posAfter.x),
+                 static_cast<double>(f.posAfter.y),
+                 static_cast<double>(f.posAfter.z),
+                 static_cast<double>(f.velBefore.x),
+                 static_cast<double>(f.velBefore.y),
+                 static_cast<double>(f.velBefore.z),
+                 static_cast<double>(f.velAfter.x),
+                 static_cast<double>(f.velAfter.y),
+                 static_cast<double>(f.velAfter.z),
+                 f.inputForward ? 1 : 0,
+                 f.inputBack ? 1 : 0,
+                 f.inputLeft ? 1 : 0,
+                 f.inputRight ? 1 : 0,
+                 f.inputJump ? 1 : 0,
+                 f.inputCrouch ? 1 : 0,
+                 f.inputGrapple ? 1 : 0,
+                 static_cast<double>(f.yaw),
+                 static_cast<double>(f.pitch),
+                 f.wallFront ? 1 : 0,
+                 f.ledgeDetected ? 1 : 0,
+                 static_cast<double>(f.groundDistance),
+                 static_cast<double>(f.frontNormal.x),
+                 static_cast<double>(f.frontNormal.y),
+                 static_cast<double>(f.frontNormal.z),
+                 static_cast<double>(f.frontPoint.x),
+                 static_cast<double>(f.frontPoint.y),
+                 static_cast<double>(f.frontPoint.z),
+                 static_cast<double>(f.ledgeNormal.x),
+                 static_cast<double>(f.ledgeNormal.y),
+                 static_cast<double>(f.ledgeNormal.z),
+                 static_cast<double>(f.ledgePoint.x),
+                 static_cast<double>(f.ledgePoint.y),
+                 static_cast<double>(f.ledgePoint.z),
+                 static_cast<double>(f.climbWallNormal.x),
+                 static_cast<double>(f.climbWallNormal.y),
+                 static_cast<double>(f.climbWallNormal.z),
+                 static_cast<double>(f.storedLedgeNormal.x),
+                 static_cast<double>(f.storedLedgeNormal.y),
+                 static_cast<double>(f.storedLedgeNormal.z),
+                 static_cast<double>(f.storedLedgePoint.x),
+                 static_cast<double>(f.storedLedgePoint.y),
+                 static_cast<double>(f.storedLedgePoint.z),
+                 static_cast<double>(f.climbTimer),
+                 static_cast<double>(f.ledgeHoldTimer),
+                 flagBits,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::InvalidState)) ? 1 : 0,
+                 note);
+    std::fflush(movementLogFile);
 }
 
 void recordDepenContact(const DepenContact& c) noexcept
@@ -253,17 +421,28 @@ void recordDepenContact(const DepenContact& c) noexcept
                  "%s,0x%X,0x%X\n",
                  static_cast<unsigned long>(row),
                  c.triId,
-                 static_cast<double>(c.playerPos.x), static_cast<double>(c.playerPos.y),
+                 static_cast<double>(c.playerPos.x),
+                 static_cast<double>(c.playerPos.y),
                  static_cast<double>(c.playerPos.z),
-                 static_cast<double>(c.faceNormal.x), static_cast<double>(c.faceNormal.y),
+                 static_cast<double>(c.faceNormal.x),
+                 static_cast<double>(c.faceNormal.y),
                  static_cast<double>(c.faceNormal.z),
-                 static_cast<double>(c.v0.x), static_cast<double>(c.v0.y), static_cast<double>(c.v0.z),
-                 static_cast<double>(c.v1.x), static_cast<double>(c.v1.y), static_cast<double>(c.v1.z),
-                 static_cast<double>(c.v2.x), static_cast<double>(c.v2.y), static_cast<double>(c.v2.z),
-                 static_cast<double>(c.signedDist), static_cast<double>(c.minkowskiR),
-                 static_cast<double>(c.depth), static_cast<double>(depthOverR),
+                 static_cast<double>(c.v0.x),
+                 static_cast<double>(c.v0.y),
+                 static_cast<double>(c.v0.z),
+                 static_cast<double>(c.v1.x),
+                 static_cast<double>(c.v1.y),
+                 static_cast<double>(c.v1.z),
+                 static_cast<double>(c.v2.x),
+                 static_cast<double>(c.v2.y),
+                 static_cast<double>(c.v2.z),
+                 static_cast<double>(c.signedDist),
+                 static_cast<double>(c.minkowskiR),
+                 static_cast<double>(c.depth),
+                 static_cast<double>(depthOverR),
                  triRegionName(c.region),
-                 static_cast<unsigned>(c.edgeFlags), static_cast<unsigned>(c.vertFlags));
+                 static_cast<unsigned>(c.edgeFlags),
+                 static_cast<unsigned>(c.vertFlags));
     std::fflush(depenLogFile);
 }
 

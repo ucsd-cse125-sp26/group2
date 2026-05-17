@@ -55,6 +55,9 @@ enum class PhaseFlag : uint32_t
     /// @brief Actual per-tick position delta exceeded `velocity * dt`
     /// by > 2× + 5 u — the player likely tunnelled through geometry.
     SuspectedPhase = 1u << 11,
+    /// @brief A position, velocity, normal, or stored movement vector was
+    /// non-finite. This is the "stop and inspect nearby rows" failure mode.
+    InvalidState = 1u << 12,
 };
 
 inline PhaseFlag operator|(PhaseFlag a, PhaseFlag b) noexcept
@@ -77,19 +80,19 @@ struct PlayerFrame
 {
     uint64_t tick = 0;
     entt::entity entity{entt::null};
-    glm::vec3 posBefore{0.0f};       ///< Position at tick start, BEFORE depen.
-    glm::vec3 posAfterDepen{0.0f};   ///< After depen, BEFORE bump loop.
-    glm::vec3 posAfter{0.0f};        ///< Final position, after bump loop + slope snap.
-    glm::vec3 velBefore{0.0f};       ///< Velocity at tick start (already integrated by movement).
-    glm::vec3 velAfter{0.0f};        ///< Velocity at tick end.
-    glm::vec3 lastHitNormal{0.0f};   ///< Normal of the last sweep hit in the bump loop (or 0).
-    float depenPushDistance = 0.0f;  ///< |posAfterDepen - posBefore|.
-    int bumpHits = 0;                ///< Number of bump iterations that hit something.
-    int moveMode = 0;                ///< MoveMode enum cast to int.
-    int wallrunSide = 0;             ///< WallSide enum (None=0, Left=1, Right=2).
+    glm::vec3 posBefore{0.0f};      ///< Position at tick start, BEFORE depen.
+    glm::vec3 posAfterDepen{0.0f};  ///< After depen, BEFORE bump loop.
+    glm::vec3 posAfter{0.0f};       ///< Final position, after bump loop + slope snap.
+    glm::vec3 velBefore{0.0f};      ///< Velocity at tick start (already integrated by movement).
+    glm::vec3 velAfter{0.0f};       ///< Velocity at tick end.
+    glm::vec3 lastHitNormal{0.0f};  ///< Normal of the last sweep hit in the bump loop (or 0).
+    float depenPushDistance = 0.0f; ///< |posAfterDepen - posBefore|.
+    int bumpHits = 0;               ///< Number of bump iterations that hit something.
+    int moveMode = 0;               ///< MoveMode enum cast to int.
+    int wallrunSide = 0;            ///< WallSide enum (None=0, Left=1, Right=2).
     int jumpCount = 0;
     PhaseFlag flags = PhaseFlag::None;
-    char note[48] = {0};             ///< Free-form annotation slot (e.g., "wallrun-enter").
+    char note[48] = {0}; ///< Free-form annotation slot (e.g., "wallrun-enter").
 };
 
 /// @brief Enable / disable telemetry.  When disabled, every `recordFrame`
@@ -101,6 +104,52 @@ void setEnabled(bool on) noexcept;
 /// log lazily on first call.  Thread-safe (single global mutex on the
 /// write path — diagnostic only, no perf concern).
 void recordFrame(const PlayerFrame& frame) noexcept;
+
+/// @brief One row captured around MovementSystem, before CollisionSystem/KCC.
+///
+/// This complements `PlayerFrame`: movement is where climb, ledge, grapple,
+/// jump, and wallrun state mutate velocity. If a stored wall/ledge normal
+/// becomes NaN, this row catches it before the collision step propagates it
+/// into position.
+struct MovementFrame
+{
+    entt::entity entity{entt::null};
+    glm::vec3 posBefore{0.0f};
+    glm::vec3 posAfter{0.0f};
+    glm::vec3 velBefore{0.0f};
+    glm::vec3 velAfter{0.0f};
+    int modeBefore = 0;
+    int modeAfter = 0;
+    bool groundedBefore = false;
+    bool groundedAfter = false;
+    bool inputForward = false;
+    bool inputBack = false;
+    bool inputLeft = false;
+    bool inputRight = false;
+    bool inputJump = false;
+    bool inputCrouch = false;
+    bool inputGrapple = false;
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+    bool wallFront = false;
+    bool ledgeDetected = false;
+    float groundDistance = 1e30f;
+    glm::vec3 frontNormal{0.0f};
+    glm::vec3 frontPoint{0.0f};
+    glm::vec3 ledgeNormal{0.0f};
+    glm::vec3 ledgePoint{0.0f};
+    glm::vec3 climbWallNormal{0.0f};
+    glm::vec3 storedLedgeNormal{0.0f};
+    glm::vec3 storedLedgePoint{0.0f};
+    float climbTimer = 0.0f;
+    float ledgeHoldTimer = 0.0f;
+    PhaseFlag flags = PhaseFlag::None;
+    char note[64] = {0};
+};
+
+/// @brief Append a MovementSystem telemetry row to
+/// `movement-diag-<timestamp>.csv`. No-op unless telemetry is enabled.
+void recordMovementFrame(const MovementFrame& frame) noexcept;
 
 /// @brief Attach a text annotation to the NEXT frame recorded for the
 /// given entity.  Used by MovementSystem hooks (wallrun enter / exit,
@@ -122,17 +171,17 @@ void consumeAnnotation(entt::entity entity, char (&out)[48]) noexcept;
 struct DepenContact
 {
     uint32_t triId = 0;
-    glm::vec3 playerPos{0.0f};   ///< Player capsule center at the moment of overlap.
-    glm::vec3 faceNormal{0.0f};  ///< Cooked face normal of the offending triangle.
+    glm::vec3 playerPos{0.0f};  ///< Player capsule center at the moment of overlap.
+    glm::vec3 faceNormal{0.0f}; ///< Cooked face normal of the offending triangle.
     glm::vec3 v0{0.0f};
     glm::vec3 v1{0.0f};
     glm::vec3 v2{0.0f};
-    float signedDist = 0.0f;     ///< `dot(faceN, playerPos - v0)`. Negative ⇒ player on back side.
-    float minkowskiR = 0.0f;     ///< `|faceN|·halfExtents` — depth would saturate at `2·R` (s = -R).
-    float depth = 0.0f;          ///< MTV magnitude = `R - signedDist`.
-    int region = 0;              ///< Closest feature on the triangle: 0=Face, 1=Edge0, 2=Edge1, 3=Edge2, 4=Vert0, 5=Vert1, 6=Vert2.
-    uint8_t edgeFlags = 0;       ///< Cooked active-edge mask (bit i ⇔ edge i active per Phase 2 welding).
-    uint8_t vertFlags = 0;       ///< Cooked active-vertex mask.
+    float signedDist = 0.0f; ///< `dot(faceN, playerPos - v0)`. Negative ⇒ player on back side.
+    float minkowskiR = 0.0f; ///< `|faceN|·halfExtents` — depth would saturate at `2·R` (s = -R).
+    float depth = 0.0f;      ///< MTV magnitude = `R - signedDist`.
+    int region = 0; ///< Closest feature on the triangle: 0=Face, 1=Edge0, 2=Edge1, 3=Edge2, 4=Vert0, 5=Vert1, 6=Vert2.
+    uint8_t edgeFlags = 0; ///< Cooked active-edge mask (bit i ⇔ edge i active per Phase 2 welding).
+    uint8_t vertFlags = 0; ///< Cooked active-vertex mask.
 };
 
 /// @brief Append one depen-contact row to its own CSV log
