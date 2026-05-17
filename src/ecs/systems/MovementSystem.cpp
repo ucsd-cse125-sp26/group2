@@ -1311,17 +1311,24 @@ void tryEnterClimb(glm::vec3& vel,
     if (glm::dot(wallNormal, wallNormal) <= 0.0f)
         return;
 
+    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+    const glm::vec3 localUp{0.0f, gravDir, 0.0f};
+    if (std::abs(glm::dot(wallNormal, localUp)) > tms::k_climbSurfaceMinDotUp)
+        return;
+
     // Check look angle: player must be facing the wall.
     const float k_sinYaw = std::sin(input.yaw);
     const float k_cosYaw = std::cos(input.yaw);
     const glm::vec3 k_lookDir{k_sinYaw, 0.0f, k_cosYaw};
     const float k_lookAngle = std::acos(std::clamp(glm::dot(-k_lookDir, wallNormal), -1.0f, 1.0f));
-    const float k_maxAngleRad = glm::radians(tms::k_climbMaxWallLookAngle);
+    const float k_maxAngleRad = glm::radians(tms::k_climbLookAngleLimit);
     if (k_lookAngle > k_maxAngleRad)
         return;
 
     const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    if (glm::dot(wishDir, -wallNormal) < tms::k_climbIntentThreshold)
+    const bool hasInputIntent = glm::dot(wishDir, -wallNormal) >= tms::k_climbIntentThreshold;
+    const bool hasMomentumIntent = glm::dot(horizVel(vel), -wallNormal) > 25.0f;
+    if (!hasInputIntent && !hasMomentumIntent)
         return;
 
     // Blacklist check.
@@ -1336,17 +1343,20 @@ void tryEnterClimb(glm::vec3& vel,
     state.vis.moveMode = MoveMode::Climbing;
     state.sim.climbWallNormal = wallNormal;
     state.sim.climbAttachPoint = walls.frontPoint;
-    state.sim.climbAttachHeight = posY;
+    state.sim.climbAttachHeight = posY * gravDir;
+    state.sim.climbBaseline = state.sim.climbAttachHeight;
+    state.sim.climbSpaceCutoff = state.sim.climbBaseline + tms::k_climbSpaceHeight;
+    state.sim.climbAttachOffsetLimit = state.sim.climbAttachHeight + tms::k_climbAttachOffset;
     state.sim.climbTimer = 0.0f;
     state.sim.climbNonUpTimer = 0.0f;
     state.sim.climbHadUpwardMotion = false;
+    state.sim.climbEndBoostQueued = false;
     // DJ no longer refreshes from entering climb — only from ground time.
     state.vis.jumpCount = 0;
 
-    // Reduce horizontal velocity immediately.
-    vel.x *= tms::k_climbSidewaysMultiplier;
-    vel.z *= tms::k_climbSidewaysMultiplier;
-    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+    const float intoWallSpeed = glm::dot(vel, wallNormal);
+    if (intoWallSpeed < 0.0f)
+        vel -= wallNormal * intoWallSpeed;
     if (vel.y * gravDir < 0.0f)
         vel.y = 0.0f;
 }

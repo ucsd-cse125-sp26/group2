@@ -1751,6 +1751,179 @@ bool climbMantleToTopFloorKeepsFiniteState()
     return ok;
 }
 
+bool climbAttachAllowsMomentumStickWithoutForward()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 180.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "wallward momentum should allow a brief climb stick without forward input");
+    ok &= expect(registry.get<PlayerSimState>(player).climbAttachPoint.z == 0.0f,
+                 "climb attach should keep a stable authored wall point");
+    return ok;
+}
+
+bool climbAttachAllowsApexWideLookAngle()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.70f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "Apex-style climbing should allow roughly 40 degree look offset");
+    return ok;
+}
+
+bool climbAttachRejectsShallowSurface()
+{
+    const WorldTriMesh ramp = makeThinRamp();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&ramp, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 20.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::OnFoot,
+                 "climb attach should reject shallow ramp-like surfaces");
+    return ok;
+}
+
+bool climbAttachRejectsExcessLookAngle()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 1.05f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::OnFoot,
+                 "climb attach should reject excessive look offset");
+    return ok;
+}
+
 bool ledgeMantleRejectsInvalidStoredNormal()
 {
     Registry registry;
@@ -2336,6 +2509,10 @@ int main()
     ok &= wallrunRollScalesWithViewAngle();
     ok &= wallrunMapCorridorEndDoesNotAttachToAirSide();
     ok &= climbMantleToTopFloorKeepsFiniteState();
+    ok &= climbAttachAllowsMomentumStickWithoutForward();
+    ok &= climbAttachAllowsApexWideLookAngle();
+    ok &= climbAttachRejectsShallowSurface();
+    ok &= climbAttachRejectsExcessLookAngle();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= flippedGravityClimbMovesAlongLocalUp();
     ok &= flippedGravityLedgeMantleMovesAlongLocalUp();
