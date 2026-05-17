@@ -3,6 +3,8 @@
 
 #include "SweptCollision.hpp"
 
+#include "Movement.hpp"
+#include "PhysicsConstants.hpp"
 #include "TriMeshCollision.hpp"
 
 #include <algorithm>
@@ -928,6 +930,263 @@ ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, con
 
     best.contact = best.distance < k_contactEpsilon;
     return best;
+}
+
+// Character-controller utilities
+
+GroundProbeResult probeGround(CapsuleShape capsule, glm::vec3 pos, float maxDistance, const WorldGeometry& world)
+{
+    GroundProbeResult result;
+    if (maxDistance <= 0.0f)
+        return result;
+
+    const glm::vec3 footDir = -capsule.up;
+    const glm::vec3 end = pos + footDir * maxDistance;
+    const HitResult hit = sweepAll(capsule, pos, end, world);
+
+    if (!hit.hit)
+        return result;
+
+    result.hit = true;
+    result.distance = hit.tFirst * maxDistance;
+    result.normal = hit.normal;
+    result.surfaceType = hit.surfaceType;
+    result.walkable = glm::dot(hit.normal, capsule.up) >= k_floorAngleCos;
+    result.point = pos + footDir * (result.distance + capsule.minkowskiExtent(hit.normal));
+    return result;
+}
+
+namespace
+{
+
+DepenContact deepestVsPlanes(CapsuleShape capsule, glm::vec3 pos, std::span<const Plane> planes)
+{
+    DepenContact best;
+    for (const Plane& p : planes) {
+        const float r = capsule.minkowskiExtent(p.normal);
+        const float s = glm::dot(p.normal, pos) - p.distance;
+        const float depth = r - s;
+        if (depth > best.depth) {
+            best.valid = true;
+            best.depth = depth;
+            best.normal = p.normal;
+            best.surfaceType = p.surfaceType;
+        }
+    }
+    return best;
+}
+
+DepenContact deepestVsBrush(CapsuleShape capsule, glm::vec3 pos, const WorldBrush& brush)
+{
+    DepenContact best;
+    float minOverlap = 1e30f;
+    int minPlane = -1;
+    for (int i = 0; i < brush.planeCount; ++i) {
+        const Plane& p = brush.planes[i];
+        const float r = capsule.minkowskiExtent(p.normal);
+        const float s = glm::dot(p.normal, pos) - p.distance;
+        if (s >= r)
+            return best;
+        const float depth = r - s;
+        if (depth < minOverlap) {
+            minOverlap = depth;
+            minPlane = i;
+        }
+    }
+    if (minPlane < 0)
+        return best;
+    const Plane& p = brush.planes[minPlane];
+    best.valid = true;
+    best.depth = minOverlap;
+    best.normal = p.normal;
+    best.surfaceType = p.surfaceType;
+    return best;
+}
+
+DepenContact deepestVsBox(CapsuleShape capsule, glm::vec3 pos, const WorldAABB& box)
+{
+    DepenContact best;
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+    const glm::vec3 expMin = box.min - he;
+    const glm::vec3 expMax = box.max + he;
+
+    if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y || pos.z < expMin.z ||
+        pos.z > expMax.z)
+        return best;
+
+    const struct
+    {
+        float pen;
+        glm::vec3 dir;
+    } faces[] = {
+        {pos.x - expMin.x, {-1, 0, 0}},
+        {expMax.x - pos.x, { 1, 0, 0}},
+        {pos.y - expMin.y, { 0,-1, 0}},
+        {expMax.y - pos.y, { 0, 1, 0}},
+        {pos.z - expMin.z, { 0, 0,-1}},
+        {expMax.z - pos.z, { 0, 0, 1}},
+    };
+    float minPen = 1e30f;
+    glm::vec3 pushDir{0.0f, 1.0f, 0.0f};
+    for (const auto& f : faces) {
+        if (f.pen < minPen) {
+            minPen = f.pen;
+            pushDir = f.dir;
+        }
+    }
+    best.valid = true;
+    best.depth = minPen;
+    best.normal = pushDir;
+    best.surfaceType = box.surfaceType;
+    return best;
+}
+
+DepenContact deepestVsCylinder(CapsuleShape capsule, glm::vec3 pos, const WorldCylinder& cyl)
+{
+    DepenContact best;
+    const glm::vec3 he = capsule.enclosingHalfExtents();
+    const float effR = cyl.radius + std::max(he.x, he.z);
+    const float yMin = cyl.base.y - he.y;
+    const float yMax = cyl.base.y + cyl.height + he.y;
+
+    if (pos.y < yMin || pos.y > yMax)
+        return best;
+
+    const float dx = pos.x - cyl.base.x;
+    const float dz = pos.z - cyl.base.z;
+    const float distXZ = std::sqrt(dx * dx + dz * dz);
+    if (distXZ >= effR)
+        return best;
+
+    const float yPenBottom = pos.y - yMin;
+    const float yPenTop = yMax - pos.y;
+    const float yPen = std::min(yPenBottom, yPenTop);
+    const float xzPen = effR - distXZ;
+
+    if (yPen < xzPen) {
+        best.depth = yPen;
+        best.normal = (yPenBottom < yPenTop) ? glm::vec3{0, -1, 0} : glm::vec3{0, 1, 0};
+    } else {
+        best.depth = xzPen;
+        if (distXZ > 1e-6f)
+            best.normal = glm::vec3{dx / distXZ, 0.0f, dz / distXZ};
+        else
+            best.normal = glm::vec3{1.0f, 0.0f, 0.0f};
+    }
+    best.valid = true;
+    best.surfaceType = cyl.surfaceType;
+    return best;
+}
+
+DepenContact deepestVsSphere(CapsuleShape capsule, glm::vec3 pos, const WorldSphere& sph)
+{
+    DepenContact best;
+    const glm::vec3 segA = capsule.segA(pos);
+    const glm::vec3 segB = capsule.segB(pos);
+    const glm::vec3 closestAxis = closestPointSegmentPoint(segA, segB, sph.center);
+    const glm::vec3 fromSphereToAxis = closestAxis - sph.center;
+    const float axisDist = glm::length(fromSphereToAxis);
+    const float surfaceDist = axisDist - capsule.radius - sph.radius;
+    if (surfaceDist >= 0.0f)
+        return best;
+    best.valid = true;
+    best.depth = -surfaceDist;
+    best.normal = (axisDist > 1e-6f) ? glm::vec3{fromSphereToAxis / axisDist} : glm::vec3{0.0f, 1.0f, 0.0f};
+    best.surfaceType = sph.surfaceType;
+    return best;
+}
+
+} // namespace
+
+DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldGeometry& world)
+{
+    DepenContact best;
+    auto consider = [&](DepenContact c) {
+        if (c.valid && c.depth > best.depth)
+            best = c;
+    };
+
+    consider(deepestVsPlanes(capsule, pos, world.planes));
+    for (const WorldAABB& box : world.boxes)
+        consider(deepestVsBox(capsule, pos, box));
+    for (const WorldBrush& brush : world.brushes)
+        consider(deepestVsBrush(capsule, pos, brush));
+    for (const WorldCylinder& cyl : world.cylinders)
+        consider(deepestVsCylinder(capsule, pos, cyl));
+    for (const WorldSphere& sph : world.spheres)
+        consider(deepestVsSphere(capsule, pos, sph));
+    for (const WorldTriMesh& tm : world.triMeshes)
+        consider(deepestCapsuleContactVsTriMesh(capsule, pos, vel, tm));
+
+    return best;
+}
+
+void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
+{
+    glm::vec3 lastNormal{0.0f};
+
+    for (int pass = 0; pass < k_maxDepenPasses; ++pass) {
+        DepenContact c = deepestCapsuleContact(capsule, pos, vel, world);
+        if (!c.valid || c.depth <= k_contactEpsilon)
+            return;
+
+        // Oscillation detector: this pass wants to push opposite to the last —
+        // the player straddles a two-sided thin volume with no single consistent
+        // ejection direction (e.g. mesh authored back-to-back instead of single-
+        // sided).  Bail to the emergency probe rather than ping-pong forever.
+        if (glm::dot(lastNormal, lastNormal) > 0.0f &&
+            glm::dot(c.normal, lastNormal) < -k_floorAngleCos) {
+            emergencyUnstick(pos, vel, capsule, world);
+            return;
+        }
+
+        pos += c.normal * (c.depth + k_contactEpsilon);
+
+        const float intoSurface = glm::dot(vel, c.normal);
+        if (intoSurface < 0.0f)
+            vel -= c.normal * intoSurface;
+
+        lastNormal = c.normal;
+    }
+
+    if (deepestCapsuleContact(capsule, pos, vel, world).valid)
+        emergencyUnstick(pos, vel, capsule, world);
+}
+
+bool emergencyUnstick(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
+{
+    static constexpr glm::vec3 k_dirs[6] = {
+        { 0.0f,  1.0f,  0.0f},   // up first — most common recovery direction
+        { 0.0f, -1.0f,  0.0f},
+        { 1.0f,  0.0f,  0.0f},
+        {-1.0f,  0.0f,  0.0f},
+        { 0.0f,  0.0f,  1.0f},
+        { 0.0f,  0.0f, -1.0f},
+    };
+
+    const float r = capsule.radius;
+    glm::vec3 bestPos = pos;
+    float bestClearance = -1e30f;
+
+    for (float radius = r; radius <= k_emergencyUnstickRadius; radius *= 2.0f) {
+        for (const glm::vec3& dir : k_dirs) {
+            const glm::vec3 candidate = pos + dir * radius;
+            const ClearanceResult clr = clearanceCapsuleVsWorld(capsule, candidate, world);
+            if (clr.distance > bestClearance) {
+                bestClearance = clr.distance;
+                bestPos = candidate;
+            }
+        }
+        if (bestClearance >= k_contactEpsilon)
+            break;
+    }
+
+    if (bestClearance < k_contactEpsilon)
+        return false;
+
+    pos = bestPos;
+    vel = glm::vec3{0.0f};
+    return true;
 }
 
 // sphereCast

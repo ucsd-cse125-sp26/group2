@@ -1272,106 +1272,80 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
     return best;
 }
 
-void depenetrateCapsuleVsTriMesh(
-    glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldTriMesh& mesh, float pushback)
+DepenContact deepestCapsuleContactVsTriMesh(
+    CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldTriMesh& mesh)
 {
+    DepenContact best;
     if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
-        return;
+        return best;
 
     const glm::vec3 he = capsule.enclosingHalfExtents();
 
     if (pos.x + he.x < mesh.boundsMin.x || pos.x - he.x > mesh.boundsMax.x ||
         pos.y + he.y < mesh.boundsMin.y || pos.y - he.y > mesh.boundsMax.y ||
         pos.z + he.z < mesh.boundsMin.z || pos.z - he.z > mesh.boundsMax.z)
-        return;
+        return best;
 
-    // Iteration scheme matches the AABB version exactly — see the block
-    // comment in `depenetrateAABBvsTriMesh` for the rationale on multi-pass
-    // convergence at concave corners and per-tick budgeted recovery.
-    constexpr int k_maxPasses = 4;
-    constexpr float k_capRatioOfR = 0.5f;
-    float totalPushedThisTick = 0.0f;
+    SurfaceType bestSurface = mesh.defaultSurface;
+    uint32_t bestTri = UINT32_MAX;
 
-    for (int pass = 0; pass < k_maxPasses; ++pass) {
-        glm::vec3 sumDir(0.0f);
-        float maxDepth = 0.0f;
-        int overlapCount = 0;
+    int stack[64];
+    int stackPtr = 0;
+    stack[0] = 0;
 
-        int stack[64];
-        int stackPtr = 0;
-        stack[0] = 0;
+    while (stackPtr >= 0) {
+        const int nodeIdx = stack[stackPtr--];
+        const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
-        while (stackPtr >= 0) {
-            const int nodeIdx = stack[stackPtr--];
-            const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
+        const glm::vec3 expMin = node.boundsMin - he;
+        const glm::vec3 expMax = node.boundsMax + he;
+        if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y ||
+            pos.z < expMin.z || pos.z > expMax.z)
+            continue;
 
-            const glm::vec3 expMin = node.boundsMin - he;
-            const glm::vec3 expMax = node.boundsMax + he;
-            if (pos.x < expMin.x || pos.x > expMax.x || pos.y < expMin.y || pos.y > expMax.y ||
-                pos.z < expMin.z || pos.z > expMax.z)
-                continue;
+        if (node.count > 0) {
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
+                const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
+                const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
+                const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
 
-            if (node.count > 0) {
-                for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
-                    const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
-                    const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
-                    const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
-                    const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+                glm::vec3 mtv;
+                if (!capsuleVsTriVoronoi(pos,
+                                         vel,
+                                         capsule,
+                                         v0,
+                                         v1,
+                                         v2,
+                                         mesh.faceNormals[ti],
+                                         mesh.edgeActive[ti],
+                                         mesh.vertActive[ti],
+                                         mtv))
+                    continue;
 
-                    glm::vec3 mtv;
-                    if (!capsuleVsTriVoronoi(pos,
-                                             vel,
-                                             capsule,
-                                             v0,
-                                             v1,
-                                             v2,
-                                             mesh.faceNormals[ti],
-                                             mesh.edgeActive[ti],
-                                             mesh.vertActive[ti],
-                                             mtv))
-                        continue;
+                const float depth = glm::length(mtv);
+                if (depth <= best.depth)
+                    continue;
 
-                    const float depth = glm::length(mtv);
-                    if (depth < 1e-6f)
-                        continue;
-
-                    const glm::vec3 mtvDir = mtv / depth;
-                    sumDir += mtvDir;
-                    maxDepth = std::max(maxDepth, depth);
-                    ++overlapCount;
-
-                    if (debug::isEnabled()) {
-                        debug::pushDepenContact(pos, mtvDir, depth, debug::ContactSource::TriMeshDepen, ti);
-                    }
-                }
-            } else {
-                stack[++stackPtr] = node.leftFirst;
-                stack[++stackPtr] = node.leftFirst + 1;
+                best.valid = true;
+                best.depth = depth;
+                best.normal = mtv / depth;
+                bestTri = ti;
+                bestSurface = (ti < mesh.triangleMaterials.size())
+                                  ? static_cast<SurfaceType>(mesh.triangleMaterials[ti])
+                                  : mesh.defaultSurface;
             }
+        } else {
+            stack[++stackPtr] = node.leftFirst;
+            stack[++stackPtr] = node.leftFirst + 1;
         }
-
-        if (overlapCount == 0)
-            return;
-
-        const float dirLen = glm::length(sumDir);
-        if (dirLen < 1e-6f)
-            return;
-
-        const glm::vec3 dir = sumDir / dirLen;
-
-        const float rDir = capsule.minkowskiExtent(dir);
-        const float perTickCap = rDir * k_capRatioOfR;
-        const float remainingBudget = std::max(0.0f, perTickCap - totalPushedThisTick);
-        const float pushAmount = std::min(maxDepth + pushback, remainingBudget);
-        if (pushAmount <= 0.0f)
-            return;
-        pos += dir * pushAmount;
-        totalPushedThisTick += pushAmount;
-
-        const float into = glm::dot(vel, dir);
-        if (into < 0.0f)
-            vel -= dir * into;
     }
+
+    best.surfaceType = bestSurface;
+    if (best.valid && debug::isEnabled())
+        debug::pushDepenContact(pos, best.normal, best.depth, debug::ContactSource::TriMeshDepen, bestTri);
+
+    return best;
 }
 
 ClosestPointOnMeshResult closestPointOnMesh(

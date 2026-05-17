@@ -71,8 +71,7 @@ void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3
 
 } // namespace
 
-static constexpr float k_pushback = 0.03125f;                         // Quake DIST_EPSILON
-static constexpr float k_groundProbeDistance = physics::k_stepHeight; // also used for slope snap
+static constexpr float k_pushback = 0.03125f; // Quake DIST_EPSILON
 
 // Depenetration
 
@@ -343,240 +342,99 @@ depenetrate(glm::vec3& pos, glm::vec3& vel, const glm::vec3& halfExtents, const 
         depenetrateTriMesh(pos, vel, halfExtents, tm);
 }
 
-// Capsule depenetration (Phase A of physics-future-path.md)
+// Modern two-capsule character controller (Havok / Jolt / Unity-KCC pattern)
 //
-// Planes and brushes get capsule-specific versions because the AABB's
-// anisotropic `|n.x|*hx + |n.y|*hy + |n.z|*hz` over-estimates the
-// capsule envelope on diagonal-wall normals (the standoff bug).  Box,
-// cylinder, and sphere depenetration reuse the AABB versions with the
-// capsule's enclosing AABB — those primitives only appear in the
-// dev-arena testWorld, and conservative slab math is acceptable.
+// Replaces:
+//   * the legacy AABB lift→horiz→drop stair-step dance (`tryStepUp`),
+//     which broke once the player became a true capsule because the
+//     drop sweep's bounded-reach check rejects edge-corner contacts
+//     that an AABB happened to reach,
+//   * the per-feature MTV-summing capsule depen, whose front+back
+//     contacts on thin geometry cancelled to zero push, and
+//   * the CA-loop "contact branch", which pushed the player by a fixed
+//     `k_pushback` per iteration in whatever direction the BVH happened
+//     to return — causing the slow downward drift through thin floors.
+//
+// The new model:
+//
+//   * Per-pass-deepest-first depen (`depenetrateCapsuleVsWorld`) picks
+//     the single deepest Voronoi contact across the whole world and
+//     ejects fully; oscillation between opposing normals trips the
+//     `emergencyUnstick` fallback (free-space probe in cardinal dirs).
+//   * Horizontal motion uses the *walk capsule* (foot above stepHeight),
+//     so stair risers / curbs / thresholds within stepHeight are
+//     physically invisible to the sweep — they cannot be hit.
+//   * Ground resolve (`resolveGround`) does ONE downward swept query for
+//     the *full capsule* and snaps the foot onto whatever walkable
+//     surface is below.  This is what climbs stairs (foot snaps to
+//     tread), descends slopes (foot snaps to lower slope), and detects
+//     "grounded" — all from a single query.
+//   * Airborne vertical motion stays a swept full-capsule query, so
+//     mid-air clipping into low walls / ceilings is honest.
 
-static void depenetratePlanesCapsule(
-    glm::vec3& pos, glm::vec3& vel, const physics::CapsuleShape& capsule, std::span<const physics::Plane> planes)
+/// @brief Build a `physics::CapsuleShape` query from a player's
+/// `CollisionShape`.  Capsule axis is `+Y` when gravity is normal and
+/// `-Y` when gravity is flipped — `probeGround` shoots its sweep along
+/// `-capsule.up`, so flipping `up` flips the floor-search direction
+/// without any other code change.  The capsule's Minkowski math is
+/// symmetric under reflection of `up`, so swept queries on the flipped
+/// capsule are numerically identical to the un-flipped queries.
+static physics::CapsuleShape makeCapsuleQuery(const CollisionShape& shape, bool gravityFlipped)
 {
-    uint32_t planeIdx = 0;
-    for (const physics::Plane& plane : planes) {
-        const float k_r = capsule.minkowskiExtent(plane.normal);
-        const float k_dist = glm::dot(plane.normal, pos) - plane.distance;
-
-        if (k_dist < k_r) {
-            const float k_overlap = k_r - k_dist;
-            pos += plane.normal * (k_overlap + k_pushback);
-
-            const float k_into = glm::dot(vel, plane.normal);
-            if (k_into < 0.0f)
-                vel -= plane.normal * k_into;
-
-            if (physics::debug::isEnabled()) {
-                physics::debug::pushDepenContact(pos - plane.normal * k_r,
-                                                 plane.normal,
-                                                 k_overlap,
-                                                 physics::debug::ContactSource::PlaneDepen,
-                                                 planeIdx);
-            }
-        }
-        ++planeIdx;
-    }
+    return physics::CapsuleShape{
+        .radius = shape.radius,
+        .halfHeight = shape.halfHeight,
+        .up = glm::vec3{0.0f, gravityFlipped ? -1.0f : 1.0f, 0.0f},
+    };
 }
 
-static void depenetrateBrushCapsule(
-    glm::vec3& pos, glm::vec3& vel, const physics::CapsuleShape& capsule, const physics::WorldBrush& brush)
-{
-    float minOverlap = 1e30f;
-    int minPlane = -1;
-
-    for (int i = 0; i < brush.planeCount; ++i) {
-        const auto& p = brush.planes[i];
-        const float k_r = capsule.minkowskiExtent(p.normal);
-        const float k_dist = glm::dot(p.normal, pos) - p.distance;
-
-        if (k_dist >= k_r)
-            return;
-
-        const float k_overlap = k_r - k_dist;
-        if (k_overlap < minOverlap) {
-            minOverlap = k_overlap;
-            minPlane = i;
-        }
-    }
-
-    if (minPlane < 0)
-        return;
-
-    const auto& plane = brush.planes[minPlane];
-    pos += plane.normal * (minOverlap + k_pushback);
-
-    const float k_into = glm::dot(vel, plane.normal);
-    if (k_into < 0.0f)
-        vel -= plane.normal * k_into;
-
-    if (physics::debug::isEnabled()) {
-        const float k_r = capsule.minkowskiExtent(plane.normal);
-        physics::debug::pushDepenContact(pos - plane.normal * k_r,
-                                         plane.normal,
-                                         minOverlap,
-                                         physics::debug::ContactSource::BrushDepen,
-                                         static_cast<uint32_t>(minPlane));
-    }
-}
-
-/// @brief Capsule version of `depenetrate()`.  Dispatches to capsule-specific
-/// implementations for planes / brushes / trimeshes and to the AABB versions
-/// with the capsule's enclosing AABB for box / cylinder / sphere.
-static void depenetrateCapsule(glm::vec3& pos,
-                               glm::vec3& vel,
-                               const physics::CapsuleShape& capsule,
-                               const physics::WorldGeometry& world)
-{
-    depenetratePlanesCapsule(pos, vel, capsule, world.planes);
-
-    const glm::vec3 he = capsule.enclosingHalfExtents();
-
-    for (const physics::WorldAABB& box : world.boxes)
-        depenetrateBox(pos, vel, he, box);
-
-    for (const physics::WorldBrush& brush : world.brushes)
-        depenetrateBrushCapsule(pos, vel, capsule, brush);
-
-    for (const physics::WorldCylinder& cyl : world.cylinders)
-        depenetrateCylinder(pos, vel, he, cyl);
-
-    for (const physics::WorldSphere& sph : world.spheres)
-        depenetrateSphere(pos, vel, he, sph);
-
-    for (const physics::WorldTriMesh& tm : world.triMeshes)
-        physics::depenetrateCapsuleVsTriMesh(pos, vel, capsule, tm, k_pushback);
-}
-
-/// @brief Build a `physics::CapsuleShape` query from an entity's `CollisionShape`.
+/// @brief Settle the player onto the closest walkable surface within
+/// `maxSnapDistance` along the foot direction (`-capsule.up`).
 ///
-/// `up` is constant +Y — gravity flip only inverts the floor-detection
-/// threshold (`normal.y > 0.7` vs `< -0.7`), not the player's capsule axis,
-/// because the capsule is symmetric under reflection of `up`.
-static physics::CapsuleShape makeCapsuleQuery(const CollisionShape& shape)
+/// Unified replacement for the legacy `Phase 2 slope-stick` +
+/// `Phase 3 ground probe` + `tryStepUp drop sweep` — one swept query,
+/// one snap, one source of truth.  Stair climbs naturally: the
+/// preceding horizontal walk-capsule sweep slid past the riser; the
+/// ground probe here uses the *full* capsule and finds the tread
+/// below; the snap places the foot on the tread.
+///
+/// On success: sets `state.grounded = true`, captures the ground
+/// normal, zeroes only the gravity-axis component of velocity
+/// (preserves tangential slide), and adjusts `pos` along
+/// `capsule.up` so the foot rests `k_pushback` above the surface.
+///
+/// Returns true when the player was settled on walkable ground.
+static bool resolveGround(physics::CapsuleShape capsule,
+                          glm::vec3& pos,
+                          glm::vec3& vel,
+                          PlayerVisState& state,
+                          float maxSnapDistance,
+                          const physics::WorldGeometry& world)
 {
-    return {.radius = shape.radius, .halfHeight = shape.halfHeight, .up = glm::vec3{0.0f, 1.0f, 0.0f}};
-}
-
-/// @brief Shape-aware sweepAll dispatch.  Capsule path for Capsule shape,
-/// AABB path otherwise.
-static physics::HitResult sweepShape(
-    const CollisionShape& shape, glm::vec3 start, glm::vec3 end, const physics::WorldGeometry& world)
-{
-    if (shape.type == CollisionShapeType::Capsule)
-        return physics::sweepAll(makeCapsuleQuery(shape), start, end, world);
-    return physics::sweepAll(shape.halfExtents, start, end, world);
-}
-
-/// @brief Shape-aware depenetration dispatch.
-static void depenetrateShape(
-    glm::vec3& pos, glm::vec3& vel, const CollisionShape& shape, const physics::WorldGeometry& world)
-{
-    if (shape.type == CollisionShapeType::Capsule)
-        depenetrateCapsule(pos, vel, makeCapsuleQuery(shape), world);
-    else
-        depenetrate(pos, vel, shape.halfExtents, world);
-}
-
-/// @brief Attempt to step over a low obstacle when a wall is hit.
-/// @param pos            Entity position (modified in place on success).
-/// @param vel            Entity velocity (modified in place on success).
-/// @param shape          Collision shape (dispatches AABB vs capsule).
-/// @param remainingTime  Time remaining in the current bump iteration.
-/// @param world          World collision geometry.
-/// @return True if the step succeeded and position/velocity were updated.
-static bool tryStepUp(glm::vec3& pos,
-                      glm::vec3& vel,
-                      const CollisionShape& shape,
-                      float remainingTime,
-                      const physics::WorldGeometry& world)
-{
-    const glm::vec3 k_stepVec{0.0f, physics::k_stepHeight, 0.0f};
-
-    // 1. Lift straight up — abort if ceiling blocks.
-    const glm::vec3 k_liftEnd = pos + k_stepVec;
-    const physics::HitResult k_lift = sweepShape(shape, pos, k_liftEnd, world);
-    if (k_lift.hit)
+    const physics::GroundProbeResult probe = physics::probeGround(capsule, pos, maxSnapDistance, world);
+    if (!probe.hit || !probe.walkable)
         return false;
 
-    // 2. Sweep horizontally at step height — abort if still blocked.
-    const glm::vec3 k_horizEnd = k_liftEnd + glm::vec3{vel.x * remainingTime, 0.0f, vel.z * remainingTime};
-    const physics::HitResult k_horiz = sweepShape(shape, k_liftEnd, k_horizEnd, world);
-    if (k_horiz.hit)
-        return false;
+    // Settle the capsule along the gravity axis so its surface touches the
+    // ground point with `k_pushback` separation along the contact normal.
+    // On a slope the contact normal is not parallel to `capsule.up`, so the
+    // along-axis offset is `dot(normal, up) * (pushback + minkExt(normal))`
+    // — using `halfHeight + radius` directly would float the player off
+    // angled slopes by `(1 - dot(normal,up)) * minkExt` units.
+    const float k_minkExtAlongNormal = capsule.minkowskiExtent(probe.normal);
+    const float k_targetAlongUp =
+        glm::dot(probe.point, capsule.up) + glm::dot(probe.normal, capsule.up) * (k_pushback + k_minkExtAlongNormal);
+    const float k_currentAlongUp = glm::dot(pos, capsule.up);
+    pos += capsule.up * (k_targetAlongUp - k_currentAlongUp);
 
-    // 3. Drop back down — must land on a floor-like surface.
-    const glm::vec3 k_dropEnd = k_horizEnd - k_stepVec;
-    const physics::HitResult k_drop = sweepShape(shape, k_horizEnd, k_dropEnd, world);
-
-    if (!k_drop.hit || k_drop.normal.y <= 0.7f)
-        return false;
-
-    pos = k_horizEnd - k_stepVec * k_drop.tFirst;
-    pos += k_drop.normal * k_pushback;
-    vel.y = 0.0f;
+    state.grounded = true;
+    state.groundNormal = probe.normal;
+    if (!state.grappleActive) {
+        const float k_vAlongUp = glm::dot(vel, capsule.up);
+        if (k_vAlongUp < 0.0f)
+            vel -= capsule.up * k_vAlongUp;
+    }
     return true;
-}
-
-/// @brief Keep the entity glued to descending slopes and step-downs.
-/// @param pos          Entity position (modified in place).
-/// @param vel          Entity velocity (modified in place).
-/// @param shape        Collision shape (dispatches AABB vs capsule).
-/// @param world        World collision geometry.
-static void
-snapToGround(glm::vec3& pos, glm::vec3& vel, const CollisionShape& shape, const physics::WorldGeometry& world)
-{
-    const glm::vec3 k_probeTarget = pos - glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
-    const physics::HitResult k_snap = sweepShape(shape, pos, k_probeTarget, world);
-
-    if (!k_snap.hit || k_snap.normal.y <= 0.7f)
-        return;
-
-    pos = pos - glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
-    pos += k_snap.normal * k_pushback;
-    vel.y = 0.0f;
-}
-
-/// @brief Minkowski half-extent of `shape` along unit direction `n`.  Used
-/// for shape-aware contact-point offset in debug visualization.
-static float shapeMinkowskiExtent(const CollisionShape& shape, glm::vec3 n)
-{
-    if (shape.type == CollisionShapeType::Capsule)
-        return makeCapsuleQuery(shape).minkowskiExtent(n);
-    return std::abs(n.x) * shape.halfExtents.x + std::abs(n.y) * shape.halfExtents.y +
-           std::abs(n.z) * shape.halfExtents.z;
-}
-
-/// @brief Minimum cross-section radius of the shape, used by Phase-C
-/// sub-stepping to size the per-tick safety budget.
-///
-/// For a capsule, this is `radius` — the smallest direction-independent
-/// half-extent of the swept shape.  For an AABB, the smallest half-extent
-/// component (the AABB's "thinnest axis").  Sub-stepping kicks in when the
-/// projected per-tick motion exceeds `this · k_substepSafetyRatio`.
-static float shapeMinCrossSection(const CollisionShape& shape)
-{
-    if (shape.type == CollisionShapeType::Capsule)
-        return shape.radius;
-    return std::min({shape.halfExtents.x, shape.halfExtents.y, shape.halfExtents.z});
-}
-
-/// @brief Shape-aware scene-wide clearance dispatch.  Capsule path uses
-/// Phase C-deep's per-primitive closest-point queries; AABB falls back to
-/// "always clear" (sentinel large distance) so the same outer loop works
-/// for projectile shapes without further per-primitive math.
-static physics::ClearanceResult clearanceShape(
-    const CollisionShape& shape, glm::vec3 pos, const physics::WorldGeometry& world)
-{
-    if (shape.type == CollisionShapeType::Capsule)
-        return physics::clearanceCapsuleVsWorld(makeCapsuleQuery(shape), pos, world);
-    // AABB shapes (projectiles) use sweep TOI directly without omni-clearance
-    // — the loop's fast-reject branch never fires for them, swept query
-    // runs as it always has.
-    physics::ClearanceResult clr;
-    clr.distance = 1e30f; // never trigger fast-reject; never trigger contact branch
-    return clr;
 }
 
 void runCollision(Registry& registry, float dt, const physics::WorldGeometry& world)
@@ -606,16 +464,13 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
         const auto& shape = registry.get<CollisionShape>(e);
         auto& state = registry.get<PlayerVisState>(e);
         {
+            // --- per-tick state setup ---
             const bool k_wasGrounded = state.grounded;
             state.grounded = false;
 
-            // Gravity-flip direction: +1 normal (floors below), -1 flipped (ceilings as floors).
-            const float gravDir = state.gravityFlipped ? -1.0f : 1.0f;
+            const physics::CapsuleShape capsule = makeCapsuleQuery(shape, state.gravityFlipped);
+            const glm::vec3 worldUp = capsule.up; // direction OPPOSITE gravity
 
-            // --- Phase-diagnostic capture (off unless enabled via DebugUI) ---
-            // Snapshot pre-depen state so we can compare against post-depen and
-            // post-bump-loop later this tick.  Records every player every tick
-            // into phase-diag-<timestamp>.csv when the toggle is on.
             const bool diagOn = physics::diag::isEnabled();
             physics::diag::PlayerFrame diagFrame{};
             if (diagOn) {
@@ -624,8 +479,14 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 diagFrame.velBefore = vel.value;
             }
 
-            // Phase 0 — Depenetration
-            depenetrateShape(pos.value, vel.value, shape, world);
+            // --- Phase 0: depenetration (per-pass-deepest single-MTV resolver) ---
+            //
+            // Replaces the legacy per-feature MTV-summing depen.  Symmetric
+            // contacts on thin geometry no longer cancel to zero push: we
+            // pick the deepest single violator, eject fully, and re-probe.
+            // Oscillation between opposing normals (genuinely ambiguous
+            // two-sided geometry) trips the emergency-unstick fallback.
+            physics::depenetrateCapsuleVsWorld(pos.value, vel.value, capsule, world);
 
             if (diagOn) {
                 diagFrame.posAfterDepen = pos.value;
@@ -634,217 +495,182 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     diagFrame.flags |= physics::diag::PhaseFlag::DeepPenetration;
             }
 
-            // Phase C — Sub-step count for high-velocity safety floor.
+            // --- Phase 1: motion integration ---
             //
-            // The CA inner loop below is itself a tunneling-free integrator:
-            // sweep TOI is exact directional clearance, so we never advance
-            // past a surface.  Sub-stepping remains as a hard upper bound on
-            // per-substep motion magnitude — extreme velocities (post-explosion
-            // launches, scripted teleports) split into multiple substeps so
-            // each CA loop runs over a bounded distance.  Determinism is
-            // preserved (client and server compute the same N).
-            const float fullStep = glm::length(vel.value) * dt;
-            const float maxSafeStep = shapeMinCrossSection(shape) * physics::k_substepSafetyRatio;
+            // Grounded ambulation: walk-capsule sweep over horizontal
+            // velocity only.  The walk capsule's foot sits stepHeight above
+            // the player's foot, so steps / risers within stepHeight are
+            // physically invisible to the sweep — they cannot be hit.
+            //
+            // Airborne or grappling: full-capsule sweep over full 3D
+            // velocity.  Feet must clear low walls in mid-air, and the
+            // grapple cable should pull the player honestly through 3D
+            // space.
+            const bool useWalkCapsule = k_wasGrounded && !state.grappleActive;
+
+            const physics::CapsuleShape sweepCapsule =
+                useWalkCapsule ? capsule.walkShape(physics::k_stepHeight) : capsule;
+            const glm::vec3 sweepCenterOffset =
+                useWalkCapsule ? capsule.walkCenterOffset(physics::k_stepHeight) : glm::vec3{0.0f};
+
+            glm::vec3 phaseVel = vel.value;
+            if (useWalkCapsule) {
+                // Strip the gravity-axis component; ground resolve below
+                // settles the foot onto whatever's there.
+                phaseVel -= worldUp * glm::dot(phaseVel, worldUp);
+            }
+
+            // Sub-step bound: cap per-substep motion at radius * safetyRatio
+            // so high-velocity grapple yanks split into multiple substeps.
+            const float fullStep = glm::length(phaseVel) * dt;
+            const float maxSafeStep = sweepCapsule.radius * physics::k_substepSafetyRatio;
             const int numSubsteps =
                 (physics::k_enableSubstepping && maxSafeStep > 1e-6f && fullStep > maxSafeStep)
                     ? std::min(physics::k_maxSubsteps,
                                static_cast<int>(std::ceil(fullStep / maxSafeStep)))
                     : 1;
             const float subDt = dt / static_cast<float>(numSubsteps);
-
-            // Phase 1 — Conservative Advancement (Mirtich 2000, hybrid form).
-            //
-            // Each iteration combines two oracles that together give
-            // production-grade behaviour:
-            //
-            //   * Omnidirectional clearance (`clearanceCapsuleVsWorld`) —
-            //     scene-wide closest-point query.  Fires the *contact branch*
-            //     when distance ≤ ε (clip velocity, push back along the
-            //     closest-surface normal), and the *fast-reject branch* when
-            //     the closest surface is farther than the per-iteration motion
-            //     bound (definitely no contact this step — full advance,
-            //     skipping the sweep entirely).
-            //
-            //   * Directional sweep TOI (`sweepShape`) — exact swept-shape
-            //     time-of-impact along the velocity direction.  Used when
-            //     clearance is too small to fast-reject but too large to
-            //     declare contact.  Advances to the swept TOI, then clips
-            //     velocity and pushes back, exactly as the prior bump loop
-            //     did.
-            //
-            // Why hybrid: pure omnidirectional CA converges to ε-steps for
-            // tangent sliding (player slides along floor → omni clearance
-            // collapses to ε per iter, ≫ 100 iterations to slide across a
-            // room).  Pure sweep-only is the existing bump loop — already
-            // directional CA, but spends a swept query every iter even when
-            // the player is in open space.  The hybrid gets the best of
-            // both: clearance fast-reject saves the sweep in open space,
-            // and the sweep does the work where the clearance can't (close
-            // proximity, complex contact geometry).
-            //
-            // Convergence: typically 1 iter (clear → fast-reject → full
-            // advance) for cruise motion, 2–3 iters for one-contact slides
-            // (sweep → advance to TOI → clip → fast-reject full advance),
-            // 4–6 iters for corner squeezes.  `k_maxCAIterations` bounds
-            // the worst case.
             constexpr int k_maxCAIterations = 8;
             bool caExhaustedAnySubstep = false;
 
             for (int sub = 0; sub < numSubsteps; ++sub) {
                 float remainingTime = subDt;
-                bool stepped = false;
                 int iter = 0;
-
                 for (; iter < k_maxCAIterations && remainingTime > 1e-5f; ++iter) {
-                    const physics::ClearanceResult clr = clearanceShape(shape, pos.value, world);
-
-                    // Contact branch — clearance reports we're already touching
-                    // (or penetrating).  Resolve in place using clr's normal:
-                    // floor / wall / step-up / clip + pushback.
-                    if (clr.contact) {
-                        if (diagOn) {
-                            ++diagFrame.bumpHits;
-                            diagFrame.lastHitNormal = clr.normal;
-                        }
-                        if (physics::debug::isEnabled()) {
-                            physics::debug::pushSweepContact(clr.pointOnGeometry,
-                                                             clr.normal,
-                                                             physics::debug::ContactSource::PlaneSweep);
-                        }
-
-                        const bool k_isFloor =
-                            state.gravityFlipped ? (clr.normal.y < -0.7f) : (clr.normal.y > 0.7f);
-
-                        if (k_isFloor) {
-                            pos.value += clr.normal * k_pushback;
-                            vel.value =
-                                physics::clipVelocity(vel.value, clr.normal, physics::k_overbounceFloor);
-                            if (!state.grappleActive) {
-                                state.grounded = true;
-                                state.groundNormal = clr.normal;
-                            }
-                        } else {
-                            if (k_wasGrounded && !state.gravityFlipped && !stepped &&
-                                tryStepUp(pos.value, vel.value, shape, remainingTime, world))
-                            {
-                                state.grounded = true;
-                                stepped = true;
-                                break;
-                            }
-                            pos.value += clr.normal * k_pushback;
-                            vel.value =
-                                physics::clipVelocity(vel.value, clr.normal, physics::k_overbounceWall);
-                        }
-                        continue;
-                    }
-
-                    // Fast-reject branch — the closest geometry is farther
-                    // than the motion bound, so no contact is possible this
-                    // step.  Full advance without ever calling sweep.
-                    const float vLen = glm::length(vel.value);
+                    const glm::vec3 sweepStart = pos.value + sweepCenterOffset;
+                    const float vLen = glm::length(phaseVel);
                     const float motionBound = vLen * remainingTime;
                     if (motionBound < 1e-6f) {
-                        // Negligible motion — done.
                         remainingTime = 0.0f;
                         break;
                     }
+
+                    // Open-space fast-reject — omni-clearance lets us skip
+                    // the sweep entirely when no geometry is within reach.
+                    const physics::ClearanceResult clr =
+                        physics::clearanceCapsuleVsWorld(sweepCapsule, sweepStart, world);
                     if (clr.distance > motionBound + k_pushback) {
-                        pos.value += vel.value * remainingTime;
+                        pos.value += phaseVel * remainingTime;
                         remainingTime = 0.0f;
                         break;
                     }
 
-                    // Sweep branch — close enough that contact is possible.
-                    // Run the swept query to get exact directional TOI.
-                    const glm::vec3 k_target = pos.value + vel.value * remainingTime;
-                    const physics::HitResult k_hit = sweepShape(shape, pos.value, k_target, world);
-
-                    if (!k_hit.hit) {
-                        // Clearance over-estimated proximity (e.g. omni
-                        // clearance picked a wall to our side that the swept
-                        // line never reaches).  Safe full advance.
-                        pos.value = k_target;
+                    // Sweep TOI for exact directional contact.
+                    const glm::vec3 sweepEnd = sweepStart + phaseVel * remainingTime;
+                    const physics::HitResult hit =
+                        physics::sweepAll(sweepCapsule, sweepStart, sweepEnd, world);
+                    if (!hit.hit) {
+                        pos.value += phaseVel * remainingTime;
                         remainingTime = 0.0f;
                         break;
                     }
+
+                    pos.value += phaseVel * hit.tFirst * remainingTime;
+                    remainingTime *= (1.0f - hit.tFirst);
 
                     if (diagOn) {
                         ++diagFrame.bumpHits;
-                        diagFrame.lastHitNormal = k_hit.normal;
+                        diagFrame.lastHitNormal = hit.normal;
                     }
-
-                    pos.value += vel.value * k_hit.tFirst * remainingTime;
-                    remainingTime *= (1.0f - k_hit.tFirst);
-
                     if (physics::debug::isEnabled()) {
-                        const float r = shapeMinkowskiExtent(shape, k_hit.normal);
-                        physics::debug::pushSweepContact(pos.value - k_hit.normal * r,
-                                                         k_hit.normal,
+                        const float r = sweepCapsule.minkowskiExtent(hit.normal);
+                        physics::debug::pushSweepContact(pos.value + sweepCenterOffset - hit.normal * r,
+                                                         hit.normal,
                                                          physics::debug::ContactSource::PlaneSweep);
                     }
 
-                    const bool k_isFloor =
-                        state.gravityFlipped ? (k_hit.normal.y < -0.7f) : (k_hit.normal.y > 0.7f);
-
-                    if (k_isFloor) {
-                        pos.value += k_hit.normal * k_pushback;
-                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceFloor);
-                        if (!state.grappleActive) {
+                    // Clip + pushback at the hit.  In the grounded /
+                    // walk-capsule branch every hit is a wall (the walk
+                    // capsule's foot cannot reach a floor), so we use the
+                    // wall overbounce uniformly.  In the airborne / full-
+                    // capsule branch we still treat floor hits as floors
+                    // (settle grounded) for the same-tick landing case.
+                    if (!useWalkCapsule) {
+                        const bool landed = glm::dot(hit.normal, worldUp) >= physics::k_floorAngleCos;
+                        if (landed) {
                             state.grounded = true;
-                            state.groundNormal = k_hit.normal;
+                            state.groundNormal = hit.normal;
+                            phaseVel = physics::clipVelocity(phaseVel, hit.normal, physics::k_overbounceFloor);
+                        } else {
+                            phaseVel = physics::clipVelocity(phaseVel, hit.normal, physics::k_overbounceWall);
                         }
                     } else {
-                        if (k_wasGrounded && !state.gravityFlipped && !stepped &&
-                            tryStepUp(pos.value, vel.value, shape, remainingTime, world))
-                        {
-                            state.grounded = true;
-                            stepped = true;
-                            break;
-                        }
-                        pos.value += k_hit.normal * k_pushback;
-                        vel.value = physics::clipVelocity(vel.value, k_hit.normal, physics::k_overbounceWall);
+                        phaseVel = physics::clipVelocity(phaseVel, hit.normal, physics::k_overbounceWall);
                     }
+                    pos.value += hit.normal * k_pushback;
                 }
-
                 if (iter >= k_maxCAIterations && remainingTime > 1e-5f)
                     caExhaustedAnySubstep = true;
             }
 
-            // Phase 2 — Slope sticking (skip during grapple — player must fly freely)
-            // When gravity is flipped, snap toward ceiling instead of floor.
-            if (k_wasGrounded && !state.grappleActive) {
-                const float k_horizSpeed = glm::length(glm::vec3{vel.value.x, 0.0f, vel.value.z});
-                if (k_horizSpeed > 0.001f) {
-                    if (state.gravityFlipped) {
-                        // Snap upward toward ceiling.
-                        const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, k_groundProbeDistance, 0.0f};
-                        const physics::HitResult k_snap = sweepShape(shape, pos.value, k_probeTarget, world);
-                        if (k_snap.hit && k_snap.normal.y < -0.7f) {
-                            pos.value = pos.value + glm::vec3{0.0f, k_groundProbeDistance * k_snap.tFirst, 0.0f};
-                            pos.value += k_snap.normal * k_pushback;
-                            vel.value.y = 0.0f;
-                        }
+            // Write back the (possibly clipped) velocity.
+            if (useWalkCapsule) {
+                vel.value.x = phaseVel.x;
+                vel.value.z = phaseVel.z;
+                // vel.y preserved — gravity component is handled by Phase 2.
+            } else {
+                vel.value = phaseVel;
+            }
+
+            // --- Phase 2: ground resolve ---
+            //
+            // One downward swept query with the full capsule.  When the
+            // player was grounded last tick, the probe extends to
+            // (effectiveStep + groundSnap) so it catches both step-ups
+            // (after a walk-capsule sweep over a riser) and step-downs
+            // (descending stairs / slopes).  When airborne, the probe is
+            // just a tiny landing check.
+            //
+            // Skipped during grapple: the player flies freely along the
+            // cable without being snapped to the ground.
+            //
+            // Skipped while actively jumping (vy strongly opposing gravity):
+            // we don't want to swallow a fresh jump impulse.
+            if (!state.grappleActive) {
+                const float k_vAlongUp = glm::dot(vel.value, worldUp);
+                const bool jumping = k_vAlongUp > 10.0f;
+                if (!jumping) {
+                    const float effStep = capsule.effectiveStepHeight(physics::k_stepHeight);
+                    const float snap = k_wasGrounded
+                                           ? (effStep + physics::k_groundSnapDistance)
+                                           : physics::k_groundSnapDistance;
+                    resolveGround(capsule, pos.value, vel.value, state, snap, world);
+                }
+            }
+
+            // --- Phase 3: vertical motion when still airborne ---
+            //
+            // Grounded case is settled by Phase 2.  Airborne case (free-
+            // fall, mid-jump, mid-grapple-arc) integrates the gravity-axis
+            // velocity with a full-capsule swept query so feet honestly
+            // clip into low walls / ceilings during vertical motion.
+            //
+            // (Horizontal was already integrated in Phase 1; this is just
+            // the Y component.)
+            if (!state.grounded && !state.grappleActive) {
+                const float k_vAlongUp = glm::dot(vel.value, worldUp);
+                const glm::vec3 vMotion = worldUp * k_vAlongUp;
+                if (glm::dot(vMotion, vMotion) > 1e-12f) {
+                    const glm::vec3 vTarget = pos.value + vMotion * dt;
+                    const physics::HitResult vHit = physics::sweepAll(capsule, pos.value, vTarget, world);
+                    if (!vHit.hit) {
+                        pos.value = vTarget;
                     } else {
-                        snapToGround(pos.value, vel.value, shape, world);
+                        pos.value += vMotion * vHit.tFirst * dt;
+                        pos.value += vHit.normal * k_pushback;
+                        const bool landed = glm::dot(vHit.normal, worldUp) >= physics::k_floorAngleCos;
+                        if (landed) {
+                            state.grounded = true;
+                            state.groundNormal = vHit.normal;
+                            vel.value = physics::clipVelocity(vel.value, vHit.normal, physics::k_overbounceFloor);
+                        } else {
+                            vel.value = physics::clipVelocity(vel.value, vHit.normal, physics::k_overbounceWall);
+                        }
                     }
                 }
             }
 
-            // Phase 3 — Ground probe (skip during grapple)
-            if (!state.grappleActive) {
-                // Probe in the direction of gravity: downward normally, upward when flipped.
-                const glm::vec3 k_probeTarget = pos.value + glm::vec3{0.0f, -gravDir * k_groundProbeDistance, 0.0f};
-                const physics::HitResult k_probe = sweepShape(shape, pos.value, k_probeTarget, world);
-
-                const bool k_isGroundProbe =
-                    state.gravityFlipped ? (k_probe.normal.y < -0.7f) : (k_probe.normal.y > 0.7f);
-                if (k_probe.hit && k_isGroundProbe) {
-                    state.grounded = true;
-                    state.groundNormal = k_probe.normal;
-                }
-            }
-
-            // --- Phase-diagnostic finalize ---
+            // --- Diag finalize ---
             if (diagOn) {
                 diagFrame.posAfter = pos.value;
                 diagFrame.velAfter = vel.value;

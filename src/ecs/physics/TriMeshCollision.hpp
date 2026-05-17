@@ -115,12 +115,17 @@ void depenetrateAABBvsTriMesh(
 /// `radius` — no dependency on which way the wall faces in the XZ plane.
 HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh);
 
-/// @brief Push a capsule out of a triangle mesh.  Capsule analogue of
-/// `depenetrateAABBvsTriMesh` — identical iteration scheme (4 passes,
-/// per-tick budget cap, velocity-coherent + welded-feature guards) with
-/// the capsule Minkowski extent in place of the AABB sum.
-void depenetrateCapsuleVsTriMesh(
-    glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldTriMesh& mesh, float pushback = 0.03125f);
+/// @brief Single deepest Voronoi contact of a capsule against any triangle
+/// in this mesh.  BVH-accelerated.  Used by the world-level
+/// `depenetrateCapsuleVsWorld` to pick the deepest violator per pass.
+///
+/// Reports the full Minkowski overlap depth (`r - s` along the face normal,
+/// where `r` is the capsule's projected half-extent), not the surface-to-
+/// surface clearance — see `DepenContact` for the rationale.  Velocity-
+/// coherent culling and welded-feature rejection are inherited from
+/// `capsuleVsTriVoronoi`.
+DepenContact deepestCapsuleContactVsTriMesh(
+    CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldTriMesh& mesh);
 
 /// @brief Result of a closest-point-on-mesh query.  Phase B foundation for
 /// the Phase D wallrun manifold walk.

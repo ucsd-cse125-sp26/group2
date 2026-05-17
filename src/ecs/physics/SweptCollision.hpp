@@ -200,6 +200,39 @@ struct CapsuleShape
     {
         return radius + halfHeight * std::abs(glm::dot(up, n));
     }
+
+    /// @brief Clamp a requested step height to a value the capsule can
+    /// safely support — never larger than the segment half-length, leaving
+    /// a small numerical margin so the derived `walkShape()` always has a
+    /// positive halfHeight.  Crouched players (small `halfHeight`) get a
+    /// proportionally smaller effective step.
+    [[nodiscard]] float effectiveStepHeight(float requestedStepHeight) const noexcept
+    {
+        const float maxAllowed = std::max(halfHeight - 0.5f, 0.0f);
+        const float clamped = std::min(std::max(requestedStepHeight, 0.0f), maxAllowed);
+        return clamped;
+    }
+
+    /// @brief "Walk" capsule — a shorter capsule whose foot is lifted by
+    /// `stepHeight` (using `effectiveStepHeight`) and whose head is
+    /// unchanged.  Used by the two-capsule character controller for
+    /// horizontal motion: a sweep with this shape is physically incapable
+    /// of contacting anything ≤ stepHeight tall, so steps / curbs / stair
+    /// risers within that height are transparently ignored.  Vertical
+    /// settle later snaps the foot onto whatever is below.
+    [[nodiscard]] CapsuleShape walkShape(float requestedStepHeight) const noexcept
+    {
+        const float effStep = effectiveStepHeight(requestedStepHeight);
+        return CapsuleShape{.radius = radius, .halfHeight = halfHeight - effStep * 0.5f, .up = up};
+    }
+
+    /// @brief Centre-position offset that takes a full-capsule centre to the
+    /// matching walk-capsule centre (head aligned).  Always points along
+    /// `+up` — for gravity-flipped play the caller should negate the result.
+    [[nodiscard]] glm::vec3 walkCenterOffset(float requestedStepHeight) const noexcept
+    {
+        return up * (effectiveStepHeight(requestedStepHeight) * 0.5f);
+    }
 };
 
 /// @brief Result of a swept AABB collision query.
@@ -329,6 +362,98 @@ ClearanceResult clearanceCapsuleVsSphere(CapsuleShape capsule, glm::vec3 pos, co
 /// feature in any direction.  This is the closest-point query the
 /// conservative-advancement integrator drives off of every iteration.
 ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, const WorldGeometry& world);
+
+// Character-controller utilities (modern KCC pattern)
+
+/// @brief Result of a downward ground probe — what's directly under a
+/// character's feet, classified for walkability.
+///
+/// Returned by `probeGround()`.  `distance` is signed:
+///   *  > 0  → feet are this far above the ground surface (snap downward to settle)
+///   *  = 0  → exactly touching (after pushback)
+///   *  < 0  → feet are below the ground (penetrating — depen needs to recover)
+struct GroundProbeResult
+{
+    bool hit{false};                                 ///< True if any surface was found within the probe range.
+    bool walkable{false};                            ///< True if the surface normal makes it standable per `k_floorAngleCos`.
+    float distance{1e30f};                           ///< Foot-to-surface signed distance along the probe axis.
+    glm::vec3 point{0.0f};                           ///< World-space contact point on the surface.
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};              ///< Outward-pointing surface normal (toward free space).
+    SurfaceType surfaceType{SurfaceType::Concrete};  ///< Material at the hit surface.
+};
+
+/// @brief Downward sweep that classifies the ground under a capsule.
+///
+/// Sweeps the capsule along `-up * maxDistance` from `pos`, then evaluates
+/// whether the first contact's normal qualifies as a floor.  This is the
+/// query the modern two-capsule character controller uses each tick to
+/// (a) decide grounded vs airborne and (b) settle the foot onto the
+/// surface — replacing the legacy lift→horiz→drop swept-AABB step-up.
+///
+/// @param capsule       The full capsule (not the walk-shape) — the foot
+///                      direction is `-capsule.up`.
+/// @param pos           Capsule centre at the start of the probe.
+/// @param maxDistance   How far to probe along the foot direction.  Should
+///                      be `effectiveStepHeight + k_groundSnapDistance` for
+///                      a grounded player, `k_groundSnapDistance` for an
+///                      airborne landing check.
+/// @param world         World collision geometry.
+GroundProbeResult probeGround(CapsuleShape capsule, glm::vec3 pos, float maxDistance, const WorldGeometry& world);
+
+/// @brief Single deepest Voronoi contact from a capsule against a primitive
+/// or the world.  Distinct from `ClearanceResult` in two important ways:
+///   * `depth` is the *full Minkowski overlap* (face-normal MTV magnitude),
+///     not the surface-to-surface clearance — for an axis-crosses-triangle
+///     overlap the clearance is `-radius` but the MTV depth is
+///     `radius + halfHeight·|dot(up,n)|`, the actual distance the capsule
+///     centre must move to fully exit the plane's slab.
+///   * `normal` is the face / Minkowski normal pointing into free space,
+///     so `pos += normal * depth` is the exact one-shot ejection vector.
+///
+/// `valid = false` when no penetration; `depth > 0` otherwise.
+struct DepenContact
+{
+    bool valid{false};
+    float depth{0.0f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    SurfaceType surfaceType{SurfaceType::Concrete};
+};
+
+/// @brief Scene-wide deepest single contact (per-primitive, per-feature).
+/// Used by the modern depen as the per-pass oracle: pick the deepest
+/// violation across the whole world, push exactly out of it, re-probe.
+DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldGeometry& world);
+
+/// @brief Per-pass-deepest-first capsule depenetration against the whole world.
+///
+/// Replaces the legacy AABB depen + per-feature MTV summation.  Each pass:
+///   1. Find the single deepest Voronoi contact via `deepestCapsuleContact`.
+///   2. Push by the full MTV depth (no per-tick cap — the loop converges
+///      in O(touched-features) passes).
+///   3. Clip velocity component into the surface, repeat.
+///
+/// Oscillation detector: if pass N's contact normal points opposite to
+/// pass N-1's (`dot < -k_floorAngleCos`), the player straddles a 2-sided
+/// thin volume with no single consistent ejection direction.  Fall
+/// straight through to `emergencyUnstick()` rather than ping-ponging.
+///
+/// @param pos      Capsule centre — modified in place to push out of overlaps.
+/// @param vel      Velocity — modified in place to cancel components into surfaces.
+/// @param capsule  Player capsule shape.
+/// @param world    World collision geometry.
+void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world);
+
+/// @brief Last-resort recovery for a capsule embedded in geometry with no
+/// clear depen direction.
+///
+/// Probes outward in axis-aligned cardinal directions at increasing
+/// radii looking for any position where the capsule has positive
+/// clearance.  When found, teleports the capsule centre there and zeros
+/// velocity.  When nothing within `k_emergencyUnstickRadius` works, the
+/// position is left unchanged (game code should fall back to a respawn).
+///
+/// @return  True if a clear position was found and `pos` updated.
+bool emergencyUnstick(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world);
 
 // Sphere cast
 

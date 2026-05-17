@@ -135,9 +135,29 @@ constexpr float k_ledgeExitTime = 0.5f;        ///< Duration of "exiting ledge" 
 constexpr float k_speedCap = 7000.0f; ///< Hard horizontal speed limit (u/s).
 
 // Player dimensions
+//
+// The player's full collision shape is a capsule.  `k_standingHalfHeight`
+// and `k_crouchingHalfHeight` are the AABB half-heights — i.e. the
+// capsule's full top-to-foot half-extent (`halfHeight + radius`).  The
+// capsule's segment half-length (the `halfHeight` field on the shape)
+// is therefore the AABB half-height *minus* the capsule radius.
+//
+// Standing: total height 72u (2*36), capsule radius 16u, capsule
+//   halfHeight 20u (= 36-16).
+// Crouching: total height 44u (2*22), capsule radius 16u, capsule
+//   halfHeight 6u (= 22-16).  Crouch keeps the radius constant —
+//   modern KCCs rely on a fixed capsule radius to keep horizontal
+//   collision continuity stable across stance transitions.
 
+constexpr float k_playerCapsuleRadius = 16.0f; ///< Capsule cross-section radius (u), fixed across stances.
 constexpr float k_standingHalfHeight = 36.0f;  ///< Standing AABB half-height (u).
 constexpr float k_crouchingHalfHeight = 22.0f; ///< Crouching/sliding AABB half-height (u).
+
+/// @brief Capsule segment half-length when standing.
+constexpr float k_standingCapsuleHalfHeight = k_standingHalfHeight - k_playerCapsuleRadius;
+
+/// @brief Capsule segment half-length when crouching.
+constexpr float k_crouchingCapsuleHalfHeight = k_crouchingHalfHeight - k_playerCapsuleRadius;
 
 // Grappling hook (Widowmaker-style: direct pull → look-biased launch)
 

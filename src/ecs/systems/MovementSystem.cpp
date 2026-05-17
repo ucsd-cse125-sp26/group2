@@ -103,6 +103,41 @@ bool anyMoveInput(const InputSnapshot& input)
 namespace
 {
 
+/// @brief Resize the player's collision shape to a target AABB half-height,
+/// keeping the foot Y in place by translating `pos` along the gravity axis.
+///
+/// Updates BOTH the AABB half-extent (used by BVH culling and projectile
+/// queries) AND the capsule `halfHeight` (used by every player collision
+/// path post-rewrite).  The capsule `radius` is held constant — modern
+/// KCCs rely on a fixed cross-section radius to keep horizontal contact
+/// continuity stable across stance transitions (mid-motion radius changes
+/// cause "pop into the wall" artefacts).
+void resizePlayerCapsule(Position& pos, CollisionShape& shape, float newAabbHalfHeight)
+{
+    const float k_oldAabbHalfHeight = shape.halfExtents.y;
+    const float k_dy = newAabbHalfHeight - k_oldAabbHalfHeight;
+    shape.halfExtents.y = newAabbHalfHeight;
+    shape.halfHeight = newAabbHalfHeight - shape.radius;
+    pos.value.y += k_dy;
+}
+
+/// @brief Test whether the player can fit at `pos` with a candidate AABB
+/// half-height, by checking capsule clearance against world geometry.
+/// Used to validate uncrouch before committing to the larger shape.
+bool playerFitsAt(const Position& pos, const CollisionShape& shape, float candidateAabbHalfHeight,
+                  const physics::WorldGeometry& world)
+{
+    physics::CapsuleShape probe{
+        .radius = shape.radius,
+        .halfHeight = candidateAabbHalfHeight - shape.radius,
+        .up = glm::vec3{0.0f, 1.0f, 0.0f},
+    };
+    const float k_dy = candidateAabbHalfHeight - shape.halfExtents.y;
+    const glm::vec3 probePos = pos.value + glm::vec3{0.0f, k_dy, 0.0f};
+    const physics::ClearanceResult clr = physics::clearanceCapsuleVsWorld(probe, probePos, world);
+    return clr.distance > -0.03125f; // allow grazing contact within pushback
+}
+
 /// @brief Handle entering the crouch state and adjusting the collision shape.
 /// @param pos    Entity position (modified in place).
 /// @param shape  Collision shape (modified in place).
@@ -116,11 +151,10 @@ void handleCrouchTransition(Position& pos, CollisionShape& shape, PlayerStateRef
     // Enter crouch immediately.
     if (k_wantsCrouch && !k_isCrouched) {
         state.vis.crouching = true;
-        shape.halfExtents.y = tms::k_crouchingHalfHeight;
-        pos.value.y -= (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
+        resizePlayerCapsule(pos, shape, tms::k_crouchingHalfHeight);
     }
     // Uncrouch is handled by the auto-uncrouch pass at tick end (step 10)
-    // which checks for collision before expanding the AABB.
+    // which checks for collision before expanding the capsule.
 }
 
 } // namespace
@@ -493,8 +527,7 @@ void tryEnterSlide(
     state.vis.moveMode = MoveMode::Sliding;
     state.sim.slideTimer = 0.0f;
     state.vis.crouching = true;
-    shape.halfExtents.y = tms::k_crouchingHalfHeight;
-    pos.value.y -= (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
+    resizePlayerCapsule(pos, shape, tms::k_crouchingHalfHeight);
 
     // Slide boost (if not on cooldown and fatigue allows).
     if (state.sim.slideBoostCooldown <= 0.0f) {
@@ -521,8 +554,7 @@ void tryEnterSlide(
 /// @param pos    Entity position (modified in place).
 /// @param input  Current input snapshot.
 /// @param dt     Fixed physics delta time in seconds.
-void handleSliding(
-    glm::vec3& vel, PlayerStateRef state, CollisionShape& shape, Position& pos, const InputSnapshot& input, float dt)
+void handleSliding(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& input, float dt)
 {
     state.sim.slideTimer += dt;
 
@@ -531,9 +563,11 @@ void handleSliding(
     if (!input.crouch || k_hs < tms::k_slideMinSpeed || !state.vis.grounded) {
         state.vis.moveMode = MoveMode::OnFoot;
         if (!input.crouch) {
-            state.vis.crouching = false;
-            shape.halfExtents.y = tms::k_standingHalfHeight;
-            pos.value.y += (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
+            // Defer stand-up to the auto-uncrouch validator at tick end;
+            // it does the proper clearance check (we don't know `world`
+            // here in this slice).  Marking pendingUncrouch is sufficient
+            // because the slide already cleared MoveMode.
+            state.vis.pendingUncrouch = true;
         }
         return;
     }
@@ -1477,7 +1511,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             }
 
             case MoveMode::Sliding: {
-                handleSliding(vel.value, state, shape, pos, input, dt);
+                handleSliding(vel.value, state, input, dt);
                 // Slide camera lean: tilt based on lateral velocity relative to look direction.
                 const float k_sinY = std::sin(input.yaw);
                 const float k_cosY = std::cos(input.yaw);
@@ -1560,29 +1594,25 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
             // 10. Auto-uncrouch / pending uncrouch
             // If the player should uncrouch (slidehop exit, or crouch key
-            // released while crouched) but collision might block it, we
-            // try here. The collision system's depenetration will push us
-            // back down if expanding the AABB puts us inside geometry.
+            // released while crouched), validate that the standing capsule
+            // fits at the current foot position BEFORE committing the
+            // shape change.  This prevents the "stand up into the ceiling
+            // and get depen-pushed back through the floor" failure mode
+            // that the old try-then-revert approach was vulnerable to
+            // when ceiling clearance was just below the resize threshold.
             if (state.vis.pendingUncrouch ||
                 (state.vis.crouching && !input.crouch && state.vis.moveMode == MoveMode::OnFoot))
             {
-                // Try to stand up: expand AABB and raise centre.
-                state.vis.crouching = false;
-                shape.halfExtents.y = tms::k_standingHalfHeight;
-                pos.value.y += (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
-
-                // Check if standing up puts us inside geometry.
-                // Use a quick sweep upward from current pos — if it hits
-                // immediately, we can't stand and must stay crouched.
-                const glm::vec3 k_testEnd = pos.value + glm::vec3(0, 0.1f, 0);
-                const physics::HitResult k_test = physics::sweepAll(shape.halfExtents, pos.value, k_testEnd, world);
-                if (k_test.hit && k_test.tFirst < 0.01f) {
-                    // Can't stand — revert to crouched.
-                    state.vis.crouching = true;
-                    shape.halfExtents.y = tms::k_crouchingHalfHeight;
-                    pos.value.y -= (tms::k_standingHalfHeight - tms::k_crouchingHalfHeight);
+                if (playerFitsAt(pos, shape, tms::k_standingHalfHeight, world)) {
+                    state.vis.crouching = false;
+                    resizePlayerCapsule(pos, shape, tms::k_standingHalfHeight);
+                    state.vis.pendingUncrouch = false;
+                } else if (!input.crouch) {
+                    // Keep `pendingUncrouch` set so we retry next tick
+                    // (player held duck momentarily then released, but
+                    // there's still a low ceiling).  Pending stays true.
+                    state.vis.pendingUncrouch = true;
                 }
-                state.vis.pendingUncrouch = false;
             }
 
             // 11. Speed cap

@@ -257,6 +257,98 @@ Acceptance: grapple-hook yank at ≥ 2000 u/s never clips; player slides
 smoothly along walls and floors at all velocities; determinism hash
 matches client/server.
 
+### Phase C-final — Modern KCC rebuild (two-capsule + per-pass-deepest depen)
+
+The Phase-C hybrid CA loop above shipped first and exposed two structural
+bugs that the bandage-style fixes (contact-branch pushback, MTV summation
+cap) couldn't paper over:
+
+* **Stair stepping completely broken.**  `tryStepUp`'s lift→horiz→drop
+  swept-shape sequence assumed the player was an AABB.  With a true
+  capsule, the drop sweep's bounded-reach check rejects edge-corner
+  contacts the AABB happened to reach (the capsule's rounded foot
+  curves inward by `radius - radius·|cos θ|` at any diagonal direction),
+  so the drop returns no hit and the step-up fails.
+* **Slow downward phasing through thin geometry.**  Per-feature MTV
+  summation in `depenetrateCapsuleVsTriMesh` cancelled to zero push when
+  the capsule straddled a two-sided coplanar surface.  The
+  CA "contact branch" then picked whatever face the BVH walked first
+  (often the back-side normal pointing into the player's solid region)
+  and pushed by a fixed `k_pushback` per iteration — a slow downward
+  drift through the geometry.
+
+The fix is a full rebuild to the modern KCC pattern used by Havok,
+Jolt's `CharacterVirtual`, and Unity's KCC.  The contact branch is
+deleted; the lift/horiz/drop dance is deleted; depen is rebuilt around
+single-deepest contact resolution; stair climbing falls out of a
+two-capsule sweep + ground-snap query.
+
+**Implementation outcome (as shipped).**
+
+*Two-capsule horizontal sweep.* `CapsuleShape::walkShape(stepHeight)`
+returns a shorter capsule whose foot is lifted by `effectiveStepHeight`,
+and `walkCenterOffset(stepHeight)` is the matching centre offset.  In
+the grounded ambulation branch of `runCollision`, horizontal CA sweeps
+the walk capsule from `pos + offset` along `(vel.x, 0, vel.z)`.  Stair
+risers and curbs within `stepHeight` are physically invisible to this
+sweep — they cannot be hit, no special-case step-up code required.
+
+*Ground probe + snap.* `physics::probeGround(capsule, pos, maxDist, world)`
+sweeps the full capsule along `-capsule.up` and reports
+`{hit, walkable, distance, point, normal}`.  After horizontal motion,
+`resolveGround` calls it with `effStep + k_groundSnapDistance` and snaps
+`pos` along the capsule axis so the foot rests exactly on the surface.
+This single query subsumes the legacy Phase-2 slope-stick, Phase-3 ground
+probe, and `tryStepUp` drop sweep — climbs stairs (foot snaps to tread),
+descends slopes (foot snaps to lower slope), and reports `grounded`.
+
+*Per-pass-deepest depen.* `physics::depenetrateCapsuleVsWorld` calls
+`deepestCapsuleContact(capsule, pos, vel, world)` each pass — a scene-
+wide single-deepest Voronoi MTV finder that uses per-primitive Minkowski
+depth calculations (`depth = r - s` along the face normal, not the
+surface-to-surface clearance).  The deepest single violator is fully
+ejected in one push; opposing-normal contacts on thin geometry no longer
+cancel.  An oscillation detector (this-pass-normal vs last-pass-normal
+dot product) trips the unstick fallback when the player straddles
+genuinely-ambiguous two-sided geometry.
+
+*Emergency unstick.* `physics::emergencyUnstick` probes outward in
+cardinal directions at exponentially-growing radii looking for any
+position with positive clearance.  Up direction first (most common
+recovery for "spawned in floor"), then ±X, ±Z, then down.  Teleports
+the capsule centre to the closest clear position and zeroes velocity.
+
+*Crouch / uncrouch.* `resizePlayerCapsule` updates both `halfExtents.y`
+and the capsule `halfHeight` together — keeping the radius fixed
+(modern KCCs require this to keep horizontal collision continuity
+stable across stance changes).  Auto-uncrouch validates with
+`playerFitsAt(...)` (capsule-clearance probe at the standing position)
+before committing the shape change, preventing the "stand into the
+ceiling and depen back through the floor" failure mode that the old
+try-then-revert approach was vulnerable to.
+
+**Deletions.**
+
+- `tryStepUp` (lift/horiz/drop swept dance) — replaced by ground-snap.
+- `snapToGround` — same role, replaced.
+- Per-tick slope-stick pass (`Phase 2`) — replaced by `resolveGround`'s
+  generous snap distance.
+- Per-tick ground-probe pass (`Phase 3`) — replaced by `resolveGround`.
+- CA contact branch (the 1/32-per-iter pushback that caused bug 2) —
+  deleted; depen handles all penetration recovery now.
+- `depenetrateCapsuleVsTriMesh` (per-feature MTV summer) — replaced by
+  `deepestCapsuleContactVsTriMesh` consumed by the world-level depen.
+- Legacy `depenetratePlanesCapsule` / `depenetrateBrushCapsule` /
+  `depenetrateCapsule` wrappers and the shape-dispatch helpers
+  (`sweepShape`, `clearanceShape`, `shapeMinkowskiExtent`,
+  `shapeMinCrossSection`, `depenetrateShape`) — folded into the player
+  kernel's direct capsule path.
+
+Acceptance: player ascends arbitrary stair geometries without stepping
+artefacts; spawn-in-floor / get-stuck-half-in-geometry recovers in 1–3
+ticks via depen + unstick fallback instead of phasing through; crouching
+under a 70-unit ceiling stays crouched until the ceiling rises.
+
 ### Phase D — Wall-attached kinematic frame
 
 The wallrun rebuild. Replace `MovementSystem::handleWallRunning`'s

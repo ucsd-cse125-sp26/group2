@@ -50,6 +50,24 @@ constexpr float k_overbounceFloor = 1.0f;  ///< Floor overbounce — exactly 1.0
 // Geometry
 constexpr float k_stepHeight = 18.0f; ///< Maximum obstacle height auto-stepped over without jumping (units).
 
+/// @brief `dot(surfaceNormal, up)` threshold above which a surface counts as walkable
+/// floor.  Cos(45.6°) ≈ 0.7 — surfaces steeper than this are walls, not floors.
+constexpr float k_floorAngleCos = 0.7f;
+
+/// @brief Distance the ground probe extends below the capsule foot to snap to
+/// descending slopes / steps.  Allows a grounded player to follow stair-downs
+/// and slope-downs without going airborne for a tick.
+constexpr float k_groundSnapDistance = 8.0f;
+
+/// @brief Maximum radius of the emergency-unstick free-space search.  When
+/// per-pass depen fails to resolve penetration, we probe outward up to this
+/// far in cardinal directions for a clear teleport target.
+constexpr float k_emergencyUnstickRadius = 64.0f;
+
+/// @brief Maximum sequential passes the deepest-first capsule depen attempts
+/// before falling through to emergency unstick.
+constexpr int k_maxDepenPasses = 6;
+
 // Gravity flip
 constexpr float k_gravityFlipCooldown = 0.5f; ///< Minimum time between gravity flips (s).
 
