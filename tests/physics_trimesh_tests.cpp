@@ -1030,6 +1030,100 @@ bool ledgeMantleRejectsInvalidStoredNormal()
     return ok;
 }
 
+bool flippedGravityClimbMovesAlongLocalUp()
+{
+    const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&climbMesh, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    vis.gravityFlipped = true;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& vel = registry.get<Velocity>(player);
+    bool ok = true;
+    ok &= expect(finiteVec3(vel.value), "flipped climb velocity should remain finite");
+    ok &= expect(vel.value.y < 0.0f, "flipped climb should move along local up (-Y), not world +Y");
+    return ok;
+}
+
+bool flippedGravityLedgeMantleMovesAlongLocalUp()
+{
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, -160.0f, 0.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::LedgeGrabbing;
+    vis.gravityFlipped = true;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.ledgeHoldTimer = tms::k_ledgeMinHoldTime;
+    sim.ledgeNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    registry.emplace<InputSnapshot>(player, input);
+
+    const physics::WorldGeometry emptyWorld{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = {},
+    };
+
+    systems::runMovement(registry, 1.0f / 128.0f, emptyWorld);
+
+    const auto& vel = registry.get<Velocity>(player);
+    bool ok = true;
+    ok &= expect(finiteVec3(vel.value), "flipped ledge mantle velocity should remain finite");
+    ok &= expect(vel.value.y < 0.0f, "flipped ledge mantle should move along local up (-Y), not world +Y");
+    return ok;
+}
+
 bool triMeshValidationReportsCookerIssues()
 {
     WorldTriMesh mesh;
@@ -1291,6 +1385,8 @@ int main()
     ok &= wallAttachmentWalksSingleMeshAdjacencyAtCorner();
     ok &= climbMantleToTopFloorKeepsFiniteState();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
+    ok &= flippedGravityClimbMovesAlongLocalUp();
+    ok &= flippedGravityLedgeMantleMovesAlongLocalUp();
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshValidationTotalsAggregateAuthoredSet();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();

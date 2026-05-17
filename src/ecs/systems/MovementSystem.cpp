@@ -1084,7 +1084,9 @@ void tryEnterClimb(glm::vec3& vel,
     // Reduce horizontal velocity immediately.
     vel.x *= tms::k_climbSidewaysMultiplier;
     vel.z *= tms::k_climbSidewaysMultiplier;
-    vel.y = std::max(vel.y, 0.0f);
+    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+    if (vel.y * gravDir < 0.0f)
+        vel.y = 0.0f;
 }
 
 /// @brief Exit climb mode and start cooldown timers.
@@ -1128,7 +1130,8 @@ void handleClimbing(glm::vec3& vel,
     const float k_decayAlpha = std::clamp(state.sim.climbTimer / tms::k_climbKickoffDuration, 0.0f, 1.0f);
     const float k_climbSpeed = std::lerp(tms::k_climbMaxSpeed, tms::k_climbMinSpeed, k_decayAlpha);
 
-    vel.y = k_climbSpeed;
+    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+    vel.y = k_climbSpeed * gravDir;
 
     // Minimal sideways movement.
     vel.x *= tms::k_climbSidewaysMultiplier;
@@ -1187,7 +1190,8 @@ void handleLedgeGrab(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& 
 
     // Auto-mantle: if holding movement keys past min hold time.
     if (state.sim.ledgeHoldTimer >= tms::k_ledgeMinHoldTime && anyMoveInput(input)) {
-        vel.y = tms::k_ledgeJumpUpForce;
+        const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
+        vel.y = tms::k_ledgeJumpUpForce * gravDir;
         const glm::vec3 ledgeNormal = normalizedOrZero(state.sim.ledgeNormal);
         if (glm::dot(ledgeNormal, ledgeNormal) > 0.0f)
             vel += ledgeNormal * tms::k_ledgeJumpBackForce;
