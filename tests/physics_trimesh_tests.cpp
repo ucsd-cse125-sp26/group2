@@ -1681,6 +1681,192 @@ bool wallrunMapCorridorEndDoesNotAttachToAirSide()
     return ok;
 }
 
+bool wallrunIntoVerticalBlockCanBecomeClimbStick()
+{
+    std::array<WorldTriMesh, 2> meshes{makeThinWallSegment(-80.0f, 0.0f), makeThinDepthWallAt(28.0f)};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-10.0f, 60.0f, 8.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {0.0f, 60.0f, 0.0f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 1u;
+    sim.wallRegion = physics::TriRegion::Edge1;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::Climbing,
+                 "wallrun into a forward vertical block should convert into climb stick");
+    ok &= expect(outSim.climbWallNormal.z < -0.7f, "wallrun-to-climb should attach to the forward blocker");
+    return ok;
+}
+
+bool sidewaysClimbCanTransitionIntoWallrun()
+{
+    std::array<WorldTriMesh, 2> meshes{
+        makeTallFrontWall(),
+        makeCookedMesh(
+            {
+                {-40.0f, -500.0f, -80.0f},
+                {-40.0f, -500.0f, 80.0f},
+                {-40.0f, 500.0f, 80.0f},
+                {-40.0f, 500.0f, -80.0f},
+            },
+            {
+                0,
+                1,
+                2,
+                0,
+                2,
+                3,
+            }),
+    };
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-24.0f, 80.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{-260.0f, 0.0f, 0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    sim.jumpHeldLastTick = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.right = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning,
+                 "sideways climb with a valid side wall should transition into wallrun");
+    ok &= expect(outSim.wallNormal.z < -0.7f, "climb-to-wallrun should keep the climb wall as the runnable wall");
+    ok &= expect(outVel.value.x < -200.0f, "climb-to-wallrun should preserve wall-tangent speed");
+    return ok;
+}
+
+bool wallrunReleaseStillOverridesAccidentalClimb()
+{
+    std::array<WorldTriMesh, 2> meshes{makeThinWallSegment(-80.0f, 0.0f), makeThinDepthWallAt(28.0f)};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-10.0f, 60.0f, 8.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {0.0f, 60.0f, 0.0f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 1u;
+    sim.wallRegion = physics::TriRegion::Edge1;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = false;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::OnFoot, "wallrun jump release should exit instead of entering climb");
+    ok &= expect(outVel.value.y > 0.0f, "wallrun jump release should keep the wall-jump upward impulse");
+    return ok;
+}
+
 bool climbMantleToTopFloorKeepsFiniteState()
 {
     const WorldTriMesh climbMesh = makeClimbWallWithTopFloor();
@@ -3008,6 +3194,9 @@ int main()
     ok &= wallrunInternalCornerKeepsMoving();
     ok &= wallrunRollScalesWithViewAngle();
     ok &= wallrunMapCorridorEndDoesNotAttachToAirSide();
+    ok &= wallrunIntoVerticalBlockCanBecomeClimbStick();
+    ok &= sidewaysClimbCanTransitionIntoWallrun();
+    ok &= wallrunReleaseStillOverridesAccidentalClimb();
     ok &= climbMantleToTopFloorKeepsFiniteState();
     ok &= climbAttachAllowsMomentumStickWithoutForward();
     ok &= climbAttachAllowsApexWideLookAngle();

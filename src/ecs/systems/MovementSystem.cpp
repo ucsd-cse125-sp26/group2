@@ -427,6 +427,9 @@ void handleJump(
 
     // Climb jump
     if (state.vis.moveMode == MoveMode::Climbing) {
+        if (state.sim.jumpHeldLastTick)
+            return;
+
         const ClimbJumpImpulse impulse = climbJumpImpulseForZone(state, posY);
         vel.y = impulse.localUp * gravDir;
         const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
@@ -794,6 +797,31 @@ bool canReattachToClimb(PlayerStateRef state, const glm::vec3& newNormal, float 
     return lowerThanPreviousAttach || differentEnoughWall;
 }
 
+void startClimbAttachment(glm::vec3& vel, PlayerStateRef state, glm::vec3 wallNormal, glm::vec3 wallPoint, float posY)
+{
+    const float gravDir = localUpSign(state.vis);
+
+    state.vis.moveMode = MoveMode::Climbing;
+    state.sim.climbWallNormal = wallNormal;
+    state.sim.climbAttachPoint = wallPoint;
+    state.sim.climbAttachHeight = climbLocalHeightFromWorldY(posY, state.vis);
+    state.sim.climbBaseline = state.sim.climbAttachHeight;
+    state.sim.climbSpaceCutoff = state.sim.climbBaseline + tms::k_climbSpaceHeight;
+    state.sim.climbAttachOffsetLimit = state.sim.climbAttachHeight + tms::k_climbAttachOffset;
+    state.sim.climbDetachPenalty = 0.0f;
+    state.sim.climbTimer = 0.0f;
+    state.sim.climbNonUpTimer = 0.0f;
+    state.sim.climbHadUpwardMotion = false;
+    state.sim.climbEndBoostQueued = false;
+    state.vis.jumpCount = 0;
+
+    const float intoWallSpeed = glm::dot(vel, wallNormal);
+    if (intoWallSpeed < 0.0f)
+        vel -= wallNormal * intoWallSpeed;
+    if (vel.y * gravDir < 0.0f)
+        vel.y = 0.0f;
+}
+
 physics::CapsuleShape capsuleQueryForWallrun(const CollisionShape& shape)
 {
     return {.radius = shape.radius, .halfHeight = shape.halfHeight, .up = glm::vec3{0.0f, 1.0f, 0.0f}};
@@ -987,6 +1015,134 @@ void finishWallrunFrame(glm::vec3& vel, PlayerStateRef state, const InputSnapsho
     state.vis.wallRunSide = (sideDot < 0.0f) ? WallSide::Right : WallSide::Left;
     state.vis.targetCameraTilt =
         std::clamp(-sideDot * tms::k_wallrunCameraTilt, -tms::k_wallrunCameraTilt, tms::k_wallrunCameraTilt);
+}
+
+bool frontWallBlocksWallrunForward(const physics::WallDetectionResult& walls, glm::vec3 wallForward)
+{
+    const glm::vec3 frontNormal = normalizedOrZero(walls.frontNormal);
+    return walls.wallFront && glm::dot(frontNormal, frontNormal) > 0.0f &&
+           std::abs(glm::dot(frontNormal, wallForward)) > 0.7f;
+}
+
+bool tryConvertWallrunToClimb(glm::vec3& vel,
+                              PlayerStateRef state,
+                              const InputSnapshot& input,
+                              const physics::WallDetectionResult& walls,
+                              float posY)
+{
+    if (!input.jump || !frontWallBlocksWallrunForward(walls, state.sim.wallForward))
+        return false;
+
+    glm::vec3 frontNormal = normalizedOrZero(walls.frontNormal);
+    if (glm::dot(frontNormal, state.sim.wallForward) > 0.0f)
+        frontNormal = -frontNormal;
+    const float gravDir = localUpSign(state.vis);
+    const glm::vec3 localUp{0.0f, gravDir, 0.0f};
+    if (std::abs(glm::dot(frontNormal, localUp)) > tms::k_climbSurfaceMinDotUp)
+        return false;
+    if (!canReattachToClimb(state, frontNormal, posY))
+        return false;
+
+    startClimbAttachment(vel, state, frontNormal, walls.frontPoint, posY);
+    return true;
+}
+
+bool tryConvertWallrunAttachmentToClimb(glm::vec3& vel,
+                                        PlayerStateRef state,
+                                        const InputSnapshot& input,
+                                        const WallAttachmentProbe& attachment,
+                                        glm::vec3 wallForward,
+                                        float posY)
+{
+    if (!input.jump)
+        return false;
+
+    glm::vec3 climbNormal = normalizedOrZero(attachment.normal);
+    if (glm::dot(climbNormal, climbNormal) <= 0.0f || std::abs(glm::dot(climbNormal, wallForward)) <= 0.7f)
+        return false;
+    if (glm::dot(climbNormal, wallForward) > 0.0f)
+        climbNormal = -climbNormal;
+
+    const glm::vec3 localUp{0.0f, localUpSign(state.vis), 0.0f};
+    if (std::abs(glm::dot(climbNormal, localUp)) > tms::k_climbSurfaceMinDotUp)
+        return false;
+    if (!canReattachToClimb(state, climbNormal, posY))
+        return false;
+
+    startClimbAttachment(vel, state, climbNormal, attachment.anchor, posY);
+    return true;
+}
+
+void startWallrunFromClimb(glm::vec3& vel,
+                           PlayerStateRef state,
+                           const InputSnapshot& input,
+                           const physics::WallDetectionResult& walls,
+                           glm::vec3 wallNormal,
+                           glm::vec3 tangentVel,
+                           float dt)
+{
+    const glm::vec3 horizontalTangent = horizVel(tangentVel);
+    const float tangentSpeed = glm::length(horizontalTangent);
+    glm::vec3 wallForward = tangentSpeed > 1.0f ? horizontalTangent / tangentSpeed : state.sim.wallForward;
+
+    wallForward -= wallNormal * glm::dot(wallForward, wallNormal);
+    wallForward.y = 0.0f;
+    const float wallForwardLen = glm::length(wallForward);
+    if (wallForwardLen > 0.001f)
+        wallForward /= wallForwardLen;
+    else {
+        wallForward = glm::cross(glm::vec3{0.0f, 1.0f, 0.0f}, wallNormal);
+        if (glm::length(wallForward) > 0.001f)
+            wallForward = glm::normalize(wallForward);
+    }
+
+    state.vis.moveMode = MoveMode::WallRunning;
+    state.sim.wallNormal = wallNormal;
+    state.sim.wallForward = wallForward;
+    state.sim.wallRunTimer = 0.0f;
+    state.sim.wallRunSpeedTimer = 0.0f;
+    clearWallCornerTransition(state);
+    clearWallCornerIgnore(state);
+
+    const glm::vec3 anchor = walls.wallFront ? walls.frontPoint : state.sim.climbAttachPoint;
+    const uint32_t meshIndex = walls.wallFront ? walls.frontMeshIndex : UINT32_MAX;
+    const uint32_t triId = walls.wallFront ? walls.frontTriId : UINT32_MAX;
+    const physics::TriRegion region = walls.wallFront ? walls.frontRegion : physics::TriRegion::Face;
+    seedWallAttachmentFromProbe(state, anchor, wallNormal, meshIndex, triId, region);
+
+    vel -= wallNormal * glm::dot(vel, wallNormal);
+    finishWallrunFrame(vel, state, input, dt);
+}
+
+bool tryConvertClimbToWallrun(glm::vec3& vel,
+                              PlayerStateRef state,
+                              const InputSnapshot& input,
+                              const physics::WallDetectionResult& walls,
+                              glm::vec3 tangentVel,
+                              bool hasSideIntent,
+                              float dt)
+{
+    if (!input.jump || !state.sim.jumpHeldLastTick || !hasSideIntent)
+        return false;
+
+    const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
+    glm::vec3 wallNormal = climbNormal;
+    if (walls.wallFront) {
+        const glm::vec3 frontNormal = normalizedOrZero(walls.frontNormal);
+        if (std::abs(glm::dot(frontNormal, climbNormal)) > 0.7f)
+            wallNormal = (glm::dot(frontNormal, climbNormal) < 0.0f) ? -frontNormal : frontNormal;
+    }
+    if (glm::dot(wallNormal, wallNormal) <= 0.0f)
+        return false;
+    if (glm::dot(wallNormal, climbNormal) < 0.7f)
+        return false;
+
+    const float tangentSpeed = glm::length(horizVel(tangentVel));
+    if (tangentSpeed < 180.0f)
+        return false;
+
+    startWallrunFromClimb(vel, state, input, walls, wallNormal, tangentVel, dt);
+    return true;
 }
 
 /// @brief Attempt to enter wallrun mode when airborne near a wall.
@@ -1316,9 +1472,22 @@ void handleWallRunning(glm::vec3& pos,
             attachment.triId = useRight ? walls.rightTriId : walls.leftTriId;
             attachment.region = useRight ? walls.rightRegion : walls.leftRegion;
         } else {
+            const float frontAhead = glm::dot(walls.frontPoint - state.sim.wallAnchor, oldForward);
+            const bool separatedForwardBlock = frontAhead > shape.radius * 2.0f;
+            if (separatedForwardBlock && tryConvertWallrunToClimb(vel, state, input, walls, posY))
+                return;
             exitWallrun(state, posY);
             return;
         }
+    }
+
+    const float frontAhead = glm::dot(walls.frontPoint - state.sim.wallAnchor, oldForward);
+    const float attachmentAhead = glm::dot(attachment.anchor - state.sim.wallAnchor, oldForward);
+    const bool separatedForwardBlock = std::max(frontAhead, attachmentAhead) > shape.radius * 2.0f;
+    const bool attachmentBlocksForward = std::abs(glm::dot(normalizedOrZero(attachment.normal), oldForward)) > 0.7f;
+    if (separatedForwardBlock && attachmentBlocksForward) {
+        if (tryConvertWallrunAttachmentToClimb(vel, state, input, attachment, oldForward, posY))
+            return;
     }
 
     if (attachment.found && state.sim.wallCornerIgnoreTimer > 0.0f &&
@@ -1464,27 +1633,7 @@ void tryEnterClimb(glm::vec3& vel,
                                                                  state.sim.climbBlacklistActive))
         return;
 
-    // Enter climbing.
-    state.vis.moveMode = MoveMode::Climbing;
-    state.sim.climbWallNormal = wallNormal;
-    state.sim.climbAttachPoint = walls.frontPoint;
-    state.sim.climbAttachHeight = posY * gravDir;
-    state.sim.climbBaseline = state.sim.climbAttachHeight;
-    state.sim.climbSpaceCutoff = state.sim.climbBaseline + tms::k_climbSpaceHeight;
-    state.sim.climbAttachOffsetLimit = state.sim.climbAttachHeight + tms::k_climbAttachOffset;
-    state.sim.climbDetachPenalty = 0.0f;
-    state.sim.climbTimer = 0.0f;
-    state.sim.climbNonUpTimer = 0.0f;
-    state.sim.climbHadUpwardMotion = false;
-    state.sim.climbEndBoostQueued = false;
-    // DJ no longer refreshes from entering climb — only from ground time.
-    state.vis.jumpCount = 0;
-
-    const float intoWallSpeed = glm::dot(vel, wallNormal);
-    if (intoWallSpeed < 0.0f)
-        vel -= wallNormal * intoWallSpeed;
-    if (vel.y * gravDir < 0.0f)
-        vel.y = 0.0f;
+    startClimbAttachment(vel, state, wallNormal, walls.frontPoint, posY);
 }
 
 /// @brief Exit climb mode and start cooldown timers.
@@ -1575,6 +1724,9 @@ void handleClimbing(glm::vec3& vel,
     const float maxTangentSpeedSq = tms::k_climbSidewaysMaxSpeed * tms::k_climbSidewaysMaxSpeed;
     if (tangentSpeedSq > maxTangentSpeedSq && tangentSpeedSq > 1e-5f)
         tangentVel *= tms::k_climbSidewaysMaxSpeed / std::sqrt(tangentSpeedSq);
+
+    if (tryConvertClimbToWallrun(vel, state, input, walls, tangentVel, hasSideIntent, dt))
+        return;
 
     const auto applyClimbVelocity = [&](float localVerticalSpeed, bool hadUpwardMotion) {
         vel = tangentVel + localUp * localVerticalSpeed;
