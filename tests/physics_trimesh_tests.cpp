@@ -1080,6 +1080,125 @@ bool duplicatedSeamVerticesStillWeldCoplanarFloor()
     return ok;
 }
 
+struct PlayerSnapshot
+{
+    glm::vec3 pos{0.0f};
+    glm::vec3 vel{0.0f};
+    CollisionShape shape{};
+    PlayerVisState vis{};
+    PlayerSimState sim{};
+};
+
+entt::entity createReplayPlayer(Registry& registry, const PlayerSnapshot& snap)
+{
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, snap.pos);
+    registry.emplace<Velocity>(player, snap.vel);
+    registry.emplace<CollisionShape>(player, snap.shape);
+    registry.emplace<PlayerVisState>(player, snap.vis);
+    registry.emplace<PlayerSimState>(player, snap.sim);
+    registry.emplace<InputSnapshot>(player);
+    return player;
+}
+
+PlayerSnapshot snapshotPlayer(const Registry& registry, entt::entity player)
+{
+    return {
+        .pos = registry.get<Position>(player).value,
+        .vel = registry.get<Velocity>(player).value,
+        .shape = registry.get<CollisionShape>(player),
+        .vis = registry.get<PlayerVisState>(player),
+        .sim = registry.get<PlayerSimState>(player),
+    };
+}
+
+void simulateReplayTick(Registry& registry,
+                        entt::entity player,
+                        const physics::WorldGeometry& world,
+                        const InputSnapshot& input)
+{
+    registry.replace<InputSnapshot>(player, input);
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+    systems::runKinematicCharacterController(registry.get<Position>(player).value,
+                                             registry.get<Velocity>(player).value,
+                                             registry.get<CollisionShape>(player),
+                                             registry.get<PlayerVisState>(player),
+                                             1.0f / 128.0f,
+                                             world,
+                                             player,
+                                             registry.get<PlayerSimState>(player).jumpedThisTick);
+}
+
+bool predictionReplayMatchesDirectKccOnThinStairs()
+{
+    const WorldTriMesh stairs = makeThinStaircase(12, 12.0f, 28.0f);
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&stairs, 1),
+    };
+
+    PlayerSnapshot initial;
+    initial.pos = {0.0f, 30.03125f, -40.0f};
+    initial.shape.type = CollisionShapeType::Capsule;
+    initial.shape.radius = 10.0f;
+    initial.shape.halfHeight = 20.0f;
+    initial.shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    initial.vis.grounded = true;
+    initial.vis.groundNormal = {0.0f, 1.0f, 0.0f};
+
+    constexpr int k_tickCount = 96;
+    constexpr int k_ackedTick = 47;
+    std::array<InputSnapshot, k_tickCount> inputs{};
+    for (int i = 0; i < k_tickCount; ++i) {
+        inputs[static_cast<size_t>(i)].forward = true;
+        inputs[static_cast<size_t>(i)].yaw = 0.0f;
+        inputs[static_cast<size_t>(i)].jump = i >= 72 && i < 76;
+    }
+
+    Registry directRegistry;
+    const entt::entity directPlayer = createReplayPlayer(directRegistry, initial);
+    PlayerSnapshot ackSnapshot{};
+    for (int tick = 0; tick < k_tickCount; ++tick) {
+        simulateReplayTick(directRegistry, directPlayer, world, inputs[static_cast<size_t>(tick)]);
+        if (tick == k_ackedTick)
+            ackSnapshot = snapshotPlayer(directRegistry, directPlayer);
+    }
+    const PlayerSnapshot directFinal = snapshotPlayer(directRegistry, directPlayer);
+
+    Registry replayRegistry;
+    const entt::entity replayPlayer = createReplayPlayer(replayRegistry, ackSnapshot);
+    for (int tick = k_ackedTick + 1; tick < k_tickCount; ++tick)
+        simulateReplayTick(replayRegistry, replayPlayer, world, inputs[static_cast<size_t>(tick)]);
+    const PlayerSnapshot replayFinal = snapshotPlayer(replayRegistry, replayPlayer);
+
+    bool ok = true;
+    ok &= expectNear(replayFinal.pos.x, directFinal.pos.x, 0.001f, "prediction replay should match direct X");
+    ok &= expectNear(replayFinal.pos.y, directFinal.pos.y, 0.001f, "prediction replay should match direct Y");
+    ok &= expectNear(replayFinal.pos.z, directFinal.pos.z, 0.001f, "prediction replay should match direct Z");
+    ok &= expectNear(replayFinal.vel.x, directFinal.vel.x, 0.001f, "prediction replay should match direct VX");
+    ok &= expectNear(replayFinal.vel.y, directFinal.vel.y, 0.001f, "prediction replay should match direct VY");
+    ok &= expectNear(replayFinal.vel.z, directFinal.vel.z, 0.001f, "prediction replay should match direct VZ");
+    ok &= expect(replayFinal.vis.grounded == directFinal.vis.grounded, "prediction replay should match grounded state");
+    ok &= expect(replayFinal.vis.moveMode == directFinal.vis.moveMode, "prediction replay should match move mode");
+    ok &= expectNear(replayFinal.vis.groundNormal.x,
+                     directFinal.vis.groundNormal.x,
+                     0.001f,
+                     "prediction replay should match ground normal X");
+    ok &= expectNear(replayFinal.vis.groundNormal.y,
+                     directFinal.vis.groundNormal.y,
+                     0.001f,
+                     "prediction replay should match ground normal Y");
+    ok &= expectNear(replayFinal.vis.groundNormal.z,
+                     directFinal.vis.groundNormal.z,
+                     0.001f,
+                     "prediction replay should match ground normal Z");
+    return ok;
+}
+
 bool playerWallAttachmentStateHasStableMeshIdentity()
 {
     PlayerSimState state;
@@ -1118,6 +1237,7 @@ int main()
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();
     ok &= duplicatedSeamVerticesStillWeldCoplanarFloor();
+    ok &= predictionReplayMatchesDirectKccOnThinStairs();
     ok &= playerWallAttachmentStateHasStableMeshIdentity();
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
