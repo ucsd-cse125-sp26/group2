@@ -3,8 +3,8 @@
 ///
 /// Production separated maps preserve authored collision meshes as static
 /// triangle surfaces. Primitive fitting remains a compatibility path for
-/// prototype maps, explicitly-forced debug collections, and standalone props.
-/// V-HACD is build-time opt-in only and is disabled in normal game builds.
+/// prototype maps and standalone props. V-HACD is build-time opt-in for
+/// experimental prop decomposition only and is not part of map loading.
 
 #include "MapLoader.hpp"
 
@@ -86,125 +86,6 @@ bool isUnderCollectionNode(const aiNode* node, const std::string& collectionName
         cur = cur->mParent;
     }
     return false;
-}
-
-/// @brief Parse an explicit `COL_<TYPE>_<name>` prefix on the node's own name.
-///
-/// PR-31 — primary authoring path going forward.  Lets the user (or the
-/// Blender export script) declare a collision shape unambiguously per
-/// object, without depending on sub-collection nesting OR on the loader's
-/// geometric heuristics getting it right.  Mapping (case-insensitive on
-/// the type word):
-///
-///   `COL_BOX_*`       / `COL_AABB_*`     → "boxes"
-///   `COL_RAMP_*`      / `COL_WEDGE_*`    → "brushes" (5-plane wedge)
-///   `COL_BRUSH_*`     / `COL_CONVEX_*`   → "brushes" (any convex)
-///   `COL_CYL_*`       / `COL_CYLINDER_*` → "cylinders"
-///   `COL_SPHERE_*`                       → "spheres"
-///   `COL_MESH_*`      / `COL_TRIMESH_*`  → "meshes"
-///   `COL_PLATFORM_*`  / `COL_PLANE_*`    → "platforms" (thin AABB, PR-31)
-///   `COL_AUTO_*`                         → ""           (explicit auto)
-///
-/// Anything that doesn't match (e.g. `COL_Plane.014` where the second word
-/// is a source-object name, not a type word) returns "" (auto-detect)
-/// — preserves the pre-PR-31 behaviour where unprefixed `COL_*` flowed
-/// through the geometric classifier.
-std::string parseTypePrefix(const std::string& nodeName)
-{
-    if (nodeName.size() < 5)
-        return "";
-    if (!(nodeName[0] == 'C' || nodeName[0] == 'c') || !(nodeName[1] == 'O' || nodeName[1] == 'o') ||
-        !(nodeName[2] == 'L' || nodeName[2] == 'l') || nodeName[3] != '_')
-        return "";
-
-    const std::string rest = nodeName.substr(4);
-    const auto sep = rest.find('_');
-    if (sep == std::string::npos)
-        return "";
-
-    std::string word = rest.substr(0, sep);
-    for (char& c : word)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-
-    if (word == "BOX" || word == "AABB")
-        return "boxes";
-    if (word == "RAMP" || word == "WEDGE" || word == "BRUSH" || word == "CONVEX")
-        return "brushes";
-    if (word == "CYL" || word == "CYLINDER")
-        return "cylinders";
-    if (word == "SPHERE")
-        return "spheres";
-    if (word == "MESH" || word == "TRIMESH")
-        return "meshes";
-    if (word == "PLATFORM" || word == "PLANE")
-        return "platforms";
-    if (word == "AUTO")
-        return "";
-    return ""; // unrecognized type word — fall through to auto-detect
-}
-
-/// @brief Determine the collision sub-collection type from ancestor node names.
-/// Returns: "boxes", "brushes", "cylinders", "spheres", "meshes", "platforms",
-/// or "" (auto).
-///
-/// Three Blender authoring conventions are supported, in priority order:
-///   1. **Per-object type prefix (PR-31):** `COL_<TYPE>_<name>` on the
-///      collision object itself.  Highest priority — explicit user intent
-///      always wins.  See `parseTypePrefix` for the type vocabulary.
-///   2. **Sub-collection (plural):** wrap collision objects in a child
-///      collection named "Boxes", "Cylinders", "Spheres", "Brushes", or
-///      "Meshes".  The collection becomes a parent node in the GLB; we
-///      walk ancestors here.
-///   3. **Object name (singular):** name the collision object after its
-///      shape (the Blender default for primitive adds — "Cylinder",
-///      "Sphere", etc.).  Useful when collision is tagged by name prefix
-///      without nested sub-collections.
-///
-/// The node's own name is checked first because it is the more specific signal:
-/// users who deliberately group meshes under a sub-collection are typically
-/// fine with auto-detection for the individual meshes, but a mesh actually
-/// named "Cylinder" almost always *is* the Blender cylinder primitive (which
-/// auto-detection mis-fits as a sphere when the cylinder is rotated off-Y).
-std::string getCollectionType(const aiNode* node)
-{
-    // 1) PR-31: explicit `COL_<TYPE>_<name>` prefix on the node's own name.
-    //    Wins over everything else — when the user has typed (or the
-    //    Blender script has emitted) a type word, honour it.
-    {
-        const std::string ownName(node->mName.C_Str());
-        if (auto explicitType = parseTypePrefix(ownName); !explicitType.empty())
-            return explicitType;
-    }
-
-    // 2) Check the node's own name for Blender-style shape keywords.  Only
-    //    "cylinder" needs help today: the auto AABB / fitSphere paths already
-    //    handle "Cube"/"Plane"/"Sphere"/"Icosphere" correctly, but a rotated
-    //    cylinder has equidistant rim vertices and slips into fitSphere.
-    {
-        const std::string ownName(node->mName.C_Str());
-        if (containsCI(ownName, "cylinder"))
-            return "cylinders";
-    }
-
-    // 3) Walk ancestors looking for sub-collection names (plural).
-    const aiNode* cur = node->mParent;
-    while (cur != nullptr) {
-        std::string name(cur->mName.C_Str());
-        if (containsCI(name, "boxes"))
-            return "boxes";
-        if (containsCI(name, "brushes"))
-            return "brushes";
-        if (containsCI(name, "cylinders"))
-            return "cylinders";
-        if (containsCI(name, "spheres"))
-            return "spheres";
-        if (containsCI(name, "meshes"))
-            return "meshes";
-        if (containsCI(name, "platforms"))
-            return "platforms";
-        cur = cur->mParent;
-    }
-    return ""; // auto-detect
 }
 
 /// @brief Walk the scene-graph ancestry and accumulate the world transform.
@@ -628,7 +509,7 @@ bool extractConvexBrush(
     if (static_cast<int>(uniquePlanes.size()) < 4) {
         if (diagNodeName)
             SDL_Log("MapLoader: brush reject '%s' — only %zu unique plane(s) (need ≥ 4 for closed convex; this is "
-                    "typical for thin 2D quads — try `COL_PLATFORM_<name>` instead)",
+                    "typical for thin 2D quads — author map collision as a separated `COL_` trimesh instead)",
                     diagNodeName,
                     uniquePlanes.size());
         return false;
@@ -940,11 +821,6 @@ bool shouldSkipNode(const char* nodeName)
     return false;
 }
 
-/// @brief Determine the best collision primitive for a mesh and add it to `out`.
-/// @param decomposeNonConvex  If true and the mesh fails the single-hull
-///        convex-brush check, try legacy V-HACD before falling back to
-///        triMesh. Normal builds have V-HACD compiled out, so this simply
-///        logs and falls back.
 /// @brief Look up the dominant `SurfaceType` for a mesh by reading its
 /// assigned Blender material name.  Falls back to `Concrete` if the scene has
 /// no materials, the mesh has no index, or the name doesn't match.
@@ -1156,6 +1032,9 @@ void extractMeshCollision(const aiMesh* mesh,
     }
 
     // --- Auto-detection ---
+    // Used by prototype/debug maps and standalone prop collision only.
+    // Production separated maps pass forceType="meshes" above and never
+    // enter this primitive-guessing path.
     // Order: AABB → cylinder → sphere → brush → fallback.
     // Cylinder before sphere because a cylinder whose height ≈ diameter has a
     // roughly cubic AABB and near-equal vertex radii — it would pass the sphere
@@ -1227,8 +1106,9 @@ void extractMeshCollision(const aiMesh* mesh,
         }
     }
 
-    // 4.5. Legacy opt-in V-HACD. Disabled in normal builds and never used for
-    //     production `COL_` map meshes; those are authored triangle surfaces.
+    // 4.5. Legacy opt-in V-HACD. Disabled in normal builds and only reachable
+    //      for standalone props; production `COL_` map meshes are authored
+    //      triangle surfaces and bypass this auto-detection function.
     if (decomposeNonConvex) {
         const size_t k_brushesBefore = out.brushes.size();
         if (decomposeIntoBrushes(mesh, world, scale, nodeName, out) > 0) {
@@ -1280,8 +1160,6 @@ void extractCollision(const aiNode* node,
                       const aiScene* scene,
                       const std::string& collectionName,
                       bool allAreCollision,
-                      bool guessShapesProcessed,
-                      bool decomposeNonConvex,
                       float scale,
                       MapCollisionData& out)
 {
@@ -1291,41 +1169,20 @@ void extractCollision(const aiNode* node,
     if (isCollision) {
         const glm::mat4 world = accumulatedTransform(node);
 
-        // Pick the shape strategy:
-        //   - Prototype mode (allAreCollision): no forcing — let auto-detection
-        //     pick the best primitive for every mesh.
-        //   - Separated mode WITHOUT shape-guessing (default): force every
-        //     collision mesh to a raw triangle mesh, preserving the exact
-        //     geometry the artist authored in Blender.
-        //   - Separated mode WITH shape-guessing: respect sub-collection
-        //     naming ("Boxes/", "Cylinders/") and Blender primitive names,
-        //     falling back to auto-detection.
-        std::string forceType;
-        if (!allAreCollision) {
-            forceType = guessShapesProcessed ? getCollectionType(node) : std::string("meshes");
-        }
-
-        // V-HACD only fires in separated + shape-guessing mode and only on
-        // meshes that fall through to auto-detection (no forced type).  In
-        // prototype mode every mesh is collision (often hundreds), and forced
-        // triMesh / brush requests should be honoured exactly.
-        const bool tryDecompose = decomposeNonConvex && !allAreCollision && guessShapesProcessed && forceType.empty();
+        // Prototype mode auto-detects cheap primitives because every render
+        // mesh is collision. Separated production mode always preserves
+        // collision nodes as authored triangle surfaces; no primitive guessing
+        // or V-HACD is allowed in the map path.
+        const std::string forceType = allAreCollision ? std::string{} : std::string{"meshes"};
 
         for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
             const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
-            extractMeshCollision(mesh, scene, world, scale, forceType, node->mName.C_Str(), tryDecompose, out);
+            extractMeshCollision(mesh, scene, world, scale, forceType, node->mName.C_Str(), false, out);
         }
     }
 
     for (unsigned int c = 0; c < node->mNumChildren; ++c)
-        extractCollision(node->mChildren[c],
-                         scene,
-                         collectionName,
-                         allAreCollision,
-                         guessShapesProcessed,
-                         decomposeNonConvex,
-                         scale,
-                         out);
+        extractCollision(node->mChildren[c], scene, collectionName, allAreCollision, scale, out);
 }
 
 } // namespace
@@ -1354,14 +1211,7 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
     out.triMeshes.clear();
     out.staticBroadphase = {};
 
-    extractCollision(scene->mRootNode,
-                     scene,
-                     opts.collisionCollection,
-                     opts.allMeshesAreCollision,
-                     opts.guessShapesProcessed,
-                     opts.decomposeNonConvex,
-                     opts.scale,
-                     out);
+    extractCollision(scene->mRootNode, scene, opts.collisionCollection, opts.allMeshesAreCollision, opts.scale, out);
 
     const size_t total =
         out.boxes.size() + out.brushes.size() + out.cylinders.size() + out.spheres.size() + out.triMeshes.size();

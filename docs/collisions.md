@@ -61,13 +61,7 @@ flowchart TD
   Imp --> AuthMode{author mode}
   AuthMode -- "prototype: every mesh is collision" --> Type
   AuthMode -- "production: prefix COL_*" --> Mesh[COL_* → authored triMesh]
-  AuthMode -- "legacy/debug opt-in" --> Type[type-prefix parse]
-  Type --> Box[COL_BOX_* → AABB]
-  Type --> Ramp[COL_RAMP_* → brush]
-  Type --> Brush[COL_BRUSH_* → brush]
-  Type --> Cyl[COL_CYL_* → cylinder]
-  Type --> Sphere[COL_SPHERE_* → sphere]
-  Type --> Auto[COL_AUTO_* / no prefix → auto-detect:<br/>AABB → cyl → sphere → convex brush → triMesh]
+  Type --> Auto[auto-detect:<br/>AABB → cyl → sphere → convex brush → triMesh]
   Mesh --> Cook[buildTriMeshBVH +<br/>weldTriMesh +<br/>edgeNeighbor adjacency]
   Auto --> Cook
   Cook --> World[WorldGeometry singleton<br/>via physics::setActiveWorld]

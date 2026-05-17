@@ -133,7 +133,7 @@ sequenceDiagram
 flowchart TD
   Call["gamemap::loadConfiguredMap(out, tag)"] --> Phys["physics::loadMapCollision<br/>(extract authored collision trimeshes)"]
   Phys --> Mesh["COL_* production nodes<br/>preserved as WorldTriMesh"]
-  Phys --> Legacy["legacy/debug opt-in:<br/>primitive fitting or prop V-HACD<br/>(GROUP2_ENABLE_VHACD only)"]
+  Phys --> Legacy["prototype/prop compatibility:<br/>primitive fitting<br/>prop V-HACD only if enabled"]
   Mesh --> Cook[buildTriMeshBVH + weldTriMesh]
   Legacy --> Cook
   Call --> ReImport[Re-import GLB without flags]
@@ -150,8 +150,7 @@ flowchart TD
 ```cpp
 inline constexpr bool k_separatedCollisionMap = true;    // collision nodes prefixed COL_ in GLB
 inline constexpr const char* k_collisionPattern = "COL_";
-inline constexpr bool k_guessShapesProcessed = false;    // don't auto-fit
-inline constexpr bool k_useVhacd = false;                // also requires GROUP2_ENABLE_VHACD=ON
+inline constexpr bool k_useVhacd = false;                // props only; also requires GROUP2_ENABLE_VHACD=ON
 ```
 
 ### Spawn/powerup/weapon spawner globals

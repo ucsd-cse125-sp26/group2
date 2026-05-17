@@ -11,9 +11,10 @@
 /// visual geometry is already simple enough to collide against.
 ///
 /// Production separated maps load collision meshes as authored triangle
-/// surfaces. Primitive guessing is an opt-in compatibility path for
-/// prototype/debug content and standalone props. V-HACD is disabled in normal
-/// builds and only exists behind the `GROUP2_ENABLE_VHACD` build option.
+/// surfaces. Primitive fitting is kept only for prototype/debug maps where
+/// every mesh is treated as collision, and for standalone prop collision.
+/// V-HACD is never part of the map load path; it remains a build-time opt-in
+/// for experimental prop decomposition only.
 
 #pragma once
 
@@ -83,53 +84,10 @@ struct MapLoadOptions
     /// through the world even if the map mesh has tiny cracks.
     bool addFloorPlane = false;
 
-    /// In separated mode (`allMeshesAreCollision = false`), should the loader
-    /// auto-detect/guess each collision mesh's best-fitting primitive
-    /// (AABB / cylinder / sphere / convex brush), or load it as an authored
-    /// triangle mesh?
-    ///
-    ///   true            — run the legacy auto-detection pipeline
-    ///                     (AABB → cylinder → sphere → convex brush → triMesh)
-    ///                     plus sub-collection / name forcing.  Convex shapes
-    ///                     end up as cheap primitives or brushes; only truly
-    ///                     non-convex meshes fall back to triMesh.  Convex
-    ///                     primitives are dramatically cheaper at runtime and
-    ///                     don't suffer triMesh edge-jitter on contact.
-    ///   false (default) — preserve exactly what Blender's collision section
-    ///                     contains: every collision mesh becomes a triangle
-    ///                     mesh, vertex-for-vertex.  Sub-collection name
-    ///                     overrides ("Boxes/", "Cylinders/", …) and Blender
-    ///                     primitive-name hints ("Cylinder") are ignored.
-    ///                     Use this when the artist has authored exact
-    ///                     collision hulls and the loader must not second-
-    ///                     guess them.
-    ///
-    /// Has no effect in prototype mode (`allMeshesAreCollision = true`):
-    /// every mesh is collision there, and forcing all of them to triMesh
-    /// would be prohibitively expensive.
-    bool guessShapesProcessed = false;
-
-    /// In separated mode with shape-guessing on, when a collision mesh is
-    /// non-convex (so it can't be a single `WorldBrush`), should the loader
-    /// run V-HACD convex decomposition to split it into multiple brushes?
-    ///
-    ///   true            — non-convex meshes go through V-HACD; the resulting
-    ///                     hulls are appended as `WorldBrush`es.  Smoother
-    ///                     collision than triMesh (no per-triangle MTV
-    ///                     jitter) and cheaper at runtime.  Costs a few
-    ///                     hundred milliseconds to a few seconds at *load*
-    ///                     time per non-convex mesh, depending on size.
-    ///   false (default) — skip decomposition; non-convex meshes fall through
-    ///                     to `WorldTriMesh`.
-    ///
-    /// This is a compatibility/prototype option. Production map collision is
-    /// authored as simplified triangle surfaces and should keep this false.
-    /// Normal builds also compile without V-HACD; setting this true only has
-    /// an effect when CMake is configured with GROUP2_ENABLE_VHACD=ON.
-    ///
-    /// Has no effect when `guessShapesProcessed = false` or when
-    /// `allMeshesAreCollision = true`.
-    bool decomposeNonConvex = false;
+    /// Separated production maps always preserve collision nodes as authored
+    /// `WorldTriMesh` surfaces. Primitive fitting and optional V-HACD are not
+    /// exposed here so client/server map loading cannot drift from the
+    /// trimesh-first contract.
 };
 
 /// API
@@ -138,9 +96,8 @@ struct MapLoadOptions
 ///
 /// Walks the Assimp scene graph.  For each mesh node, determines whether it
 /// belongs to the collision collection (by checking ancestor node names) or,
-/// in prototype mode, always. In separated production mode with
-/// `guessShapesProcessed = false`, collision meshes are preserved as
-/// `WorldTriMesh` vertex-for-vertex after Assimp triangulation.
+/// in prototype mode, always. In separated production mode, collision meshes
+/// are preserved as `WorldTriMesh` vertex-for-vertex after Assimp triangulation.
 ///
 /// This function does **not** produce visual / renderable data — use the
 /// existing `Renderer::loadSceneModel()` path for that.

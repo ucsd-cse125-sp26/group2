@@ -55,18 +55,6 @@ inline constexpr bool k_separatedCollisionMap = true;
 /// Matched case-insensitively against Assimp node names.
 inline constexpr const char* k_collisionPattern = "COL_";
 
-/// @brief Should separated collision meshes be auto-fit to primitive shapes?
-///
-/// Production maps keep this false: `COL_` Blender collision nodes are loaded
-/// as `WorldTriMesh` vertex-for-vertex after export triangulation. The old
-/// auto-detection pipeline remains available only for prototype/debug maps
-/// that deliberately opt into primitive guessing.
-///
-/// Has no effect in prototype mode (`k_separatedCollisionMap = false`):
-/// every mesh is collision there, and forcing all of them to triMesh would
-/// be prohibitively expensive.
-inline constexpr bool k_guessShapesProcessed = false;
-
 /// @brief Run V-HACD convex decomposition on non-convex prop meshes?
 ///
 /// Production map collision does not use V-HACD. `COL_` map nodes are
@@ -77,7 +65,7 @@ inline constexpr bool k_guessShapesProcessed = false;
 /// when CMake is configured with GROUP2_ENABLE_VHACD=ON. When `false`
 /// (default), V-HACD is bypassed and non-convex props fall back to triMesh.
 /// Disable to:
-///   * skip the multi-second V-HACD step during map iteration,
+///   * skip multi-second prop decomposition during iteration,
 ///   * sidestep V-HACD regressions on a particular asset, or
 ///   * keep parity with bot/headless tooling that doesn't need smooth
 ///     curved-contact collision.
@@ -103,9 +91,7 @@ inline constexpr bool k_useVhacd = false;
     opts.allMeshesAreCollision = !k_separatedCollisionMap;
     if (k_separatedCollisionMap)
         opts.collisionCollection = k_collisionPattern;
-    opts.guessShapesProcessed = k_guessShapesProcessed;
-    opts.decomposeNonConvex = k_useVhacd; // PR-30: project-wide V-HACD gate.
-    opts.addFloorPlane = false;           // Map geometry provides its own floor.
+    opts.addFloorPlane = false; // Map geometry provides its own floor.
     return opts;
 }
 
