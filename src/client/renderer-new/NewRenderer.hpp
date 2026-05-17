@@ -315,6 +315,9 @@ public:
     /// to populate its dropdown.
     void scanHDRFiles();
 
+    bool setRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+
+    void setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
     // ─── Public settings members (mutable directly from Game / debug UI) ─────
     //
     // The legacy renderer exposed these as direct member access.  Keep the
@@ -334,7 +337,6 @@ private:
 
     bool createGeometryPipeline();
     bool createHudPipeline();
-    bool createSkinningPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
@@ -351,6 +353,7 @@ private:
     void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
+
 
     // ─── Member state ────────────────────────────────────────────────────────
 

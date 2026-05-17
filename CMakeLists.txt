@@ -593,7 +593,8 @@ set(SHADER_NEW_OUT_DIR "${CMAKE_BINARY_DIR}/shaders-new")
 file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
 
 set(SHADER_NEW_SOURCES
-    geometry.vert geometry.frag
+        skinned_geometry.vert
+        geometry.vert geometry.frag
     hud.vert hud.frag
 )
 

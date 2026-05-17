@@ -68,6 +68,7 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    colorTarget_ = SDL_GetGPUSwapchainTextureFormat(device_, window_);
     shaderFormat_ = Boilerplate::selectShaderFormat(device_);
     if (shaderFormat_ == SDL_GPU_SHADERFORMAT_INVALID) {
         SDL_Log("NewRenderer: no supported shader format (got 0x%x)",
@@ -105,7 +106,6 @@ bool NewRenderer::init(SDL_Window* window)
     }
 
     camera_ = NewCamera();
-    colorTarget_ = SDL_GetGPUSwapchainTextureFormat(device_, window_);
 
     skinnedRenderer_.init(device_,colorTarget_,shaderFormat_);
 
@@ -187,7 +187,6 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
 
-    SDL_Log("DRAW FRAME");
     const Uint64 freq = SDL_GetPerformanceFrequency();
     const Uint64 t0 = SDL_GetPerformanceCounter();
 
@@ -214,8 +213,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
-    SDL_Log("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
-
     if (!ensureDepthTextureSize(width, height)) {
         SDL_Log("NewRenderer::drawFrame: ensureDepthTextureSize failed");
         SDL_CancelGPUCommandBuffer(cmd);
@@ -235,7 +232,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     drawGeometryPass(swapchain, cmd);
-    //drawWeaponPass(swapchain,cmd);
+    drawWeaponPass(swapchain,cmd);
     drawUIPass(swapchain, cmd);
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
@@ -271,7 +268,7 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);
 
-    //drawSkinnedModels(geometryPass,cmd);
+    drawSkinnedModels(geometryPass,cmd);
 
     //drawWeapon(geometryPass, cmd);
 
@@ -676,3 +673,13 @@ void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)
 //     // `availableHDRFiles` with absolute paths.  Called once at init.
 //     availableHDRFiles.clear();
 // }
+
+bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return skinnedRenderer_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+{
+    skinnedRenderer_.setFrame(palette, instances);
+}
