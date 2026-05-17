@@ -2641,6 +2641,92 @@ bool climbSameWallReattachRequiresMeaningfulDrop()
     return ok;
 }
 
+struct ClimbAttachResult
+{
+    MoveMode mode{MoveMode::OnFoot};
+    PlayerSimState sim{};
+};
+
+ClimbAttachResult
+runReattachAttempt(float y, glm::vec3 previousNormal, float previousAttachHeight, float baseline, float cutoff)
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, y, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbPreviousWallNormal = previousNormal;
+    sim.climbPreviousAttachHeight = previousAttachHeight;
+    sim.climbBaseline = baseline;
+    sim.climbSpaceCutoff = cutoff;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    return {
+        registry.get<PlayerVisState>(player).moveMode,
+        registry.get<PlayerSimState>(player),
+    };
+}
+
+bool sameWallReattachRequiresDroppingBelowAttachPoint()
+{
+    const ClimbAttachResult high = runReattachAttempt(120.0f, {0.0f, 0.0f, -1.0f}, 100.0f, 0.0f, 200.0f);
+    const ClimbAttachResult low = runReattachAttempt(90.0f, {0.0f, 0.0f, -1.0f}, 100.0f, 0.0f, 200.0f);
+
+    bool ok = true;
+    ok &= expect(high.mode == MoveMode::OnFoot, "same-wall reattach should be blocked above previous attach height");
+    ok &= expect(low.mode == MoveMode::Climbing,
+                 "same-wall reattach should be allowed after dropping below attach height");
+    return ok;
+}
+
+bool differentWallReattachAllowedAbovePreviousAttachByAngle()
+{
+    const ClimbAttachResult result = runReattachAttempt(120.0f, {1.0f, 0.0f, 0.0f}, 100.0f, 0.0f, 200.0f);
+
+    bool ok = true;
+    ok &= expect(result.mode == MoveMode::Climbing,
+                 "different-wall reattach should be allowed above previous attach height");
+    return ok;
+}
+
+bool reattachStillRequiresValidClimbSpace()
+{
+    const ClimbAttachResult result = runReattachAttempt(160.0f, {1.0f, 0.0f, 0.0f}, 100.0f, 0.0f, 120.0f);
+
+    bool ok = true;
+    ok &= expect(result.mode == MoveMode::OnFoot, "reattach should be blocked when current height exceeds climb space");
+    return ok;
+}
+
 bool climbSpaceDefaultsAreDeterministic()
 {
     PlayerSimState state;
@@ -2942,6 +3028,9 @@ int main()
     ok &= climbNeutralInputSlipsBeforeDetach();
     ok &= climbNeutralInputDetachesAfterGrace();
     ok &= climbSameWallReattachRequiresMeaningfulDrop();
+    ok &= sameWallReattachRequiresDroppingBelowAttachPoint();
+    ok &= differentWallReattachAllowedAbovePreviousAttachByAngle();
+    ok &= reattachStillRequiresValidClimbSpace();
     ok &= climbSpaceDefaultsAreDeterministic();
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshValidationTotalsAggregateAuthoredSet();

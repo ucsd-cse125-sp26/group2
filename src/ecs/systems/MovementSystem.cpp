@@ -765,6 +765,35 @@ bool isClimbBlacklisted(const glm::vec3& normal, float height, const glm::vec3& 
     return height > blHeight - tms::k_climbRegrabLowerHeight;
 }
 
+bool hasPreviousClimbAttach(const PlayerSimState& sim)
+{
+    return sim.climbPreviousAttachHeight > -1e9f && usableNormal(sim.climbPreviousWallNormal);
+}
+
+bool hasActiveClimbSpace(const PlayerSimState& sim)
+{
+    return sim.climbSpaceCutoff > sim.climbBaseline + 0.001f;
+}
+
+bool canReattachToClimb(PlayerStateRef state, const glm::vec3& newNormal, float posY)
+{
+    const float currentAttachHeight = climbLocalHeightFromWorldY(posY, state.vis);
+    if (hasActiveClimbSpace(state.sim) &&
+        (currentAttachHeight < state.sim.climbBaseline || currentAttachHeight > state.sim.climbSpaceCutoff))
+    {
+        return false;
+    }
+
+    if (!hasPreviousClimbAttach(state.sim))
+        return true;
+
+    const glm::vec3 previousNormal = normalizedOrZero(state.sim.climbPreviousWallNormal);
+    const float normalAngle = std::acos(std::clamp(glm::dot(newNormal, previousNormal), -1.0f, 1.0f));
+    const bool differentEnoughWall = normalAngle >= glm::radians(tms::k_climbReattachDifferentWallAngle);
+    const bool lowerThanPreviousAttach = currentAttachHeight < state.sim.climbPreviousAttachHeight;
+    return lowerThanPreviousAttach || differentEnoughWall;
+}
+
 physics::CapsuleShape capsuleQueryForWallrun(const CollisionShape& shape)
 {
     return {.radius = shape.radius, .halfHeight = shape.halfHeight, .up = glm::vec3{0.0f, 1.0f, 0.0f}};
@@ -1424,12 +1453,15 @@ void tryEnterClimb(glm::vec3& vel,
     if (!hasInputIntent && !hasMomentumIntent)
         return;
 
+    if (!canReattachToClimb(state, wallNormal, posY))
+        return;
+
     // Blacklist check.
-    if (isClimbBlacklisted(wallNormal,
-                           posY,
-                           state.sim.climbBlacklistNormal,
-                           state.sim.climbBlacklistHeight,
-                           state.sim.climbBlacklistActive))
+    if (!hasPreviousClimbAttach(state.sim) && isClimbBlacklisted(wallNormal,
+                                                                 posY,
+                                                                 state.sim.climbBlacklistNormal,
+                                                                 state.sim.climbBlacklistHeight,
+                                                                 state.sim.climbBlacklistActive))
         return;
 
     // Enter climbing.
