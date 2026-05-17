@@ -113,6 +113,32 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
     SDL_snprintf(outBuf, bufSize, "Player #%d", cid.value);
     return outBuf;
 }
+
+std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
+{
+    std::vector<RigMeshSource> sources;
+    sources.reserve(rig.meshes().size());
+
+    for (const RigMeshData& mesh : rig.meshes()) {
+        RigMeshSource source;
+        source.bindPoseVertices = mesh.baseVertices;
+        source.indices = mesh.indices;
+        source.boneInfluences.reserve(mesh.skinWeights.size());
+
+        for (const SkinWeight& weight : mesh.skinWeights) {
+            BoneInfluence influence;
+            for (int i = 0; i < 4; ++i) {
+                influence.boneIndices[i] = weight.boneIndices[i];
+                influence.boneWeights[i] = weight.weights[i];
+            }
+            source.boneInfluences.push_back(influence);
+        }
+
+        sources.push_back(std::move(source));
+    }
+
+    return sources;
+}
 } // namespace
 
 bool Game::initDebugUI(SDL_Window* windowPtr)
@@ -517,6 +543,13 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
             SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
             SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
+
+            if (!renderer->skinned().rigInstalled()) {
+                const std::vector<RigMeshSource> rigMeshes = buildRigMeshSources(charRig_);
+                if (!renderer->setRig(rigMeshes, charRig_.numJoints())) {
+                    SDL_Log("[client] WARNING: renderer rejected skinned rig — remote player bodies may be invisible");
+                }
+            }
 
             // Auto-calculate rig scale so the animated model matches the
             // player's standing hitbox height, and compute the vertical
@@ -1860,6 +1893,13 @@ SDL_AppResult Game::iterate()
         // ─── Phase 3: sequential registry writeback ─────────────────────────
         // JointMatrices is an EnTT component; insert/update needs the main
         // thread.  Cheap loop — just copies a per-char matrix array.
+        std::vector<glm::mat4> bonePalette;
+        std::vector<SkinnedInstance> skinnedInstances;
+        if (numJoints > 0 && drawSlot > 0) {
+            bonePalette.reserve(static_cast<size_t>(drawSlot) * static_cast<size_t>(numJoints));
+            skinnedInstances.reserve(drawSlot);
+        }
+
         for (const auto& c : candidates) {
             if (c.sampleThisFrame) {
                 auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
@@ -1883,7 +1923,22 @@ SDL_AppResult Game::iterate()
                     dst.weight = active ? src.weight : 0.0f;
                 }
             }
+
+            if (c.drawThisFrame && c.ac != nullptr && c.ac->animator) {
+                const std::vector<glm::mat4>& skinMatrices = c.ac->animator->skinMatrices();
+                if (skinMatrices.size() != static_cast<size_t>(numJoints))
+                    continue;
+
+                SkinnedInstance instance;
+                instance.worldTransform = c.worldTransform;
+                instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
+                instance.tint = c.tint;
+
+                bonePalette.insert(bonePalette.end(), skinMatrices.begin(), skinMatrices.end());
+                skinnedInstances.push_back(instance);
+            }
         }
+        renderer->setSkinnedFrame(bonePalette, skinnedInstances);
 
         // Update hitbox capsules from bone transforms (client-side for debug visualization).
         if (charRig_.isLoaded())
