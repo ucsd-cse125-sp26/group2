@@ -1185,6 +1185,104 @@ bool wallrunMapCorridorTurnsIntoCorridor()
                  "map corridor outside corner should keep wallrunning onto the corridor wall");
     ok &= expect(outSim.wallNormal.z < -0.7f, "map corridor handoff should attach to the upper corridor wall");
     ok &= expect(outVel.value.x > 0.0f, "map corridor handoff should turn into the corridor instead of away from it");
+    ok &= expect(glm::length(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}) > 300.0f,
+                 "map corridor handoff should preserve moving wallrun speed instead of stopping in place");
+    return ok;
+}
+
+bool wallrunInternalCornerKeepsMoving()
+{
+    WorldTriMesh corner = makeCookedMesh(
+        {
+            {0.0f, 0.0f, -80.0f},
+            {0.0f, 40.0f, -80.0f},
+            {0.0f, 40.0f, 20.0f},
+            {0.0f, 0.0f, 20.0f},
+            {80.0f, 0.0f, 20.0f},
+            {80.0f, 40.0f, 20.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+            3,
+            2,
+            5,
+            3,
+            5,
+            4,
+        });
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&corner, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-10.0f, 20.0f, 12.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 0.0f, 500.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {0.0f, 20.0f, 12.0f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 1u;
+    sim.wallRegion = physics::TriRegion::Edge1;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 20.0f, .up = {0.0f, 1.0f, 0.0f}};
+    const physics::WallAttachmentResult attachment = physics::findWallRunAttachment(capsule,
+                                                                                    {-10.0f, 20.0f, 12.0f},
+                                                                                    world,
+                                                                                    {-1.0f, 0.0f, 0.0f},
+                                                                                    {0.0f, 0.0f, 1.0f},
+                                                                                    10.0f,
+                                                                                    35.0f,
+                                                                                    0u,
+                                                                                    1u,
+                                                                                    physics::TriRegion::Edge1);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(attachment.found, "internal corner attachment query should find a candidate");
+    ok &= expect(attachment.normal.z < -0.7f, "internal corner attachment query should prefer the turned wall");
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning, "internal corner should stay wallrunning");
+    ok &= expect(outSim.wallNormal.z < -0.7f, "internal corner should transition to the turned wall normal");
+    ok &= expect(glm::length(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}) > 300.0f,
+                 "internal corner wallrun should keep moving instead of becoming static");
     return ok;
 }
 
@@ -1947,6 +2045,7 @@ int main()
     ok &= wallrunOuterCornerKeepsForwardVelocity();
     ok &= wallrunGapDropsWithoutReversingVelocity();
     ok &= wallrunMapCorridorTurnsIntoCorridor();
+    ok &= wallrunInternalCornerKeepsMoving();
     ok &= wallrunRollScalesWithViewAngle();
     ok &= wallrunMapCorridorEndDoesNotAttachToAirSide();
     ok &= climbMantleToTopFloorKeepsFiniteState();

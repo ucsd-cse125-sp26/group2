@@ -739,9 +739,11 @@ glm::vec3 redirectWallForward(glm::vec3 oldForward, glm::vec3 oldNormal, glm::ve
 {
     glm::vec3 redirected = oldForward + oldNormal;
     redirected -= newNormal * glm::dot(redirected, newNormal);
+    redirected.y = 0.0f;
 
     if (glm::length(redirected) < 0.001f) {
         redirected = glm::cross(glm::vec3{0.0f, 1.0f, 0.0f}, newNormal);
+        redirected.y = 0.0f;
         if (glm::dot(redirected, oldNormal) < 0.0f)
             redirected = -redirected;
     }
@@ -790,6 +792,7 @@ glm::vec3 redirectWallForwardTowardAnchor(
 {
     glm::vec3 anchorTangent = anchor - pos;
     anchorTangent -= newNormal * glm::dot(anchorTangent, newNormal);
+    anchorTangent.y = 0.0f;
 
     const float anchorLen = glm::length(anchorTangent);
     if (anchorLen > 0.25f) {
@@ -1034,6 +1037,7 @@ void handleWallRunning(glm::vec3& pos,
         (shape.type == CollisionShapeType::Capsule)
             ? capsuleQueryForWallrun(shape).minkowskiExtent(state.sim.wallNormal) + k_wallrunAttachPushback
             : shape.minkowskiExtent(state.sim.wallNormal) + k_wallrunAttachPushback;
+    const glm::vec3 preStandoffPos = pos;
     const float currentStandoff = glm::dot(pos - state.sim.wallAnchor, state.sim.wallNormal);
     pos += state.sim.wallNormal * (desiredStandoff - currentStandoff);
 
@@ -1041,8 +1045,16 @@ void handleWallRunning(glm::vec3& pos,
     vel -= state.sim.wallNormal * normalVel;
 
     if (normalTurn > 0.05f) {
-        state.sim.wallForward =
-            redirectWallForwardTowardAnchor(oldForward, oldNormal, state.sim.wallNormal, pos, state.sim.wallAnchor);
+        const glm::vec3 redirectedForward = redirectWallForwardTowardAnchor(
+            oldForward, oldNormal, state.sim.wallNormal, preStandoffPos, state.sim.wallAnchor);
+        const glm::vec3 wishDir =
+            physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+        if (glm::length(wishDir) > 0.5f && glm::dot(wishDir, redirectedForward) < -0.05f) {
+            exitWallrun(state, posY);
+            return;
+        }
+
+        state.sim.wallForward = redirectedForward;
         const float verticalVel = vel.y;
         vel = state.sim.wallForward * preAttachHorizSpeed;
         vel.y = verticalVel;
