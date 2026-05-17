@@ -874,6 +874,37 @@ struct QuantizedVertexKeyHash
     }
 };
 
+bool quantizedVertexLess(const QuantizedVertexKey& lhs, const QuantizedVertexKey& rhs)
+{
+    if (lhs.x != rhs.x)
+        return lhs.x < rhs.x;
+    if (lhs.y != rhs.y)
+        return lhs.y < rhs.y;
+    return lhs.z < rhs.z;
+}
+
+struct QuantizedEdgeKey
+{
+    QuantizedVertexKey a;
+    QuantizedVertexKey b;
+
+    bool operator==(const QuantizedEdgeKey& other) const noexcept { return a == other.a && b == other.b; }
+};
+
+struct QuantizedEdgeKeyHash
+{
+    size_t operator()(const QuantizedEdgeKey& key) const noexcept
+    {
+        QuantizedVertexKeyHash hash;
+        size_t h = 1469598103934665603ull;
+        h ^= hash(key.a);
+        h *= 1099511628211ull;
+        h ^= hash(key.b);
+        h *= 1099511628211ull;
+        return h;
+    }
+};
+
 struct FaceKey
 {
     QuantizedVertexKey v[3];
@@ -911,14 +942,15 @@ QuantizedVertexKey quantizeVertex(glm::vec3 v, float epsilon)
 FaceKey canonicalFaceKey(QuantizedVertexKey a, QuantizedVertexKey b, QuantizedVertexKey c)
 {
     FaceKey key{{a, b, c}};
-    std::sort(std::begin(key.v), std::end(key.v), [](const QuantizedVertexKey& lhs, const QuantizedVertexKey& rhs) {
-        if (lhs.x != rhs.x)
-            return lhs.x < rhs.x;
-        if (lhs.y != rhs.y)
-            return lhs.y < rhs.y;
-        return lhs.z < rhs.z;
-    });
+    std::sort(std::begin(key.v), std::end(key.v), quantizedVertexLess);
     return key;
+}
+
+QuantizedEdgeKey canonicalEdgeKey(QuantizedVertexKey a, QuantizedVertexKey b)
+{
+    if (quantizedVertexLess(b, a))
+        std::swap(a, b);
+    return {.a = a, .b = b};
 }
 
 int windingSignInCanonicalFace(const QuantizedVertexKey original[3], const FaceKey& canonical)
@@ -1011,6 +1043,7 @@ void buildTriMeshBVH(WorldTriMesh& mesh)
 
 void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
 {
+    constexpr float k_positionWeldEpsilon = 1e-4f;
     const uint32_t triCount = static_cast<uint32_t>(mesh.indices.size() / 3);
     mesh.faceNormals.assign(triCount, glm::vec3{0.0f, 1.0f, 0.0f});
     mesh.edgeActive.assign(triCount, 0u);
@@ -1038,7 +1071,7 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
     // 2. Build edge → triangle adjacency.  Order is deterministic because we
     //    iterate triangles in index order; the hash map's iteration order is
     //    NOT used (we only look records up by key in step 4).
-    std::unordered_map<uint64_t, EdgeRecord> adjacency;
+    std::unordered_map<QuantizedEdgeKey, EdgeRecord, QuantizedEdgeKeyHash> adjacency;
     adjacency.reserve(static_cast<size_t>(triCount) * 3u);
 
     for (uint32_t t = 0; t < triCount; ++t) {
@@ -1047,8 +1080,13 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
             mesh.indices[t * 3 + 1],
             mesh.indices[t * 3 + 2],
         };
+        const QuantizedVertexKey q[3] = {
+            quantizeVertex(mesh.vertices[v[0]], k_positionWeldEpsilon),
+            quantizeVertex(mesh.vertices[v[1]], k_positionWeldEpsilon),
+            quantizeVertex(mesh.vertices[v[2]], k_positionWeldEpsilon),
+        };
         for (int e = 0; e < 3; ++e) {
-            const uint64_t k = edgeKey(v[e], v[(e + 1) % 3]);
+            const QuantizedEdgeKey k = canonicalEdgeKey(q[e], q[(e + 1) % 3]);
             EdgeRecord& rec = adjacency[k];
             if (rec.count < 2) {
                 rec.tri[rec.count] = t;
@@ -1067,10 +1105,15 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
             mesh.indices[t * 3 + 1],
             mesh.indices[t * 3 + 2],
         };
+        const QuantizedVertexKey q[3] = {
+            quantizeVertex(mesh.vertices[v[0]], k_positionWeldEpsilon),
+            quantizeVertex(mesh.vertices[v[1]], k_positionWeldEpsilon),
+            quantizeVertex(mesh.vertices[v[2]], k_positionWeldEpsilon),
+        };
         const glm::vec3& nA = mesh.faceNormals[t];
 
         for (int e = 0; e < 3; ++e) {
-            const uint64_t k = edgeKey(v[e], v[(e + 1) % 3]);
+            const QuantizedEdgeKey k = canonicalEdgeKey(q[e], q[(e + 1) % 3]);
             const auto it = adjacency.find(k);
             // Every edge must have a record (we inserted them all in step 2).
             const EdgeRecord& rec = it->second;

@@ -171,6 +171,27 @@ WorldTriMesh makeTwoTriangleFloor()
         });
 }
 
+WorldTriMesh makeTwoTriangleFloorWithDuplicatedSeamVertices()
+{
+    return makeCookedMesh(
+        {
+            {-64.0f, 0.0f, -64.0f},
+            {64.0f, 0.0f, -64.0f},
+            {64.0f, 0.0f, 64.0f},
+            {-64.0f, 0.0f, -64.0f},
+            {64.0f, 0.0f, 64.0f},
+            {-64.0f, 0.0f, 64.0f},
+        },
+        {
+            0,
+            2,
+            1,
+            3,
+            5,
+            4,
+        });
+}
+
 WorldTriMesh makeThinSingleStep()
 {
     return makeCookedMesh(
@@ -1043,6 +1064,22 @@ bool triMeshCookStatsReportWeldAndBvhQuality()
     return ok;
 }
 
+bool duplicatedSeamVerticesStillWeldCoplanarFloor()
+{
+    const WorldTriMesh floor = makeTwoTriangleFloorWithDuplicatedSeamVertices();
+    const physics::TriMeshCookStats stats = physics::collectTriMeshCookStats(std::span<const WorldTriMesh>(&floor, 1));
+
+    bool ok = true;
+    ok &= expect(stats.activeHalfEdges == 4u, "duplicated-position floor seam should not become active boundary edges");
+    ok &= expect(stats.boundaryHalfEdges == 4u, "duplicated-position floor should keep only true outer boundaries");
+    ok &= expect(stats.weldedHalfEdges == 2u, "duplicated-position floor seam should weld both internal half-edges");
+    ok &= expect(floor.edgeNeighbor.size() == 6u, "duplicated-position floor should have one neighbour slot per edge");
+    ok &= expect(floor.edgeNeighbor[0u] == 1u, "duplicated-position floor first triangle should link across seam");
+    ok &=
+        expect(floor.edgeNeighbor[5u] == 0u, "duplicated-position floor second triangle should link back across seam");
+    return ok;
+}
+
 bool playerWallAttachmentStateHasStableMeshIdentity()
 {
     PlayerSimState state;
@@ -1080,6 +1117,7 @@ int main()
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= triMeshValidationReportsCookerIssues();
     ok &= triMeshCookStatsReportWeldAndBvhQuality();
+    ok &= duplicatedSeamVerticesStillWeldCoplanarFloor();
     ok &= playerWallAttachmentStateHasStableMeshIdentity();
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
