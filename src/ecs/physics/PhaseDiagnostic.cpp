@@ -105,7 +105,8 @@ void openMovementLazily()
                  "frontNx,frontNy,frontNz,frontPx,frontPy,frontPz,"
                  "ledgeNx,ledgeNy,ledgeNz,ledgePx,ledgePy,ledgePz,"
                  "climbNx,climbNy,climbNz,storedLedgeNx,storedLedgeNy,storedLedgeNz,"
-                 "storedLedgePx,storedLedgePy,storedLedgePz,climbTimer,ledgeHoldTimer,"
+                 "storedLedgePx,storedLedgePy,storedLedgePz,climbTimer,climbBaseline,climbSpaceCutoff,"
+                 "climbAttachHeight,climbDetachPenalty,climbZone,climbEndBoostQueued,ledgeHoldTimer,"
                  "flagsHex,invalidState,note\n");
 }
 
@@ -345,12 +346,15 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                         finiteVec3(f.ledgeNormal) && finiteVec3(f.ledgePoint) && finiteVec3(f.climbWallNormal) &&
                         finiteVec3(f.storedLedgeNormal) && finiteVec3(f.storedLedgePoint) &&
                         std::isfinite(f.groundDistance) && std::isfinite(f.yaw) && std::isfinite(f.pitch);
-    if (!finite)
+    const bool finiteClimb = std::isfinite(f.climbTimer) && std::isfinite(f.climbBaseline) &&
+                             std::isfinite(f.climbSpaceCutoff) && std::isfinite(f.climbAttachHeight) &&
+                             std::isfinite(f.climbDetachPenalty);
+    if (!finite || !finiteClimb)
         flags |= PhaseFlag::InvalidState;
 
     char note[64] = {0};
     std::strncpy(note, f.note, sizeof(note) - 1);
-    if (note[0] == 0 && !finite)
+    if (note[0] == 0 && (!finite || !finiteClimb))
         std::strncpy(note, "invalid-movement-state", sizeof(note) - 1);
 
     const uint32_t flagBits = static_cast<uint32_t>(flags);
@@ -363,7 +367,8 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  "%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,"
                  "%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,"
                  "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
-                 "%.3f,%.3f,%.3f,%.6f,%.6f,"
+                 "%.3f,%.3f,%.3f,%.6f,"
+                 "%.3f,%.3f,%.3f,%.3f,%d,%d,%.6f,"
                  "0x%X,%d,%s\n",
                  static_cast<unsigned long>(rowIndex),
                  entt::to_integral(f.entity),
@@ -417,6 +422,12 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  static_cast<double>(f.storedLedgePoint.y),
                  static_cast<double>(f.storedLedgePoint.z),
                  static_cast<double>(f.climbTimer),
+                 static_cast<double>(f.climbBaseline),
+                 static_cast<double>(f.climbSpaceCutoff),
+                 static_cast<double>(f.climbAttachHeight),
+                 static_cast<double>(f.climbDetachPenalty),
+                 f.climbZone,
+                 f.climbEndBoostQueued ? 1 : 0,
                  static_cast<double>(f.ledgeHoldTimer),
                  flagBits,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::InvalidState)) ? 1 : 0,

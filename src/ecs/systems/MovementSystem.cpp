@@ -74,6 +74,94 @@ glm::vec3 normalizedOrZero(glm::vec3 n)
     return usableNormal(n) ? n / glm::length(n) : glm::vec3{0.0f};
 }
 
+enum class ClimbZone
+{
+    Mini = 0,
+    Green = 1,
+    Neutral = 2,
+    Exhausted = 3,
+};
+
+float localUpSign(const PlayerVisState& vis)
+{
+    return vis.gravityFlipped ? -1.0f : 1.0f;
+}
+
+float climbLocalHeightFromWorldY(float posY, const PlayerVisState& vis)
+{
+    return posY * localUpSign(vis);
+}
+
+float climbHeightAboveBaseline(PlayerStateRef state, float posY)
+{
+    return climbLocalHeightFromWorldY(posY, state.vis) - state.sim.climbBaseline;
+}
+
+ClimbZone climbZoneForHeight(PlayerStateRef state, float posY)
+{
+    const float height = climbHeightAboveBaseline(state, posY);
+    if (height < tms::k_climbMiniZoneHeight)
+        return ClimbZone::Mini;
+    if (height < tms::k_climbMiniZoneHeight + tms::k_climbGreenZoneHeight)
+        return ClimbZone::Green;
+    if (height < tms::k_climbSpaceHeight)
+        return ClimbZone::Neutral;
+    return ClimbZone::Exhausted;
+}
+
+int climbZoneIndex(PlayerStateRef state, float posY)
+{
+    return static_cast<int>(climbZoneForHeight(state, posY));
+}
+
+struct ClimbJumpImpulse
+{
+    float localUp = tms::k_climbNeutralJumpUp;
+    float wallPush = tms::k_climbNeutralJumpBack;
+    float detachPenalty = tms::k_climbJumpDetachPenalty;
+};
+
+ClimbJumpImpulse climbJumpImpulseForZone(PlayerStateRef state, float posY)
+{
+    switch (climbZoneForHeight(state, posY)) {
+    case ClimbZone::Mini:
+        return {
+            tms::k_climbMiniJumpUp,
+            tms::k_climbMiniJumpBack,
+            tms::k_climbMiniJumpDetachPenalty,
+        };
+    case ClimbZone::Green: {
+        const float greenStart = tms::k_climbMiniZoneHeight;
+        const float greenHeight = std::max(tms::k_climbGreenZoneHeight, 0.001f);
+        const float greenT = std::clamp((climbHeightAboveBaseline(state, posY) - greenStart) / greenHeight, 0.0f, 1.0f);
+        return {
+            std::lerp(tms::k_climbGreenJumpUpMax, tms::k_climbGreenJumpUpMin, greenT),
+            tms::k_climbGreenJumpBack,
+            tms::k_climbGreenJumpDetachPenalty,
+        };
+    }
+    case ClimbZone::Neutral:
+    case ClimbZone::Exhausted:
+        return {
+            tms::k_climbNeutralJumpUp,
+            tms::k_climbNeutralJumpBack,
+            tms::k_climbJumpDetachPenalty,
+        };
+    }
+    return {};
+}
+
+void recordClimbDetachMetadata(PlayerStateRef state, float posY, float penalty)
+{
+    state.sim.climbPreviousWallNormal = normalizedOrZero(state.sim.climbWallNormal);
+    state.sim.climbPreviousAttachHeight = climbLocalHeightFromWorldY(posY, state.vis);
+    state.sim.climbDetachPenalty = std::max(0.0f, penalty);
+    if (state.sim.climbDetachPenalty > 0.0f) {
+        state.sim.climbBaseline = state.sim.climbPreviousAttachHeight - state.sim.climbDetachPenalty;
+        state.sim.climbSpaceCutoff = state.sim.climbBaseline + tms::k_climbSpaceHeight;
+    }
+}
+
 /// @brief Clamp horizontal speed without affecting Y.
 /// @param v         Velocity vector to clamp (modified in place).
 /// @param maxSpeed  Maximum allowed horizontal speed.
@@ -339,8 +427,11 @@ void handleJump(
 
     // Climb jump
     if (state.vis.moveMode == MoveMode::Climbing) {
-        vel.y = tms::k_climbJumpUpForce * gravDir;
-        vel += state.sim.climbWallNormal * tms::k_climbJumpBackForce;
+        const ClimbJumpImpulse impulse = climbJumpImpulseForZone(state, posY);
+        vel.y = impulse.localUp * gravDir;
+        const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
+        if (glm::dot(climbNormal, climbNormal) > 0.0f)
+            vel += climbNormal * impulse.wallPush;
         state.vis.moveMode = MoveMode::OnFoot;
         state.vis.exitingClimb = true;
         state.sim.exitClimbTimer = tms::k_climbExitTime;
@@ -348,9 +439,11 @@ void handleJump(
         state.vis.grounded = false;
         // DJ no longer refreshes from climb jump — only from ground time.
         state.vis.jumpCount = 1;
+        state.sim.jumpedThisTick = true;
 
+        recordClimbDetachMetadata(state, posY, impulse.detachPenalty);
         state.sim.climbBlacklistActive = true;
-        state.sim.climbBlacklistNormal = state.sim.climbWallNormal;
+        state.sim.climbBlacklistNormal = climbNormal;
         state.sim.climbBlacklistHeight = posY;
         return;
     }
@@ -1347,6 +1440,7 @@ void tryEnterClimb(glm::vec3& vel,
     state.sim.climbBaseline = state.sim.climbAttachHeight;
     state.sim.climbSpaceCutoff = state.sim.climbBaseline + tms::k_climbSpaceHeight;
     state.sim.climbAttachOffsetLimit = state.sim.climbAttachHeight + tms::k_climbAttachOffset;
+    state.sim.climbDetachPenalty = 0.0f;
     state.sim.climbTimer = 0.0f;
     state.sim.climbNonUpTimer = 0.0f;
     state.sim.climbHadUpwardMotion = false;
@@ -1364,16 +1458,29 @@ void tryEnterClimb(glm::vec3& vel,
 /// @brief Exit climb mode and start cooldown timers.
 /// @param state  Player state (modified in place).
 /// @param posY   Current vertical position for blacklist height.
-void exitClimb(PlayerStateRef state, float posY)
+/// @param detachPenalty Climb-space penalty to store for reattach rules.
+void exitClimb(PlayerStateRef state, float posY, float detachPenalty = tms::k_climbNormalDetachPenalty)
 {
     state.vis.moveMode = MoveMode::OnFoot;
     state.vis.exitingClimb = true;
     state.sim.exitClimbTimer = tms::k_climbExitTime;
     state.sim.wasClimbing = true;
     state.sim.coyoteTimer = tms::k_coyoteTime;
+    recordClimbDetachMetadata(state, posY, detachPenalty);
     state.sim.climbBlacklistActive = true;
-    state.sim.climbBlacklistNormal = state.sim.climbWallNormal;
+    state.sim.climbBlacklistNormal = normalizedOrZero(state.sim.climbWallNormal);
     state.sim.climbBlacklistHeight = posY;
+}
+
+void exitClimbWithEndBoost(glm::vec3& vel, PlayerStateRef state, float posY)
+{
+    const glm::vec3 localUp{0.0f, localUpSign(state.vis), 0.0f};
+    const float localUpSpeed = glm::dot(vel, localUp);
+    if (localUpSpeed < 0.0f)
+        vel -= localUp * localUpSpeed;
+    vel += localUp * tms::k_climbEndBoostUp;
+    state.sim.climbEndBoostQueued = true;
+    exitClimb(state, posY, tms::k_climbNormalDetachPenalty);
 }
 
 /// @brief Process climbing movement with speed decay and exit conditions.
@@ -1401,6 +1508,16 @@ void handleClimbing(glm::vec3& vel,
     const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
     if (glm::dot(climbNormal, climbNormal) <= 0.0f) {
         exitClimb(state, posY);
+        return;
+    }
+
+    const float localHeight = climbLocalHeightFromWorldY(posY, state.vis);
+    const bool hasAttachOffsetLimit = state.sim.climbAttachOffsetLimit > state.sim.climbAttachHeight + 0.001f;
+    const bool hasSpaceCutoff = state.sim.climbSpaceCutoff > state.sim.climbBaseline + 0.001f;
+    if ((hasAttachOffsetLimit && localHeight >= state.sim.climbAttachOffsetLimit) ||
+        (hasSpaceCutoff && localHeight >= state.sim.climbSpaceCutoff))
+    {
+        exitClimbWithEndBoost(vel, state, posY);
         return;
     }
 
@@ -1494,6 +1611,7 @@ void tryEnterLedgeGrab(PlayerStateRef state, const physics::WallDetectionResult&
     state.sim.ledgePoint = walls.ledgePoint;
     state.sim.ledgeNormal = ledgeNormal;
     state.sim.ledgeHoldTimer = 0.0f;
+    state.sim.climbDetachPenalty = 0.0f;
     // DJ no longer refreshes from entering ledge grab — only from ground time.
     state.vis.jumpCount = 0;
 }
@@ -2047,6 +2165,12 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 movementDiag.storedLedgeNormal = state.sim.ledgeNormal;
                 movementDiag.storedLedgePoint = state.sim.ledgePoint;
                 movementDiag.climbTimer = state.sim.climbTimer;
+                movementDiag.climbBaseline = state.sim.climbBaseline;
+                movementDiag.climbSpaceCutoff = state.sim.climbSpaceCutoff;
+                movementDiag.climbAttachHeight = state.sim.climbAttachHeight;
+                movementDiag.climbDetachPenalty = state.sim.climbDetachPenalty;
+                movementDiag.climbZone = climbZoneIndex(state, pos.value.y);
+                movementDiag.climbEndBoostQueued = state.sim.climbEndBoostQueued;
                 movementDiag.ledgeHoldTimer = state.sim.ledgeHoldTimer;
                 if (state.vis.grounded)
                     movementDiag.flags |= physics::diag::PhaseFlag::Grounded;

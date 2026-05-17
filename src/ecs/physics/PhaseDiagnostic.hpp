@@ -142,6 +142,12 @@ struct MovementFrame
     glm::vec3 storedLedgeNormal{0.0f};
     glm::vec3 storedLedgePoint{0.0f};
     float climbTimer = 0.0f;
+    float climbBaseline = 0.0f;
+    float climbSpaceCutoff = 0.0f;
+    float climbAttachHeight = 0.0f;
+    float climbDetachPenalty = 0.0f;
+    int climbZone = 0;
+    bool climbEndBoostQueued = false;
     float ledgeHoldTimer = 0.0f;
     PhaseFlag flags = PhaseFlag::None;
     char note[64] = {0};

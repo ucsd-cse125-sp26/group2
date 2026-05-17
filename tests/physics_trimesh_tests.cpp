@@ -2128,6 +2128,211 @@ bool sidewaysClimbPreservesWallTangentSpeed()
     return ok;
 }
 
+struct ClimbJumpResult
+{
+    MoveMode mode{MoveMode::OnFoot};
+    glm::vec3 velocity{0.0f};
+    PlayerSimState sim{};
+};
+
+ClimbJumpResult runClimbJumpAtOffset(float heightOffset)
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    constexpr float baseline = 100.0f;
+    registry.emplace<Position>(player, glm::vec3{0.0f, baseline + heightOffset, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    sim.climbAttachHeight = baseline;
+    sim.climbBaseline = baseline;
+    sim.climbSpaceCutoff = baseline + tms::k_climbSpaceHeight;
+    sim.climbAttachOffsetLimit = baseline + tms::k_climbAttachOffset;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    return {
+        registry.get<PlayerVisState>(player).moveMode,
+        registry.get<Velocity>(player).value,
+        registry.get<PlayerSimState>(player),
+    };
+}
+
+bool miniZoneJumpGivesSmallWallPush()
+{
+    const ClimbJumpResult mini = runClimbJumpAtOffset(tms::k_climbMiniZoneHeight * 0.5f);
+
+    bool ok = true;
+    ok &= expect(mini.mode == MoveMode::OnFoot, "mini-zone climb jump should detach to air movement");
+    ok &= expect(std::abs(mini.velocity.z) <= tms::k_climbMiniJumpBack + 10.0f,
+                 "mini-zone climb jump should use the small wall-push impulse");
+    ok &= expect(mini.velocity.y < tms::k_climbGreenJumpUpMin,
+                 "mini-zone climb jump should stay below the green-zone wallbounce height");
+    return ok;
+}
+
+bool greenZoneJumpGivesHigherWallbounceImpulse()
+{
+    const ClimbJumpResult mini = runClimbJumpAtOffset(tms::k_climbMiniZoneHeight * 0.5f);
+    const ClimbJumpResult green =
+        runClimbJumpAtOffset(tms::k_climbMiniZoneHeight + tms::k_climbGreenZoneHeight * 0.25f);
+    const ClimbJumpResult neutral =
+        runClimbJumpAtOffset(tms::k_climbMiniZoneHeight + tms::k_climbGreenZoneHeight + 40.0f);
+
+    bool ok = true;
+    ok &= expect(green.velocity.y > mini.velocity.y + 100.0f,
+                 "green-zone climb jump should give more height than mini-zone jump");
+    ok &= expect(green.velocity.y > neutral.velocity.y + 100.0f,
+                 "green-zone climb jump should give more height than neutral-zone wall push");
+    ok &= expect(std::abs(green.velocity.z) > std::abs(mini.velocity.z) + 80.0f,
+                 "green-zone climb jump should give a stronger wall push than mini-zone jump");
+    return ok;
+}
+
+bool neutralZoneJumpGivesMostlyHorizontalWallPush()
+{
+    const ClimbJumpResult neutral =
+        runClimbJumpAtOffset(tms::k_climbMiniZoneHeight + tms::k_climbGreenZoneHeight + 55.0f);
+
+    bool ok = true;
+    ok &= expect(neutral.mode == MoveMode::OnFoot, "neutral-zone climb jump should detach to air movement");
+    ok &= expect(std::abs(neutral.velocity.z) > std::abs(neutral.velocity.y) * 2.0f,
+                 "neutral-zone climb jump should be mostly horizontal wall push");
+    ok &= expect(neutral.sim.climbDetachPenalty >= tms::k_climbJumpDetachPenalty,
+                 "neutral-zone climb jump should apply the jump detach climb-space penalty");
+    return ok;
+}
+
+bool climbSpaceCutoffTriggersEndBoost()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    constexpr float baseline = 100.0f;
+    registry.emplace<Position>(player, glm::vec3{0.0f, baseline + tms::k_climbSpaceHeight + 1.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{120.0f, tms::k_climbMinSpeed, 0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::Climbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    sim.climbAttachHeight = baseline;
+    sim.climbBaseline = baseline;
+    sim.climbSpaceCutoff = baseline + tms::k_climbSpaceHeight;
+    sim.climbAttachOffsetLimit = baseline + tms::k_climbAttachOffset + 100.0f;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::OnFoot, "climb-space cutoff should end the climb");
+    ok &= expect(outSim.climbEndBoostQueued, "climb-space cutoff should queue an end boost");
+    ok &= expect(outVel.value.y >= tms::k_climbMinSpeed + tms::k_climbEndBoostUp,
+                 "climb-space cutoff should add local-up end boost without killing carried climb speed");
+    ok &= expect(std::abs(outVel.value.x) > 100.0f, "climb-space cutoff should preserve wall-tangent speed");
+    return ok;
+}
+
+bool mantleDetachDoesNotApplyClimbSpacePenalty()
+{
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 150.0f, -24.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::LedgeGrabbing;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.climbWallNormal = {0.0f, 0.0f, -1.0f};
+    sim.climbDetachPenalty = 0.0f;
+    sim.ledgeHoldTimer = tms::k_ledgeMinHoldTime;
+    sim.ledgeNormal = {0.0f, 0.0f, -1.0f};
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    const physics::WorldGeometry world{};
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outSim = registry.get<PlayerSimState>(player);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::OnFoot,
+                 "ledge mantle should detach to air movement");
+    ok &= expect(outSim.climbDetachPenalty == 0.0f, "ledge mantle should not apply climb-space detach penalty");
+    return ok;
+}
+
 bool ledgeMantleRejectsInvalidStoredNormal()
 {
     Registry registry;
@@ -2726,6 +2931,11 @@ int main()
     ok &= nonUpwardClimbExpiresAfterOneSecond();
     ok &= downwardClimbIsFasterThanPassiveSlip();
     ok &= sidewaysClimbPreservesWallTangentSpeed();
+    ok &= miniZoneJumpGivesSmallWallPush();
+    ok &= greenZoneJumpGivesHigherWallbounceImpulse();
+    ok &= neutralZoneJumpGivesMostlyHorizontalWallPush();
+    ok &= climbSpaceCutoffTriggersEndBoost();
+    ok &= mantleDetachDoesNotApplyClimbSpacePenalty();
     ok &= ledgeMantleRejectsInvalidStoredNormal();
     ok &= flippedGravityClimbMovesAlongLocalUp();
     ok &= flippedGravityLedgeMantleMovesAlongLocalUp();

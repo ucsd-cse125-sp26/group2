@@ -134,6 +134,15 @@ constexpr float k_climbReattachDifferentWallAngle = 25.842f; ///< Angle that cou
 constexpr float k_climbNormalDetachPenalty = 128.0f;         ///< Climb-space penalty after normal detach (u).
 constexpr float k_climbJumpDetachPenalty = 256.0f;           ///< Climb-space penalty after climb jump (u).
 constexpr float k_climbEndBoostUp = 28.0f;                   ///< Local-up velocity added by climb end boost (u/s).
+constexpr float k_climbMiniJumpUp = 180.0f;                  ///< Mini-zone climb jump local-up impulse (u/s).
+constexpr float k_climbMiniJumpBack = 180.0f;                ///< Mini-zone climb jump wall-push impulse (u/s).
+constexpr float k_climbGreenJumpUpMax = 390.0f;              ///< Lower green-zone max wallbounce impulse (u/s).
+constexpr float k_climbGreenJumpUpMin = 320.0f;              ///< Upper green-zone min wallbounce impulse (u/s).
+constexpr float k_climbGreenJumpBack = 320.0f;               ///< Green-zone climb jump wall-push impulse (u/s).
+constexpr float k_climbNeutralJumpUp = 120.0f;               ///< Neutral-zone low vertical wall-push impulse (u/s).
+constexpr float k_climbNeutralJumpBack = 430.0f;             ///< Neutral-zone mostly-horizontal wall push (u/s).
+constexpr float k_climbMiniJumpDetachPenalty = 64.0f;        ///< Mini-zone jump reattach penalty (u).
+constexpr float k_climbGreenJumpDetachPenalty = 192.0f;      ///< Green-zone jump reattach penalty (u).
 
 // Ledge grabbing
 
