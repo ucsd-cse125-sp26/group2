@@ -344,11 +344,14 @@ jobs:
           cp -r "${{ matrix.build_dir }}/shaders-new" "$STAGE/"
 
           # Live assets from Google Drive — fresh on every release.
-          # --folder       : recursive folder download (gdown >= 5.0)
-          # Note: --remaining-ok was removed in gdown 6.x; gdown >= 6.0 has
-          #       no file-count limit for folder downloads by default.
-          # -O             : output directory
-          pip install --quiet 'gdown>=5.0.0'
+          # --folder : recursive folder download.
+          # -O       : output directory.
+          #
+          # Pin to gdown >= 6.0 because gdown 5.x with `--folder` silently
+          # caps at 50 files unless `--remaining-ok` is passed; the flag
+          # was removed in 6.x and the limit was lifted, so the modern
+          # invocation is simply `--folder` with no extra flag.
+          pip install --quiet 'gdown>=6.0.0'
           gdown --folder \
                 -O "$STAGE/assets" \
                 "https://drive.google.com/drive/folders/${ASSETS_FOLDER_ID}"
