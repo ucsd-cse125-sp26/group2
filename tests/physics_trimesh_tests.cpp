@@ -1082,6 +1082,29 @@ bool wallAttachmentWalksSingleMeshAdjacencyAtCorner()
     return ok;
 }
 
+bool wallAttachmentOrientsOverlappedThinWallTowardContinuity()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 20.0f, .up = {0.0f, 1.0f, 0.0f}};
+
+    const physics::WallAttachmentResult result =
+        physics::findWallRunAttachment(capsule, {0.0f, 120.0f, 0.0f}, world, {0.0f, 0.0f, -1.0f});
+
+    bool ok = true;
+    ok &= expect(result.found, "wall attachment should keep overlapped two-sided thin planes attachable");
+    ok &=
+        expect(result.normal.z < -0.9f, "wall attachment should orient an overlapped thin-plane normal to continuity");
+    return ok;
+}
+
 bool wallrunOuterCornerKeepsForwardVelocity()
 {
     std::array<WorldTriMesh, 2> meshes{makeThinWall(), makeThinDepthWallAt(20.0f)};
@@ -2271,6 +2294,51 @@ bool climbAttachFollowsGroundJumpIntoWall()
     bool ok = true;
     ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
                  "holding jump and forward into a wall should attach on the first airborne follow-up tick");
+    return ok;
+}
+
+bool climbAttachUsesTwoSidedAttachmentWhenCapsuleOverlapsThinWall()
+{
+    const WorldTriMesh wall = makeTallFrontWall();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&wall, 1),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{0.0f, 120.0f, 0.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 40.0f, 160.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 10.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {10.0f, 30.0f, 10.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    registry.emplace<PlayerSimState>(player);
+
+    InputSnapshot input;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    bool ok = true;
+    ok &= expect(registry.get<PlayerVisState>(player).moveMode == MoveMode::Climbing,
+                 "climb attach should use two-sided mesh attachment when the capsule overlaps a thin wall");
+    ok &= expect(registry.get<PlayerSimState>(player).climbWallNormal.z < -0.9f,
+                 "overlapped thin-wall climb normal should point from the wall toward the player");
     return ok;
 }
 
@@ -3556,6 +3624,7 @@ int main()
     ok &= wallDetectionGroundDistanceUsesFlippedGravityDirection();
     ok &= wallAttachmentLookaheadFindsOuterCornerContinuation();
     ok &= wallAttachmentWalksSingleMeshAdjacencyAtCorner();
+    ok &= wallAttachmentOrientsOverlappedThinWallTowardContinuity();
     ok &= wallrunOuterCornerKeepsForwardVelocity();
     ok &= wallrunSingleMeshExternalLCornerContinuesAroundCorner();
     ok &= wallrunGapDropsWithoutReversingVelocity();
@@ -3576,6 +3645,7 @@ int main()
     ok &= climbAttachAllowsNearGroundJumpIntoWall();
     ok &= climbAttachAllowsNearGroundMomentumStickWithoutForward();
     ok &= climbAttachFollowsGroundJumpIntoWall();
+    ok &= climbAttachUsesTwoSidedAttachmentWhenCapsuleOverlapsThinWall();
     ok &= climbAttachFindsWallWhenSameMeshFloorIsCloser();
     ok &= climbStayUsesWallWhenSameMeshFloorIsCloser();
     ok &= climbLostContactCanImmediatelyRestick();

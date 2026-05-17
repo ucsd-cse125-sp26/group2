@@ -102,7 +102,8 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
                                            float checkDist = 24.0f,
                                            uint32_t previousMeshIndex = UINT32_MAX,
                                            uint32_t previousTriId = UINT32_MAX,
-                                           TriRegion previousRegion = TriRegion::Face);
+                                           TriRegion previousRegion = TriRegion::Face,
+                                           float minContinuity = -0.05f);
 
 /// @brief Check if a surface normal represents a wall (not floor/ceiling).
 ///

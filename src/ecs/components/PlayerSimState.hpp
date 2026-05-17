@@ -87,8 +87,12 @@ struct PlayerSimState
     bool wallBlacklistActive{false};
 
     // ── Climbing ───────────────────────────────────────────────────────────
-    glm::vec3 climbWallNormal{0.0f};         ///< Normal of the wall being climbed.
-    glm::vec3 climbAttachPoint{0.0f};        ///< Surface point where the current climb attached.
+    glm::vec3 climbWallNormal{0.0f};     ///< Normal of the wall being climbed.
+    glm::vec3 climbAttachPoint{0.0f};    ///< Surface point where the current climb attached.
+    uint32_t climbMeshIndex{UINT32_MAX}; ///< Current static collision mesh under the climb attachment, if any.
+    uint32_t climbTriId{UINT32_MAX};     ///< Current mesh triangle under the climb attachment, if any.
+    physics::TriRegion climbRegion{physics::TriRegion::Face}; ///< Closest feature on the climb triangle.
+    bool climbAttachmentValid{false};        ///< True while climb has a collision-backed triangle attachment.
     float climbAttachHeight{0.0f};           ///< World Y at climb attach; used for same-wall regrab gating.
     float climbBaseline{0.0f};               ///< Local-up climb-space baseline used for Apex-style climb zones.
     float climbSpaceCutoff{0.0f};            ///< Local-up height where climb space is exhausted.

@@ -54,6 +54,13 @@ int incidentEdgeForVertex(TriRegion vertexRegion, int slot)
     }
 }
 
+glm::vec3 orientTowardContinuity(glm::vec3 normal, glm::vec3 continuityNormal, bool hasContinuity)
+{
+    if (hasContinuity && glm::dot(normal, continuityNormal) < 0.0f)
+        return -normal;
+    return normal;
+}
+
 WorldAABB wallProbeBounds(glm::vec3 segA, glm::vec3 segB, glm::vec3 dir, float checkDist, float sphereRadius)
 {
     const glm::vec3 endA = segA + dir * checkDist;
@@ -133,7 +140,8 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
                                            float checkDist,
                                            uint32_t previousMeshIndex,
                                            uint32_t previousTriId,
-                                           TriRegion previousRegion)
+                                           TriRegion previousRegion,
+                                           float minContinuity)
 {
     WallAttachmentResult best;
     float bestScore = 1e30f;
@@ -146,17 +154,20 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
 
     auto considerClosest =
         [&](uint32_t meshIndex, const ClosestPointOnMeshResult& cp, bool lookaheadSample, float scoreBias = 0.0f) {
-            if (!cp.found || !isWallNormal(cp.normal))
+            if (!cp.found)
+                return;
+            const glm::vec3 normal = orientTowardContinuity(cp.normal, continuityNormal, hasContinuity);
+            if (!isWallNormal(normal))
                 return;
             if (cp.dist > maxAxisDist)
                 return;
 
-            const float continuity = hasContinuity ? glm::dot(cp.normal, continuityNormal) : 1.0f;
-            if (continuity < -0.05f)
+            const float continuity = hasContinuity ? glm::dot(normal, continuityNormal) : 1.0f;
+            if (continuity < minContinuity)
                 return;
 
-            const float blocking = hasTravel ? std::max(0.0f, -glm::dot(travel, cp.normal)) : 0.0f;
-            const float surfaceDist = std::abs(cp.dist - capsule.minkowskiExtent(cp.normal));
+            const float blocking = hasTravel ? std::max(0.0f, -glm::dot(travel, normal)) : 0.0f;
+            const float surfaceDist = std::abs(cp.dist - capsule.minkowskiExtent(normal));
             const float continuityPenalty = (1.0f - continuity) * 2.0f;
             const float lookaheadBonus = lookaheadSample ? lookaheadDist * 0.5f : 0.0f;
             const float blockingScale = std::max(lookaheadDist, capsule.radius * 0.5f);
@@ -168,7 +179,7 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
             bestScore = score;
             best.found = true;
             best.anchor = cp.pointOnMesh;
-            best.normal = cp.normal;
+            best.normal = normal;
             best.meshIndex = meshIndex;
             best.triId = cp.triId;
             best.region = cp.region;
@@ -181,7 +192,8 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
         const ClosestPointOnMeshResult cp = closestPointOnMeshTriangle(capsule, pos, maxAxisDist, mesh, neighborTri);
         if (!cp.found)
             return;
-        if (hasTravel && glm::dot(travel, cp.normal) > 0.25f)
+        const glm::vec3 normal = orientTowardContinuity(cp.normal, continuityNormal, hasContinuity);
+        if (hasTravel && glm::dot(travel, normal) > 0.25f)
             return;
         considerClosest(meshIndex, cp, false, -capsule.radius);
 

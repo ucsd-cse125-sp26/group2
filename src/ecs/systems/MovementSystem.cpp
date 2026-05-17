@@ -797,13 +797,24 @@ bool canReattachToClimb(PlayerStateRef state, const glm::vec3& newNormal, float 
     return lowerThanPreviousAttach || differentEnoughWall;
 }
 
-void startClimbAttachment(glm::vec3& vel, PlayerStateRef state, glm::vec3 wallNormal, glm::vec3 wallPoint, float posY)
+void startClimbAttachment(glm::vec3& vel,
+                          PlayerStateRef state,
+                          glm::vec3 wallNormal,
+                          glm::vec3 wallPoint,
+                          float posY,
+                          uint32_t meshIndex = UINT32_MAX,
+                          uint32_t triId = UINT32_MAX,
+                          physics::TriRegion region = physics::TriRegion::Face)
 {
     const float gravDir = localUpSign(state.vis);
 
     state.vis.moveMode = MoveMode::Climbing;
     state.sim.climbWallNormal = wallNormal;
     state.sim.climbAttachPoint = wallPoint;
+    state.sim.climbMeshIndex = meshIndex;
+    state.sim.climbTriId = triId;
+    state.sim.climbRegion = region;
+    state.sim.climbAttachmentValid = meshIndex != UINT32_MAX && triId != UINT32_MAX;
     state.sim.climbAttachHeight = climbLocalHeightFromWorldY(posY, state.vis);
     state.sim.climbBaseline = state.sim.climbAttachHeight;
     state.sim.climbSpaceCutoff = state.sim.climbBaseline + tms::k_climbSpaceHeight;
@@ -865,7 +876,8 @@ WallAttachmentProbe findWallAttachment(glm::vec3 pos,
                                        float lookaheadDist = 0.0f,
                                        uint32_t previousMeshIndex = UINT32_MAX,
                                        uint32_t previousTriId = UINT32_MAX,
-                                       physics::TriRegion previousRegion = physics::TriRegion::Face)
+                                       physics::TriRegion previousRegion = physics::TriRegion::Face,
+                                       float minContinuity = -0.05f)
 {
     WallAttachmentProbe best;
     if (shape.type != CollisionShapeType::Capsule)
@@ -880,7 +892,8 @@ WallAttachmentProbe findWallAttachment(glm::vec3 pos,
                                                                                     tms::k_wallrunCheckDist,
                                                                                     previousMeshIndex,
                                                                                     previousTriId,
-                                                                                    previousRegion);
+                                                                                    previousRegion,
+                                                                                    minContinuity);
     if (!attachment.found)
         return best;
 
@@ -892,6 +905,134 @@ WallAttachmentProbe findWallAttachment(glm::vec3 pos,
     best.region = attachment.region;
 
     return best;
+}
+
+glm::vec3 lookDirFromYaw(float yaw)
+{
+    return normalizedOrZero(glm::vec3{std::sin(yaw), 0.0f, std::cos(yaw)});
+}
+
+glm::vec3
+orientClimbNormal(glm::vec3 normal, glm::vec3 referenceNormal, glm::vec3 lookDir, glm::vec3 pos, glm::vec3 anchor)
+{
+    normal = normalizedOrZero(normal);
+    if (!usableNormal(normal))
+        return glm::vec3{0.0f};
+
+    const glm::vec3 toPlayer = normalizedOrZero(pos - anchor);
+    if (usableNormal(toPlayer)) {
+        const float side = glm::dot(normal, toPlayer);
+        if (std::abs(side) > 1e-4f) {
+            if (side < 0.0f)
+                normal = -normal;
+            return normal;
+        }
+    }
+
+    referenceNormal = normalizedOrZero(referenceNormal);
+    if (usableNormal(referenceNormal)) {
+        if (glm::dot(normal, referenceNormal) < 0.0f)
+            normal = -normal;
+        return normal;
+    }
+
+    lookDir = normalizedOrZero(lookDir);
+    if (usableNormal(lookDir) && glm::dot(normal, lookDir) > 0.0f)
+        normal = -normal;
+
+    return normal;
+}
+
+WallAttachmentProbe
+orientClimbAttachment(WallAttachmentProbe attachment, glm::vec3 referenceNormal, glm::vec3 lookDir, glm::vec3 pos)
+{
+    if (!attachment.found)
+        return attachment;
+    attachment.normal = orientClimbNormal(attachment.normal, referenceNormal, lookDir, pos, attachment.anchor);
+    if (!usableNormal(attachment.normal))
+        attachment.found = false;
+    return attachment;
+}
+
+WallAttachmentProbe findClimbAttachment(glm::vec3 pos,
+                                        const CollisionShape& shape,
+                                        const physics::WorldGeometry& world,
+                                        glm::vec3 referenceNormal,
+                                        glm::vec3 lookDir,
+                                        glm::vec3 travelDir = glm::vec3{0.0f},
+                                        float lookaheadDist = 0.0f,
+                                        uint32_t previousMeshIndex = UINT32_MAX,
+                                        uint32_t previousTriId = UINT32_MAX,
+                                        physics::TriRegion previousRegion = physics::TriRegion::Face)
+{
+    referenceNormal = normalizedOrZero(referenceNormal);
+    lookDir = normalizedOrZero(lookDir);
+    if (!usableNormal(referenceNormal) && usableNormal(lookDir))
+        referenceNormal = -lookDir;
+    if (!usableNormal(referenceNormal))
+        return {};
+
+    WallAttachmentProbe attachment = findWallAttachment(pos,
+                                                        shape,
+                                                        world,
+                                                        referenceNormal,
+                                                        travelDir,
+                                                        lookaheadDist,
+                                                        previousMeshIndex,
+                                                        previousTriId,
+                                                        previousRegion,
+                                                        0.2f);
+    attachment = orientClimbAttachment(attachment, referenceNormal, lookDir, pos);
+    if (attachment.found)
+        return attachment;
+
+    if (usableNormal(lookDir) && glm::dot(referenceNormal, -lookDir) < 0.98f) {
+        attachment = findWallAttachment(pos,
+                                        shape,
+                                        world,
+                                        -lookDir,
+                                        travelDir,
+                                        lookaheadDist,
+                                        previousMeshIndex,
+                                        previousTriId,
+                                        previousRegion,
+                                        0.2f);
+        attachment = orientClimbAttachment(attachment, -lookDir, lookDir, pos);
+    }
+    return attachment;
+}
+
+bool climbAttachmentIsUsable(const WallAttachmentProbe& attachment,
+                             PlayerStateRef state,
+                             const CollisionShape& shape,
+                             glm::vec3 pos,
+                             glm::vec3 lookDir,
+                             bool requireLookGate)
+{
+    if (!attachment.found || !usableNormal(attachment.normal) || !finiteVec3(attachment.anchor))
+        return false;
+
+    const glm::vec3 localUp{0.0f, localUpSign(state.vis), 0.0f};
+    if (std::abs(glm::dot(attachment.normal, localUp)) > tms::k_climbSurfaceMinDotUp)
+        return false;
+
+    const float capsuleSide = glm::dot(pos - attachment.anchor, attachment.normal);
+    if (capsuleSide < -shape.radius * 0.35f)
+        return false;
+
+    if (usableNormal(lookDir)) {
+        const float alongLook = glm::dot(attachment.anchor - pos, lookDir);
+        if (alongLook < -shape.radius * 0.75f)
+            return false;
+        if (requireLookGate) {
+            const float lookFacing = glm::dot(-lookDir, attachment.normal);
+            const float minLookFacing = std::cos(glm::radians(tms::k_climbLookAngleLimit));
+            if (lookFacing < minLookFacing)
+                return false;
+        }
+    }
+
+    return true;
 }
 
 void seedWallAttachmentFromProbe(PlayerStateRef state,
@@ -1043,7 +1184,8 @@ bool tryConvertWallrunToClimb(glm::vec3& vel,
     if (!canReattachToClimb(state, frontNormal, posY))
         return false;
 
-    startClimbAttachment(vel, state, frontNormal, walls.frontPoint, posY);
+    startClimbAttachment(
+        vel, state, frontNormal, walls.frontPoint, posY, walls.frontMeshIndex, walls.frontTriId, walls.frontRegion);
     return true;
 }
 
@@ -1069,7 +1211,8 @@ bool tryConvertWallrunAttachmentToClimb(glm::vec3& vel,
     if (!canReattachToClimb(state, climbNormal, posY))
         return false;
 
-    startClimbAttachment(vel, state, climbNormal, attachment.anchor, posY);
+    startClimbAttachment(
+        vel, state, climbNormal, attachment.anchor, posY, attachment.meshIndex, attachment.triId, attachment.region);
     return true;
 }
 
@@ -1105,9 +1248,9 @@ void startWallrunFromClimb(glm::vec3& vel,
     clearWallCornerIgnore(state);
 
     const glm::vec3 anchor = walls.wallFront ? walls.frontPoint : state.sim.climbAttachPoint;
-    const uint32_t meshIndex = walls.wallFront ? walls.frontMeshIndex : UINT32_MAX;
-    const uint32_t triId = walls.wallFront ? walls.frontTriId : UINT32_MAX;
-    const physics::TriRegion region = walls.wallFront ? walls.frontRegion : physics::TriRegion::Face;
+    const uint32_t meshIndex = walls.wallFront ? walls.frontMeshIndex : state.sim.climbMeshIndex;
+    const uint32_t triId = walls.wallFront ? walls.frontTriId : state.sim.climbTriId;
+    const physics::TriRegion region = walls.wallFront ? walls.frontRegion : state.sim.climbRegion;
     seedWallAttachmentFromProbe(state, anchor, wallNormal, meshIndex, triId, region);
 
     vel -= wallNormal * glm::dot(vel, wallNormal);
@@ -1588,32 +1731,42 @@ void tryEnterClimb(glm::vec3& vel,
                    PlayerStateRef state,
                    const InputSnapshot& input,
                    const physics::WallDetectionResult& walls,
+                   const CollisionShape& shape,
+                   const physics::WorldGeometry& world,
+                   glm::vec3 pos,
                    float posY)
 {
     if (state.vis.moveMode != MoveMode::OnFoot)
         return;
     if (state.vis.grounded || state.vis.exitingClimb)
         return;
-    if (!walls.wallFront)
-        return;
-    const glm::vec3 wallNormal = normalizedOrZero(walls.frontNormal);
-    if (glm::dot(wallNormal, wallNormal) <= 0.0f)
+
+    const glm::vec3 lookDir = lookDirFromYaw(input.yaw);
+    if (!usableNormal(lookDir))
         return;
 
-    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
-    const glm::vec3 localUp{0.0f, gravDir, 0.0f};
-    if (std::abs(glm::dot(wallNormal, localUp)) > tms::k_climbSurfaceMinDotUp)
+    glm::vec3 referenceNormal = -lookDir;
+    if (walls.wallFront && usableNormal(walls.frontNormal))
+        referenceNormal = orientClimbNormal(walls.frontNormal, -lookDir, lookDir, pos, walls.frontPoint);
+
+    const glm::vec3 travelDir = usableNormal(horizVel(vel)) ? normalizedOrZero(horizVel(vel)) : lookDir;
+    const float lookaheadDist = shape.radius + 8.0f;
+    WallAttachmentProbe attachment =
+        findClimbAttachment(pos, shape, world, referenceNormal, lookDir, travelDir, lookaheadDist);
+
+    const bool usablePrimary = climbAttachmentIsUsable(attachment, state, shape, pos, lookDir, true);
+    if (!usablePrimary && walls.wallFront) {
+        attachment.found = true;
+        attachment.anchor = walls.frontPoint;
+        attachment.normal = orientClimbNormal(walls.frontNormal, referenceNormal, lookDir, pos, walls.frontPoint);
+        attachment.meshIndex = walls.frontMeshIndex;
+        attachment.triId = walls.frontTriId;
+        attachment.region = walls.frontRegion;
+    }
+    if (!climbAttachmentIsUsable(attachment, state, shape, pos, lookDir, true))
         return;
 
-    // Check look angle: player must be facing the wall.
-    const float k_sinYaw = std::sin(input.yaw);
-    const float k_cosYaw = std::cos(input.yaw);
-    const glm::vec3 k_lookDir{k_sinYaw, 0.0f, k_cosYaw};
-    const float k_lookAngle = std::acos(std::clamp(glm::dot(-k_lookDir, wallNormal), -1.0f, 1.0f));
-    const float k_maxAngleRad = glm::radians(tms::k_climbLookAngleLimit);
-    if (k_lookAngle > k_maxAngleRad)
-        return;
-
+    const glm::vec3 wallNormal = attachment.normal;
     const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
     const bool hasInputIntent = glm::dot(wishDir, -wallNormal) >= tms::k_climbIntentThreshold;
     const bool hasMomentumIntent = glm::dot(horizVel(vel), -wallNormal) > 25.0f;
@@ -1631,7 +1784,8 @@ void tryEnterClimb(glm::vec3& vel,
                                                                  state.sim.climbBlacklistActive))
         return;
 
-    startClimbAttachment(vel, state, wallNormal, walls.frontPoint, posY);
+    startClimbAttachment(
+        vel, state, wallNormal, attachment.anchor, posY, attachment.meshIndex, attachment.triId, attachment.region);
 }
 
 /// @brief Exit climb mode and start cooldown timers.
@@ -1649,6 +1803,10 @@ void exitClimb(PlayerStateRef state, float posY, float detachPenalty = tms::k_cl
     state.sim.climbBlacklistActive = true;
     state.sim.climbBlacklistNormal = normalizedOrZero(state.sim.climbWallNormal);
     state.sim.climbBlacklistHeight = posY;
+    state.sim.climbAttachmentValid = false;
+    state.sim.climbMeshIndex = UINT32_MAX;
+    state.sim.climbTriId = UINT32_MAX;
+    state.sim.climbRegion = physics::TriRegion::Face;
 }
 
 void dropClimbLostContact(PlayerStateRef state)
@@ -1661,6 +1819,10 @@ void dropClimbLostContact(PlayerStateRef state)
     state.sim.climbDetachPenalty = 0.0f;
     state.sim.climbPreviousWallNormal = glm::vec3{0.0f};
     state.sim.climbPreviousAttachHeight = -1e10f;
+    state.sim.climbAttachmentValid = false;
+    state.sim.climbMeshIndex = UINT32_MAX;
+    state.sim.climbTriId = UINT32_MAX;
+    state.sim.climbRegion = physics::TriRegion::Face;
 }
 
 void exitClimbWithEndBoost(glm::vec3& vel, PlayerStateRef state, float posY)
@@ -1685,6 +1847,9 @@ void handleClimbing(glm::vec3& vel,
                     PlayerStateRef state,
                     const InputSnapshot& input,
                     const physics::WallDetectionResult& walls,
+                    const CollisionShape& shape,
+                    const physics::WorldGeometry& world,
+                    glm::vec3 pos,
                     float posY,
                     float dt)
 {
@@ -1695,16 +1860,54 @@ void handleClimbing(glm::vec3& vel,
         exitClimb(state, posY);
         return;
     }
-    if (!walls.wallFront) {
-        dropClimbLostContact(state);
-        return;
-    }
 
     const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
     if (glm::dot(climbNormal, climbNormal) <= 0.0f) {
         dropClimbLostContact(state);
         return;
     }
+
+    const glm::vec3 lookDir = lookDirFromYaw(input.yaw);
+    WallAttachmentProbe attachment =
+        findClimbAttachment(pos,
+                            shape,
+                            world,
+                            climbNormal,
+                            lookDir,
+                            glm::vec3{0.0f},
+                            0.0f,
+                            state.sim.climbAttachmentValid ? state.sim.climbMeshIndex : UINT32_MAX,
+                            state.sim.climbAttachmentValid ? state.sim.climbTriId : UINT32_MAX,
+                            state.sim.climbRegion);
+    const bool attachmentMatchesCurrentWall =
+        climbAttachmentIsUsable(attachment, state, shape, pos, glm::vec3{0.0f}, false) &&
+        glm::dot(attachment.normal, climbNormal) >= 0.2f;
+    if (!attachmentMatchesCurrentWall && walls.wallFront) {
+        const glm::vec3 frontNormal = orientClimbNormal(walls.frontNormal, climbNormal, lookDir, pos, walls.frontPoint);
+        if (glm::dot(frontNormal, climbNormal) > 0.35f) {
+            attachment.found = true;
+            attachment.anchor = walls.frontPoint;
+            attachment.normal = frontNormal;
+            attachment.meshIndex = walls.frontMeshIndex;
+            attachment.triId = walls.frontTriId;
+            attachment.region = walls.frontRegion;
+        }
+    }
+    if (!climbAttachmentIsUsable(attachment, state, shape, pos, glm::vec3{0.0f}, false) ||
+        glm::dot(attachment.normal, climbNormal) < 0.2f)
+    {
+        dropClimbLostContact(state);
+        return;
+    }
+
+    state.sim.climbWallNormal = attachment.normal;
+    state.sim.climbAttachPoint = attachment.anchor;
+    state.sim.climbMeshIndex = attachment.meshIndex;
+    state.sim.climbTriId = attachment.triId;
+    state.sim.climbRegion = attachment.region;
+    state.sim.climbAttachmentValid = attachment.meshIndex != UINT32_MAX && attachment.triId != UINT32_MAX;
+
+    const glm::vec3 activeClimbNormal = attachment.normal;
 
     const float localHeight = climbLocalHeightFromWorldY(posY, state.vis);
     const bool hasAttachOffsetLimit = state.sim.climbAttachOffsetLimit > state.sim.climbAttachHeight + 0.001f;
@@ -1717,15 +1920,15 @@ void handleClimbing(glm::vec3& vel,
     }
 
     const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    const float wallIntent = glm::dot(wishDir, -climbNormal);
+    const float wallIntent = glm::dot(wishDir, -activeClimbNormal);
     const bool hasUpIntent = wallIntent >= tms::k_climbIntentThreshold;
     const bool hasDownIntent = wallIntent <= -tms::k_climbIntentThreshold;
     const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
     const glm::vec3 localUp{0.0f, gravDir, 0.0f};
     const float localUpSpeed = glm::dot(vel, localUp);
 
-    glm::vec3 tangentVel = vel - climbNormal * glm::dot(vel, climbNormal) - localUp * localUpSpeed;
-    glm::vec3 sideWish = wishDir - climbNormal * glm::dot(wishDir, climbNormal);
+    glm::vec3 tangentVel = vel - activeClimbNormal * glm::dot(vel, activeClimbNormal) - localUp * localUpSpeed;
+    glm::vec3 sideWish = wishDir - activeClimbNormal * glm::dot(wishDir, activeClimbNormal);
     sideWish -= localUp * glm::dot(sideWish, localUp);
     const float sideWishLenSq = glm::dot(sideWish, sideWish);
     const bool hasSideIntent = sideWishLenSq > 1e-5f;
@@ -1744,7 +1947,7 @@ void handleClimbing(glm::vec3& vel,
 
     const auto applyClimbVelocity = [&](float localVerticalSpeed, bool hadUpwardMotion) {
         vel = tangentVel + localUp * localVerticalSpeed;
-        vel -= climbNormal * tms::k_wallrunPushForce * dt;
+        vel -= activeClimbNormal * tms::k_wallrunPushForce * dt;
         state.sim.climbHadUpwardMotion = hadUpwardMotion;
         state.vis.targetCameraTilt = 0.0f;
     };
@@ -2162,8 +2365,11 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             if (!state.vis.grounded || state.vis.moveMode == MoveMode::WallRunning ||
                 state.vis.moveMode == MoveMode::Climbing)
             {
-                const glm::vec3 prevNormal =
-                    (state.vis.moveMode == MoveMode::WallRunning) ? state.sim.wallNormal : glm::vec3(0.0f);
+                glm::vec3 prevNormal = glm::vec3(0.0f);
+                if (state.vis.moveMode == MoveMode::WallRunning)
+                    prevNormal = state.sim.wallNormal;
+                else if (state.vis.moveMode == MoveMode::Climbing)
+                    prevNormal = state.sim.climbWallNormal;
                 walls = physics::detectWalls(pos.value,
                                              input.yaw,
                                              shape.halfExtents,
@@ -2190,7 +2396,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // Order matters: ledge > climb > wallrun > slide
             tryEnterLedgeGrab(state, walls);
             if (state.vis.moveMode == MoveMode::OnFoot)
-                tryEnterClimb(vel.value, state, input, walls, pos.value.y);
+                tryEnterClimb(vel.value, state, input, walls, shape, world, pos.value, pos.value.y);
             if (state.vis.moveMode == MoveMode::OnFoot)
                 tryEnterWallrun(vel.value, state, input, walls, shape, world, pos.value, pos.value.y);
             if (state.vis.moveMode == MoveMode::OnFoot)
@@ -2259,7 +2465,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 break;
 
             case MoveMode::Climbing:
-                handleClimbing(vel.value, state, input, walls, pos.value.y, dt);
+                handleClimbing(vel.value, state, input, walls, shape, world, pos.value, pos.value.y, dt);
                 break;
 
             case MoveMode::LedgeGrabbing:
