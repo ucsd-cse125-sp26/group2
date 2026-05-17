@@ -32,6 +32,49 @@ namespace
 {
 
 constexpr int k_maxLeafTris = 4; ///< Max triangles per BVH leaf.
+constexpr float k_hitTieEpsilon = 1e-5f;
+
+bool lexicographicallySmallerNormal(glm::vec3 a, glm::vec3 b)
+{
+    if (std::abs(a.x - b.x) > k_hitTieEpsilon)
+        return a.x < b.x;
+    if (std::abs(a.y - b.y) > k_hitTieEpsilon)
+        return a.y < b.y;
+    if (std::abs(a.z - b.z) > k_hitTieEpsilon)
+        return a.z < b.z;
+    return false;
+}
+
+bool isBetterMeshSweepHit(
+    const HitResult& candidate, uint32_t candidateTri, const HitResult& best, uint32_t bestTri, glm::vec3 delta)
+{
+    if (!candidate.hit)
+        return false;
+    if (!best.hit)
+        return true;
+    if (candidate.tFirst < best.tFirst - k_hitTieEpsilon)
+        return true;
+    if (candidate.tFirst > best.tFirst + k_hitTieEpsilon)
+        return false;
+
+    const float deltaLenSq = glm::dot(delta, delta);
+    if (deltaLenSq > 1e-12f) {
+        const glm::vec3 dir = delta / std::sqrt(deltaLenSq);
+        const float candidateOpposition = glm::dot(candidate.normal, dir);
+        const float bestOpposition = glm::dot(best.normal, dir);
+        if (candidateOpposition < bestOpposition - k_hitTieEpsilon)
+            return true;
+        if (candidateOpposition > bestOpposition + k_hitTieEpsilon)
+            return false;
+    }
+
+    if (lexicographicallySmallerNormal(candidate.normal, best.normal))
+        return true;
+    if (lexicographicallySmallerNormal(best.normal, candidate.normal))
+        return false;
+
+    return candidateTri < bestTri;
+}
 
 // BVH helpers
 
@@ -1151,6 +1194,7 @@ TriMeshCookStats collectTriMeshCookStats(std::span<const WorldTriMesh> meshes)
 HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)
 {
     HitResult best;
+    uint32_t bestTri = UINT32_MAX;
     if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
         return best;
 
@@ -1188,13 +1232,14 @@ HitResult sweepAABBvsTriMesh(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 e
                                                    mesh.faceNormals[ti],
                                                    mesh.edgeActive[ti],
                                                    mesh.vertActive[ti]);
-                if (hr.hit && hr.tFirst < best.tFirst) {
+                if (isBetterMeshSweepHit(hr, ti, best, bestTri, delta)) {
                     // Per-triangle material if cooked, else mesh-wide default.
                     if (ti < mesh.triangleMaterials.size())
                         hr.surfaceType = static_cast<SurfaceType>(mesh.triangleMaterials[ti]);
                     else
                         hr.surfaceType = mesh.defaultSurface;
                     best = hr;
+                    bestTri = ti;
                     if (debug::isEnabled()) {
                         const glm::vec3 hitPos = start + (end - start) * hr.tFirst;
                         const float r = std::abs(hr.normal.x) * halfExtents.x + std::abs(hr.normal.y) * halfExtents.y +
@@ -1414,6 +1459,7 @@ void depenetrateAABBvsTriMesh(
 HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)
 {
     HitResult best;
+    uint32_t bestTri = UINT32_MAX;
     if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
         return best;
 
@@ -1443,12 +1489,13 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
 
                 HitResult hr = sweepCapsuleVsTriangle(
                     capsule, start, end, v0, v1, v2, mesh.faceNormals[ti], mesh.edgeActive[ti], mesh.vertActive[ti]);
-                if (hr.hit && hr.tFirst < best.tFirst) {
+                if (isBetterMeshSweepHit(hr, ti, best, bestTri, delta)) {
                     if (ti < mesh.triangleMaterials.size())
                         hr.surfaceType = static_cast<SurfaceType>(mesh.triangleMaterials[ti]);
                     else
                         hr.surfaceType = mesh.defaultSurface;
                     best = hr;
+                    bestTri = ti;
                     if (debug::isEnabled()) {
                         const glm::vec3 hitPos = start + (end - start) * hr.tFirst;
                         const float r = capsule.minkowskiExtent(hr.normal);

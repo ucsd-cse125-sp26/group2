@@ -75,6 +75,25 @@ WorldTriMesh makeThinWall()
         });
 }
 
+WorldTriMesh makeThinDepthWall()
+{
+    return makeCookedMesh(
+        {
+            {-20.0f, 0.0f, 0.0f},
+            {20.0f, 0.0f, 0.0f},
+            {20.0f, 40.0f, 0.0f},
+            {-20.0f, 40.0f, 0.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+}
+
 WorldTriMesh makeTwoTriangleFloor()
 {
     return makeCookedMesh(
@@ -178,6 +197,43 @@ bool thinWallPlaneBlocksFromBothSides()
     ok &= expect(rightToLeft.hit, "thin wall plane should block capsule motion from the positive side");
     ok &= expect(rightToLeft.normal.x > 0.99f,
                  "right-to-left wall hit normal should point back toward the positive side");
+    return ok;
+}
+
+bool simultaneousCornerSweepTieBreakIsMeshOrderIndependent()
+{
+    std::array<WorldTriMesh, 2> xThenZ{makeThinWall(), makeThinDepthWall()};
+    std::array<WorldTriMesh, 2> zThenX{xThenZ[1], xThenZ[0]};
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 4.0f, .up = {0.0f, 1.0f, 0.0f}};
+
+    const physics::WorldGeometry worldXThenZ{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(xThenZ),
+    };
+    const physics::WorldGeometry worldZThenX{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(zThenX),
+    };
+
+    const glm::vec3 start{-24.0f, 20.0f, -24.0f};
+    const glm::vec3 end{24.0f, 20.0f, 24.0f};
+    const HitResult first = physics::sweepAll(capsule, start, end, worldXThenZ);
+    const HitResult second = physics::sweepAll(capsule, start, end, worldZThenX);
+
+    bool ok = true;
+    ok &= expect(first.hit && second.hit, "simultaneous corner sweep should hit both mesh-order variants");
+    ok &= expectNear(first.tFirst, second.tFirst, 0.0001f, "simultaneous corner sweep should keep the same TOI");
+    ok &= expectNear(first.normal.x, second.normal.x, 0.001f, "corner tie-break should not depend on mesh order");
+    ok &= expectNear(first.normal.z, second.normal.z, 0.001f, "corner tie-break should not depend on mesh order");
+    ok &= expect(first.normal.x < -0.99f, "corner tie-break should prefer the canonical X wall normal");
     return ok;
 }
 
@@ -511,6 +567,7 @@ int main()
 {
     bool ok = true;
     ok &= thinWallPlaneBlocksFromBothSides();
+    ok &= simultaneousCornerSweepTieBreakIsMeshOrderIndependent();
     ok &= sweptCapsuleHitsFiniteWallEdge();
     ok &= walkCapsuleStepsOntoThinTrimeshTread();
     ok &= kccClimbsThinTrimeshStep();

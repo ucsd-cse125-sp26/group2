@@ -20,6 +20,43 @@ namespace
 
 constexpr float k_contactEpsilon = 0.03125f; // 1/32 unit — matches Quake DIST_EPSILON.
 constexpr int k_staticBroadphaseLeafMeshes = 4;
+constexpr float k_hitTieEpsilon = 1e-5f;
+
+bool lexicographicallySmallerNormal(glm::vec3 a, glm::vec3 b)
+{
+    if (std::abs(a.x - b.x) > k_hitTieEpsilon)
+        return a.x < b.x;
+    if (std::abs(a.y - b.y) > k_hitTieEpsilon)
+        return a.y < b.y;
+    if (std::abs(a.z - b.z) > k_hitTieEpsilon)
+        return a.z < b.z;
+    return false;
+}
+
+bool isBetterSweepHit(const HitResult& candidate, const HitResult& best, glm::vec3 delta)
+{
+    if (!candidate.hit)
+        return false;
+    if (!best.hit)
+        return true;
+    if (candidate.tFirst < best.tFirst - k_hitTieEpsilon)
+        return true;
+    if (candidate.tFirst > best.tFirst + k_hitTieEpsilon)
+        return false;
+
+    const float deltaLenSq = glm::dot(delta, delta);
+    if (deltaLenSq > 1e-12f) {
+        const glm::vec3 dir = delta / std::sqrt(deltaLenSq);
+        const float candidateOpposition = glm::dot(candidate.normal, dir);
+        const float bestOpposition = glm::dot(best.normal, dir);
+        if (candidateOpposition < bestOpposition - k_hitTieEpsilon)
+            return true;
+        if (candidateOpposition > bestOpposition + k_hitTieEpsilon)
+            return false;
+    }
+
+    return lexicographicallySmallerNormal(candidate.normal, best.normal);
+}
 
 /// @brief Closest point on segment `[a, b]` to point `p`.  Standard
 /// parametric clamp; degenerate (zero-length) segments collapse to `a`.
@@ -845,35 +882,36 @@ HitResult sweepCapsuleVsSphere(CapsuleShape capsule, glm::vec3 start, glm::vec3 
 
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
+    const glm::vec3 delta = end - start;
     HitResult best = sweepAABB(halfExtents, start, end, world.planes);
 
     for (const WorldAABB& box : world.boxes) {
         const HitResult k_hr = sweepAABBvsBox(halfExtents, start, end, box);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     for (const WorldBrush& brush : world.brushes) {
         const HitResult k_hr = sweepAABBvsBrush(halfExtents, start, end, brush);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     for (const WorldCylinder& cyl : world.cylinders) {
         const HitResult k_hr = sweepAABBvsCylinder(halfExtents, start, end, cyl);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     for (const WorldSphere& sph : world.spheres) {
         const HitResult k_hr = sweepAABBvsSphere(halfExtents, start, end, sph);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     forTriMeshCandidates(world, sweptBounds(halfExtents, start, end), [&](const WorldTriMesh& tm) {
         const HitResult k_hr = sweepAABBvsTriMesh(halfExtents, start, end, tm);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     });
 
@@ -882,35 +920,36 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
 
 HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
+    const glm::vec3 delta = end - start;
     HitResult best = sweepCapsuleVsPlanes(capsule, start, end, world.planes);
 
     for (const WorldAABB& box : world.boxes) {
         const HitResult k_hr = sweepCapsuleVsBox(capsule, start, end, box);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     for (const WorldBrush& brush : world.brushes) {
         const HitResult k_hr = sweepCapsuleVsBrush(capsule, start, end, brush);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     for (const WorldCylinder& cyl : world.cylinders) {
         const HitResult k_hr = sweepCapsuleVsCylinder(capsule, start, end, cyl);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     for (const WorldSphere& sph : world.spheres) {
         const HitResult k_hr = sweepCapsuleVsSphere(capsule, start, end, sph);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     }
 
     forTriMeshCandidates(world, sweptBounds(capsule.enclosingHalfExtents(), start, end), [&](const WorldTriMesh& tm) {
         const HitResult k_hr = sweepCapsuleVsTriMesh(capsule, start, end, tm);
-        if (k_hr.hit && k_hr.tFirst < best.tFirst)
+        if (isBetterSweepHit(k_hr, best, delta))
             best = k_hr;
     });
 
