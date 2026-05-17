@@ -163,7 +163,7 @@ sequenceDiagram
   participant WA as findWallAttachment
   participant TM as TriMesh::closestPointOnMesh
 
-  M->>WD: detectWalls<br/>(sphere-cast right/left/forward, ledge, ground)
+  M->>WD: detectWalls<br/>(triMesh closest-point walls,<br/>KCC ledge/ground probes)
   M->>M: tryEnterWallrun guards<br/>(jump held, groundDist≥50, intent dot≥0.1)
   M->>WA: query mesh closest-point
   WA->>TM: closestPointOnMesh per tri-mesh
@@ -172,7 +172,7 @@ sequenceDiagram
     M->>M: jump released? → wall-jump impulse + exitWallrun
     M->>WA: refresh attachment
     alt attachment lost
-      M->>M: sphere-cast fallback wall
+      M->>M: fallback wall probe
       alt fallback also missing
         M->>M: detach to OnFoot
       end
@@ -185,11 +185,13 @@ sequenceDiagram
   end
 ```
 
-The wall-attachment data (`wallAnchor`, `wallNormal`, `wallForward`) is stored in `PlayerSimState` and refreshed each tick. `wallTriId` and `wallRegion` are **written but never read** — Phase D adjacency walking via `WorldTriMesh::edgeNeighbor` is not yet wired.
+The wall-attachment data (`wallAnchor`, `wallNormal`, `wallForward`, `wallMeshIndex`, `wallTriId`, `wallRegion`) is
+stored in `PlayerSimState` and refreshed each tick. `findWallRunAttachment` uses the stored mesh/triangle/feature to
+walk adjacent triangles through `WorldTriMesh::edgeNeighbor`, which keeps inside and outside 90-degree corner wallruns
+continuous.
 
-The "entry mechanism uses sphere-cast `WallDetection`, sustain uses `closestPointOnMesh`" split means wallrun entry can fail on a tri-mesh wall that's near but slightly beyond `k_wallrunCheckDist + sphereRadius`. See *potential-issues*.
-
-`findWallAttachment` **only iterates `world.triMeshes`** — boxes/brushes/cylinders/spheres are silently ignored. On `testWorld()` (all boxes), it always returns `{found=false}` and the sphere-cast fallback carries everything.
+Wall entry is triMesh-first through `WallDetection`; primitive/debug worlds keep the sphere-cast fallback. Sustain uses
+the closest-point attachment path and falls back to the latest side-wall probe only when mesh attachment is lost.
 
 ---
 
@@ -309,7 +311,7 @@ Wait-free no-op when disabled. The CLI flag to disable it is a TODO (`ServerGame
 | `src/ecs/physics/Joints.cpp` | Point/Hinge/ConeTwist constraints |
 | `src/ecs/physics/Sleep.cpp` | Sleep/wake bookkeeping |
 | `src/ecs/physics/Inertia.hpp` | Analytical inverse inertia tensors |
-| `src/ecs/physics/WallDetection.cpp` | Sphere-cast wallrun/climb/ledge probes |
+| `src/ecs/physics/WallDetection.cpp` | TriMesh wall probes + KCC ledge/ground probes |
 | `src/ecs/physics/PhaseDiagnostic.cpp` | CSV instrumentation |
 | `src/ecs/physics/DeterminismHash.cpp` | Cross-side parity hash |
 

@@ -176,9 +176,10 @@ Never assigned, never read.
 
 `k_wallrunKickoffDuration`, `k_wallrunDetachThreshold`, `k_wallrunGripTime`, `k_wallrunGravityRampTime` — all dead. **No max-wallrun-time enforced.**
 
-### 🟡 P-12. `wallTriId` / `wallRegion` / `wallAttachmentValid` written but never read
+### ✅ P-12. `wallTriId` / `wallRegion` / `wallAttachmentValid` now consumed
 
-Phase D adjacency-walking via `WorldTriMesh::edgeNeighbor` not wired.
+Fixed on branch `core/collisions+wallrun`: wallrun sustain now passes stored mesh/triangle/feature identity back into
+`findWallRunAttachment`, which walks `WorldTriMesh::edgeNeighbor` across triangle seams.
 
 ### 🟡 P-13. Stale wallrun standoff snap still writes `pos` directly
 

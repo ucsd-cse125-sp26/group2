@@ -1,6 +1,8 @@
 # Collisions
 
-Per-player **capsule** with hybrid conservative-advancement (CA), per-pass-deepest depenetration, two-capsule stair handling, and a welded-edge-classified BVH triangle mesh. Projectiles still use the legacy AABB path. This is the area with **known active regressions** on branch `core/collisions+wallrun`.
+Per-player **capsule** with hybrid conservative-advancement (CA), per-pass-deepest depenetration, two-capsule stair
+handling, welded-edge-classified BVH triangle meshes, mesh-surface wall attachment, and KCC-based ground/ledge probes.
+Projectiles still use the legacy AABB path.
 
 Last verified against source: branch `core/collisions+wallrun` (2026-05-16).
 
@@ -117,7 +119,8 @@ All swept queries return `HitResult { hit, tFirst, normal, surfaceType }`. Close
 | Sphere | conservative corner | ✓ | conservative | conservative | conservative |
 | TriMesh | per-tri (Möller-Trumbore-ish with reach test) | Voronoi-feature MTV (Ericson §5.1.5) | per-tri capsule sweep | per-tri Voronoi capsule MTV | BVH-accel `closestPointSegmentTriangle` |
 
-The Box/Brush/Cylinder/Sphere capsule paths use an AABB-enclosing approximation — the comment says "real maps are trimesh" but the dev arena's staircase is built from boxes, which is where the **stair-climb regression** lives.
+The Box/Brush/Cylinder/Sphere capsule paths use an AABB-enclosing approximation. Production maps should not depend on
+those primitive paths for authored floors, walls, ceilings, or stairs; those surfaces are imported as `WorldTriMesh`.
 
 ### Triangle-mesh details
 
@@ -278,13 +281,13 @@ The PGS solver (`Solver.cpp`) is detailed in [physics.md §7](physics.md#7-dynam
 |---|---|
 | Phase A: capsule sweep vs all primitives | **Live** but box/cyl/sphere paths are *conservative* (enclosingHalfExtents) |
 | Phase A: capsule depen vs all primitives | **Live**; legacy AABB depen kept for projectiles |
-| Phase B: edge-neighbor adjacency | **Live as data** (`edgeNeighbor` populated), **not consumed** |
-| Phase B: closest-point-on-mesh | **Live**; used by wallrun's `findWallAttachment` |
+| Phase B: edge-neighbor adjacency | **Live and consumed** by wallrun manifold traversal |
+| Phase B: closest-point-on-mesh | **Live**; used by wallrun/climb detection and wallrun sustain |
 | Phase B: active-edge swap on sweep | **Intentional no-op** — `(void)edgeFlags; (void)vertFlags;` |
 | Phase C: per-primitive capsule clearance | **Live**; `clearanceCapsuleVsBrush` reports MAX of positive clearances (overestimates — see *potential-issues*) |
 | Phase C: hybrid CA inner loop | **Live** |
 | Phase C: sub-stepping | **Live** |
-| Phase C-deep: two-capsule stair step | **Live** but **regressing** on box stairs |
+| Phase C-deep: two-capsule stair step | **Live for authored trimesh stairs** |
 | Phase C-deep: per-pass-deepest depen | **Live** |
 | Phase C-deep: emergency unstick | **Live** but gated by `if (contact.valid)` — see issue |
 | Phase D: wall manifold walk | **Live** — attachment stores mesh/triangle/feature and walks neighbouring triangles across seams |
