@@ -34,6 +34,18 @@ namespace
 constexpr int k_maxLeafTris = 4; ///< Max triangles per BVH leaf.
 constexpr float k_hitTieEpsilon = 1e-5f;
 
+bool finiteVec3(glm::vec3 v) noexcept
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+bool validTriangleArea(glm::vec3 a, glm::vec3 b, glm::vec3 c) noexcept
+{
+    const glm::vec3 raw = glm::cross(b - a, c - a);
+    const float lenSq = glm::dot(raw, raw);
+    return std::isfinite(lenSq) && lenSq > 1e-12f;
+}
+
 bool lexicographicallySmallerNormal(glm::vec3 a, glm::vec3 b)
 {
     if (std::abs(a.x - b.x) > k_hitTieEpsilon)
@@ -205,6 +217,51 @@ bool sweptAABBOverlapsAABB(
 /// Voronoi region tag for the chosen feature.  Ericson, *RTCD* §5.1.5.
 TriRegion closestPointOnTriangle(glm::vec3 p, glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3& outClosest)
 {
+    if (!validTriangleArea(a, b, c)) {
+        auto closestOnSegment = [](glm::vec3 point, glm::vec3 s0, glm::vec3 s1, float& outDistSq) {
+            const glm::vec3 d = s1 - s0;
+            const float lenSq = glm::dot(d, d);
+            if (!std::isfinite(lenSq) || lenSq <= 1e-12f) {
+                outDistSq = glm::dot(point - s0, point - s0);
+                return s0;
+            }
+            const float t = glm::clamp(glm::dot(point - s0, d) / lenSq, 0.0f, 1.0f);
+            const glm::vec3 closest = s0 + d * t;
+            outDistSq = glm::dot(point - closest, point - closest);
+            return closest;
+        };
+
+        float bestDistSq = 1e30f;
+        TriRegion bestRegion = TriRegion::Vert0;
+        glm::vec3 best = a;
+        auto considerPoint = [&](glm::vec3 q, TriRegion region) {
+            const float dSq = glm::dot(p - q, p - q);
+            if (std::isfinite(dSq) && dSq < bestDistSq) {
+                bestDistSq = dSq;
+                bestRegion = region;
+                best = q;
+            }
+        };
+        auto considerSegment = [&](glm::vec3 s0, glm::vec3 s1, TriRegion region) {
+            float dSq = 1e30f;
+            const glm::vec3 q = closestOnSegment(p, s0, s1, dSq);
+            if (std::isfinite(dSq) && finiteVec3(q) && dSq < bestDistSq) {
+                bestDistSq = dSq;
+                bestRegion = region;
+                best = q;
+            }
+        };
+
+        considerPoint(a, TriRegion::Vert0);
+        considerPoint(b, TriRegion::Vert1);
+        considerPoint(c, TriRegion::Vert2);
+        considerSegment(a, b, TriRegion::Edge0);
+        considerSegment(b, c, TriRegion::Edge1);
+        considerSegment(c, a, TriRegion::Edge2);
+        outClosest = best;
+        return bestRegion;
+    }
+
     const glm::vec3 ab = b - a;
     const glm::vec3 ac = c - a;
     const glm::vec3 ap = p - a;
@@ -965,10 +1022,9 @@ void weldTriMesh(WorldTriMesh& mesh, float coplanarTolerance)
     if (triCount == 0)
         return;
 
-    // 1. Face normals.  Degenerate triangles (collinear vertices) get a
-    //    fallback +Y normal — they never produce contacts because their
-    //    plane test always fails the |s| ≤ r check, so the fallback value
-    //    only matters for indexing safety.
+    // 1. Face normals. Degenerate triangles (collinear vertices) get a
+    //    fallback +Y normal for indexing safety; runtime queries that need a
+    //    real surface still skip zero-area triangles explicitly.
     for (uint32_t t = 0; t < triCount; ++t) {
         const glm::vec3& v0 = mesh.vertices[mesh.indices[t * 3 + 0]];
         const glm::vec3& v1 = mesh.vertices[mesh.indices[t * 3 + 1]];
@@ -1717,10 +1773,13 @@ GroundProbeResult groundProbeCapsuleVsTriMesh(
                 const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
                 const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
                 const glm::vec3& v2 = mesh.vertices[mesh.indices[ti * 3 + 2]];
+                if (!validTriangleArea(v0, v1, v2))
+                    continue;
+
                 const float planeDist = glm::dot(n, v0);
                 const float clearance = glm::dot(n, pos) - planeDist - capsule.minkowskiExtent(n);
                 const float probeDistance = clearance / upDot;
-                if (probeDistance > maxDistance || probeDistance > best.distance)
+                if (!std::isfinite(probeDistance) || probeDistance > maxDistance || probeDistance > best.distance)
                     continue;
 
                 const glm::vec3 centerAtSupport = pos - up * std::max(probeDistance, 0.0f);
@@ -1728,9 +1787,13 @@ GroundProbeResult groundProbeCapsuleVsTriMesh(
                 const glm::vec3 support =
                     centerAtSupport - n * capsule.radius - capsule.up * (capsule.halfHeight * axisSign);
                 const glm::vec3 planePoint = support - n * (glm::dot(n, support) - planeDist);
+                if (!finiteVec3(centerAtSupport) || !finiteVec3(support) || !finiteVec3(planePoint))
+                    continue;
 
                 glm::vec3 closest;
                 closestPointOnTriangle(planePoint, v0, v1, v2, closest);
+                if (!finiteVec3(closest))
+                    continue;
                 if (glm::dot(closest - planePoint, closest - planePoint) > 0.25f * 0.25f)
                     continue;
 

@@ -174,6 +174,33 @@ WorldTriMesh makeThinSingleStep()
         });
 }
 
+WorldTriMesh makeFloorWithDegenerateRaisedEdge()
+{
+    // Mirrors the captured map failure: an exported zero-area triangle sits
+    // inside the grounded snap window near a valid tread/floor.
+    return makeCookedMesh(
+        {
+            {16.0f, 6.912f, 32.0f},
+            {16.0f, 6.912f, 32.0f},
+            {16.0f, 6.912f, -32.0f},
+            {-64.0f, 0.0f, -64.0f},
+            {64.0f, 0.0f, -64.0f},
+            {64.0f, 0.0f, 64.0f},
+            {-64.0f, 0.0f, 64.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            3,
+            5,
+            4,
+            3,
+            6,
+            5,
+        });
+}
+
 WorldTriMesh makeThinStaircase(int steps, float stepHeight, float treadDepth)
 {
     std::vector<glm::vec3> vertices;
@@ -363,6 +390,30 @@ bool walkCapsuleStepsOntoThinTrimeshTread()
     ok &= expect(ground.distance < 0.0f, "ground probe should report overlapping tread as negative distance");
     ok &= expectNear(ground.point.y, 16.0f, 0.05f, "ground probe should report the authored tread surface");
     ok &= expect(ground.normal.y > 0.99f, "ground probe should keep the tread normal stable");
+    return ok;
+}
+
+bool groundProbeIgnoresDegenerateSnapCandidate()
+{
+    const WorldTriMesh floor = makeFloorWithDegenerateRaisedEdge();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&floor, 1),
+    };
+
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 20.0f, .up = {0.0f, 1.0f, 0.0f}};
+    const GroundProbeResult ground = physics::probeGround(capsule, {0.0f, 30.03125f, 0.0f}, 26.0f, world);
+
+    bool ok = true;
+    ok &= expect(ground.hit, "ground probe should still find the valid floor below a degenerate exported triangle");
+    ok &= expect(finiteVec3(ground.point), "ground probe point should remain finite around degenerate triangles");
+    ok &= expect(finiteVec3(ground.normal), "ground probe normal should remain finite around degenerate triangles");
+    ok &= expectNear(ground.point.y, 0.0f, 0.05f, "ground probe should ignore the raised zero-area triangle");
+    ok &= expect(ground.normal.y > 0.99f, "ground probe should keep the valid floor normal");
     return ok;
 }
 
@@ -902,6 +953,7 @@ int main()
     ok &= simultaneousCornerSweepTieBreakIsMeshOrderIndependent();
     ok &= sweptCapsuleHitsFiniteWallEdge();
     ok &= walkCapsuleStepsOntoThinTrimeshTread();
+    ok &= groundProbeIgnoresDegenerateSnapCandidate();
     ok &= kccClimbsThinTrimeshStep();
     ok &= kccAscendsThinTrimeshStaircaseSmoothly();
     ok &= kccAscendsThinTrimeshStaircaseAtSprintSpeed();
