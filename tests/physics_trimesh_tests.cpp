@@ -123,6 +123,64 @@ WorldTriMesh makeThinSingleStep()
         });
 }
 
+WorldTriMesh makeThinCeiling()
+{
+    return makeCookedMesh(
+        {
+            {-64.0f, 44.0f, -64.0f},
+            {64.0f, 44.0f, -64.0f},
+            {64.0f, 44.0f, 64.0f},
+            {-64.0f, 44.0f, 64.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+}
+
+WorldTriMesh makeThinRamp()
+{
+    return makeCookedMesh(
+        {
+            {-64.0f, 0.0f, 0.0f},
+            {64.0f, 0.0f, 0.0f},
+            {64.0f, 32.0f, 64.0f},
+            {-64.0f, 32.0f, 64.0f},
+        },
+        {
+            0,
+            2,
+            1,
+            0,
+            3,
+            2,
+        });
+}
+
+bool thinWallPlaneBlocksFromBothSides()
+{
+    const WorldTriMesh wall = makeThinWall();
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 4.0f, .up = {0.0f, 1.0f, 0.0f}};
+
+    const HitResult leftToRight =
+        physics::sweepCapsuleVsTriMesh(capsule, {-24.0f, 20.0f, 0.0f}, {24.0f, 20.0f, 0.0f}, wall);
+    const HitResult rightToLeft =
+        physics::sweepCapsuleVsTriMesh(capsule, {24.0f, 20.0f, 0.0f}, {-24.0f, 20.0f, 0.0f}, wall);
+
+    bool ok = true;
+    ok &= expect(leftToRight.hit, "thin wall plane should block capsule motion from the negative side");
+    ok &= expect(leftToRight.normal.x < -0.99f,
+                 "left-to-right wall hit normal should point back toward the negative side");
+    ok &= expect(rightToLeft.hit, "thin wall plane should block capsule motion from the positive side");
+    ok &= expect(rightToLeft.normal.x > 0.99f,
+                 "right-to-left wall hit normal should point back toward the positive side");
+    return ok;
+}
+
 bool walkCapsuleStepsOntoThinTrimeshTread()
 {
     const WorldTriMesh step = makeThinSingleStep();
@@ -186,6 +244,52 @@ bool kccClimbsThinTrimeshStep()
     ok &= expectNear(pos.y, 46.03125f, 0.1f, "KCC should settle the full capsule onto the raised tread");
     ok &= expect(state.grounded, "KCC should remain grounded after stepping onto a thin trimesh tread");
     ok &= expect(state.groundNormal.y > 0.99f, "KCC should keep the tread ground normal stable");
+    return ok;
+}
+
+bool thinCeilingPlaneBlocksUpwardCapsuleMotion()
+{
+    const WorldTriMesh ceiling = makeThinCeiling();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&ceiling, 1),
+    };
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 4.0f, .up = {0.0f, 1.0f, 0.0f}};
+
+    const HitResult hit = physics::sweepAll(capsule, {0.0f, 20.0f, 0.0f}, {0.0f, 48.0f, 0.0f}, world);
+
+    bool ok = true;
+    ok &= expect(hit.hit, "thin ceiling plane should block upward capsule motion");
+    ok &= expect(hit.normal.y < -0.99f, "ceiling hit normal should push the capsule downward");
+    ok &= expect(hit.tFirst > 0.0f && hit.tFirst < 1.0f, "ceiling hit should occur during the upward sweep");
+    return ok;
+}
+
+bool rampGroundProbeKeepsAuthoredNormal()
+{
+    const WorldTriMesh ramp = makeThinRamp();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&ramp, 1),
+    };
+    const CapsuleShape capsule{.radius = 10.0f, .halfHeight = 4.0f, .up = {0.0f, 1.0f, 0.0f}};
+
+    const GroundProbeResult ground = physics::probeGround(capsule, {0.0f, 46.0f, 32.0f}, 40.0f, world);
+
+    bool ok = true;
+    ok &= expect(ground.hit, "ground probe should hit a thin authored ramp surface");
+    ok &= expect(ground.walkable, "26 degree ramp should classify as walkable");
+    ok &= expectNear(ground.normal.x, 0.0f, 0.02f, "ramp normal should not acquire sideways noise");
+    ok &= expectNear(ground.normal.y, 0.894427f, 0.02f, "ramp normal should preserve authored slope");
+    ok &= expectNear(ground.normal.z, -0.447214f, 0.02f, "ramp normal should point against the ramp rise");
     return ok;
 }
 
@@ -406,9 +510,12 @@ bool playerWallAttachmentStateHasStableMeshIdentity()
 int main()
 {
     bool ok = true;
+    ok &= thinWallPlaneBlocksFromBothSides();
     ok &= sweptCapsuleHitsFiniteWallEdge();
     ok &= walkCapsuleStepsOntoThinTrimeshTread();
     ok &= kccClimbsThinTrimeshStep();
+    ok &= thinCeilingPlaneBlocksUpwardCapsuleMotion();
+    ok &= rampGroundProbeKeepsAuthoredNormal();
     ok &= staticCapsuleDepenUsesSurfaceFeatureNormal();
     ok &= twoTriangleFloorHasStableSurfaceOverlap();
     ok &= sphereCastAgainstTriMeshUsesSurfaceFeatureNormal();
