@@ -235,6 +235,10 @@ Map loading now emits aggregate trimesh validation totals alongside cook stats: 
 degenerate triangles, opposite-winding duplicate faces, non-manifold edges, invalid indices, BVH quality, seam weld
 counts, and invalid cooked normals.
 
+When physics diagnostics are enabled, KCC timing is also emitted to `kcc-timing-<timestamp>.csv` with elapsed
+microseconds, substep count, CA iteration count, clearance/sweep query counts, hit count, and exhaustion state. Use this
+CSV to compute p99 against the 128 Hz tick budget on real routes and bot loads.
+
 `BroadphaseTree` (`src/ecs/physics/BroadphaseTree.cpp`) is a separate Box2D-style fat-AABB BVH for future dynamic rigid
 bodies. It still has no live player/projectile consumers.
 

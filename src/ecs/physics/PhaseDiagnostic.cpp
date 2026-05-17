@@ -27,6 +27,9 @@ bool wroteHeader = false;
 std::mutex movementLogMutex;
 FILE* movementLogFile = nullptr;
 
+std::mutex kccTimingLogMutex;
+FILE* kccTimingLogFile = nullptr;
+
 std::mutex annotationMutex;
 std::unordered_map<entt::entity, std::string> pendingAnnotations;
 
@@ -104,6 +107,30 @@ void openMovementLazily()
                  "climbNx,climbNy,climbNz,storedLedgeNx,storedLedgeNy,storedLedgeNz,"
                  "storedLedgePx,storedLedgePy,storedLedgePz,climbTimer,ledgeHoldTimer,"
                  "flagsHex,invalidState,note\n");
+}
+
+void openKccTimingLazily()
+{
+    if (kccTimingLogFile != nullptr)
+        return;
+
+    const auto now = std::chrono::system_clock::now();
+    const auto t = std::chrono::system_clock::to_time_t(now);
+    char nameBuf[64];
+    std::tm tmbuf{};
+#if defined(_WIN32)
+    ::localtime_s(&tmbuf, &t);
+#else
+    ::localtime_r(&t, &tmbuf);
+#endif
+    std::strftime(nameBuf, sizeof(nameBuf), "kcc-timing-%Y%m%d-%H%M%S.csv", &tmbuf);
+    kccTimingLogFile = std::fopen(nameBuf, "w");
+    if (kccTimingLogFile == nullptr)
+        return;
+
+    std::fprintf(kccTimingLogFile,
+                 "row,entity,elapsedUs,substeps,caIterations,clearanceQueries,sweepQueries,sweepHits,"
+                 "usedWalkCapsule,caExhausted,grounded,moveMode\n");
 }
 
 const char* moveModeName(int m)
@@ -395,6 +422,36 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  (flagBits & static_cast<uint32_t>(PhaseFlag::InvalidState)) ? 1 : 0,
                  note);
     std::fflush(movementLogFile);
+}
+
+void recordKccTimingFrame(const KccTimingFrame& f) noexcept
+{
+    if (!enabledFlag.load(std::memory_order_relaxed))
+        return;
+
+    std::lock_guard<std::mutex> lk(kccTimingLogMutex);
+    openKccTimingLazily();
+    if (kccTimingLogFile == nullptr)
+        return;
+
+    static uint64_t rowIndex = 0;
+    ++rowIndex;
+
+    std::fprintf(kccTimingLogFile,
+                 "%lu,%u,%lu,%d,%d,%d,%d,%d,%d,%d,%d,%s\n",
+                 static_cast<unsigned long>(rowIndex),
+                 entt::to_integral(f.entity),
+                 static_cast<unsigned long>(f.elapsedUs),
+                 f.substeps,
+                 f.caIterations,
+                 f.clearanceQueries,
+                 f.sweepQueries,
+                 f.sweepHits,
+                 f.usedWalkCapsule ? 1 : 0,
+                 f.caExhausted ? 1 : 0,
+                 f.grounded ? 1 : 0,
+                 moveModeName(f.moveMode));
+    std::fflush(kccTimingLogFile);
 }
 
 void recordDepenContact(const DepenContact& c) noexcept

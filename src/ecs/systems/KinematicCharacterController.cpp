@@ -9,7 +9,9 @@
 #include "ecs/physics/PhysicsConstants.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <glm/geometric.hpp>
 
 namespace systems
@@ -80,7 +82,9 @@ void runKinematicCharacterController(glm::vec3& pos,
 
     const bool diagOn = physics::diag::isEnabled();
     physics::diag::PlayerFrame diagFrame{};
+    std::chrono::steady_clock::time_point diagStart{};
     if (diagOn) {
+        diagStart = std::chrono::steady_clock::now();
         diagFrame.entity = entity;
         diagFrame.posBefore = pos;
         diagFrame.velBefore = vel;
@@ -114,11 +118,16 @@ void runKinematicCharacterController(glm::vec3& pos,
     const float subDt = dt / static_cast<float>(numSubsteps);
     constexpr int k_maxCAIterations = 8;
     bool caExhaustedAnySubstep = false;
+    int caIterations = 0;
+    int clearanceQueries = 0;
+    int sweepQueries = 0;
+    int sweepHits = 0;
 
     for (int sub = 0; sub < numSubsteps; ++sub) {
         float remainingTime = subDt;
         int iter = 0;
         for (; iter < k_maxCAIterations && remainingTime > 1e-5f; ++iter) {
+            ++caIterations;
             const glm::vec3 sweepStart = pos + sweepCenterOffset;
             const float vLen = glm::length(phaseVel);
             const float motionBound = vLen * remainingTime;
@@ -127,6 +136,7 @@ void runKinematicCharacterController(glm::vec3& pos,
                 break;
             }
 
+            ++clearanceQueries;
             const physics::ClearanceResult clr = physics::clearanceCapsuleVsWorld(sweepCapsule, sweepStart, world);
             if (clr.distance > motionBound + k_pushback) {
                 pos += phaseVel * remainingTime;
@@ -135,6 +145,7 @@ void runKinematicCharacterController(glm::vec3& pos,
             }
 
             const glm::vec3 sweepEnd = sweepStart + phaseVel * remainingTime;
+            ++sweepQueries;
             const physics::HitResult hit = physics::sweepAll(sweepCapsule, sweepStart, sweepEnd, world);
             if (!hit.hit) {
                 pos += phaseVel * remainingTime;
@@ -146,6 +157,7 @@ void runKinematicCharacterController(glm::vec3& pos,
                 remainingTime = 0.0f;
                 break;
             }
+            ++sweepHits;
 
             pos += phaseVel * hit.tFirst * remainingTime;
             remainingTime *= (1.0f - hit.tFirst);
@@ -201,10 +213,12 @@ void runKinematicCharacterController(glm::vec3& pos,
         const glm::vec3 vMotion = worldUp * k_vAlongUp;
         if (glm::dot(vMotion, vMotion) > 1e-12f) {
             const glm::vec3 vTarget = pos + vMotion * dt;
+            ++sweepQueries;
             const physics::HitResult vHit = physics::sweepAll(capsule, pos, vTarget, world);
             if (!vHit.hit) {
                 pos = vTarget;
             } else {
+                ++sweepHits;
                 pos += vMotion * vHit.tFirst * dt;
                 pos += vHit.normal * k_pushback;
                 const bool landed = glm::dot(vHit.normal, worldUp) >= physics::k_floorAngleCos;
@@ -220,6 +234,9 @@ void runKinematicCharacterController(glm::vec3& pos,
     }
 
     if (diagOn) {
+        const auto diagEnd = std::chrono::steady_clock::now();
+        const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(diagEnd - diagStart).count();
+        const uint64_t clampedElapsedUs = elapsedUs > 0 ? static_cast<uint64_t>(elapsedUs) : 0u;
         diagFrame.posAfter = pos;
         diagFrame.velAfter = vel;
         const bool finiteState = std::isfinite(pos.x) && std::isfinite(pos.y) && std::isfinite(pos.z) &&
@@ -250,6 +267,19 @@ void runKinematicCharacterController(glm::vec3& pos,
         if (jumpedThisTick)
             diagFrame.flags |= physics::diag::PhaseFlag::DoubleJumped;
         physics::diag::recordFrame(diagFrame);
+        physics::diag::recordKccTimingFrame(physics::diag::KccTimingFrame{
+            .entity = entity,
+            .elapsedUs = clampedElapsedUs,
+            .substeps = numSubsteps,
+            .caIterations = caIterations,
+            .clearanceQueries = clearanceQueries,
+            .sweepQueries = sweepQueries,
+            .sweepHits = sweepHits,
+            .usedWalkCapsule = useWalkCapsule,
+            .caExhausted = caExhaustedAnySubstep,
+            .grounded = state.grounded,
+            .moveMode = static_cast<int>(state.moveMode),
+        });
     }
 }
 

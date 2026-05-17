@@ -151,6 +151,26 @@ struct MovementFrame
 /// `movement-diag-<timestamp>.csv`. No-op unless telemetry is enabled.
 void recordMovementFrame(const MovementFrame& frame) noexcept;
 
+/// @brief One row of timing telemetry for the player KCC. Emitted only when
+/// diagnostics are enabled, so normal gameplay stays on the no-op path.
+struct KccTimingFrame
+{
+    entt::entity entity{entt::null};
+    uint64_t elapsedUs = 0;
+    int substeps = 0;
+    int caIterations = 0;
+    int clearanceQueries = 0;
+    int sweepQueries = 0;
+    int sweepHits = 0;
+    bool usedWalkCapsule = false;
+    bool caExhausted = false;
+    bool grounded = false;
+    int moveMode = 0;
+};
+
+/// @brief Append KCC timing telemetry to `kcc-timing-<timestamp>.csv`.
+void recordKccTimingFrame(const KccTimingFrame& frame) noexcept;
+
 /// @brief Attach a text annotation to the NEXT frame recorded for the
 /// given entity.  Used by MovementSystem hooks (wallrun enter / exit,
 /// double-jump fired, etc.) to correlate movement events with collision
