@@ -347,6 +347,12 @@ target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
 set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+if(WIN32 AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+    # Opus 1.5.2's CMake files treat clang-cl as MSVC and add SSE4.1/AVX2
+    # runtime-dispatch sources without the per-file target flags clang needs.
+    # Keep Windows CI portable; voice chat does not need the SIMD path.
+    set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE)
+endif()
 FetchContent_Declare(
     opus
     GIT_REPOSITORY https://github.com/xiph/opus.git
