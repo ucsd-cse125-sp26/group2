@@ -91,6 +91,8 @@ struct AbilityState
     bool recallMarkerSet = false;
     bool recallMarkerGravityFlipped = false;
     glm::vec3 recallMarkerPosition{0.0f};
+
+    AbilitySlot nextReselectSlot = AbilitySlot::Primary;
 };
 
 inline bool hasPendingAbilitySelection(const AbilityState& state)
@@ -124,6 +126,7 @@ inline void choosePendingAbility(AbilityState& state, std::size_t choiceIndex)
         state.secondary = state.secondaryChoices[choiceIndex];
         state.secondaryCooldown = 0.0f;
         state.secondaryActive = false;
+        state.recallMarkerSet = false;
         state.pendingLevel2 = false;
     }
 }

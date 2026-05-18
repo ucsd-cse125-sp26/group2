@@ -4,6 +4,7 @@
 #include "debug/DebugUI.hpp"
 
 #include "client/systems/GamepadAimAssistSystem.hpp"
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -24,6 +25,7 @@
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/Client.hpp" // for NetworkStats
@@ -1109,7 +1111,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     }
 
     ImGui::SetNextWindowPos({10.0f, 540.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({220.0f, 160.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({260.0f, 220.0f}, ImGuiCond_FirstUseEver);
     constexpr ImGuiWindowFlags k_flags =
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
     if (!ImGui::Begin("Weapon HUD", nullptr, k_flags)) {
@@ -1141,6 +1143,29 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     // Flag checked by Game::iterate() to refill ammo (registry is const here).
     if (ImGui::Button("Refill All Ammo"))
         pendingAmmoRefill_ = true;
+
+    ImGui::SeparatorText("Abilities");
+    if (const auto* ability = registry.try_get<AbilityState>(localPlayer)) {
+        const char* pendingSlot = "None";
+        if (ability->pendingLevel1) {
+            pendingSlot = "Primary";
+        } else if (ability->pendingLevel2) {
+            pendingSlot = "Secondary";
+        }
+
+        ImGui::Text("Level:   %d", ability->level);
+        ImGui::Text("Damage:  %.0f / %.0f",
+                    static_cast<double>(ability->accumDamage),
+                    static_cast<double>(systems::dmgThreshold));
+        ImGui::Text("Primary: %s", abilityName(ability->primary));
+        ImGui::Text("Second:  %s", abilityName(ability->secondary));
+        ImGui::Text("Pending: %s", pendingSlot);
+    } else {
+        ImGui::TextDisabled("Ability state unavailable");
+    }
+
+    if (ImGui::Button("Grant Ability Level"))
+        pendingAbilityLevelGrant_ = true;
 
     ImGui::SeparatorText("Vitals");
     if (registry.all_of<Health>(localPlayer)) {

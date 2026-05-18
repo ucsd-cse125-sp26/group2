@@ -1271,8 +1271,12 @@ SDL_AppResult Game::iterate()
     // 4. Physics -- always 128 Hz, up to k_maxTicksPerFrame catch-up
     bool physicsRan = false;
     int ticksThisFrame = 0;
+    bool grantAbilityLevelThisFrame = false;
 
     if (accumulator >= k_physicsDt) {
+        grantAbilityLevelThisFrame = debugUI.pendingAbilityLevelGrant_;
+        debugUI.pendingAbilityLevelGrant_ = false;
+
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured) {
             systems::runMovementKeys(registry, localGravFlipped);
@@ -1334,8 +1338,10 @@ SDL_AppResult Game::iterate()
             // sampled at runWeaponKeys/runMovementKeys time above —
             // we just give each tick its own monotonic tick number.
             ++clientPredictTick;
-            registry.view<InputSnapshot, LocalPlayer>().each(
-                [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+            registry.view<InputSnapshot, LocalPlayer>().each([this, grantAbilityLevelThisFrame](InputSnapshot& snap) {
+                snap.tick = clientPredictTick;
+                snap.debugGrantAbilityLevel = grantAbilityLevelThisFrame;
+            });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
 
@@ -3029,7 +3035,7 @@ SDL_AppResult Game::iterate()
             if (hasPendingAbilitySelection(ability)) {
                 const auto& choices = choicesForPendingSelection(ability);
                 hudState.abilitySelection.available = true;
-                hudState.abilitySelection.level = ability.pendingLevel1 ? 1 : 2;
+                hudState.abilitySelection.level = std::max(1, ability.level);
                 hudState.abilitySelection.slotLabel =
                     pendingAbilitySlot(ability) == AbilitySlot::Primary ? "PRIMARY" : "SECONDARY";
                 for (std::size_t i = 0; i < choices.size(); ++i) {

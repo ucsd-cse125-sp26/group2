@@ -328,9 +328,10 @@ public:
     };
     void buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels);
 
-    bool showDebugMenu = false;      ///< Master toggle for the unified debug menu window.
+    bool showDebugMenu = false;             ///< Master toggle for the unified debug menu window.
 
-    bool pendingAmmoRefill_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
+    bool pendingAmmoRefill_ = false;        ///< Set by Weapon HUD button, consumed by Game::iterate().
+    bool pendingAbilityLevelGrant_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
 
 private:
     /// Per-window visibility toggles — persistent across frames.

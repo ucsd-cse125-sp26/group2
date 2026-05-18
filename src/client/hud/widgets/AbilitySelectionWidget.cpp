@@ -47,15 +47,7 @@ void AbilitySelectionWidget::draw(HudContext& ctx, float anchorX, float anchorY)
     using namespace voidfall;
 
     const float s = uiScale_;
-    const float choiceW = choiceWidth * s;
-    const float choiceH = choiceHeight * s;
-    const float gap = choiceGap * s;
-    const float totalW = choiceW * 2.0f + gap;
-    const float x0 = anchorX - totalW * 0.5f;
-    const float y0 = anchorY - choiceH * 0.5f;
     const float headerFs = headerFontSize * s;
-    const float nameFs = nameFontSize * s;
-    const float bodyFs = bodyFontSize * s;
     const float keyFs = keyFontSize * s;
 
     char header[96];
@@ -64,9 +56,31 @@ void AbilitySelectionWidget::draw(HudContext& ctx, float anchorX, float anchorY)
                   "LEVEL %d %s AVAILABLE",
                   std::max(1, state_.level),
                   state_.slotLabel.empty() ? "ABILITY" : state_.slotLabel.c_str());
+
+    if (!state_.modifierHeld) {
+        const float panelW = 270.0f * s;
+        const float panelH = 58.0f * s;
+        const float x = anchorX - panelW * 0.5f;
+        const float y = anchorY - panelH * 0.5f;
+
+        drawPanel(ctx, x, y, panelW, panelH, HudColor{0.06f, 0.07f, 0.08f, 0.78f}, k_lineBright, 1.0f);
+        drawCornerBrackets(ctx, x, y, panelW, panelH, 8.0f * s, 1.0f, 2.0f * s, k_lineBright);
+        ctx.text(header, anchorX, y + 10.0f * s, headerFs, k_amber, HudAlign::Center, true);
+        ctx.text("HOLD ALT TO CHOOSE", anchorX, y + 34.0f * s, keyFs, k_textDim, HudAlign::Center, true);
+        return;
+    }
+
+    const float choiceW = choiceWidth * s;
+    const float choiceH = choiceHeight * s;
+    const float gap = choiceGap * s;
+    const float totalW = choiceW * 2.0f + gap;
+    const float x0 = anchorX - totalW * 0.5f;
+    const float y0 = anchorY - choiceH * 0.5f;
+    const float nameFs = nameFontSize * s;
+    const float bodyFs = bodyFontSize * s;
+
     ctx.text(header, anchorX, y0 - 42.0f * s, headerFs, k_amber, HudAlign::Center, true);
-    ctx.text(
-        "HOLD ALT", anchorX, y0 - 24.0f * s, keyFs, state_.modifierHeld ? k_amber : k_textDim, HudAlign::Center, true);
+    ctx.text("HOLD ALT", anchorX, y0 - 24.0f * s, keyFs, k_amber, HudAlign::Center, true);
 
     for (int i = 0; i < 2; ++i) {
         const auto& choice = state_.choices[static_cast<std::size_t>(i)];
