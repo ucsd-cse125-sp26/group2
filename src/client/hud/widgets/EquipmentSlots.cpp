@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 EquipmentSlots::EquipmentSlots()
 {
@@ -48,24 +49,42 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
         const char* keyLabel;
         float charge;
         int count; // -1 = no count (show RDY/secs)
-        const char* name;
+        std::string name;
         bool isGrapple;
         bool isGrenade;
         bool isTactical;
+        bool available;
+        bool marked;
     };
 
     const SlotConfig slots[3] = {
-        {"E", state_.grappleCharge, -1, "GRAPPLE", true, false, false},
-        {"G", state_.grenadeCharge, state_.grenadeCount, "GRENADE", false, true, false},
-        {"Q", state_.tacticalCharge, state_.tacticalCount, "TACTICAL", false, false, true},
+        {"SHIFT",
+         state_.primaryAbilityCharge,
+         -1,
+         state_.primaryAbilityAvailable ? state_.primaryAbilityName : "LOCKED",
+         state_.primaryAbilityName == "GRAPPLE",
+         false,
+         state_.primaryAbilityName != "GRAPPLE",
+         state_.primaryAbilityAvailable,
+         false},
+        {"E",
+         state_.secondaryAbilityCharge,
+         -1,
+         state_.secondaryAbilityAvailable ? state_.secondaryAbilityName : "LOCKED",
+         false,
+         false,
+         true,
+         state_.secondaryAbilityAvailable,
+         state_.secondaryAbilityMarked},
+        {"G", state_.grenadeCharge, state_.grenadeCount, "GRENADE", false, true, false, true, false},
     };
 
     for (int i = 0; i < slotCount; ++i) {
         const auto& sl = slots[i];
         const float x = startX + static_cast<float>(i) * (ss + gp);
-        const bool ready = sl.charge >= 0.999f;
-        const HudColor border = ready ? k_amber : k_line;
-        const HudColor iconC = ready ? k_amber : k_textDim;
+        const bool ready = sl.available && sl.charge >= 0.999f;
+        const HudColor border = ready ? k_amber : (sl.available ? k_line : k_lineDim);
+        const HudColor iconC = ready ? k_amber : (sl.available ? k_textDim : withAlpha(k_textDim, 0.45f));
 
         // Slot background.
         drawPanel(ctx, x, y, ss, ss, k_bgPanel, border, 1.f);
@@ -82,7 +101,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
 
         // Key tab (top-right).
         const float keyFs = keyFontSize * s;
-        const float keyW = ctx.measureText(sl.keyLabel, keyFs) + 6.f * s;
+        const float keyW = std::min(ss - pad * 2.f, ctx.measureText(sl.keyLabel, keyFs) + 6.f * s);
         const float keyH = keyFs + 4.f * s;
         const float keyX = x + ss - pad - keyW;
         const float keyY = y + pad - 1.f * s;
@@ -91,16 +110,22 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
         ctx.text(sl.keyLabel, keyX + keyW * 0.5f, keyY + 1.f * s - keyFs * 0.18f, keyFs, k_textDim, HudAlign::Center);
 
         // Cooldown overlay (covers (1-charge) of slot height from top).
-        if (!ready) {
+        if (sl.available && !ready) {
             const float overH = ss * (1.f - std::clamp(sl.charge, 0.f, 1.f));
             ctx.rect(x, y, ss, overH, HudColor{0.f, 0.f, 0.f, 0.55f});
+        } else if (!sl.available) {
+            ctx.rect(x, y, ss, ss, HudColor{0.f, 0.f, 0.f, 0.45f});
         }
 
         // Status text bottom-left.
         const float statusFs = statusFontSize * s;
         const float countFs = countFontSize * s;
         const float statY = y + ss - pad - statusFs;
-        if (sl.count >= 0) {
+        if (!sl.available) {
+            ctx.text("LOCK", x + pad, statY, statusFs, k_textDim, HudAlign::Left);
+        } else if (sl.marked) {
+            ctx.text("MARK", x + pad, statY, statusFs, k_cyan, HudAlign::Left);
+        } else if (sl.count >= 0) {
             char buf[8];
             SDL_snprintf(buf, sizeof(buf), "%d", sl.count);
             ctx.text(buf, x + pad, y + ss - pad - countFs, countFs, ready ? k_amber : k_textDim, HudAlign::Left);
@@ -112,5 +137,9 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
             SDL_snprintf(buf, sizeof(buf), "%ds", secs);
             ctx.text(buf, x + pad, statY, statusFs, k_textDim, HudAlign::Left);
         }
+
+        const float nameFs = nameFontSize * s;
+        ctx.text(
+            sl.name.c_str(), x + pad, y + ss + 4.f * s, nameFs, sl.available ? k_textDim : withAlpha(k_textDim, 0.55f));
     }
 }

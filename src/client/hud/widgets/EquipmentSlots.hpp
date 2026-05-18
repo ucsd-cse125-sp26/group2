@@ -23,6 +23,7 @@ struct EquipmentSlots : HudWidget
     float keyFontSize = 8.f;
     float countFontSize = 14.f;
     float statusFontSize = 10.f;
+    float nameFontSize = 7.f;
 
     EquipmentSlots();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

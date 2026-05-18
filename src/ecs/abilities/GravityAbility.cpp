@@ -3,8 +3,8 @@
 
 #include "GravityAbility.hpp"
 
+#include "ecs/abilities/AbilityTuning.hpp"
 #include "ecs/components/PlayerVisState.hpp"
-#include "ecs/physics/PhysicsConstants.hpp"
 
 AbilityType GravityAbility::type() const
 {
@@ -13,7 +13,7 @@ AbilityType GravityAbility::type() const
 
 float GravityAbility::cooldown() const
 {
-    return physics::k_gravityFlipCooldown;
+    return abilities::cooldownFor(type());
 }
 
 bool GravityAbility::canUse(entt::entity player, Registry& registry) const
@@ -29,11 +29,7 @@ bool GravityAbility::canUse(entt::entity player, Registry& registry) const
         return false;
     }
 
-    if (abilState->primary == type() && abilState->primaryCooldown > 0.0f) {
-        return false;
-    }
-
-    if (abilState->secondary == type() && abilState->secondaryCooldown > 0.0f) {
+    if (isAbilityOnCooldown(*abilState, type())) {
         return false;
     }
 
@@ -48,11 +44,5 @@ void GravityAbility::activate(entt::entity player, Registry& registry)
     vis.gravityFlipped = !vis.gravityFlipped;
     vis.grounded = false;
 
-    if (abilState.primary == type()) {
-        abilState.primaryCooldown = cooldown();
-    }
-
-    if (abilState.secondary == type()) {
-        abilState.secondaryCooldown = cooldown();
-    }
+    setAbilityCooldown(abilState, type(), cooldown());
 }

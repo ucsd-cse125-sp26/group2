@@ -43,12 +43,29 @@ inline void useAbility(entt::entity player, AbilityType type, Registry& registry
     ability->activate(player, registry);
 }
 
+inline void handleAbilitySelection(InputSnapshot& snap, AbilityState& state)
+{
+    if (!hasPendingAbilitySelection(state)) {
+        snap.abilitySelectLeft = false;
+        snap.abilitySelectRight = false;
+        return;
+    }
+
+    if (snap.abilitySelectLeft || snap.abilitySelectRight) {
+        choosePendingAbility(state, snap.abilitySelectRight ? 1 : 0);
+        snap.abilitySelectLeft = false;
+        snap.abilitySelectRight = false;
+    }
+}
+
 void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float dt)
 {
     registry.view<Player, InputSnapshot, AbilityState>().each(
         [&registry, &abilityRegistry, dt](entt::entity e, InputSnapshot& snap, AbilityState& state) {
             tickCooldown(state.primaryCooldown, dt);
             tickCooldown(state.secondaryCooldown, dt);
+
+            handleAbilitySelection(snap, state);
 
             if (snap.ability1 && !state.primaryActive) {
                 useAbility(e, state.primary, registry, abilityRegistry);
