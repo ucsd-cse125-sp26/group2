@@ -36,6 +36,7 @@ private:
     SDL_AudioStream* captureStream_ = nullptr;
     VoiceEncoder encoder_;
     std::vector<float> capturePcm_;
+    std::size_t captureReadOffset_ = 0;
     std::uint16_t nextSequence_ = 0;
     bool transmitting_ = false;
 };

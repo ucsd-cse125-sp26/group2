@@ -112,12 +112,13 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
             hz / snapshotEveryNTicks,
             snapshotEveryNTicks);
 
-    // Phase-through diagnostic: default ON for the server so investigating
-    // a phase-through bug doesn't require a UI toggle on a headless build.
-    // Writes phase-diag-<timestamp>.csv next to the server binary; flip off
-    // with `--no-phase-diag` once the bug is fixed (TODO: CLI plumb).
-    physics::diag::setEnabled(true);
-    SDL_Log("[server] phase-through diagnostic ENABLED — writing phase-diag-*.csv");
+    // Phase-through diagnostic is intentionally opt-in. It writes multiple
+    // CSV rows per player per tick and flushes them for crash-safe debugging,
+    // which is far too expensive for normal servers.
+    const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
+    const bool phaseDiagEnabled = phaseDiagEnv != nullptr && phaseDiagEnv[0] != '\0' && phaseDiagEnv[0] != '0';
+    physics::diag::setEnabled(phaseDiagEnabled);
+    SDL_Log("[server] phase-through diagnostic %s", phaseDiagEnabled ? "ENABLED" : "disabled");
 
     clientEntities.clear(); // For safety
     registry.clear();
@@ -311,10 +312,27 @@ void ServerGame::closeGroundTruthLog() noexcept
     }
 }
 
-void ServerGame::eventHandler(Event event)
+void ServerGame::applyInputEvent(ClientId clientId, const InputSnapshot& inputSnapshot)
+{
+    GROUP2_PROF_SCOPE("eventInput");
+
+    const auto entityIt = clientEntities.find(clientId);
+    if (entityIt == clientEntities.end())
+        return;
+
+    const entt::entity player = entityIt->second;
+    if (!registry.valid(player))
+        return;
+
+    InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
+    input = inputSnapshot;
+}
+
+void ServerGame::eventHandler(const Event& event)
 {
     switch (event.type) {
     case EventType::Connected: {
+        GROUP2_PROF_SCOPE("eventConnected");
         initNewPlayerEntity(event.clientId);
         const bool sent = server->notifyPlayerClientId(event.clientId, clientEntities[event.clientId]);
         if (!sent) {
@@ -325,33 +343,27 @@ void ServerGame::eventHandler(Event event)
         break;
     }
     case EventType::Disconnected: {
+        GROUP2_PROF_SCOPE("eventDisconnected");
         lobbyManager.removePlayer(event.clientId);
         deletePlayerEntity(event.clientId);
         break;
     }
     case EventType::Input: {
-        // Handle input snapshot
-        const auto entityIt = clientEntities.find(event.clientId);
-        if (entityIt == clientEntities.end())
-            return;
-
-        const entt::entity player = entityIt->second;
-        if (!registry.valid(player))
-            return;
-
-        InputSnapshot& input = registry.get_or_emplace<InputSnapshot>(player);
-        input = event.movementIntent;
+        applyInputEvent(event.clientId, event.movementIntent);
         break;
     }
     case EventType::PlayerReady: {
+        GROUP2_PROF_SCOPE("eventLobby");
         lobbyManager.setPlayerReadyStatus(event.clientId, true);
         break;
     }
     case EventType::PlayerUnready: {
+        GROUP2_PROF_SCOPE("eventLobby");
         lobbyManager.setPlayerReadyStatus(event.clientId, false);
         break;
     }
     case EventType::StartMatchRequested: {
+        GROUP2_PROF_SCOPE("eventLobby");
         if (!lobbyStartCountdownActive && lobbyManager.hostStartMatch(event.clientId)) {
             lobbyStartCountdownActive = true;
             lobbyStartCountdownTimer = k_lobbyStartCountdownDuration;
@@ -365,6 +377,7 @@ void ServerGame::eventHandler(Event event)
         break;
     }
     case EventType::ShotIntent: {
+        GROUP2_PROF_SCOPE("eventShotIntent");
         // PR-27: stash the per-shot client assertion under
         // `(shooterClientId, shotInputTick)` so the weapon-system path
         // can pick it up when it processes that tick's INPUT.  The
@@ -384,6 +397,7 @@ void ServerGame::eventHandler(Event event)
         break;
     }
     case EventType::TextChat: {
+        GROUP2_PROF_SCOPE("eventTextChat");
         const auto entityIt = clientEntities.find(event.clientId);
         if (entityIt == clientEntities.end() || !registry.valid(entityIt->second))
             return;
@@ -391,6 +405,7 @@ void ServerGame::eventHandler(Event event)
         break;
     }
     case EventType::VoiceFrame: {
+        GROUP2_PROF_SCOPE("eventVoice");
         const auto speakerIt = clientEntities.find(event.clientId);
         if (speakerIt == clientEntities.end() || !registry.valid(speakerIt->second))
             return;
@@ -399,6 +414,9 @@ void ServerGame::eventHandler(Event event)
             return;
 
         constexpr float maxRangeSq = k_voiceMaxRange * k_voiceMaxRange;
+        static thread_local std::vector<ClientId> recipients;
+        recipients.clear();
+        recipients.reserve(clientEntities.size());
         for (const auto& [listenerClientId, listenerEntity] : clientEntities) {
             if (listenerClientId == event.clientId || !registry.valid(listenerEntity))
                 continue;
@@ -408,12 +426,10 @@ void ServerGame::eventHandler(Event event)
             const glm::vec3 delta = listenerPos->value - speakerPos->value;
             if (glm::dot(delta, delta) > maxRangeSq)
                 continue;
-            server->sendVoiceFrameToClient(listenerClientId,
-                                           event.clientId,
-                                           event.voiceFrame.sequence,
-                                           event.voiceFrame.frameMs,
-                                           event.voiceFrame.opus);
+            recipients.push_back(listenerClientId);
         }
+        server->sendVoiceFrameToClients(
+            recipients, event.clientId, event.voiceFrame.sequence, event.voiceFrame.frameMs, event.voiceFrame.opus);
         break;
     }
     default:
@@ -458,15 +474,50 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         // operations/sec on stateMutex_, which contended hard with the
         // network thread's 1 kHz I/O cycle. Now: one lock per tick.
         static thread_local std::vector<Event> events;
+        static thread_local std::unordered_map<ClientId, InputSnapshot> latestInputs;
         server->drainEvents(events);
+        latestInputs.clear();
+        latestInputs.reserve(clientEntities.size());
+
+        std::size_t processedEvents = 0;
+        std::size_t voiceEvents = 0;
+        std::size_t chatEvents = 0;
+        bool exceededEventBudget = false;
         for (const Event& event : events) {
+            if (event.type == EventType::Input) {
+                latestInputs[event.clientId] = event.movementIntent;
+                continue;
+            }
+            if (event.type == EventType::VoiceFrame)
+                ++voiceEvents;
+            else if (event.type == EventType::TextChat)
+                ++chatEvents;
             eventHandler(event);
+            ++processedEvents;
             // Tick-time bail-out kept identical to pre-PR-2b: if event
             // processing alone blows the tick budget we abort the rest
             // of the events (lost — TODO upstream the drop reason).
             if (const Uint64 kNow = SDL_GetPerformanceCounter(); kNow >= nextTick) {
-                SDL_Log("[server] Exceeded tick time for event handling.");
+                exceededEventBudget = true;
                 break;
+            }
+        }
+        for (const auto& [clientId, inputSnapshot] : latestInputs) {
+            applyInputEvent(clientId, inputSnapshot);
+            ++processedEvents;
+        }
+        if (exceededEventBudget) {
+            static Uint64 nextWarningMs = 0;
+            const Uint64 nowMs = SDL_GetTicks();
+            if (nowMs >= nextWarningMs) {
+                SDL_Log("[server] Exceeded tick time for event handling: drained=%zu processed=%zu coalescedInputs=%zu "
+                        "voice=%zu chat=%zu",
+                        events.size(),
+                        processedEvents,
+                        latestInputs.size(),
+                        voiceEvents,
+                        chatEvents);
+                nextWarningMs = nowMs + 1000;
             }
         }
     }

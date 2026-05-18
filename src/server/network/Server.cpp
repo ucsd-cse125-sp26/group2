@@ -560,7 +560,7 @@ void Server::handleSessionPayload(std::uint64_t connId,
 
 void Server::handleVoiceFrame(Connection& conn, const std::uint8_t* payload, std::uint32_t len)
 {
-    const auto frame = net::voice::decodeClientFrame(std::span<const std::uint8_t>(payload, len));
+    const auto frame = net::voice::decodeClientFrameView(std::span<const std::uint8_t>(payload, len));
     if (!frame)
         return;
 
@@ -579,7 +579,7 @@ void Server::handleVoiceFrame(Connection& conn, const std::uint8_t* payload, std
     event.clientId = conn.clientId;
     event.voiceFrame.sequence = frame->sequence;
     event.voiceFrame.frameMs = frame->frameMs;
-    event.voiceFrame.opus = frame->opus;
+    event.voiceFrame.opus.assign(frame->opus.begin(), frame->opus.end());
     eventQueue.enqueue(std::move(event));
 }
 
@@ -1585,21 +1585,37 @@ bool Server::sendVoiceFrameToClient(ClientId recipient,
                                     std::uint8_t frameMs,
                                     std::span<const std::uint8_t> opus)
 {
+    const ClientId recipients[1] = {recipient};
+    return sendVoiceFrameToClients(recipients, speaker, sequence, frameMs, opus);
+}
+
+bool Server::sendVoiceFrameToClients(std::span<const ClientId> recipients,
+                                     ClientId speaker,
+                                     std::uint16_t sequence,
+                                     std::uint8_t frameMs,
+                                     std::span<const std::uint8_t> opus)
+{
     if (!usingUdpSession_)
         return false;
+    if (recipients.empty())
+        return true;
 
     std::vector<std::uint8_t> payload = net::voice::encodeServerFrame(speaker, sequence, frameMs, opus);
     if (payload.empty())
         return false;
 
+    bool sentAny = false;
     std::shared_lock<std::shared_mutex> lock(stateMutex_);
-    const auto it = clients.find(recipient);
-    if (it == clients.end())
-        return false;
-    return session_.send(it->second.connectionId,
-                         net::ChannelId::VoiceUnreliableSequenced,
-                         payload.data(),
-                         static_cast<int>(payload.size()));
+    for (ClientId recipient : recipients) {
+        const auto it = clients.find(recipient);
+        if (it == clients.end())
+            continue;
+        sentAny |= session_.send(it->second.connectionId,
+                                 net::ChannelId::VoiceUnreliableSequenced,
+                                 payload.data(),
+                                 static_cast<int>(payload.size()));
+    }
+    return sentAny;
 }
 
 bool Server::sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players)

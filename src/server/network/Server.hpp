@@ -141,6 +141,13 @@ public:
                                 std::uint8_t frameMs,
                                 std::span<const std::uint8_t> opus);
 
+    /// @brief Send one proximity-routed voice frame to multiple listeners.
+    bool sendVoiceFrameToClients(std::span<const ClientId> recipients,
+                                 ClientId speaker,
+                                 std::uint16_t sequence,
+                                 std::uint8_t frameMs,
+                                 std::span<const std::uint8_t> opus);
+
     /// @brief PR-20: unicast a serialized SHOT_DEBUG_REPORT (or any
     /// other already-framed payload) to a single client.  Wraps the
     /// private `enqueueTo` so call sites in `ServerGame` can address

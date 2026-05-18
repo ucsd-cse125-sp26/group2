@@ -63,7 +63,8 @@ public:
 private:
     /// @brief Apply a single event to the ECS registry.
     /// @param event The event to process.
-    void eventHandler(Event event);
+    void eventHandler(const Event& event);
+    void applyInputEvent(ClientId clientId, const InputSnapshot& inputSnapshot);
 
     /// @brief Advance one physics tick: drain events, run ECS systems, broadcast state.
     ///
