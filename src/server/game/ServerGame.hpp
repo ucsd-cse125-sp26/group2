@@ -63,7 +63,8 @@ public:
 private:
     /// @brief Apply a single event to the ECS registry.
     /// @param event The event to process.
-    void eventHandler(Event event);
+    void eventHandler(const Event& event);
+    void applyInputEvent(ClientId clientId, const InputSnapshot& inputSnapshot);
 
     /// @brief Advance one physics tick: drain events, run ECS systems, broadcast state.
     ///
@@ -175,6 +176,7 @@ private:
     /// the server snapshots every 4th tick — 4× less serialization +
     /// broadcast work than pre-Phase-4.
     int snapshotEveryNTicks = 4;
+    bool shotDebugEnabled_ = false; ///< Opt-in lag-comp shot visualizer capture/send path.
 
     // ── Phase 6+ rigid-body dynamics state ──
     /// @brief Persistent contact-manifold cache for warm-starting the PGS

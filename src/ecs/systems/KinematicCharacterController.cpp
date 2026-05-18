@@ -137,7 +137,9 @@ void runKinematicCharacterController(glm::vec3& pos,
             }
 
             ++clearanceQueries;
-            const physics::ClearanceResult clr = physics::clearanceCapsuleVsWorld(sweepCapsule, sweepStart, world);
+            const float clearanceSearchRadius = motionBound + sweepCapsule.radius + 16.0f;
+            const physics::ClearanceResult clr =
+                physics::clearanceCapsuleVsWorld(sweepCapsule, sweepStart, world, clearanceSearchRadius);
             if (clr.distance > motionBound + k_pushback) {
                 pos += phaseVel * remainingTime;
                 remainingTime = 0.0f;

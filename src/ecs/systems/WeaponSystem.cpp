@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -51,6 +52,15 @@ using physics::resolveHitscanHitbox;
 
 namespace systems
 {
+
+inline bool combatLogEnabled()
+{
+    static const bool enabled = [] {
+        const char* env = std::getenv("GROUP2_COMBAT_LOG");
+        return env != nullptr && env[0] != '\0' && env[0] != '0';
+    }();
+    return enabled;
+}
 
 /// @brief Apply weapon slot switch from player input.
 /// @param input   Current input snapshot.
@@ -620,7 +630,7 @@ inline void handleFire(Registry& registry,
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
             chargeDealtDamage =
                 applyDamage(config.chargeDamage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
-            if (hit.region == BodyRegion::Head) {
+            if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
                         static_cast<double>(chargeDealtDamage));
@@ -708,7 +718,7 @@ inline void handleFire(Registry& registry,
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
             dealtDamage =
                 applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
-            if (hit.region == BodyRegion::Head) {
+            if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                 SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
                         static_cast<int>(shooter),
                         static_cast<int>(hit.entity),

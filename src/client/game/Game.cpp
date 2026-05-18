@@ -317,8 +317,10 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         countdownTimer = latestMatchState->countdownTimer;
     }
 
-    physics::diag::setEnabled(true);
-    SDL_Log("[client] physics diagnostic ENABLED - writing phase-diag-*.csv and movement-diag-*.csv");
+    const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
+    const bool phaseDiagEnabled = phaseDiagEnv != nullptr && phaseDiagEnv[0] != '\0' && phaseDiagEnv[0] != '0';
+    physics::diag::setEnabled(phaseDiagEnabled);
+    SDL_Log("[client] physics diagnostic %s", phaseDiagEnabled ? "ENABLED" : "disabled");
 
     // Particle system needs the device + formats from the renderer.
     // colorFmt is the format particles draw into (RGBA16F was the legacy

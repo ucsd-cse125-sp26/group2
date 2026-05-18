@@ -92,6 +92,18 @@ encodeServerFrame(ClientId speaker, std::uint16_t sequence, std::uint8_t frameMs
 
 std::optional<ClientVoiceFrame> decodeClientFrame(std::span<const std::uint8_t> payload)
 {
+    const auto view = decodeClientFrameView(payload);
+    if (!view)
+        return std::nullopt;
+    ClientVoiceFrame frame;
+    frame.sequence = view->sequence;
+    frame.frameMs = view->frameMs;
+    frame.opus.assign(view->opus.begin(), view->opus.end());
+    return frame;
+}
+
+std::optional<ClientVoiceFrameView> decodeClientFrameView(std::span<const std::uint8_t> payload)
+{
     constexpr std::size_t k_header = 1 + sizeof(std::uint16_t) + sizeof(std::uint8_t) + sizeof(std::uint16_t);
     if (payload.size() < k_header || payload[0] != static_cast<std::uint8_t>(PacketType::VOICE_FRAME))
         return std::nullopt;
@@ -100,10 +112,10 @@ std::optional<ClientVoiceFrame> decodeClientFrame(std::span<const std::uint8_t> 
     const std::uint16_t opusLen = readU16Le(payload.data() + 1 + sizeof(std::uint16_t) + sizeof(std::uint8_t));
     if (!validFrame(frameMs, opusLen) || payload.size() != k_header + opusLen)
         return std::nullopt;
-    ClientVoiceFrame frame;
+    ClientVoiceFrameView frame;
     frame.sequence = sequence;
     frame.frameMs = frameMs;
-    frame.opus.assign(payload.begin() + static_cast<std::ptrdiff_t>(k_header), payload.end());
+    frame.opus = payload.subspan(k_header, opusLen);
     return frame;
 }
 

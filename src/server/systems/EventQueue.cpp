@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -22,7 +23,7 @@ void EventQueue::enqueue(Event event)
     std::lock_guard<std::mutex> lock(queueMutex);
     if (events.size() >= k_maxQueuedEvents)
         events.pop();
-    events.push(event);
+    events.push(std::move(event));
 }
 
 Event EventQueue::dequeue()
@@ -50,7 +51,7 @@ void EventQueue::drainAll(std::vector<Event>& out)
         return;
     out.reserve(out.capacity() < events.size() ? events.size() : out.capacity());
     while (!events.empty()) {
-        out.push_back(events.front());
+        out.push_back(std::move(events.front()));
         events.pop();
     }
 }

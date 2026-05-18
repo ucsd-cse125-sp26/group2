@@ -1117,7 +1117,8 @@ ClearanceResult clearanceCapsuleVsSphere(CapsuleShape capsule, glm::vec3 pos, co
     return clr;
 }
 
-ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, const WorldGeometry& world)
+ClearanceResult
+clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, const WorldGeometry& world, float maxMeshSearchRadius)
 {
     ClearanceResult best;
     auto consider = [&](const ClearanceResult& c) {
@@ -1137,9 +1138,12 @@ ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, con
 
     // Trimesh search radius: at least capsule.radius (to find any contact),
     // bounded by current best clearance plus margin (BVH cull won't process
-    // triangles further than this).  If best is still huge (1e30) — no
-    // convex primitive is close — fall back to a generous 1024 u search.
-    const float meshSearchRadius = (best.distance < 1024.0f) ? (best.distance + capsule.radius + 16.0f) : 1024.0f;
+    // triangles further than this). Conservative advancement callers pass a
+    // much tighter per-iteration limit based on how far the character can
+    // move this substep; full clearance/fit tests keep the 1024 u default.
+    const float searchLimit = std::max(capsule.radius, maxMeshSearchRadius);
+    const float meshSearchRadius =
+        (best.distance < searchLimit) ? std::min(best.distance + capsule.radius + 16.0f, searchLimit) : searchLimit;
     forTriMeshCandidates(
         world,
         overlapBounds(capsule.enclosingHalfExtents() + glm::vec3(meshSearchRadius), pos),

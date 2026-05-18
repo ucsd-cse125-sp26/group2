@@ -14,9 +14,8 @@
 ///     which libstdc++ implements via TBB's task-group scheduler.
 ///   - On platforms without TBB (currently a CMake fallback path:
 ///     macOS Homebrew without explicit install, some Linux distros),
-///     we fall back to a sequential `std::for_each` so behaviour stays
-///     correct and the build still links. CMake defines
-///     `GROUP2_HAVE_TBB` when the parallel path is wired.
+///     we use a small persistent `std::thread` pool. CMake defines
+///     `GROUP2_HAVE_TBB` when the parallel-STL path is wired.
 ///
 /// Determinism: lag-comp + hitscan rely on the simulation being
 /// deterministic across the network/recording boundary. par_unseq
@@ -33,10 +32,22 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdlib>
+#include <iterator>
+#include <utility>
 
 #if defined(GROUP2_HAVE_TBB)
 #include <execution>
+#else
+#include <condition_variable>
+#include <deque>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 #endif
 
 namespace group2::perf
@@ -66,7 +77,111 @@ inline std::atomic<bool> parallelEnabled{true};
 /// Minimum items below which `parallelFor` runs sequentially even
 /// when the master switch is on. Avoids paying TBB dispatch overhead
 /// for trivially-small work where sequential is faster.
-inline constexpr std::size_t k_parallelThreshold = 64;
+inline constexpr std::size_t k_parallelThreshold = 8;
+
+#if !defined(GROUP2_HAVE_TBB)
+
+inline thread_local bool inParallelKernel = false;
+
+class ParallelFlagGuard
+{
+public:
+    ParallelFlagGuard() : previous_(inParallelKernel) { inParallelKernel = true; }
+    ~ParallelFlagGuard() { inParallelKernel = previous_; }
+
+private:
+    bool previous_;
+};
+
+inline unsigned fallbackWorkerCountFromEnv()
+{
+    const unsigned hw = std::thread::hardware_concurrency();
+    unsigned count = (hw > 1) ? (hw - 1) : 0;
+
+    const char* p = std::getenv("GROUP2_SERVER_THREADS");
+    if (p == nullptr || p[0] == '\0')
+        return count;
+
+    char* end = nullptr;
+    const unsigned long requested = std::strtoul(p, &end, 10);
+    if (end == p)
+        return count;
+
+    constexpr unsigned k_maxFallbackWorkers = 64;
+    return static_cast<unsigned>(std::min<unsigned long>(requested, k_maxFallbackWorkers));
+}
+
+class FallbackThreadPool
+{
+public:
+    FallbackThreadPool()
+    {
+        const unsigned count = fallbackWorkerCountFromEnv();
+        workers_.reserve(count);
+        for (unsigned i = 0; i < count; ++i) {
+            workers_.emplace_back([this] { workerLoop(); });
+        }
+    }
+
+    ~FallbackThreadPool()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stopping_ = true;
+        }
+        cv_.notify_all();
+        for (std::thread& worker : workers_) {
+            if (worker.joinable())
+                worker.join();
+        }
+    }
+
+    FallbackThreadPool(const FallbackThreadPool&) = delete;
+    FallbackThreadPool& operator=(const FallbackThreadPool&) = delete;
+
+    std::size_t workerCount() const noexcept { return workers_.size(); }
+
+    template <class Job>
+    void enqueue(Job&& job)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            jobs_.emplace_back(std::forward<Job>(job));
+        }
+        cv_.notify_one();
+    }
+
+private:
+    void workerLoop()
+    {
+        for (;;) {
+            std::function<void()> job;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
+                if (stopping_ && jobs_.empty())
+                    return;
+                job = std::move(jobs_.front());
+                jobs_.pop_front();
+            }
+            job();
+        }
+    }
+
+    std::vector<std::thread> workers_;
+    std::deque<std::function<void()>> jobs_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool stopping_ = false;
+};
+
+inline FallbackThreadPool& fallbackPool()
+{
+    static FallbackThreadPool pool;
+    return pool;
+}
+
+#endif
 
 /// Initialize from environment. Idempotent.
 ///
@@ -83,7 +198,15 @@ inline void initParallelFromEnv()
     SDL_Log("[perf] parallel kernels: %s (TBB-backed; default ON, set GROUP2_SERVER_PARALLEL=0 to disable)",
             wantOn ? "ENABLED" : "disabled");
 #else
-    SDL_Log("[perf] parallel kernels: sequential fallback (TBB not linked)");
+    if (wantOn) {
+        const std::size_t workers = fallbackPool().workerCount();
+        SDL_Log(
+            "[perf] parallel kernels: %s (std::thread fallback, %zu workers; set GROUP2_SERVER_PARALLEL=0 to disable)",
+            workers > 0 ? "ENABLED" : "sequential",
+            workers);
+    } else {
+        SDL_Log("[perf] parallel kernels: disabled (std::thread fallback available)");
+    }
 #endif
 }
 
@@ -99,6 +222,83 @@ inline void parallelFor(Iter begin, Iter end, Fn&& fn)
     if (parallelEnabled.load(std::memory_order_relaxed) && static_cast<std::size_t>(distance) >= k_parallelThreshold) {
         std::for_each(std::execution::par_unseq, begin, end, std::forward<Fn>(fn));
         return;
+    }
+#else
+    const auto distance = std::distance(begin, end);
+    if (distance <= 0)
+        return;
+
+    const auto count = static_cast<std::size_t>(distance);
+    if (parallelEnabled.load(std::memory_order_relaxed) && count >= k_parallelThreshold && !inParallelKernel) {
+        FallbackThreadPool& pool = fallbackPool();
+        const std::size_t workers = pool.workerCount();
+        if (workers > 0) {
+            const std::size_t chunks = std::min<std::size_t>(count, workers + 1);
+            if (chunks > 1) {
+                struct WaitState
+                {
+                    std::mutex mutex;
+                    std::condition_variable cv;
+                    std::size_t remaining = 0;
+                    std::exception_ptr exception;
+                };
+
+                auto state = std::make_shared<WaitState>();
+                state->remaining = chunks - 1;
+
+                auto runChunk = [&](std::size_t chunk) {
+                    const std::size_t first = (chunk * count) / chunks;
+                    const std::size_t last = ((chunk + 1) * count) / chunks;
+                    auto it = begin;
+                    std::advance(it, static_cast<decltype(distance)>(first));
+                    auto chunkEnd = begin;
+                    std::advance(chunkEnd, static_cast<decltype(distance)>(last));
+                    for (; it != chunkEnd; ++it) {
+                        fn(*it);
+                    }
+                };
+
+                auto finish = [state](std::exception_ptr ex) {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    if (ex && !state->exception)
+                        state->exception = ex;
+                    if (--state->remaining == 0)
+                        state->cv.notify_one();
+                };
+
+                for (std::size_t chunk = 1; chunk < chunks; ++chunk) {
+                    pool.enqueue([&, finish, chunk] {
+                        std::exception_ptr ex;
+                        try {
+                            ParallelFlagGuard guard;
+                            runChunk(chunk);
+                        } catch (...) {
+                            ex = std::current_exception();
+                        }
+                        finish(ex);
+                    });
+                }
+
+                std::exception_ptr mainException;
+                try {
+                    ParallelFlagGuard guard;
+                    runChunk(0);
+                } catch (...) {
+                    mainException = std::current_exception();
+                }
+
+                {
+                    std::unique_lock<std::mutex> lock(state->mutex);
+                    state->cv.wait(lock, [state] { return state->remaining == 0; });
+                }
+
+                if (mainException)
+                    std::rethrow_exception(mainException);
+                if (state->exception)
+                    std::rethrow_exception(state->exception);
+                return;
+            }
+        }
     }
 #endif
     std::for_each(begin, end, std::forward<Fn>(fn));

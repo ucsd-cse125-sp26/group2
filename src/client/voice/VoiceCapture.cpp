@@ -37,6 +37,7 @@ void VoiceCapture::quit()
     }
     encoder_.reset();
     capturePcm_.clear();
+    captureReadOffset_ = 0;
     transmitting_ = false;
 }
 
@@ -46,6 +47,7 @@ void VoiceCapture::setPushToTalk(bool active)
         return;
     transmitting_ = active;
     capturePcm_.clear();
+    captureReadOffset_ = 0;
     SDL_ClearAudioStream(captureStream_);
     if (transmitting_)
         SDL_ResumeAudioStreamDevice(captureStream_);
@@ -70,13 +72,17 @@ std::vector<VoiceCapture::EncodedFrame> VoiceCapture::poll()
         }
     }
 
-    if (capturePcm_.size() > kMaxAccumulatedSamples) {
-        const std::size_t trim = capturePcm_.size() - kMaxAccumulatedSamples;
-        capturePcm_.erase(capturePcm_.begin(), capturePcm_.begin() + static_cast<std::ptrdiff_t>(trim));
+    if (captureReadOffset_ > capturePcm_.size())
+        captureReadOffset_ = capturePcm_.size();
+
+    const std::size_t availableSamples = capturePcm_.size() - captureReadOffset_;
+    if (availableSamples > kMaxAccumulatedSamples) {
+        captureReadOffset_ = capturePcm_.size() - kMaxAccumulatedSamples;
     }
 
-    while (capturePcm_.size() >= static_cast<std::size_t>(kFrameSamples)) {
-        const std::span<const float> frame(capturePcm_.data(), static_cast<std::size_t>(kFrameSamples));
+    while (capturePcm_.size() - captureReadOffset_ >= static_cast<std::size_t>(kFrameSamples)) {
+        const std::span<const float> frame(capturePcm_.data() + captureReadOffset_,
+                                           static_cast<std::size_t>(kFrameSamples));
         if (framePassesNoiseGate(frame)) {
             EncodedFrame encoded;
             encoded.sequence = nextSequence_++;
@@ -84,9 +90,17 @@ std::vector<VoiceCapture::EncodedFrame> VoiceCapture::poll()
             if (!encoded.opus.empty())
                 frames.push_back(std::move(encoded));
         }
-        capturePcm_.erase(capturePcm_.begin(), capturePcm_.begin() + static_cast<std::ptrdiff_t>(kFrameSamples));
+        captureReadOffset_ += static_cast<std::size_t>(kFrameSamples);
         if (frames.size() >= 4)
             break;
+    }
+
+    if (captureReadOffset_ == capturePcm_.size()) {
+        capturePcm_.clear();
+        captureReadOffset_ = 0;
+    } else if (captureReadOffset_ >= static_cast<std::size_t>(kFrameSamples * 4)) {
+        capturePcm_.erase(capturePcm_.begin(), capturePcm_.begin() + static_cast<std::ptrdiff_t>(captureReadOffset_));
+        captureReadOffset_ = 0;
     }
     return frames;
 }

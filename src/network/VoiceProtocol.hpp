@@ -25,6 +25,13 @@ struct ClientVoiceFrame
     std::vector<std::uint8_t> opus;
 };
 
+struct ClientVoiceFrameView
+{
+    std::uint16_t sequence = 0;
+    std::uint8_t frameMs = k_frameMs;
+    std::span<const std::uint8_t> opus;
+};
+
 struct ServerVoiceFrame
 {
     ClientId speaker{};
@@ -37,6 +44,7 @@ struct ServerVoiceFrame
 encodeClientFrame(std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus);
 [[nodiscard]] std::vector<std::uint8_t>
 encodeServerFrame(ClientId speaker, std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus);
+[[nodiscard]] std::optional<ClientVoiceFrameView> decodeClientFrameView(std::span<const std::uint8_t> payload);
 [[nodiscard]] std::optional<ClientVoiceFrame> decodeClientFrame(std::span<const std::uint8_t> payload);
 [[nodiscard]] std::optional<ServerVoiceFrame> decodeServerFrame(std::span<const std::uint8_t> payload);
 
