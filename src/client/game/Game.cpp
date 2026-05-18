@@ -1702,6 +1702,14 @@ SDL_AppResult Game::iterate()
     particleSystem.update(frameTime, renderer->getCamera(), registry);
     phaseSnap(phaseStats.particles);
 
+    audio::ListenerState audioListener;
+    audioListener.position = cachedEye_;
+    audioListener.forward = cachedCamFwd_;
+    audioListener.up = cachedGravFlipped_ ? glm::vec3{0.0f, -1.0f, 0.0f} : glm::vec3{0.0f, 1.0f, 0.0f};
+    registry.view<LocalPlayer, Velocity>().each(
+        [&](const Velocity& velocity) { audioListener.velocity = velocity.value; });
+    sfxSystem.setListener(audioListener);
+
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
 
