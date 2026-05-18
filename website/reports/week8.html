@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSE_125_GROUP_02 // WEEK_08_REPORT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=Work+Sans:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+
+  <header class="topbar">
+    <div class="brand">CSE_125_GROUP_02</div>
+
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a href="../index.html" class="active">Overview</a>
+      <a href="../docs/index.html">Docs</a>
+      <a href="../archive.html">Archive</a>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="status-chip">
+        <span class="status-label">System_Status</span>
+        <span class="status-value">Progressing</span>
+      </div>
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--ghost">GitHub_Link</a>
+      <button class="mobile-toggle" id="mobileToggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar" aria-label="Sidebar navigation">
+    <div class="operator-card">
+      <div class="operator-row">
+        <div class="operator-icon">
+          <span class="material-symbols-outlined">person</span>
+        </div>
+        <div>
+          <p class="operator-name">TERMINAL_01</p>
+          <p class="operator-status">Status: Online</p>
+        </div>
+      </div>
+    </div>
+
+    <nav class="side-nav">
+      <a class="nav-link" href="../index.html">
+        <span class="material-symbols-outlined">terminal</span>
+        <span>Home</span>
+      </a>
+      <a class="nav-link" href="../spec.html">
+        <span class="material-symbols-outlined">deployed_code</span>
+        <span>Project_Specs</span>
+      </a>
+      <a class="nav-link active" href="../reports.html">
+        <span class="material-symbols-outlined">article</span>
+        <span>Weekly_Reports</span>
+      </a>
+      <a class="nav-link" href="#">
+        <span class="material-symbols-outlined">task_alt</span>
+        <span>Final Report</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--primary" style="display:block; text-align: center;">GitHub_Link</a>
+    </div>
+  </aside>
+
+  <main class="page">
+    <div class="content">
+      <section class="reports-shell" aria-label="Weekly report week 2">
+        <div class="reports-bg-word" aria-hidden="true">WEEK_08</div>
+
+        <header class="reports-header">
+          <div>
+            <h1><span aria-hidden="true"></span> Week_08 // 2026.05.19</h1>
+            <p>Group status report and individual member logs</p>
+          </div>
+          <div class="reports-signal" aria-label="Report signal">
+            <small>Uplink Quality</small>
+            <div class="reports-signal-bars">
+              <i></i><i></i><i></i><i class="low"></i><i class="low"></i>
+            </div>
+          </div>
+        </header>
+
+        <section class="section" aria-label="Group weekly report">
+          <h2 class="section-title">01_GROUP_WEEKLY_REPORT</h2>
+
+          <div style="display:grid; grid-template-columns: minmax(0, 1.00fr) minmax(320px, 1.00fr); gap:24px; align-items:start;">
+            <article class="panel inset" style="min-height: 100%;">
+              <p class="card-title">Group_Status_Report</p>
+              <p class="body-copy">
+                Progress has been steady as we have been patching up the remaining hiccups from the renderer change. The graphics team was able to get the viewmodel, player models, texures, and map entity imports working. The physics have been overhauled, with movement like wall running being refactored. There is now a working lobby system and a nice dev feature to disable the lobby during testing. In terms of gameplay, the ability system, powerups, and an early grenade implementation are functional.
+              </p>
+
+              <div class="mission-panel" style="margin-top: 10px;" aria-label="Mission briefing">
+
+                <div class="brief-item">
+                  <p>Morale</p>
+                  <span>Morale is high, the team is getting ready for the last few weeks.</span>
+                </div>
+
+                <div class="brief-item danger">
+                  <p>Concerns</p>
+                  <span>There are no major concerns at the moment.</span>
+                </div>
+
+                <div class="diag-card" aria-label="System diagnostics">
+                  <div class="diag-row">
+                    <div class="diag-bar">
+                      <div class="priority-bar"><div class="priority-fill" style="width: 85%; background: linear-gradient(90deg, #7fff65 0%, #2bff00 100%);"></div></div>
+                    </div>
+                    <p><span>Morale</span><strong>High</strong></p>
+                  </div>
+                  <div class="diag-row">
+                    <div class="diag-bar">
+                      <div class="priority-bar"><div class="priority-fill" style="width: 25%; background: linear-gradient(90deg, #ff6565 0%, #ff0000 100%);"></div></div>
+                    </div>
+                    <p><span>Stress</span><strong>OK</strong></p>
+                  </div>
+                  <div class="diag-row">
+                    <p><span>Team Status</span><strong style="color:rgb(51, 235, 51)">OK</strong></p>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <figure class="panel" style="padding:16px; margin:0; display:grid; gap:12px; align-content:start; min-height: 100%;">
+              <p class="card-title" style="margin:0;">Latest_Screenshots</p>
+              <img
+                src="../img/screenshots/32_week7.png"
+                alt="Latest project screenshot."
+                style="max-width:100%; display:block; aspect-ratio: 16 / 10; object-fit: cover; border:1px solid rgba(255,255,255,0.06); box-shadow:0 10px 24px rgba(0,0,0,0.25);"
+              />
+              <img
+                src="../img/screenshots/34_lobby.png"
+                alt="Latest project screenshot."
+                style="max-width:100%; display:block; aspect-ratio: 16 / 10; object-fit: contain; border:1px solid rgba(255,255,255,0.06); box-shadow:0 10px 24px rgba(0,0,0,0.25);"
+              />
+            </figure>
+          </div>
+        </section>
+
+        <section class="section" aria-label="Individual reports">
+          <h2 class="section-title">02_INDIVIDUAL_REPORTS</h2>
+
+          <div style="display:grid; gap:20px; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));">
+
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
+                <div>
+                  <p class="card-title report-header">Joshua Castaneda</p>
+                  <p class="small-copy">Graphics / Misc</p>
+                </div>
+                <div>
+                  <p class="muted-label">Concrete_Goals</p>
+                  <p class="small-copy">Asset loading</p>
+                </div>
+                <div>
+                  <p class="muted-label">Accomplished</p>
+                  <p class="small-copy">I completed the asset loading including loading the map, textures, materials, and gameplay objects from the map file. I also implemented the feature to get the spawn/weapon/powerup points into the game .</p>
+                </div>
+                <div>
+                  <p class="muted-label">Why_It_Changed</p>
+                  <p class="small-copy">The week went pretty much as planned. I completed the main thing I wanted (asset loading) and was even able to fully integrate some gameplay components with it.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Next_Week</p>
+                  <p class="small-copy">At the very least I want to get point lights working. Ideally I also get one more renderer feature in.</p>
+                </div>
+                <div>
+                  <p class="muted-label">What_I_Learned</p>
+                  <p class="small-copy">File and export formats are a pain. Most of the struggle was actually accessing the data from the imported file. The other biggest pain point was realizing that we needed to check a box on the blender side of things to actually get the metadata we wanted into the exported file. </p>
+                </div>
+                <div>
+                  <p class="muted-label">Individual_Morale</p>
+                  <p class="small-copy">I like the work I did this week, my morale is good.</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
+                <div>
+                  <p class="card-title report-header">Cedric-James David</p>
+                  <p class="small-copy">Gameplay / Network</p>
+                </div>
+                <div>
+                  <p class="muted-label">Concrete_Goals</p>
+                  <p class="small-copy">Wire lobby system, main menu to allow people to type in IP and connect, settings menu.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Accomplished</p>
+                  <p class="small-copy">Lobby system + main menu up.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Why_It_Changed</p>
+                  <p class="small-copy">I was sick the second half of the week, so I could not do much.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Next_Week</p>
+                  <p class="small-copy">Settings menu.</p>
+                </div>
+                <div>
+                  <p class="muted-label">What_I_Learned</p>
+                  <p class="small-copy">Claude + Codex are good at helping devise plans when given enough context.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Individual_Morale</p>
+                  <p class="small-copy">Good.</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
+                <div>
+                  <p class="card-title report-header">Guthry Hahm</p>
+                  <p class="small-copy">Graphics</p>
+                </div>
+                <div>
+                  <p class="muted-label">Concrete_Goals</p>
+                  <p class="small-copy">Get entities rendering, animations rendering, and render the correct weapon, to get that info from the .</p>
+                </div>
+                <div>
+                  <p class="muted-label">Accomplished</p>
+                  <p class="small-copy">I did in fact get entities rendering, animations rendering, and fix the depth issue with the weapon clipping through the scene geometry. I have another branch where I brought the old particles. Right now my priority is not with particles but at some point I plan on merging that functionality into main.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Why_It_Changed</p>
+                  <p class="small-copy">The week went how I expected in terms of what I was able to accomplish. There were some hiccups with getting animations working. I asked Daniel to set up the empty functions for me to implement and to set up some boilerplate for game loop input. Apparently the code for calling those functions was deleted in the nuking of the old renderer. Because of this I couldn’t test my code myself at least in the morning before I had to go to work as I wasn’t sure how much was actually deleted for that functionality in the great vibe-nuking of May 7th. Luckily my theory for what was missing was correct and Daniel knew exactly what to do, and after that it has worked like a dream (from the little testing we have done lol)</p>
+                </div>
+                <div>
+                  <p class="muted-label">Next_Week</p>
+                  <p class="small-copy">Get AO working, originally I wanted to work on shadows first, but right now we have to multiply the albedo by the normals because otherwise the player has next to no depth perception in a map made entirely with solid color corridors. AO would provide visual references to where the player is in the map by darkening the corners. If I am able to get this done, next I would want to work on shadows or what other shaders or visual additions the team wants.</p>
+                </div>
+                <div>
+                  <p class="muted-label">What_I_Learned</p>
+                  <p class="small-copy">I learned quite a lot about gpu optimization regarding skinned meshes, I learned how to implement ssbo’s to store the joint transforms in a bone palette, and using gpu instancing to render the same mesh data but index the bone palette using the index id. </p>
+                </div>
+                <div>
+                  <p class="muted-label">Individual_Morale</p>
+                  <p class="small-copy">My morale is pretty good. Implementing animations in the way we talked about was by far the most difficult part, I spent an all-nighter on implementing and debugging it. I am quite proud that I was able to do that by Sunday morning, as I was doubting that I would be able to get that part done in time for play-testing.</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
+                <div>
+                  <p class="card-title report-header">Daniil Katulevskiy</p>
+                  <p class="small-copy">Physics / CI</p>
+                </div>
+                <div>
+                  <p class="muted-label">Concrete_Goals</p>
+                  <p class="small-copy">Map load fix, better trimesh collision, movement tuning, abilities tuning to movement, match system improvements.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Accomplished</p>
+                  <p class="small-copy">Fixed map loading fully, now trimesh is first-class primitive, got much more advanced collisions primitives and algorithms, now player collider is a capsule, triangle edges are auto welded where possible, and this goes extremely well together with movement adjustments, now can continuously wallrun from wall to wall without detatching at all, including around inside and outside corners. Movement systems now properly adapt actions based on colliders, not just rely on collision and depenetration system to fix it afterwards. Added abilities with Jacob, match system now includes ability selection in-match and preset of abilities to use for that match. Jacob registered on steamworks portal. Added dash and recall abilities. Abilities are now earned in-match. Started on global server list and UDP holepunching support for easy hosting from home without portforwarding. Fixed issues that Guthry had with the rendering api that Game exposed, now everything is smooth and graphics team was able to render enemies with animations, all on GPU with SSBO and instanced rendering.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Why_It_Changed</p>
+                  <p class="small-copy">yes, better than expected. i can enjoy the movement again, since all the bugs with it are fixed, especially the new smooth collisions, stairs handling, wallrun mechanics.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Next_Week</p>
+                  <p class="small-copy">todo wishlist
+                    local broadcast
+                    global broadcast
+                    graphics feature complete state
+                    graphics enhancements
+                    gameplay loop improvements
+                    start adjusting the map to movement, add obstactles and start on textures and decor
+                    steam coming out soon page complete for 2 week cooldown
+                    HUD final redesign
+                    UI menus backend and design
+                    add emotes
+                    improve animations to match real movement more closely
+                    add hands to guns with point attachment and IK
+                    IK for legs on ground to match running speed to covered distance
+                    predictive animation states, curved animations, more than simple blending
+                    try to do reload anims
+                    rework SFX to support more complex modes of operation, things like step aligned sounds, sounds from other players actions, positioned in space, maybe echo and reflections, rtx sound?
+                    make cool shaders for guns, nades, smoke, beams, blood, players, tracers, projectiles
+                    add chat and voice chat with spatial playing and doppler effect. If we complete some portion of this list this week, would be great.</p>
+                </div>
+                <div>
+                  <p class="muted-label">What_I_Learned</p>
+                  <p class="small-copy">We're pretty tight on time. 
+                      And had very interesting AI use experience.
+                      So I remember the initial discussion of how LLM use influences development. And I had an argument that AI is only a force multiplier. And I could feel it when dealing with trimesh collisions, where it was literally unplayable on first iteration. The primary reason was that I skipped research and just asked Claude to implement trimesh collisions, not what I normally do. But after skimming through papers on trimesh collisions and postmortems of modern physics engines like Havok, I got much more insight, and I could really quickly get production-grade collision and physics against our trimesh map, all because of right steering, architecture choices, and instructions. So preparation and initial research is 90% of work when dealing with LLMs, and 10% is control over execution and code review.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Individual_Morale</p>
+                  <p class="small-copy">Good, but a bit tired, a lot of work outside of class. Same as last week.</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
+                <div>
+                  <p class="card-title report-header">Jolina Leong</p>
+                  <p class="small-copy">Art / Modeling</p>
+                </div>
+                <div>
+                  <p class="muted-label">Concrete_Goals</p>
+                  <p class="small-copy">Make adjustments to the map as needed, Finish player model (uncolored)</p>
+                </div>
+                <div>
+                  <p class="muted-label">Accomplished</p>
+                  <p class="small-copy">Still working on the player model today, will have the uncolored version finished by class tomorrow hopefully, Made adjustments to the map (disconnected planes, missing door, extruded platforms) and reuploaded updated glb to the drive, Quickly mocked up color palettes for the hud</p>
+                </div>
+                <div>
+                  <p class="muted-label">Why_It_Changed</p>
+                  <p class="small-copy">Have been pretty busy with helping at club events this week, made less progress on the player model than expected</p>
+                </div>
+                <div>
+                  <p class="muted-label">Next_Week</p>
+                  <p class="small-copy">Flesh out map once playtesting is done, Finish making player model and export to Adobe's Mixamo to test rig</p>
+                </div>
+                <div>
+                  <p class="muted-label">What_I_Learned</p>
+                  <p class="small-copy">Not much new this week</p>
+                </div>
+                <div>
+                  <p class="muted-label">Individual_Morale</p>
+                  <p class="small-copy">Individual moral is still pretty alright, good to see the collisions are working pretty decently now so I got to run around the map myself to get an idea of how everything's looking so far </p>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
+                <div>
+                  <p class="card-title report-header">Jacob Roner</p>
+                  <p class="small-copy">Gameplay / Integration</p>
+                </div>
+                <div>
+                  <p class="muted-label">Concrete_Goals</p>
+                  <p class="small-copy">My main goal was to add powerups/powerup spawners, balance the weapons and movement, and update spawner placements in the map (for players, weapons, and powerups).</p>
+                </div>
+                <div>
+                  <p class="muted-label">Accomplished</p>
+                  <p class="small-copy">Updated rocket projectile with new model, Fixed powerup system management, implemented damage and shield powerups, updated hud when using damage powerup, Rendered powerups, worked with daniil on converting movment systems to abilities, added ability pools for each match, began steam page setup.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Why_It_Changed</p>
+                  <p class="small-copy">I felt a little exhausted this week, so I didnt get as much done as I had hoped. That coupled with the fact that we still had some major fixes that were required meant that we were not able to meet our play test goal.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Next_Week</p>
+                  <p class="small-copy">I want to balance the weapons, rework the charge rifle, fix some issues with projectiles, rework game configs, add direction to spawner points.</p>
+                </div>
+                <div>
+                  <p class="muted-label">What_I_Learned</p>
+                  <p class="small-copy">Nothing new, just a lot of coding.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Individual_Morale</p>
+                  <p class="small-copy">Feeling good, but getting tired so its hard to sit down and grind like I could at the beginning of the quarter.</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div style="display:grid; gap:20px;">
+                <div>
+                  <p class="card-title report-header">Scott Semtner</p>
+                  <p class="small-copy">Network</p>
+                </div>
+                <div>
+                  <p class="muted-label">Concrete_Goals</p>
+                  <p class="small-copy">Finish LAN server discovery and get it working with the future lobby system.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Accomplished</p>
+                  <p class="small-copy">I finished local server discovery which required switching the model from server broadcast to client broadcast and server response, all in UDP. The client broadcasts every 1 second asking for servers that receive it to send their information. I got the system integrated with the global server discovery stub that was added to main, so it its a fully functional system, at least when testing with multiple clients on my machine.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Why_It_Changed</p>
+                  <p class="small-copy">I think it went as planned on my end.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Next_Week</p>
+                  <p class="small-copy">I need to discuss with the group on tuesday to figure out what tasks we want to prioritize. For the local server discovery we just have to test on lab machines.</p>
+                </div>
+                <div>
+                  <p class="muted-label">What_I_Learned</p>
+                  <p class="small-copy">I learned about using ImGui which is pretty great for this type of thing.</p>
+                </div>
+                <div>
+                  <p class="muted-label">Individual_Morale</p>
+                  <p class="small-copy">My morale is decent, not much has changed.</p>
+                </div>
+              </div>
+            </article>
+
+          </div>
+        </section>
+
+        <section class="section" aria-label="Screenshots archive">
+          <h2 class="section-title">03_SCREENSHOTS_ARCHIVE</h2>
+
+          <div style="display:grid; gap:20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+            <figure class="panel" style="padding:16px; margin:0; display:grid; gap:12px; align-content:start;">
+              <p class="card-title">Screenshot_01 // Week_7</p>
+              <a href="../archive.html">
+                <img
+                src="../img/screenshots/32_week7.png"
+                style="width:100%; display:block; aspect-ratio: 16 / 10; object-fit: cover; border:1px solid rgba(255,255,255,0.06); box-shadow:0 10px 24px rgba(0,0,0,0.25);"
+                />
+              </a>
+              <figcaption class="small-copy">
+                In game screenshot from week 7.
+              </figcaption>
+            </figure>
+
+            <figure class="panel" style="padding:16px; margin:0; display:grid; gap:12px; align-content:start;">
+              <p class="card-title">Screenshot_02 // Server_join</p>
+              <a href="../archive.html">
+                <img
+                src="../img/screenshots/33_server_join.png"
+                style="width:100%; display:block; aspect-ratio: 16 / 10; object-fit: cover; border:1px solid rgba(255,255,255,0.06); box-shadow:0 10px 24px rgba(0,0,0,0.25);"
+                />
+              </a>
+              <figcaption class="small-copy">
+                Screenshot of server join screen on boot up.
+              </figcaption>
+            </figure>
+
+            <figure class="panel" style="padding:16px; margin:0; display:grid; gap:12px; align-content:start;">
+              <p class="card-title">Screenshot_03 // Lobby</p>
+              <a href="../archive.html">
+                <img
+                src="../img/screenshots/34_lobby.png"
+                style="width:100%; display:block; aspect-ratio: 16 / 10; object-fit: cover; border:1px solid rgba(255,255,255,0.06); box-shadow:0 10px 24px rgba(0,0,0,0.25);"
+                />
+              </a>
+              <figcaption class="small-copy">
+                Screenshot of lobby in server.
+              </figcaption>
+            </figure>
+
+          </div>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <div class="status-hud" aria-label="Status HUD">
+    <div class="meta">
+      <span class="label">Date</span><span class="value" id="hudDate">----</span>
+      <span class="label">Time</span><span class="value" id="hudTime">--:--:--</span>
+      <span class="label">Latency</span><span class="value" id="hudLatency">18ms</span>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div>© 1999 Group_02. All Rights Reserved.</div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a class="foot-link" href="../img/gag/no-privacy.jpg">Privacy_Protocols</a>
+      <a class="foot-link" href="../img/gag/lost.png">System_Status</a>
+      <a class="foot-link" href="../img/gag/lost.png">Support_Comms</a>
+    </nav>
+    <div class="footer-build">Project_Accelerate</div>
+  </footer>
+  <script src="../script.js"></script>
+</body>
+</html>

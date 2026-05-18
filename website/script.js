@@ -141,7 +141,9 @@
         if (images.length <= 1) return;
 
         const rotationMs = 3000;
-        const fadeMs = 800;
+        const fadeMs = 500;
+        const recentRotationLimit = 10;
+        const recentImages = [];
         let isTransitioning = false;
 
         heroImage.style.transition = 'opacity ' + fadeMs + 'ms ease';
@@ -151,10 +153,20 @@
           if (isTransitioning) return;
 
           const current = heroImage.getAttribute('src') || '';
-          const candidates = images.filter(function (src) {
-            return src !== current;
+          let pool = images.filter(function (src) {
+            return src !== current && !recentImages.includes(src);
           });
-          const pool = candidates.length ? candidates : images;
+
+          if (!pool.length) {
+            pool = images.filter(function (src) {
+              return src !== current;
+            });
+          }
+
+          if (!pool.length) {
+            pool = images;
+          }
+
           const next = pool[Math.floor(Math.random() * pool.length)];
 
           const preloaded = new Image();
@@ -164,6 +176,10 @@
 
             setTimeout(function () {
               heroImage.src = next;
+              recentImages.push(next);
+              if (recentImages.length > recentRotationLimit) {
+                recentImages.shift();
+              }
               heroImage.style.opacity = '1';
 
               setTimeout(function () {
