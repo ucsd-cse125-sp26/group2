@@ -20,26 +20,24 @@ struct InputSnapshot
     uint32_t tick{0}; ///< Physics tick this snapshot was sampled on.
 
     // Movement keys
-    bool forward{false};           ///< W key.
-    bool back{false};              ///< S key.
-    bool left{false};              ///< A key.
-    bool right{false};             ///< D key.
-    bool jump{false};              ///< Space key.
-    bool crouch{false};            ///< Left Ctrl key.
-    bool sprint{false};            ///< Left Shift key.
-    bool grapple{false};           ///< Middle mouse button / E key.
-    bool shooting{false};          ///< Primary fire button.
-    bool reload{false};            ///< Reload button.
-    bool pickup{false};            ///< Pick Up button (f).
-    bool switchToPrimary{false};   ///< Switch to gun in primary slot.
-    bool switchToSecondary{false}; ///< Switch to gun in secondary slot.
-    bool refillAmmo{false};        ///< Debug: refill all weapons to full ammo.
-    bool killSelf{false};          ///< Debug: kill self (rising-edge only).
-    bool skipRespawn{false};       ///< Skip respawn timer (space while dead).
-    bool flipGravity{false};       ///< Legacy gravity flip toggle; gravity ability now owns flips.
-    bool cycleGrenade{false};      ///< Legacy grenade-slot cycle; superseded by grenade radial.
-    bool throwGrenade{false};      ///< Quick G press: throw the selected grenade.
-    bool grenadeMenuHeld{false};   ///< True while the held-G radial menu is open.
+    bool forward{false};                                         ///< W key.
+    bool back{false};                                            ///< S key.
+    bool left{false};                                            ///< A key.
+    bool right{false};                                           ///< D key.
+    bool jump{false};                                            ///< Space key.
+    bool crouch{false};                                          ///< Left Ctrl key.
+    bool sprint{false};                                          ///< Left Shift key.
+    bool grapple{false};                                         ///< Middle mouse button / E key.
+    bool shooting{false};                                        ///< Primary fire button.
+    bool reload{false};                                          ///< Reload button.
+    bool pickup{false};                                          ///< Pick Up button (f).
+    bool switchToPrimary{false};                                 ///< Switch to gun in primary slot.
+    bool switchToSecondary{false};                               ///< Switch to gun in secondary slot.
+    bool refillAmmo{false};                                      ///< Debug: refill all weapons to full ammo.
+    bool killSelf{false};                                        ///< Debug: kill self (rising-edge only).
+    bool skipRespawn{false};                                     ///< Skip respawn timer (space while dead).
+    bool throwGrenade{false};                                    ///< Quick G press: throw the selected grenade.
+    bool grenadeMenuHeld{false};                                 ///< True while the held-G radial menu is open.
     std::uint8_t grenadeSelectIndex{kInvalidGrenadeSelectIndex}; ///< Hovered radial grenade index, or invalid.
     bool ability1{false};                                        ///< Activate ability 1
     bool ability2{false};                                        ///< Activate ability 2

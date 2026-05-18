@@ -108,35 +108,13 @@ inline constexpr const char* grenadeTypeName(WeaponType type)
     }
 }
 
-/// @brief Legacy slot/type compatibility predicate for pickup guards.
+/// @brief Weapon-slot type compatibility predicate for pickup guards.
 ///
-/// The live grenade inventory is GrenadeState. This helper still protects older
-/// weapon-slot pickup paths from mixing grenade and gun families.
-/// @note XNOR works for the current 2-family partition (grenade vs everything else).
-///       Adding a 3rd family (e.g. melee) will require a slot-keyed table — see
-///       WeaponSlot doc.
-inline bool canAcceptType(WeaponSlot slot, WeaponType type)
+/// Grenades are equipped through GrenadeState, not WeaponState, so weapon slots
+/// reject grenade types.
+inline bool canAcceptType(WeaponSlot /*slot*/, WeaponType type)
 {
-    const bool slotIsGrenade = (slot == WeaponSlot::GRENADE);
-    const bool typeIsGrenade = isGrenadeType(type);
-    return slotIsGrenade == typeIsGrenade;
-}
-
-/// @brief Cycle to the next grenade type. HE → Molotov → Impulse → HE.
-inline WeaponType nextGrenadeType(WeaponType type)
-{
-    switch (type) {
-    case WeaponType::HEGrenade:
-        return WeaponType::Molotov;
-    case WeaponType::Molotov:
-        return WeaponType::Impulse;
-    case WeaponType::Impulse:
-        return WeaponType::HEGrenade;
-    default:
-        break;
-    }
-    assert(false && "nextGrenadeType called on non-grenade WeaponType");
-    return WeaponType::HEGrenade;
+    return !isGrenadeType(type);
 }
 
 /// @brief Returns the config for a grenade WeaponType.

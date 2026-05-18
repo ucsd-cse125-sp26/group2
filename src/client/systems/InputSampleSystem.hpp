@@ -147,7 +147,6 @@ inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
         snap.ability1 = kKeys[SDL_SCANCODE_LSHIFT];
         snap.ability2 = kKeys[SDL_SCANCODE_E];
         snap.killSelf = killEdge;
-        snap.flipGravity = false;
         snap.skipRespawn = false; // Clear stale flag from previous death.
     });
 }
@@ -215,7 +214,6 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
         snap.shooting = leftDown && !altHeld;
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
-        snap.cycleGrenade = false;
         snap.throwGrenade = snap.throwGrenade || pendingGrenadeThrow;
         snap.grenadeMenuHeld = grenadeRadialActive;
         snap.grenadeSelectIndex = grenadeSelectIndex;

@@ -28,8 +28,7 @@ enum class WeaponSlot : uint8_t
 {
     PRIMARY,
     SECONDARY,
-    GRENADE, ///< Legacy reserved slot; live grenade equipment uses GrenadeState.
-    Count,   ///< Sentinel — must be last. Equals the number of valid slots.
+    Count, ///< Sentinel — must be last. Equals the number of valid slots.
 };
 
 /// @brief Struct that defines this weapon's type, cooldown, and ammo.
