@@ -6,8 +6,10 @@
 #include "network/NetworkConfig.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/NewRenderer.hpp"
+#include "network/DiscoveryClient.hpp"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -50,10 +52,13 @@ private:
         pendingJoinRequest;          ///< Set when the user clicks "Join", cleared on App transition to Lobby.
     std::string joinError;           ///< Error message shown on the join form; empty when no error.
 
+    std::unique_ptr<DiscoveryClient> localDiscoveryClient = std::make_unique<DiscoveryClient>();
+
     void startGlobalRefresh(bool force = false);
     void joinRefreshThreadIfFinished();
 
     std::vector<net::discovery::ServerInfo> globalServers;
+    std::vector<DiscoveryClient::DiscoveredServer> localServers;
     std::string browserError;
     std::mutex browserMutex;
     std::thread browserThread;

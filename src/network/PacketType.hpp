@@ -72,6 +72,6 @@ enum class PacketType : uint8_t
     VOICE_FRAME,    ///< Client <-> Server: Opus voice frame for proximity chat.
     VOICE_STATE,    ///< Client <-> Server: push-to-talk state hint for HUD indicators.
 
-    LOCAL_SERVER_ADVERTISEMENT, ///< Server -> clients on LAN before starting a game, lets clients discover that a server
-                          ///< exists
+    LOCAL_SERVER_DISCOVERY_REQUEST, ///< client broadcasts to server, which responds with response below
+    LOCAL_SERVER_DISCOVERY_RESPONSE,
 };

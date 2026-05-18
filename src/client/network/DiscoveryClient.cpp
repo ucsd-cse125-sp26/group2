@@ -5,13 +5,25 @@
 
 #include <vector>
 
-bool DiscoveryClient::start(uint16_t discoveryPort)
+bool DiscoveryClient::start(uint16_t port)
 {
-    socket = NET_CreateDatagramSocket(nullptr, discoveryPort);
+    discoveryPort = port;
+
+    socket = NET_CreateDatagramSocket(nullptr, 0);
     if (!socket) {
         SDL_Log("DiscoveryClient: failed to create datagram socket: %s", SDL_GetError());
         return false;
     }
+
+    broadcastAddr = NET_ResolveHostname("255.255.255.255");
+    if (NET_WaitUntilResolved(broadcastAddr, -1) == NET_FAILURE) {
+        SDL_Log("DiscoveryClient: failed to resolve broadcast address: %s", SDL_GetError());
+        NET_UnrefAddress(broadcastAddr);
+        NET_DestroyDatagramSocket(socket);
+        socket = nullptr;
+        return false;
+    }
+
     return true;
 }
 
@@ -21,6 +33,10 @@ void DiscoveryClient::stop()
         NET_DestroyDatagramSocket(socket);
         socket = nullptr;
     }
+    if (broadcastAddr) {
+        NET_UnrefAddress(broadcastAddr);
+        broadcastAddr = nullptr;
+    }
 }
 
 void DiscoveryClient::poll()
@@ -29,10 +45,20 @@ void DiscoveryClient::poll()
         return;
     }
 
+    auto now = SDL_GetTicks();
+    // broadcast every 1 second
+    if (broadcastAddr && now - lastRequestMs > 1000) {
+        uint8_t buf[1] = {static_cast<uint8_t>(PacketType::LOCAL_SERVER_DISCOVERY_REQUEST)};
+        NET_SendDatagram(socket, broadcastAddr, discoveryPort, buf, sizeof(buf));
+        lastRequestMs = now;
+    }
+
     NET_Datagram* datagram = nullptr;
     while (NET_ReceiveDatagram(socket, &datagram) && datagram) {
-        // min length is 1+2+1+1=5
-        if (datagram->buflen >= 5 && static_cast<PacketType>(datagram->buf[0]) == PacketType::LOCAL_SERVER_ADVERTISEMENT) {
+        // min length is 1+2+1+1+1=6
+        if (datagram->buflen >= 6 &&
+            static_cast<PacketType>(datagram->buf[0]) == PacketType::LOCAL_SERVER_DISCOVERY_RESPONSE)
+        {
             const uint8_t* data = datagram->buf + 1;
 
             uint16_t port = 0;
@@ -40,9 +66,10 @@ void DiscoveryClient::poll()
             data += sizeof(port);
 
             uint8_t currentPlayers = *data++;
+            uint8_t maxPlayers = *data++;
             uint8_t nameLength = *data++;
 
-            if (datagram->buflen >= 5 + nameLength) {
+            if (datagram->buflen >= 6 + nameLength) {
                 const char* addrRaw = NET_GetAddressString(datagram->addr);
                 std::string addr = addrRaw ? addrRaw : "unknown";
                 std::string fullAddr = addr + ":" + std::to_string(port);
@@ -51,6 +78,7 @@ void DiscoveryClient::poll()
                 server.hostIp = addr;
                 server.gamePort = port;
                 server.currentPlayers = currentPlayers;
+                server.maxPlayers = maxPlayers;
                 server.serverName.assign(reinterpret_cast<const char*>(data), nameLength);
                 server.lastSeenMs = SDL_GetTicks();
             }

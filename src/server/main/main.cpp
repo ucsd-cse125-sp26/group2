@@ -191,14 +191,14 @@ int main()
     }
 
     // start server discovery system
-    // TODO: random port
     DiscoveryServer discoveryServer;
     const DiscoveryServer::ServerInfo serverInfo{
-        .serverName = "Test Server",
+        .serverName = cfg.discovery.serverName,
         .gamePort = serverNet.port,
         .currentPlayers = 0,
+        .maxPlayers = cfg.discovery.maxPlayers,
     };
-    discoveryServer.start(9998, serverInfo);
+    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
 
     ServerGame game;
     if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, developerCfg.skipLobby)) {

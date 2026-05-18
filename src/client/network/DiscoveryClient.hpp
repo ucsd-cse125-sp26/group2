@@ -15,6 +15,7 @@ public:
         std::string hostIp;
         uint16_t gamePort;
         uint8_t currentPlayers;
+        uint8_t maxPlayers;
         uint64_t lastSeenMs;
     };
 
@@ -27,6 +28,11 @@ public:
     std::vector<DiscoveredServer> getServers();
 
 private:
+    uint16_t discoveryPort = 0;
+    NET_Address *broadcastAddr = nullptr;
+    uint64_t lastRequestMs = 0;
+
     NET_DatagramSocket* socket = nullptr;
+
     std::unordered_map<std::string, DiscoveredServer> discoveredServers; // key is host IP
 };

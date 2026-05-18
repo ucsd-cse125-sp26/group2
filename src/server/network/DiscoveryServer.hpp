@@ -14,12 +14,13 @@ public:
         std::string serverName;
         uint16_t gamePort;
         uint8_t currentPlayers;
+        uint8_t maxPlayers;
 
         // other interesting things can go here
     };
 
     /// starts a thread that makes a UDP socket and broadcasts
-    bool start(uint16_t port, const ServerInfo& serverInfo);
+    bool start(uint16_t port, const ServerInfo& serverInfo, std::function<uint8_t()> playerCountFn = nullptr);
 
     void updateInfo(const ServerInfo& serverInfo);
 
@@ -29,12 +30,12 @@ private:
     void loop();
 
     NET_DatagramSocket* socket = nullptr;
-    NET_Address* broadcastAddr = nullptr;
-    uint16_t discoveryPort = 0;
 
     std::atomic<bool> shouldStop{false};
     std::thread broadcastThread;
 
     ServerInfo info;
     std::mutex infoMutex;
+
+    std::function<uint8_t()> currentPlayersFn;
 };

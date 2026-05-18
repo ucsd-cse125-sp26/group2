@@ -4,39 +4,32 @@
 #include "network/PacketType.hpp"
 
 #include <mutex>
+#include <utility>
 
 // struct ServerInfo
 // {
 //     std::string serverName;
 //     uint16_t gamePort;
 //     uint8_t currentPlayers;
+//     uint8_t maxPlayers;
 //
 //     // other interesting things can go here
 // };
 //
 // /// starts a thread that makes a UDP socket and broadcasts
 
-bool DiscoveryServer::start(uint16_t port, const ServerInfo& serverInfo)
+bool DiscoveryServer::start(uint16_t port, const ServerInfo& serverInfo, std::function<uint8_t()> playerCountFn)
 {
-    discoveryPort = port;
+    currentPlayersFn = std::move(playerCountFn);
 
     {
         std::lock_guard<std::mutex> lock(infoMutex);
         info = serverInfo;
     }
 
-    socket = NET_CreateDatagramSocket(nullptr, 0);
+    socket = NET_CreateDatagramSocket(nullptr, port);
     if (!socket) {
         SDL_Log("DiscoveryServer: failed to create datagram socket: %s", SDL_GetError());
-        return false;
-    }
-
-    broadcastAddr = NET_ResolveHostname("255.255.255.255");
-    if (NET_WaitUntilResolved(broadcastAddr, -1) == NET_FAILURE) {
-        SDL_Log("DiscoveryServer: failed to resolve broadcast address: %s", SDL_GetError());
-        NET_UnrefAddress(broadcastAddr);
-        NET_DestroyDatagramSocket(socket);
-        socket = nullptr;
         return false;
     }
 
@@ -63,43 +56,54 @@ void DiscoveryServer::stop()
         NET_DestroyDatagramSocket(socket);
         socket = nullptr;
     }
-    if (broadcastAddr) {
-        NET_UnrefAddress(broadcastAddr);
-        broadcastAddr = nullptr;
-    }
 }
 
 void DiscoveryServer::loop()
 {
     while (!shouldStop.load()) {
+
         // serialize into packet
         std::vector<uint8_t> data;
         {
             std::lock_guard<std::mutex> lock(infoMutex);
 
+            if (currentPlayersFn) {
+                info.currentPlayers = currentPlayersFn();
+            }
+
             const uint8_t nameLen = static_cast<uint8_t>(std::min<size_t>(info.serverName.size(), 255));
 
             // packet is
-            // [packetType (1)][everything but name len (2+1 = 3)][nameLen (1)][name (nameLen)]
-            data.resize(1 + 3 + 1 + nameLen);
+            // [packetType (1)][gamePort (2)][currentPlayers (1)][maxPlayers (1)][nameLen (1)][name (nameLen)]
+            data.resize(1 + 4 + 1 + nameLen);
 
             uint8_t* ptr = data.data();
-            *ptr++ = static_cast<uint8_t>(PacketType::LOCAL_SERVER_ADVERTISEMENT);
+            *ptr++ = static_cast<uint8_t>(PacketType::LOCAL_SERVER_DISCOVERY_RESPONSE);
 
             std::memcpy(ptr, &info.gamePort, sizeof(info.gamePort));
             ptr += sizeof(info.gamePort);
 
             *ptr++ = info.currentPlayers;
+            *ptr++ = info.maxPlayers;
 
             *ptr++ = nameLen;
             std::memcpy(ptr, info.serverName.data(), nameLen);
         }
 
-        NET_SendDatagram(socket, broadcastAddr, discoveryPort, data.data(), static_cast<int>(data.size()));
+        // drain datagrams
+        NET_Datagram* datagram = nullptr;
+        while (NET_ReceiveDatagram(socket, &datagram) && datagram) {
+            // check if it is a server discovery request
+            if (datagram->buflen >= 1 &&
+                static_cast<PacketType>(datagram->buf[0]) == PacketType::LOCAL_SERVER_DISCOVERY_REQUEST)
+            {
+                // respond to the request
+                NET_SendDatagram(socket, datagram->addr, datagram->port, data.data(), static_cast<int>(data.size()));
+            }
 
-        // check should stop every 100ms, wait 2s
-        for (int i = 0; i < 20 && !shouldStop.load(); ++i) {
-            SDL_Delay(100);
+            NET_DestroyDatagram(datagram);
         }
+
+        SDL_Delay(50);
     }
 }
