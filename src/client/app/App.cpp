@@ -183,7 +183,7 @@ SDL_AppResult App::iterate()
                 net::discovery::ServerInfo punchedServer;
                 std::string punchError;
                 const std::uint32_t clientNonce = net::discovery::randomNonce();
-                std::uint64_t relayToken = 0;
+                net::RelayToken relayToken;
                 if (discovery.requestHolePunch(networkConfig.discovery,
                                                joinRequest->globalServerId,
                                                clientNonce,

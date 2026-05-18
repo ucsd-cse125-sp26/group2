@@ -170,45 +170,50 @@ bool UdpEndpoint::tryReceive(UdpReceivedMessage& out)
     if (!socket_)
         return false;
 
-    NET_Datagram* dgram = nullptr;
-    if (!NET_ReceiveDatagram(socket_, &dgram)) {
-        // Fatal socket error per SDL_net docs; UDP normally just returns
-        // (true, nullptr) on no-data.
-        return false;
-    }
-    if (!dgram)
-        return false;
+    constexpr int k_maxMalformedDrain = 64;
+    for (int discarded = 0; discarded < k_maxMalformedDrain; ++discarded) {
+        NET_Datagram* dgram = nullptr;
+        if (!NET_ReceiveDatagram(socket_, &dgram)) {
+            // Fatal socket error per SDL_net docs; UDP normally just returns
+            // (true, nullptr) on no-data.
+            return false;
+        }
+        if (!dgram)
+            return false;
 
-    // Validate: must be at least header-sized, and magic/version must match.
-    if (dgram->buflen < static_cast<int>(sizeof(PacketHeader))) {
+        // Validate: must be at least header-sized, MTU-bounded, and match
+        // our magic/version. Keep draining malformed noise so one bad UDP
+        // datagram cannot pin the receive loop at the head of the queue.
+        PacketHeader hdr;
+        const bool validSize =
+            dgram->buflen >= static_cast<int>(sizeof(PacketHeader)) && dgram->buflen <= k_maxPacketBytes;
+        const bool validHeader =
+            validSize && decodePacketHeader(dgram->buf, static_cast<std::size_t>(dgram->buflen), hdr);
+        if (!validHeader) {
+            NET_DestroyDatagram(dgram);
+            continue;
+        }
+
+        out.header = hdr;
+        const int payloadLen = dgram->buflen - static_cast<int>(sizeof(hdr));
+        if (payloadLen > 0) {
+            out.payload.assign(dgram->buf + sizeof(hdr), dgram->buf + dgram->buflen);
+        } else {
+            out.payload.clear();
+        }
+
+        // Take a ref on the address so the caller can hold it past the
+        // NET_DestroyDatagram below. They release() it when done.
+        if (out.from.addr)
+            out.from.release();
+        out.from.addr = NET_RefAddress(dgram->addr);
+        out.from.port = dgram->port;
+
         NET_DestroyDatagram(dgram);
-        return false;
+        return true;
     }
 
-    PacketHeader hdr;
-    if (!decodePacketHeader(dgram->buf, static_cast<std::size_t>(dgram->buflen), hdr)) {
-        // Not for us — silently drop. UDP receives noise sometimes.
-        NET_DestroyDatagram(dgram);
-        return false;
-    }
-
-    out.header = hdr;
-    const int payloadLen = dgram->buflen - static_cast<int>(sizeof(hdr));
-    if (payloadLen > 0) {
-        out.payload.assign(dgram->buf + sizeof(hdr), dgram->buf + dgram->buflen);
-    } else {
-        out.payload.clear();
-    }
-
-    // Take a ref on the address so the caller can hold it past the
-    // NET_DestroyDatagram below. They release() it when done.
-    if (out.from.addr)
-        out.from.release();
-    out.from.addr = NET_RefAddress(dgram->addr);
-    out.from.port = dgram->port;
-
-    NET_DestroyDatagram(dgram);
-    return true;
+    return false;
 }
 
 } // namespace net

@@ -67,7 +67,7 @@ public:
     /// Stage 3c uses this from the game thread after `pumpReads` has run on
     /// the network thread. Together with pumpReads it does what poll() does
     /// in the single-threaded code path, just split across two threads.
-    void drainComplete(const std::function<void(const void* data, Uint32 size)>& callback);
+    bool drainComplete(const std::function<void(const void* data, Uint32 size)>& callback);
 
 private:
     /// @brief Bytes available for parsing in recvBuf, starting at recvHead.

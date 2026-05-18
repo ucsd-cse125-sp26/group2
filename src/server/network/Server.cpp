@@ -23,6 +23,7 @@
 #include <entt/entity/entity.hpp>
 #include <memory>
 #include <random>
+#include <string>
 #include <utility>
 
 bool Server::init(const char* addr,
@@ -147,6 +148,17 @@ void Server::shutdown()
 // broadcast — saves N - 1 framing copies on a broadcast to N clients.
 namespace
 {
+std::string endpointHost(const net::UdpEndpointAddr& endpoint)
+{
+    const char* raw = endpoint.addr ? NET_GetAddressString(endpoint.addr) : nullptr;
+    return raw ? raw : "";
+}
+
+bool sameEndpoint(const net::UdpEndpointAddr& a, const net::UdpEndpointAddr& b)
+{
+    return a.port == b.port && endpointHost(a) == endpointHost(b);
+}
+
 std::vector<uint8_t> frameMessage(const void* data, int len)
 {
     std::vector<uint8_t> framed(sizeof(Uint32) + static_cast<size_t>(len));
@@ -540,8 +552,11 @@ void Server::handleSessionPayload(std::uint64_t connId,
     handleMessage(connIt->second, payload, len);
 }
 
-void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload)
+void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, const net::UdpEndpointAddr& from)
 {
+    if (!directoryAddr_.addr || !sameEndpoint(from, directoryAddr_))
+        return;
+
     net::discovery::DirectoryMessage kind{};
     const std::uint8_t* body = nullptr;
     std::size_t bodyLen = 0;
@@ -649,7 +664,7 @@ void Server::networkLoop()
                     if (id.value != -1 && clientDisconnectedFn_)
                         clientDisconnectedFn_(id);
                 } else if (ev.type == net::UdpSessionTransport::EventType::DirectoryControl) {
-                    handleDirectoryEvent(ev.payload);
+                    handleDirectoryEvent(ev.payload, ev.from);
                 }
             }
 

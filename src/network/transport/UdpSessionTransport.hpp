@@ -5,6 +5,7 @@
 
 #include "FragmentReassembler.hpp"
 #include "UdpEndpoint.hpp"
+#include "network/RelayToken.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
@@ -44,6 +45,7 @@ public:
         std::uint64_t connectionId = 0;
         ChannelId channel = ChannelId::InputUnreliable;
         std::vector<std::uint8_t> payload;
+        UdpEndpointAddr from;
         bool viaRelay = false;
     };
 
@@ -67,7 +69,7 @@ public:
         Uint16 port = 0;
         std::uint32_t serverId = 0;
         std::uint32_t clientNonce = 0;
-        std::uint64_t relayToken = 0;
+        RelayToken relayToken;
         bool enabled = false;
     };
 
@@ -144,9 +146,13 @@ private:
     static constexpr Uint64 k_routeUnhealthyMs = 3000;
     static constexpr Uint64 k_timeoutMs = 5000;
     static constexpr Uint64 k_retransmitFloorMs = 80;
+    static constexpr std::size_t k_maxPeers = 128;
+    static constexpr std::size_t k_maxQueuedEvents = 1024;
     static constexpr std::size_t k_maxReliablePending = 256;
+    static constexpr std::size_t k_maxReliableOrderedBuffer = 256;
 
     [[nodiscard]] static std::size_t channelIndex(ChannelId channel) noexcept;
+    [[nodiscard]] static bool isKnownChannel(std::uint8_t channel) noexcept;
     [[nodiscard]] static bool isReliable(ChannelId channel) noexcept;
     [[nodiscard]] static bool seqMoreRecent(std::uint32_t s1, std::uint32_t s2) noexcept;
     [[nodiscard]] static bool seqAcked(std::uint32_t seq, std::uint32_t ack, std::uint32_t ackBits) noexcept;
@@ -154,7 +160,7 @@ private:
     bool resolveAddress(const char* host, Uint16 port, UdpEndpointAddr& out, int timeoutMs);
     void queueEvent(Event&& event);
     Peer* findPeer(std::uint64_t connectionId);
-    Peer& createServerPeer(const UdpEndpointAddr& from, std::uint32_t clientNonce, bool viaRelay);
+    Peer* createServerPeer(const UdpEndpointAddr& from, std::uint32_t clientNonce, bool viaRelay);
 
     void sendConnectionRequest(bool viaRelay);
     void sendConnectionAccepted(Peer& peer);

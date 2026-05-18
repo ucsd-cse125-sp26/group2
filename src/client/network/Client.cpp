@@ -1061,8 +1061,11 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         uint32_t count = 0;
         std::memcpy(&count, payload, sizeof(uint32_t));
         const uint8_t* eventData = payload + sizeof(uint32_t);
-        const uint32_t expectedSize = sizeof(uint32_t) + count * sizeof(NetParticleEvent);
-        if (payloadSize < expectedSize)
+        constexpr std::uint32_t k_maxParticleEvents = 4096;
+        if (count > k_maxParticleEvents)
+            break;
+        const std::size_t expectedSize = sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(NetParticleEvent);
+        if (static_cast<std::size_t>(payloadSize) != expectedSize)
             break;
 
         if (rawParticleEventFn_) {
@@ -1105,8 +1108,11 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         uint32_t count = 0;
         std::memcpy(&count, payload, sizeof(uint32_t));
         const uint8_t* eventData = payload + sizeof(uint32_t);
-        const uint32_t expectedSize = sizeof(uint32_t) + count * sizeof(NetKillEvent);
-        if (payloadSize < expectedSize)
+        constexpr std::uint32_t k_maxKillEvents = 4096;
+        if (count > k_maxKillEvents)
+            break;
+        const std::size_t expectedSize = sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(NetKillEvent);
+        if (static_cast<std::size_t>(payloadSize) != expectedSize)
             break;
         if (killEventFn_) {
             for (uint32_t i = 0; i < count; ++i) {
@@ -1228,8 +1234,12 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         uint32_t count = 0;
         std::memcpy(&count, payload + sizeof(int), sizeof(uint32_t));
 
-        const size_t expectedSize = sizeof(int) + sizeof(uint32_t) + count * sizeof(LobbyPlayer);
-        if (payloadSize < expectedSize)
+        constexpr std::uint32_t k_maxLobbyPlayers = 256;
+        if (count > k_maxLobbyPlayers)
+            break;
+        const size_t expectedSize =
+            sizeof(int) + sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(LobbyPlayer);
+        if (static_cast<std::size_t>(payloadSize) != expectedSize)
             break;
 
         std::vector<LobbyPlayer> players(count);
@@ -1275,9 +1285,13 @@ bool Client::poll()
     std::vector<std::vector<uint8_t>> ready;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
-        msgStream.drainComplete([&](const void* data, Uint32 size) {
-            ready.emplace_back(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
-        });
+        if (!msgStream.drainComplete([&](const void* data, Uint32 size) {
+                ready.emplace_back(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
+            }))
+        {
+            socketDead_.store(true, std::memory_order_relaxed);
+            return false;
+        }
         if (!udpRecvQueue_.empty()) {
             for (auto& msg : udpRecvQueue_) {
                 ready.emplace_back(std::move(msg));

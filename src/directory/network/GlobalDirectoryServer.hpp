@@ -37,8 +37,9 @@ private:
     struct ClientEndpoint
     {
         net::UdpEndpointAddr endpoint;
-        std::uint64_t relayToken = 0;
+        net::RelayToken relayToken;
         Uint64 lastSeenMs = 0;
+        bool relayAuthorized = false;
     };
 
     void pollUdp();
@@ -53,10 +54,16 @@ private:
     void handleRelayPayload(const net::UdpReceivedMessage& msg);
     void sendDirectory(const net::UdpEndpointAddr& dest, const std::vector<std::uint8_t>& payload);
     void sendRelay(const net::UdpEndpointAddr& dest, const std::uint8_t* payload, std::size_t len);
+    net::RelayToken makeRelayToken(std::uint32_t serverId, std::uint32_t clientNonce, Uint64 nowMs) const;
+    bool validateRelayToken(const net::RelayToken& token,
+                            std::uint32_t serverId,
+                            std::uint32_t clientNonce,
+                            Uint64 nowMs) const;
 
     net::UdpEndpoint udpEndpoint_;
+    std::vector<std::uint8_t> relaySecret_;
     std::unordered_map<std::uint32_t, ServerRecord> servers_;
-    std::unordered_map<std::uint32_t, ClientEndpoint> clientsByNonce_;
+    std::unordered_map<std::uint64_t, ClientEndpoint> clientsByRelaySession_;
     std::uint32_t nextServerId_ = 1;
     std::atomic<bool> shouldStop_{false};
 };

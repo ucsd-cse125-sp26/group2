@@ -345,7 +345,7 @@ private:
     handleUdpUnreliable(std::uint64_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len);
     void
     handleSessionPayload(std::uint64_t connId, net::ChannelId channel, const std::uint8_t* payload, std::uint32_t len);
-    void handleDirectoryEvent(const std::vector<std::uint8_t>& payload);
+    void handleDirectoryEvent(const std::vector<std::uint8_t>& payload, const net::UdpEndpointAddr& from);
     void sendDirectoryHeartbeat(Uint64 nowMs);
 
     NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.

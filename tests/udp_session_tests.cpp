@@ -1,12 +1,15 @@
+#include "network/crypto/HmacSha256.hpp"
 #include "network/transport/PacketHeader.hpp"
 #include "network/transport/UdpSessionTransport.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <string_view>
 #include <thread>
 
 namespace
@@ -33,12 +36,50 @@ bool require(bool condition, const char* message)
         SDL_Log("udp_session_tests: %s", message);
     return condition;
 }
+
+bool digestMatchesHex(const net::crypto::Sha256Digest& digest, std::string_view hex)
+{
+    static constexpr char k_digits[] = "0123456789abcdef";
+    if (hex.size() != digest.size() * 2)
+        return false;
+    for (std::size_t i = 0; i < digest.size(); ++i) {
+        if (hex[i * 2] != k_digits[digest[i] >> 4] || hex[i * 2 + 1] != k_digits[digest[i] & 0x0f])
+            return false;
+    }
+    return true;
+}
 } // namespace
 
 int main()
 {
     SDL_Init(0);
     NET_Init();
+
+    {
+        const char abc[] = "abc";
+        const auto digest = net::crypto::sha256(abc, 3);
+        if (!require(digestMatchesHex(digest, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+                     "sha256 test vector mismatch"))
+        {
+            NET_Quit();
+            SDL_Quit();
+            return 1;
+        }
+
+        const std::array<std::uint8_t, 20> key = {
+            0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+            0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        };
+        const char msg[] = "Hi There";
+        const auto mac = net::crypto::hmacSha256(key.data(), key.size(), msg, 8);
+        if (!require(digestMatchesHex(mac, "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"),
+                     "hmac-sha256 test vector mismatch"))
+        {
+            NET_Quit();
+            SDL_Quit();
+            return 1;
+        }
+    }
 
     {
         net::PacketHeader hdr{};

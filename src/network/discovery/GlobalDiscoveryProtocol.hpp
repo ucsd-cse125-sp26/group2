@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "network/RelayToken.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -82,7 +84,7 @@ struct PunchResponse
 {
     bool accepted = false;
     ServerInfo server;
-    std::uint64_t relayToken = 0;
+    net::RelayToken relayToken;
     std::string message;
 };
 

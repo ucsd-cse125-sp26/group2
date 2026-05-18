@@ -3,16 +3,24 @@
 
 #include "GlobalDirectoryServer.hpp"
 
+#include "network/crypto/HmacSha256.hpp"
 #include "network/transport/PacketHeader.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <random>
+#include <vector>
 
 namespace
 {
+constexpr std::size_t k_maxAdvertisedServers = 256;
+constexpr std::size_t k_maxRelayClients = 4096;
+constexpr std::size_t k_maxServersPerList = 5;
+constexpr std::size_t k_maxServerNameBytes = 64;
+
 std::string addressString(NET_Address* addr)
 {
     const char* raw = addr ? NET_GetAddressString(addr) : nullptr;
@@ -24,11 +32,47 @@ bool sameEndpoint(const net::UdpEndpointAddr& a, const net::UdpEndpointAddr& b)
     return a.port == b.port && addressString(a.addr) == addressString(b.addr);
 }
 
-std::uint64_t randomRelayToken()
+std::uint64_t relaySessionKey(std::uint32_t serverId, std::uint32_t clientNonce)
 {
-    static thread_local std::mt19937_64 rng{std::random_device{}()};
-    std::uniform_int_distribution<std::uint64_t> dist{1, std::numeric_limits<std::uint64_t>::max()};
-    return dist(rng);
+    return (static_cast<std::uint64_t>(serverId) << 32) | clientNonce;
+}
+
+std::string sanitizeServerName(const std::string& name)
+{
+    if (name.empty())
+        return "Unnamed Server";
+    return name.substr(0, k_maxServerNameBytes);
+}
+
+std::vector<std::uint8_t> loadRelaySecret()
+{
+    if (const char* envSecret = SDL_getenv("GROUP2_RELAY_SECRET")) {
+        const std::size_t len = std::strlen(envSecret);
+        if (len >= 32)
+            return std::vector<std::uint8_t>(envSecret, envSecret + len);
+        SDL_Log("[directory] GROUP2_RELAY_SECRET is shorter than 32 bytes; using process-random fallback");
+    }
+
+    std::vector<std::uint8_t> secret(32);
+    std::random_device rd;
+    for (std::uint8_t& byte : secret)
+        byte = static_cast<std::uint8_t>(rd());
+    SDL_Log("[directory] GROUP2_RELAY_SECRET not set; relay tokens will be valid only for this process");
+    return secret;
+}
+
+void appendTokenMaterial(std::vector<std::uint8_t>& out,
+                         std::uint32_t serverId,
+                         std::uint32_t clientNonce,
+                         Uint64 expiresAtMs)
+{
+    static constexpr char k_domain[] = "group2-relay-token-v1";
+    out.insert(out.end(), k_domain, k_domain + sizeof(k_domain) - 1);
+    const std::size_t off = out.size();
+    out.resize(off + sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t));
+    net::writeU32Le(out.data() + off, serverId);
+    net::writeU32Le(out.data() + off + 4, clientNonce);
+    net::writeU64Le(out.data() + off + 8, expiresAtMs);
 }
 } // namespace
 
@@ -40,6 +84,7 @@ bool GlobalDirectoryServer::init(const char* bindHost, Uint16 tcpPort, Uint16 ud
         return false;
     }
 
+    relaySecret_ = loadRelaySecret();
     SDL_Log("[directory] UDP directory/relay listening on %u", udpPort);
     shouldStop_.store(false, std::memory_order_relaxed);
     return true;
@@ -48,7 +93,7 @@ bool GlobalDirectoryServer::init(const char* bindHost, Uint16 tcpPort, Uint16 ud
 void GlobalDirectoryServer::stop()
 {
     shouldStop_.store(true, std::memory_order_relaxed);
-    clientsByNonce_.clear();
+    clientsByRelaySession_.clear();
     servers_.clear();
     udpEndpoint_.close();
 }
@@ -91,9 +136,9 @@ void GlobalDirectoryServer::pruneExpired()
         }
     }
 
-    for (auto it = clientsByNonce_.begin(); it != clientsByNonce_.end();) {
+    for (auto it = clientsByRelaySession_.begin(); it != clientsByRelaySession_.end();) {
         if (now - it->second.lastSeenMs > 10000) {
-            it = clientsByNonce_.erase(it);
+            it = clientsByRelaySession_.erase(it);
         } else {
             ++it;
         }
@@ -135,11 +180,27 @@ void GlobalDirectoryServer::handleRegistration(const net::UdpReceivedMessage& ms
 
     const auto& reg = *maybeReg;
     const std::uint32_t id = reg.serverId != 0 ? reg.serverId : nextServerId_++;
-    ServerRecord& record = servers_[id];
     const std::string host = addressString(msg.from.addr);
+    auto existing = servers_.find(id);
+    if (reg.serverId != 0 && existing != servers_.end() && !sameEndpoint(msg.from, existing->second.endpoint)) {
+        sendDirectory(msg.from,
+                      net::discovery::encodeRegisterAck({.accepted = false,
+                                                         .serverId = 0,
+                                                         .publicHost = host,
+                                                         .message = "server id belongs to another endpoint"}));
+        return;
+    }
+    if (existing == servers_.end() && servers_.size() >= k_maxAdvertisedServers) {
+        sendDirectory(msg.from,
+                      net::discovery::encodeRegisterAck(
+                          {.accepted = false, .serverId = 0, .publicHost = host, .message = "directory is full"}));
+        return;
+    }
+
+    ServerRecord& record = existing != servers_.end() ? existing->second : servers_.try_emplace(id).first->second;
 
     record.info.id = id;
-    record.info.name = reg.name.empty() ? "Unnamed Server" : reg.name;
+    record.info.name = sanitizeServerName(reg.name);
     record.info.host = host;
     record.info.gamePort = reg.gamePort;
     record.info.udpHost = host;
@@ -167,8 +228,10 @@ void GlobalDirectoryServer::handleListRequest(const net::UdpReceivedMessage& msg
 {
     const Uint64 now = SDL_GetTicks();
     std::vector<net::discovery::ServerInfo> active;
-    active.reserve(servers_.size());
+    active.reserve(std::min(servers_.size(), k_maxServersPerList));
     for (const auto& [_, record] : servers_) {
+        if (active.size() >= k_maxServersPerList)
+            break;
         net::discovery::ServerInfo info = record.info;
         info.lastSeenMs = now - record.lastSeenMs;
         active.push_back(std::move(info));
@@ -184,59 +247,95 @@ void GlobalDirectoryServer::handlePunchRequest(const net::UdpReceivedMessage& ms
     if (!maybeReq)
         return;
 
-    ClientEndpoint& client = clientsByNonce_[maybeReq->clientNonce];
+    net::discovery::PunchResponse resp;
+    if (maybeReq->serverId == 0 || maybeReq->clientNonce == 0) {
+        resp.message = "invalid punch request";
+        sendDirectory(msg.from, net::discovery::encodePunchResponse(resp));
+        return;
+    }
+
+    auto serverIt = servers_.find(maybeReq->serverId);
+    if (serverIt == servers_.end()) {
+        resp.message = "server not found";
+        sendDirectory(msg.from, net::discovery::encodePunchResponse(resp));
+        return;
+    }
+
+    const std::uint64_t key = relaySessionKey(maybeReq->serverId, maybeReq->clientNonce);
+    if (clientsByRelaySession_.find(key) == clientsByRelaySession_.end() &&
+        clientsByRelaySession_.size() >= k_maxRelayClients)
+    {
+        resp.message = "relay is busy";
+        sendDirectory(msg.from, net::discovery::encodePunchResponse(resp));
+        return;
+    }
+
+    ClientEndpoint& client = clientsByRelaySession_[key];
     client.endpoint = msg.from;
-    client.relayToken = randomRelayToken();
+    client.relayToken = makeRelayToken(maybeReq->serverId, maybeReq->clientNonce, SDL_GetTicks());
     client.lastSeenMs = SDL_GetTicks();
 
-    net::discovery::PunchResponse resp;
-    resp.message = "server not found";
-    if (auto it = servers_.find(maybeReq->serverId); it != servers_.end()) {
-        resp.accepted = true;
-        resp.server = it->second.info;
-        resp.relayToken = client.relayToken;
-        resp.message = "ok";
+    resp.accepted = true;
+    resp.server = serverIt->second.info;
+    resp.relayToken = client.relayToken;
+    resp.message = "ok";
 
-        const net::discovery::UdpPunchPeer toServer{
-            .clientNonce = maybeReq->clientNonce,
-            .host = addressString(msg.from.addr),
-            .port = msg.from.port,
-        };
-        sendDirectory(it->second.endpoint,
-                      net::discovery::makeEnvelope(net::discovery::DirectoryMessage::PunchPeer,
-                                                   net::discovery::encodeUdpPunchPeer(toServer)));
-    }
+    const net::discovery::UdpPunchPeer toServer{
+        .clientNonce = maybeReq->clientNonce,
+        .host = addressString(msg.from.addr),
+        .port = msg.from.port,
+    };
+    sendDirectory(serverIt->second.endpoint,
+                  net::discovery::makeEnvelope(net::discovery::DirectoryMessage::PunchPeer,
+                                               net::discovery::encodeUdpPunchPeer(toServer)));
 
     sendDirectory(msg.from, net::discovery::encodePunchResponse(resp));
 }
 
 void GlobalDirectoryServer::handleRelayPayload(const net::UdpReceivedMessage& msg)
 {
-    constexpr std::size_t k_relayEnvelopeBytes =
-        sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) + sizeof(std::uint16_t);
+    constexpr std::size_t k_tokenOffset = sizeof(std::uint32_t) * 2;
+    constexpr std::size_t k_macOffset = k_tokenOffset + sizeof(std::uint64_t);
+    constexpr std::size_t k_innerLenOffset = k_macOffset + net::k_relayTokenMacBytes;
+    constexpr std::size_t k_relayEnvelopeBytes = k_innerLenOffset + sizeof(std::uint16_t);
     if (msg.payload.size() < k_relayEnvelopeBytes)
         return;
 
     const std::uint32_t serverId = net::readU32Le(msg.payload.data());
     const std::uint32_t clientNonce = net::readU32Le(msg.payload.data() + 4);
-    const std::uint64_t relayToken = net::readU64Le(msg.payload.data() + 8);
+    const std::uint16_t innerLen = net::readU16Le(msg.payload.data() + k_innerLenOffset);
+    if (serverId == 0 || clientNonce == 0 || innerLen < sizeof(net::PacketHeader) ||
+        msg.payload.size() != k_relayEnvelopeBytes + innerLen)
+    {
+        return;
+    }
+
+    net::RelayToken relayToken;
+    relayToken.expiresAtMs = net::readU64Le(msg.payload.data() + k_tokenOffset);
+    std::memcpy(relayToken.mac.data(), msg.payload.data() + k_macOffset, relayToken.mac.size());
     auto serverIt = servers_.find(serverId);
     if (serverIt == servers_.end())
         return;
 
     ServerRecord& server = serverIt->second;
     const bool fromServer = sameEndpoint(msg.from, server.endpoint);
+    const std::uint64_t key = relaySessionKey(serverId, clientNonce);
     if (fromServer) {
-        auto clientIt = clientsByNonce_.find(clientNonce);
-        if (clientIt == clientsByNonce_.end())
+        auto clientIt = clientsByRelaySession_.find(key);
+        if (clientIt == clientsByRelaySession_.end())
             return;
         sendRelay(clientIt->second.endpoint, msg.payload.data(), msg.payload.size());
     } else {
-        auto clientIt = clientsByNonce_.find(clientNonce);
-        if (clientIt == clientsByNonce_.end() || relayToken == 0 || relayToken != clientIt->second.relayToken)
+        auto clientIt = clientsByRelaySession_.find(key);
+        if (clientIt == clientsByRelaySession_.end() ||
+            ((!clientIt->second.relayAuthorized || !sameEndpoint(msg.from, clientIt->second.endpoint)) &&
+             !validateRelayToken(relayToken, serverId, clientNonce, SDL_GetTicks())))
+        {
             return;
+        }
         clientIt->second.endpoint = msg.from;
         clientIt->second.lastSeenMs = SDL_GetTicks();
+        clientIt->second.relayAuthorized = true;
         sendRelay(server.endpoint, msg.payload.data(), msg.payload.size());
     }
 }
@@ -259,4 +358,32 @@ void GlobalDirectoryServer::sendRelay(const net::UdpEndpointAddr& dest, const st
     hdr.kind = static_cast<std::uint8_t>(net::PacketKind::RelayPayload);
     hdr.channel = static_cast<std::uint8_t>(net::ChannelId::ControlReliableOrdered);
     udpEndpoint_.sendFragmented(dest, hdr, payload, static_cast<int>(len), 1);
+}
+
+net::RelayToken
+GlobalDirectoryServer::makeRelayToken(std::uint32_t serverId, std::uint32_t clientNonce, Uint64 nowMs) const
+{
+    static constexpr Uint64 k_tokenTtlMs = 30000;
+    net::RelayToken token;
+    token.expiresAtMs = nowMs + k_tokenTtlMs;
+
+    std::vector<std::uint8_t> material;
+    appendTokenMaterial(material, serverId, clientNonce, token.expiresAtMs);
+    token.mac = net::crypto::hmacSha256(relaySecret_.data(), relaySecret_.size(), material.data(), material.size());
+    return token;
+}
+
+bool GlobalDirectoryServer::validateRelayToken(const net::RelayToken& token,
+                                               std::uint32_t serverId,
+                                               std::uint32_t clientNonce,
+                                               Uint64 nowMs) const
+{
+    if (!net::hasRelayToken(token) || token.expiresAtMs < nowMs)
+        return false;
+
+    std::vector<std::uint8_t> material;
+    appendTokenMaterial(material, serverId, clientNonce, token.expiresAtMs);
+    const auto expected =
+        net::crypto::hmacSha256(relaySecret_.data(), relaySecret_.size(), material.data(), material.size());
+    return net::crypto::constantTimeEqual(token.mac.data(), expected.data(), expected.size());
 }

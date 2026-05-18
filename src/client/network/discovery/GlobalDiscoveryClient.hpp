@@ -29,5 +29,5 @@ public:
                           net::discovery::ServerInfo& outServer,
                           std::string& outError,
                           int timeoutMs,
-                          std::uint64_t* outRelayToken = nullptr);
+                          net::RelayToken* outRelayToken = nullptr);
 };

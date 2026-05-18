@@ -851,6 +851,9 @@ add_executable(group2
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/RelayToken.hpp
+        src/network/crypto/HmacSha256.hpp
+        src/network/crypto/HmacSha256.cpp
         src/network/discovery/GlobalDiscoveryProtocol.hpp
         src/network/discovery/GlobalDiscoveryProtocol.cpp
         src/client/network/discovery/GlobalDiscoveryClient.hpp
@@ -1151,6 +1154,9 @@ add_executable(server
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/RelayToken.hpp
+        src/network/crypto/HmacSha256.hpp
+        src/network/crypto/HmacSha256.cpp
         src/network/discovery/GlobalDiscoveryProtocol.hpp
         src/network/discovery/GlobalDiscoveryProtocol.cpp
         src/network/OutboundQueue.hpp
@@ -1366,6 +1372,9 @@ add_executable(directory_server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RelayToken.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/discovery/GlobalDiscoveryProtocol.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/discovery/GlobalDiscoveryProtocol.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
@@ -1440,6 +1449,9 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RelayToken.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/OutboundQueue.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
@@ -1607,6 +1619,9 @@ add_executable(udp_session_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/udp_session_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/FragmentReassembler.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RelayToken.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpSessionTransport.hpp"

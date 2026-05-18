@@ -10,6 +10,9 @@ answers browser list/punch requests, and forwards opaque relay envelopes.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
+import os
 import secrets
 import selectors
 import socket
@@ -23,6 +26,13 @@ DIR_VERSION = 1
 SERVER_TTL_SECONDS = 15.0
 CLIENT_TTL_SECONDS = 10.0
 FRAGMENT_TTL_SECONDS = 3.0
+RELAY_TOKEN_TTL_MS = 30_000
+RELAY_TOKEN_MAC_BYTES = 32
+MAX_ADVERTISED_SERVERS = 256
+MAX_RELAY_CLIENTS = 4096
+MAX_SERVERS_PER_LIST = 5
+MAX_SERVER_NAME_BYTES = 64
+MAX_FRAGMENT_SETS = 2048
 
 MSG_REGISTER = 1
 MSG_REGISTER_ACK = 2
@@ -80,8 +90,10 @@ class ServerRecord:
 @dataclass
 class ClientEndpoint:
     endpoint: tuple[str, int]
-    relay_token: int
+    relay_token_expires_at_ms: int
+    relay_token_mac: bytes
     last_seen: float
+    relay_authorized: bool = False
 
 
 @dataclass
@@ -171,20 +183,22 @@ def pack_register_ack(server_id: int, public_host: str, message: str, accepted: 
 
 def pack_list_response(records: list[ServerRecord]) -> bytes:
     now = time.monotonic()
-    active = records[:65535]
+    active = records[:MAX_SERVERS_PER_LIST]
     payload = struct.pack("<H", len(active))
     for record in active:
         payload += pack_server(record, int((now - record.last_seen) * 1000))
     return envelope(MSG_LIST_RESPONSE, payload)
 
 
-def pack_punch_response(record: ServerRecord | None, relay_token: int, message: str) -> bytes:
+def pack_punch_response(record: ServerRecord | None, token_expires_at_ms: int, token_mac: bytes, message: str) -> bytes:
     if record is None:
         empty = ServerRecord(0, "", "", 0, ("", 0), nat_ready=False)
-        payload = struct.pack("<B", 0) + pack_server(empty, 0) + struct.pack("<Q", 0) + pack_string(message)
+        payload = struct.pack("<B", 0) + pack_server(empty, 0) + struct.pack("<Q", 0)
+        payload += bytes(RELAY_TOKEN_MAC_BYTES) + pack_string(message)
     else:
         payload = struct.pack("<B", 1) + pack_server(record, int((time.monotonic() - record.last_seen) * 1000))
-        payload += struct.pack("<Q", relay_token)
+        payload += struct.pack("<Q", token_expires_at_ms)
+        payload += token_mac
         payload += pack_string(message)
     return envelope(MSG_PUNCH_RESPONSE, payload)
 
@@ -196,6 +210,8 @@ def pack_udp_punch_peer(nonce: int, host: str, port: int) -> bytes:
 def parse_packet(data: bytes) -> tuple[PacketHeader, bytes]:
     if len(data) < G2_HEADER_SIZE:
         raise ValueError("short g2 packet")
+    if len(data) > G2_MAX_PACKET_BYTES:
+        raise ValueError("oversize g2 packet")
     fields = struct.unpack_from(G2_HEADER_FMT, data, 0)
     magic, version, kind, conn_id, sequence, ack, ack_bits, route_id, channel, flags, frag_info, frag_group, _pad = fields
     if magic != G2_MAGIC or version != G2_VERSION:
@@ -240,11 +256,35 @@ class DirectoryServer:
     def __init__(self, udp_port: int):
         self.udp_port = udp_port
         self.selector = selectors.DefaultSelector()
+        self.relay_secret = self.load_relay_secret()
         self.servers: dict[int, ServerRecord] = {}
-        self.clients_by_nonce: dict[int, ClientEndpoint] = {}
+        self.clients_by_relay_session: dict[tuple[int, int], ClientEndpoint] = {}
         self.fragments: dict[tuple[str, int, int, int, int, int, int], FragmentSet] = {}
+        self.last_malformed_log = 0.0
+        self.malformed_drops = 0
         self.next_server_id = 1
         self.sock: socket.socket | None = None
+
+    @staticmethod
+    def load_relay_secret() -> bytes:
+        secret = os.environ.get("GROUP2_RELAY_SECRET")
+        if secret and len(secret.encode("utf-8")) >= 32:
+            return secret.encode("utf-8")
+        if secret:
+            print("[directory] GROUP2_RELAY_SECRET is shorter than 32 bytes; using process-random fallback", flush=True)
+        else:
+            print("[directory] GROUP2_RELAY_SECRET not set; relay tokens will be valid only for this process", flush=True)
+        return secrets.token_bytes(32)
+
+    def sign_relay_token(self, server_id: int, client_nonce: int, expires_at_ms: int) -> bytes:
+        material = b"group2-relay-token-v1" + struct.pack("<IIQ", server_id, client_nonce, expires_at_ms)
+        return hmac.new(self.relay_secret, material, hashlib.sha256).digest()
+
+    def verify_relay_token(self, server_id: int, client_nonce: int, expires_at_ms: int, mac: bytes) -> bool:
+        if expires_at_ms < int(time.monotonic() * 1000) or len(mac) != RELAY_TOKEN_MAC_BYTES:
+            return False
+        expected = self.sign_relay_token(server_id, client_nonce, expires_at_ms)
+        return hmac.compare_digest(mac, expected)
 
     def start(self):
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -280,7 +320,16 @@ class DirectoryServer:
             elif header.kind == KIND_RELAY_PAYLOAD:
                 self.handle_relay_payload(addr, payload)
         except Exception as exc:
-            print(f"[directory] dropped malformed UDP message from {addr[0]}:{addr[1]}: {exc}", flush=True)
+            self.malformed_drops += 1
+            now = time.monotonic()
+            if now - self.last_malformed_log >= 2.0:
+                print(
+                    f"[directory] dropped malformed UDP from {addr[0]}:{addr[1]}: {exc} "
+                    f"(recent drops={self.malformed_drops})",
+                    flush=True,
+                )
+                self.last_malformed_log = now
+                self.malformed_drops = 0
 
     def reassemble_if_needed(self, addr: tuple[str, int], header: PacketHeader, payload: bytes) -> bytes | None:
         if (header.flags & FLAG_FRAGMENTED) == 0:
@@ -302,6 +351,8 @@ class DirectoryServer:
         )
         frag_set = self.fragments.get(key)
         if frag_set is None or frag_set.count != frag_count:
+            if key not in self.fragments and len(self.fragments) >= MAX_FRAGMENT_SETS:
+                raise ValueError("fragment table full")
             frag_set = FragmentSet(count=frag_count, first_seen=time.monotonic())
             self.fragments[key] = frag_set
         frag_set.parts.setdefault(frag_idx, payload)
@@ -322,17 +373,24 @@ class DirectoryServer:
 
     def handle_registration(self, addr: tuple[str, int], kind: int, payload: bytes):
         server_id, name, game_port, current_players, max_players = parse_registration(payload)
+        name = (name or "Unnamed Server")[:MAX_SERVER_NAME_BYTES]
         if server_id == 0:
             server_id = self.next_server_id
             self.next_server_id += 1
 
         host = addr[0]
         record = self.servers.get(server_id)
+        if server_id != 0 and record is not None and record.endpoint != addr:
+            self.send_directory(addr, pack_register_ack(0, host, "server id belongs to another endpoint", False))
+            return
         if record is None:
-            record = ServerRecord(server_id, name or "Unnamed Server", host, game_port, addr)
+            if len(self.servers) >= MAX_ADVERTISED_SERVERS:
+                self.send_directory(addr, pack_register_ack(0, host, "directory is full", False))
+                return
+            record = ServerRecord(server_id, name, host, game_port, addr)
             self.servers[server_id] = record
 
-        record.name = name or "Unnamed Server"
+        record.name = name
         record.host = host
         record.game_port = game_port
         record.endpoint = addr
@@ -349,45 +407,60 @@ class DirectoryServer:
 
     def handle_punch_request(self, addr: tuple[str, int], payload: bytes):
         server_id, nonce = parse_punch_request(payload)
-        relay_token = secrets.randbits(64) or 1
-        self.clients_by_nonce[nonce] = ClientEndpoint(addr, relay_token, time.monotonic())
+        if server_id == 0 or nonce == 0:
+            self.send_directory(addr, pack_punch_response(None, 0, b"", "invalid punch request"))
+            return
 
         record = self.servers.get(server_id)
         if record is None:
-            self.send_directory(addr, pack_punch_response(None, 0, "server not found"))
+            self.send_directory(addr, pack_punch_response(None, 0, b"", "server not found"))
             return
+
+        relay_key = (server_id, nonce)
+        if relay_key not in self.clients_by_relay_session and len(self.clients_by_relay_session) >= MAX_RELAY_CLIENTS:
+            self.send_directory(addr, pack_punch_response(None, 0, b"", "relay is busy"))
+            return
+
+        expires_at_ms = int(time.monotonic() * 1000) + RELAY_TOKEN_TTL_MS
+        token_mac = self.sign_relay_token(server_id, nonce, expires_at_ms)
+        self.clients_by_relay_session[relay_key] = ClientEndpoint(addr, expires_at_ms, token_mac, time.monotonic())
 
         peer_payload = envelope(MSG_PUNCH_PEER, pack_udp_punch_peer(nonce, addr[0], addr[1]))
         self.send_directory(record.endpoint, peer_payload)
-        self.send_directory(addr, pack_punch_response(record, relay_token, "ok"))
+        self.send_directory(addr, pack_punch_response(record, expires_at_ms, token_mac, "ok"))
         print(
             f"[directory] punch assist server={server_id} client={addr[0]}:{addr[1]} serverUdp={record.udp_host}:{record.udp_port}",
             flush=True,
         )
 
     def handle_relay_payload(self, addr: tuple[str, int], payload: bytes):
-        if len(payload) < 18:
+        relay_header_len = 4 + 4 + 8 + RELAY_TOKEN_MAC_BYTES + 2
+        if len(payload) < relay_header_len:
             return
         server_id, client_nonce = struct.unpack_from("<II", payload, 0)
-        (relay_token,) = struct.unpack_from("<Q", payload, 8)
-        (inner_len,) = struct.unpack_from("<H", payload, 16)
-        if len(payload) < 18 + inner_len:
+        (token_expires_at_ms,) = struct.unpack_from("<Q", payload, 8)
+        token_mac = payload[16 : 16 + RELAY_TOKEN_MAC_BYTES]
+        (inner_len,) = struct.unpack_from("<H", payload, 16 + RELAY_TOKEN_MAC_BYTES)
+        if server_id == 0 or client_nonce == 0 or inner_len < G2_HEADER_SIZE or len(payload) != relay_header_len + inner_len:
             return
 
         record = self.servers.get(server_id)
         if record is None:
             return
 
+        relay_key = (server_id, client_nonce)
         if addr == record.endpoint:
-            client = self.clients_by_nonce.get(client_nonce)
+            client = self.clients_by_relay_session.get(relay_key)
             if client is not None:
                 self.send_relay(client.endpoint, payload)
         else:
-            client = self.clients_by_nonce.get(client_nonce)
-            if client is None or relay_token == 0 or relay_token != client.relay_token:
+            client = self.clients_by_relay_session.get(relay_key)
+            needs_token = client is None or not client.relay_authorized or client.endpoint != addr
+            if client is None or (needs_token and not self.verify_relay_token(server_id, client_nonce, token_expires_at_ms, token_mac)):
                 return
             client.endpoint = addr
             client.last_seen = time.monotonic()
+            client.relay_authorized = True
             self.send_relay(record.endpoint, payload)
 
     def send_directory(self, addr: tuple[str, int], payload: bytes):
@@ -411,9 +484,9 @@ class DirectoryServer:
             if now - self.servers[server_id].last_seen > SERVER_TTL_SECONDS:
                 print(f"[directory] expiring server {server_id}", flush=True)
                 del self.servers[server_id]
-        for nonce in list(self.clients_by_nonce):
-            if now - self.clients_by_nonce[nonce].last_seen > CLIENT_TTL_SECONDS:
-                del self.clients_by_nonce[nonce]
+        for key in list(self.clients_by_relay_session):
+            if now - self.clients_by_relay_session[key].last_seen > CLIENT_TTL_SECONDS:
+                del self.clients_by_relay_session[key]
         for key in list(self.fragments):
             if now - self.fragments[key].first_seen > FRAGMENT_TTL_SECONDS:
                 del self.fragments[key]

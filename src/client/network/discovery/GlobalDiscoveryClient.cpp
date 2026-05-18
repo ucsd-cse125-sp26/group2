@@ -9,9 +9,21 @@
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <string>
 
 namespace
 {
+std::string endpointHost(const net::UdpEndpointAddr& endpoint)
+{
+    const char* raw = endpoint.addr ? NET_GetAddressString(endpoint.addr) : nullptr;
+    return raw ? raw : "";
+}
+
+bool sameEndpoint(const net::UdpEndpointAddr& a, const net::UdpEndpointAddr& b)
+{
+    return a.port == b.port && endpointHost(a) == endpointHost(b);
+}
+
 bool resolveDirectory(const GlobalDiscoveryConfig& cfg, net::UdpEndpointAddr& out, std::string& outError, int timeoutMs)
 {
     NET_Address* addr = NET_ResolveHostname(cfg.directoryHost.c_str());
@@ -66,6 +78,10 @@ bool requestDirectory(const GlobalDiscoveryConfig& cfg,
 
         net::UdpReceivedMessage msg;
         while (udp.tryReceive(msg)) {
+            if (!sameEndpoint(msg.from, dir)) {
+                msg.from.release();
+                continue;
+            }
             if (msg.header.kind == static_cast<std::uint8_t>(net::PacketKind::DirectoryControl)) {
                 net::discovery::DirectoryMessage kind{};
                 const std::uint8_t* payload = nullptr;
@@ -134,7 +150,7 @@ bool GlobalDiscoveryClient::requestHolePunch(const GlobalDiscoveryConfig& cfg,
                                              net::discovery::ServerInfo& outServer,
                                              std::string& outError,
                                              int timeoutMs,
-                                             std::uint64_t* outRelayToken)
+                                             net::RelayToken* outRelayToken)
 {
     outError.clear();
     if (!cfg.enabled || serverId == 0 || timeoutMs <= 0)

@@ -11,6 +11,8 @@ namespace
 /// loop iterations under heavy load. The drain loop handles arbitrarily large
 /// kernel-queued backlogs regardless of this value.
 constexpr int k_readChunkBytes = 16 * 1024;
+constexpr Uint32 k_maxFrameBytes = 2 * 1024 * 1024;
+constexpr std::size_t k_maxRecvBufferBytes = static_cast<std::size_t>(k_maxFrameBytes) + k_readChunkBytes;
 
 /// @brief Compact recvBuf when the head offset is past this fraction of size.
 /// Keeps amortized O(1) per consumed message while preventing unbounded growth
@@ -23,9 +25,12 @@ bool MessageStream::send(const void* data, Uint32 size)
 {
     if (!socket)
         return false;
+    if (size > k_maxFrameBytes)
+        return false;
 
     auto dataSize = static_cast<int>(size);
-    NET_WriteToStreamSocket(socket, &size, sizeof(size));
+    if (!NET_WriteToStreamSocket(socket, &size, sizeof(size)))
+        return false;
     return NET_WriteToStreamSocket(socket, data, dataSize);
 }
 
@@ -64,12 +69,14 @@ bool MessageStream::pumpReads()
             return false; // socket error → caller treats as disconnect
         if (n == 0)
             break;        // kernel buffer empty → done draining
+        if (recvBuf.size() + static_cast<std::size_t>(n) > k_maxRecvBufferBytes)
+            return false;
         recvBuf.insert(recvBuf.end(), buf, buf + n);
     }
     return true;
 }
 
-void MessageStream::drainComplete(const std::function<void(const void* data, Uint32 size)>& callback)
+bool MessageStream::drainComplete(const std::function<void(const void* data, Uint32 size)>& callback)
 {
     // Use a head offset rather than vector::erase(begin,...) which is O(N)
     // and turns "drain 10 backlogged messages of M bytes each" into O(N^2)
@@ -78,8 +85,13 @@ void MessageStream::drainComplete(const std::function<void(const void* data, Uin
     while (recvAvailable() >= sizeof(Uint32)) {
         Uint32 len;
         std::memcpy(&len, recvFront(), sizeof(Uint32));
+        if (len > k_maxFrameBytes) {
+            recvBuf.clear();
+            recvHead = 0;
+            return false;
+        }
 
-        if (recvAvailable() < sizeof(Uint32) + len)
+        if (static_cast<std::size_t>(recvAvailable()) < sizeof(Uint32) + static_cast<std::size_t>(len))
             break; // need more data
 
         const Uint8* payload = recvFront() + sizeof(Uint32);
@@ -97,6 +109,7 @@ void MessageStream::drainComplete(const std::function<void(const void* data, Uin
     {
         recvCompact();
     }
+    return true;
 }
 
 bool MessageStream::poll(const std::function<void(const void* data, Uint32 size)>& callback)
@@ -106,6 +119,5 @@ bool MessageStream::poll(const std::function<void(const void* data, Uint32 size)
     // a network thread (pumpReads) and the game thread (drainComplete).
     if (!pumpReads())
         return false;
-    drainComplete(callback);
-    return true;
+    return drainComplete(callback);
 }

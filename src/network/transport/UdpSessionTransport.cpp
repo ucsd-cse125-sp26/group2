@@ -9,11 +9,23 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <string>
 
 namespace net
 {
 namespace
 {
+std::string endpointHost(const UdpEndpointAddr& endpoint)
+{
+    const char* raw = endpoint.addr ? NET_GetAddressString(endpoint.addr) : nullptr;
+    return raw ? raw : "";
+}
+
+bool sameEndpoint(const UdpEndpointAddr& a, const UdpEndpointAddr& b)
+{
+    return a.port == b.port && endpointHost(a) == endpointHost(b);
+}
+
 void appendU32(std::vector<std::uint8_t>& out, std::uint32_t value)
 {
     const std::size_t off = out.size();
@@ -50,6 +62,11 @@ std::size_t UdpSessionTransport::channelIndex(ChannelId channel) noexcept
 {
     const auto idx = static_cast<std::size_t>(channel);
     return idx < static_cast<std::size_t>(ChannelId::Count) ? idx : 0;
+}
+
+bool UdpSessionTransport::isKnownChannel(std::uint8_t channel) noexcept
+{
+    return channel < static_cast<std::uint8_t>(ChannelId::Count);
 }
 
 bool UdpSessionTransport::isReliable(ChannelId channel) noexcept
@@ -161,6 +178,8 @@ void UdpSessionTransport::setRelayConfig(const RelayConfig& cfg)
 
 void UdpSessionTransport::queueEvent(Event&& event)
 {
+    if (events_.size() >= k_maxQueuedEvents)
+        events_.pop_front();
     events_.push_back(std::move(event));
 }
 
@@ -189,7 +208,11 @@ void UdpSessionTransport::pump()
         if (msg.header.kind == static_cast<std::uint8_t>(PacketKind::RelayPayload)) {
             processRelayPayload(msg);
         } else if (msg.header.kind == static_cast<std::uint8_t>(PacketKind::DirectoryControl)) {
-            queueEvent(Event{.type = EventType::DirectoryControl, .payload = std::move(msg.payload)});
+            Event event;
+            event.type = EventType::DirectoryControl;
+            event.payload = std::move(msg.payload);
+            event.from = msg.from;
+            queueEvent(std::move(event));
         } else {
             processDatagram(msg, false);
         }
@@ -208,12 +231,14 @@ UdpSessionTransport::Peer* UdpSessionTransport::findPeer(std::uint64_t connectio
     return it == peers_.end() ? nullptr : &it->second;
 }
 
-UdpSessionTransport::Peer&
+UdpSessionTransport::Peer*
 UdpSessionTransport::createServerPeer(const UdpEndpointAddr& from, std::uint32_t clientNonce, bool viaRelay)
 {
     if (auto existing = connectionByClientNonce_.find(clientNonce); existing != connectionByClientNonce_.end()) {
-        return peers_.at(existing->second);
+        return &peers_.at(existing->second);
     }
+    if (clientNonce == 0 || peers_.size() >= k_maxPeers)
+        return nullptr;
 
     const std::uint64_t connectionId = randomU64(rng_);
     auto [it, _] = peers_.try_emplace(connectionId);
@@ -233,7 +258,7 @@ UdpSessionTransport::createServerPeer(const UdpEndpointAddr& from, std::uint32_t
         peer.lastDirectHeardMs = peer.lastHeardMs;
     }
     connectionByClientNonce_[clientNonce] = connectionId;
-    return peer;
+    return &peer;
 }
 
 void UdpSessionTransport::sendConnectionRequest(bool viaRelay)
@@ -395,8 +420,8 @@ bool UdpSessionTransport::sendViaRelay(Peer& peer, PacketHeader hdr, const void*
     if (payloadLen < 0)
         return false;
 
-    constexpr int k_relayEnvelopeBytes =
-        static_cast<int>(sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) + sizeof(std::uint16_t));
+    constexpr int k_relayEnvelopeBytes = static_cast<int>(sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) +
+                                                          k_relayTokenMacBytes + sizeof(std::uint16_t));
     constexpr int k_maxRelayInnerPayload = k_maxPacketBytes - static_cast<int>(sizeof(PacketHeader)) -
                                            k_relayEnvelopeBytes - static_cast<int>(sizeof(PacketHeader));
     static_assert(k_maxRelayInnerPayload > 0, "relay MTU budget must leave room for inner payload bytes");
@@ -408,7 +433,8 @@ bool UdpSessionTransport::sendViaRelay(Peer& peer, PacketHeader hdr, const void*
         envelope.reserve(k_relayEnvelopeBytes + inner.size());
         appendU32(envelope, peer.relayServerId ? peer.relayServerId : relayConfig_.serverId);
         appendU32(envelope, peer.relayClientNonce ? peer.relayClientNonce : relayConfig_.clientNonce);
-        appendU64(envelope, relayConfig_.relayToken);
+        appendU64(envelope, relayConfig_.relayToken.expiresAtMs);
+        envelope.insert(envelope.end(), relayConfig_.relayToken.mac.begin(), relayConfig_.relayToken.mac.end());
         const std::size_t lenOff = envelope.size();
         envelope.resize(envelope.size() + sizeof(std::uint16_t));
         writeU16Le(envelope.data() + lenOff, static_cast<std::uint16_t>(inner.size()));
@@ -453,13 +479,18 @@ bool UdpSessionTransport::sendViaRelay(Peer& peer, PacketHeader hdr, const void*
 
 void UdpSessionTransport::processRelayPayload(UdpReceivedMessage& msg)
 {
-    constexpr std::size_t k_relayEnvelopeBytes =
-        sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) + sizeof(std::uint16_t);
+    if (!relayConfig_.enabled || !relayAddr_.addr || !sameEndpoint(msg.from, relayAddr_))
+        return;
+
+    constexpr std::size_t k_relayTokenOffset = sizeof(std::uint32_t) * 2;
+    constexpr std::size_t k_relayMacOffset = k_relayTokenOffset + sizeof(std::uint64_t);
+    constexpr std::size_t k_relayInnerLenOffset = k_relayMacOffset + k_relayTokenMacBytes;
+    constexpr std::size_t k_relayEnvelopeBytes = k_relayInnerLenOffset + sizeof(std::uint16_t);
     if (msg.payload.size() < k_relayEnvelopeBytes)
         return;
     const std::uint8_t* data = msg.payload.data();
-    const std::uint16_t innerLen = readU16Le(data + 16);
-    if (msg.payload.size() < k_relayEnvelopeBytes + innerLen || innerLen < sizeof(PacketHeader))
+    const std::uint16_t innerLen = readU16Le(data + k_relayInnerLenOffset);
+    if (innerLen < sizeof(PacketHeader) || msg.payload.size() != k_relayEnvelopeBytes + innerLen)
         return;
 
     PacketHeader innerHdr{};
@@ -477,12 +508,18 @@ void UdpSessionTransport::processRelayPayload(UdpReceivedMessage& msg)
 
 void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay)
 {
+    if (!isKnownChannel(msg.header.channel))
+        return;
+
     const auto kind = static_cast<PacketKind>(msg.header.kind);
     if (kind == PacketKind::ConnectionRequest && mode_ == Mode::Server) {
         if (msg.payload.size() < sizeof(std::uint32_t))
             return;
         const std::uint32_t nonce = readU32Le(msg.payload.data());
-        Peer& peer = createServerPeer(msg.from, nonce, viaRelay);
+        Peer* maybePeer = createServerPeer(msg.from, nonce, viaRelay);
+        if (!maybePeer)
+            return;
+        Peer& peer = *maybePeer;
         peer.lastHeardMs = SDL_GetTicks();
         if (viaRelay) {
             peer.relayAddr = msg.from;
@@ -505,6 +542,11 @@ void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay
     }
 
     if (kind == PacketKind::ConnectionAccepted && mode_ == Mode::Client) {
+        if (!viaRelay && serverAddr_.addr && !sameEndpoint(msg.from, serverAddr_))
+            return;
+        if (viaRelay && relayAddr_.addr && !sameEndpoint(msg.from, relayAddr_))
+            return;
+
         std::uint64_t connId = msg.header.connectionId;
         if (msg.payload.size() >= sizeof(std::uint64_t))
             connId = readU64Le(msg.payload.data());
@@ -693,6 +735,8 @@ void UdpSessionTransport::deliverReliable(
     }
 
     if (seqMoreRecent(sequence, ch.orderedNext)) {
+        if (ch.orderedBuffer.size() >= k_maxReliableOrderedBuffer)
+            return;
         ch.orderedBuffer.try_emplace(sequence, std::move(payload));
     }
 }

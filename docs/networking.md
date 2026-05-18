@@ -59,8 +59,9 @@ flowchart LR
 - Stores active advertised servers with observed public UDP endpoint.
 - Answers browser list and punch requests.
 - Forwards opaque relay envelopes by `(serverId, clientNonce)`.
-- Validates client-to-relay envelopes with short-lived relay tokens issued by `PunchResponse`.
+- Validates client-to-relay envelopes with HMAC-SHA256 relay tokens issued by `PunchResponse`.
 - Does not parse gameplay payloads inside relay envelopes.
+- Bounds advertised servers, active relay sessions, queued fragments, packet sizes, and server-list response size so random Internet traffic cannot grow memory without limit.
 
 ---
 
@@ -144,6 +145,14 @@ sequenceDiagram
 The transport prefers direct traffic unless `transport.force-relay = true`.
 If direct packets stop arriving, keepalive timeout disconnects the route; relay fallback can carry the session without changing gameplay connection IDs.
 
+Relay authorization uses a short-lived token:
+
+- The directory signs `serverId`, `clientNonce`, and expiry with HMAC-SHA256.
+- The client includes that token in relay envelopes.
+- The first valid client-to-relay envelope authorizes that `(serverId, clientNonce)` relay session.
+- After activation, same-endpoint relay traffic can continue until the idle client entry expires; a changed endpoint must prove possession with a still-valid token.
+- Set `GROUP2_RELAY_SECRET` on the directory host. If it is missing, the service generates a process-random fallback, which is fine for local testing but invalidates tokens on restart.
+
 ---
 
 ## 6. Configuration
@@ -167,6 +176,11 @@ relay-fallback-delay-ms = 450
 ```
 
 Ops requirement: CSE125 must allow inbound UDP on the selected directory/relay port. If that UDP port is blocked, no UDP relay can be guaranteed.
+Run the Python helper with a persistent secret on CSE125:
+
+```bash
+GROUP2_RELAY_SECRET='replace-with-at-least-32-random-bytes' tools/global_directory_server.py --udp-port 10081
+```
 
 ---
 
