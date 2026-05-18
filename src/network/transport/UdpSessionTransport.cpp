@@ -105,7 +105,7 @@ bool UdpSessionTransport::connectClient(const char* host, Uint16 port, int timeo
 {
     close();
     mode_ = Mode::Client;
-    clientNonce_ = randomU32(rng_);
+    clientNonce_ = relayConfig_.clientNonce != 0 ? relayConfig_.clientNonce : randomU32(rng_);
     clientConnectionId_ = 0;
 
     if (!endpoint_.open(nullptr, 0))
