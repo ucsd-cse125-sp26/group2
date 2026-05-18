@@ -95,6 +95,20 @@ struct TransportConfig
     bool eventsOverUdp = true;
 };
 
+/// @brief Global server browser / directory-service settings.
+struct GlobalDiscoveryConfig
+{
+    bool enabled = true;                           ///< Client browser and server publishing toggle.
+    bool advertiseServer = true;                   ///< Server auto-publishes itself to the directory.
+    std::string directoryHost = "cse125.ucsd.edu"; ///< Central directory host.
+    uint16_t directoryTcpPort = 10080;             ///< Directory TCP API port.
+    uint16_t directoryUdpPort = 10081;             ///< Directory UDP punch-assist port.
+    std::string serverName = "Group 2 Server";     ///< Name advertised by local servers.
+    uint8_t maxPlayers = 8;                        ///< Display-only capacity advertised by servers.
+    int refreshSeconds = 5;                        ///< Client browser refresh cadence.
+    int connectPunchTimeoutMs = 900;               ///< UDP punch-assist window before a direct join attempt.
+};
+
 /// @brief Runtime network connection parameters.
 ///
 /// Populated by loadNetworkConfig(). If the config file is absent or a key
@@ -105,6 +119,7 @@ struct NetworkConfig
     NetworkAddress serverNetwork;      ///< Server network config (host and port).
     ServerReplicationConfig serverRep; ///< Server-side replication tuning.
     TransportConfig transport;         ///< Phase 3d: UDP transport sub-feature toggles.
+    GlobalDiscoveryConfig discovery;   ///< Global server browser and NAT assist.
 };
 
 /// @brief Load network config from a TOML file.

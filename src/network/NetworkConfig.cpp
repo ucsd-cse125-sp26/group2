@@ -57,5 +57,25 @@ NetworkConfig loadNetworkConfig(const char* path)
     if (auto v = transport["events-over-udp"].value<bool>())
         cfg.transport.eventsOverUdp = *v;
 
+    auto discovery = tbl["global-discovery"];
+    if (auto v = discovery["enabled"].value<bool>())
+        cfg.discovery.enabled = *v;
+    if (auto v = discovery["advertise-server"].value<bool>())
+        cfg.discovery.advertiseServer = *v;
+    if (auto v = discovery["directory-host"].value<std::string>())
+        cfg.discovery.directoryHost = *v;
+    if (auto v = discovery["directory-tcp-port"].value<uint16_t>())
+        cfg.discovery.directoryTcpPort = *v;
+    if (auto v = discovery["directory-udp-port"].value<uint16_t>())
+        cfg.discovery.directoryUdpPort = *v;
+    if (auto v = discovery["server-name"].value<std::string>())
+        cfg.discovery.serverName = *v;
+    if (auto v = discovery["max-players"].value<int>())
+        cfg.discovery.maxPlayers = static_cast<uint8_t>(std::clamp(*v, 0, 255));
+    if (auto v = discovery["refresh-seconds"].value<int>())
+        cfg.discovery.refreshSeconds = std::clamp(*v, 1, 60);
+    if (auto v = discovery["connect-punch-timeout-ms"].value<int>())
+        cfg.discovery.connectPunchTimeoutMs = std::clamp(*v, 0, 5000);
+
     return cfg;
 }

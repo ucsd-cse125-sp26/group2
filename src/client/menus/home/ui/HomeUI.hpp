@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include "network/discovery/GlobalDiscoveryProtocol.hpp"
+
 #include <string>
 #include <string_view>
+#include <vector>
 
 /// @brief Mutable widget state for the server join form.
 struct JoinMenuState
@@ -17,6 +20,8 @@ struct JoinMenuState
 struct JoinMenuResult
 {
     bool connectClicked = false; ///< True if the user pressed "Join" this frame.
+    bool refreshClicked = false; ///< True if the user requested a global browser refresh.
+    int globalServerIndex = -1;  ///< Index of a discovered server to join, or -1.
 };
 
 namespace home_ui
@@ -26,6 +31,10 @@ namespace home_ui
 /// @param state      Persistent widget state (IP/port fields).
 /// @param errorMessage Optional error string displayed in red below the form.
 /// @return Actions the caller should apply (connect request).
-JoinMenuResult buildJoinMenu(JoinMenuState& state, std::string_view errorMessage = {});
+JoinMenuResult buildJoinMenu(JoinMenuState& state,
+                             std::string_view errorMessage,
+                             const std::vector<net::discovery::ServerInfo>& globalServers,
+                             std::string_view browserError,
+                             bool browserRefreshing);
 
 } // namespace home_ui

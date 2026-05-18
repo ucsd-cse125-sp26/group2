@@ -7,6 +7,7 @@
 #include "game/Game.hpp"
 #include "menus/home/Home.hpp"
 #include "menus/lobby/Lobby.hpp"
+#include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 
 #include <SDL3/SDL_video.h>
@@ -140,7 +141,7 @@ bool App::init()
         current = Screen::InGame;
     } else {
         auto homeScreen = std::make_unique<Home>();
-        if (!homeScreen->init(&renderer, window)) {
+        if (!homeScreen->init(&renderer, window, networkConfig.discovery)) {
             homeScreen->quit();
             cleanup();
             return false;
@@ -175,6 +176,24 @@ SDL_AppResult App::iterate()
         if (auto joinRequest = home->consumeJoinRequest()) {
             std::string serverIp = joinRequest->serverIp;
             uint16_t serverPort = joinRequest->serverPort;
+            if (joinRequest->globalServerId != 0 && networkConfig.discovery.enabled) {
+                GlobalDiscoveryClient discovery;
+                net::discovery::ServerInfo punchedServer;
+                std::string punchError;
+                if (discovery.requestHolePunch(networkConfig.discovery,
+                                               joinRequest->globalServerId,
+                                               punchedServer,
+                                               punchError,
+                                               networkConfig.discovery.connectPunchTimeoutMs))
+                {
+                    serverIp = punchedServer.host;
+                    serverPort = punchedServer.gamePort;
+                } else if (!punchError.empty()) {
+                    SDL_Log("Global punch assist failed for server %u: %s",
+                            joinRequest->globalServerId,
+                            punchError.c_str());
+                }
+            }
             SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
             const ConnectError connectError =
                 client.init(serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs);
@@ -260,7 +279,7 @@ void App::transitionTo(Screen next)
     }
     case Screen::Home: {
         auto homeScreen = std::make_unique<Home>();
-        if (homeScreen->init(&renderer, window)) {
+        if (homeScreen->init(&renderer, window, networkConfig.discovery)) {
             screen_ = std::move(homeScreen);
             current = next;
         } else {

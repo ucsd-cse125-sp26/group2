@@ -851,6 +851,10 @@ add_executable(group2
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/discovery/GlobalDiscoveryProtocol.hpp
+        src/network/discovery/GlobalDiscoveryProtocol.cpp
+        src/client/network/discovery/GlobalDiscoveryClient.hpp
+        src/client/network/discovery/GlobalDiscoveryClient.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
         src/network/transport/FragmentReassembler.hpp
@@ -1145,6 +1149,10 @@ add_executable(server
         src/network/MessageStream.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/discovery/GlobalDiscoveryProtocol.hpp
+        src/network/discovery/GlobalDiscoveryProtocol.cpp
+        src/server/network/discovery/GlobalServerAdvertiser.hpp
+        src/server/network/discovery/GlobalServerAdvertiser.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
         src/network/transport/FragmentReassembler.hpp
@@ -1344,6 +1352,52 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
         )
     endif()
 endif()
+
+# ===========================================================================
+# Global directory executable
+# ===========================================================================
+add_executable(directory_server
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/directory/main/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/directory/network/GlobalDirectoryServer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/directory/network/GlobalDirectoryServer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/discovery/GlobalDiscoveryProtocol.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/discovery/GlobalDiscoveryProtocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
+)
+
+target_include_directories(directory_server PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/directory"
+)
+
+target_link_libraries(directory_server PRIVATE
+    SDL3::SDL3-static
+    SDL3_net::SDL3_net
+    tomlplusplus::tomlplusplus
+)
+
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(directory_server PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/config_directory_server.stamp"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CONFIG_TOML_SOURCE}"
+            "$<TARGET_FILE_DIR:directory_server>/config.toml"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/config_directory_server.stamp"
+    DEPENDS "${CONFIG_TOML_SOURCE}"
+    COMMENT "Copying config.toml to directory_server binary directory"
+    VERBATIM
+)
+add_custom_target(copy_directory_server_config DEPENDS "${CMAKE_BINARY_DIR}/config_directory_server.stamp")
+add_dependencies(directory_server copy_directory_server_config)
 
 # ===========================================================================
 # Clientbot executable — headless behavior-accurate bot for hit-reg /
@@ -1546,12 +1600,14 @@ add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
 set_compiler_warnings(server)
+set_compiler_warnings(directory_server)
 set_compiler_warnings(clientbot)
 set_compiler_warnings(physics_trimesh_tests)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
 enable_sanitizers(server)
+enable_sanitizers(directory_server)
 enable_sanitizers(clientbot)
 enable_sanitizers(physics_trimesh_tests)
 

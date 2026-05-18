@@ -5,6 +5,7 @@
 #include "game/ServerGame.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
+#include "network/discovery/GlobalServerAdvertiser.hpp"
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 
@@ -189,8 +190,14 @@ int main()
         return 1;
     }
 
+    GlobalServerAdvertiser globalAdvertiser;
+    if (cfg.discovery.enabled && cfg.discovery.advertiseServer) {
+        globalAdvertiser.start(cfg.discovery, serverNet.port, [&server]() { return server.getClientCount(); });
+    }
+
     ServerGame game;
     if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, developerCfg.skipLobby)) {
+        globalAdvertiser.stop();
         server.shutdown();
         ::group2::perf::stopAggregator();
         closeCsv();
@@ -201,6 +208,7 @@ int main()
 
     game.run();
     game.shutdown();
+    globalAdvertiser.stop();
     server.shutdown();
 
     ::group2::perf::stopAggregator();
