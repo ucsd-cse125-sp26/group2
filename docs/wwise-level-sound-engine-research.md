@@ -24,17 +24,18 @@ Primary sources used:
 
 ## Current Local Baseline
 
-`docs/sfx.md` describes the current engine:
+`docs/sfx.md` describes the current engine. Since this research note was first
+written, the branch added the core Wwise-lite runtime:
 
-- SDL3 audio directly.
-- WAV through `SDL_LoadWAV`, MP3 through vendored `minimp3`.
-- Clips are preconverted to the device format.
-- 32 concurrent voices.
-- Playback comes from `entt::dispatcher` events plus client-side state-delta polling.
-- Category and master volume exist.
-- No 3D spatialization, Doppler, attenuation, obstruction, priority, virtual voices, real loop support, banks, data-driven containers, or bus graph.
+- SDL3 custom mixer with predecoded float clips and a bounded 64-source pool.
+- Data-driven `assets/audio/audio_manifest.toml` for clips, busses, nodes, and events.
+- Stable FNV-1a IDs for events, nodes, clips, busses, switches, states, RTPCs, and audio objects.
+- Semantic event posting on audio objects, with runtime transforms and velocities.
+- `sound`, `random`, `sequence`, `switch`, and `blend` nodes.
+- Object switches, object RTPCs, global states, bus gain routing, priority offsets, clip/bus limits, hot reload, and runtime stats.
+- Spatial attenuation, stereo pan, Doppler, raycast occlusion, low-pass, simple reverb taps, and virtualized inaudible loops.
 
-That is a good foundation for a student-game sound engine. The biggest leap is not decoding more file types; it is turning "play this clip" into "post an event on a game object, then let authored data decide what happens."
+Remaining middleware-scale pieces are visual authoring, advanced room/portal propagation, dialogue/music specialty systems, HDR audio, and HRTF/object output.
 
 ## Wwise's Core Work Principles
 
@@ -243,32 +244,32 @@ Scores: impact 1-5, complexity 1-5. "Priority" combines value, project fit, and 
 
 | Primitive | Impact | Complexity | Priority | Why |
 |---|---:|---:|---|---|
-| Event API with action list | 5 | 2 | P0 | Moves game code from clip calls to semantic audio events. Foundation for everything else. |
-| Data manifest for clips/events | 5 | 2 | P0 | Lets audio change without recompiling. Great fit for current hardcoded clips. |
-| Stable generated IDs | 4 | 2 | P0 | Prevents string hashing and typo bugs in hot paths. |
-| Voice priority + stealing | 5 | 2 | P0 | Fixes current weakest runtime policy under combat load. |
-| Real looping voices | 4 | 2 | P0 | Needed for beam, charge, ambience, music, reverb tails. |
-| 3D emitter/listener transforms | 5 | 3 | P0 | Current "far explosions are loud" issue is high-impact in FPS. |
-| Distance attenuation curves | 5 | 2 | P0 | Immediate clarity and gameplay readability. |
-| Stereo panning | 5 | 3 | P0 | Essential positional cue without needing HRTF. |
-| Bus/category routing | 4 | 2 | P0 | Volume sliders, mix organization, future ducking/effects. |
-| Random container | 4 | 2 | P1 | Cheap variation for weapons/impacts/footsteps. |
-| Switches + switch container | 5 | 3 | P1 | Needed for surface/material/weapon/team variants. |
-| RTPC values + curves | 5 | 3 | P1 | Charge rifle, beam intensity, low-health mix, distance/pitch effects. |
-| Per-sound/category/bus voice limits | 4 | 3 | P1 | Stops rifle spam from starving important cues. |
-| Debug voice profiler panel | 4 | 2 | P1 | Makes audio bugs visible: active voices, stolen voices, event spam. |
-| Stream/voice preallocation | 4 | 2 | P1 | Fixes known per-shot allocation cost. |
-| Attenuation ShareSets | 4 | 2 | P1 | Keeps spatial tuning reusable and designer-friendly. |
-| Sequence container | 3 | 2 | P2 | Nice for shell casings, announcer lines, UI sequences. |
-| States | 3 | 2 | P2 | Useful for menu/pause/round/slowmo mix changes, but less urgent than switches/RTPC. |
-| Aux sends + simple reverb zones | 4 | 4 | P2 | Adds map feel, but needs spatial basics first. |
-| Occlusion raycasts | 4 | 4 | P2 | Valuable in arena maps with walls; implement after attenuation/pan. |
+| Event API with action list | 5 | 2 | P0 | Implemented. |
+| Data manifest for clips/events | 5 | 2 | P0 | Implemented as TOML. |
+| Stable generated IDs | 4 | 2 | P0 | Implemented with FNV-1a name IDs. |
+| Voice priority + stealing | 5 | 2 | P0 | Implemented in the source manager. |
+| Real looping voices | 4 | 2 | P0 | Implemented with source handles and inaudible-loop virtualization. |
+| 3D emitter/listener transforms | 5 | 3 | P0 | Implemented through audio objects and listener state. |
+| Distance attenuation curves | 5 | 2 | P0 | Implemented as per-clip full/max distances; true curve assets can follow. |
+| Stereo panning | 5 | 3 | P0 | Implemented. |
+| Bus/category routing | 4 | 2 | P0 | Implemented as parented bus gains plus categories. |
+| Random container | 4 | 2 | P1 | Implemented. |
+| Switches + switch container | 5 | 3 | P1 | Implemented for object switches and global states. |
+| RTPC values + curves | 5 | 3 | P1 | Implemented as blend nodes over RTPC values. |
+| Per-sound/category/bus voice limits | 4 | 3 | P1 | Implemented for clip and bus limits; category-specific limits can map to busses. |
+| Debug voice profiler panel | 4 | 2 | P1 | Runtime stats exist; UI panel still pending. |
+| Stream/voice preallocation | 4 | 2 | P1 | Implemented by replacing per-shot streams with one mixer/source pool. |
+| Attenuation ShareSets | 4 | 2 | P1 | Partially implemented as per-clip distances; reusable named ShareSets still pending. |
+| Sequence container | 3 | 2 | P2 | Implemented. |
+| States | 3 | 2 | P2 | Implemented for state-driven switch nodes. |
+| Aux sends + simple reverb zones | 4 | 4 | P2 | Partially implemented as source reverb send/taps; authored zones and aux busses are pending. |
+| Occlusion raycasts | 4 | 4 | P2 | Implemented as listener-to-source raycasts that drive gain/filter/reverb. |
 | Music state machine | 3 | 3 | P2 | Good if round music exists; not core combat audio. |
-| Blend container | 4 | 4 | P2 | Excellent for charge/engine-like layers; more complex than RTPC pitch/gain. |
-| Hot reload for audio manifest | 3 | 3 | P2 | Huge iteration win, but can wait until data model stabilizes. |
+| Blend container | 4 | 4 | P2 | Implemented for RTPC-driven clip choice/layering. |
+| Hot reload for audio manifest | 3 | 3 | P2 | Implemented through `SfxSystem::reloadAudioManifest()`. |
 | Dialogue event selector | 2 | 3 | P3 | Only needed for announcer/commentary complexity. |
-| Virtual voices | 3 | 4 | P3 | Useful for loops/ambience, but simple kill/steal policy is enough first. |
-| Doppler | 2 | 3 | P3 | Cool for rockets, but can be distracting and is not foundational. |
+| Virtual voices | 3 | 4 | P3 | Implemented for inaudible loops; richer resume policy can still evolve. |
+| Doppler | 2 | 3 | P3 | Implemented with conservative clamps. |
 | Rooms/portals | 2 | 5 | P3 | Wwise-grade acoustics are overkill unless maps demand them. |
 | Geometry diffraction/transmission | 1 | 5 | P4 | Too expensive and subtle for current scope. |
 | Full authoring editor | 2 | 5 | P4 | A TOML/JSON manifest and debug UI are enough for this project. |
@@ -284,7 +285,9 @@ Scores: impact 1-5, complexity 1-5. "Priority" combines value, project fit, and 
 - Add priority fields and deterministic voice stealing.
 - Add debug counters: active voices, dropped voices, stolen voices, event counts.
 
-Deliverable: current SFX system becomes robust under combat.
+Status: implemented. The current SFX system now mixes through one playback path
+with a bounded source pool, loop handles, priority stealing, virtualization, and
+runtime counters.
 
 ### Phase 1: Data-Driven Events
 
@@ -292,7 +295,8 @@ Deliverable: current SFX system becomes robust under combat.
 - Replace direct hardcoded `SfxId` play sites with `EventId` posts.
 - Keep current `SfxId` internally during migration if needed.
 
-Deliverable: gameplay code posts semantic audio events.
+Status: implemented. Gameplay code now posts semantic audio events for weapons,
+impacts, explosions, player feedback, beam loops, and footsteps.
 
 ### Phase 2: Spatial Core
 
@@ -302,7 +306,9 @@ Deliverable: gameplay code posts semantic audio events.
 - Add per-event/object `spatial = true/false`.
 - Route local UI/player feedback as 2D; world combat as 3D.
 
-Deliverable: explosions, shots, impacts, and players have direction and distance.
+Status: implemented. Explosions, shots, impacts, footsteps, voice, and loops can
+be positioned on audio objects with listener-relative attenuation, pan, and
+Doppler.
 
 ### Phase 3: Wwise-Lite Nodes
 
@@ -310,7 +316,8 @@ Deliverable: explosions, shots, impacts, and players have direction and distance
 - Add switch groups: surface material, weapon type, team, movement mode.
 - Add RTPC curves for charge amount, beam intensity, low health, and optional distance-derived controls.
 
-Deliverable: variation and game-state-responsive sound without code changes.
+Status: implemented. The runtime supports `sound`, `random`, `sequence`,
+`switch`, and `blend` nodes with object switches, global states, and RTPCs.
 
 ### Phase 4: Mix Graph
 
@@ -319,7 +326,8 @@ Deliverable: variation and game-state-responsive sound without code changes.
 - Add UI/debug controls for bus volumes.
 - Add simple ducking if voice chat or announcer needs it.
 
-Deliverable: usable mix structure and runtime tuning.
+Status: implemented except dedicated in-game mixer UI. The bus tree, bus gain,
+bus voice limits, priority offsets, and hot reload path exist.
 
 ### Phase 5: Environment
 
@@ -327,7 +335,9 @@ Deliverable: usable mix structure and runtime tuning.
 - Add aux sends per emitter.
 - Add optional occlusion raycast from listener to emitter.
 
-Deliverable: map-aware audio space.
+Status: partially implemented. Raycast occlusion, low-pass, and simple reverb
+taps exist; authored acoustic volumes, aux bus routing, rooms, and portals are
+still future work.
 
 ### Phase 6: Music and Polish
 
@@ -335,7 +345,8 @@ Deliverable: map-aware audio space.
 - Add stingers/triggers for round events.
 - Add hot reload and validation tooling.
 
-Deliverable: richer presentation without deep middleware complexity.
+Status: hot reload exists; interactive music, stingers, dialogue routing, and
+standalone validation tooling are still pending.
 
 ## Recommended Minimal Data Shape
 
@@ -390,12 +401,15 @@ Avoid these until the core is working:
 
 Each is real Wwise functionality, but each also risks eating the project. The FPS will sound dramatically better from event data, spatialization, variation, and voice policy alone.
 
-## Best First Target
+## First Target Status
 
-The best first milestone is:
+The original first milestone was:
 
 ```text
 Data-driven event + priority voice manager + true loops + 3D attenuation/pan.
 ```
 
-That gives the game most of the perceived jump from "simple SFX player" to "game audio engine" while staying small enough to actually finish.
+That milestone is now implemented on this branch. The useful next layer is not
+more hardcoded playback; it is production content, an in-game audio debug/mixer
+panel, authored acoustic zones, and optional specialty systems for music or
+dialogue if the game design needs them.
