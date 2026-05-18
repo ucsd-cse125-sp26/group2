@@ -3,7 +3,13 @@
 
 #include "EventQueue.hpp"
 
+#include <cstddef>
 #include <stdexcept>
+
+namespace
+{
+constexpr std::size_t k_maxQueuedEvents = 8192;
+}
 
 bool EventQueue::isEmpty()
 {
@@ -14,6 +20,8 @@ bool EventQueue::isEmpty()
 void EventQueue::enqueue(Event event)
 {
     std::lock_guard<std::mutex> lock(queueMutex);
+    if (events.size() >= k_maxQueuedEvents)
+        events.pop();
     events.push(event);
 }
 

@@ -148,6 +148,8 @@ void Server::shutdown()
 // broadcast — saves N - 1 framing copies on a broadcast to N clients.
 namespace
 {
+constexpr std::size_t k_maxAcceptedClients = 128;
+
 std::string endpointHost(const net::UdpEndpointAddr& endpoint)
 {
     const char* raw = endpoint.addr ? NET_GetAddressString(endpoint.addr) : nullptr;
@@ -942,6 +944,12 @@ ClientId Server::acceptClients()
         SDL_Log("NET_AcceptClient failed: %s", SDL_GetError());
         return {};
     } else if (socket) {
+        if (clients.size() >= k_maxAcceptedClients) {
+            SDL_Log("Server: rejecting client; max client cap reached");
+            NET_DestroyStreamSocket(socket);
+            return {};
+        }
+
         SDL_Log("Server: accepted new client");
         NET_SetStreamSocketNoDelay(socket, true);
         ClientId clientId = getNextClientId();
