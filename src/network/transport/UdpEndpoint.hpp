@@ -50,6 +50,38 @@ struct UdpEndpointAddr
     NET_Address* addr = nullptr; ///< Refcounted SDL_net address.
     Uint16 port = 0;             ///< Source/destination port.
 
+    UdpEndpointAddr() = default;
+    UdpEndpointAddr(NET_Address* address, Uint16 p) : addr(address ? NET_RefAddress(address) : nullptr), port(p) {}
+    UdpEndpointAddr(const UdpEndpointAddr& other)
+        : addr(other.addr ? NET_RefAddress(other.addr) : nullptr), port(other.port)
+    {}
+    UdpEndpointAddr& operator=(const UdpEndpointAddr& other)
+    {
+        if (this == &other)
+            return *this;
+        release();
+        addr = other.addr ? NET_RefAddress(other.addr) : nullptr;
+        port = other.port;
+        return *this;
+    }
+    UdpEndpointAddr(UdpEndpointAddr&& other) noexcept : addr(other.addr), port(other.port)
+    {
+        other.addr = nullptr;
+        other.port = 0;
+    }
+    UdpEndpointAddr& operator=(UdpEndpointAddr&& other) noexcept
+    {
+        if (this == &other)
+            return *this;
+        release();
+        addr = other.addr;
+        port = other.port;
+        other.addr = nullptr;
+        other.port = 0;
+        return *this;
+    }
+    ~UdpEndpointAddr() { release(); }
+
     /// @brief Drop the refcount (idempotent).
     void release() noexcept
     {
@@ -99,6 +131,12 @@ public:
     ///
     /// @return False on socket error or oversize payload.
     bool send(const UdpEndpointAddr& dest, PacketHeader hdr, const void* payload, int payloadLen);
+
+    /// @brief Send an already encoded datagram to @p dest.
+    ///
+    /// Used by relay wrappers and tests that need the complete
+    /// `[PacketHeader][payload]` byte sequence as an opaque blob.
+    bool sendDatagramBytes(const UdpEndpointAddr& dest, const void* bytes, int len);
 
     /// @brief Send a payload by splitting it into MTU-safe fragments.
     ///

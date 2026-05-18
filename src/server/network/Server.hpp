@@ -13,6 +13,7 @@
 #include "network/ShotEvent.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/UdpEndpoint.hpp"
+#include "network/transport/UdpSessionTransport.hpp"
 #include "systems/EventQueue.hpp"
 
 #include <SDL3/SDL_stdinc.h>
@@ -41,7 +42,10 @@ public:
     ///                  socket; OS handles the demux).
     /// @param transport Phase 3d: which UDP features to enable.
     /// @return False on DNS or socket creation failure.
-    bool init(const char* addr, Uint16 port, const TransportConfig& transport = {});
+    bool init(const char* addr,
+              Uint16 port,
+              const TransportConfig& transport = {},
+              const GlobalDiscoveryConfig& discovery = {});
 
     /// @brief Close the socket and release resources.
     void shutdown();
@@ -194,7 +198,7 @@ private:
         /// outbound UDP datagram with this; the server demuxes incoming
         /// UDP via `connIdToClient_` to find which TCP-established client
         /// the datagram is from. 0 = not yet assigned.
-        uint32_t connectionId = 0;
+        std::uint64_t connectionId = 0;
 
         /// @brief Phase 3d: source address of the most-recent UDP packet
         /// from this client. Filled in lazily on first UDP receive (the
@@ -337,7 +341,12 @@ private:
     /// handler. Currently handles INPUT (Phase 3d-2) and PING (3d-3).
     /// All others are dropped silently — they're either meant for TCP
     /// or not yet ported to UDP.
-    void handleUdpUnreliable(uint32_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len);
+    void
+    handleUdpUnreliable(std::uint64_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len);
+    void
+    handleSessionPayload(std::uint64_t connId, net::ChannelId channel, const std::uint8_t* payload, std::uint32_t len);
+    void handleDirectoryEvent(const std::vector<std::uint8_t>& payload, const net::UdpEndpointAddr& from);
+    void sendDirectoryHeartbeat(Uint64 nowMs);
 
     NET_Server* server = nullptr;                     ///< Underlying SDL_net server handle.
 
@@ -355,8 +364,15 @@ private:
     // are minted on TCP accept and shipped to the client in the
     // ASSIGN_CLIENT_ID packet so it can stamp them on outbound UDP.
     net::UdpEndpoint udpEndpoint_;
+    net::UdpSessionTransport session_;
     TransportConfig transportConfig_;
-    std::unordered_map<uint32_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.
+    GlobalDiscoveryConfig discoveryConfig_;
+    net::UdpEndpointAddr directoryAddr_;
+    std::uint32_t directoryServerId_ = 0;
+    Uint64 lastDirectoryHeartbeatMs_ = 0;
+    bool usingUdpSession_ = false;
+    Uint16 listenPort_ = 0;
+    std::unordered_map<std::uint64_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.
 
     // ── Stage 3b: dedicated network thread ────────────────────────────────
     //

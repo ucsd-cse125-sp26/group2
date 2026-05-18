@@ -25,8 +25,46 @@
 #include <cmath>
 #include <cstring>
 
-ConnectError Client::init(const char* addr, Uint16 port, const TransportConfig& transport, int timeoutMs)
+ConnectError Client::init(const char* addr,
+                          Uint16 port,
+                          const TransportConfig& transport,
+                          int timeoutMs,
+                          const std::optional<net::UdpSessionTransport::RelayConfig>& relay)
 {
+    transportConfig_ = transport;
+
+    if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS")) {
+        const int parsed = SDL_atoi(envDelay);
+        interpDelaySnapshots_ = std::clamp(parsed, 0, static_cast<int>(InterpolationBuffer::k_capacity));
+        SDL_Log("Client: GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=%d", interpDelaySnapshots_);
+    }
+    simLossRng_.seed(std::random_device{}());
+
+    if (transportConfig_.useUdpSessions) {
+        usingUdpSession_ = true;
+        session_.preferRelay(transportConfig_.forceRelay);
+        if (relay)
+            session_.setRelayConfig(*relay);
+        if (!session_.connectClient(addr, port, timeoutMs)) {
+            SDL_Log("Client: UDP session connection to %s:%u failed", addr, port);
+            session_.close();
+            usingUdpSession_ = false;
+            return ConnectError::ConnectTimedOut;
+        }
+
+        connectionId_ = session_.clientConnectionId();
+        SDL_Log("Client: UDP session connected to %s:%u, session=0x%llx",
+                addr,
+                port,
+                static_cast<unsigned long long>(connectionId_));
+
+        shouldStop_.store(false, std::memory_order_relaxed);
+        socketDead_.store(false, std::memory_order_relaxed);
+        networkThread_ = std::thread(&Client::networkLoop, this);
+        return ConnectError::None;
+    }
+
+    usingUdpSession_ = false;
     serverAddr = NET_ResolveHostname(addr);
     if (!serverAddr) {
         SDL_Log("Failed to start resolving server address: %s", SDL_GetError());
@@ -121,6 +159,8 @@ void Client::shutdown()
     }
 
     std::lock_guard<std::mutex> lock(stateMutex_);
+    session_.close();
+    usingUdpSession_ = false;
     if (msgStream.socket) {
         NET_DestroyStreamSocket(msgStream.socket);
         msgStream.socket = nullptr;
@@ -152,6 +192,16 @@ std::vector<uint8_t> frameMessage(const void* data, uint32_t len)
 
 bool Client::send(const void* data, uint32_t len)
 {
+    if (usingUdpSession_) {
+        const bool ok =
+            session_.send(connectionId_, net::ChannelId::ControlReliableOrdered, data, static_cast<int>(len));
+        if (ok) {
+            stats.bytesSentTotal += len + sizeof(net::PacketHeader);
+            bytesSentWindow += len + sizeof(net::PacketHeader);
+        }
+        return ok;
+    }
+
     // Frame outside the lock; lock briefly to push into the outbound queue.
     // The network thread will drain it to the socket within ~1 ms.
     auto framed = frameMessage(data, len);
@@ -176,6 +226,11 @@ void Client::sendPing()
     uint8_t buf[1 + sizeof(Uint64)];
     buf[0] = static_cast<uint8_t>(PacketType::PING);
     std::memcpy(buf + 1, &now, sizeof(Uint64));
+
+    if (usingUdpSession_) {
+        session_.send(connectionId_, net::ChannelId::InputUnreliable, buf, static_cast<int>(sizeof(buf)));
+        return;
+    }
 
     // ── Phase 3d-3: prefer UDP for PING ─────────────────────────────────
     //
@@ -280,6 +335,10 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
 
     const uint32_t totalLen = 5 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
 
+    if (usingUdpSession_) {
+        return session_.send(connectionId_, net::ChannelId::InputUnreliable, buf, static_cast<int>(totalLen));
+    }
+
     // ── Phase 3d-2: prefer UDP for INPUT once handshake completes ────────
     //
     // INPUT is naturally loss-tolerant (5-tick redundancy means a single
@@ -339,6 +398,10 @@ bool Client::sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetCli
     std::memcpy(buf + 1 + sizeof(uint32_t), &targetClientId, sizeof(uint16_t));
     anim_snapshot::packSnapshot(targetAnim, buf + 1 + sizeof(uint32_t) + sizeof(uint16_t));
 
+    if (usingUdpSession_) {
+        return session_.send(connectionId_, net::ChannelId::InputUnreliable, buf, static_cast<int>(payloadLen));
+    }
+
     // SHOT_INTENT prefers UDP for the same reasons as INPUT — single-
     // shot packets are loss-tolerant: a missed SHOT_INTENT just means
     // the server falls back to its own historical anim state for that
@@ -385,7 +448,7 @@ std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> Client::getLatestLo
     return std::make_pair(*latestLobbyPlayers_, *latestLobbyLocalId_);
 }
 
-bool Client::acceptReliableSequence(uint16_t seq)
+bool Client::acceptReliableSequence(std::uint32_t seq)
 {
     // First sequence ever — accept and seed the window.
     if (!reliableHasAny_) {
@@ -397,8 +460,8 @@ bool Client::acceptReliableSequence(uint16_t seq)
 
     // Glenn-Fiedler distance with 16-bit wrap. Positive forward delta
     // means `seq` is newer than highestSeen.
-    const uint16_t fwd = static_cast<uint16_t>(seq - reliableHighestSeen_);
-    if (fwd != 0 && fwd < 32768u) {
+    const std::uint32_t fwd = seq - reliableHighestSeen_;
+    if (fwd != 0 && fwd < 0x80000000u) {
         // Newer: shift the window forward by `fwd` bits, set bit 0
         // (current = highest-seen), accept.
         reliableSeenBitmask_ = (fwd >= 64) ? 0 : (reliableSeenBitmask_ << fwd);
@@ -412,7 +475,7 @@ bool Client::acceptReliableSequence(uint16_t seq)
     }
 
     // Older. distance = how many slots behind the highest.
-    const uint16_t back = static_cast<uint16_t>(reliableHighestSeen_ - seq);
+    const std::uint32_t back = reliableHighestSeen_ - seq;
     if (back >= 64) {
         // Too old for the window — assume duplicate / out-of-order
         // beyond redundancy budget.
@@ -692,6 +755,29 @@ void Client::recvUdpDelayed(std::vector<uint8_t>&& payload)
 
 void Client::networkLoop()
 {
+    if (usingUdpSession_) {
+        while (!shouldStop_.load(std::memory_order_relaxed)) {
+            session_.pump();
+            net::UdpSessionTransport::Event event;
+            while (session_.pollEvent(event)) {
+                if (event.type == net::UdpSessionTransport::EventType::Payload) {
+                    std::lock_guard<std::mutex> lock(stateMutex_);
+                    recvUdpDelayed(std::move(event.payload));
+                } else if (event.type == net::UdpSessionTransport::EventType::Disconnected) {
+                    socketDead_.store(true, std::memory_order_relaxed);
+                }
+            }
+
+            const auto& s = session_.stats();
+            stats.rttMs = s.rttMs;
+            if (s.rttMs > 0.0f)
+                stats.avgRttMs = stats.avgRttMs <= 0.0f ? s.rttMs : stats.avgRttMs * 0.8f + s.rttMs * 0.2f;
+
+            SDL_Delay(1);
+        }
+        return;
+    }
+
     // ~1 kHz cycle, symmetric to Server::networkLoop. Each phase takes the
     // mutex briefly so the game thread's enqueue / poll calls don't have
     // to wait for an entire I/O round-trip.
@@ -872,21 +958,28 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         // server builds keep working during the rollout.
         constexpr uint32_t k_oldSize = sizeof(entt::entity);
         constexpr uint32_t k_newSize = sizeof(entt::entity) + sizeof(uint32_t);
-        if (payloadSize != k_oldSize && payloadSize != k_newSize) {
-            SDL_Log("Client: received ASSIGN_CLIENT_ID packet of invalid size %u (expected %u or %u)",
+        constexpr uint32_t k_sessionSize = sizeof(entt::entity) + sizeof(std::uint64_t);
+        if (payloadSize != k_oldSize && payloadSize != k_newSize && payloadSize != k_sessionSize) {
+            SDL_Log("Client: received ASSIGN_CLIENT_ID packet of invalid size %u (expected %u, %u, or %u)",
                     payloadSize,
                     k_oldSize,
-                    k_newSize);
+                    k_newSize,
+                    k_sessionSize);
             return;
         }
         entt::entity assignedEntity;
         std::memcpy(&assignedEntity, payload, sizeof(entt::entity));
         localPlayerEntity = assignedEntity;
         if (payloadSize == k_newSize) {
-            uint32_t connId = 0;
+            std::uint32_t connId = 0;
             std::memcpy(&connId, payload + sizeof(entt::entity), sizeof(uint32_t));
             connectionId_ = connId;
             SDL_Log("Client: assigned UDP connection id 0x%08x", connId);
+        } else if (payloadSize == k_sessionSize) {
+            std::uint64_t connId = 0;
+            std::memcpy(&connId, payload + sizeof(entt::entity), sizeof(std::uint64_t));
+            connectionId_ = connId;
+            SDL_Log("Client: assigned UDP session id 0x%llx", static_cast<unsigned long long>(connId));
         }
         break;
     }
@@ -968,8 +1061,11 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         uint32_t count = 0;
         std::memcpy(&count, payload, sizeof(uint32_t));
         const uint8_t* eventData = payload + sizeof(uint32_t);
-        const uint32_t expectedSize = sizeof(uint32_t) + count * sizeof(NetParticleEvent);
-        if (payloadSize < expectedSize)
+        constexpr std::uint32_t k_maxParticleEvents = 4096;
+        if (count > k_maxParticleEvents)
+            break;
+        const std::size_t expectedSize = sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(NetParticleEvent);
+        if (static_cast<std::size_t>(payloadSize) != expectedSize)
             break;
 
         if (rawParticleEventFn_) {
@@ -1012,8 +1108,11 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         uint32_t count = 0;
         std::memcpy(&count, payload, sizeof(uint32_t));
         const uint8_t* eventData = payload + sizeof(uint32_t);
-        const uint32_t expectedSize = sizeof(uint32_t) + count * sizeof(NetKillEvent);
-        if (payloadSize < expectedSize)
+        constexpr std::uint32_t k_maxKillEvents = 4096;
+        if (count > k_maxKillEvents)
+            break;
+        const std::size_t expectedSize = sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(NetKillEvent);
+        if (static_cast<std::size_t>(payloadSize) != expectedSize)
             break;
         if (killEventFn_) {
             for (uint32_t i = 0; i < count; ++i) {
@@ -1135,8 +1234,12 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         uint32_t count = 0;
         std::memcpy(&count, payload + sizeof(int), sizeof(uint32_t));
 
-        const size_t expectedSize = sizeof(int) + sizeof(uint32_t) + count * sizeof(LobbyPlayer);
-        if (payloadSize < expectedSize)
+        constexpr std::uint32_t k_maxLobbyPlayers = 256;
+        if (count > k_maxLobbyPlayers)
+            break;
+        const size_t expectedSize =
+            sizeof(int) + sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(LobbyPlayer);
+        if (static_cast<std::size_t>(payloadSize) != expectedSize)
             break;
 
         std::vector<LobbyPlayer> players(count);
@@ -1182,9 +1285,13 @@ bool Client::poll()
     std::vector<std::vector<uint8_t>> ready;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
-        msgStream.drainComplete([&](const void* data, Uint32 size) {
-            ready.emplace_back(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
-        });
+        if (!msgStream.drainComplete([&](const void* data, Uint32 size) {
+                ready.emplace_back(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
+            }))
+        {
+            socketDead_.store(true, std::memory_order_relaxed);
+            return false;
+        }
         if (!udpRecvQueue_.empty()) {
             for (auto& msg : udpRecvQueue_) {
                 ready.emplace_back(std::move(msg));

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "network/RelayToken.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -25,6 +27,7 @@ enum class DirectoryMessage : std::uint8_t
     ListResponse = 5,
     PunchRequest = 6,
     PunchResponse = 7,
+    PunchPeer = 8,
 };
 
 enum class DirectoryUdpMessage : std::uint8_t
@@ -81,6 +84,7 @@ struct PunchResponse
 {
     bool accepted = false;
     ServerInfo server;
+    net::RelayToken relayToken;
     std::string message;
 };
 

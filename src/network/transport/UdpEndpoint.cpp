@@ -70,11 +70,29 @@ bool UdpEndpoint::send(const UdpEndpointAddr& dest, PacketHeader hdr, const void
 
     // Single contiguous datagram: [PacketHeader][payload].
     uint8_t buf[k_maxPacketBytes];
-    std::memcpy(buf, &hdr, sizeof(hdr));
+    encodePacketHeader(hdr, buf);
     if (payloadLen > 0)
         std::memcpy(buf + sizeof(hdr), payload, static_cast<size_t>(payloadLen));
 
     return NET_SendDatagram(socket_, dest.addr, dest.port, buf, static_cast<int>(sizeof(hdr)) + payloadLen);
+}
+
+bool UdpEndpoint::sendDatagramBytes(const UdpEndpointAddr& dest, const void* bytes, int len)
+{
+    if (!socket_)
+        return false;
+    if (!dest.addr) {
+        SDL_Log("UdpEndpoint::sendDatagramBytes: null dest address");
+        return false;
+    }
+    if (!bytes || len < static_cast<int>(sizeof(PacketHeader)) || len > k_maxPacketBytes) {
+        SDL_Log("UdpEndpoint::sendDatagramBytes: datagram size %d out of range [%zu, %d]",
+                len,
+                sizeof(PacketHeader),
+                k_maxPacketBytes);
+        return false;
+    }
+    return NET_SendDatagram(socket_, dest.addr, dest.port, bytes, len);
 }
 
 bool UdpEndpoint::sendFragmented(
@@ -100,13 +118,12 @@ bool UdpEndpoint::sendFragmented(
         return ok;
     }
 
-    // Fragment count = ceil(dataLen / k_maxPayloadBytes). 256-fragment
-    // sanity cap matches what the wire format's 8-bit fragment-count
-    // field can encode; a snapshot that exceeds it indicates a bug
-    // upstream (something is generating > ~300 KB / tick of state).
+    // Fragment count = ceil(dataLen / k_maxPayloadBytes). The low byte
+    // of fragmentInfo carries the count, so 255 is the maximum encodable
+    // value.
     const int fragCount = (dataLen + k_maxPayloadBytes - 1) / k_maxPayloadBytes;
-    if (fragCount > 256) {
-        SDL_Log("UdpEndpoint::sendFragmented: payload %d B needs %d fragments (>256 cap)", dataLen, fragCount);
+    if (fragCount > 255) {
+        SDL_Log("UdpEndpoint::sendFragmented: payload %d B needs %d fragments (>255 cap)", dataLen, fragCount);
         return false;
     }
 
@@ -133,7 +150,7 @@ bool UdpEndpoint::sendFragmented(
         const int chunkLen = std::min(k_maxPayloadBytes, dataLen - offset);
 
         PacketHeader fragHdr = hdr;
-        fragHdr.flags = 0x01; // bit 0 = fragmented
+        fragHdr.flags = static_cast<uint8_t>(fragHdr.flags | k_flagFragmented);
         fragHdr.fragmentInfo = static_cast<uint16_t>((i << 8) | fragCount);
 
         for (int copy = 0; copy < redundancy; ++copy) {
@@ -153,46 +170,50 @@ bool UdpEndpoint::tryReceive(UdpReceivedMessage& out)
     if (!socket_)
         return false;
 
-    NET_Datagram* dgram = nullptr;
-    if (!NET_ReceiveDatagram(socket_, &dgram)) {
-        // Fatal socket error per SDL_net docs; UDP normally just returns
-        // (true, nullptr) on no-data.
-        return false;
-    }
-    if (!dgram)
-        return false;
+    constexpr int k_maxMalformedDrain = 64;
+    for (int discarded = 0; discarded < k_maxMalformedDrain; ++discarded) {
+        NET_Datagram* dgram = nullptr;
+        if (!NET_ReceiveDatagram(socket_, &dgram)) {
+            // Fatal socket error per SDL_net docs; UDP normally just returns
+            // (true, nullptr) on no-data.
+            return false;
+        }
+        if (!dgram)
+            return false;
 
-    // Validate: must be at least header-sized, and magic/version must match.
-    if (dgram->buflen < static_cast<int>(sizeof(PacketHeader))) {
+        // Validate: must be at least header-sized, MTU-bounded, and match
+        // our magic/version. Keep draining malformed noise so one bad UDP
+        // datagram cannot pin the receive loop at the head of the queue.
+        PacketHeader hdr;
+        const bool validSize =
+            dgram->buflen >= static_cast<int>(sizeof(PacketHeader)) && dgram->buflen <= k_maxPacketBytes;
+        const bool validHeader =
+            validSize && decodePacketHeader(dgram->buf, static_cast<std::size_t>(dgram->buflen), hdr);
+        if (!validHeader) {
+            NET_DestroyDatagram(dgram);
+            continue;
+        }
+
+        out.header = hdr;
+        const int payloadLen = dgram->buflen - static_cast<int>(sizeof(hdr));
+        if (payloadLen > 0) {
+            out.payload.assign(dgram->buf + sizeof(hdr), dgram->buf + dgram->buflen);
+        } else {
+            out.payload.clear();
+        }
+
+        // Take a ref on the address so the caller can hold it past the
+        // NET_DestroyDatagram below. They release() it when done.
+        if (out.from.addr)
+            out.from.release();
+        out.from.addr = NET_RefAddress(dgram->addr);
+        out.from.port = dgram->port;
+
         NET_DestroyDatagram(dgram);
-        return false;
+        return true;
     }
 
-    PacketHeader hdr;
-    std::memcpy(&hdr, dgram->buf, sizeof(hdr));
-    if (hdr.magic != k_protocolMagic || hdr.version != k_protocolVersion) {
-        // Not for us — silently drop. UDP receives noise sometimes.
-        NET_DestroyDatagram(dgram);
-        return false;
-    }
-
-    out.header = hdr;
-    const int payloadLen = dgram->buflen - static_cast<int>(sizeof(hdr));
-    if (payloadLen > 0) {
-        out.payload.assign(dgram->buf + sizeof(hdr), dgram->buf + dgram->buflen);
-    } else {
-        out.payload.clear();
-    }
-
-    // Take a ref on the address so the caller can hold it past the
-    // NET_DestroyDatagram below. They release() it when done.
-    if (out.from.addr)
-        out.from.release();
-    out.from.addr = NET_RefAddress(dgram->addr);
-    out.from.port = dgram->port;
-
-    NET_DestroyDatagram(dgram);
-    return true;
+    return false;
 }
 
 } // namespace net

@@ -13,6 +13,7 @@ namespace
 {
 inline constexpr std::uint32_t k_magic = 0x32444747u; // "GGD2"
 inline constexpr std::uint16_t k_version = 1;
+inline constexpr std::uint16_t k_maxDecodedServers = 256;
 
 template <typename T>
 void append(std::vector<std::uint8_t>& out, T value)
@@ -184,6 +185,8 @@ std::optional<std::vector<ServerInfo>> decodeServerList(const std::uint8_t* data
     std::uint16_t count = 0;
     if (!reader.read(count))
         return std::nullopt;
+    if (count > k_maxDecodedServers)
+        return std::nullopt;
 
     std::vector<ServerInfo> servers;
     servers.reserve(count);
@@ -221,6 +224,8 @@ std::vector<std::uint8_t> encodePunchResponse(const PunchResponse& resp)
     std::vector<std::uint8_t> payload;
     append(payload, static_cast<std::uint8_t>(resp.accepted ? 1 : 0));
     appendServer(payload, resp.server);
+    append(payload, resp.relayToken.expiresAtMs);
+    payload.insert(payload.end(), resp.relayToken.mac.begin(), resp.relayToken.mac.end());
     appendString(payload, resp.message);
     return makeEnvelope(DirectoryMessage::PunchResponse, payload);
 }
@@ -230,9 +235,13 @@ std::optional<PunchResponse> decodePunchResponse(const std::uint8_t* data, std::
     Reader reader(data, len);
     PunchResponse resp;
     std::uint8_t accepted = 0;
-    if (!reader.read(accepted) || !readServer(reader, resp.server) || !reader.readString(resp.message) ||
-        !reader.finished())
-    {
+    if (!reader.read(accepted) || !readServer(reader, resp.server) || !reader.read(resp.relayToken.expiresAtMs))
+        return std::nullopt;
+    for (std::uint8_t& byte : resp.relayToken.mac) {
+        if (!reader.read(byte))
+            return std::nullopt;
+    }
+    if (!reader.readString(resp.message) || !reader.finished()) {
         return std::nullopt;
     }
     resp.accepted = accepted != 0;

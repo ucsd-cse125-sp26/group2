@@ -17,6 +17,7 @@
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/FragmentReassembler.hpp"
 #include "network/transport/UdpEndpoint.hpp"
+#include "network/transport/UdpSessionTransport.hpp"
 
 #include <SDL3/SDL_stdinc.h>
 
@@ -90,7 +91,11 @@ public:
     /// @param timeoutMs Maximum time to wait for DNS resolution and TCP
     ///                  connection, in milliseconds. Negative waits forever.
     /// @return None on success, otherwise the specific connection failure.
-    ConnectError init(const char* addr, Uint16 port, const TransportConfig& transport = {}, int timeoutMs = -1);
+    ConnectError init(const char* addr,
+                      Uint16 port,
+                      const TransportConfig& transport = {},
+                      int timeoutMs = -1,
+                      const std::optional<net::UdpSessionTransport::RelayConfig>& relay = std::nullopt);
 
     /// @brief Close the socket and release the resolved address.
     void shutdown();
@@ -494,9 +499,11 @@ private:
     // datagrams to our TCP-established Connection. Until that arrives
     // we fall back to TCP for everything (connectionId == 0).
     TransportConfig transportConfig_;
+    bool usingUdpSession_ = false;
+    net::UdpSessionTransport session_;
     net::UdpEndpoint udpEndpoint_;
     net::UdpEndpointAddr serverUdpAddr_;
-    uint32_t connectionId_ = 0;
+    std::uint64_t connectionId_ = 0;
     uint16_t udpInputSequence_ = 0; ///< Per-channel sequence for INPUT datagrams.
 
     /// @brief UDP-received payloads waiting for the game thread to
@@ -520,14 +527,14 @@ private:
     /// reasonable network speed. Sequences older than that get
     /// dropped (very rare — would require 64 events to arrive
     /// during one RTT).
-    uint16_t reliableHighestSeen_ = 0;
+    std::uint32_t reliableHighestSeen_ = 0;
     uint64_t reliableSeenBitmask_ = 0;
     bool reliableHasAny_ = false; ///< False until the first reliable event arrives.
 
     /// @brief Sliding-window dedup helper. Returns true if the
     /// caller should dispatch this sequence (i.e. it's new); false
     /// if it's a duplicate or too old to track.
-    bool acceptReliableSequence(uint16_t seq);
+    bool acceptReliableSequence(std::uint32_t seq);
 
     // ── Phase 6 testing: latency simulator ────────────────────────────────
     //

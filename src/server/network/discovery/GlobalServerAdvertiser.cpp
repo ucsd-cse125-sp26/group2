@@ -49,7 +49,9 @@ bool sendUdp(net::UdpEndpoint& udp,
         return false;
     }
 
-    net::UdpEndpointAddr dest{.addr = addr, .port = port};
+    net::UdpEndpointAddr dest;
+    dest.addr = addr;
+    dest.port = port;
     net::PacketHeader hdr{};
     hdr.kind = static_cast<std::uint8_t>(net::PacketKind::KeepAlive);
     hdr.connectionId = connectionId;
