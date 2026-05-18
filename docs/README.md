@@ -27,6 +27,7 @@ The previous docs live under `docs/old/` for reference, but they're stale (some 
 | [particles-vfx.md](particles-vfx.md) | CPU pools + GPU storage/vertex buffers, 9-pipeline renderer, SDF text |
 | [hud.md](hud.md) | 4-layer immediate-mode HUD, tween pool, offscreen MSAA target |
 | [sfx.md](sfx.md) | SDL3 audio directly, 32-voice pool, dispatcher events + state-delta polling |
+| [wwise-level-sound-engine-research.md](wwise-level-sound-engine-research.md) | Wwise concepts mapped to a practical data-driven/spatial sound-engine roadmap |
 | [gameplay.md](gameplay.md) | Weapons, abilities, grenades, explosions, fire fields, powerups, match flow, ragdolls |
 
 ---
@@ -68,7 +69,7 @@ The docs in `docs/old/` should be considered historical artifacts. Don't try to 
 
 **I'm writing or debugging shaders** → [graphics.md §5](graphics.md#5-shaders); note only 4 active shaders today.
 
-**I'm adding sound** → [sfx.md](sfx.md); no spatialisation yet.
+**I'm adding sound** → [sfx.md](sfx.md); no spatialisation yet. For the Wwise-like roadmap, see [wwise-level-sound-engine-research.md](wwise-level-sound-engine-research.md).
 
 **I'm authoring HUD widgets** → [hud.md](hud.md).
 
