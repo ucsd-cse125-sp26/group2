@@ -6,6 +6,7 @@
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
+#include "network/ChatProtocol.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetKillEvent.hpp"
@@ -14,6 +15,7 @@
 #include "network/RegistrySerialization.hpp"
 #include "network/ShotDebugReport.hpp" // PR-20: shared wire-format + runtime capture struct.
 #include "network/ShotEvent.hpp"
+#include "network/VoiceProtocol.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/FragmentReassembler.hpp"
 #include "network/transport/UdpEndpoint.hpp"
@@ -30,6 +32,8 @@
 #include <mutex>
 #include <optional>
 #include <random>
+#include <span>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -71,6 +75,8 @@ public:
     using RawParticleEventCallback = std::function<void(const NetParticleEvent& evt)>;
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
+    using TextChatCallback = std::function<void(const net::chat::ServerTextChat&)>;
+    using VoiceFrameCallback = std::function<void(const net::voice::ServerVoiceFrame&)>;
     /// @brief PR-20: callback for SHOT_DEBUG_REPORT.  Fired on the
     /// game thread inside `dispatchMessage` after the bytes have been
     /// parsed back into a `ShotDebugCapture`.  The DebugUI registers
@@ -127,6 +133,12 @@ public:
     /// = `0xFFFF` when the client wasn't aiming at any specific target.
     bool sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetClientId, const AnimSnapshot& targetAnim);
 
+    /// @brief Send an all-chat message to the authoritative server.
+    bool sendChatMessage(std::string_view message);
+
+    /// @brief Send one Opus-encoded voice frame. Voice rides unreliable sequenced UDP.
+    bool sendVoiceFrame(std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus);
+
     /// @brief Send a PLAYER_READY or PLAYER_UNREADY packet to the server.
     bool sendPlayerReady(bool ready);
 
@@ -151,6 +163,8 @@ public:
     void onMatchStateUpdate(MatchStateUpdateFn fn) { matchStateUpdateFn_ = std::move(fn); }
     /// @brief Register the kill-event callback, fired for each replicated kill from the server.
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
+    void onTextChat(TextChatCallback fn) { textChatFn_ = std::move(fn); }
+    void onVoiceFrame(VoiceFrameCallback fn) { voiceFrameFn_ = std::move(fn); }
     /// @brief Register the shot-debug callback (PR-20); fired for each SHOT_DEBUG_REPORT.
     void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
     void onLobbyUpdate(LobbyUpdateCallback fn)
@@ -356,6 +370,8 @@ private:
     RawParticleEventCallback rawParticleEventFn_;  ///< Called for unmapped replicated particle events.
     MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     KillEventCallback killEventFn_;                ///< Called for each replicated kill event from server.
+    TextChatCallback textChatFn_;                  ///< Called for server-broadcast all-chat messages.
+    VoiceFrameCallback voiceFrameFn_;              ///< Called for proximity-routed Opus voice frames.
     ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.
     LobbyStateCallback lobbyStateFn_;              ///< Called once on join with the full lobby snapshot.
@@ -505,6 +521,7 @@ private:
     net::UdpEndpointAddr serverUdpAddr_;
     std::uint64_t connectionId_ = 0;
     uint16_t udpInputSequence_ = 0; ///< Per-channel sequence for INPUT datagrams.
+    std::uint16_t chatClientSeq_ = 0;
 
     /// @brief UDP-received payloads waiting for the game thread to
     /// dispatch. Filled by the network thread under stateMutex_; drained

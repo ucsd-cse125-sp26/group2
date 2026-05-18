@@ -428,6 +428,27 @@ bool Client::sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetCli
     return send(buf, payloadLen);
 }
 
+bool Client::sendChatMessage(std::string_view message)
+{
+    std::vector<std::uint8_t> payload = net::chat::encodeClientText(chatClientSeq_++, message);
+    if (payload.empty())
+        return false;
+    return send(payload.data(), static_cast<std::uint32_t>(payload.size()));
+}
+
+bool Client::sendVoiceFrame(std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus)
+{
+    if (!usingUdpSession_)
+        return false;
+
+    std::vector<std::uint8_t> payload = net::voice::encodeClientFrame(sequence, frameMs, opus);
+    if (payload.empty())
+        return false;
+
+    return session_.send(
+        connectionId_, net::ChannelId::VoiceUnreliableSequenced, payload.data(), static_cast<int>(payload.size()));
+}
+
 bool Client::sendPlayerReady(bool ready)
 {
     const auto type = static_cast<uint8_t>(ready ? PacketType::PLAYER_READY : PacketType::PLAYER_UNREADY);
@@ -1250,6 +1271,18 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
 
         if (lobbyStateFn_)
             lobbyStateFn_(players, localId);
+        break;
+    }
+    case PacketType::TEXT_CHAT: {
+        const auto chat = net::chat::decodeServerText(std::span<const std::uint8_t>(data, size));
+        if (chat && textChatFn_)
+            textChatFn_(*chat);
+        break;
+    }
+    case PacketType::VOICE_FRAME: {
+        const auto frame = net::voice::decodeServerFrame(std::span<const std::uint8_t>(data, size));
+        if (frame && voiceFrameFn_)
+            voiceFrameFn_(*frame);
         break;
     }
     default:

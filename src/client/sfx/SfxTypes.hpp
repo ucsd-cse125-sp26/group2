@@ -5,7 +5,10 @@
 
 #include <SDL3/SDL_audio.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 /// @brief Identifies a loaded sound clip.
@@ -40,6 +43,13 @@ enum class SfxId : uint8_t
     Healing,        ///< Voicy_Syringe SFX .mp3
     ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
 
+    // Movement / equipment placeholders. These synthesize if final assets are absent.
+    FootstepLight,
+    FootstepHeavy,
+    GrenadeThrow,
+    VoiceStart,
+    VoiceStop,
+
     _Count
 };
 
@@ -49,6 +59,8 @@ enum class SfxCategory : uint8_t
     Weapons,
     Impacts,
     Player,
+    Footsteps,
+    Voice,
     UI,
     _Count
 };
@@ -56,11 +68,95 @@ enum class SfxCategory : uint8_t
 /// @brief A decoded sound clip ready for playback.
 struct SoundClip
 {
-    std::vector<uint8_t> pcmData; ///< Raw PCM samples (S16LE, interleaved channels).
-    SDL_AudioSpec spec{};         ///< Format descriptor matching pcmData.
+    std::vector<uint8_t> pcmData; ///< Original/intermediate PCM bytes while loading.
+    std::vector<float> samples;   ///< Mixer-ready F32 stereo samples.
+    SDL_AudioSpec spec{};         ///< Format descriptor matching pcmData, or mixer format after conversion.
     float durationSeconds = 0.0f; ///< Total playback duration in seconds.
+    std::size_t frameCount = 0;   ///< Number of interleaved stereo frames in samples.
     SfxCategory category = SfxCategory::Weapons;
     float defaultGain = 1.0f;     ///< Base volume for this clip.
     float minCooldown = 0.05f;    ///< Minimum seconds between repeated plays.
     bool loaded = false;          ///< True when the clip was decoded successfully.
 };
+
+inline const char* sfxIdName(SfxId id) noexcept
+{
+    switch (id) {
+    case SfxId::RifleFire:
+        return "RifleFire";
+    case SfxId::RocketFire:
+        return "RocketFire";
+    case SfxId::RailGunFire:
+        return "RailGunFire";
+    case SfxId::EnergyGunFire:
+        return "EnergyGunFire";
+    case SfxId::FleshHit:
+        return "FleshHit";
+    case SfxId::Headshot:
+        return "Headshot";
+    case SfxId::Explosion:
+        return "Explosion";
+    case SfxId::DamageTaken:
+        return "DamageTaken";
+    case SfxId::ArmorBreak:
+        return "ArmorBreak";
+    case SfxId::Death:
+        return "Death";
+    case SfxId::Respawn:
+        return "Respawn";
+    case SfxId::KillConfirm:
+        return "KillConfirm";
+    case SfxId::ChargeRifleLoad:
+        return "ChargeRifleLoad";
+    case SfxId::ChargeRifleShoot:
+        return "ChargeRifleShoot";
+    case SfxId::EnergyBeamLoop:
+        return "EnergyBeamLoop";
+    case SfxId::Healing:
+        return "Healing";
+    case SfxId::ShieldRecharge:
+        return "ShieldRecharge";
+    case SfxId::FootstepLight:
+        return "FootstepLight";
+    case SfxId::FootstepHeavy:
+        return "FootstepHeavy";
+    case SfxId::GrenadeThrow:
+        return "GrenadeThrow";
+    case SfxId::VoiceStart:
+        return "VoiceStart";
+    case SfxId::VoiceStop:
+        return "VoiceStop";
+    default:
+        return "Unknown";
+    }
+}
+
+inline std::optional<SfxId> sfxIdFromName(std::string_view name) noexcept
+{
+    for (std::uint8_t i = 0; i < static_cast<std::uint8_t>(SfxId::_Count); ++i) {
+        const auto id = static_cast<SfxId>(i);
+        if (name == sfxIdName(id))
+            return id;
+    }
+    return std::nullopt;
+}
+
+inline const char* sfxCategoryName(SfxCategory category) noexcept
+{
+    switch (category) {
+    case SfxCategory::Weapons:
+        return "Weapons";
+    case SfxCategory::Impacts:
+        return "Impacts";
+    case SfxCategory::Player:
+        return "Player";
+    case SfxCategory::Footsteps:
+        return "Footsteps";
+    case SfxCategory::Voice:
+        return "Voice";
+    case SfxCategory::UI:
+        return "UI";
+    default:
+        return "Unknown";
+    }
+}

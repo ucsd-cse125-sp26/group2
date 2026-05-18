@@ -1,0 +1,451 @@
+[[busses]]
+id = "Master"
+volume = 1.0
+max_voices = 64
+
+[[busses]]
+id = "SFX"
+parent = "Master"
+volume = 1.0
+max_voices = 48
+
+[[busses]]
+id = "Weapons"
+parent = "SFX"
+volume = 1.0
+priority_offset = 0.3
+max_voices = 18
+
+[[busses]]
+id = "Impacts"
+parent = "SFX"
+volume = 0.95
+max_voices = 16
+
+[[busses]]
+id = "Player"
+parent = "SFX"
+volume = 1.0
+priority_offset = 0.6
+max_voices = 12
+
+[[busses]]
+id = "Footsteps"
+parent = "SFX"
+volume = 0.75
+priority_offset = -0.4
+max_voices = 20
+
+[[busses]]
+id = "VoiceChat"
+parent = "Master"
+volume = 1.0
+priority_offset = 0.8
+max_voices = 12
+
+[[busses]]
+id = "UI"
+parent = "Master"
+volume = 1.0
+max_voices = 10
+
+[[clips]]
+id = "rifle_fire"
+sfx = "RifleFire"
+bus = "Weapons"
+gain = 1.0
+priority = 2.0
+cooldown = 0.10
+spatial = true
+max_instances = 10
+
+[[clips]]
+id = "rocket_fire"
+sfx = "RocketFire"
+bus = "Weapons"
+gain = 1.0
+priority = 2.2
+cooldown = 0.80
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "railgun_fire"
+sfx = "ChargeRifleShoot"
+bus = "Weapons"
+gain = 1.0
+priority = 2.5
+cooldown = 0.20
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "railgun_charge_start"
+sfx = "ChargeRifleLoad"
+bus = "Weapons"
+gain = 0.9
+priority = 1.7
+max_instances = 1
+
+[[clips]]
+id = "energy_fire"
+sfx = "EnergyGunFire"
+bus = "Weapons"
+gain = 0.9
+priority = 1.8
+cooldown = 0.08
+spatial = true
+max_instances = 8
+
+[[clips]]
+id = "grenade_throw"
+sfx = "GrenadeThrow"
+bus = "Weapons"
+gain = 0.9
+priority = 1.2
+cooldown = 0.12
+spatial = true
+max_instances = 8
+
+[[clips]]
+id = "beam_loop"
+sfx = "EnergyBeamLoop"
+bus = "Weapons"
+gain = 0.55
+priority = 1.8
+loop = true
+spatial = false
+max_instances = 2
+
+[[clips]]
+id = "flesh_hit"
+sfx = "FleshHit"
+bus = "Impacts"
+gain = 0.75
+priority = 1.6
+cooldown = 0.08
+spatial = true
+max_instances = 8
+
+[[clips]]
+id = "headshot"
+sfx = "Headshot"
+bus = "Impacts"
+gain = 0.9
+priority = 2.0
+cooldown = 0.08
+max_instances = 3
+
+[[clips]]
+id = "world_impact"
+sfx = "FootstepLight"
+bus = "Impacts"
+gain = 0.35
+priority = 0.7
+cooldown = 0.04
+spatial = true
+max_instances = 12
+
+[[clips]]
+id = "explosion"
+sfx = "Explosion"
+bus = "Impacts"
+gain = 1.0
+priority = 3.0
+cooldown = 0.30
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "damage_taken"
+sfx = "DamageTaken"
+bus = "Player"
+gain = 0.9
+priority = 3.0
+cooldown = 0.30
+max_instances = 2
+
+[[clips]]
+id = "armor_break"
+sfx = "ArmorBreak"
+bus = "Player"
+gain = 1.0
+priority = 3.2
+cooldown = 1.0
+max_instances = 2
+
+[[clips]]
+id = "death"
+sfx = "Death"
+bus = "Player"
+gain = 1.0
+priority = 3.0
+cooldown = 2.0
+max_instances = 1
+
+[[clips]]
+id = "respawn"
+sfx = "Respawn"
+bus = "Player"
+gain = 0.8
+priority = 2.4
+cooldown = 2.0
+max_instances = 1
+
+[[clips]]
+id = "kill_confirm"
+sfx = "KillConfirm"
+bus = "Player"
+gain = 0.9
+priority = 3.0
+cooldown = 0.30
+max_instances = 3
+
+[[clips]]
+id = "healing"
+sfx = "Healing"
+bus = "Player"
+gain = 0.55
+priority = 1.2
+cooldown = 1.0
+max_instances = 1
+
+[[clips]]
+id = "footstep_light"
+sfx = "FootstepLight"
+bus = "Footsteps"
+gain = 0.55
+priority = 0.8
+cooldown = 0.06
+spatial = true
+max_instances = 16
+
+[[clips]]
+id = "footstep_heavy"
+sfx = "FootstepHeavy"
+bus = "Footsteps"
+gain = 0.75
+priority = 0.9
+cooldown = 0.06
+spatial = true
+max_instances = 16
+
+[[clips]]
+id = "voice_start"
+sfx = "VoiceStart"
+bus = "VoiceChat"
+gain = 0.2
+priority = 1.0
+cooldown = 0.05
+max_instances = 2
+
+[[clips]]
+id = "voice_stop"
+sfx = "VoiceStop"
+bus = "VoiceChat"
+gain = 0.14
+priority = 1.0
+cooldown = 0.05
+max_instances = 2
+
+[[nodes]]
+id = "node.rifle_fire"
+type = "sound"
+clip = "rifle_fire"
+
+[[nodes]]
+id = "node.rocket_fire"
+type = "sound"
+clip = "rocket_fire"
+
+[[nodes]]
+id = "node.railgun_fire"
+type = "sound"
+clip = "railgun_fire"
+
+[[nodes]]
+id = "node.railgun_charge_start"
+type = "sound"
+clip = "railgun_charge_start"
+
+[[nodes]]
+id = "node.energy_fire"
+type = "sound"
+clip = "energy_fire"
+
+[[nodes]]
+id = "node.grenade_throw"
+type = "sound"
+clip = "grenade_throw"
+
+[[nodes]]
+id = "node.beam_loop"
+type = "sound"
+clip = "beam_loop"
+
+[[nodes]]
+id = "node.flesh_hit"
+type = "sound"
+clip = "flesh_hit"
+
+[[nodes]]
+id = "node.headshot"
+type = "sound"
+clip = "headshot"
+
+[[nodes]]
+id = "node.world_impact"
+type = "sound"
+clip = "world_impact"
+
+[[nodes]]
+id = "node.explosion"
+type = "sound"
+clip = "explosion"
+
+[[nodes]]
+id = "node.damage_taken"
+type = "sound"
+clip = "damage_taken"
+
+[[nodes]]
+id = "node.armor_break"
+type = "sound"
+clip = "armor_break"
+
+[[nodes]]
+id = "node.death"
+type = "sound"
+clip = "death"
+
+[[nodes]]
+id = "node.respawn"
+type = "sound"
+clip = "respawn"
+
+[[nodes]]
+id = "node.kill_confirm"
+type = "sound"
+clip = "kill_confirm"
+
+[[nodes]]
+id = "node.healing"
+type = "sound"
+clip = "healing"
+
+[[nodes]]
+id = "node.footstep_light"
+type = "sound"
+clip = "footstep_light"
+
+[[nodes]]
+id = "node.footstep_heavy"
+type = "sound"
+clip = "footstep_heavy"
+
+[[nodes]]
+id = "node.footstep.by_weight"
+type = "blend"
+rtpc = "movement.intensity"
+children = [
+  { node = "node.footstep_light", value = 0.0, gain = 1.0 },
+  { node = "node.footstep_heavy", value = 1.0, gain = 1.0 },
+]
+
+[[nodes]]
+id = "node.voice_start"
+type = "sound"
+clip = "voice_start"
+
+[[nodes]]
+id = "node.voice_stop"
+type = "sound"
+clip = "voice_stop"
+
+[[events]]
+id = "weapon.rifle.fire"
+actions = [{ type = "play", target = "node.rifle_fire" }]
+
+[[events]]
+id = "weapon.rocket.fire"
+actions = [{ type = "play", target = "node.rocket_fire" }]
+
+[[events]]
+id = "weapon.railgun.fire"
+actions = [{ type = "play", target = "node.railgun_fire" }]
+
+[[events]]
+id = "weapon.railgun.charge_start"
+actions = [{ type = "play", target = "node.railgun_charge_start" }]
+
+[[events]]
+id = "weapon.energy.fire"
+actions = [{ type = "play", target = "node.energy_fire" }]
+
+[[events]]
+id = "weapon.grenade.throw"
+actions = [{ type = "play", target = "node.grenade_throw" }]
+
+[[events]]
+id = "weapon.energy.loop"
+actions = [{ type = "play", target = "node.beam_loop" }]
+
+[[events]]
+id = "impact.flesh"
+actions = [{ type = "play", target = "node.flesh_hit" }]
+
+[[events]]
+id = "impact.headshot"
+actions = [{ type = "play", target = "node.headshot" }]
+
+[[events]]
+id = "impact.world"
+actions = [{ type = "play", target = "node.world_impact" }]
+
+[[events]]
+id = "explosion"
+actions = [{ type = "play", target = "node.explosion" }]
+
+[[events]]
+id = "player.damage"
+actions = [{ type = "play", target = "node.damage_taken" }]
+
+[[events]]
+id = "player.armor_break"
+actions = [{ type = "play", target = "node.armor_break" }]
+
+[[events]]
+id = "player.death"
+actions = [{ type = "play", target = "node.death" }]
+
+[[events]]
+id = "player.respawn"
+actions = [{ type = "play", target = "node.respawn" }]
+
+[[events]]
+id = "player.kill_confirm"
+actions = [{ type = "play", target = "node.kill_confirm" }]
+
+[[events]]
+id = "player.healing"
+actions = [{ type = "play", target = "node.healing" }]
+
+[[events]]
+id = "footstep"
+actions = [{ type = "play", target = "node.footstep.by_weight" }]
+
+[[events]]
+id = "footstep.light"
+actions = [{ type = "play", target = "node.footstep_light" }]
+
+[[events]]
+id = "footstep.heavy"
+actions = [{ type = "play", target = "node.footstep_heavy" }]
+
+[[events]]
+id = "voice.start"
+actions = [{ type = "play", target = "node.voice_start" }]
+
+[[events]]
+id = "voice.stop"
+actions = [{ type = "play", target = "node.voice_stop" }]

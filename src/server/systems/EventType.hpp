@@ -19,4 +19,7 @@ enum class EventType
     /// `shotInputTick` and computes anim-state delta vs its own
     /// historical snapshot at the rewound tick.
     ShotIntent,
+
+    TextChat,  ///< Client submitted a bounded all-chat message.
+    VoiceFrame ///< Client submitted one Opus voice frame for proximity routing.
 };

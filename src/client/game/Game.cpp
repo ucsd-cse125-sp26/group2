@@ -73,6 +73,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
 #include <numeric>
+#include <string_view>
 
 #if defined(__linux__)
 #include <pthread.h>
@@ -128,6 +129,91 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
     }
     SDL_snprintf(outBuf, bufSize, "Player #%d", cid.value);
     return outBuf;
+}
+
+void popUtf8Codepoint(std::string& text)
+{
+    if (text.empty())
+        return;
+    std::size_t firstByte = text.size() - 1;
+    while (firstByte > 0 && (static_cast<unsigned char>(text[firstByte]) & 0xc0u) == 0x80u)
+        --firstByte;
+    text.erase(firstByte);
+}
+
+void appendBoundedUtf8(std::string& dst, const char* text)
+{
+    if (!text || !*text)
+        return;
+    std::string candidate = dst;
+    candidate += text;
+    if (candidate.size() > net::chat::k_maxChatBytes)
+        return;
+    if (!net::chat::isValidUtf8(candidate))
+        return;
+    dst = std::move(candidate);
+}
+
+bool isFootstepClip(ClipId id) noexcept
+{
+    switch (id) {
+    case ClipId::Walk:
+    case ClipId::Run:
+    case ClipId::RunBackward:
+    case ClipId::SlowRun:
+    case ClipId::WallRun:
+    case ClipId::StrafeLeft:
+    case ClipId::StrafeRight:
+    case ClipId::StrafeLeftWalk:
+    case ClipId::StrafeRightWalk:
+    case ClipId::CrouchWalk:
+    case ClipId::CrouchWalkLeft:
+    case ClipId::CrouchWalkRight:
+    case ClipId::CrouchWalkBackward:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool footstepMarkerCrossed(float previous, float current, float marker) noexcept
+{
+    if (previous < 0.0f)
+        return false;
+    if (current < previous)
+        return marker > previous || marker <= current;
+    return marker > previous && marker <= current;
+}
+
+bool isHeavyFootstepClip(ClipId id) noexcept
+{
+    return id == ClipId::Run || id == ClipId::RunBackward || id == ClipId::SlowRun || id == ClipId::WallRun ||
+           id == ClipId::StrafeLeft || id == ClipId::StrafeRight;
+}
+
+std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
+{
+    switch (type) {
+    case WeaponType::Rifle:
+        return "weapon.rifle.fire";
+    case WeaponType::Rocket:
+        return "weapon.rocket.fire";
+    case WeaponType::RailGun:
+        return "weapon.railgun.fire";
+    case WeaponType::EnergyGun:
+        return "weapon.energy.fire";
+    case WeaponType::HEGrenade:
+    case WeaponType::Molotov:
+    case WeaponType::Impulse:
+        return "weapon.grenade.throw";
+    }
+    return {};
+}
+
+audio::AudioObjectId audioObjectForEntity(entt::entity entity) noexcept
+{
+    const auto raw = static_cast<std::uint32_t>(entt::to_integral(entity));
+    return audio::AudioObjectId{raw == 0 ? 1u : raw};
 }
 
 std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
@@ -264,6 +350,7 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         // ExplosionEvent: also play the explosion SFX alongside the particle effect.
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
     }
+    voiceChat_.init();
 
     // HUD system — needs device + shader format from renderer, SDF atlas from particles.
     if (particleSystem.sdfReady()) {
@@ -418,7 +505,7 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
             evt.surfaceType == SurfaceType::Flesh)
         {
             if (sfxSystem.isInitialized())
-                sfxSystem.play(SfxId::FleshHit);
+                sfxSystem.postAudioEvent("impact.flesh");
             hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
             hitmarkerIsHeadshot_ = (evt.headshot != 0);
             hitmarkerShieldBreak_ = (evt.shieldBreak != 0);
@@ -481,12 +568,35 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
             particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
+            if (sfxSystem.isInitialized()) {
+                const std::string_view eventName = fireAudioEventForWeapon(evt.weaponType);
+                if (!eventName.empty()) {
+                    const audio::AudioObjectId object = audioObjectForEntity(evt.source);
+                    sfxSystem.setAudioObjectTransform(object, evtOrigin);
+                    sfxSystem.postAudioEvent(eventName, object, 0.82f);
+                }
+            }
             break;
         case ParticleEffectType::HitscanBeam:
             particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
+            if (sfxSystem.isInitialized()) {
+                const std::string_view eventName = fireAudioEventForWeapon(evt.weaponType);
+                if (!eventName.empty()) {
+                    const audio::AudioObjectId object = audioObjectForEntity(evt.source);
+                    sfxSystem.setAudioObjectTransform(object, evtOrigin);
+                    sfxSystem.postAudioEvent(eventName, object, 0.92f);
+                }
+            }
             break;
         case ParticleEffectType::Impact:
             particleSystem.spawnImpactEffect(evt.pos1, evt.pos2, evt.surfaceType, evt.weaponType);
+            if (sfxSystem.isInitialized() && evt.source != localPlayer) {
+                const audio::AudioObjectId object = audioObjectForEntity(evt.source);
+                sfxSystem.setAudioObjectTransform(object, evt.pos1);
+                sfxSystem.postAudioEvent(evt.surfaceType == SurfaceType::Flesh ? "impact.flesh" : "impact.world",
+                                         object,
+                                         evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f);
+            }
             break;
         case ParticleEffectType::Explosion:
             particleSystem.spawnExplosion(evt.pos1, evt.param);
@@ -527,6 +637,9 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
 
         // TODO: Specific handling for local player deaths (display enemy health)
     });
+
+    client->onTextChat([this](const net::chat::ServerTextChat& chat) { appendChatMessage(chat.sender, chat.message); });
+    client->onVoiceFrame([this](const net::voice::ServerVoiceFrame& frame) { voiceChat_.enqueueFrame(frame); });
 
     // PR-20: hand each SHOT_DEBUG_REPORT off to the DebugUI's ring
     // buffer.  Pairs with the client-side fire-time snapshot the
@@ -712,6 +825,89 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
     return true;
 }
 
+void Game::openChat()
+{
+    if (chatOpen_)
+        return;
+    chatOpen_ = true;
+    chatDraft_.clear();
+    clearGameplayInputForChat();
+    SDL_StartTextInput(window);
+}
+
+void Game::closeChat()
+{
+    if (!chatOpen_)
+        return;
+    chatOpen_ = false;
+    chatDraft_.clear();
+    SDL_StopTextInput(window);
+    clearGameplayInputForChat();
+}
+
+void Game::submitChat()
+{
+    const std::string clean = net::chat::sanitizeUtf8(chatDraft_);
+    if (!clean.empty())
+        client->sendChatMessage(clean);
+    closeChat();
+}
+
+void Game::appendChatMessage(ClientId sender, std::string_view message)
+{
+    HudChatMessage entry;
+    char nameBuf[32];
+    ClientId localClientId{-1};
+    registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+    entry.fromLocal = localClientId.value != -1 && sender == localClientId;
+    entry.senderName = entry.fromLocal ? "You" : lookupPlayerName(registry, sender, nameBuf, sizeof(nameBuf));
+    entry.message = std::string(message);
+    entry.ageSeconds = 0.0f;
+    chatMessages_.push_back(std::move(entry));
+    constexpr std::size_t k_maxChatHistory = 64;
+    if (chatMessages_.size() > k_maxChatHistory)
+        chatMessages_.erase(chatMessages_.begin(),
+                            chatMessages_.begin() +
+                                static_cast<std::ptrdiff_t>(chatMessages_.size() - k_maxChatHistory));
+}
+
+void Game::clearGameplayInputForChat()
+{
+    systems::grenadeRadialActive = false;
+    systems::pendingGrenadeThrow = false;
+    systems::prevGrenadeKey = false;
+    systems::prevAbilitySelectLeft = false;
+    systems::prevAbilitySelectRight = false;
+    pendingScrollSwitch_ = 0;
+
+    registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
+        snap.forward = false;
+        snap.back = false;
+        snap.left = false;
+        snap.right = false;
+        snap.jump = false;
+        snap.crouch = false;
+        snap.sprint = false;
+        snap.grapple = false;
+        snap.shooting = false;
+        snap.reload = false;
+        snap.pickup = false;
+        snap.switchToPrimary = false;
+        snap.switchToSecondary = false;
+        snap.killSelf = false;
+        snap.skipRespawn = false;
+        snap.throwGrenade = false;
+        snap.grenadeMenuHeld = false;
+        snap.grenadeSelectIndex = kInvalidGrenadeSelectIndex;
+        snap.ability1 = false;
+        snap.ability2 = false;
+        snap.abilitySelectHeld = false;
+        snap.abilitySelectLeft = false;
+        snap.abilitySelectRight = false;
+        snap.debugGrantAbilityLevel = false;
+    });
+}
+
 SDL_AppResult Game::event(SDL_Event* event)
 {
     // Forward every event to ImGui first so it can capture keyboard/mouse
@@ -730,8 +926,42 @@ SDL_AppResult Game::event(SDL_Event* event)
         renderer->setHudTexture(hud_.getOutputTexture());
     }
 
+    if (chatOpen_) {
+        if (event->type == SDL_EVENT_TEXT_INPUT) {
+            appendBoundedUtf8(chatDraft_, event->text.text);
+            return SDL_APP_CONTINUE;
+        }
+        if (event->type == SDL_EVENT_KEY_DOWN) {
+            switch (event->key.key) {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                submitChat();
+                return SDL_APP_CONTINUE;
+            case SDLK_ESCAPE:
+                closeChat();
+                return SDL_APP_CONTINUE;
+            case SDLK_BACKSPACE:
+                popUtf8Codepoint(chatDraft_);
+                return SDL_APP_CONTINUE;
+            default:
+                return SDL_APP_CONTINUE;
+            }
+        }
+        if (event->type == SDL_EVENT_MOUSE_WHEEL || event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+            event->type == SDL_EVENT_MOUSE_BUTTON_UP)
+        {
+            return SDL_APP_CONTINUE;
+        }
+    }
+
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            if (!event->key.repeat)
+                openChat();
+            break;
+
         case SDLK_MINUS:
             return SDL_APP_SUCCESS;
 
@@ -1210,7 +1440,12 @@ SDL_AppResult Game::iterate()
     // is true) so WASD movement calculations match the server.  When the
     // sync toggle is off, movement keys also run every frame.
     // Dead input runs regardless of mouse capture — allows skip-respawn.
-    systems::runDeadInput(registry);
+    // Chat owns the keyboard while open, so gameplay inputs are cleared
+    // instead of sampled.
+    if (chatOpen_)
+        clearGameplayInputForChat();
+    else
+        systems::runDeadInput(registry);
 
     // Query local player's gravity flip state — used for mouse/stick
     // inversion AND for swapping A-D / left-stick left-right.
@@ -1218,7 +1453,7 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
-    if (mouseCaptured) {
+    if (mouseCaptured && !chatOpen_) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
@@ -1281,7 +1516,7 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured) {
+        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_) {
             systems::runMovementKeys(registry, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
@@ -1554,6 +1789,21 @@ SDL_AppResult Game::iterate()
     particleSystem.update(frameTime, renderer->getCamera(), registry);
     phaseSnap(phaseStats.particles);
 
+    audio::ListenerState audioListener;
+    audioListener.position = cachedEye_;
+    audioListener.forward = cachedCamFwd_;
+    audioListener.up = cachedGravFlipped_ ? glm::vec3{0.0f, -1.0f, 0.0f} : glm::vec3{0.0f, 1.0f, 0.0f};
+    registry.view<LocalPlayer, Velocity>().each(
+        [&](const Velocity& velocity) { audioListener.velocity = velocity.value; });
+    sfxSystem.setListener(audioListener);
+
+    int keyboardCount = 0;
+    const bool* keyboard = SDL_GetKeyboardState(&keyboardCount);
+    const bool pttHeld = keyboard != nullptr && SDL_SCANCODE_V < keyboardCount && keyboard[SDL_SCANCODE_V];
+    const bool imguiTextInput = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantTextInput;
+    voiceChat_.setPushToTalk(pttHeld && mouseCaptured && !chatOpen_ && !imguiTextInput);
+    voiceChat_.update(frameTime, *client, registry, sfxSystem);
+
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
 
@@ -1567,16 +1817,20 @@ SDL_AppResult Game::iterate()
                 isChargingNow = true;
         });
         if (isChargingNow && !wasChargingRailgun_)
-            sfxSystem.play(SfxId::ChargeRifleLoad);
+            sfxSystem.postAudioEvent("weapon.railgun.charge_start");
         wasChargingRailgun_ = isChargingNow;
 
         // Energy beam: play/stop loop sound on beam active transitions.
         bool isBeamNow = false;
         registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
         if (isBeamNow && !wasBeamActive_)
-            sfxSystem.play(SfxId::EnergyBeamLoop);
-        if (!isBeamNow && wasBeamActive_)
-            sfxSystem.stop(SfxId::EnergyBeamLoop);
+            beamLoopHandle_ = sfxSystem.postAudioEvent("weapon.energy.loop", audio::kGlobalObject, 1.0f);
+        if (isBeamNow && beamLoopHandle_ != SfxSystem::kInvalidSource)
+            sfxSystem.updateSource(beamLoopHandle_, cachedEye_, audioListener.velocity, 0.55f);
+        if (!isBeamNow && wasBeamActive_) {
+            sfxSystem.stopSource(beamLoopHandle_);
+            beamLoopHandle_ = SfxSystem::kInvalidSource;
+        }
         wasBeamActive_ = isBeamNow;
 
         // Beam hitmarker: client-side raycast against player hitboxes while firing.
@@ -1746,6 +2000,7 @@ SDL_AppResult Game::iterate()
             entt::entity entity{};
             AnimatedCharacter* ac = nullptr;
             AnimationInputs ai;
+            glm::vec3 audioPosition{0.0f};
             glm::mat4 worldTransform{1.0f};
             glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< rgb=color, a=blend factor (0=no tint).
             bool sampleThisFrame = false;           ///< call animator->update()
@@ -1813,6 +2068,7 @@ SDL_AppResult Game::iterate()
                 c.entity = e;
                 c.ac = &ac;
                 c.isLocal = isLocal;
+                c.audioPosition = pos.value;
 
                 if constexpr (player_colors::k_enabled) {
                     if (const auto* pc = registry.try_get<PlayerColor>(e); pc != nullptr) {
@@ -1940,6 +2196,45 @@ SDL_AppResult Game::iterate()
                     dst.clipIdRaw = active ? static_cast<std::uint8_t>(src.id) : 0xFFu;
                     dst.timeRatio = active ? src.timeRatio : 0.0f;
                     dst.weight = active ? src.weight : 0.0f;
+                }
+
+                auto [phaseIt, inserted] = footstepPhases_.try_emplace(c.entity);
+                if (inserted)
+                    phaseIt->second.fill(-1.0f);
+                const bool canStep = c.ai.grounded || c.ai.moveMode == 2;
+                const float speed = glm::length(c.ai.velocityWorld);
+                if (sfxSystem.isInitialized() && canStep && speed > 65.0f) {
+                    for (std::size_t i = 0; i < samplers.size() && i < phaseIt->second.size(); ++i) {
+                        const ClipSampler& src = samplers[i];
+                        const bool audibleSampler = src.active && src.weight > 0.22f && isFootstepClip(src.id);
+                        if (!audibleSampler) {
+                            phaseIt->second[i] = src.active ? src.timeRatio : -1.0f;
+                            continue;
+                        }
+                        const float previous = phaseIt->second[i];
+                        const bool leftStep = footstepMarkerCrossed(previous, src.timeRatio, 0.18f);
+                        const bool rightStep = footstepMarkerCrossed(previous, src.timeRatio, 0.68f);
+                        if (leftStep || rightStep) {
+                            const SfxId stepId =
+                                isHeavyFootstepClip(src.id) ? SfxId::FootstepHeavy : SfxId::FootstepLight;
+                            const float gain = std::clamp(0.35f + src.weight * (speed / 900.0f), 0.25f, 0.85f);
+                            const glm::vec3 lateral = glm::normalize(
+                                glm::cross(glm::vec3{0.0f, 1.0f, 0.0f},
+                                           glm::vec3{std::sin(c.ai.yawRad), 0.0f, std::cos(c.ai.yawRad)}));
+                            const float side = leftStep ? -7.0f : 7.0f;
+                            const audio::AudioObjectId object = audioObjectForEntity(c.entity);
+                            sfxSystem.setAudioObjectTransform(
+                                object, c.audioPosition + lateral * side, c.ai.velocityWorld);
+                            sfxSystem.setAudioRtpc(object,
+                                                   audio::rtpcId("movement.intensity"),
+                                                   stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
+                            sfxSystem.postAudioEvent("footstep", object, gain);
+                        }
+                        phaseIt->second[i] = src.timeRatio;
+                    }
+                } else {
+                    for (std::size_t i = 0; i < samplers.size() && i < phaseIt->second.size(); ++i)
+                        phaseIt->second[i] = samplers[i].active ? samplers[i].timeRatio : -1.0f;
                 }
             }
 
@@ -3470,6 +3765,27 @@ SDL_AppResult Game::iterate()
         hudState.matchInfo.valid =
             (currentMatchPhase == MatchPhase::IN_PROGRESS || currentMatchPhase == MatchPhase::FINISHED);
 
+        for (auto& msg : chatMessages_)
+            msg.ageSeconds += frameTime;
+        if (!chatOpen_) {
+            chatMessages_.erase(std::remove_if(chatMessages_.begin(),
+                                               chatMessages_.end(),
+                                               [](const HudChatMessage& msg) { return msg.ageSeconds > 30.0f; }),
+                                chatMessages_.end());
+        }
+        hudState.chat.open = chatOpen_;
+        hudState.chat.draft = chatDraft_;
+        hudState.chat.messages = chatMessages_;
+
+        voiceSpeakers_.clear();
+        for (const auto& speaker : voiceChat_.speaking()) {
+            HudVoiceSpeaker hudSpeaker;
+            char nameBuf[32];
+            hudSpeaker.senderName = lookupPlayerName(registry, speaker.speaker, nameBuf, sizeof(nameBuf));
+            voiceSpeakers_.push_back(std::move(hudSpeaker));
+        }
+        hudState.voiceSpeakers = voiceSpeakers_;
+
         hud_.update(frameTime, hudState);
         hud_.render();
 
@@ -3536,8 +3852,10 @@ bool Game::shouldReturnToLobby() const
 
 void Game::quit()
 {
+    closeChat();
     if (recorder.isRecording())
         recorder.stopRecording();
+    voiceChat_.quit();
     sfxSystem.quit();
     particleSystem.quit();
     hud_.quit();
@@ -3550,6 +3868,8 @@ void Game::quit()
         client->onRawParticleEvent({});
         client->onMatchStateUpdate({});
         client->onKillEvent({});
+        client->onTextChat({});
+        client->onVoiceFrame({});
         client->onShotDebugReport({});
     }
 }

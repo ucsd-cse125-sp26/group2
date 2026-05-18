@@ -343,6 +343,32 @@ FetchContent_MakeAvailable(minimp3)
 add_library(minimp3 INTERFACE)
 target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
 
+# Opus — low-latency voice compression for proximity chat.
+set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+if(WIN32)
+    # Opus 1.5.2's CMake files can enable SSE4.1/AVX2 runtime-dispatch
+    # sources on Windows without per-file target flags that clang-cl requires.
+    # Keep Windows CI portable; proximity voice does not need the SIMD path.
+    set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE)
+    set(OPUS_X86_MAY_HAVE_SSE OFF CACHE BOOL "" FORCE)
+    set(OPUS_X86_MAY_HAVE_SSE2 OFF CACHE BOOL "" FORCE)
+    set(OPUS_X86_MAY_HAVE_SSE4_1 OFF CACHE BOOL "" FORCE)
+    set(OPUS_X86_MAY_HAVE_AVX2 OFF CACHE BOOL "" FORCE)
+    set(OPUS_X86_PRESUME_SSE OFF CACHE BOOL "" FORCE)
+    set(OPUS_X86_PRESUME_SSE2 OFF CACHE BOOL "" FORCE)
+    set(OPUS_X86_PRESUME_SSE4_1 OFF CACHE BOOL "" FORCE)
+    set(OPUS_X86_PRESUME_AVX2 OFF CACHE BOOL "" FORCE)
+endif()
+FetchContent_Declare(
+    opus
+    GIT_REPOSITORY https://github.com/xiph/opus.git
+    GIT_TAG        v1.5.2
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(opus)
+
 add_library(vhacd INTERFACE)
 if(GROUP2_ENABLE_VHACD)
     # V-HACD — legacy opt-in convex decomposition for prototype props.
@@ -684,7 +710,20 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
+    # Voice chat
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCapture.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceChatSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceChatSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCodec.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCodec.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.hpp"
     # Sound effects system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxEvents.hpp"
@@ -721,6 +760,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
@@ -849,8 +890,12 @@ add_executable(group2
         src/client/debug/DebugUI.cpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/network/ChatProtocol.hpp
+        src/network/ChatProtocol.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/VoiceProtocol.hpp
+        src/network/VoiceProtocol.cpp
         src/network/RelayToken.hpp
         src/network/crypto/HmacSha256.hpp
         src/network/crypto/HmacSha256.cpp
@@ -1018,6 +1063,7 @@ target_link_libraries(group2 PRIVATE
     assimp
     stb_image
     minimp3
+    Opus::opus
     ozz_animation_offline
     ozz_animation
     ozz_base
@@ -1152,8 +1198,12 @@ add_executable(server
         src/server/systems/InputReceiveSystem.hpp
         src/network/MessageStream.hpp
         src/network/MessageStream.cpp
+        src/network/ChatProtocol.hpp
+        src/network/ChatProtocol.cpp
         src/network/NetworkConfig.hpp
         src/network/NetworkConfig.cpp
+        src/network/VoiceProtocol.hpp
+        src/network/VoiceProtocol.cpp
         src/network/RelayToken.hpp
         src/network/crypto/HmacSha256.hpp
         src/network/crypto/HmacSha256.cpp
@@ -1447,8 +1497,12 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/MessageStream.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/ChatProtocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/ChatProtocol.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/NetworkConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/VoiceProtocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/VoiceProtocol.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RelayToken.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/crypto/HmacSha256.hpp"
@@ -1640,6 +1694,78 @@ endif()
 set_compiler_warnings(udp_session_tests)
 enable_sanitizers(udp_session_tests)
 add_test(NAME udp_session_tests COMMAND udp_session_tests)
+
+add_executable(chat_voice_protocol_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/chat_voice_protocol_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/ChatProtocol.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/ChatProtocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/VoiceProtocol.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/VoiceProtocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
+)
+target_include_directories(chat_voice_protocol_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(chat_voice_protocol_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(chat_voice_protocol_tests)
+enable_sanitizers(chat_voice_protocol_tests)
+add_test(NAME chat_voice_protocol_tests COMMAND chat_voice_protocol_tests)
+
+add_executable(audio_math_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_math_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
+)
+target_include_directories(audio_math_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(audio_math_tests PRIVATE
+    glm::glm
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(audio_math_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(audio_math_tests)
+enable_sanitizers(audio_math_tests)
+add_test(NAME audio_math_tests COMMAND audio_math_tests)
+
+add_executable(voice_jitter_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/voice_jitter_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.hpp"
+)
+target_include_directories(voice_jitter_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(voice_jitter_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(voice_jitter_tests)
+enable_sanitizers(voice_jitter_tests)
+add_test(NAME voice_jitter_tests COMMAND voice_jitter_tests)
+
+add_executable(audio_runtime_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_runtime_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxTypes.hpp"
+)
+target_include_directories(audio_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(audio_runtime_tests PRIVATE
+    SDL3::SDL3-static
+    glm::glm
+    tomlplusplus::tomlplusplus
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(audio_runtime_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(audio_runtime_tests)
+enable_sanitizers(audio_runtime_tests)
+add_test(NAME audio_runtime_tests COMMAND audio_runtime_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

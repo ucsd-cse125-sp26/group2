@@ -6,11 +6,13 @@
 #include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "network/ChatProtocol.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/ShotEvent.hpp"
+#include "network/VoiceProtocol.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/UdpEndpoint.hpp"
 #include "network/transport/UdpSessionTransport.hpp"
@@ -25,6 +27,8 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <span>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -126,6 +130,16 @@ public:
 
     /// @brief Broadcast kill events to clients for kill feed updates.
     void broadcastKillEvents(const std::vector<NetKillEvent>& events);
+
+    /// @brief Broadcast a sanitized all-chat message from one client.
+    void broadcastTextChat(ClientId sender, std::string_view message);
+
+    /// @brief Send one proximity-routed voice frame to a specific listener.
+    bool sendVoiceFrameToClient(ClientId recipient,
+                                ClientId speaker,
+                                std::uint16_t sequence,
+                                std::uint8_t frameMs,
+                                std::span<const std::uint8_t> opus);
 
     /// @brief PR-20: unicast a serialized SHOT_DEBUG_REPORT (or any
     /// other already-framed payload) to a single client.  Wraps the
@@ -272,6 +286,11 @@ private:
         /// engine ships this value over the wire as well — see TF2
         /// `cl_interp` / Quake `cl_interp_ratio`.
         uint8_t lastReportedInterpDelaySnapshots = 0;
+
+        Uint64 chatWindowStartMs = 0;
+        std::uint8_t chatMessagesInWindow = 0;
+        Uint64 voiceWindowStartMs = 0;
+        std::uint8_t voiceFramesInWindow = 0;
     };
 
     /// @brief Dispatch a single decoded message from a client.
@@ -345,6 +364,7 @@ private:
     handleUdpUnreliable(std::uint64_t connId, const net::UdpEndpointAddr& from, const uint8_t* payload, uint32_t len);
     void
     handleSessionPayload(std::uint64_t connId, net::ChannelId channel, const std::uint8_t* payload, std::uint32_t len);
+    void handleVoiceFrame(Connection& conn, const std::uint8_t* payload, std::uint32_t len);
     void handleDirectoryEvent(const std::vector<std::uint8_t>& payload, const net::UdpEndpointAddr& from);
     void sendDirectoryHeartbeat(Uint64 nowMs);
 
@@ -370,6 +390,7 @@ private:
     net::UdpEndpointAddr directoryAddr_;
     std::uint32_t directoryServerId_ = 0;
     Uint64 lastDirectoryHeartbeatMs_ = 0;
+    std::uint32_t nextChatServerSeq_ = 0;
     bool usingUdpSession_ = false;
     Uint16 listenPort_ = 0;
     std::unordered_map<std::uint64_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.

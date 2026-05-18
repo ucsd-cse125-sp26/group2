@@ -26,14 +26,20 @@
 #include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
 #include "util/WorkerPool.hpp"
+#include "voice/VoiceChatSystem.hpp"
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstdint>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
 
 /// @brief Top-level client game object.
 ///
@@ -118,6 +124,11 @@ private:
         std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
     /// @brief Emplace player-control components onto the mapped local entity and record it.
     void handleLocalPlayerReady(entt::entity local);
+    void openChat();
+    void closeChat();
+    void submitChat();
+    void appendChatMessage(ClientId sender, std::string_view message);
+    void clearGameplayInputForChat();
 
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
@@ -142,6 +153,7 @@ private:
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
     SfxSystem sfxSystem;           ///< Client-side sound effects system.
+    VoiceChatSystem voiceChat_;    ///< Push-to-talk Opus proximity voice chat.
     Hud hud_;                      ///< In-game HUD overlay system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
@@ -280,6 +292,8 @@ private:
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
+    SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
+    std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
 
     // Hitmarker
     float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
@@ -323,6 +337,10 @@ private:
     /// when the local player's WeaponState gains a new weapon type or their
     /// reserve ammo grows beyond the previous frame's reading.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
+    std::vector<HudChatMessage> chatMessages_;
+    std::vector<HudVoiceSpeaker> voiceSpeakers_;
+    std::string chatDraft_;
+    bool chatOpen_ = false;
 
     // (No additional bookkeeping needed — name strings are constructed
     // each frame into the thread_local vector inside Game.cpp.)

@@ -88,6 +88,22 @@ Reliability is chosen by transport channel:
 | `SnapshotUnreliableSequenced` | full/delta snapshots, stale-drop |
 | `ControlReliableOrdered` | assign ID, lobby, ready/start, disconnect |
 | `EventReliableOrdered` | kill events, particles, match state, shot debug |
+| `VoiceUnreliableSequenced` | Opus voice frames; stale-drop, no reliable backlog |
+
+Text chat and voice are normal app payloads on top of the same session transport:
+
+| Packet | Channel | Wire shape |
+|---|---|---|
+| `TEXT_CHAT` client -> server | `ControlReliableOrdered` | `[TEXT_CHAT][clientSeq:u16][utf8Len:u16][utf8 bytes]` |
+| `TEXT_CHAT` server -> clients | `EventReliableOrdered` | `[TEXT_CHAT][senderClientId:i32][serverSeq:u32][utf8Len:u16][utf8 bytes]` |
+| `VOICE_FRAME` client -> server | `VoiceUnreliableSequenced` | `[VOICE_FRAME][seq:u16][frameMs:u8][opusLen:u16][opus bytes]` |
+| `VOICE_FRAME` server -> clients | `VoiceUnreliableSequenced` | `[VOICE_FRAME][speakerClientId:i32][seq:u16][frameMs:u8][opusLen:u16][opus bytes]` |
+
+Chat is capped at 240 UTF-8 bytes, sanitized, validated, and rate-limited per
+client. Voice frames are capped at 512 encoded bytes and use 48 kHz mono Opus
+with 20 ms frames. The server validates sender state and proximity-routes voice
+from authoritative player positions so clients outside voice range do not receive
+the frame.
 
 ---
 

@@ -50,8 +50,9 @@ enum class ChannelId : std::uint8_t
     SnapshotUnreliableSequenced = 1,
     ControlReliableOrdered = 2,
     EventReliableOrdered = 3,
+    VoiceUnreliableSequenced = 4,
 
-    Count = 4,
+    Count = 5,
 
     // Compatibility aliases for code written during the UDP-sidecar rollout.
     Unreliable = InputUnreliable,
