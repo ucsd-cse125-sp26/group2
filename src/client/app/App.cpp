@@ -15,6 +15,7 @@
 #include <SDL3_net/SDL_net.h>
 #include <backends/imgui_impl_sdl3.h>
 #include <imgui.h>
+#include <optional>
 #include <string>
 
 namespace
@@ -176,18 +177,28 @@ SDL_AppResult App::iterate()
         if (auto joinRequest = home->consumeJoinRequest()) {
             std::string serverIp = joinRequest->serverIp;
             uint16_t serverPort = joinRequest->serverPort;
+            std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
             if (joinRequest->globalServerId != 0 && networkConfig.discovery.enabled) {
                 GlobalDiscoveryClient discovery;
                 net::discovery::ServerInfo punchedServer;
                 std::string punchError;
+                const std::uint32_t clientNonce = net::discovery::randomNonce();
                 if (discovery.requestHolePunch(networkConfig.discovery,
                                                joinRequest->globalServerId,
+                                               clientNonce,
                                                punchedServer,
                                                punchError,
                                                networkConfig.discovery.connectPunchTimeoutMs))
                 {
                     serverIp = punchedServer.host;
                     serverPort = punchedServer.gamePort;
+                    relayConfig = net::UdpSessionTransport::RelayConfig{
+                        .host = networkConfig.discovery.directoryHost,
+                        .port = networkConfig.discovery.directoryUdpPort,
+                        .serverId = joinRequest->globalServerId,
+                        .clientNonce = clientNonce,
+                        .enabled = true,
+                    };
                 } else if (!punchError.empty()) {
                     SDL_Log("Global punch assist failed for server %u: %s",
                             joinRequest->globalServerId,
@@ -195,8 +206,8 @@ SDL_AppResult App::iterate()
                 }
             }
             SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
-            const ConnectError connectError =
-                client.init(serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs);
+            const ConnectError connectError = client.init(
+                serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs, relayConfig);
             if (connectError != ConnectError::None) {
                 SDL_Log("Failed to connect to server at %s:%d: %s",
                         serverIp.c_str(),

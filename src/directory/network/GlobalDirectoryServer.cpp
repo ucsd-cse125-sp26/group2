@@ -1,5 +1,5 @@
 /// @file GlobalDirectoryServer.cpp
-/// @brief Central directory server for global server browser and NAT assist.
+/// @brief UDP-only central directory, NAT assist, and relay service.
 
 #include "GlobalDirectoryServer.hpp"
 
@@ -8,8 +8,6 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cstring>
-#include <utility>
 
 namespace
 {
@@ -19,45 +17,21 @@ std::string addressString(NET_Address* addr)
     return raw ? raw : "";
 }
 
-std::string remoteHost(NET_StreamSocket* socket)
+bool sameEndpoint(const net::UdpEndpointAddr& a, const net::UdpEndpointAddr& b)
 {
-    NET_Address* addr = NET_GetStreamSocketAddress(socket);
-    std::string host = addressString(addr);
-    if (addr)
-        NET_UnrefAddress(addr);
-    return host;
+    return a.port == b.port && addressString(a.addr) == addressString(b.addr);
 }
 } // namespace
 
 bool GlobalDirectoryServer::init(const char* bindHost, Uint16 tcpPort, Uint16 udpPort)
 {
-    NET_Address* addr = nullptr;
-    if (bindHost != nullptr && bindHost[0] != '\0') {
-        addr = NET_ResolveHostname(bindHost);
-        if (!addr || NET_WaitUntilResolved(addr, -1) != NET_SUCCESS) {
-            SDL_Log("[directory] failed to resolve bind host '%s': %s", bindHost, SDL_GetError());
-            if (addr)
-                NET_UnrefAddress(addr);
-            return false;
-        }
-    }
-
-    tcpServer_ = NET_CreateServer(addr, tcpPort);
-    if (addr)
-        NET_UnrefAddress(addr);
-    if (!tcpServer_) {
-        SDL_Log("[directory] failed to create TCP listener on %u: %s", tcpPort, SDL_GetError());
-        return false;
-    }
-
+    (void)tcpPort;
     if (!udpEndpoint_.open(bindHost, udpPort)) {
-        SDL_Log("[directory] failed to create UDP listener on %u", udpPort);
-        NET_DestroyServer(tcpServer_);
-        tcpServer_ = nullptr;
+        SDL_Log("[directory] failed to create UDP directory/relay listener on %u", udpPort);
         return false;
     }
 
-    SDL_Log("[directory] listening on TCP %u / UDP %u", tcpPort, udpPort);
+    SDL_Log("[directory] UDP directory/relay listening on %u", udpPort);
     shouldStop_.store(false, std::memory_order_relaxed);
     return true;
 }
@@ -65,82 +39,33 @@ bool GlobalDirectoryServer::init(const char* bindHost, Uint16 tcpPort, Uint16 ud
 void GlobalDirectoryServer::stop()
 {
     shouldStop_.store(true, std::memory_order_relaxed);
-    clients_.clear();
+    clientsByNonce_.clear();
+    servers_.clear();
     udpEndpoint_.close();
-    if (tcpServer_) {
-        NET_DestroyServer(tcpServer_);
-        tcpServer_ = nullptr;
-    }
 }
 
 void GlobalDirectoryServer::run()
 {
     while (!shouldStop_.load(std::memory_order_relaxed)) {
-        acceptClients();
-        pollTcpClients();
         pollUdp();
         pruneExpired();
-        SDL_Delay(10);
-    }
-}
-
-void GlobalDirectoryServer::acceptClients()
-{
-    NET_StreamSocket* socket = nullptr;
-    while (NET_AcceptClient(tcpServer_, &socket) && socket != nullptr) {
-        NET_SetStreamSocketNoDelay(socket, true);
-        TcpConnection conn;
-        conn.stream = MessageStream(socket);
-        conn.host = remoteHost(socket);
-        SDL_Log("[directory] accepted TCP client from %s", conn.host.c_str());
-        clients_.push_back(std::move(conn));
-        socket = nullptr;
-    }
-}
-
-void GlobalDirectoryServer::pollTcpClients()
-{
-    for (auto it = clients_.begin(); it != clients_.end();) {
-        const bool ok =
-            it->stream.poll([this, &conn = *it](const void* data, Uint32 len) { handleTcpMessage(conn, data, len); });
-        if (!ok) {
-            if (it->stream.socket)
-                NET_DestroyStreamSocket(it->stream.socket);
-            it = clients_.erase(it);
-        } else {
-            ++it;
-        }
+        SDL_Delay(2);
     }
 }
 
 void GlobalDirectoryServer::pollUdp()
 {
     net::UdpReceivedMessage msg;
-    constexpr int k_maxDatagramsPerCycle = 256;
     int drained = 0;
+    constexpr int k_maxDatagramsPerCycle = 1024;
     while (drained < k_maxDatagramsPerCycle && udpEndpoint_.tryReceive(msg)) {
         ++drained;
-        if (msg.payload.empty()) {
-            msg.from.release();
-            continue;
+        const auto kind = static_cast<net::PacketKind>(msg.header.kind);
+        if (kind == net::PacketKind::DirectoryControl) {
+            handleDirectoryControl(msg);
+        } else if (kind == net::PacketKind::RelayPayload) {
+            handleRelayPayload(msg);
         }
-
-        const auto maybeHello = net::discovery::decodeUdpHello(msg.payload.data(), msg.payload.size());
-        const std::string host = addressString(msg.from.addr);
-        const Uint64 now = SDL_GetTicks();
-
-        if (maybeHello && maybeHello->role == net::discovery::UdpRole::Server) {
-            if (auto it = servers_.find(maybeHello->idOrNonce); it != servers_.end()) {
-                it->second.info.udpHost = host;
-                it->second.info.udpPort = msg.from.port;
-                it->second.info.natTraversalReady = true;
-                it->second.lastSeenMs = now;
-            }
-        } else if (maybeHello && maybeHello->role == net::discovery::UdpRole::Client) {
-            clientUdpByNonce_[maybeHello->idOrNonce] =
-                ClientUdpEndpoint{.host = host, .port = msg.from.port, .lastSeenMs = now};
-        }
-
         msg.from.release();
     }
 }
@@ -157,40 +82,40 @@ void GlobalDirectoryServer::pruneExpired()
         }
     }
 
-    for (auto it = clientUdpByNonce_.begin(); it != clientUdpByNonce_.end();) {
+    for (auto it = clientsByNonce_.begin(); it != clientsByNonce_.end();) {
         if (now - it->second.lastSeenMs > 10000) {
-            it = clientUdpByNonce_.erase(it);
+            it = clientsByNonce_.erase(it);
         } else {
             ++it;
         }
     }
 }
 
-void GlobalDirectoryServer::handleTcpMessage(TcpConnection& conn, const void* data, Uint32 len)
+void GlobalDirectoryServer::handleDirectoryControl(const net::UdpReceivedMessage& msg)
 {
     net::discovery::DirectoryMessage kind{};
     const std::uint8_t* payload = nullptr;
     std::size_t payloadLen = 0;
-    if (!net::discovery::parseEnvelope(data, len, kind, payload, payloadLen))
+    if (!net::discovery::parseEnvelope(msg.payload.data(), msg.payload.size(), kind, payload, payloadLen))
         return;
 
     switch (kind) {
     case net::discovery::DirectoryMessage::RegisterServer:
     case net::discovery::DirectoryMessage::Heartbeat:
-        handleRegistration(conn, kind, payload, payloadLen);
+        handleRegistration(msg, kind, payload, payloadLen);
         break;
     case net::discovery::DirectoryMessage::ListRequest:
-        handleListRequest(conn);
+        handleListRequest(msg);
         break;
     case net::discovery::DirectoryMessage::PunchRequest:
-        handlePunchRequest(conn, payload, payloadLen);
+        handlePunchRequest(msg, payload, payloadLen);
         break;
     default:
         break;
     }
 }
 
-void GlobalDirectoryServer::handleRegistration(TcpConnection& conn,
+void GlobalDirectoryServer::handleRegistration(const net::UdpReceivedMessage& msg,
                                                net::discovery::DirectoryMessage kind,
                                                const std::uint8_t* data,
                                                std::size_t len)
@@ -199,38 +124,37 @@ void GlobalDirectoryServer::handleRegistration(TcpConnection& conn,
     if (!maybeReg)
         return;
 
-    const net::discovery::ServerRegistration& reg = *maybeReg;
+    const auto& reg = *maybeReg;
     const std::uint32_t id = reg.serverId != 0 ? reg.serverId : nextServerId_++;
     ServerRecord& record = servers_[id];
-    const std::string oldUdpHost = record.info.udpHost;
-    const std::uint16_t oldUdpPort = record.info.udpPort;
-    const bool oldNatReady = record.info.natTraversalReady;
+    const std::string host = addressString(msg.from.addr);
 
     record.info.id = id;
     record.info.name = reg.name.empty() ? "Unnamed Server" : reg.name;
-    record.info.host = conn.host;
+    record.info.host = host;
     record.info.gamePort = reg.gamePort;
+    record.info.udpHost = host;
+    record.info.udpPort = msg.from.port;
     record.info.currentPlayers = reg.currentPlayers;
     record.info.maxPlayers = reg.maxPlayers;
-    record.info.udpHost = oldUdpHost;
-    record.info.udpPort = oldUdpPort;
-    record.info.natTraversalReady = oldNatReady;
+    record.info.natTraversalReady = true;
     record.lastSeenMs = SDL_GetTicks();
+    record.endpoint = msg.from;
 
     if (kind == net::discovery::DirectoryMessage::RegisterServer) {
         SDL_Log("[directory] registered server %u '%s' at %s:%u",
                 id,
                 record.info.name.c_str(),
-                record.info.host.c_str(),
-                record.info.gamePort);
+                record.info.udpHost.c_str(),
+                record.info.udpPort);
     }
 
-    sendTcp(conn,
-            net::discovery::encodeRegisterAck(
-                {.accepted = true, .serverId = id, .publicHost = conn.host, .message = "registered"}));
+    sendDirectory(msg.from,
+                  net::discovery::encodeRegisterAck(
+                      {.accepted = true, .serverId = id, .publicHost = host, .message = "registered"}));
 }
 
-void GlobalDirectoryServer::handleListRequest(TcpConnection& conn)
+void GlobalDirectoryServer::handleListRequest(const net::UdpReceivedMessage& msg)
 {
     const Uint64 now = SDL_GetTicks();
     std::vector<net::discovery::ServerInfo> active;
@@ -240,76 +164,79 @@ void GlobalDirectoryServer::handleListRequest(TcpConnection& conn)
         info.lastSeenMs = now - record.lastSeenMs;
         active.push_back(std::move(info));
     }
-    sendTcp(conn, net::discovery::encodeServerList(active));
+    sendDirectory(msg.from, net::discovery::encodeServerList(active));
 }
 
-void GlobalDirectoryServer::handlePunchRequest(TcpConnection& conn, const std::uint8_t* data, std::size_t len)
+void GlobalDirectoryServer::handlePunchRequest(const net::UdpReceivedMessage& msg,
+                                               const std::uint8_t* data,
+                                               std::size_t len)
 {
     const auto maybeReq = net::discovery::decodePunchRequest(data, len);
     if (!maybeReq)
         return;
 
+    clientsByNonce_[maybeReq->clientNonce] = ClientEndpoint{.endpoint = msg.from, .lastSeenMs = SDL_GetTicks()};
+
     net::discovery::PunchResponse resp;
     resp.message = "server not found";
-
-    if (auto serverIt = servers_.find(maybeReq->serverId); serverIt != servers_.end()) {
+    if (auto it = servers_.find(maybeReq->serverId); it != servers_.end()) {
         resp.accepted = true;
-        resp.server = serverIt->second.info;
+        resp.server = it->second.info;
         resp.message = "ok";
 
-        if (auto clientIt = clientUdpByNonce_.find(maybeReq->clientNonce);
-            clientIt != clientUdpByNonce_.end() && !serverIt->second.info.udpHost.empty())
-        {
-            const auto& client = clientIt->second;
-            const auto& server = serverIt->second.info;
-            sendUdpTo(server.udpHost,
-                      server.udpPort,
-                      net::discovery::encodeUdpPunchPeer(
-                          {.clientNonce = maybeReq->clientNonce, .host = client.host, .port = client.port}),
-                      server.id);
-            sendUdpTo(client.host,
-                      client.port,
-                      net::discovery::encodeUdpPunchPeer(
-                          {.clientNonce = maybeReq->clientNonce, .host = server.udpHost, .port = server.udpPort}),
-                      maybeReq->clientNonce);
-            SDL_Log("[directory] punch assist server=%u client=%s:%u serverUdp=%s:%u",
-                    server.id,
-                    client.host.c_str(),
-                    client.port,
-                    server.udpHost.c_str(),
-                    server.udpPort);
-        }
+        const net::discovery::UdpPunchPeer toServer{
+            .clientNonce = maybeReq->clientNonce,
+            .host = addressString(msg.from.addr),
+            .port = msg.from.port,
+        };
+        sendDirectory(it->second.endpoint,
+                      net::discovery::makeEnvelope(net::discovery::DirectoryMessage::PunchPeer,
+                                                   net::discovery::encodeUdpPunchPeer(toServer)));
     }
 
-    sendTcp(conn, net::discovery::encodePunchResponse(resp));
+    sendDirectory(msg.from, net::discovery::encodePunchResponse(resp));
 }
 
-void GlobalDirectoryServer::sendTcp(TcpConnection& conn, const std::vector<std::uint8_t>& payload)
+void GlobalDirectoryServer::handleRelayPayload(const net::UdpReceivedMessage& msg)
 {
-    if (conn.stream.socket)
-        conn.stream.send(payload.data(), static_cast<Uint32>(payload.size()));
-}
-
-void GlobalDirectoryServer::sendUdpTo(const std::string& host,
-                                      Uint16 port,
-                                      const std::vector<std::uint8_t>& payload,
-                                      std::uint32_t connectionId)
-{
-    if (host.empty() || port == 0 || payload.empty())
+    if (msg.payload.size() < sizeof(std::uint32_t) * 2 + sizeof(std::uint16_t))
         return;
 
-    NET_Address* addr = NET_ResolveHostname(host.c_str());
-    if (!addr || NET_WaitUntilResolved(addr, 1000) != NET_SUCCESS) {
-        if (addr)
-            NET_UnrefAddress(addr);
+    const std::uint32_t serverId = net::readU32Le(msg.payload.data());
+    const std::uint32_t clientNonce = net::readU32Le(msg.payload.data() + 4);
+    auto serverIt = servers_.find(serverId);
+    if (serverIt == servers_.end())
         return;
+
+    ServerRecord& server = serverIt->second;
+    const bool fromServer = sameEndpoint(msg.from, server.endpoint);
+    if (fromServer) {
+        auto clientIt = clientsByNonce_.find(clientNonce);
+        if (clientIt == clientsByNonce_.end())
+            return;
+        sendRelay(clientIt->second.endpoint, msg.payload.data(), msg.payload.size());
+    } else {
+        clientsByNonce_[clientNonce] = ClientEndpoint{.endpoint = msg.from, .lastSeenMs = SDL_GetTicks()};
+        sendRelay(server.endpoint, msg.payload.data(), msg.payload.size());
     }
+}
 
-    net::UdpEndpointAddr dest{.addr = addr, .port = port};
+void GlobalDirectoryServer::sendDirectory(const net::UdpEndpointAddr& dest, const std::vector<std::uint8_t>& payload)
+{
+    if (!dest.addr || payload.empty())
+        return;
     net::PacketHeader hdr{};
-    hdr.kind = static_cast<std::uint8_t>(net::PacketKind::KeepAlive);
-    hdr.connectionId = connectionId;
-    hdr.channel = static_cast<std::uint8_t>(net::ChannelId::Unreliable);
+    hdr.kind = static_cast<std::uint8_t>(net::PacketKind::DirectoryControl);
+    hdr.channel = static_cast<std::uint8_t>(net::ChannelId::ControlReliableOrdered);
     udpEndpoint_.send(dest, hdr, payload.data(), static_cast<int>(payload.size()));
-    dest.release();
+}
+
+void GlobalDirectoryServer::sendRelay(const net::UdpEndpointAddr& dest, const std::uint8_t* payload, std::size_t len)
+{
+    if (!dest.addr || !payload || len == 0)
+        return;
+    net::PacketHeader hdr{};
+    hdr.kind = static_cast<std::uint8_t>(net::PacketKind::RelayPayload);
+    hdr.channel = static_cast<std::uint8_t>(net::ChannelId::ControlReliableOrdered);
+    udpEndpoint_.sendFragmented(dest, hdr, payload, static_cast<int>(len), 1);
 }

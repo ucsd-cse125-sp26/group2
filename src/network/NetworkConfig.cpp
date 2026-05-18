@@ -46,6 +46,12 @@ NetworkConfig loadNetworkConfig(const char* path)
 
     // [transport] section — Phase 3d UDP rollout toggles.
     auto transport = tbl["transport"];
+    if (auto v = transport["use-udp-sessions"].value<bool>())
+        cfg.transport.useUdpSessions = *v;
+    if (auto v = transport["allow-legacy-tcp-fallback"].value<bool>())
+        cfg.transport.allowLegacyTcpFallback = *v;
+    if (auto v = transport["force-relay"].value<bool>())
+        cfg.transport.forceRelay = *v;
     if (auto v = transport["enable-udp-sidecar"].value<bool>())
         cfg.transport.enableUdpSidecar = *v;
     if (auto v = transport["inputs-over-udp"].value<bool>())
@@ -76,6 +82,8 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.discovery.refreshSeconds = std::clamp(*v, 1, 60);
     if (auto v = discovery["connect-punch-timeout-ms"].value<int>())
         cfg.discovery.connectPunchTimeoutMs = std::clamp(*v, 0, 5000);
+    if (auto v = discovery["relay-fallback-delay-ms"].value<int>())
+        cfg.discovery.relayFallbackDelayMs = std::clamp(*v, 0, 5000);
 
     return cfg;
 }

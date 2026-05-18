@@ -22,4 +22,11 @@ public:
                           net::discovery::ServerInfo& outServer,
                           std::string& outError,
                           int timeoutMs);
+
+    bool requestHolePunch(const GlobalDiscoveryConfig& cfg,
+                          std::uint32_t serverId,
+                          std::uint32_t clientNonce,
+                          net::discovery::ServerInfo& outServer,
+                          std::string& outError,
+                          int timeoutMs);
 };

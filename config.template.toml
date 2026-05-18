@@ -31,17 +31,30 @@ snapshot-hz = 128
 
 [global-discovery]
 # Global server browser / central directory service. The directory server
-# executable listens on these ports; the game server auto-registers here,
-# and clients refresh this directory from the Home screen.
+# executable listens on the UDP port; the game server auto-registers here
+# from its gameplay UDP socket, clients refresh this directory from the Home
+# screen, and relay fallback uses the same UDP service.
 enabled = true
 advertise-server = true
 directory-host = "cse125.ucsd.edu"
-directory-tcp-port = 10080
 directory-udp-port = 10081
 server-name = "Group 2 Server"
 max-players = 8
 refresh-seconds = 5
 connect-punch-timeout-ms = 900
+relay-fallback-delay-ms = 450
+
+[transport]
+# UDP-first networking. Keep the legacy TCP path available during the
+# staged cutover, but default all normal runtime traffic to UDP sessions.
+use-udp-sessions = true
+allow-legacy-tcp-fallback = true
+force-relay = false
+enable-udp-sidecar = true
+inputs-over-udp = true
+ping-over-udp = true
+snapshots-over-udp = true
+events-over-udp = true
 
 [graphics]
 # GPU backend selection.  Falls back to other available backends if the

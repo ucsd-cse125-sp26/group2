@@ -861,6 +861,8 @@ add_executable(group2
         src/network/transport/PacketHeader.hpp
         src/network/transport/UdpEndpoint.hpp
         src/network/transport/UdpEndpoint.cpp
+        src/network/transport/UdpSessionTransport.hpp
+        src/network/transport/UdpSessionTransport.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1151,14 +1153,14 @@ add_executable(server
         src/network/NetworkConfig.cpp
         src/network/discovery/GlobalDiscoveryProtocol.hpp
         src/network/discovery/GlobalDiscoveryProtocol.cpp
-        src/server/network/discovery/GlobalServerAdvertiser.hpp
-        src/server/network/discovery/GlobalServerAdvertiser.cpp
         src/network/OutboundQueue.hpp
         src/network/OutboundQueue.cpp
         src/network/transport/FragmentReassembler.hpp
         src/network/transport/PacketHeader.hpp
         src/network/transport/UdpEndpoint.hpp
         src/network/transport/UdpEndpoint.cpp
+        src/network/transport/UdpSessionTransport.hpp
+        src/network/transport/UdpSessionTransport.cpp
         src/network/RegistryArchive.hpp
         src/network/RegistrySerialization.hpp
         src/network/RegistrySerialization.cpp
@@ -1369,6 +1371,8 @@ add_executable(directory_server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpSessionTransport.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpSessionTransport.cpp"
 )
 
 target_include_directories(directory_server PRIVATE
@@ -1441,6 +1445,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpSessionTransport.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpSessionTransport.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistrySerialization.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/RegistryArchive.hpp"
@@ -1596,6 +1602,29 @@ target_link_libraries(physics_trimesh_tests PRIVATE
     glm::glm
 )
 add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
+
+add_executable(udp_session_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/udp_session_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/FragmentReassembler.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpEndpoint.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpSessionTransport.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/UdpSessionTransport.cpp"
+)
+target_include_directories(udp_session_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(udp_session_tests PRIVATE
+    SDL3::SDL3-static
+    SDL3_net::SDL3_net
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(udp_session_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(udp_session_tests)
+enable_sanitizers(udp_session_tests)
+add_test(NAME udp_session_tests COMMAND udp_session_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

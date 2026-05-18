@@ -9,6 +9,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/discovery/GlobalDiscoveryProtocol.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/PacketHeader.hpp"
 #include "perf/Parallel.hpp" // PR-9: parallelFor for per-client syscall fan-out.
@@ -24,8 +25,49 @@
 #include <random>
 #include <utility>
 
-bool Server::init(const char* addr, Uint16 port, const TransportConfig& transport)
+bool Server::init(const char* addr,
+                  Uint16 port,
+                  const TransportConfig& transport,
+                  const GlobalDiscoveryConfig& discovery)
 {
+    transportConfig_ = transport;
+    discoveryConfig_ = discovery;
+    usingUdpSession_ = transportConfig_.useUdpSessions;
+    listenPort_ = port;
+
+    // PR-2c: EventQueue holds a mutex now; reset by draining instead of
+    // assignment (mutex is non-copyable / non-assignable). At init
+    // time the queue should already be empty, but draining is cheap.
+    {
+        std::vector<Event> drained;
+        eventQueue.drainAll(drained);
+    }
+    nextClientId.value = 0;
+
+    if (usingUdpSession_) {
+        if (!session_.openServer(addr, port)) {
+            SDL_Log("Server: failed to create UDP session listener on port %u", port);
+            return false;
+        }
+        session_.preferRelay(transportConfig_.forceRelay);
+
+        if (discoveryConfig_.enabled && discoveryConfig_.advertiseServer) {
+            NET_Address* dir = NET_ResolveHostname(discoveryConfig_.directoryHost.c_str());
+            if (dir && NET_WaitUntilResolved(dir, 1000) == NET_SUCCESS) {
+                directoryAddr_.release();
+                directoryAddr_.addr = dir;
+                directoryAddr_.port = discoveryConfig_.directoryUdpPort;
+            } else if (dir) {
+                NET_UnrefAddress(dir);
+            }
+        }
+
+        SDL_Log("Server: UDP session listening on port %d", static_cast<int>(port));
+        shouldStop_.store(false, std::memory_order_relaxed);
+        networkThread_ = std::thread(&Server::networkLoop, this);
+        return true;
+    }
+
     NET_Address* netAddr = NET_ResolveHostname(addr);
     if (NET_WaitUntilResolved(netAddr, -1) == NET_FAILURE) {
         SDL_Log("Server: failed to resolve address: %s", SDL_GetError());
@@ -40,17 +82,7 @@ bool Server::init(const char* addr, Uint16 port, const TransportConfig& transpor
         return false;
     }
 
-    // PR-2c: EventQueue holds a mutex now; reset by draining instead of
-    // assignment (mutex is non-copyable / non-assignable). At init
-    // time the queue should already be empty, but draining is cheap.
-    {
-        std::vector<Event> drained;
-        eventQueue.drainAll(drained);
-    }
     SDL_Log("Server: listening on port %d", static_cast<int>(port));
-
-    nextClientId.value = 0;
-    transportConfig_ = transport;
 
     // ── Phase 3d-1: open UDP sidecar on the same port ────────────────────
     //
@@ -90,6 +122,8 @@ void Server::shutdown()
     }
 
     std::unique_lock<std::shared_mutex> lock(stateMutex_);
+    session_.close();
+    directoryAddr_.release();
     if (server) {
         SDL_Log("Server: shutting down");
         NET_DestroyServer(server);
@@ -125,6 +159,17 @@ std::vector<uint8_t> frameMessage(const void* data, int len)
 
 bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void* data, int len)
 {
+    if (usingUdpSession_) {
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        auto it = clients.find(clientId);
+        if (it == clients.end())
+            return false;
+        const net::ChannelId channel = replaceKey == static_cast<uint8_t>(PacketType::UPDATE_REGISTRY)
+                                           ? net::ChannelId::SnapshotUnreliableSequenced
+                                           : net::ChannelId::ControlReliableOrdered;
+        return session_.send(it->second.connectionId, channel, data, len);
+    }
+
     // PR-6: shared lock — we only read the clients map structure
     // (lookup) and write into the target's `outbound` queue, which
     // self-locks (PR-5b).
@@ -139,6 +184,16 @@ bool Server::enqueueTo(const ClientId& clientId, uint8_t replaceKey, const void*
 
 void Server::enqueueBroadcast(uint8_t replaceKey, const void* data, int len)
 {
+    if (usingUdpSession_) {
+        const net::ChannelId channel = replaceKey == static_cast<uint8_t>(PacketType::UPDATE_REGISTRY)
+                                           ? net::ChannelId::SnapshotUnreliableSequenced
+                                           : net::ChannelId::ControlReliableOrdered;
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        for (auto& [_, conn] : clients)
+            session_.send(conn.connectionId, channel, data, len);
+        return;
+    }
+
     // PR-4 (server-perf): build the framed bytes ONCE into a
     // shared_ptr; per-client enqueue is a pointer copy. Pre-PR-4 this
     // copied the framed `std::vector<uint8_t>` per client — fine at
@@ -160,6 +215,9 @@ void Server::enqueueBroadcast(uint8_t replaceKey, const void* data, int len)
 
 void Server::flushAllOutbound()
 {
+    if (usingUdpSession_)
+        return;
+
     // Per-tick max-age for unreliable entries. Anything older than this is
     // dropped before going on the wire — see OutboundQueue::flushTo.
     constexpr Uint32 k_maxAgeMs = 300;
@@ -289,6 +347,13 @@ void Server::flushAllOutbound()
 
 void Server::enqueueReliableEvent(const void* data, int len)
 {
+    if (usingUdpSession_) {
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        for (auto& [_, conn] : clients)
+            session_.send(conn.connectionId, net::ChannelId::EventReliableOrdered, data, len);
+        return;
+    }
+
     // Phase 3d-5: build the framed payload once, then push it into
     // every connected client's reliable queue with a fresh per-client
     // sequence number. Each entry rides UDP `k_reliableRedundancy`
@@ -334,7 +399,7 @@ void Server::enqueueReliableEvent(const void* data, int len)
     }
 }
 
-void Server::handleUdpUnreliable(uint32_t connId,
+void Server::handleUdpUnreliable(std::uint64_t connId,
                                  const net::UdpEndpointAddr& from,
                                  const uint8_t* payload,
                                  uint32_t len)
@@ -456,8 +521,171 @@ void Server::handleUdpUnreliable(uint32_t connId,
     }
 }
 
+void Server::handleSessionPayload(std::uint64_t connId,
+                                  net::ChannelId channel,
+                                  const std::uint8_t* payload,
+                                  std::uint32_t len)
+{
+    (void)channel;
+    if (!payload || len == 0)
+        return;
+
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+    auto idIt = connIdToClient_.find(connId);
+    if (idIt == connIdToClient_.end())
+        return;
+    auto connIt = clients.find(idIt->second);
+    if (connIt == clients.end())
+        return;
+    handleMessage(connIt->second, payload, len);
+}
+
+void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload)
+{
+    net::discovery::DirectoryMessage kind{};
+    const std::uint8_t* body = nullptr;
+    std::size_t bodyLen = 0;
+    if (!net::discovery::parseEnvelope(payload.data(), payload.size(), kind, body, bodyLen))
+        return;
+
+    if (kind == net::discovery::DirectoryMessage::RegisterAck) {
+        const auto ack = net::discovery::decodeRegisterAck(body, bodyLen);
+        if (ack && ack->accepted) {
+            directoryServerId_ = ack->serverId;
+            session_.setRelayConfig(net::UdpSessionTransport::RelayConfig{
+                .host = discoveryConfig_.directoryHost,
+                .port = discoveryConfig_.directoryUdpPort,
+                .serverId = directoryServerId_,
+                .clientNonce = 0,
+                .enabled = true,
+            });
+        }
+        return;
+    }
+
+    if (kind == net::discovery::DirectoryMessage::PunchPeer) {
+        const auto peer = net::discovery::decodeUdpPunchPeer(body, bodyLen);
+        if (!peer || peer->host.empty() || peer->port == 0)
+            return;
+
+        NET_Address* rawAddr = NET_ResolveHostname(peer->host.c_str());
+        if (!rawAddr)
+            return;
+        if (NET_WaitUntilResolved(rawAddr, 1000) != NET_SUCCESS) {
+            NET_UnrefAddress(rawAddr);
+            return;
+        }
+
+        net::UdpEndpointAddr dest;
+        dest.addr = rawAddr;
+        dest.port = peer->port;
+        const std::vector<std::uint8_t> probe = net::discovery::encodeUdpHello(
+            {.role = net::discovery::UdpRole::Server, .idOrNonce = directoryServerId_, .gamePort = listenPort_});
+        for (int i = 0; i < 4; ++i)
+            session_.sendDirectoryControl(dest, probe.data(), static_cast<int>(probe.size()));
+    }
+}
+
+void Server::sendDirectoryHeartbeat(Uint64 nowMs)
+{
+    if (!usingUdpSession_ || !discoveryConfig_.enabled || !discoveryConfig_.advertiseServer || !directoryAddr_.addr)
+        return;
+    if (lastDirectoryHeartbeatMs_ != 0 && nowMs - lastDirectoryHeartbeatMs_ < 2000)
+        return;
+
+    const auto kind = directoryServerId_ == 0 ? net::discovery::DirectoryMessage::RegisterServer
+                                              : net::discovery::DirectoryMessage::Heartbeat;
+    const int currentPlayers = getClientCount();
+    const net::discovery::ServerRegistration reg{
+        .serverId = directoryServerId_,
+        .name = discoveryConfig_.serverName,
+        .gamePort = listenPort_,
+        .currentPlayers = static_cast<std::uint8_t>(std::clamp(currentPlayers, 0, 255)),
+        .maxPlayers = discoveryConfig_.maxPlayers,
+    };
+    std::vector<std::uint8_t> payload = net::discovery::encodeRegistration(kind, reg);
+    session_.sendDirectoryControl(directoryAddr_, payload.data(), static_cast<int>(payload.size()));
+    lastDirectoryHeartbeatMs_ = nowMs;
+}
+
 void Server::networkLoop()
 {
+    if (usingUdpSession_) {
+        while (!shouldStop_.load(std::memory_order_relaxed)) {
+            session_.pump();
+            net::UdpSessionTransport::Event ev;
+            while (session_.pollEvent(ev)) {
+                if (ev.type == net::UdpSessionTransport::EventType::Connected) {
+                    ClientId clientId = getNextClientId();
+                    {
+                        std::unique_lock<std::shared_mutex> lock(stateMutex_);
+                        auto [it, inserted] = clients.try_emplace(clientId);
+                        if (inserted) {
+                            auto& conn = it->second;
+                            conn.clientId = clientId;
+                            conn.pendingInitialization = true;
+                            conn.connectionId = ev.connectionId;
+                            connIdToClient_[ev.connectionId] = clientId;
+                        }
+                    }
+                    eventQueue.enqueue(Event{.clientId = clientId, .type = EventType::Connected, .movementIntent = {}});
+                    if (clientConnectedFn_)
+                        clientConnectedFn_(clientId);
+                } else if (ev.type == net::UdpSessionTransport::EventType::Payload) {
+                    handleSessionPayload(
+                        ev.connectionId, ev.channel, ev.payload.data(), static_cast<std::uint32_t>(ev.payload.size()));
+                } else if (ev.type == net::UdpSessionTransport::EventType::Disconnected) {
+                    ClientId id{-1};
+                    {
+                        std::unique_lock<std::shared_mutex> lock(stateMutex_);
+                        if (auto idIt = connIdToClient_.find(ev.connectionId); idIt != connIdToClient_.end()) {
+                            id = idIt->second;
+                            if (auto connIt = clients.find(id); connIt != clients.end()) {
+                                disconnectClient(connIt->second);
+                                clients.erase(connIt);
+                            }
+                        }
+                    }
+                    if (id.value != -1 && clientDisconnectedFn_)
+                        clientDisconnectedFn_(id);
+                } else if (ev.type == net::UdpSessionTransport::EventType::DirectoryControl) {
+                    handleDirectoryEvent(ev.payload);
+                }
+            }
+
+            sendDirectoryHeartbeat(SDL_GetTicks());
+
+            {
+                std::shared_ptr<const std::vector<uint8_t>> payload;
+                {
+                    std::unique_lock<std::shared_mutex> lock(stateMutex_);
+                    payload = std::exchange(pendingSnapshotPayload_, nullptr);
+                    pendingSnapshotFramed_.reset();
+                }
+                if (payload) {
+                    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+                    for (auto& [_, conn] : clients) {
+                        session_.send(conn.connectionId,
+                                      net::ChannelId::SnapshotUnreliableSequenced,
+                                      payload->data(),
+                                      static_cast<int>(payload->size()),
+                                      (!payload->empty() &&
+                                       static_cast<PacketType>(payload->front()) == PacketType::UPDATE_REGISTRY)
+                                          ? 2
+                                          : 1);
+                    }
+                }
+            }
+
+            {
+                std::shared_lock<std::shared_mutex> lock(stateMutex_);
+                clientCountAtomic_.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+            }
+            SDL_Delay(1);
+        }
+        return;
+    }
+
     // The three I/O phases run separately so the lock can be released
     // between them — letting the game thread enqueue / dequeue without
     // having to wait for an entire I/O cycle to finish.
@@ -538,7 +766,7 @@ void Server::networkLoop()
                 struct UdpTarget
                 {
                     net::UdpEndpointAddr addr; // ref-counted; we'll release
-                    uint32_t connectionId;
+                    std::uint64_t connectionId;
                     uint16_t sequence;
                 };
                 static thread_local std::vector<UdpTarget> udpTargets;
@@ -735,7 +963,10 @@ ClientId Server::acceptClients()
 void Server::disconnectClient(Connection& conn)
 {
     SDL_Log("Server: disconnecting client %d", conn.clientId.value);
-    NET_DestroyStreamSocket(conn.msgStream.socket);
+    if (conn.msgStream.socket) {
+        NET_DestroyStreamSocket(conn.msgStream.socket);
+        conn.msgStream.socket = nullptr;
+    }
     if (conn.connectionId != 0)
         connIdToClient_.erase(conn.connectionId);
     conn.udpAddr.release();
@@ -906,6 +1137,20 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         break;
     }
 
+    case PacketType::SHOT_INTENT: {
+        constexpr std::size_t k_shotIntentPayloadLen = sizeof(uint32_t) + sizeof(uint16_t) + anim_snapshot::k_wireSize;
+        if (payloadLen != k_shotIntentPayloadLen)
+            return;
+        Event event{};
+        event.type = EventType::ShotIntent;
+        event.clientId = conn.clientId;
+        std::memcpy(&event.shotIntent.shotInputTick, payload, sizeof(uint32_t));
+        std::memcpy(&event.shotIntent.targetClientId, payload + sizeof(uint32_t), sizeof(uint16_t));
+        event.shotIntent.targetAnim = anim_snapshot::unpackSnapshot(payload + sizeof(uint32_t) + sizeof(uint16_t));
+        eventQueue.enqueue(event);
+        break;
+    }
+
     case PacketType::PLAYER_READY: {
         Event event{};
         event.type = EventType::PlayerReady;
@@ -962,6 +1207,21 @@ void Server::drainEvents(std::vector<Event>& out)
 // NOTE: playerEntity is the entity id of the player
 bool Server::notifyPlayerClientId(ClientId clientId, entt::entity playerEntity)
 {
+    if (usingUdpSession_) {
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        auto it = clients.find(clientId);
+        if (it == clients.end())
+            return false;
+
+        uint8_t buf[1 + sizeof(entt::entity) + sizeof(std::uint64_t)];
+        buf[0] = static_cast<uint8_t>(PacketType::ASSIGN_CLIENT_ID);
+        std::memcpy(buf + 1, &playerEntity, sizeof(entt::entity));
+        std::memcpy(buf + 1 + sizeof(entt::entity), &it->second.connectionId, sizeof(std::uint64_t));
+        it->second.pendingInitialization = false;
+        return session_.send(
+            it->second.connectionId, net::ChannelId::ControlReliableOrdered, buf, static_cast<int>(sizeof(buf)));
+    }
+
     // PR-6: shared lock — we look up by clientId, set
     // `pendingInitialization=false` (per-Conn write, single writer:
     // this is only called once per client init from the game thread),

@@ -34,7 +34,7 @@ class FragmentReassembler
 public:
     /// @brief Maximum fragments per logical message — matches the
     /// 8-bit fragment-count field in the wire header.
-    static constexpr int k_maxFragments = 256;
+    static constexpr int k_maxFragments = 255;
 
     /// @brief Result of `addFragment`.
     enum class Result
@@ -150,17 +150,17 @@ public:
 private:
     /// @brief Glenn-Fiedler "is s2 more recent than s1?" with 16-bit
     /// wrap. Used for stale-fragment detection.
-    static bool seqMoreRecent(uint16_t s1, uint16_t s2) noexcept
+    static bool seqMoreRecent(std::uint32_t s1, std::uint32_t s2) noexcept
     {
-        constexpr uint16_t k_half = 32768u;
+        constexpr std::uint32_t k_half = 0x80000000u;
         return ((s1 > s2) && (s1 - s2 > k_half)) || ((s2 > s1) && (s2 - s1 < k_half));
     }
 
     struct ActiveSet
     {
-        uint16_t sequence = 0;
-        uint8_t fragmentCount = 0;
-        uint8_t haveCount = 0;
+        std::uint32_t sequence = 0;
+        std::uint8_t fragmentCount = 0;
+        std::uint8_t haveCount = 0;
         std::vector<std::vector<uint8_t>> received;
     };
 

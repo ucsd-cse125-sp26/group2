@@ -61,6 +61,20 @@ struct ServerReplicationConfig
 /// stable for at least one release.
 struct TransportConfig
 {
+    /// @brief UDP-first session transport. When true, client/server
+    /// connect, control, snapshots, events, ping, and disconnects use
+    /// UdpSessionTransport rather than the legacy TCP stream.
+    bool useUdpSessions = true;
+
+    /// @brief Temporary staged-cutover fallback. When true, the legacy
+    /// TCP+UDP-sidecar path can still be selected by setting
+    /// useUdpSessions=false. Kept only until UDP sessions are battle tested.
+    bool allowLegacyTcpFallback = true;
+
+    /// @brief Prefer the relay route even when direct is available.
+    /// Useful for forced-relay testing.
+    bool forceRelay = false;
+
     /// @brief Stage 3d-1: bind a UDP datagram socket alongside the TCP
     /// socket. Currently no traffic flows through it; later stages move
     /// individual packet types over. Cheap to enable (one socket bind);
@@ -101,12 +115,13 @@ struct GlobalDiscoveryConfig
     bool enabled = true;                           ///< Client browser and server publishing toggle.
     bool advertiseServer = true;                   ///< Server auto-publishes itself to the directory.
     std::string directoryHost = "cse125.ucsd.edu"; ///< Central directory host.
-    uint16_t directoryTcpPort = 10080;             ///< Directory TCP API port.
-    uint16_t directoryUdpPort = 10081;             ///< Directory UDP punch-assist port.
+    uint16_t directoryTcpPort = 10080;             ///< Legacy directory TCP API port.
+    uint16_t directoryUdpPort = 10081;             ///< UDP directory/relay port.
     std::string serverName = "Group 2 Server";     ///< Name advertised by local servers.
     uint8_t maxPlayers = 8;                        ///< Display-only capacity advertised by servers.
     int refreshSeconds = 5;                        ///< Client browser refresh cadence.
     int connectPunchTimeoutMs = 900;               ///< UDP punch-assist window before a direct join attempt.
+    int relayFallbackDelayMs = 450; ///< Start relay if direct route has not validated within this window.
 };
 
 /// @brief Runtime network connection parameters.
