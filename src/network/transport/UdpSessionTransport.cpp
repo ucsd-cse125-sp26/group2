@@ -112,6 +112,8 @@ bool UdpSessionTransport::connectClient(const char* host, Uint16 port, int timeo
         return false;
     if (!resolveAddress(host, port, serverAddr_, timeoutMs))
         return false;
+    if (relayConfig_.enabled && !relayConfig_.host.empty() && relayConfig_.port != 0)
+        resolveAddress(relayConfig_.host.c_str(), relayConfig_.port, relayAddr_, timeoutMs);
 
     const Uint64 started = SDL_GetTicks();
     lastConnectAttemptMs_ = 0;
