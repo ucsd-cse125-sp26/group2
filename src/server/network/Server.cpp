@@ -19,6 +19,7 @@
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <cstdlib>
 #include <cstring>
 #include <entt/entity/entity.hpp>
 #include <memory>
@@ -26,6 +27,20 @@
 #include <span>
 #include <string>
 #include <utility>
+
+namespace
+{
+
+bool combatLogEnabled()
+{
+    static const bool enabled = [] {
+        const char* env = std::getenv("GROUP2_COMBAT_LOG");
+        return env != nullptr && env[0] != '\0' && env[0] != '0';
+    }();
+    return enabled;
+}
+
+} // namespace
 
 bool Server::init(const char* addr,
                   Uint16 port,
@@ -725,7 +740,9 @@ void Server::networkLoop()
 
             {
                 std::shared_lock<std::shared_mutex> lock(stateMutex_);
-                clientCountAtomic_.store(static_cast<std::uint32_t>(clients.size()), std::memory_order_relaxed);
+                const auto count = static_cast<std::uint32_t>(clients.size());
+                clientCountAtomic_.store(count, std::memory_order_relaxed);
+                ::group2::perf::net().clientCount.store(count, std::memory_order_relaxed);
             }
             SDL_Delay(1);
         }
@@ -1568,7 +1585,8 @@ void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
 
     enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
 
-    SDL_Log("Server: broadcasted %u kill events to clients", count);
+    if (combatLogEnabled())
+        SDL_Log("Server: broadcasted %u kill events to clients", count);
 }
 
 void Server::broadcastTextChat(ClientId sender, std::string_view message)

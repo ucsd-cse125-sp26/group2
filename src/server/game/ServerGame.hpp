@@ -176,6 +176,7 @@ private:
     /// the server snapshots every 4th tick — 4× less serialization +
     /// broadcast work than pre-Phase-4.
     int snapshotEveryNTicks = 4;
+    bool shotDebugEnabled_ = false; ///< Opt-in lag-comp shot visualizer capture/send path.
 
     // ── Phase 6+ rigid-body dynamics state ──
     /// @brief Persistent contact-manifold cache for warm-starting the PGS

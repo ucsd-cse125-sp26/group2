@@ -378,7 +378,10 @@ ClearanceResult clearanceCapsuleVsSphere(CapsuleShape capsule, glm::vec3 pos, co
 /// @brief Scene-wide minimum clearance.  Returns the nearest geometry
 /// feature in any direction.  This is the closest-point query the
 /// conservative-advancement integrator drives off of every iteration.
-ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule, glm::vec3 pos, const WorldGeometry& world);
+ClearanceResult clearanceCapsuleVsWorld(CapsuleShape capsule,
+                                        glm::vec3 pos,
+                                        const WorldGeometry& world,
+                                        float maxMeshSearchRadius = 1024.0f);
 
 // Character-controller utilities (modern KCC pattern)
 

@@ -120,6 +120,10 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     physics::diag::setEnabled(phaseDiagEnabled);
     SDL_Log("[server] phase-through diagnostic %s", phaseDiagEnabled ? "ENABLED" : "disabled");
 
+    const char* shotDebugEnv = std::getenv("GROUP2_SHOT_DEBUG");
+    shotDebugEnabled_ = shotDebugEnv != nullptr && shotDebugEnv[0] != '\0' && shotDebugEnv[0] != '0';
+    SDL_Log("[server] shot debug reports %s", shotDebugEnabled_ ? "ENABLED" : "disabled");
+
     clientEntities.clear(); // For safety
     registry.clear();
     if (!lobbyManager.init(serverRef)) {
@@ -558,6 +562,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // Populated only when the weapon system fires a hitscan; sent
     // unicast to the shooter after the broadcast events block below.
     std::vector<net::shotdebug::ShotDebugCapture> shotDebugReports;
+    std::vector<net::shotdebug::ShotDebugCapture>* shotDebugSink = shotDebugEnabled_ ? &shotDebugReports : nullptr;
     {
         // PR-27: stash pending SHOT_INTENTs onto each shooter as a
         // transient `PendingShotIntent` component, keyed by the
@@ -591,7 +596,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
             }
         }
         GROUP2_PROF_SCOPE("weapon");
-        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, &shotDebugReports);
+        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, shotDebugSink);
     }
     {
         GROUP2_PROF_SCOPE("ability");
@@ -722,7 +727,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // on a beam weapon for the whole tick → multiple captures all
     // referencing nearly-identical state).  In practice we see 1-2
     // entries per tick per shooting player.
-    if (!shotDebugReports.empty()) {
+    if (shotDebugSink != nullptr && !shotDebugReports.empty()) {
         GROUP2_PROF_SCOPE("shotDebugSend");
         for (const auto& cap : shotDebugReports) {
             // Reserve worst-case so we only allocate once per shot.

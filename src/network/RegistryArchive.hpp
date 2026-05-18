@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -20,6 +21,16 @@ class OutputArchive
 public:
     std::vector<uint8_t> buffer;
 
+    /// @brief Append a raw byte range with a single resize + memcpy.
+    void appendRaw(const uint8_t* data, std::size_t size)
+    {
+        if (size == 0)
+            return;
+        const std::size_t offset = buffer.size();
+        buffer.resize(offset + size);
+        std::memcpy(buffer.data() + offset, data, size);
+    }
+
     /// @brief Append @p value to the internal buffer as raw bytes.
     /// @tparam T A trivially-copyable type.
     /// @param value The value to serialize.
@@ -28,8 +39,7 @@ public:
     {
         static_assert(std::is_trivially_copyable_v<T>, "Component type must be trivially copyable for serialization");
 
-        const auto* p = reinterpret_cast<const uint8_t*>(&value);
-        buffer.insert(buffer.end(), p, p + sizeof(T));
+        appendRaw(reinterpret_cast<const uint8_t*>(&value), sizeof(T));
     }
 };
 

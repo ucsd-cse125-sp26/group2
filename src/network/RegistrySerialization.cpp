@@ -102,10 +102,14 @@ void serializeParallelImpl(const entt::registry& registry, OutputArchive& output
 #endif
 
     // Concatenate per-type buffers in tuple order. This is a sequential
-    // pass, but each insertion is just a memcpy and the total size is
+    // pass, but each append is just a memcpy and the total size is
     // bounded by the snapshot wire size — typically 10s of KB.
+    std::size_t totalBytes = 0;
+    for (const auto& archive : archives)
+        totalBytes += archive.buffer.size();
+    output.buffer.reserve(output.buffer.size() + totalBytes);
     for (std::size_t i = 0; i < k_n; ++i) {
-        output.buffer.insert(output.buffer.end(), archives[i].buffer.begin(), archives[i].buffer.end());
+        output.appendRaw(archives[i].buffer.data(), archives[i].buffer.size());
     }
 }
 
@@ -268,25 +272,21 @@ std::vector<uint8_t> serialize(const entt::registry& registry)
     // Loader expects.
     serializeParallel<Synced>(registry, snapshotArchive);
 
-    std::vector<RemoteInputRecord> remoteInputs;
-    if (const auto view = registry.view<const InputSnapshot>(); !view.empty()) {
-        remoteInputs.reserve(view.size());
-        view.each([&](const entt::entity entity, const InputSnapshot& input) {
-            remoteInputs.push_back(RemoteInputRecord{.entity = entity, .input = input});
-        });
-    }
+    const auto remoteInputView = registry.view<const InputSnapshot>();
+    const auto remoteInputCount = static_cast<uint32_t>(remoteInputView.size());
 
     OutputArchive packetArchive;
     const auto snapshotSize = static_cast<uint32_t>(snapshotArchive.buffer.size());
+    packetArchive.buffer.reserve(sizeof(snapshotSize) + snapshotArchive.buffer.size() + sizeof(remoteInputCount) +
+                                 static_cast<std::size_t>(remoteInputCount) * sizeof(RemoteInputRecord));
     packetArchive(snapshotSize);
-    packetArchive.buffer.insert(
-        packetArchive.buffer.end(), snapshotArchive.buffer.begin(), snapshotArchive.buffer.end());
+    packetArchive.appendRaw(snapshotArchive.buffer.data(), snapshotArchive.buffer.size());
 
-    const auto remoteInputCount = static_cast<uint32_t>(remoteInputs.size());
     packetArchive(remoteInputCount);
-    for (const RemoteInputRecord& record : remoteInputs) {
+    remoteInputView.each([&](const entt::entity entity, const InputSnapshot& input) {
+        const RemoteInputRecord record{.entity = entity, .input = input};
         packetArchive(record);
-    }
+    });
 
     return std::move(packetArchive.buffer);
 }
