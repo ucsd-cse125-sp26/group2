@@ -34,6 +34,9 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 /// @brief Top-level client game object.
 ///
@@ -118,6 +121,11 @@ private:
         std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
     /// @brief Emplace player-control components onto the mapped local entity and record it.
     void handleLocalPlayerReady(entt::entity local);
+    void openChat();
+    void closeChat();
+    void submitChat();
+    void appendChatMessage(ClientId sender, std::string_view message);
+    void clearGameplayInputForChat();
 
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
     static constexpr float k_physicsDt = 1.0f / static_cast<float>(k_physicsHz); ///< Seconds per tick.
@@ -323,6 +331,9 @@ private:
     /// when the local player's WeaponState gains a new weapon type or their
     /// reserve ammo grows beyond the previous frame's reading.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
+    std::vector<HudChatMessage> chatMessages_;
+    std::string chatDraft_;
+    bool chatOpen_ = false;
 
     // (No additional bookkeeping needed — name strings are constructed
     // each frame into the thread_local vector inside Game.cpp.)

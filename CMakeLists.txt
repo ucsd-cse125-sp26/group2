@@ -721,6 +721,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"

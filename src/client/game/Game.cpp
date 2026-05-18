@@ -73,6 +73,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
 #include <numeric>
+#include <string_view>
 
 #if defined(__linux__)
 #include <pthread.h>
@@ -128,6 +129,29 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
     }
     SDL_snprintf(outBuf, bufSize, "Player #%d", cid.value);
     return outBuf;
+}
+
+void popUtf8Codepoint(std::string& text)
+{
+    if (text.empty())
+        return;
+    std::size_t firstByte = text.size() - 1;
+    while (firstByte > 0 && (static_cast<unsigned char>(text[firstByte]) & 0xc0u) == 0x80u)
+        --firstByte;
+    text.erase(firstByte);
+}
+
+void appendBoundedUtf8(std::string& dst, const char* text)
+{
+    if (!text || !*text)
+        return;
+    std::string candidate = dst;
+    candidate += text;
+    if (candidate.size() > net::chat::k_maxChatBytes)
+        return;
+    if (!net::chat::isValidUtf8(candidate))
+        return;
+    dst = std::move(candidate);
 }
 
 std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
@@ -528,6 +552,8 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         // TODO: Specific handling for local player deaths (display enemy health)
     });
 
+    client->onTextChat([this](const net::chat::ServerTextChat& chat) { appendChatMessage(chat.sender, chat.message); });
+
     // PR-20: hand each SHOT_DEBUG_REPORT off to the DebugUI's ring
     // buffer.  Pairs with the client-side fire-time snapshot the
     // game thread captures inside iterate() (see fire-detection
@@ -712,6 +738,89 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
     return true;
 }
 
+void Game::openChat()
+{
+    if (chatOpen_)
+        return;
+    chatOpen_ = true;
+    chatDraft_.clear();
+    clearGameplayInputForChat();
+    SDL_StartTextInput(window);
+}
+
+void Game::closeChat()
+{
+    if (!chatOpen_)
+        return;
+    chatOpen_ = false;
+    chatDraft_.clear();
+    SDL_StopTextInput(window);
+    clearGameplayInputForChat();
+}
+
+void Game::submitChat()
+{
+    const std::string clean = net::chat::sanitizeUtf8(chatDraft_);
+    if (!clean.empty())
+        client->sendChatMessage(clean);
+    closeChat();
+}
+
+void Game::appendChatMessage(ClientId sender, std::string_view message)
+{
+    HudChatMessage entry;
+    char nameBuf[32];
+    ClientId localClientId{-1};
+    registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+    entry.fromLocal = localClientId.value != -1 && sender == localClientId;
+    entry.senderName = entry.fromLocal ? "You" : lookupPlayerName(registry, sender, nameBuf, sizeof(nameBuf));
+    entry.message = std::string(message);
+    entry.ageSeconds = 0.0f;
+    chatMessages_.push_back(std::move(entry));
+    constexpr std::size_t k_maxChatHistory = 64;
+    if (chatMessages_.size() > k_maxChatHistory)
+        chatMessages_.erase(chatMessages_.begin(),
+                            chatMessages_.begin() +
+                                static_cast<std::ptrdiff_t>(chatMessages_.size() - k_maxChatHistory));
+}
+
+void Game::clearGameplayInputForChat()
+{
+    systems::grenadeRadialActive = false;
+    systems::pendingGrenadeThrow = false;
+    systems::prevGrenadeKey = false;
+    systems::prevAbilitySelectLeft = false;
+    systems::prevAbilitySelectRight = false;
+    pendingScrollSwitch_ = 0;
+
+    registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
+        snap.forward = false;
+        snap.back = false;
+        snap.left = false;
+        snap.right = false;
+        snap.jump = false;
+        snap.crouch = false;
+        snap.sprint = false;
+        snap.grapple = false;
+        snap.shooting = false;
+        snap.reload = false;
+        snap.pickup = false;
+        snap.switchToPrimary = false;
+        snap.switchToSecondary = false;
+        snap.killSelf = false;
+        snap.skipRespawn = false;
+        snap.throwGrenade = false;
+        snap.grenadeMenuHeld = false;
+        snap.grenadeSelectIndex = kInvalidGrenadeSelectIndex;
+        snap.ability1 = false;
+        snap.ability2 = false;
+        snap.abilitySelectHeld = false;
+        snap.abilitySelectLeft = false;
+        snap.abilitySelectRight = false;
+        snap.debugGrantAbilityLevel = false;
+    });
+}
+
 SDL_AppResult Game::event(SDL_Event* event)
 {
     // Forward every event to ImGui first so it can capture keyboard/mouse
@@ -730,8 +839,42 @@ SDL_AppResult Game::event(SDL_Event* event)
         renderer->setHudTexture(hud_.getOutputTexture());
     }
 
+    if (chatOpen_) {
+        if (event->type == SDL_EVENT_TEXT_INPUT) {
+            appendBoundedUtf8(chatDraft_, event->text.text);
+            return SDL_APP_CONTINUE;
+        }
+        if (event->type == SDL_EVENT_KEY_DOWN) {
+            switch (event->key.key) {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                submitChat();
+                return SDL_APP_CONTINUE;
+            case SDLK_ESCAPE:
+                closeChat();
+                return SDL_APP_CONTINUE;
+            case SDLK_BACKSPACE:
+                popUtf8Codepoint(chatDraft_);
+                return SDL_APP_CONTINUE;
+            default:
+                return SDL_APP_CONTINUE;
+            }
+        }
+        if (event->type == SDL_EVENT_MOUSE_WHEEL || event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+            event->type == SDL_EVENT_MOUSE_BUTTON_UP)
+        {
+            return SDL_APP_CONTINUE;
+        }
+    }
+
     if (event->type == SDL_EVENT_KEY_DOWN) {
         switch (event->key.key) {
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            if (!event->key.repeat)
+                openChat();
+            break;
+
         case SDLK_MINUS:
             return SDL_APP_SUCCESS;
 
@@ -1210,7 +1353,12 @@ SDL_AppResult Game::iterate()
     // is true) so WASD movement calculations match the server.  When the
     // sync toggle is off, movement keys also run every frame.
     // Dead input runs regardless of mouse capture — allows skip-respawn.
-    systems::runDeadInput(registry);
+    // Chat owns the keyboard while open, so gameplay inputs are cleared
+    // instead of sampled.
+    if (chatOpen_)
+        clearGameplayInputForChat();
+    else
+        systems::runDeadInput(registry);
 
     // Query local player's gravity flip state — used for mouse/stick
     // inversion AND for swapping A-D / left-stick left-right.
@@ -1218,7 +1366,7 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
-    if (mouseCaptured) {
+    if (mouseCaptured && !chatOpen_) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
@@ -1281,7 +1429,7 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured) {
+        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_) {
             systems::runMovementKeys(registry, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
@@ -3470,6 +3618,18 @@ SDL_AppResult Game::iterate()
         hudState.matchInfo.valid =
             (currentMatchPhase == MatchPhase::IN_PROGRESS || currentMatchPhase == MatchPhase::FINISHED);
 
+        for (auto& msg : chatMessages_)
+            msg.ageSeconds += frameTime;
+        if (!chatOpen_) {
+            chatMessages_.erase(std::remove_if(chatMessages_.begin(),
+                                               chatMessages_.end(),
+                                               [](const HudChatMessage& msg) { return msg.ageSeconds > 30.0f; }),
+                                chatMessages_.end());
+        }
+        hudState.chat.open = chatOpen_;
+        hudState.chat.draft = chatDraft_;
+        hudState.chat.messages = chatMessages_;
+
         hud_.update(frameTime, hudState);
         hud_.render();
 
@@ -3536,6 +3696,7 @@ bool Game::shouldReturnToLobby() const
 
 void Game::quit()
 {
+    closeChat();
     if (recorder.isRecording())
         recorder.stopRecording();
     sfxSystem.quit();
@@ -3550,6 +3711,7 @@ void Game::quit()
         client->onRawParticleEvent({});
         client->onMatchStateUpdate({});
         client->onKillEvent({});
+        client->onTextChat({});
         client->onShotDebugReport({});
     }
 }

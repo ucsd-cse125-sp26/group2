@@ -7,6 +7,7 @@
 #include "widgets/AbilitySelectionWidget.hpp"
 #include "widgets/AmmoCounter.hpp"
 #include "widgets/BuyMenu.hpp"
+#include "widgets/ChatWidget.hpp"
 #include "widgets/CrosshairWidget.hpp"
 #include "widgets/DamageAccumWidget.hpp"
 #include "widgets/DamageIndicator.hpp"
@@ -189,6 +190,7 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
     widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
+    widgets_.push_back(std::make_unique<ChatWidget>());
 
     // Top center: match header.  (Compass strip removed — gravity flips
     // make a heading readout meaningless and players found it useless.)
