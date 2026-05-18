@@ -848,19 +848,49 @@ void Game::closeChat()
 void Game::submitChat()
 {
     const std::string clean = net::chat::sanitizeUtf8(chatDraft_);
-    if (!clean.empty())
-        client->sendChatMessage(clean);
+    if (!clean.empty() && client->sendChatMessage(clean)) {
+        appendLocalChatMessage(clean);
+        pendingLocalChatEchoes_.push_back(clean);
+        constexpr std::size_t k_maxPendingLocalEchoes = 8;
+        if (pendingLocalChatEchoes_.size() > k_maxPendingLocalEchoes)
+            pendingLocalChatEchoes_.pop_front();
+    }
     closeChat();
 }
 
 void Game::appendChatMessage(ClientId sender, std::string_view message)
 {
-    HudChatMessage entry;
     char nameBuf[32];
     ClientId localClientId{-1};
     registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
-    entry.fromLocal = localClientId.value != -1 && sender == localClientId;
+
+    const bool fromLocal = localClientId.value != -1 && sender == localClientId;
+    if (fromLocal) {
+        const auto pendingIt = std::find(pendingLocalChatEchoes_.begin(), pendingLocalChatEchoes_.end(), message);
+        if (pendingIt != pendingLocalChatEchoes_.end()) {
+            pendingLocalChatEchoes_.erase(pendingIt);
+            return;
+        }
+    }
+
+    HudChatMessage entry;
+    entry.fromLocal = fromLocal;
     entry.senderName = entry.fromLocal ? "You" : lookupPlayerName(registry, sender, nameBuf, sizeof(nameBuf));
+    entry.message = std::string(message);
+    entry.ageSeconds = 0.0f;
+    chatMessages_.push_back(std::move(entry));
+    constexpr std::size_t k_maxChatHistory = 64;
+    if (chatMessages_.size() > k_maxChatHistory)
+        chatMessages_.erase(chatMessages_.begin(),
+                            chatMessages_.begin() +
+                                static_cast<std::ptrdiff_t>(chatMessages_.size() - k_maxChatHistory));
+}
+
+void Game::appendLocalChatMessage(std::string_view message)
+{
+    HudChatMessage entry;
+    entry.fromLocal = true;
+    entry.senderName = "You";
     entry.message = std::string(message);
     entry.ageSeconds = 0.0f;
     chatMessages_.push_back(std::move(entry));

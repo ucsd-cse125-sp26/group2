@@ -190,7 +190,6 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
     widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
-    widgets_.push_back(std::make_unique<ChatWidget>());
 
     // Top center: match header.  (Compass strip removed — gravity flips
     // make a heading readout meaningless and players found it useless.)
@@ -209,6 +208,7 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<EquipmentSlots>());   // bottom-center
     widgets_.push_back(std::make_unique<AmmoCounter>());      // weapon panel (bottom-right)
     widgets_.push_back(std::make_unique<GravityIndicator>()); // sits above weapon panel
+    widgets_.push_back(std::make_unique<ChatWidget>());       // chat should sit above gameplay chrome
 
     // Modal panels (only visible when toggled).
     // TeamStatusBar is intentionally omitted in the Voidfall design — its
