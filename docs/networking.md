@@ -59,6 +59,7 @@ flowchart LR
 - Stores active advertised servers with observed public UDP endpoint.
 - Answers browser list and punch requests.
 - Forwards opaque relay envelopes by `(serverId, clientNonce)`.
+- Validates client-to-relay envelopes with short-lived relay tokens issued by `PunchResponse`.
 - Does not parse gameplay payloads inside relay envelopes.
 
 ---
@@ -126,7 +127,7 @@ sequenceDiagram
   D-->>C: ListResponse with observed server UDP endpoint
   C->>D: PunchRequest(serverId, clientNonce)
   D-->>S: PunchPeer(client public endpoint)
-  D-->>C: PunchResponse(server public endpoint)
+  D-->>C: PunchResponse(server public endpoint, relay token)
   par Direct route
     C->>S: ConnectionRequest direct
     S-->>C: ConnectionAccepted direct

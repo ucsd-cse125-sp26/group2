@@ -67,6 +67,7 @@ public:
         Uint16 port = 0;
         std::uint32_t serverId = 0;
         std::uint32_t clientNonce = 0;
+        std::uint64_t relayToken = 0;
         bool enabled = false;
     };
 

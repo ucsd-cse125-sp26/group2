@@ -183,12 +183,14 @@ SDL_AppResult App::iterate()
                 net::discovery::ServerInfo punchedServer;
                 std::string punchError;
                 const std::uint32_t clientNonce = net::discovery::randomNonce();
+                std::uint64_t relayToken = 0;
                 if (discovery.requestHolePunch(networkConfig.discovery,
                                                joinRequest->globalServerId,
                                                clientNonce,
                                                punchedServer,
                                                punchError,
-                                               networkConfig.discovery.connectPunchTimeoutMs))
+                                               networkConfig.discovery.connectPunchTimeoutMs,
+                                               &relayToken))
                 {
                     serverIp = punchedServer.host;
                     serverPort = punchedServer.gamePort;
@@ -197,6 +199,7 @@ SDL_AppResult App::iterate()
                         .port = networkConfig.discovery.directoryUdpPort,
                         .serverId = joinRequest->globalServerId,
                         .clientNonce = clientNonce,
+                        .relayToken = relayToken,
                         .enabled = true,
                     };
                 } else if (!punchError.empty()) {

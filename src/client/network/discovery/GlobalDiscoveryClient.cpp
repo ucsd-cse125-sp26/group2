@@ -133,7 +133,8 @@ bool GlobalDiscoveryClient::requestHolePunch(const GlobalDiscoveryConfig& cfg,
                                              std::uint32_t clientNonce,
                                              net::discovery::ServerInfo& outServer,
                                              std::string& outError,
-                                             int timeoutMs)
+                                             int timeoutMs,
+                                             std::uint64_t* outRelayToken)
 {
     outError.clear();
     if (!cfg.enabled || serverId == 0 || timeoutMs <= 0)
@@ -157,5 +158,7 @@ bool GlobalDiscoveryClient::requestHolePunch(const GlobalDiscoveryConfig& cfg,
     }
 
     outServer = decoded->server;
+    if (outRelayToken)
+        *outRelayToken = decoded->relayToken;
     return true;
 }

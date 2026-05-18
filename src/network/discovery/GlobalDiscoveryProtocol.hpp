@@ -82,6 +82,7 @@ struct PunchResponse
 {
     bool accepted = false;
     ServerInfo server;
+    std::uint64_t relayToken = 0;
     std::string message;
 };
 

@@ -395,7 +395,8 @@ bool UdpSessionTransport::sendViaRelay(Peer& peer, PacketHeader hdr, const void*
     if (payloadLen < 0)
         return false;
 
-    constexpr int k_relayEnvelopeBytes = static_cast<int>(sizeof(std::uint32_t) * 2 + sizeof(std::uint16_t));
+    constexpr int k_relayEnvelopeBytes =
+        static_cast<int>(sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) + sizeof(std::uint16_t));
     constexpr int k_maxRelayInnerPayload = k_maxPacketBytes - static_cast<int>(sizeof(PacketHeader)) -
                                            k_relayEnvelopeBytes - static_cast<int>(sizeof(PacketHeader));
     static_assert(k_maxRelayInnerPayload > 0, "relay MTU budget must leave room for inner payload bytes");
@@ -407,6 +408,7 @@ bool UdpSessionTransport::sendViaRelay(Peer& peer, PacketHeader hdr, const void*
         envelope.reserve(k_relayEnvelopeBytes + inner.size());
         appendU32(envelope, peer.relayServerId ? peer.relayServerId : relayConfig_.serverId);
         appendU32(envelope, peer.relayClientNonce ? peer.relayClientNonce : relayConfig_.clientNonce);
+        appendU64(envelope, relayConfig_.relayToken);
         const std::size_t lenOff = envelope.size();
         envelope.resize(envelope.size() + sizeof(std::uint16_t));
         writeU16Le(envelope.data() + lenOff, static_cast<std::uint16_t>(inner.size()));
@@ -451,21 +453,23 @@ bool UdpSessionTransport::sendViaRelay(Peer& peer, PacketHeader hdr, const void*
 
 void UdpSessionTransport::processRelayPayload(UdpReceivedMessage& msg)
 {
-    if (msg.payload.size() < sizeof(std::uint32_t) * 2 + sizeof(std::uint16_t))
+    constexpr std::size_t k_relayEnvelopeBytes =
+        sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) + sizeof(std::uint16_t);
+    if (msg.payload.size() < k_relayEnvelopeBytes)
         return;
     const std::uint8_t* data = msg.payload.data();
-    const std::uint16_t innerLen = readU16Le(data + 8);
-    if (msg.payload.size() < 10u + innerLen || innerLen < sizeof(PacketHeader))
+    const std::uint16_t innerLen = readU16Le(data + 16);
+    if (msg.payload.size() < k_relayEnvelopeBytes + innerLen || innerLen < sizeof(PacketHeader))
         return;
 
     PacketHeader innerHdr{};
-    if (!decodePacketHeader(data + 10, innerLen, innerHdr))
+    if (!decodePacketHeader(data + k_relayEnvelopeBytes, innerLen, innerHdr))
         return;
 
     UdpReceivedMessage inner;
     inner.from = msg.from;
     inner.header = innerHdr;
-    const std::uint8_t* payload = data + 10 + sizeof(PacketHeader);
+    const std::uint8_t* payload = data + k_relayEnvelopeBytes + sizeof(PacketHeader);
     const std::size_t payloadLen = innerLen - sizeof(PacketHeader);
     inner.payload.assign(payload, payload + payloadLen);
     processDatagram(inner, true);

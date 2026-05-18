@@ -221,6 +221,7 @@ std::vector<std::uint8_t> encodePunchResponse(const PunchResponse& resp)
     std::vector<std::uint8_t> payload;
     append(payload, static_cast<std::uint8_t>(resp.accepted ? 1 : 0));
     appendServer(payload, resp.server);
+    append(payload, resp.relayToken);
     appendString(payload, resp.message);
     return makeEnvelope(DirectoryMessage::PunchResponse, payload);
 }
@@ -230,8 +231,8 @@ std::optional<PunchResponse> decodePunchResponse(const std::uint8_t* data, std::
     Reader reader(data, len);
     PunchResponse resp;
     std::uint8_t accepted = 0;
-    if (!reader.read(accepted) || !readServer(reader, resp.server) || !reader.readString(resp.message) ||
-        !reader.finished())
+    if (!reader.read(accepted) || !readServer(reader, resp.server) || !reader.read(resp.relayToken) ||
+        !reader.readString(resp.message) || !reader.finished())
     {
         return std::nullopt;
     }

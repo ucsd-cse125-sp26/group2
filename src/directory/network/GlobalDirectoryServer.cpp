@@ -8,6 +8,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <limits>
+#include <random>
 
 namespace
 {
@@ -20,6 +22,13 @@ std::string addressString(NET_Address* addr)
 bool sameEndpoint(const net::UdpEndpointAddr& a, const net::UdpEndpointAddr& b)
 {
     return a.port == b.port && addressString(a.addr) == addressString(b.addr);
+}
+
+std::uint64_t randomRelayToken()
+{
+    static thread_local std::mt19937_64 rng{std::random_device{}()};
+    std::uniform_int_distribution<std::uint64_t> dist{1, std::numeric_limits<std::uint64_t>::max()};
+    return dist(rng);
 }
 } // namespace
 
@@ -175,13 +184,17 @@ void GlobalDirectoryServer::handlePunchRequest(const net::UdpReceivedMessage& ms
     if (!maybeReq)
         return;
 
-    clientsByNonce_[maybeReq->clientNonce] = ClientEndpoint{.endpoint = msg.from, .lastSeenMs = SDL_GetTicks()};
+    ClientEndpoint& client = clientsByNonce_[maybeReq->clientNonce];
+    client.endpoint = msg.from;
+    client.relayToken = randomRelayToken();
+    client.lastSeenMs = SDL_GetTicks();
 
     net::discovery::PunchResponse resp;
     resp.message = "server not found";
     if (auto it = servers_.find(maybeReq->serverId); it != servers_.end()) {
         resp.accepted = true;
         resp.server = it->second.info;
+        resp.relayToken = client.relayToken;
         resp.message = "ok";
 
         const net::discovery::UdpPunchPeer toServer{
@@ -199,11 +212,14 @@ void GlobalDirectoryServer::handlePunchRequest(const net::UdpReceivedMessage& ms
 
 void GlobalDirectoryServer::handleRelayPayload(const net::UdpReceivedMessage& msg)
 {
-    if (msg.payload.size() < sizeof(std::uint32_t) * 2 + sizeof(std::uint16_t))
+    constexpr std::size_t k_relayEnvelopeBytes =
+        sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) + sizeof(std::uint16_t);
+    if (msg.payload.size() < k_relayEnvelopeBytes)
         return;
 
     const std::uint32_t serverId = net::readU32Le(msg.payload.data());
     const std::uint32_t clientNonce = net::readU32Le(msg.payload.data() + 4);
+    const std::uint64_t relayToken = net::readU64Le(msg.payload.data() + 8);
     auto serverIt = servers_.find(serverId);
     if (serverIt == servers_.end())
         return;
@@ -216,7 +232,11 @@ void GlobalDirectoryServer::handleRelayPayload(const net::UdpReceivedMessage& ms
             return;
         sendRelay(clientIt->second.endpoint, msg.payload.data(), msg.payload.size());
     } else {
-        clientsByNonce_[clientNonce] = ClientEndpoint{.endpoint = msg.from, .lastSeenMs = SDL_GetTicks()};
+        auto clientIt = clientsByNonce_.find(clientNonce);
+        if (clientIt == clientsByNonce_.end() || relayToken == 0 || relayToken != clientIt->second.relayToken)
+            return;
+        clientIt->second.endpoint = msg.from;
+        clientIt->second.lastSeenMs = SDL_GetTicks();
         sendRelay(server.endpoint, msg.payload.data(), msg.payload.size());
     }
 }

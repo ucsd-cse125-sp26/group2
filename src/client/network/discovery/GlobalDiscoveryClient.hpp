@@ -28,5 +28,6 @@ public:
                           std::uint32_t clientNonce,
                           net::discovery::ServerInfo& outServer,
                           std::string& outError,
-                          int timeoutMs);
+                          int timeoutMs,
+                          std::uint64_t* outRelayToken = nullptr);
 };

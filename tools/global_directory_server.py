@@ -10,6 +10,7 @@ answers browser list/punch requests, and forwards opaque relay envelopes.
 from __future__ import annotations
 
 import argparse
+import secrets
 import selectors
 import socket
 import struct
@@ -79,6 +80,7 @@ class ServerRecord:
 @dataclass
 class ClientEndpoint:
     endpoint: tuple[str, int]
+    relay_token: int
     last_seen: float
 
 
@@ -176,12 +178,13 @@ def pack_list_response(records: list[ServerRecord]) -> bytes:
     return envelope(MSG_LIST_RESPONSE, payload)
 
 
-def pack_punch_response(record: ServerRecord | None, message: str) -> bytes:
+def pack_punch_response(record: ServerRecord | None, relay_token: int, message: str) -> bytes:
     if record is None:
         empty = ServerRecord(0, "", "", 0, ("", 0), nat_ready=False)
-        payload = struct.pack("<B", 0) + pack_server(empty, 0) + pack_string(message)
+        payload = struct.pack("<B", 0) + pack_server(empty, 0) + struct.pack("<Q", 0) + pack_string(message)
     else:
         payload = struct.pack("<B", 1) + pack_server(record, int((time.monotonic() - record.last_seen) * 1000))
+        payload += struct.pack("<Q", relay_token)
         payload += pack_string(message)
     return envelope(MSG_PUNCH_RESPONSE, payload)
 
@@ -346,27 +349,29 @@ class DirectoryServer:
 
     def handle_punch_request(self, addr: tuple[str, int], payload: bytes):
         server_id, nonce = parse_punch_request(payload)
-        self.clients_by_nonce[nonce] = ClientEndpoint(addr, time.monotonic())
+        relay_token = secrets.randbits(64) or 1
+        self.clients_by_nonce[nonce] = ClientEndpoint(addr, relay_token, time.monotonic())
 
         record = self.servers.get(server_id)
         if record is None:
-            self.send_directory(addr, pack_punch_response(None, "server not found"))
+            self.send_directory(addr, pack_punch_response(None, 0, "server not found"))
             return
 
         peer_payload = envelope(MSG_PUNCH_PEER, pack_udp_punch_peer(nonce, addr[0], addr[1]))
         self.send_directory(record.endpoint, peer_payload)
-        self.send_directory(addr, pack_punch_response(record, "ok"))
+        self.send_directory(addr, pack_punch_response(record, relay_token, "ok"))
         print(
             f"[directory] punch assist server={server_id} client={addr[0]}:{addr[1]} serverUdp={record.udp_host}:{record.udp_port}",
             flush=True,
         )
 
     def handle_relay_payload(self, addr: tuple[str, int], payload: bytes):
-        if len(payload) < 10:
+        if len(payload) < 18:
             return
         server_id, client_nonce = struct.unpack_from("<II", payload, 0)
-        (inner_len,) = struct.unpack_from("<H", payload, 8)
-        if len(payload) < 10 + inner_len:
+        (relay_token,) = struct.unpack_from("<Q", payload, 8)
+        (inner_len,) = struct.unpack_from("<H", payload, 16)
+        if len(payload) < 18 + inner_len:
             return
 
         record = self.servers.get(server_id)
@@ -378,7 +383,11 @@ class DirectoryServer:
             if client is not None:
                 self.send_relay(client.endpoint, payload)
         else:
-            self.clients_by_nonce[client_nonce] = ClientEndpoint(addr, time.monotonic())
+            client = self.clients_by_nonce.get(client_nonce)
+            if client is None or relay_token == 0 or relay_token != client.relay_token:
+                return
+            client.endpoint = addr
+            client.last_seen = time.monotonic()
             self.send_relay(record.endpoint, payload)
 
     def send_directory(self, addr: tuple[str, int], payload: bytes):

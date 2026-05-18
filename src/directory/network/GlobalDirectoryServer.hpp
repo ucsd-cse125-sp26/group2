@@ -37,6 +37,7 @@ private:
     struct ClientEndpoint
     {
         net::UdpEndpointAddr endpoint;
+        std::uint64_t relayToken = 0;
         Uint64 lastSeenMs = 0;
     };
 
