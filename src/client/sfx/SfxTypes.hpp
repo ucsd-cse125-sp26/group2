@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 /// @brief Identifies a loaded sound clip.
@@ -76,3 +78,85 @@ struct SoundClip
     float minCooldown = 0.05f;    ///< Minimum seconds between repeated plays.
     bool loaded = false;          ///< True when the clip was decoded successfully.
 };
+
+inline const char* sfxIdName(SfxId id) noexcept
+{
+    switch (id) {
+    case SfxId::RifleFire:
+        return "RifleFire";
+    case SfxId::RocketFire:
+        return "RocketFire";
+    case SfxId::RailGunFire:
+        return "RailGunFire";
+    case SfxId::EnergyGunFire:
+        return "EnergyGunFire";
+    case SfxId::FleshHit:
+        return "FleshHit";
+    case SfxId::Headshot:
+        return "Headshot";
+    case SfxId::Explosion:
+        return "Explosion";
+    case SfxId::DamageTaken:
+        return "DamageTaken";
+    case SfxId::ArmorBreak:
+        return "ArmorBreak";
+    case SfxId::Death:
+        return "Death";
+    case SfxId::Respawn:
+        return "Respawn";
+    case SfxId::KillConfirm:
+        return "KillConfirm";
+    case SfxId::ChargeRifleLoad:
+        return "ChargeRifleLoad";
+    case SfxId::ChargeRifleShoot:
+        return "ChargeRifleShoot";
+    case SfxId::EnergyBeamLoop:
+        return "EnergyBeamLoop";
+    case SfxId::Healing:
+        return "Healing";
+    case SfxId::ShieldRecharge:
+        return "ShieldRecharge";
+    case SfxId::FootstepLight:
+        return "FootstepLight";
+    case SfxId::FootstepHeavy:
+        return "FootstepHeavy";
+    case SfxId::GrenadeThrow:
+        return "GrenadeThrow";
+    case SfxId::VoiceStart:
+        return "VoiceStart";
+    case SfxId::VoiceStop:
+        return "VoiceStop";
+    default:
+        return "Unknown";
+    }
+}
+
+inline std::optional<SfxId> sfxIdFromName(std::string_view name) noexcept
+{
+    for (std::uint8_t i = 0; i < static_cast<std::uint8_t>(SfxId::_Count); ++i) {
+        const auto id = static_cast<SfxId>(i);
+        if (name == sfxIdName(id))
+            return id;
+    }
+    return std::nullopt;
+}
+
+inline const char* sfxCategoryName(SfxCategory category) noexcept
+{
+    switch (category) {
+    case SfxCategory::Weapons:
+        return "Weapons";
+    case SfxCategory::Impacts:
+        return "Impacts";
+    case SfxCategory::Player:
+        return "Player";
+    case SfxCategory::Footsteps:
+        return "Footsteps";
+    case SfxCategory::Voice:
+        return "Voice";
+    case SfxCategory::UI:
+        return "UI";
+    default:
+        return "Unknown";
+    }
+}

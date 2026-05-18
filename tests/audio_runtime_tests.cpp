@@ -1,0 +1,131 @@
+#include "client/sfx/AudioRuntime.hpp"
+
+#include <cassert>
+#include <fstream>
+#include <string>
+
+namespace
+{
+
+void testDefaultManifestResolvesEvents()
+{
+    audio::AudioRuntime runtime;
+    runtime.loadDefaultManifest();
+    const audio::AudioObjectId object = audio::objectId("player.7");
+    runtime.setObjectTransform(object, {10.0f, 20.0f, 30.0f}, {1.0f, 0.0f, 0.0f});
+
+    const auto commands = runtime.postEvent("weapon.rifle.fire", object);
+    assert(commands.size() == 1);
+    assert(commands[0].type == audio::AudioCommandType::Play);
+    assert(commands[0].sfx == SfxId::RifleFire);
+    assert(commands[0].positional);
+    assert(commands[0].position.x == 10.0f);
+    assert(commands[0].priority > 2.0f);
+}
+
+void testBlendNodeUsesRtpc()
+{
+    audio::AudioRuntime runtime;
+    runtime.loadDefaultManifest();
+    const audio::AudioObjectId object = audio::objectId("runner");
+    runtime.setObjectTransform(object, {0.0f, 0.0f, 0.0f});
+    runtime.setRtpc(object, audio::rtpcId("movement.intensity"), 0.75f);
+
+    const auto commands = runtime.postEvent("footstep", object);
+    assert(commands.size() == 2);
+    assert(commands[0].sfx == SfxId::FootstepLight);
+    assert(commands[1].sfx == SfxId::FootstepHeavy);
+    assert(commands[1].gain > commands[0].gain);
+}
+
+void testTomlManifestLoadsSwitchRandomAndStop()
+{
+    const std::string path = "audio_runtime_test_manifest.toml";
+    {
+        std::ofstream out(path);
+        out << R"(
+[[busses]]
+id = "Master"
+volume = 1.0
+
+[[busses]]
+id = "Weapons"
+parent = "Master"
+volume = 0.5
+max_voices = 4
+
+[[clips]]
+id = "a"
+sfx = "RifleFire"
+bus = "Weapons"
+spatial = true
+priority = 2.0
+
+[[clips]]
+id = "b"
+sfx = "RocketFire"
+bus = "Weapons"
+spatial = true
+priority = 2.0
+
+[[nodes]]
+id = "node.a"
+type = "sound"
+clip = "a"
+
+[[nodes]]
+id = "node.b"
+type = "sound"
+clip = "b"
+
+[[nodes]]
+id = "node.switch"
+type = "switch"
+switch = "weapon.kind"
+default = "node.a"
+children = [
+  { node = "node.b", switch = "rocket" },
+]
+
+[[events]]
+id = "weapon.fire"
+actions = [{ type = "play", target = "node.switch" }]
+
+[[events]]
+id = "weapon.stop"
+actions = [{ type = "stop", target = "node.switch" }]
+)";
+    }
+
+    audio::AudioRuntime runtime;
+    std::vector<std::string> errors;
+    assert(runtime.loadManifest(path, &errors));
+    const audio::AudioObjectId object = audio::objectId("object");
+    runtime.setObjectTransform(object, {2.0f, 0.0f, 0.0f});
+
+    auto commands = runtime.postEvent("weapon.fire", object);
+    assert(commands.size() == 1);
+    assert(commands[0].sfx == SfxId::RifleFire);
+    assert(runtime.busGain(audio::busId("Weapons")) == 0.5f);
+
+    runtime.setSwitch(object, audio::switchGroupId("weapon.kind"), audio::switchValueId("rocket"));
+    commands = runtime.postEvent("weapon.fire", object);
+    assert(commands.size() == 1);
+    assert(commands[0].sfx == SfxId::RocketFire);
+    assert(commands[0].maxBusInstances == 4);
+
+    commands = runtime.postEvent("weapon.stop", object);
+    assert(commands.size() >= 2);
+    assert(commands[0].type == audio::AudioCommandType::StopClip);
+}
+
+} // namespace
+
+int main()
+{
+    static_assert(audio::stableHash("weapon.rifle.fire") == audio::stableHash("weapon.rifle.fire"));
+    testDefaultManifestResolvesEvents();
+    testBlendNodeUsesRtpc();
+    testTomlManifestLoadsSwitchRandomAndStop();
+    return 0;
+}

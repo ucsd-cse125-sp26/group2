@@ -708,6 +708,8 @@ add_executable(group2
     # Sound effects system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxEvents.hpp"
@@ -1729,6 +1731,27 @@ endif()
 set_compiler_warnings(voice_jitter_tests)
 enable_sanitizers(voice_jitter_tests)
 add_test(NAME voice_jitter_tests COMMAND voice_jitter_tests)
+
+add_executable(audio_runtime_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_runtime_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioRuntime.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxTypes.hpp"
+)
+target_include_directories(audio_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(audio_runtime_tests PRIVATE
+    SDL3::SDL3-static
+    glm::glm
+    tomlplusplus::tomlplusplus
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(audio_runtime_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(audio_runtime_tests)
+enable_sanitizers(audio_runtime_tests)
+add_test(NAME audio_runtime_tests COMMAND audio_runtime_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
