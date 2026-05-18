@@ -56,18 +56,62 @@ struct GrenadeConfig
     glm::vec3 tint = {1.0f, 1.0f, 1.0f}; ///< RGB multiplier for projectile rendering.
 };
 
+inline constexpr std::array<WeaponType, 3> kGrenadeTypes = {
+    WeaponType::HEGrenade,
+    WeaponType::Molotov,
+    WeaponType::Impulse,
+};
+inline constexpr std::size_t kGrenadeTypeCount = kGrenadeTypes.size();
+
 /// @brief True if `type` is a grenade (covered by getGrenadeConfig).
 inline bool isGrenadeType(WeaponType type)
 {
-    return type == WeaponType::HEGrenade || type == WeaponType::Molotov || type == WeaponType::Impulse;
+    for (WeaponType grenadeType : kGrenadeTypes) {
+        if (type == grenadeType) {
+            return true;
+        }
+    }
+    return false;
 }
 
-/// @brief Slot/type compatibility predicate for pickups.
+inline std::size_t grenadeTypeIndex(WeaponType type)
+{
+    for (std::size_t i = 0; i < kGrenadeTypes.size(); ++i) {
+        if (kGrenadeTypes[i] == type) {
+            return i;
+        }
+    }
+
+    assert(false && "grenadeTypeIndex called on non-grenade WeaponType");
+    return 0;
+}
+
+inline WeaponType grenadeTypeAt(std::size_t index)
+{
+    if (index >= kGrenadeTypes.size()) {
+        index = 0;
+    }
+    return kGrenadeTypes[index];
+}
+
+inline constexpr const char* grenadeTypeName(WeaponType type)
+{
+    switch (type) {
+    case WeaponType::HEGrenade:
+        return "FRAG";
+    case WeaponType::Molotov:
+        return "MOLOTOV";
+    case WeaponType::Impulse:
+        return "IMPULSE";
+    default:
+        return "GRENADE";
+    }
+}
+
+/// @brief Legacy slot/type compatibility predicate for pickup guards.
 ///
-/// The grenade slot only accepts grenade types; non-grenade slots only accept
-/// non-grenade types. WeaponSpawnerSystem calls this before assigning any
-/// picked-up gun to a slot, so a rifle pickup never overwrites the player's
-/// grenade and a hypothetical world-spawned grenade never overwrites a real gun.
+/// The live grenade inventory is GrenadeState. This helper still protects older
+/// weapon-slot pickup paths from mixing grenade and gun families.
 /// @note XNOR works for the current 2-family partition (grenade vs everything else).
 ///       Adding a 3rd family (e.g. melee) will require a slot-keyed table — see
 ///       WeaponSlot doc.

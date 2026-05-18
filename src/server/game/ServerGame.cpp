@@ -15,6 +15,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -596,6 +597,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         } else {
             const MatchPhase previousPhase = matchController.getCurrentPhase();
             matchController.update(dt, registry, *server);
+            if (previousPhase != MatchPhase::COUNTDOWN && matchController.getCurrentPhase() == MatchPhase::COUNTDOWN)
+                selectMatchAbilityPool();
             if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
                 lobbyManager.resetReadyStatuses();
         }
@@ -795,17 +798,8 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
         .currentMagAmmo = railConfig.magazineSize,
         .fireCooldown = 0.0f,
     };
-    // Grenade slot is exclusive to grenade types — initialize the type so the
-    // single source of truth for "which grenade is selected" is the slot
-    // itself (no separate GrenadeInventory component). Mag + reserve must be
-    // populated from the WeaponConfig so handleAmmo() in WeaponSystem succeeds
-    // when the player throws a grenade.
-    GunInstance& grenade = getSlot(weaponState, WeaponSlot::GRENADE);
-    grenade.type = WeaponType::HEGrenade;
-    const WeaponConfig& grenadeCfg = getWeaponConfig(WeaponType::HEGrenade);
-    grenade.currentMagAmmo = grenadeCfg.magazineSize;
-    grenade.totalAmmo = grenadeCfg.defaultAmmoCapacity;
     registry.emplace<WeaponState>(player, weaponState);
+    registry.emplace<GrenadeState>(player, makeDefaultGrenadeState());
 
     // Attach server-side animator for skeleton-driven hitboxes.
     attachServerAnimator(player);

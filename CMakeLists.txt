@@ -719,6 +719,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
@@ -778,6 +780,8 @@ add_executable(group2
         src/ecs/components/Renderable.hpp
         src/ecs/components/Projectile.hpp
         src/ecs/components/WeaponState.hpp
+        src/ecs/components/GrenadeState.hpp
+        src/ecs/components/GrenadeConfig.hpp
         src/ecs/components/TracerEmitter.hpp
         src/ecs/components/RibbonEmitter.hpp
         src/ecs/components/ParticleEmitterTag.hpp
@@ -874,6 +878,8 @@ add_executable(group2
         src/ecs/systems/WeaponSystem.cpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
+        src/ecs/components/GrenadeState.hpp
+        src/ecs/components/GrenadeConfig.hpp
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
