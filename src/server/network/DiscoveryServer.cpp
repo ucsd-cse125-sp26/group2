@@ -3,6 +3,7 @@
 #include "SDL3_net/SDL_net.h"
 #include "network/PacketType.hpp"
 
+#include <cstring>
 #include <mutex>
 #include <utility>
 

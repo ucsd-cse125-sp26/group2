@@ -3,8 +3,8 @@
 #include "SDL3_net/SDL_net.h"
 #include "network/PacketType.hpp"
 
-#include <vector>
 #include <cstring>
+#include <vector>
 
 bool DiscoveryClient::start(uint16_t port)
 {
