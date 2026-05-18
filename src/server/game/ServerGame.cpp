@@ -70,10 +70,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <glm/geometric.hpp>
 
 namespace
 {
 constexpr float k_lobbyStartCountdownDuration = 3.0f;
+constexpr float k_voiceMaxRange = 3500.0f;
 
 template <std::size_t N>
 std::vector<AbilityType> chooseTwoAbilities(const std::array<AbilityType, N>& pool)
@@ -378,6 +380,39 @@ void ServerGame::eventHandler(Event event)
             // anim history); this keeps memory bounded under abnormal
             // packet rates without requiring a separate LRU.
             pendingShotIntents_.erase(pendingShotIntents_.begin());
+        }
+        break;
+    }
+    case EventType::TextChat: {
+        const auto entityIt = clientEntities.find(event.clientId);
+        if (entityIt == clientEntities.end() || !registry.valid(entityIt->second))
+            return;
+        server->broadcastTextChat(event.clientId, event.textChat.message);
+        break;
+    }
+    case EventType::VoiceFrame: {
+        const auto speakerIt = clientEntities.find(event.clientId);
+        if (speakerIt == clientEntities.end() || !registry.valid(speakerIt->second))
+            return;
+        const Position* speakerPos = registry.try_get<Position>(speakerIt->second);
+        if (!speakerPos)
+            return;
+
+        constexpr float maxRangeSq = k_voiceMaxRange * k_voiceMaxRange;
+        for (const auto& [listenerClientId, listenerEntity] : clientEntities) {
+            if (listenerClientId == event.clientId || !registry.valid(listenerEntity))
+                continue;
+            const Position* listenerPos = registry.try_get<Position>(listenerEntity);
+            if (!listenerPos)
+                continue;
+            const glm::vec3 delta = listenerPos->value - speakerPos->value;
+            if (glm::dot(delta, delta) > maxRangeSq)
+                continue;
+            server->sendVoiceFrameToClient(listenerClientId,
+                                           event.clientId,
+                                           event.voiceFrame.sequence,
+                                           event.voiceFrame.frameMs,
+                                           event.voiceFrame.opus);
         }
         break;
     }

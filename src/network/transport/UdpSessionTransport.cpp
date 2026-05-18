@@ -638,8 +638,11 @@ void UdpSessionTransport::processPayload(Peer& peer,
         return;
     }
 
-    if (channel == ChannelId::SnapshotUnreliableSequenced && !acceptUnreliableSequenced(ch, hdr.sequence))
+    if ((channel == ChannelId::SnapshotUnreliableSequenced || channel == ChannelId::VoiceUnreliableSequenced) &&
+        !acceptUnreliableSequenced(ch, hdr.sequence))
+    {
         return;
+    }
 
     queueEvent(Event{.type = EventType::Payload,
                      .connectionId = peer.connectionId,

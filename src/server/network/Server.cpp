@@ -23,6 +23,7 @@
 #include <entt/entity/entity.hpp>
 #include <memory>
 #include <random>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -540,7 +541,6 @@ void Server::handleSessionPayload(std::uint64_t connId,
                                   const std::uint8_t* payload,
                                   std::uint32_t len)
 {
-    (void)channel;
     if (!payload || len == 0)
         return;
 
@@ -551,7 +551,36 @@ void Server::handleSessionPayload(std::uint64_t connId,
     auto connIt = clients.find(idIt->second);
     if (connIt == clients.end())
         return;
+    if (channel == net::ChannelId::VoiceUnreliableSequenced) {
+        handleVoiceFrame(connIt->second, payload, len);
+        return;
+    }
     handleMessage(connIt->second, payload, len);
+}
+
+void Server::handleVoiceFrame(Connection& conn, const std::uint8_t* payload, std::uint32_t len)
+{
+    const auto frame = net::voice::decodeClientFrame(std::span<const std::uint8_t>(payload, len));
+    if (!frame)
+        return;
+
+    const Uint64 now = SDL_GetTicks();
+    if (conn.voiceWindowStartMs == 0 || now - conn.voiceWindowStartMs >= 1000) {
+        conn.voiceWindowStartMs = now;
+        conn.voiceFramesInWindow = 0;
+    }
+    constexpr std::uint8_t k_maxVoiceFramesPerSecond = 75;
+    if (conn.voiceFramesInWindow >= k_maxVoiceFramesPerSecond)
+        return;
+    ++conn.voiceFramesInWindow;
+
+    Event event{};
+    event.type = EventType::VoiceFrame;
+    event.clientId = conn.clientId;
+    event.voiceFrame.sequence = frame->sequence;
+    event.voiceFrame.frameMs = frame->frameMs;
+    event.voiceFrame.opus = frame->opus;
+    eventQueue.enqueue(std::move(event));
 }
 
 void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, const net::UdpEndpointAddr& from)
@@ -1195,6 +1224,34 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         eventQueue.enqueue(event);
         break;
     }
+    case PacketType::TEXT_CHAT: {
+        const auto chat = net::chat::decodeClientText(
+            std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(data), len));
+        if (!chat)
+            return;
+
+        const Uint64 now = SDL_GetTicks();
+        if (conn.chatWindowStartMs == 0 || now - conn.chatWindowStartMs >= 2000) {
+            conn.chatWindowStartMs = now;
+            conn.chatMessagesInWindow = 0;
+        }
+        constexpr std::uint8_t k_maxChatMessagesPerWindow = 6;
+        if (conn.chatMessagesInWindow >= k_maxChatMessagesPerWindow)
+            return;
+        ++conn.chatMessagesInWindow;
+
+        Event event{};
+        event.type = EventType::TextChat;
+        event.clientId = conn.clientId;
+        event.textChat.clientSeq = chat->clientSeq;
+        event.textChat.message = chat->message;
+        eventQueue.enqueue(std::move(event));
+        break;
+    }
+    case PacketType::VOICE_FRAME:
+        // Voice must ride VoiceUnreliableSequenced; a reliable voice
+        // backlog would be worse than dropped syllables.
+        break;
 
     default:
         SDL_Log("Server: received unknown packet type %d", static_cast<int>(type));
@@ -1512,6 +1569,37 @@ void Server::broadcastKillEvents(const std::vector<NetKillEvent>& events)
     enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
 
     SDL_Log("Server: broadcasted %u kill events to clients", count);
+}
+
+void Server::broadcastTextChat(ClientId sender, std::string_view message)
+{
+    std::vector<std::uint8_t> payload = net::chat::encodeServerText(sender, nextChatServerSeq_++, message);
+    if (payload.empty())
+        return;
+    enqueueReliableEvent(payload.data(), static_cast<int>(payload.size()));
+}
+
+bool Server::sendVoiceFrameToClient(ClientId recipient,
+                                    ClientId speaker,
+                                    std::uint16_t sequence,
+                                    std::uint8_t frameMs,
+                                    std::span<const std::uint8_t> opus)
+{
+    if (!usingUdpSession_)
+        return false;
+
+    std::vector<std::uint8_t> payload = net::voice::encodeServerFrame(speaker, sequence, frameMs, opus);
+    if (payload.empty())
+        return false;
+
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+    const auto it = clients.find(recipient);
+    if (it == clients.end())
+        return false;
+    return session_.send(it->second.connectionId,
+                         net::ChannelId::VoiceUnreliableSequenced,
+                         payload.data(),
+                         static_cast<int>(payload.size()));
 }
 
 bool Server::sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players)

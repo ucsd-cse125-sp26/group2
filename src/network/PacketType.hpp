@@ -67,4 +67,8 @@ enum class PacketType : uint8_t
     LOBBY_STATE,    ///< Server -> single Client: full lobby snapshot on join. Format: [count:u32][LobbyPlayer*count]
     HOST_READY,     ///< Client -> Server: host signals ready to start match.
     START_MATCH,    ///< Client -> Server: host requests match start.
+
+    TEXT_CHAT,      ///< Client <-> Server: bounded UTF-8 all-chat message.
+    VOICE_FRAME,    ///< Client <-> Server: Opus voice frame for proximity chat.
+    VOICE_STATE,    ///< Client <-> Server: push-to-talk state hint for HUD indicators.
 };

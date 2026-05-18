@@ -7,6 +7,8 @@
 #include "ecs/components/InputSnapshot.hpp"
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 /// @brief PR-27: per-shot animation-state assertion from the client.
 ///
@@ -25,6 +27,19 @@ struct ShotIntentPayload
     AnimSnapshot targetAnim{};
 };
 
+struct TextChatPayload
+{
+    std::uint16_t clientSeq = 0;
+    std::string message;
+};
+
+struct VoiceFramePayload
+{
+    std::uint16_t sequence = 0;
+    std::uint8_t frameMs = 20;
+    std::vector<std::uint8_t> opus;
+};
+
 /// @brief A single gameplay event produced by network input processing.
 class Event
 {
@@ -33,4 +48,6 @@ public:
     EventType type;
     InputSnapshot movementIntent = {}; ///< Used when `type == Input`.
     ShotIntentPayload shotIntent = {}; ///< Used when `type == ShotIntent` (PR-27).
+    TextChatPayload textChat = {};     ///< Used when `type == TextChat`.
+    VoiceFramePayload voiceFrame = {}; ///< Used when `type == VoiceFrame`.
 };
