@@ -908,6 +908,8 @@ add_executable(group2
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/ecs/abilities/GravityAbility.cpp
+        src/ecs/abilities/GravityAbility.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
         src/client/menus/lobby/Lobby.hpp
@@ -1203,6 +1205,8 @@ add_executable(server
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/ecs/abilities/GravityAbility.cpp
+        src/ecs/abilities/GravityAbility.hpp
         src/server/lobby/LobbyManager.hpp
         src/server/lobby/LobbyManager.cpp
         src/ecs/components/PowerupSpawner.hpp
@@ -1455,6 +1459,8 @@ add_executable(clientbot
         src/ecs/systems/AbilitySystem.hpp
         src/ecs/abilities/DashAbility.cpp
         src/ecs/abilities/DashAbility.hpp
+        src/ecs/abilities/GravityAbility.cpp
+        src/ecs/abilities/GravityAbility.hpp
         src/ecs/components/PowerupSpawner.hpp
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp

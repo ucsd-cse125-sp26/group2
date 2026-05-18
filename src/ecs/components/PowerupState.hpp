@@ -33,13 +33,13 @@ inline const PowerupConfig& getPowerupConfig(PowerupType type)
         PowerupConfig{
             .type = PowerupType::Damage,
             .duration = 15.0f,
-            .spawnCooldown = 240.0f,
+            .spawnCooldown = 2.0f,
             .amount = 2.0f,
         }, // Damage
         PowerupConfig{
             .type = PowerupType::Shield,
             .duration = 30.0f,
-            .spawnCooldown = 240.0f,
+            .spawnCooldown = 2.0f,
             .amount = 200.0f, // amount of over shield
         },                    // Shield
     }};

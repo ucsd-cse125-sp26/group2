@@ -3,7 +3,9 @@
 
 #include "PowerupSpawnerSystem.hpp"
 
+#include "PlayerStatusSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -53,14 +55,21 @@ inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, PowerupSpawner& spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, PowerupState>();
-    view.each([&](const Position& pos, const CollisionShape& shape, PowerupState& powerups) {
-        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) &&
-            spawner.hasPowerup)
+    view.each([&](entt::entity player,
+                  const Position& pos,
+                  const CollisionShape& shape,
+                  PowerupState& powerups){
+        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasPowerup)
         {
             const PowerupConfig config = getPowerupConfig(spawner.type);
             addOrRefreshPowerup(powerups, spawner.type, config.duration);
             spawner.hasPowerup = false;
             spawner.spawnCooldown = config.spawnCooldown;
+
+            if (spawner.type == PowerupType::Shield) {
+                Health& healthComp = registry.get<Health>(player);
+                healthComp.overShield = overShieldMax;
+            }
         }
     });
 }

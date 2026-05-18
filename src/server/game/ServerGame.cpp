@@ -6,6 +6,7 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/abilities/GravityAbility.hpp"
 #include "ecs/abilities/GrappleAbility.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
@@ -64,7 +65,6 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cstring>
 
 namespace
 {
@@ -92,7 +92,7 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     // Writes phase-diag-<timestamp>.csv next to the server binary; flip off
     // with `--no-phase-diag` once the bug is fixed (TODO: CLI plumb).
     physics::diag::setEnabled(true);
-    SDL_Log("[server] physics diagnostic ENABLED - writing phase-diag-*.csv and movement-diag-*.csv");
+    SDL_Log("[server] phase-through diagnostic ENABLED — writing phase-diag-*.csv");
 
     clientEntities.clear(); // For safety
     registry.clear();
@@ -160,9 +160,13 @@ void ServerGame::run()
         const entt::entity spawner = registry.create();
         registry.emplace<WeaponSpawner>(
             spawner,
-            WeaponSpawner{.type = weaponType, .spawnCooldown = systems::weaponCooldownTime, .hasWeapon = true});
-        registry.emplace<Position>(spawner, pos);
-        registry.emplace<CollisionShape>(spawner);
+            WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
+        );
+        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
+
+        registry.emplace<Position>(spawner, centeredPos);
+        registry.emplace<CollisionShape>(spawner, shape);
     }
 
     // Respawn points (with cooldown state)
@@ -181,8 +185,14 @@ void ServerGame::run()
 
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
-            spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
-        registry.emplace<Position>(spawner, pos);
+            spawner,
+            PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false}
+        );
+        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
+
+        registry.emplace<Position>(spawner, centeredPos);
+        registry.emplace<CollisionShape>(spawner, shape);
         registry.emplace<CollisionShape>(spawner);
     }
 
@@ -351,6 +361,25 @@ void ServerGame::eventHandler(Event event)
     default:
         break;
     }
+}
+
+void ServerGame::selectMatchAbilityPool()
+{
+    // Clear old abilities
+    matchPrimaryAbilities.clear();
+    matchSecondaryAbilities.clear();
+
+    auto idx1 = std::rand() % primaryAbilityTypes.size();
+    auto idx2 = std::rand() % primaryAbilityTypes.size();
+
+    matchPrimaryAbilities.push_back(primaryAbilityTypes[idx1]);
+    matchPrimaryAbilities.push_back(primaryAbilityTypes[idx2]);
+
+    idx1 = std::rand() % secondaryAbilityTypes.size();
+    idx2 = std::rand() % secondaryAbilityTypes.size();
+
+    matchSecondaryAbilities.push_back(secondaryAbilityTypes[idx1]);
+    matchSecondaryAbilities.push_back(secondaryAbilityTypes[idx2]);
 }
 
 void ServerGame::tick(float dt, Uint64 nextTick)
@@ -529,6 +558,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 lobbyStartCountdownActive = false;
                 lobbyStartCountdownTimer = 0.0f;
                 if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
+                    selectMatchAbilityPool();
                     matchController.hostStartedMatch();
                     matchController.update(dt, registry, *server);
                 } else {
@@ -695,6 +725,7 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<AbilityState>(player,
                                    AbilityState{
                                        .primary = AbilityType::Grapple,
+                                       .secondary = AbilityType::Gravity,
                                    }); // Defaults to level 0 with 0 accum damage
     registry.emplace<PowerupState>(player);
 

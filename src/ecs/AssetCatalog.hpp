@@ -52,6 +52,7 @@ inline const AssetDefinition kRocketProjectile{
     .filename = "rocket_projectile.glb", // update with rocket projectile asset
     .role = AssetRole::Entity,
     .loadScale = 20.0f,
+    .flipUVs = true,
 };
 
 inline const std::array<AssetDefinition, 4> kWeaponAssets{{

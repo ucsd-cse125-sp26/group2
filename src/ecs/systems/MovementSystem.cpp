@@ -255,9 +255,6 @@ void tickTimers(PlayerStateRef state, float dt)
             state.sim.grappleCooldownActive = false;
     }
 
-    // Gravity flip cooldown.
-    if (state.sim.gravityFlipCooldown > 0.0f)
-        state.sim.gravityFlipCooldown -= dt;
 }
 
 } // namespace
@@ -1787,18 +1784,6 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
             // 0. Tick timers
             tickTimers(state, dt);
-
-            // 0b. Gravity flip toggle (rising edge of G key with cooldown).
-            {
-                const bool flipEdge = input.flipGravity && !state.sim.flipGravityHeldLastTick;
-                if (flipEdge && state.sim.gravityFlipCooldown <= 0.0f) {
-                    state.vis.gravityFlipped = !state.vis.gravityFlipped;
-                    state.sim.gravityFlipCooldown = physics::k_gravityFlipCooldown;
-                    // Clear grounded so the player doesn't stick to the old surface.
-                    state.vis.grounded = false;
-                }
-                state.sim.flipGravityHeldLastTick = input.flipGravity;
-            }
 
             // Gravity direction multiplier: +1 normal, -1 flipped.
             const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;

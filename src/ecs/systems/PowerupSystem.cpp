@@ -42,12 +42,29 @@ namespace systems
 
 void runPowerups(Registry& registry, float dt)
 {
-    auto view = registry.view<Player, PowerupState>();
-    view.each([&](PowerupState& powerups) {
-        for (ActivePowerup powerup : powerups.active) {
-            powerup.timeRemaining -= dt;
-            if (powerup.timeRemaining <= 0) {
-                removePowerup(powerups, powerup.type);
+    auto view = registry.view<Player, PowerupState, Health>();
+
+    view.each([&](PowerupState& powerups, Health& health) {
+        for (auto it = powerups.active.begin(); it != powerups.active.end(); ) {
+            it->timeRemaining -= dt;
+
+            bool expired = it->timeRemaining <= 0.0f;
+
+            if (it->type == PowerupType::Shield) {
+                const PowerupConfig shieldConfig = getPowerupConfig(PowerupType::Shield);
+                const float tickDmg = (overShieldMax / shieldConfig.duration) * dt;
+
+                health.overShield = std::max(0.0f, health.overShield - tickDmg);
+
+                if (health.overShield <= 0.0f) {
+                    expired = true;
+                }
+            }
+
+            if (expired) {
+                it = powerups.active.erase(it);
+            } else {
+                ++it;
             }
         }
     });

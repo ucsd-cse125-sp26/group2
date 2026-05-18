@@ -14,6 +14,7 @@ namespace systems
 {
 const float armorMax = 100.0f;   ///< Maximum armor value.
 const float healthMax = 100.0f;  ///< Maximum health value.
+const float overShieldMax = 200.0f;
 const float healCooldown = 5.0f; ///< Seconds after last damage before passive healing starts.
 const float healingRate = 20.0f; ///< Passive healing amount per second.
 
@@ -33,7 +34,8 @@ void applyHeal(float amount, Health& playerHealth);
 /// @param registry   The ECS registry.
 /// @param killEvents Accumulates kill events for network broadcast.
 /// @param hitRegion  Body region that was hit (for kill feed / headshot tracking).
-void applyDamage(float damage,
+/// @return Final damage value after status modifiers such as powerups. Returns 0 if damage was ignored.
+float applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
                  Registry& registry,

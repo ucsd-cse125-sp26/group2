@@ -274,7 +274,19 @@ inline void updateAbilityLevel(Registry& registry, entt::entity player, float dm
     }
 }
 
-void applyDamage(float damage,
+inline float absorbDamage(float& pool, float damage)
+{
+    if (pool < 0 ) {
+        pool = 0;
+        return damage;
+    }
+
+    const float absorbed = std::min(pool, damage);
+    pool -= absorbed;
+    return damage - absorbed;
+}
+
+float applyDamage(float damage,
                  entt::entity player,
                  entt::entity& killer,
                  Registry& registry,
@@ -283,35 +295,39 @@ void applyDamage(float damage,
 {
     // If player is dead, ignore damage
     if (registry.all_of<RespawnTimer>(player))
-        return;
+        return 0.0f;
+
 
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 
     // Reset heal cooldown on every damage tick
     playerHealth.healTimer = systems::healCooldown;
 
-    if (player != killer) {
-        updateAbilityLevel(registry, killer, damage);
-
-        PowerupState& powerupState = registry.get<PowerupState>(killer);
-        PowerupConfig damageConfig = getPowerupConfig(PowerupType::Damage);
-        if (hasPowerup(powerupState, PowerupType::Damage)) {
+    if (player != killer && registry.valid(killer)) {
+        const PowerupState* powerupState = registry.try_get<PowerupState>(killer);
+        const PowerupConfig damageConfig = getPowerupConfig(PowerupType::Damage);
+        if (powerupState != nullptr && hasPowerup(*powerupState, PowerupType::Damage)) {
             damage = damage * damageConfig.amount;
         }
+
+        updateAbilityLevel(registry, killer, damage);
     }
 
-    if (playerHealth.armor >= damage) {
-        playerHealth.armor -= damage;
-    } else {
-        const float overflow = damage - playerHealth.armor;
-        playerHealth.armor = 0;
-        if (playerHealth.health - overflow <= 0) {
-            playerHealth.health = 0;
+    float remainingDamage = damage;
+
+    remainingDamage = absorbDamage(playerHealth.overShield, remainingDamage);
+    remainingDamage = absorbDamage(playerHealth.armor, remainingDamage);
+
+    if (remainingDamage > 0.0f) {
+        if (playerHealth.health <= remainingDamage) {
+            playerHealth.health = 0.0f;
             handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion);
         } else {
-            playerHealth.health -= overflow;
+            playerHealth.health -= remainingDamage;
         }
     }
+
+    return damage;
 }
 
 /// @brief Tick passive health regeneration after the heal cooldown expires.
