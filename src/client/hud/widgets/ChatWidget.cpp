@@ -22,7 +22,8 @@ ChatWidget::ChatWidget()
 void ChatWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     chat_ = state.chat;
-    visible = chat_.open || !chat_.messages.empty();
+    speakers_ = state.voiceSpeakers;
+    visible = chat_.open || !chat_.messages.empty() || !speakers_.empty();
 }
 
 void ChatWidget::draw(HudContext& ctx, float x, float y)
@@ -73,6 +74,23 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
 
         cursorY += lineH;
         ++drawn;
+    }
+
+    if (!speakers_.empty()) {
+        float speakerY = y - (static_cast<float>(speakers_.size()) * 18.f + 8.f) * s;
+        int count = 0;
+        for (const auto& speaker : speakers_) {
+            if (count++ >= 3)
+                break;
+            ctx.text("VOICE", x + pad, speakerY, 10.f * s, withAlpha(k_cyan, 0.85f), HudAlign::Left);
+            ctx.text(speaker.senderName.c_str(),
+                     x + pad + 46.f * s,
+                     speakerY,
+                     11.f * s,
+                     withAlpha(k_textBright, 0.9f),
+                     HudAlign::Left);
+            speakerY += 18.f * s;
+        }
     }
 
     if (!chat_.open)

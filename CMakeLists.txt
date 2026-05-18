@@ -343,6 +343,18 @@ FetchContent_MakeAvailable(minimp3)
 add_library(minimp3 INTERFACE)
 target_include_directories(minimp3 SYSTEM INTERFACE ${minimp3_SOURCE_DIR})
 
+# Opus — low-latency voice compression for proximity chat.
+set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    opus
+    GIT_REPOSITORY https://github.com/xiph/opus.git
+    GIT_TAG        v1.5.2
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(opus)
+
 add_library(vhacd INTERFACE)
 if(GROUP2_ENABLE_VHACD)
     # V-HACD — legacy opt-in convex decomposition for prototype props.
@@ -684,6 +696,15 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
+    # Voice chat
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCapture.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceChatSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceChatSystem.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCodec.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceCodec.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.hpp"
     # Sound effects system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
@@ -1026,6 +1047,7 @@ target_link_libraries(group2 PRIVATE
     assimp
     stb_image
     minimp3
+    Opus::opus
     ozz_animation_offline
     ozz_animation
     ozz_base
@@ -1692,6 +1714,21 @@ endif()
 set_compiler_warnings(audio_math_tests)
 enable_sanitizers(audio_math_tests)
 add_test(NAME audio_math_tests COMMAND audio_math_tests)
+
+add_executable(voice_jitter_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/voice_jitter_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.hpp"
+)
+target_include_directories(voice_jitter_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(voice_jitter_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(voice_jitter_tests)
+enable_sanitizers(voice_jitter_tests)
+add_test(NAME voice_jitter_tests COMMAND voice_jitter_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

@@ -59,7 +59,7 @@ SpatialParams evaluateSpatial(const glm::vec3& sourcePosition,
                                                                                : glm::vec3{0.0f, 0.0f, 1.0f};
     glm::vec3 up =
         glm::dot(listener.up, listener.up) > 0.0001f ? glm::normalize(listener.up) : glm::vec3{0.0f, 1.0f, 0.0f};
-    glm::vec3 right = glm::cross(forward, up);
+    glm::vec3 right = glm::cross(up, forward);
     if (glm::dot(right, right) <= 0.0001f)
         right = glm::vec3{1.0f, 0.0f, 0.0f};
     else

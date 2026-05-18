@@ -13,4 +13,5 @@ struct ChatWidget : HudWidget
 
 private:
     HudChatState chat_{};
+    std::span<const HudVoiceSpeaker> speakers_{};
 };

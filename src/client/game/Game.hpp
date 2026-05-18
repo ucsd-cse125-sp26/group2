@@ -26,6 +26,7 @@
 #include "systems/InputRingBuffer.hpp"
 #include "systems/KillFeedEvent.hpp"
 #include "util/WorkerPool.hpp"
+#include "voice/VoiceChatSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -150,6 +151,7 @@ private:
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
     SfxSystem sfxSystem;           ///< Client-side sound effects system.
+    VoiceChatSystem voiceChat_;    ///< Push-to-talk Opus proximity voice chat.
     Hud hud_;                      ///< In-game HUD overlay system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
 
@@ -332,6 +334,7 @@ private:
     /// reserve ammo grows beyond the previous frame's reading.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
     std::vector<HudChatMessage> chatMessages_;
+    std::vector<HudVoiceSpeaker> voiceSpeakers_;
     std::string chatDraft_;
     bool chatOpen_ = false;
 

@@ -288,6 +288,7 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         // ExplosionEvent: also play the explosion SFX alongside the particle effect.
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
     }
+    voiceChat_.init();
 
     // HUD system — needs device + shader format from renderer, SDF atlas from particles.
     if (particleSystem.sdfReady()) {
@@ -553,6 +554,7 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
     });
 
     client->onTextChat([this](const net::chat::ServerTextChat& chat) { appendChatMessage(chat.sender, chat.message); });
+    client->onVoiceFrame([this](const net::voice::ServerVoiceFrame& frame) { voiceChat_.enqueueFrame(frame); });
 
     // PR-20: hand each SHOT_DEBUG_REPORT off to the DebugUI's ring
     // buffer.  Pairs with the client-side fire-time snapshot the
@@ -1709,6 +1711,13 @@ SDL_AppResult Game::iterate()
     registry.view<LocalPlayer, Velocity>().each(
         [&](const Velocity& velocity) { audioListener.velocity = velocity.value; });
     sfxSystem.setListener(audioListener);
+
+    int keyboardCount = 0;
+    const bool* keyboard = SDL_GetKeyboardState(&keyboardCount);
+    const bool pttHeld = keyboard != nullptr && SDL_SCANCODE_V < keyboardCount && keyboard[SDL_SCANCODE_V];
+    const bool imguiTextInput = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantTextInput;
+    voiceChat_.setPushToTalk(pttHeld && mouseCaptured && !chatOpen_ && !imguiTextInput);
+    voiceChat_.update(frameTime, *client, registry, sfxSystem);
 
     // Update SFX system: retire finished voices, tick cooldowns, detect state changes.
     sfxSystem.update(frameTime, registry);
@@ -3638,6 +3647,15 @@ SDL_AppResult Game::iterate()
         hudState.chat.draft = chatDraft_;
         hudState.chat.messages = chatMessages_;
 
+        voiceSpeakers_.clear();
+        for (const auto& speaker : voiceChat_.speaking()) {
+            HudVoiceSpeaker hudSpeaker;
+            char nameBuf[32];
+            hudSpeaker.senderName = lookupPlayerName(registry, speaker.speaker, nameBuf, sizeof(nameBuf));
+            voiceSpeakers_.push_back(std::move(hudSpeaker));
+        }
+        hudState.voiceSpeakers = voiceSpeakers_;
+
         hud_.update(frameTime, hudState);
         hud_.render();
 
@@ -3707,6 +3725,7 @@ void Game::quit()
     closeChat();
     if (recorder.isRecording())
         recorder.stopRecording();
+    voiceChat_.quit();
     sfxSystem.quit();
     particleSystem.quit();
     hud_.quit();
@@ -3720,6 +3739,7 @@ void Game::quit()
         client->onMatchStateUpdate({});
         client->onKillEvent({});
         client->onTextChat({});
+        client->onVoiceFrame({});
         client->onShotDebugReport({});
     }
 }

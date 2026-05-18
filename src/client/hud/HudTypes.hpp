@@ -233,6 +233,11 @@ struct HudChatState
     std::span<const HudChatMessage> messages;
 };
 
+struct HudVoiceSpeaker
+{
+    std::string senderName;
+};
+
 /// @brief Match info for the top-center header.
 struct HudMatchInfo
 {
@@ -297,6 +302,7 @@ struct HudGameState
     std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
     HudKdaCounter kda;                                          ///< Local player kill/assist/death counter (top-right).
     HudChatState chat;                                          ///< Bottom-left all-chat log/input.
+    std::span<const HudVoiceSpeaker> voiceSpeakers;             ///< Currently audible proximity voice speakers.
     HudMatchInfo matchInfo;   ///< Match elapsed time + frag target (top-center header).
     int gravityDirection = 0; ///< 0=down, 1=left, 2=up, 3=right (HUD compass arrow).
 
