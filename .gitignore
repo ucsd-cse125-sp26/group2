@@ -7,6 +7,9 @@ cmake-build-debug/
 # FetchContent cache (persists across clean builds for speed)
 .deps/
 
+*.csv
+*.txt
+
 # Per-developer CMake preset overrides (e.g. relocating build out of a
 # network home with a quota).  CMake auto-loads this alongside CMakePresets.json.
 CMakeUserPresets.json
