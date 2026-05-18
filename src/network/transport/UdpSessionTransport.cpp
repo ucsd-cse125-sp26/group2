@@ -376,27 +376,60 @@ bool UdpSessionTransport::sendViaRelay(Peer& peer, PacketHeader hdr, const void*
     if (!peer.relayAddr.addr)
         return false;
 
-    std::vector<std::uint8_t> inner = makeDatagram(hdr, payload, payloadLen);
-    std::vector<std::uint8_t> envelope;
-    appendU32(envelope, peer.relayServerId ? peer.relayServerId : relayConfig_.serverId);
-    appendU32(envelope, peer.relayClientNonce ? peer.relayClientNonce : relayConfig_.clientNonce);
-    const std::size_t lenOff = envelope.size();
-    envelope.resize(envelope.size() + sizeof(std::uint16_t));
-    writeU16Le(envelope.data() + lenOff, static_cast<std::uint16_t>(inner.size()));
-    envelope.insert(envelope.end(), inner.begin(), inner.end());
+    if (payloadLen < 0)
+        return false;
 
-    PacketHeader outer{};
-    outer.kind = static_cast<std::uint8_t>(PacketKind::RelayPayload);
-    outer.connectionId = hdr.connectionId;
-    outer.channel = hdr.channel;
-    outer.routeId = 1;
-    const bool ok =
-        endpoint_.sendFragmented(peer.relayAddr, outer, envelope.data(), static_cast<int>(envelope.size()), 1);
-    if (ok) {
-        stats_.bytesSent += sizeof(PacketHeader) + envelope.size();
-        ++stats_.packetsSent;
-        stats_.relayActive = true;
+    constexpr int k_relayEnvelopeBytes = static_cast<int>(sizeof(std::uint32_t) * 2 + sizeof(std::uint16_t));
+    constexpr int k_maxRelayInnerPayload = k_maxPacketBytes - static_cast<int>(sizeof(PacketHeader)) -
+                                           k_relayEnvelopeBytes - static_cast<int>(sizeof(PacketHeader));
+    static_assert(k_maxRelayInnerPayload > 0, "relay MTU budget must leave room for inner payload bytes");
+
+    const auto* bytes = static_cast<const std::uint8_t*>(payload);
+    auto sendInner = [&](PacketHeader innerHdr, const std::uint8_t* innerPayload, int innerPayloadLen) {
+        const std::vector<std::uint8_t> inner = makeDatagram(innerHdr, innerPayload, innerPayloadLen);
+        std::vector<std::uint8_t> envelope;
+        envelope.reserve(k_relayEnvelopeBytes + inner.size());
+        appendU32(envelope, peer.relayServerId ? peer.relayServerId : relayConfig_.serverId);
+        appendU32(envelope, peer.relayClientNonce ? peer.relayClientNonce : relayConfig_.clientNonce);
+        const std::size_t lenOff = envelope.size();
+        envelope.resize(envelope.size() + sizeof(std::uint16_t));
+        writeU16Le(envelope.data() + lenOff, static_cast<std::uint16_t>(inner.size()));
+        envelope.insert(envelope.end(), inner.begin(), inner.end());
+
+        PacketHeader outer{};
+        outer.kind = static_cast<std::uint8_t>(PacketKind::RelayPayload);
+        outer.connectionId = innerHdr.connectionId;
+        outer.channel = innerHdr.channel;
+        outer.routeId = 1;
+        const bool sent = endpoint_.send(peer.relayAddr, outer, envelope.data(), static_cast<int>(envelope.size()));
+        if (sent) {
+            stats_.bytesSent += sizeof(PacketHeader) + envelope.size();
+            ++stats_.packetsSent;
+        }
+        return sent;
+    };
+
+    bool ok = true;
+    if (payloadLen <= k_maxRelayInnerPayload) {
+        hdr.flags = static_cast<std::uint8_t>(hdr.flags & ~k_flagFragmented);
+        hdr.fragmentInfo = 0;
+        ok = sendInner(hdr, bytes, payloadLen);
+    } else {
+        const int fragCount = (payloadLen + k_maxRelayInnerPayload - 1) / k_maxRelayInnerPayload;
+        if (fragCount > 255)
+            return false;
+        for (int i = 0; i < fragCount; ++i) {
+            const int offset = i * k_maxRelayInnerPayload;
+            const int chunkLen = std::min(k_maxRelayInnerPayload, payloadLen - offset);
+            PacketHeader fragHdr = hdr;
+            fragHdr.flags = static_cast<std::uint8_t>(fragHdr.flags | k_flagFragmented);
+            fragHdr.fragmentInfo = static_cast<std::uint16_t>((i << 8) | fragCount);
+            ok = sendInner(fragHdr, bytes ? bytes + offset : nullptr, chunkLen) && ok;
+        }
     }
+
+    if (ok)
+        stats_.relayActive = true;
     return ok;
 }
 
