@@ -1,7 +1,7 @@
 /// @file SfxSystem.hpp
 /// @brief Client-side sound effects system.
 ///
-/// Owns the SDL3 audio device and a pool of AudioStream voices.
+/// Owns the SDL3 audio device, clip bank, source pool, and custom mixer.
 /// Follows the same init / update / quit lifecycle as ParticleSystem.
 /// Subscribes to entt::dispatcher events (WeaponFiredEvent, ExplosionEvent)
 /// and detects client-side state changes (health, death, kills) each update().
@@ -51,7 +51,7 @@ public:
     /// @param registry  ECS registry (read-only — used to detect health/death/kill changes).
     void update(float dt, const Registry& registry);
 
-    /// @brief Destroy all active streams, close the audio device, quit audio subsystem.
+    /// @brief Destroy active sources, close the audio device, quit audio subsystem.
     void quit();
 
     /// @brief Forward SDL audio-device events so the system can handle hot-swap.

@@ -1,8 +1,10 @@
-# SFX
+# SFX, Voice, And Spatial Audio
 
-SDL3 audio directly (no SDL_mixer, no OpenAL). MP3 decode via vendored `minimp3`, WAV via `SDL_LoadWAV`. Engine does its own mixing through a 32-voice pool. Fed by both `entt::dispatcher` events and per-frame state-delta polling.
+SDL3 audio directly (no SDL_mixer, no OpenAL). The client now owns one playback
+device and one custom mixer path, while `SfxSystem` remains the game-facing
+facade for UI sounds, weapon sounds, world sounds, loops, and voice playback.
 
-Last verified against source: branch `core/collisions+wallrun` (2026-05-16).
+Last verified against source: branch `codex/text-voice-chat-audio` (2026-05-18).
 
 ---
 
@@ -10,156 +12,179 @@ Last verified against source: branch `core/collisions+wallrun` (2026-05-16).
 
 ```mermaid
 flowchart LR
-  Assets[assets/sounds/*.wav · *.mp3] --> Init[SfxSystem::init]
-  Init --> Decode[WAV: SDL_LoadWAV<br/>MP3: minimp3 decode]
-  Decode --> Pre[preconvertClips:<br/>SDL_ConvertAudioSamples to device format]
-  Pre --> Clips[SoundClip{pcmData, sampleRate, format, ...}]
-  Gameplay["WeaponFiredEvent / ExplosionEvent<br/>dispatcher sinks"] --> Sys[SfxSystem::update]
-  Sys --> Poll["state-delta polling each frame:<br/>Health.health drop → DamageTaken<br/>armor=0 → ArmorBreak<br/>stats.kills+ → KillConfirm<br/>stats.deaths+ → Death + Respawn"]
-  Poll --> Play
-  Sys --> Play[play(clip)]
-  Play --> Voice[acquireVoice from 32-voice pool]
-  Voice --> Stream["SDL_AudioStream per voice<br/>(allocated per play — see issue)"]
-  Stream --> Mix["engine = the mixer<br/>effectiveGain = master×category×clip×caller"]
-  Mix --> Dev[SDL_AudioDevice]
+  Assets["assets/sounds/*.wav / *.mp3"] --> Init["SfxSystem::init"]
+  Init --> Decode["SDL_LoadWAV / minimp3"]
+  Decode --> Clips["Predecoded F32 stereo clip bank"]
+  Gameplay["Gameplay events / state polling / net particle events"] --> Facade["SfxSystem facade"]
+  Voice["VoiceChatSystem<br/>Opus decode + jitter buffer"] --> Facade
+  Facade --> Sources["Source manager<br/>2D, 3D, loops, voice streams"]
+  Sources --> Spatial["Spatial evaluation<br/>attenuation, pan, Doppler, occlusion"]
+  Spatial --> Mixer["SDL callback mixer<br/>buses, priority, reverb taps"]
+  Mixer --> Device["SDL playback device"]
 ```
 
----
+`SfxSystem` owns:
 
-## 2. Audio backend
+- clip loading and preconversion into mixer-ready float PCM
+- a bounded 64-source pool with priority stealing and virtualization
+- category volumes and master gain
+- one SDL playback stream fed by the custom mixer
+- positional source handles for loops and moving sounds
+- per-speaker voice PCM queues
+- listener state, occlusion checks, simple reflection/reverb state
 
-`SDL_OpenAudioDevice` + `SDL_AudioStream` per voice. **No spatialisation, no Doppler, no distance falloff** — every sound plays at the master mix. Confirmed by the absence of any pan/HRTF/distance API call.
-
-macOS gets special handling for default-device hot-swap (`openDevice`, `handleEvent`, `reopenDevice`).
-
----
-
-## 3. Voice pool
-
-Fixed 32 voices (`SfxSystem.cpp:90-91`). `acquireVoice` recycles the voice furthest into its playback when full (no priority system today).
-
-Each voice owns an `SDL_AudioStream` allocated in `play()` and destroyed when retired — at sustained rifle fire (~10 Hz) that's 10 stream allocations/sec; under crossfire stress, more. A pool of pre-allocated streams would be cheaper (see *potential-issues*).
+The old per-shot `SDL_AudioStream` allocation path is gone.
 
 ---
 
-## 4. Event flow
+## 2. Public Facade
 
-Two sources feed `play()`:
+Gameplay code should call the facade, not the mixer internals:
 
-### Dispatcher events
-
-Wired in `Game.cpp:208-220`:
-
-| Event | Sink | Notes |
-|---|---|---|
-| `WeaponFiredEvent` | `SfxSystem::onWeaponFired` | Per-weapon fire sound (Rifle, RailGun-charge, Rocket, etc.). **NOT** routed to `ParticleSystem` — that goes via direct `spawnX` calls for fine control |
-| `ExplosionEvent` | `SfxSystem::onExplosion` AND `ParticleSystem::onExplosion` | |
-| (no `ProjectileImpactEvent` → SFX wiring today) | | |
-
-### State-delta polling
-
-`SfxSystem::update` (`:355-407`) walks the local player every frame and compares against last-frame copies:
-
-| Event | Trigger |
+| API | Use |
 |---|---|
-| `DamageTaken` | `h.health < prevHealth_` |
-| `ArmorBreak` | `prevArmor_ > 0 && armor <= 0` |
-| `KillConfirm` | `stats.kills > prevKills_` |
-| `Death + Respawn` | `stats.deaths > prevDeaths_` — fired back-to-back unconditionally, because the server's `handleDeath` calls `handleRespawn` immediately so `IsDead==true` never reaches the client |
+| `play(SfxId, gain)` / `play2D(...)` | UI, local-only, or player-space one-shots |
+| `play3D(id, position, velocity, gain, priority)` | World one-shots such as remote fire, impacts, explosions, footsteps |
+| `startLoop(...)` | Persistent sounds such as beams or charge loops |
+| `updateSource(handle, position, velocity, gain)` | Move an active loop/source |
+| `stopSource(handle)` / `stop(id)` | Stop one handle or all sources for a clip |
+| `setListener(listener)` | Update camera/player position, orientation, and velocity |
+| `submitVoiceFrame(speaker, seq, pcm, position, velocity)` | Feed decoded remote voice into positional playback |
 
-Healing is throttled by `healingSoundCooldown_` (1 s).
-
-### Continuous loops
-
-Charge-up / beam-loop sounds are started/stopped manually from `Game::iterate`:
-
-- `ChargeRifleLoad` plays on charge start (`Game.cpp:1513`)
-- `EnergyBeamLoop` started/stopped on beam-active transition (`Game.cpp:1520-1522`)
+`play()` is kept for older callers and currently forwards to the 2D path.
 
 ---
 
-## 5. Cooldowns
+## 3. Mixer And Buses
 
-Per-clip minimum cooldown set at load (matches fire rates):
-
-| Clip | Cooldown |
-|---|---|
-| Rifle fire | 0.10 s |
-| Rocket fire | 0.80 s |
-| Charge rifle | (no auto-fire) |
-| Healing | 1.0 s |
-
-Central `cooldowns_[]` array ticked in `update()` (`:324-326`); `play()` gates on remaining cooldown.
-
----
-
-## 6. Voice retirement
-
-Voices retire when `elapsed > duration + 0.1 s`. For looped sounds (`EnergyBeamLoop`) duration is the **single playthrough** length — but the loop actually doesn't loop on the stream level, it's a single playthrough manually stopped via `stop()`. The API surface is misleading: nothing in `play()` enables true SDL stream looping.
-
----
-
-## 7. Volume mix
+The audio callback mixes into 48 kHz stereo float. Clips are predecoded and
+converted before playback so the hot path does not allocate streams per sound.
 
 ```text
-effective_gain = master_gain × category_gain × clip_gain × caller_gain
+effective_gain = master_gain * category_gain * clip_gain * caller_gain * spatial_gain
 ```
 
-Categories and per-clip gains are not exposed via TOML — they're set in `SfxSystem.cpp` constants today. Debug-UI panel exposes runtime tuning (see [hud.md](hud.md#7-renderer-integration) → debug HUD).
+Categories include weapons, impacts, player feedback, footsteps, voice, and UI.
+Cooldowns still exist for spammy clips such as rifle fire and healing ticks.
+
+When the source pool is full, low-priority or least-important sources are stolen
+before high-priority gameplay cues. Voice queues are bounded per speaker to avoid
+unbounded memory growth during stalls.
 
 ---
 
-## 8. Assets
+## 4. Spatial Model
 
-`assets/sounds/` (~20 clips):
+The v1 spatial path is lightweight but real:
+
+| Feature | Behavior |
+|---|---|
+| Attenuation | Full gain within about 450 units, fades to silence by about 3500 units |
+| Panning | Equal-power stereo pan from listener forward/up basis |
+| Doppler | Relative source/listener velocity changes playback step, clamped for stability |
+| Occlusion | Raycast from listener to source against active physics world |
+| Low-pass | Occluded sources get softened in the mixer |
+| Reverb/reflections | Simple delay taps and reverb send, stronger for occluded/distant sources |
+
+Future room/portal metadata can replace the occlusion/reverb evaluator without
+changing gameplay callers, because callers only provide source/listener state.
+
+---
+
+## 5. Voice Chat Path
+
+Voice is push-to-talk on `V` and is disabled while text chat or text-input UI is
+active. The local client captures SDL recording audio, gates very quiet frames,
+encodes Opus at 48 kHz mono / 20 ms, and sends `VOICE_FRAME` packets on the
+unreliable sequenced voice channel.
+
+Receive path:
 
 ```text
-charge-rifle-load.wav    charge-rifle-shoot.wav   pubg-ak.wav
-Voicy_*.mp3              csgo-case-open.mp3
+server VOICE_FRAME
+  -> VoiceChatSystem::enqueueFrame
+  -> per-speaker VoiceJitterBuffer
+  -> Opus decoder / packet-loss concealment
+  -> SfxSystem::submitVoiceFrame
+  -> positional voice source at replicated speaker transform
 ```
 
-Mostly meme placeholders. WAV decoded via `SDL_LoadWAV`. MP3 via `minimp3` (single-TU vendored implementation). After load, `preconvertClips()` runs `SDL_ConvertAudioSamples` to the device's native format so the audio callback doesn't resample per-callback (especially important on macOS).
+The server proximity-routes voice from authoritative positions: nearby listeners
+receive the frame, clients outside max voice range do not. The client also keeps
+short-lived speaking indicators for the HUD.
 
 ---
 
-## 9. Cross-system event paths
+## 6. Gameplay SFX
 
-```mermaid
-sequenceDiagram
-  participant GP as Gameplay code
-  participant D as entt::dispatcher
-  participant SX as SfxSystem
-  participant LP as Local player state
+### Local feedback
 
-  GP->>D: enqueue WeaponFiredEvent
-  GP->>D: enqueue ExplosionEvent
-  Note over GP,D: in iterate()
-  GP->>D: dispatcher.update()
-  D->>SX: onWeaponFired
-  D->>SX: onExplosion
-  Note over SX: per-frame:
-  SX->>LP: read Health, PlayerMatchStats
-  SX->>SX: diff vs prev*<br/>edge-trigger DamageTaken/ArmorBreak/KillConfirm/Death+Respawn
-  SX->>SX: play(clip)
+Local weapon fire still plays predicted in player space for responsiveness.
+Damage, armor break, kill confirm, death, respawn, and healing cues are detected
+from local state deltas in `SfxSystem::update`.
+
+### Authoritative remote sounds
+
+Remote fire, impacts, explosions, grenade throws, and beams are driven from
+replicated gameplay/particle events. Local duplicate echoes are skipped where the
+local prediction already played the sound.
+
+### Loops
+
+Beam/charge style sounds use source handles:
+
+```text
+startLoop -> updateSource each frame -> stopSource
 ```
 
+This keeps moving world loops positioned correctly and avoids pretending a
+one-shot clip is a loop.
+
+### Footsteps
+
+Footsteps are animation-driven. `Game` tracks locomotion clip phase per animated
+entity and emits footstep one-shots when left/right marker phases are crossed.
+The event is positioned at the animated entity with a small side offset and uses
+light/heavy placeholder clips depending on movement state.
+
 ---
 
-## 10. Configuration
+## 7. Assets And Placeholders
 
-`SfxSystem::update` reads `state.masterVolume`, `state.sfxVolume`, etc. from `HudGameState` if exposed — today most knobs are constants in C++.
+`assets/sounds/` still contains mostly placeholder WAV/MP3 files. Missing clips
+are synthesized at startup for build stability, including:
 
-`GROUP2_NO_IMGUI` env var doesn't affect SFX.
+- `FootstepLight`
+- `FootstepHeavy`
+- `GrenadeThrow`
+- `VoiceStart`
+- `VoiceStop`
+
+Final content can replace these mappings without changing gameplay code.
 
 ---
 
-## 11. Key files
+## 8. Key Files
 
 | File | Role |
 |---|---|
-| `src/client/sfx/SfxSystem.cpp` | Voice pool, mixer, event sinks, state polling |
-| `src/client/sfx/SfxEvents.hpp` | Dispatcher event types (`WeaponFiredEvent`, `ExplosionEvent`, ...) |
-| `src/client/sfx/SfxTypes.hpp` | `SoundClip`, `Voice` types |
-| `assets/sounds/` | WAV + MP3 clips |
+| `src/client/sfx/SfxSystem.hpp/.cpp` | Facade, clip bank, mixer, source manager, event sinks, state polling |
+| `src/client/sfx/AudioMath.hpp/.cpp` | Attenuation, panning, Doppler, occlusion/reverb parameters |
+| `src/client/sfx/SfxTypes.hpp` | Clip IDs, categories, clip metadata |
+| `src/client/voice/VoiceCapture.hpp/.cpp` | SDL recording, PTT, Opus encode |
+| `src/client/voice/VoiceChatSystem.hpp/.cpp` | Remote speaker jitter/decode/spatial voice submission |
+| `src/client/voice/VoiceJitterBuffer.hpp/.cpp` | Bounded unreliable frame ordering and gap handling |
+| `src/network/VoiceProtocol.hpp/.cpp` | Bounded voice packet encode/decode |
+| `tests/audio_math_tests.cpp` | Spatial math unit coverage |
+| `tests/voice_jitter_tests.cpp` | Jitter buffer ordering/drop coverage |
 
-See [potential-issues.md](potential-issues.md#sfx).
+---
+
+## 9. Limitations
+
+- This is not HRTF audio; stereo pan is the v1 spatial renderer.
+- Corridor/room acoustics are practical raycast + reverb approximations, not an
+  authored room/portal graph yet.
+- Voice QA still needs real multi-client microphone testing on different
+  machines and networks.
+- Most final production sound assets have not landed yet.
