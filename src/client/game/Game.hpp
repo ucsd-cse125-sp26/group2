@@ -367,8 +367,8 @@ private:
 
     // Weapon spawner model tuning (per weapon type, live-adjustable via ImGui)
     WeaponSpawnerModelParams spawnerWeaponParams_[4]; ///< Runtime-tunable copy; initialised from spawner defaults.
-    int spawnerTuneWeaponIdx_ = 0;                     ///< Which weapon type is being tuned.
-    bool showWeaponSpawnerModelUI_ = false;            ///< Show the Weapon Spawner Model Tweaker window.
+    int spawnerTuneWeaponIdx_ = 0;                    ///< Which weapon type is being tuned.
+    bool showWeaponSpawnerModelUI_ = false;           ///< Show the Weapon Spawner Model Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
