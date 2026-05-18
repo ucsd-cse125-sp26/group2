@@ -14,7 +14,9 @@ ChatWidget::ChatWidget()
 {
     anchor = HudAnchor::BottomLeft;
     offsetX = 24.f;
-    offsetY = -196.f;
+    // Bottom HUD widgets resolve their bottom-left anchor to the widget's
+    // bottom edge. Keep chat above the vitals plate and grow upward.
+    offsetY = -104.f;
     width = 520.f;
     height = 172.f;
 }
@@ -41,11 +43,12 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
     const int maxLines = chat_.open ? 8 : 4;
     const float inputH = chat_.open ? 26.f * s : 0.f;
     const float panelH = pad * 2.f + lineH * static_cast<float>(maxLines) + inputH;
+    const float panelY = y - panelH;
 
     const HudColor panel = chat_.open ? HudColor{0.08f, 0.075f, 0.07f, 0.72f} : HudColor{0.08f, 0.075f, 0.07f, 0.28f};
-    ctx.rect(x, y, w, panelH, panel);
+    ctx.rect(x, panelY, w, panelH, panel);
     if (chat_.open)
-        ctx.rectOutline(x, y, w, panelH, 1.f, k_lineDim);
+        ctx.rectOutline(x, panelY, w, panelH, 1.f, k_lineDim);
 
     const auto& messages = chat_.messages;
     int visibleMessages = 0;
@@ -55,7 +58,7 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
         ++visibleMessages;
     }
 
-    float cursorY = y + pad + (static_cast<float>(maxLines - visibleMessages) * lineH);
+    float cursorY = panelY + pad + (static_cast<float>(maxLines - visibleMessages) * lineH);
     int drawn = 0;
     for (auto it = messages.rbegin(); it != messages.rend() && drawn < visibleMessages; ++it) {
         if (!chat_.open && it->ageSeconds > 7.0f)
@@ -77,7 +80,7 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
     }
 
     if (!speakers_.empty()) {
-        float speakerY = y - (static_cast<float>(speakers_.size()) * 18.f + 8.f) * s;
+        float speakerY = panelY - (static_cast<float>(speakers_.size()) * 18.f + 8.f) * s;
         int count = 0;
         for (const auto& speaker : speakers_) {
             if (count++ >= 3)
@@ -96,7 +99,7 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
     if (!chat_.open)
         return;
 
-    const float inputY = y + panelH - inputH - pad * 0.35f;
+    const float inputY = panelY + panelH - inputH - pad * 0.35f;
     ctx.rect(x + pad, inputY, w - pad * 2.f, inputH, HudColor{0.12f, 0.115f, 0.105f, 0.86f});
     ctx.rectOutline(x + pad, inputY, w - pad * 2.f, inputH, 1.f, k_lineDim);
 
