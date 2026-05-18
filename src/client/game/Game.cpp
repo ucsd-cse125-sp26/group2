@@ -191,22 +191,29 @@ bool isHeavyFootstepClip(ClipId id) noexcept
            id == ClipId::StrafeLeft || id == ClipId::StrafeRight;
 }
 
-std::optional<SfxId> fireSfxForWeapon(WeaponType type) noexcept
+std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
 {
     switch (type) {
     case WeaponType::Rifle:
-        return SfxId::RifleFire;
+        return "weapon.rifle.fire";
     case WeaponType::Rocket:
+        return "weapon.rocket.fire";
+    case WeaponType::RailGun:
+        return "weapon.railgun.fire";
+    case WeaponType::EnergyGun:
+        return "weapon.energy.fire";
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
     case WeaponType::Impulse:
-        return SfxId::GrenadeThrow;
-    case WeaponType::RailGun:
-        return SfxId::ChargeRifleShoot;
-    case WeaponType::EnergyGun:
-        return SfxId::EnergyGunFire;
+        return "weapon.grenade.throw";
     }
-    return std::nullopt;
+    return {};
+}
+
+audio::AudioObjectId audioObjectForEntity(entt::entity entity) noexcept
+{
+    const auto raw = static_cast<std::uint32_t>(entt::to_integral(entity));
+    return audio::AudioObjectId{raw == 0 ? 1u : raw};
 }
 
 std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
@@ -498,7 +505,7 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
             evt.surfaceType == SurfaceType::Flesh)
         {
             if (sfxSystem.isInitialized())
-                sfxSystem.play(SfxId::FleshHit);
+                sfxSystem.postAudioEvent("impact.flesh");
             hitmarkerTimer_ = 0.25f; // show hitmarker for 250ms
             hitmarkerIsHeadshot_ = (evt.headshot != 0);
             hitmarkerShieldBreak_ = (evt.shieldBreak != 0);
@@ -562,23 +569,33 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         case ParticleEffectType::BulletTracer:
             particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
             if (sfxSystem.isInitialized()) {
-                if (const auto sfx = fireSfxForWeapon(evt.weaponType))
-                    sfxSystem.play3D(*sfx, evtOrigin, glm::vec3{0.0f}, 0.82f, 1.6f);
+                const std::string_view eventName = fireAudioEventForWeapon(evt.weaponType);
+                if (!eventName.empty()) {
+                    const audio::AudioObjectId object = audioObjectForEntity(evt.source);
+                    sfxSystem.setAudioObjectTransform(object, evtOrigin);
+                    sfxSystem.postAudioEvent(eventName, object, 0.82f);
+                }
             }
             break;
         case ParticleEffectType::HitscanBeam:
             particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
             if (sfxSystem.isInitialized()) {
-                if (const auto sfx = fireSfxForWeapon(evt.weaponType))
-                    sfxSystem.play3D(*sfx, evtOrigin, glm::vec3{0.0f}, 0.92f, 1.9f);
+                const std::string_view eventName = fireAudioEventForWeapon(evt.weaponType);
+                if (!eventName.empty()) {
+                    const audio::AudioObjectId object = audioObjectForEntity(evt.source);
+                    sfxSystem.setAudioObjectTransform(object, evtOrigin);
+                    sfxSystem.postAudioEvent(eventName, object, 0.92f);
+                }
             }
             break;
         case ParticleEffectType::Impact:
             particleSystem.spawnImpactEffect(evt.pos1, evt.pos2, evt.surfaceType, evt.weaponType);
             if (sfxSystem.isInitialized() && evt.source != localPlayer) {
-                const SfxId impact = evt.surfaceType == SurfaceType::Flesh ? SfxId::FleshHit : SfxId::FootstepLight;
-                sfxSystem.play3D(
-                    impact, evt.pos1, glm::vec3{0.0f}, evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f, 0.7f);
+                const audio::AudioObjectId object = audioObjectForEntity(evt.source);
+                sfxSystem.setAudioObjectTransform(object, evt.pos1);
+                sfxSystem.postAudioEvent(evt.surfaceType == SurfaceType::Flesh ? "impact.flesh" : "impact.world",
+                                         object,
+                                         evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f);
             }
             break;
         case ParticleEffectType::Explosion:
@@ -1800,14 +1817,14 @@ SDL_AppResult Game::iterate()
                 isChargingNow = true;
         });
         if (isChargingNow && !wasChargingRailgun_)
-            sfxSystem.play(SfxId::ChargeRifleLoad);
+            sfxSystem.postAudioEvent("weapon.railgun.charge_start");
         wasChargingRailgun_ = isChargingNow;
 
         // Energy beam: play/stop loop sound on beam active transitions.
         bool isBeamNow = false;
         registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
         if (isBeamNow && !wasBeamActive_)
-            beamLoopHandle_ = sfxSystem.startLoop(SfxId::EnergyBeamLoop, false, cachedEye_, 0.55f, 1.4f);
+            beamLoopHandle_ = sfxSystem.postAudioEvent("weapon.energy.loop", audio::kGlobalObject, 1.0f);
         if (isBeamNow && beamLoopHandle_ != SfxSystem::kInvalidSource)
             sfxSystem.updateSource(beamLoopHandle_, cachedEye_, audioListener.velocity, 0.55f);
         if (!isBeamNow && wasBeamActive_) {
@@ -2205,7 +2222,13 @@ SDL_AppResult Game::iterate()
                                 glm::cross(glm::vec3{0.0f, 1.0f, 0.0f},
                                            glm::vec3{std::sin(c.ai.yawRad), 0.0f, std::cos(c.ai.yawRad)}));
                             const float side = leftStep ? -7.0f : 7.0f;
-                            sfxSystem.play3D(stepId, c.audioPosition + lateral * side, c.ai.velocityWorld, gain, 0.8f);
+                            const audio::AudioObjectId object = audioObjectForEntity(c.entity);
+                            sfxSystem.setAudioObjectTransform(
+                                object, c.audioPosition + lateral * side, c.ai.velocityWorld);
+                            sfxSystem.setAudioRtpc(object,
+                                                   audio::rtpcId("movement.intensity"),
+                                                   stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
+                            sfxSystem.postAudioEvent("footstep", object, gain);
                         }
                         phaseIt->second[i] = src.timeRatio;
                     }

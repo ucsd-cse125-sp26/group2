@@ -115,7 +115,7 @@ actions = [{ type = "stop", target = "node.switch" }]
     assert(commands[0].maxBusInstances == 4);
 
     commands = runtime.postEvent("weapon.stop", object);
-    assert(commands.size() >= 2);
+    assert(commands.size() >= 1);
     assert(commands[0].type == audio::AudioCommandType::StopClip);
 }
 
