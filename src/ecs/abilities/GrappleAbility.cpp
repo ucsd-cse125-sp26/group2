@@ -3,6 +3,7 @@
 
 #include "GrappleAbility.hpp"
 
+#include "ecs/abilities/AbilityTuning.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerSimState.hpp"
@@ -37,15 +38,16 @@ AbilityType GrappleAbility::type() const
 
 float GrappleAbility::cooldown() const
 {
-    return tms::k_grappleCooldown;
+    return abilities::cooldownFor(type());
 }
 
 bool GrappleAbility::canUse(entt::entity player, Registry& registry) const
 {
     const auto* vis = registry.try_get<PlayerVisState>(player);
     const auto* sim = registry.try_get<PlayerSimState>(player);
+    const auto* abilState = registry.try_get<AbilityState>(player);
 
-    if (vis == nullptr || sim == nullptr) {
+    if (vis == nullptr || sim == nullptr || abilState == nullptr) {
         return false;
     }
 
@@ -57,7 +59,7 @@ bool GrappleAbility::canUse(entt::entity player, Registry& registry) const
         return false;
     }
 
-    if (sim->grappleCooldownActive) {
+    if (isAbilityOnCooldown(*abilState, type())) {
         return false;
     }
 
@@ -71,8 +73,10 @@ void GrappleAbility::activate(entt::entity player, Registry& registry)
     auto& input = registry.get<InputSnapshot>(player);
     auto& vis = registry.get<PlayerVisState>(player);
     auto& sim = registry.get<PlayerSimState>(player);
+    auto& abilState = registry.get<AbilityState>(player);
 
-    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
+    const float eyeDir = vis.gravityFlipped ? -1.0f : 1.0f;
+    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDir, 0.0f};
     const glm::vec3 forward = lookDirFromInput(input);
     const glm::vec3 end = eye + forward * tms::k_grappleMaxRange;
 
@@ -88,4 +92,5 @@ void GrappleAbility::activate(entt::entity player, Registry& registry)
 
     sim.grapplePullTimer = 0.0f;
     sim.grapplePullDir = glm::normalize(hit.point - eye);
+    setAbilityCooldown(abilState, type(), cooldown());
 }

@@ -36,11 +36,11 @@ void applyHeal(float amount, Health& playerHealth);
 /// @param hitRegion  Body region that was hit (for kill feed / headshot tracking).
 /// @return Final damage value after status modifiers such as powerups. Returns 0 if damage was ignored.
 float applyDamage(float damage,
-                 entt::entity player,
-                 entt::entity& killer,
-                 Registry& registry,
-                 std::vector<NetKillEvent>& killEvents,
-                 BodyRegion hitRegion = BodyRegion::UpperTorso);
+                  entt::entity player,
+                  entt::entity& killer,
+                  Registry& registry,
+                  std::vector<NetKillEvent>& killEvents,
+                  BodyRegion hitRegion = BodyRegion::UpperTorso);
 
 /// @brief Run one tick of player status: respawn timers and passive healing.
 /// @param registry  The ECS registry.

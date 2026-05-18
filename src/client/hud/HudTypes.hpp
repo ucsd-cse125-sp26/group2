@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <span>
@@ -155,11 +156,33 @@ struct HudWorldEnemy
 /// @brief Equipment slot state — drives the bottom-center grapple/grenade/tactical row.
 struct HudEquipmentState
 {
-    float grappleCharge = 1.f;  ///< 0..1, 1 = ready.
+    std::string primaryAbilityName = "LOCKED";
+    std::string secondaryAbilityName = "LOCKED";
+    float primaryAbilityCharge = 1.f;   ///< 0..1, 1 = ready.
+    float secondaryAbilityCharge = 1.f; ///< 0..1, 1 = ready.
+    bool primaryAbilityAvailable = false;
+    bool secondaryAbilityAvailable = false;
+    bool secondaryAbilityMarked = false;
+    float grappleCharge = 1.f;  ///< Legacy fallback; 0..1, 1 = ready.
     float grenadeCharge = 1.f;  ///< 0..1, 1 = ready (used when count not shown).
     float tacticalCharge = 1.f; ///< 0..1, 1 = ready.
     int grenadeCount = 2;       ///< Count for slot showing a number; 0 = unavailable.
     int tacticalCount = 1;      ///< Count for slot showing a number; 0 = unavailable.
+};
+
+struct HudAbilityChoice
+{
+    std::string name;
+    std::string description;
+};
+
+struct HudAbilitySelectionState
+{
+    bool available = false;
+    bool modifierHeld = false;
+    int level = 0;
+    std::string slotLabel;
+    std::array<HudAbilityChoice, 2> choices;
 };
 
 /// @brief Pickup notification entry — slide-in messages for items just acquired.
@@ -236,6 +259,7 @@ struct HudGameState
     // Voidfall HUD additions.
     std::span<const HudWorldEnemy> worldEnemies;                ///< Enemies whose HP bars float above them in-world.
     HudEquipmentState equipment;                                ///< Grapple / grenade / tactical state.
+    HudAbilitySelectionState abilitySelection;                  ///< Pending level-up ability choice.
     std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
     HudKdaCounter kda;                                          ///< Local player kill/assist/death counter (top-right).
     HudMatchInfo matchInfo;   ///< Match elapsed time + frag target (top-center header).

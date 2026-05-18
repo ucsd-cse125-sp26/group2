@@ -28,6 +28,7 @@
 #include <entt/entity/entity.hpp>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 /// @brief Top-level server game loop.
 ///
@@ -136,19 +137,20 @@ private:
 
     /// @brief Select the subset of abilities for new match.
     void selectMatchAbilityPool();
+    void applyMatchAbilityChoices(AbilityState& state) const;
 
-    physics::MapCollisionData mapCollision_; ///< Map collision data — owns vectors backing activeWorld().
+    physics::MapCollisionData mapCollision_;        ///< Map collision data — owns vectors backing activeWorld().
 
-    Server* server = nullptr;                ///< Non-owning pointer; main() owns and shuts down the socket.
-    Registry registry;                       ///< ECS entity/component store.
-    AbilityRegistry abilityRegistry;         ///< Registry of abilities via type idx.
+    Server* server = nullptr;                       ///< Non-owning pointer; main() owns and shuts down the socket.
+    Registry registry;                              ///< ECS entity/component store.
+    AbilityRegistry abilityRegistry;                ///< Registry of abilities via type idx.
     std::vector<AbilityType> matchPrimaryAbilities; ///< list of abilities available during the match
     std::vector<AbilityType> matchSecondaryAbilities;
-    LobbyManager lobbyManager;               ///< Owns lobby roster and validates host-initiated match starts.
-    MatchController matchController;         ///< Manages match flow and state.
-    bool lobbyStartCountdownActive = false;  ///< True while lobby is counting down before entering match countdown.
-    float lobbyStartCountdownTimer = 0.0f;   ///< Seconds remaining in the lobby staging countdown.
-    ClientId lobbyStartRequester{-1};        ///< Host that requested the active lobby staging countdown.
+    LobbyManager lobbyManager;                      ///< Owns lobby roster and validates host-initiated match starts.
+    MatchController matchController;                ///< Manages match flow and state.
+    bool lobbyStartCountdownActive = false; ///< True while lobby is counting down before entering match countdown.
+    float lobbyStartCountdownTimer = 0.0f;  ///< Seconds remaining in the lobby staging countdown.
+    ClientId lobbyStartRequester{-1};       ///< Host that requested the active lobby staging countdown.
     std::unordered_map<ClientId, entt::entity> clientEntities; ///< Maps client IDs to ECS entities.
     std::vector<NetKillEvent> pendingKillEvents; ///< Accumulates kill events waiting for network broadcast.
 

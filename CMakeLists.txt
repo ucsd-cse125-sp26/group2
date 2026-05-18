@@ -717,6 +717,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudIcons.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
@@ -900,6 +902,7 @@ add_executable(group2
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/AbilityState.hpp
         src/ecs/abilities/Ability.hpp
+        src/ecs/abilities/AbilityTuning.hpp
         src/ecs/abilities/GrappleAbility.cpp
         src/ecs/abilities/GrappleAbility.hpp
         src/ecs/abilities/AbilityRegistry.cpp
@@ -910,6 +913,8 @@ add_executable(group2
         src/ecs/abilities/DashAbility.hpp
         src/ecs/abilities/GravityAbility.cpp
         src/ecs/abilities/GravityAbility.hpp
+        src/ecs/abilities/RecallAbility.cpp
+        src/ecs/abilities/RecallAbility.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
         src/client/menus/lobby/Lobby.hpp
@@ -1197,6 +1202,7 @@ add_executable(server
         src/client/animation/SkinVertex.hpp
         src/ecs/components/AbilityState.hpp
         src/ecs/abilities/Ability.hpp
+        src/ecs/abilities/AbilityTuning.hpp
         src/ecs/abilities/GrappleAbility.cpp
         src/ecs/abilities/GrappleAbility.hpp
         src/ecs/abilities/AbilityRegistry.cpp
@@ -1207,6 +1213,8 @@ add_executable(server
         src/ecs/abilities/DashAbility.hpp
         src/ecs/abilities/GravityAbility.cpp
         src/ecs/abilities/GravityAbility.hpp
+        src/ecs/abilities/RecallAbility.cpp
+        src/ecs/abilities/RecallAbility.hpp
         src/server/lobby/LobbyManager.hpp
         src/server/lobby/LobbyManager.cpp
         src/ecs/components/PowerupSpawner.hpp
@@ -1451,6 +1459,7 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.hpp"
         src/ecs/components/AbilityState.hpp
         src/ecs/abilities/Ability.hpp
+        src/ecs/abilities/AbilityTuning.hpp
         src/ecs/abilities/GrappleAbility.cpp
         src/ecs/abilities/GrappleAbility.hpp
         src/ecs/abilities/AbilityRegistry.cpp
@@ -1461,6 +1470,8 @@ add_executable(clientbot
         src/ecs/abilities/DashAbility.hpp
         src/ecs/abilities/GravityAbility.cpp
         src/ecs/abilities/GravityAbility.hpp
+        src/ecs/abilities/RecallAbility.cpp
+        src/ecs/abilities/RecallAbility.hpp
         src/ecs/components/PowerupSpawner.hpp
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp

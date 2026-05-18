@@ -3,25 +3,28 @@
 
 #include "DashAbility.hpp"
 
+#include "ecs/abilities/AbilityTuning.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
-#include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/PlayerVisState.hpp"
-#include "ecs/components/Position.hpp"
-#include "ecs/physics/SweptCollision.hpp"
-#include "ecs/physics/WorldData.hpp"
+#include "ecs/components/Velocity.hpp"
+#include "ecs/physics/Movement.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <glm/geometric.hpp>
 
 namespace
 {
 
-glm::vec3 lookDirFromInput(const InputSnapshot& input)
+glm::vec3 dashDirFromInput(const InputSnapshot& input)
 {
-    const float cosPitch = std::cos(input.pitch);
-    return {
-        std::sin(input.yaw) * cosPitch,
-        -std::sin(input.pitch),
-        std::cos(input.yaw) * cosPitch,
-    };
+    glm::vec3 dir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
+    if (glm::length(dir) > 0.001f) {
+        return glm::normalize(dir);
+    }
+
+    return glm::normalize(glm::vec3{std::sin(input.yaw), 0.0f, std::cos(input.yaw)});
 }
 
 } // namespace
@@ -33,16 +36,15 @@ AbilityType DashAbility::type() const
 
 float DashAbility::cooldown() const
 {
-    return 5.0f;
+    return abilities::cooldownFor(type());
 }
 
 bool DashAbility::canUse(entt::entity player, Registry& registry) const
 {
     const auto* vis = registry.try_get<PlayerVisState>(player);
-    const auto* sim = registry.try_get<PlayerSimState>(player);
     const auto* abilState = registry.try_get<AbilityState>(player);
 
-    if (vis == nullptr || sim == nullptr || abilState == nullptr) {
+    if (vis == nullptr || abilState == nullptr) {
         return false;
     }
 
@@ -50,39 +52,35 @@ bool DashAbility::canUse(entt::entity player, Registry& registry) const
         return false;
     }
 
-    if (abilState->primaryCooldown > 0.0f) {
+    if (isAbilityOnCooldown(*abilState, type())) {
         return false;
     }
 
-    if (abilState->primaryActive) {
+    if (vis->grappleActive) {
         return false;
     }
 
-    return registry.all_of<Position, CollisionShape, InputSnapshot>(player);
+    return registry.all_of<Velocity, CollisionShape, InputSnapshot>(player);
 }
 
 void DashAbility::activate(entt::entity player, Registry& registry)
 {
-    auto& pos = registry.get<Position>(player);
-    auto& shape = registry.get<CollisionShape>(player);
     auto& input = registry.get<InputSnapshot>(player);
     auto& vis = registry.get<PlayerVisState>(player);
-    auto& sim = registry.get<PlayerSimState>(player);
+    auto& vel = registry.get<Velocity>(player);
+    auto& abilState = registry.get<AbilityState>(player);
 
-    const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f, 0.0f};
-    const glm::vec3 forward = lookDirFromInput(input);
-    const glm::vec3 end = eye + forward * 500.0f;
+    const glm::vec3 dir = dashDirFromInput(input);
+    const glm::vec3 localUp = vis.gravityFlipped ? glm::vec3{0.0f, -1.0f, 0.0f} : glm::vec3{0.0f, 1.0f, 0.0f};
+    const float upwardSpeed = std::max(0.0f, glm::dot(vel.value, localUp));
 
-    const physics::SphereHitResult hit = physics::sphereCast(4.0f, eye, end, physics::activeWorld());
+    vel.value = dir * abilities::k_dashSpeed + localUp * std::max(upwardSpeed, abilities::k_dashLift);
 
-    if (!hit.hit) {
-        return;
-    }
-
-    vis.grappleActive = true;
-    vis.grapplePoint = hit.point;
     vis.grounded = false;
+    vis.grappleActive = false;
+    vis.moveMode = MoveMode::OnFoot;
+    vis.exitingWall = false;
+    vis.exitingClimb = false;
 
-    sim.grapplePullTimer = 0.0f;
-    sim.grapplePullDir = glm::normalize(hit.point - eye);
+    setAbilityCooldown(abilState, type(), cooldown());
 }

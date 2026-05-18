@@ -132,6 +132,13 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     registry.emplace_or_replace<PlayerVisState>(player);
     registry.emplace_or_replace<PlayerSimState>(player);
     registry.emplace_or_replace<Health>(player, Health{});
+    if (auto* abilityState = registry.try_get<AbilityState>(player)) {
+        abilityState->primaryCooldown = 0.0f;
+        abilityState->primaryActive = false;
+        abilityState->secondaryCooldown = 0.0f;
+        abilityState->secondaryActive = false;
+        abilityState->recallMarkerSet = false;
+    }
     WeaponState weaponState{};
     weaponState.current = WeaponSlot::PRIMARY;
     getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
@@ -256,27 +263,12 @@ inline void updateAbilityLevel(Registry& registry, entt::entity player, float dm
         return;
 
     AbilityState& abilityState = registry.get<AbilityState>(player);
-    if (abilityState.level >= systems::maxLevel)
-        return;
-
-    abilityState.accumDamage += dmg;
-    if (abilityState.accumDamage >= systems::dmgThreshold) {
-        abilityState.accumDamage = abilityState.accumDamage - systems::dmgThreshold;
-        abilityState.level += 1;
-
-        if (abilityState.level == 1)
-            abilityState.pendingLevel1 = true;
-        if (abilityState.level == 2)
-            abilityState.pendingLevel2 = true;
-
-        if (abilityState.level >= systems::maxLevel)
-            abilityState.accumDamage = systems::dmgThreshold;
-    }
+    systems::grantAbilityProgress(abilityState, dmg);
 }
 
 inline float absorbDamage(float& pool, float damage)
 {
-    if (pool < 0 ) {
+    if (pool < 0) {
         pool = 0;
         return damage;
     }
@@ -287,16 +279,15 @@ inline float absorbDamage(float& pool, float damage)
 }
 
 float applyDamage(float damage,
-                 entt::entity player,
-                 entt::entity& killer,
-                 Registry& registry,
-                 std::vector<NetKillEvent>& killEvents,
-                 BodyRegion hitRegion)
+                  entt::entity player,
+                  entt::entity& killer,
+                  Registry& registry,
+                  std::vector<NetKillEvent>& killEvents,
+                  BodyRegion hitRegion)
 {
     // If player is dead, ignore damage
     if (registry.all_of<RespawnTimer>(player))
         return 0.0f;
-
 
     Health& playerHealth = registry.get_or_emplace<Health>(player);
 

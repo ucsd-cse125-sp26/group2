@@ -254,7 +254,6 @@ void tickTimers(PlayerStateRef state, float dt)
         if (state.sim.grappleCooldownTimer <= 0.0f)
             state.sim.grappleCooldownActive = false;
     }
-
 }
 
 } // namespace

@@ -69,6 +69,10 @@ inline bool prevKillSelfKey = false;
 inline bool prevFlipGravityKey = false;
 /// @brief Tracks previous-frame 3 key state for grenade cycle edge detection.
 inline bool prevGrenadeKey = false;
+/// @brief Tracks previous-frame Alt+LMB state for ability choice edge detection.
+inline bool prevAbilitySelectLeft = false;
+/// @brief Tracks previous-frame Alt+RMB state for ability choice edge detection.
+inline bool prevAbilitySelectRight = false;
 
 /// @brief Sample keyboard state into the movement flags.
 ///
@@ -137,6 +141,15 @@ inline void runWeaponKeys(Registry& registry)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
+    const bool altHeld = kKeys[SDL_SCANCODE_LALT] || kKeys[SDL_SCANCODE_RALT];
+    const bool leftDown = (mouse & SDL_BUTTON_LMASK) != 0;
+    const bool rightDown = (mouse & SDL_BUTTON_RMASK) != 0;
+    const bool selectLeftNow = altHeld && leftDown;
+    const bool selectRightNow = altHeld && rightDown;
+    const bool selectLeftEdge = selectLeftNow && !prevAbilitySelectLeft;
+    const bool selectRightEdge = selectRightNow && !prevAbilitySelectRight;
+    prevAbilitySelectLeft = selectLeftNow;
+    prevAbilitySelectRight = selectRightNow;
 
     // Edge-detect 3 key: grenade cycle is a toggle, fire on rising edge only.
     const bool grenadeKeyNow = kKeys[SDL_SCANCODE_3];
@@ -144,13 +157,15 @@ inline void runWeaponKeys(Registry& registry)
     prevGrenadeKey = grenadeKeyNow;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.shooting =
-            (mouse & SDL_BUTTON_LMASK) != 0; // Apply bitmask to mouse input, true if left click is held down.
+        snap.shooting = leftDown && !altHeld;
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
         snap.cycleGrenade = grenadeEdge;
         snap.reload = kKeys[SDL_SCANCODE_R];
         snap.pickup = kKeys[SDL_SCANCODE_F];
+        snap.abilitySelectHeld = altHeld;
+        snap.abilitySelectLeft = selectLeftEdge;
+        snap.abilitySelectRight = selectRightEdge;
     });
 }
 
@@ -267,7 +282,7 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
 ///   A (south)      → jump
 ///   B (east)       → crouch
 ///   L3 (LS click)  → sprint
-///   LT             → grapple   (analog, threshold @ 0.5)
+///   LT             → primary ability   (analog, threshold @ 0.5)
 ///
 /// @param registry        The ECS registry.
 /// @param gamepad          Open gamepad, or nullptr to no-op.
@@ -296,7 +311,7 @@ inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gr
     const bool padSprint = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
 
     const float lt = static_cast<float>(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER)) / 32767.0f;
-    const bool padGrapple = lt >= gamepad::k_triggerThreshold;
+    const bool padAbility1 = lt >= gamepad::k_triggerThreshold;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.forward |= padForward;
@@ -306,7 +321,7 @@ inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gr
         snap.jump |= padJump;
         snap.crouch |= padCrouch;
         snap.sprint |= padSprint;
-        snap.grapple |= padGrapple;
+        snap.ability1 |= padAbility1;
     });
 }
 

@@ -587,8 +587,8 @@ inline void handleFire(Registry& registry,
         float chargeDealtDamage = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            chargeDealtDamage = applyDamage(
-                config.chargeDamage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            chargeDealtDamage =
+                applyDamage(config.chargeDamage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
@@ -698,7 +698,8 @@ inline void handleFire(Registry& registry,
         float dealtDamage = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            dealtDamage = applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            dealtDamage =
+                applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head) {
                 SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
                         static_cast<int>(shooter),

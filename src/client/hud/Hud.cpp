@@ -4,6 +4,7 @@
 #include "Hud.hpp"
 
 #include "particles/sdf/SdfAtlas.hpp"
+#include "widgets/AbilitySelectionWidget.hpp"
 #include "widgets/AmmoCounter.hpp"
 #include "widgets/BuyMenu.hpp"
 #include "widgets/CrosshairWidget.hpp"
@@ -185,6 +186,7 @@ void Hud::createWidgets()
 
     // Directional damage arcs around the reticle.
     widgets_.push_back(std::make_unique<DamageIndicator>());
+    widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
 
     // Top center: match header.  (Compass strip removed — gravity flips
     // make a heading readout meaningless and players found it useless.)

@@ -7,6 +7,7 @@
 #include "animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
+#include "ecs/abilities/AbilityTuning.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimatedCharacter.hpp"
 #include "ecs/components/BeamState.hpp"
@@ -101,8 +102,8 @@ glm::quat spawnerModelRotation(const WeaponSpawnerModelParams& params, float tim
 {
     const glm::vec3 r = glm::radians(glm::vec3{params.pitchOffset, params.yawOffset, params.rollOffset});
     const float spin = active ? glm::radians(params.spinDegreesPerSecond) * timeSeconds : 0.0f;
-    return glm::angleAxis(spin + r.y, glm::vec3{0.0f, 1.0f, 0.0f}) *
-           glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) * glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
+    return glm::angleAxis(spin + r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
+           glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
 }
 
 /// @brief Resolve a `ClientId` to its display nickname.
@@ -1270,8 +1271,12 @@ SDL_AppResult Game::iterate()
     // 4. Physics -- always 128 Hz, up to k_maxTicksPerFrame catch-up
     bool physicsRan = false;
     int ticksThisFrame = 0;
+    bool grantAbilityLevelThisFrame = false;
 
     if (accumulator >= k_physicsDt) {
+        grantAbilityLevelThisFrame = debugUI.pendingAbilityLevelGrant_;
+        debugUI.pendingAbilityLevelGrant_ = false;
+
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured) {
             systems::runMovementKeys(registry, localGravFlipped);
@@ -1333,8 +1338,10 @@ SDL_AppResult Game::iterate()
             // sampled at runWeaponKeys/runMovementKeys time above —
             // we just give each tick its own monotonic tick number.
             ++clientPredictTick;
-            registry.view<InputSnapshot, LocalPlayer>().each(
-                [this](InputSnapshot& snap) { snap.tick = clientPredictTick; });
+            registry.view<InputSnapshot, LocalPlayer>().each([this, grantAbilityLevelThisFrame](InputSnapshot& snap) {
+                snap.tick = clientPredictTick;
+                snap.debugGrantAbilityLevel = grantAbilityLevelThisFrame;
+            });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
 
@@ -3009,7 +3016,36 @@ SDL_AppResult Game::iterate()
         registry.view<LocalPlayer, AbilityState>().each([&](const AbilityState& ability) {
             hudState.abilityLevelProgress = std::clamp(ability.accumDamage / systems::dmgThreshold, 0.f, 1.f);
             hudState.abilityLevel = ability.level;
+            hudState.equipment.primaryAbilityName = abilityName(ability.primary);
+            hudState.equipment.secondaryAbilityName = abilityName(ability.secondary);
+            hudState.equipment.primaryAbilityAvailable = ability.primary != AbilityType::None;
+            hudState.equipment.secondaryAbilityAvailable = ability.secondary != AbilityType::None;
+            hudState.equipment.secondaryAbilityMarked =
+                ability.secondary == AbilityType::Recall && ability.recallMarkerSet;
+
+            const float primaryDuration = abilities::cooldownFor(ability.primary);
+            hudState.equipment.primaryAbilityCharge =
+                primaryDuration > 0.0f ? 1.0f - std::clamp(ability.primaryCooldown / primaryDuration, 0.0f, 1.0f)
+                                       : 1.0f;
+            const float secondaryDuration = abilities::cooldownFor(ability.secondary);
+            hudState.equipment.secondaryAbilityCharge =
+                secondaryDuration > 0.0f ? 1.0f - std::clamp(ability.secondaryCooldown / secondaryDuration, 0.0f, 1.0f)
+                                         : 1.0f;
+
+            if (hasPendingAbilitySelection(ability)) {
+                const auto& choices = choicesForPendingSelection(ability);
+                hudState.abilitySelection.available = true;
+                hudState.abilitySelection.level = std::max(1, ability.level);
+                hudState.abilitySelection.slotLabel =
+                    pendingAbilitySlot(ability) == AbilitySlot::Primary ? "PRIMARY" : "SECONDARY";
+                for (std::size_t i = 0; i < choices.size(); ++i) {
+                    hudState.abilitySelection.choices[i].name = abilityName(choices[i]);
+                    hudState.abilitySelection.choices[i].description = abilityDescription(choices[i]);
+                }
+            }
         });
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [&](const InputSnapshot& snap) { hudState.abilitySelection.modifierHeld = snap.abilitySelectHeld; });
 
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
@@ -3602,8 +3638,8 @@ void Game::refreshRemoteRespawnRenderables()
             if (spawner.hasWeapon) {
                 static constexpr float k_twoPi = 6.28318530718f;
 
-                rend.translation =
-                    params.translation + glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+                rend.translation = params.translation +
+                                   glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
             } else {
                 rend.translation = params.translation;
             }

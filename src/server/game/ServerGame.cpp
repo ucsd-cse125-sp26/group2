@@ -6,8 +6,10 @@
 #include "client/animation/CharacterAnimator.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
-#include "ecs/abilities/GravityAbility.hpp"
+#include "ecs/abilities/DashAbility.hpp"
 #include "ecs/abilities/GrappleAbility.hpp"
+#include "ecs/abilities/GravityAbility.hpp"
+#include "ecs/abilities/RecallAbility.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
@@ -65,11 +67,31 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdlib>
 
 namespace
 {
 constexpr float k_lobbyStartCountdownDuration = 3.0f;
+
+template <std::size_t N>
+std::vector<AbilityType> chooseTwoAbilities(const std::array<AbilityType, N>& pool)
+{
+    std::vector<AbilityType> choices(pool.begin(), pool.end());
+    if (choices.size() <= kAbilityChoicesPerTier) {
+        return choices;
+    }
+
+    std::vector<AbilityType> selected;
+    selected.reserve(kAbilityChoicesPerTier);
+    for (std::size_t i = 0; i < kAbilityChoicesPerTier; ++i) {
+        const auto idx = static_cast<std::size_t>(std::rand()) % choices.size();
+        selected.push_back(choices[idx]);
+        choices.erase(choices.begin() + static_cast<std::ptrdiff_t>(idx));
+    }
+    return selected;
 }
+} // namespace
 
 bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
 {
@@ -102,7 +124,10 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     }
 
     // Register abilities
+    abilityRegistry.registerAbility(std::make_unique<DashAbility>());
     abilityRegistry.registerAbility(std::make_unique<GrappleAbility>());
+    abilityRegistry.registerAbility(std::make_unique<GravityAbility>());
+    abilityRegistry.registerAbility(std::make_unique<RecallAbility>());
 
     // ── Load map collision ──────────────────────────────────────────────
     // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
@@ -160,8 +185,7 @@ void ServerGame::run()
         const entt::entity spawner = registry.create();
         registry.emplace<WeaponSpawner>(
             spawner,
-            WeaponSpawner{.type= weaponType, .spawnCooldown=systems::weaponCooldownTime, .hasWeapon = true}
-        );
+            WeaponSpawner{.type = weaponType, .spawnCooldown = systems::weaponCooldownTime, .hasWeapon = true});
         CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
@@ -185,9 +209,7 @@ void ServerGame::run()
 
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
-            spawner,
-            PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false}
-        );
+            spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
         CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
@@ -365,21 +387,23 @@ void ServerGame::eventHandler(Event event)
 
 void ServerGame::selectMatchAbilityPool()
 {
-    // Clear old abilities
-    matchPrimaryAbilities.clear();
-    matchSecondaryAbilities.clear();
+    matchPrimaryAbilities = chooseTwoAbilities(primaryAbilityTypes);
+    matchSecondaryAbilities = chooseTwoAbilities(secondaryAbilityTypes);
 
-    auto idx1 = std::rand() % primaryAbilityTypes.size();
-    auto idx2 = std::rand() % primaryAbilityTypes.size();
+    registry.view<Player, AbilityState>().each([this](AbilityState& abilityState) {
+        abilityState = AbilityState{};
+        applyMatchAbilityChoices(abilityState);
+    });
+}
 
-    matchPrimaryAbilities.push_back(primaryAbilityTypes[idx1]);
-    matchPrimaryAbilities.push_back(primaryAbilityTypes[idx2]);
-
-    idx1 = std::rand() % secondaryAbilityTypes.size();
-    idx2 = std::rand() % secondaryAbilityTypes.size();
-
-    matchSecondaryAbilities.push_back(secondaryAbilityTypes[idx1]);
-    matchSecondaryAbilities.push_back(secondaryAbilityTypes[idx2]);
+void ServerGame::applyMatchAbilityChoices(AbilityState& state) const
+{
+    for (std::size_t i = 0; i < kAbilityChoicesPerTier; ++i) {
+        state.primaryChoices[i] =
+            (i < matchPrimaryAbilities.size()) ? matchPrimaryAbilities[i] : primaryAbilityTypes[i];
+        state.secondaryChoices[i] =
+            (i < matchSecondaryAbilities.size()) ? matchSecondaryAbilities[i] : secondaryAbilityTypes[i];
+    }
 }
 
 void ServerGame::tick(float dt, Uint64 nextTick)
@@ -722,11 +746,9 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
     registry.emplace<PlayerMatchStats>(player, PlayerMatchStats{});
-    registry.emplace<AbilityState>(player,
-                                   AbilityState{
-                                       .primary = AbilityType::Grapple,
-                                       .secondary = AbilityType::Gravity,
-                                   }); // Defaults to level 0 with 0 accum damage
+    AbilityState abilityState{};
+    applyMatchAbilityChoices(abilityState);
+    registry.emplace<AbilityState>(player, abilityState); // Level 0; level-ups unlock the two ability picks.
     registry.emplace<PowerupState>(player);
 
     if constexpr (player_colors::k_enabled) {
