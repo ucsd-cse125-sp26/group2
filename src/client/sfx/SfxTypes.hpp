@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL_audio.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -40,6 +41,13 @@ enum class SfxId : uint8_t
     Healing,        ///< Voicy_Syringe SFX .mp3
     ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
 
+    // Movement / equipment placeholders. These synthesize if final assets are absent.
+    FootstepLight,
+    FootstepHeavy,
+    GrenadeThrow,
+    VoiceStart,
+    VoiceStop,
+
     _Count
 };
 
@@ -49,6 +57,8 @@ enum class SfxCategory : uint8_t
     Weapons,
     Impacts,
     Player,
+    Footsteps,
+    Voice,
     UI,
     _Count
 };
@@ -56,9 +66,11 @@ enum class SfxCategory : uint8_t
 /// @brief A decoded sound clip ready for playback.
 struct SoundClip
 {
-    std::vector<uint8_t> pcmData; ///< Raw PCM samples (S16LE, interleaved channels).
-    SDL_AudioSpec spec{};         ///< Format descriptor matching pcmData.
+    std::vector<uint8_t> pcmData; ///< Original/intermediate PCM bytes while loading.
+    std::vector<float> samples;   ///< Mixer-ready F32 stereo samples.
+    SDL_AudioSpec spec{};         ///< Format descriptor matching pcmData, or mixer format after conversion.
     float durationSeconds = 0.0f; ///< Total playback duration in seconds.
+    std::size_t frameCount = 0;   ///< Number of interleaved stereo frames in samples.
     SfxCategory category = SfxCategory::Weapons;
     float defaultGain = 1.0f;     ///< Base volume for this clip.
     float minCooldown = 0.05f;    ///< Minimum seconds between repeated plays.

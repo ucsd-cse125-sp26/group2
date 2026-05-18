@@ -685,6 +685,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfRenderer.hpp"
     # Sound effects system
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxSystem.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/SfxEvents.hpp"
@@ -1672,6 +1674,24 @@ endif()
 set_compiler_warnings(chat_voice_protocol_tests)
 enable_sanitizers(chat_voice_protocol_tests)
 add_test(NAME chat_voice_protocol_tests COMMAND chat_voice_protocol_tests)
+
+add_executable(audio_math_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_math_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
+)
+target_include_directories(audio_math_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(audio_math_tests PRIVATE
+    glm::glm
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(audio_math_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(audio_math_tests)
+enable_sanitizers(audio_math_tests)
+add_test(NAME audio_math_tests COMMAND audio_math_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
