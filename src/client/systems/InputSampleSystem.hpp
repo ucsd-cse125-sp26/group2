@@ -13,13 +13,63 @@
 
 #include <algorithm>
 #include <cmath>
+#include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
+#include <glm/vec2.hpp>
 
 /// @brief Client-only input sampling system — split into two halves so mouse
 ///        look can run every iterate() (smooth camera at any FPS) while
 ///        movement keys run once per physics tick group (server-consistent).
 namespace systems
 {
+
+/// @brief Tracks previous-frame key state for edge detection.
+inline bool prevKillSelfKey = false;
+/// @brief Tracks previous-frame G key state for grenade quick-throw / radial behavior.
+inline bool prevGrenadeKey = false;
+inline float grenadeHeldSeconds = 0.0f;
+inline bool grenadeRadialActive = false;
+inline glm::vec2 grenadeRadialAim{0.0f, -1.0f};
+inline bool pendingGrenadeThrow = false;
+inline constexpr float k_grenadeRadialHoldSeconds = 0.24f;
+inline constexpr float k_grenadeRadialDeadzone = 18.0f;
+inline constexpr float k_grenadeRadialMaxDistance = 130.0f;
+/// @brief Tracks previous-frame Alt+LMB state for ability choice edge detection.
+inline bool prevAbilitySelectLeft = false;
+/// @brief Tracks previous-frame Alt+RMB state for ability choice edge detection.
+inline bool prevAbilitySelectRight = false;
+
+inline std::uint8_t grenadeRadialIndexFromAim()
+{
+    if (glm::dot(grenadeRadialAim, grenadeRadialAim) < k_grenadeRadialDeadzone * k_grenadeRadialDeadzone) {
+        return kInvalidGrenadeSelectIndex;
+    }
+
+    constexpr glm::vec2 directions[3] = {
+        {0.0f, -1.0f},
+        {0.8660254f, 0.5f},
+        {-0.8660254f, 0.5f},
+    };
+
+    const glm::vec2 aim = glm::normalize(grenadeRadialAim);
+    std::uint8_t bestIndex = 0;
+    float bestDot = glm::dot(aim, directions[0]);
+    for (std::uint8_t i = 1; i < 3; ++i) {
+        const float d = glm::dot(aim, directions[i]);
+        if (d > bestDot) {
+            bestDot = d;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
+}
+
+inline bool consumePendingGrenadeThrow()
+{
+    const bool shouldThrow = pendingGrenadeThrow;
+    pendingGrenadeThrow = false;
+    return shouldThrow;
+}
 
 /// @brief Sample mouse delta and accumulate into yaw / pitch.
 ///
@@ -39,6 +89,15 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
     float mdx = 0.0f;
     float mdy = 0.0f;
     SDL_GetRelativeMouseState(&mdx, &mdy);
+
+    if (grenadeRadialActive) {
+        grenadeRadialAim += glm::vec2{mdx, mdy};
+        const float len = glm::length(grenadeRadialAim);
+        if (len > k_grenadeRadialMaxDistance) {
+            grenadeRadialAim *= k_grenadeRadialMaxDistance / len;
+        }
+        return;
+    }
 
     // When gravity is flipped the camera is rolled 180°, which swaps
     // both screen-left/right and screen-up/down relative to world space.
@@ -63,17 +122,6 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
     });
 }
 
-/// @brief Tracks previous-frame key state for edge detection.
-inline bool prevKillSelfKey = false;
-/// @brief Tracks previous-frame G key state for gravity flip edge detection.
-inline bool prevFlipGravityKey = false;
-/// @brief Tracks previous-frame 3 key state for grenade cycle edge detection.
-inline bool prevGrenadeKey = false;
-/// @brief Tracks previous-frame Alt+LMB state for ability choice edge detection.
-inline bool prevAbilitySelectLeft = false;
-/// @brief Tracks previous-frame Alt+RMB state for ability choice edge detection.
-inline bool prevAbilitySelectRight = false;
-
 /// @brief Sample keyboard state into the movement flags.
 ///
 /// Should be called **once per physics tick group** when input is synced
@@ -93,11 +141,6 @@ inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
     const bool killEdge = killKeyNow && !prevKillSelfKey;
     prevKillSelfKey = killKeyNow;
 
-    // Edge-detect G key: gravity flip is a toggle, fire on rising edge only.
-    const bool flipKeyNow = kKeys[SDL_SCANCODE_G];
-    const bool flipEdge = flipKeyNow && !prevFlipGravityKey;
-    prevFlipGravityKey = flipKeyNow;
-
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.forward = kKeys[SDL_SCANCODE_W];
         snap.back = kKeys[SDL_SCANCODE_S];
@@ -111,7 +154,6 @@ inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
         snap.ability1 = kKeys[SDL_SCANCODE_LSHIFT];
         snap.ability2 = kKeys[SDL_SCANCODE_E];
         snap.killSelf = killEdge;
-        snap.flipGravity = flipEdge;
         snap.skipRespawn = false; // Clear stale flag from previous death.
     });
 }
@@ -137,7 +179,7 @@ inline void runDeadInput(Registry& registry)
 /// Can also be called every iterate() when the sync toggle is off.
 ///
 /// @param registry  The ECS registry.
-inline void runWeaponKeys(Registry& registry)
+inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
@@ -151,16 +193,37 @@ inline void runWeaponKeys(Registry& registry)
     prevAbilitySelectLeft = selectLeftNow;
     prevAbilitySelectRight = selectRightNow;
 
-    // Edge-detect 3 key: grenade cycle is a toggle, fire on rising edge only.
-    const bool grenadeKeyNow = kKeys[SDL_SCANCODE_3];
-    const bool grenadeEdge = grenadeKeyNow && !prevGrenadeKey;
+    const bool grenadeKeyNow = kKeys[SDL_SCANCODE_G];
+    if (grenadeKeyNow) {
+        if (!prevGrenadeKey) {
+            grenadeHeldSeconds = 0.0f;
+            grenadeRadialActive = false;
+            grenadeRadialAim = glm::vec2{0.0f, -1.0f};
+        } else {
+            grenadeHeldSeconds += dt;
+        }
+
+        if (!grenadeRadialActive && grenadeHeldSeconds >= k_grenadeRadialHoldSeconds) {
+            grenadeRadialActive = true;
+        }
+    } else if (prevGrenadeKey) {
+        if (!grenadeRadialActive) {
+            pendingGrenadeThrow = true;
+        }
+        grenadeHeldSeconds = 0.0f;
+        grenadeRadialActive = false;
+    }
     prevGrenadeKey = grenadeKeyNow;
+    const std::uint8_t grenadeSelectIndex =
+        grenadeRadialActive ? grenadeRadialIndexFromAim() : kInvalidGrenadeSelectIndex;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting = leftDown && !altHeld;
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
-        snap.cycleGrenade = grenadeEdge;
+        snap.throwGrenade = false;
+        snap.grenadeMenuHeld = grenadeRadialActive;
+        snap.grenadeSelectIndex = grenadeSelectIndex;
         snap.reload = kKeys[SDL_SCANCODE_R];
         snap.pickup = kKeys[SDL_SCANCODE_F];
         snap.abilitySelectHeld = altHeld;

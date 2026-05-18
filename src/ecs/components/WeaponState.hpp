@@ -28,8 +28,7 @@ enum class WeaponSlot : uint8_t
 {
     PRIMARY,
     SECONDARY,
-    GRENADE, ///< Exclusive grenade slot — only accepts grenade types (see canAcceptType).
-    Count,   ///< Sentinel — must be last. Equals the number of valid slots.
+    Count, ///< Sentinel — must be last. Equals the number of valid slots.
 };
 
 /// @brief Struct that defines this weapon's type, cooldown, and ammo.

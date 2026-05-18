@@ -59,18 +59,14 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
             // Resolve the destination slot under the type-compatibility guard.
             // The currently-equipped slot is preferred so picking up a rifle
             // while holding a rifle replaces it in-place; otherwise we fall
-            // back to PRIMARY. The grenade slot is exclusive to grenade types
-            // (canAcceptType enforces this), so a rifle pickup can never land
-            // there even if the player happens to have grenade equipped.
+            // back to PRIMARY. Grenades are not weapon-slot pickups; they live
+            // in GrenadeState.
             const WeaponSlot targetSlot =
                 canAcceptType(weapon.current, spawner.type) ? weapon.current : WeaponSlot::PRIMARY;
             if (!canAcceptType(targetSlot, spawner.type)) {
                 // Fallback slot can't accept this type either (e.g. a
                 // hypothetical world-spawned grenade hitting this path).
-                // Reject the pickup rather than silently dropping it into
-                // the wrong slot.
-                // TODO: when world-spawned grenade pickups exist, route them to the GRENADE slot
-                // instead of silently dropping. (Stub policy for v1: WeaponSpawner only emits guns.)
+                // Reject the pickup rather than silently dropping it into a gun slot.
                 return;
             }
             spawner.hasWeapon = false;

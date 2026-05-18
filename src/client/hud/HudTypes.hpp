@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <span>
@@ -158,6 +159,7 @@ struct HudEquipmentState
 {
     std::string primaryAbilityName = "LOCKED";
     std::string secondaryAbilityName = "LOCKED";
+    std::string grenadeName = "FRAG";
     float primaryAbilityCharge = 1.f;   ///< 0..1, 1 = ready.
     float secondaryAbilityCharge = 1.f; ///< 0..1, 1 = ready.
     bool primaryAbilityAvailable = false;
@@ -168,6 +170,22 @@ struct HudEquipmentState
     float tacticalCharge = 1.f; ///< 0..1, 1 = ready.
     int grenadeCount = 2;       ///< Count for slot showing a number; 0 = unavailable.
     int tacticalCount = 1;      ///< Count for slot showing a number; 0 = unavailable.
+};
+
+inline constexpr std::size_t kHudGrenadeSlots = 3;
+
+struct HudGrenadeRadialItem
+{
+    std::string name;
+    int count = 0;
+    bool available = true;
+};
+
+struct HudGrenadeRadialState
+{
+    bool open = false;
+    int selectedIndex = -1;
+    std::array<HudGrenadeRadialItem, kHudGrenadeSlots> items;
 };
 
 struct HudAbilityChoice
@@ -259,6 +277,7 @@ struct HudGameState
     // Voidfall HUD additions.
     std::span<const HudWorldEnemy> worldEnemies;                ///< Enemies whose HP bars float above them in-world.
     HudEquipmentState equipment;                                ///< Grapple / grenade / tactical state.
+    HudGrenadeRadialState grenadeRadial;                        ///< Held-G grenade selection radial.
     HudAbilitySelectionState abilitySelection;                  ///< Pending level-up ability choice.
     std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
     HudKdaCounter kda;                                          ///< Local player kill/assist/death counter (top-right).

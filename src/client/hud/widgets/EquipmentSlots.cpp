@@ -76,7 +76,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
          true,
          state_.secondaryAbilityAvailable,
          state_.secondaryAbilityMarked},
-        {"G", state_.grenadeCharge, state_.grenadeCount, "GRENADE", false, true, false, true, false},
+        {"G", state_.grenadeCharge, state_.grenadeCount, state_.grenadeName, false, true, false, true, false},
     };
 
     for (int i = 0; i < slotCount; ++i) {

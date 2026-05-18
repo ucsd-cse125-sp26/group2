@@ -17,6 +17,7 @@
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
+#include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -1222,7 +1223,7 @@ SDL_AppResult Game::iterate()
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry, localGravFlipped);
-        systems::runWeaponKeys(registry);
+        systems::runWeaponKeys(registry, frameTime);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
         // a player can use kbm and pad simultaneously without either source
@@ -1272,10 +1273,12 @@ SDL_AppResult Game::iterate()
     bool physicsRan = false;
     int ticksThisFrame = 0;
     bool grantAbilityLevelThisFrame = false;
+    bool throwGrenadeThisFrame = false;
 
     if (accumulator >= k_physicsDt) {
         grantAbilityLevelThisFrame = debugUI.pendingAbilityLevelGrant_;
         debugUI.pendingAbilityLevelGrant_ = false;
+        throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured) {
@@ -1341,6 +1344,7 @@ SDL_AppResult Game::iterate()
             registry.view<InputSnapshot, LocalPlayer>().each([this, grantAbilityLevelThisFrame](InputSnapshot& snap) {
                 snap.tick = clientPredictTick;
                 snap.debugGrantAbilityLevel = grantAbilityLevelThisFrame;
+                snap.throwGrenade = false;
             });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
@@ -1364,7 +1368,10 @@ SDL_AppResult Game::iterate()
         // last physics tick's number.  Prior k_inputRedundancy
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [throwGrenadeThisFrame](InputSnapshot& snap) { snap.throwGrenade = throwGrenadeThisFrame; });
         systems::runInputSend(registry, *client);
+        registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) { snap.throwGrenade = false; });
 
         phaseSnap(phaseStats.physics);
 
@@ -3044,8 +3051,13 @@ SDL_AppResult Game::iterate()
                 }
             }
         });
-        registry.view<LocalPlayer, InputSnapshot>().each(
-            [&](const InputSnapshot& snap) { hudState.abilitySelection.modifierHeld = snap.abilitySelectHeld; });
+        registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+            hudState.abilitySelection.modifierHeld = snap.abilitySelectHeld;
+            hudState.grenadeRadial.open = snap.grenadeMenuHeld;
+            if (snap.grenadeSelectIndex < kHudGrenadeSlots) {
+                hudState.grenadeRadial.selectedIndex = static_cast<int>(snap.grenadeSelectIndex);
+            }
+        });
 
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
@@ -3308,15 +3320,26 @@ SDL_AppResult Game::iterate()
                 grappleCharge = std::clamp(s_grappleSinceRelease / tms::k_grappleCooldown, 0.f, 1.f);
             hudState.equipment.grappleCharge = grappleCharge;
 
-            // Grenade: v1 has no cooldown and unlimited grenades for testing,
-            // so charge stays 1.0. The grenade slot lives on WeaponState now
-            // (single source of truth — see Task 6b); we still surface "∞" as
-            // 9 if the local player exists.
-            int grenadeCount = 2; // sensible default if no local WeaponState yet
-            // TODO: read getSlot(ws, WeaponSlot::GRENADE).totalAmmo once finite carry counts land (deferred from v1).
-            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& /*ws*/) { grenadeCount = 9; });
-            hudState.equipment.grenadeCount = grenadeCount;
-            hudState.equipment.grenadeCharge = 1.f;
+            registry.view<LocalPlayer, GrenadeState>().each([&](const GrenadeState& grenades) {
+                const WeaponType selected = grenades.selected;
+                hudState.equipment.grenadeName = grenadeTypeName(selected);
+                hudState.equipment.grenadeCount = grenadeAmmo(grenades, selected);
+                const float cooldown = getGrenadeConfig(selected).throwCooldown;
+                hudState.equipment.grenadeCharge =
+                    cooldown > 0.0f ? 1.0f - std::clamp(grenades.cooldown / cooldown, 0.0f, 1.0f) : 1.0f;
+                const int selectedIndex = static_cast<int>(grenadeTypeIndex(selected));
+                if (hudState.grenadeRadial.selectedIndex < 0) {
+                    hudState.grenadeRadial.selectedIndex = selectedIndex;
+                }
+
+                for (std::size_t i = 0; i < kGrenadeTypes.size() && i < hudState.grenadeRadial.items.size(); ++i) {
+                    const WeaponType type = kGrenadeTypes[i];
+                    const int ammo = grenadeAmmo(grenades, type);
+                    hudState.grenadeRadial.items[i].name = grenadeTypeName(type);
+                    hudState.grenadeRadial.items[i].count = ammo;
+                    hudState.grenadeRadial.items[i].available = ammo > 0;
+                }
+            });
 
             // Tactical: not implemented in ECS yet; show as ready with a
             // single charge so the slot still renders correctly.

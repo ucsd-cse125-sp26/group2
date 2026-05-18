@@ -56,9 +56,8 @@ inline bool tryPickup(Registry& registry, Position dropPos, CollisionShape dropS
         }
 
         // Look-and-press pickup: replaces the currently equipped slot when it
-        // can accept the dropped type, else falls back to PRIMARY. Mirrors the
-        // type-guard policy in WeaponSpawnerSystem so a player holding GRENADE
-        // can still pick up gun drops without dumping them into the wrong slot.
+        // can accept the dropped type, else falls back to PRIMARY. Grenades
+        // are equipment, not dropped weapon-slot pickups.
         const float eyeDir = pvis.gravityFlipped ? -1.0f : 1.0f;
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.77f * eyeDir, 0.0f};
         const glm::vec3 viewFwd = viewForward(input.yaw, input.pitch);

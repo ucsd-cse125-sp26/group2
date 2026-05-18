@@ -11,6 +11,7 @@
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
+#include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerColor.hpp"
@@ -145,6 +146,7 @@ using Synced = std::tuple<entt::entity,
                           PlayerVisState,
                           CollisionShape,
                           WeaponState,
+                          GrenadeState,
                           Health,
                           AbilityState,
                           PlayerMatchStats,

@@ -56,43 +56,65 @@ struct GrenadeConfig
     glm::vec3 tint = {1.0f, 1.0f, 1.0f}; ///< RGB multiplier for projectile rendering.
 };
 
+inline constexpr std::array<WeaponType, 3> kGrenadeTypes = {
+    WeaponType::HEGrenade,
+    WeaponType::Molotov,
+    WeaponType::Impulse,
+};
+inline constexpr std::size_t kGrenadeTypeCount = kGrenadeTypes.size();
+
 /// @brief True if `type` is a grenade (covered by getGrenadeConfig).
 inline bool isGrenadeType(WeaponType type)
 {
-    return type == WeaponType::HEGrenade || type == WeaponType::Molotov || type == WeaponType::Impulse;
+    for (WeaponType grenadeType : kGrenadeTypes) {
+        if (type == grenadeType) {
+            return true;
+        }
+    }
+    return false;
 }
 
-/// @brief Slot/type compatibility predicate for pickups.
-///
-/// The grenade slot only accepts grenade types; non-grenade slots only accept
-/// non-grenade types. WeaponSpawnerSystem calls this before assigning any
-/// picked-up gun to a slot, so a rifle pickup never overwrites the player's
-/// grenade and a hypothetical world-spawned grenade never overwrites a real gun.
-/// @note XNOR works for the current 2-family partition (grenade vs everything else).
-///       Adding a 3rd family (e.g. melee) will require a slot-keyed table — see
-///       WeaponSlot doc.
-inline bool canAcceptType(WeaponSlot slot, WeaponType type)
+inline std::size_t grenadeTypeIndex(WeaponType type)
 {
-    const bool slotIsGrenade = (slot == WeaponSlot::GRENADE);
-    const bool typeIsGrenade = isGrenadeType(type);
-    return slotIsGrenade == typeIsGrenade;
+    for (std::size_t i = 0; i < kGrenadeTypes.size(); ++i) {
+        if (kGrenadeTypes[i] == type) {
+            return i;
+        }
+    }
+
+    assert(false && "grenadeTypeIndex called on non-grenade WeaponType");
+    return 0;
 }
 
-/// @brief Cycle to the next grenade type. HE → Molotov → Impulse → HE.
-inline WeaponType nextGrenadeType(WeaponType type)
+inline WeaponType grenadeTypeAt(std::size_t index)
+{
+    if (index >= kGrenadeTypes.size()) {
+        index = 0;
+    }
+    return kGrenadeTypes[index];
+}
+
+inline constexpr const char* grenadeTypeName(WeaponType type)
 {
     switch (type) {
     case WeaponType::HEGrenade:
-        return WeaponType::Molotov;
+        return "FRAG";
     case WeaponType::Molotov:
-        return WeaponType::Impulse;
+        return "MOLOTOV";
     case WeaponType::Impulse:
-        return WeaponType::HEGrenade;
+        return "IMPULSE";
     default:
-        break;
+        return "GRENADE";
     }
-    assert(false && "nextGrenadeType called on non-grenade WeaponType");
-    return WeaponType::HEGrenade;
+}
+
+/// @brief Weapon-slot type compatibility predicate for pickup guards.
+///
+/// Grenades are equipped through GrenadeState, not WeaponState, so weapon slots
+/// reject grenade types.
+inline bool canAcceptType(WeaponSlot /*slot*/, WeaponType type)
+{
+    return !isGrenadeType(type);
 }
 
 /// @brief Returns the config for a grenade WeaponType.
