@@ -29,7 +29,7 @@ public:
 
 private:
     uint16_t discoveryPort = 0;
-    NET_Address *broadcastAddr = nullptr;
+    NET_Address* broadcastAddr = nullptr;
     uint64_t lastRequestMs = 0;
 
     NET_DatagramSocket* socket = nullptr;

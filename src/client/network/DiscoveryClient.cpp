@@ -4,6 +4,7 @@
 #include "network/PacketType.hpp"
 
 #include <vector>
+#include <cstring>
 
 bool DiscoveryClient::start(uint16_t port)
 {

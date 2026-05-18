@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "network/discovery/GlobalDiscoveryProtocol.hpp"
 #include "network/DiscoveryClient.hpp"
+#include "network/discovery/GlobalDiscoveryProtocol.hpp"
 
 #include <string>
 #include <string_view>

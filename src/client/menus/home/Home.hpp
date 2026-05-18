@@ -3,10 +3,10 @@
 
 #include "IScreen.hpp"
 #include "menus/home/ui/HomeUI.hpp"
+#include "network/DiscoveryClient.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/NewRenderer.hpp"
-#include "network/DiscoveryClient.hpp"
 
 #include <atomic>
 #include <memory>
