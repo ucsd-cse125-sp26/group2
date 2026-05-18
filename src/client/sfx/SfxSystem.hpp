@@ -9,6 +9,7 @@
 #pragma once
 
 #include "AudioMath.hpp"
+#include "AudioRuntime.hpp"
 #include "SfxTypes.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -81,6 +82,16 @@ public:
                       float gain = 1.0f);
     void stopSource(SourceHandle handle);
     void setListener(const audio::ListenerState& listener);
+    void setAudioObjectTransform(audio::AudioObjectId object,
+                                 const glm::vec3& position,
+                                 const glm::vec3& velocity = glm::vec3{0.0f});
+    void removeAudioObject(audio::AudioObjectId object);
+    void setAudioRtpc(audio::AudioObjectId object, audio::RtpcId rtpc, float value);
+    void setAudioSwitch(audio::AudioObjectId object, audio::SwitchGroupId group, audio::SwitchValueId value);
+    void setAudioState(audio::StateGroupId group, audio::StateValueId value);
+    void setAudioBusVolume(audio::AudioBusId bus, float volume);
+    SourceHandle
+    postAudioEvent(std::string_view eventName, audio::AudioObjectId object = audio::kGlobalObject, float gain = 1.0f);
     void submitVoiceFrame(ClientId speaker,
                           std::uint16_t sequence,
                           std::span<const float> monoPcm48k,
@@ -102,6 +113,8 @@ public:
 
     /// @brief True after a successful init().
     bool isInitialized() const { return device_ != 0; }
+    [[nodiscard]] const audio::AudioRuntime& audioRuntime() const noexcept { return audioRuntime_; }
+    [[nodiscard]] const audio::AudioRuntimeStats& audioStats() const noexcept { return audioRuntime_.stats(); }
 
 private:
     SDL_AudioDeviceID device_ = 0;           ///< Logical playback device (0 = not initialised).
@@ -123,6 +136,10 @@ private:
         float cursor = 0.0f;
         float gain = 1.0f;
         float priority = 1.0f;
+        audio::AudioBusId bus{};
+        float busGain = 1.0f;
+        std::uint16_t maxInstances = 0;
+        std::uint16_t maxBusInstances = 0;
         float age = 0.0f;
         float lowPassStateL = 0.0f;
         float lowPassStateR = 0.0f;
@@ -142,6 +159,7 @@ private:
 
     float masterVolume_ = 0.8f;
     std::array<float, static_cast<size_t>(SfxCategory::_Count)> categoryVolumes_{};
+    audio::AudioRuntime audioRuntime_;
     audio::ListenerState listener_{};
     std::array<float, 48000> reverbDelayL_{};
     std::array<float, 48000> reverbDelayR_{};
@@ -165,9 +183,26 @@ private:
     /// @brief Decode a single MP3 from assets/sounds/ and store it as clip[id].
     bool loadClip(SfxId id, const char* filename, SfxCategory cat, float gain, float cooldownSecs);
 
-    Source* acquireSource(float priority);
+    Source* acquireSource(float priority,
+                          SfxId id = SfxId::_Count,
+                          audio::AudioBusId bus = audio::kInvalidBus,
+                          std::uint16_t maxInstances = 0,
+                          std::uint16_t maxBusInstances = 0);
     Source* findSource(SourceHandle handle);
     Source* findVoiceSource(ClientId speaker);
+    SourceHandle startSource(SfxId id,
+                             bool positional,
+                             bool loop,
+                             const glm::vec3& position,
+                             const glm::vec3& velocity,
+                             float gain,
+                             float priority,
+                             audio::AudioBusId bus,
+                             float busGain,
+                             std::uint16_t maxInstances,
+                             std::uint16_t maxBusInstances,
+                             float cooldownOverrideSeconds = -1.0f);
+    SourceHandle playCommand(const audio::AudioCommand& command);
 
     /// @brief master × category × clip × extraGain.
     float effectiveGain(SfxId id, float extraGain) const;

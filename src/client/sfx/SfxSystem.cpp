@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <span>
 #include <string>
 
 // minimp3 — header-only MP3 decoder (implementation defined exactly once here).
@@ -51,58 +52,6 @@ namespace
 {
 
 constexpr float kPi = 3.1415926535f;
-
-const char* sfxIdName(SfxId id)
-{
-    switch (id) {
-    case SfxId::RifleFire:
-        return "RifleFire";
-    case SfxId::RocketFire:
-        return "RocketFire";
-    case SfxId::RailGunFire:
-        return "RailGunFire";
-    case SfxId::EnergyGunFire:
-        return "EnergyGunFire";
-    case SfxId::FleshHit:
-        return "FleshHit";
-    case SfxId::Headshot:
-        return "Headshot";
-    case SfxId::Explosion:
-        return "Explosion";
-    case SfxId::DamageTaken:
-        return "DamageTaken";
-    case SfxId::ArmorBreak:
-        return "ArmorBreak";
-    case SfxId::Death:
-        return "Death";
-    case SfxId::Respawn:
-        return "Respawn";
-    case SfxId::KillConfirm:
-        return "KillConfirm";
-    case SfxId::Healing:
-        return "Healing";
-    case SfxId::ShieldRecharge:
-        return "ShieldRecharge";
-    case SfxId::ChargeRifleLoad:
-        return "ChargeRifleLoad";
-    case SfxId::ChargeRifleShoot:
-        return "ChargeRifleShoot";
-    case SfxId::EnergyBeamLoop:
-        return "EnergyBeamLoop";
-    case SfxId::FootstepLight:
-        return "FootstepLight";
-    case SfxId::FootstepHeavy:
-        return "FootstepHeavy";
-    case SfxId::GrenadeThrow:
-        return "GrenadeThrow";
-    case SfxId::VoiceStart:
-        return "VoiceStart";
-    case SfxId::VoiceStop:
-        return "VoiceStop";
-    default:
-        return "Unknown";
-    }
-}
 
 bool sequenceNewer(std::uint16_t a, std::uint16_t b) noexcept
 {
@@ -162,6 +111,23 @@ bool SfxSystem::init()
     synthesizeClip(SfxId::VoiceStop, SfxCategory::Voice, 0.14f, 0.05f);
 
     convertClipsToMixer();
+
+    std::vector<std::string> manifestErrors;
+    const char* base = SDL_GetBasePath();
+    const std::string manifestPath = std::string(base ? base : "") + "assets/audio/audio_manifest.toml";
+    if (!audioRuntime_.loadManifest(manifestPath, &manifestErrors)) {
+        audioRuntime_.loadDefaultManifest();
+        SDL_Log("[sfx] Audio manifest unavailable at '%s'; using built-in graph", manifestPath.c_str());
+        for (const std::string& error : manifestErrors)
+            SDL_Log("[sfx]   manifest: %s", error.c_str());
+    } else {
+        SDL_Log("[sfx] Loaded audio manifest '%s' (%zu clips, %zu nodes, %zu events)",
+                manifestPath.c_str(),
+                audioRuntime_.manifest().clips().size(),
+                audioRuntime_.manifest().nodes().size(),
+                audioRuntime_.manifest().events().size());
+    }
+
     warmUpDevice();
 
     int loaded = 0;
@@ -206,64 +172,20 @@ void SfxSystem::play(SfxId id, float gain)
 
 SfxSystem::SourceHandle SfxSystem::play2D(SfxId id, float gain, float priority)
 {
-    if (!mixStream_)
-        return kInvalidSource;
-
-    const size_t idx = static_cast<size_t>(id);
-    if (idx >= clips_.size())
-        return kInvalidSource;
-    const SoundClip& clip = clips_[idx];
-    if (!clip.loaded || clip.samples.empty())
-        return kInvalidSource;
-    if (cooldowns_[idx] > 0.0f)
-        return kInvalidSource;
-    cooldowns_[idx] = clip.minCooldown;
-
-    std::lock_guard lock(mixerMutex_);
-    Source* source = acquireSource(priority);
-    if (!source)
-        return kInvalidSource;
-
-    const SourceHandle handle = nextSourceHandle_++;
-    if (handle == kInvalidSource)
-        nextSourceHandle_ = 1;
-    *source = Source{};
-    source->active = true;
-    source->playingId = id;
-    source->handle = handle;
-    source->gain = gain;
-    source->priority = priority;
-    return source->handle;
+    return startSource(
+        id, false, false, glm::vec3{0.0f}, glm::vec3{0.0f}, gain, priority, audio::kInvalidBus, 1.0f, 0, 0);
 }
 
 SfxSystem::SourceHandle
 SfxSystem::play3D(SfxId id, const glm::vec3& position, const glm::vec3& velocity, float gain, float priority)
 {
-    SourceHandle handle = play2D(id, gain, priority);
-    std::lock_guard lock(mixerMutex_);
-    Source* source = findSource(handle);
-    if (!source)
-        return kInvalidSource;
-    source->positional = true;
-    source->position = position;
-    source->velocity = velocity;
-    source->occluded = isOccluded(position);
-    return handle;
+    return startSource(id, true, false, position, velocity, gain, priority, audio::kInvalidBus, 1.0f, 0, 0);
 }
 
 SfxSystem::SourceHandle
 SfxSystem::startLoop(SfxId id, bool positional, const glm::vec3& position, float gain, float priority)
 {
-    SourceHandle handle = play2D(id, gain, priority);
-    std::lock_guard lock(mixerMutex_);
-    Source* source = findSource(handle);
-    if (!source)
-        return kInvalidSource;
-    source->loop = true;
-    source->positional = positional;
-    source->position = position;
-    source->occluded = positional && isOccluded(position);
-    return handle;
+    return startSource(id, positional, true, position, glm::vec3{0.0f}, gain, priority, audio::kInvalidBus, 1.0f, 0, 0);
 }
 
 void SfxSystem::updateSource(SourceHandle handle, const glm::vec3& position, const glm::vec3& velocity, float gain)
@@ -303,6 +225,49 @@ void SfxSystem::setListener(const audio::ListenerState& listener)
     }
 }
 
+void SfxSystem::setAudioObjectTransform(audio::AudioObjectId object,
+                                        const glm::vec3& position,
+                                        const glm::vec3& velocity)
+{
+    audioRuntime_.setObjectTransform(object, position, velocity);
+}
+
+void SfxSystem::removeAudioObject(audio::AudioObjectId object)
+{
+    audioRuntime_.removeObject(object);
+}
+
+void SfxSystem::setAudioRtpc(audio::AudioObjectId object, audio::RtpcId rtpc, float value)
+{
+    audioRuntime_.setRtpc(object, rtpc, value);
+}
+
+void SfxSystem::setAudioSwitch(audio::AudioObjectId object, audio::SwitchGroupId group, audio::SwitchValueId value)
+{
+    audioRuntime_.setSwitch(object, group, value);
+}
+
+void SfxSystem::setAudioState(audio::StateGroupId group, audio::StateValueId value)
+{
+    audioRuntime_.setState(group, value);
+}
+
+void SfxSystem::setAudioBusVolume(audio::AudioBusId bus, float volume)
+{
+    audioRuntime_.setBusVolume(bus, volume);
+}
+
+SfxSystem::SourceHandle SfxSystem::postAudioEvent(std::string_view eventName, audio::AudioObjectId object, float gain)
+{
+    SourceHandle first = kInvalidSource;
+    for (const audio::AudioCommand& command : audioRuntime_.postEvent(eventName, object, gain)) {
+        const SourceHandle handle = playCommand(command);
+        if (first == kInvalidSource && handle != kInvalidSource)
+            first = handle;
+    }
+    return first;
+}
+
 void SfxSystem::submitVoiceFrame(ClientId speaker,
                                  std::uint16_t sequence,
                                  std::span<const float> monoPcm48k,
@@ -315,7 +280,7 @@ void SfxSystem::submitVoiceFrame(ClientId speaker,
     std::lock_guard lock(mixerMutex_);
     Source* source = findVoiceSource(speaker);
     if (!source) {
-        source = acquireSource(3.0f);
+        source = acquireSource(3.0f, SfxId::_Count, audio::busId("VoiceChat"), 0, 12);
         if (!source)
             return;
         const SourceHandle handle = nextSourceHandle_++;
@@ -330,6 +295,9 @@ void SfxSystem::submitVoiceFrame(ClientId speaker,
         source->speaker = speaker;
         source->gain = 1.0f;
         source->priority = 3.0f;
+        source->bus = audio::busId("VoiceChat");
+        source->busGain = audioRuntime_.busGain(source->bus);
+        source->maxBusInstances = audioRuntime_.busMaxVoices(source->bus);
         voiceSources_[speaker.value] = handle;
     } else if (source->hasVoiceSeq && !sequenceNewer(sequence, source->newestVoiceSeq)) {
         return;
@@ -373,17 +341,21 @@ float SfxSystem::categoryVolume(SfxCategory cat) const
 
 void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
 {
+    const audio::AudioObjectId object = audio::objectId("event.weapon_fire");
+    setAudioObjectTransform(object, e.origin);
     switch (e.type) {
     case WeaponType::Rifle:
-        play3D(SfxId::RifleFire, e.origin, glm::vec3{0.0f}, 1.0f, 2.0f);
+        postAudioEvent("weapon.rifle.fire", object);
         break;
     case WeaponType::Rocket:
-        play3D(SfxId::GrenadeThrow, e.origin, glm::vec3{0.0f}, 0.9f, 1.5f);
+        postAudioEvent("weapon.rocket.fire", object);
         break;
     case WeaponType::RailGun:
-        play3D(SfxId::ChargeRifleShoot, e.origin, glm::vec3{0.0f}, 1.0f, 2.0f);
+        postAudioEvent("weapon.railgun.fire", object);
         break;
     case WeaponType::EnergyGun:
+        postAudioEvent("weapon.energy.fire", object);
+        break;
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
     case WeaponType::Impulse:
@@ -393,7 +365,9 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
 
 void SfxSystem::onExplosion(const ExplosionEvent& e)
 {
-    play3D(SfxId::Explosion, e.pos, glm::vec3{0.0f}, std::clamp(e.blastRadius / 220.0f, 0.75f, 1.8f), 3.0f);
+    const audio::AudioObjectId object = audio::objectId("event.explosion");
+    setAudioObjectTransform(object, e.pos);
+    postAudioEvent("explosion", object, std::clamp(e.blastRadius / 220.0f, 0.75f, 1.8f));
 }
 
 void SfxSystem::handleEvent(const SDL_Event& event)
@@ -443,7 +417,9 @@ void SfxSystem::update(float dt, const Registry& registry)
             if (source.voiceStream && source.voicePcm.empty() && source.age > 0.35f) {
                 voiceSources_.erase(source.speaker.value);
                 source = Source{};
+                continue;
             }
+            source.busGain = audioRuntime_.busGain(source.bus);
         }
     }
 
@@ -462,24 +438,24 @@ void SfxSystem::update(float dt, const Registry& registry)
 
         const bool justDied = stats.deaths > prevDeaths_;
         if (justDied) {
-            play2D(SfxId::Death);
-            play2D(SfxId::Respawn);
+            postAudioEvent("player.death");
+            postAudioEvent("player.respawn");
         } else {
             const bool healthLost = h.health < prevHealth_ || h.armor < prevArmor_;
             const bool armorJustBroke = prevArmor_ > 0.0f && h.armor <= 0.0f;
             if (healthLost)
-                play2D(SfxId::DamageTaken);
+                postAudioEvent("player.damage");
             if (armorJustBroke)
-                play2D(SfxId::ArmorBreak);
+                postAudioEvent("player.armor_break");
             const bool healing = h.health > prevHealth_ || h.armor > prevArmor_;
             if (healing && healingSoundCooldown_ <= 0.0f) {
-                play2D(SfxId::Healing);
+                postAudioEvent("player.healing");
                 healingSoundCooldown_ = 1.0f;
             }
         }
 
         if (stats.kills > prevKills_)
-            play2D(SfxId::KillConfirm);
+            postAudioEvent("player.kill_confirm");
 
         prevHealth_ = h.health;
         prevArmor_ = h.armor;
@@ -624,8 +600,55 @@ void SfxSystem::convertClipsToMixer()
     SDL_Log("[sfx] Converted %d clips to mixer format (%d Hz, stereo F32)", converted, mixerSpec_.freq);
 }
 
-SfxSystem::Source* SfxSystem::acquireSource(float priority)
+SfxSystem::Source* SfxSystem::acquireSource(
+    float priority, SfxId id, audio::AudioBusId bus, std::uint16_t maxInstances, std::uint16_t maxBusInstances)
 {
+    auto stealBest = [&](auto predicate) -> Source* {
+        Source* best = nullptr;
+        float bestScore = std::numeric_limits<float>::max();
+        for (Source& source : sources_) {
+            if (!source.active || !predicate(source))
+                continue;
+            const float score = source.priority - source.age * 0.02f;
+            if (score < bestScore) {
+                bestScore = score;
+                best = &source;
+            }
+        }
+        if (!best || best->priority > priority + 0.25f)
+            return nullptr;
+        if (best->voiceStream)
+            voiceSources_.erase(best->speaker.value);
+        *best = Source{};
+        return best;
+    };
+
+    if (maxInstances > 0 && id != SfxId::_Count) {
+        std::uint16_t count = 0;
+        for (const Source& source : sources_) {
+            if (source.active && source.playingId == id)
+                ++count;
+        }
+        if (count >= maxInstances) {
+            if (Source* stolen = stealBest([&](const Source& source) { return source.playingId == id; }))
+                return stolen;
+            return nullptr;
+        }
+    }
+
+    if (maxBusInstances > 0 && bus.value != 0) {
+        std::uint16_t count = 0;
+        for (const Source& source : sources_) {
+            if (source.active && source.bus == bus)
+                ++count;
+        }
+        if (count >= maxBusInstances) {
+            if (Source* stolen = stealBest([&](const Source& source) { return source.bus == bus; }))
+                return stolen;
+            return nullptr;
+        }
+    }
+
     for (Source& source : sources_) {
         if (!source.active)
             return &source;
@@ -670,6 +693,78 @@ SfxSystem::Source* SfxSystem::findVoiceSource(ClientId speaker)
         return nullptr;
     }
     return source;
+}
+
+SfxSystem::SourceHandle SfxSystem::startSource(SfxId id,
+                                               bool positional,
+                                               bool loop,
+                                               const glm::vec3& position,
+                                               const glm::vec3& velocity,
+                                               float gain,
+                                               float priority,
+                                               audio::AudioBusId bus,
+                                               float busGain,
+                                               std::uint16_t maxInstances,
+                                               std::uint16_t maxBusInstances,
+                                               float cooldownOverrideSeconds)
+{
+    if (!mixStream_)
+        return kInvalidSource;
+
+    const size_t idx = static_cast<size_t>(id);
+    if (idx >= clips_.size())
+        return kInvalidSource;
+    const SoundClip& clip = clips_[idx];
+    if (!clip.loaded || clip.samples.empty())
+        return kInvalidSource;
+    if (cooldowns_[idx] > 0.0f)
+        return kInvalidSource;
+    cooldowns_[idx] = cooldownOverrideSeconds >= 0.0f ? cooldownOverrideSeconds : clip.minCooldown;
+
+    std::lock_guard lock(mixerMutex_);
+    Source* source = acquireSource(priority, id, bus, maxInstances, maxBusInstances);
+    if (!source)
+        return kInvalidSource;
+
+    const SourceHandle handle = nextSourceHandle_++;
+    if (handle == kInvalidSource)
+        nextSourceHandle_ = 1;
+    *source = Source{};
+    source->active = true;
+    source->loop = loop;
+    source->positional = positional;
+    source->playingId = id;
+    source->handle = handle;
+    source->gain = gain;
+    source->priority = priority;
+    source->bus = bus;
+    source->busGain = busGain;
+    source->maxInstances = maxInstances;
+    source->maxBusInstances = maxBusInstances;
+    source->position = position;
+    source->velocity = velocity;
+    source->occluded = positional && isOccluded(position);
+    return source->handle;
+}
+
+SfxSystem::SourceHandle SfxSystem::playCommand(const audio::AudioCommand& command)
+{
+    if (command.type == audio::AudioCommandType::StopClip) {
+        stop(command.sfx);
+        return kInvalidSource;
+    }
+    return startSource(command.sfx,
+                       command.positional,
+                       command.loop,
+                       command.position,
+                       command.velocity,
+                       command.gain,
+                       command.priority,
+                       command.bus,
+                       audioRuntime_.busGain(command.bus),
+                       command.maxInstances,
+                       command.maxBusInstances,
+                       command.cooldownSeconds);
 }
 
 float SfxSystem::effectiveGain(SfxId id, float extraGain) const
@@ -788,13 +883,20 @@ void SfxSystem::mixIntoStream(SDL_AudioStream* stream, int additionalAmount)
             audio::SpatialParams spatial;
             if (source.positional)
                 spatial = audio::evaluateSpatial(source.position, source.velocity, listener_, source.occluded);
-            if (!spatial.audible)
+            if (!spatial.audible) {
+                if (source.loop && !source.voiceStream && source.playingId != SfxId::_Count) {
+                    const SoundClip& clip = clips_[static_cast<size_t>(source.playingId)];
+                    if (clip.frameCount > 0)
+                        source.cursor =
+                            std::fmod(source.cursor + static_cast<float>(frames), static_cast<float>(clip.frameCount));
+                }
                 continue;
+            }
 
             const float baseGain =
                 source.voiceStream
                     ? masterVolume_ * categoryVolumes_[static_cast<size_t>(SfxCategory::Voice)] * source.gain
-                    : effectiveGain(source.playingId, source.gain);
+                    : effectiveGain(source.playingId, source.gain) * source.busGain;
             const float gain = baseGain * (source.positional ? spatial.gain : 1.0f);
             if (gain <= 0.0001f)
                 continue;
