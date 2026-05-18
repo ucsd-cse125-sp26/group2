@@ -1273,10 +1273,12 @@ SDL_AppResult Game::iterate()
     bool physicsRan = false;
     int ticksThisFrame = 0;
     bool grantAbilityLevelThisFrame = false;
+    bool throwGrenadeThisFrame = false;
 
     if (accumulator >= k_physicsDt) {
         grantAbilityLevelThisFrame = debugUI.pendingAbilityLevelGrant_;
         debugUI.pendingAbilityLevelGrant_ = false;
+        throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured) {
@@ -1342,6 +1344,7 @@ SDL_AppResult Game::iterate()
             registry.view<InputSnapshot, LocalPlayer>().each([this, grantAbilityLevelThisFrame](InputSnapshot& snap) {
                 snap.tick = clientPredictTick;
                 snap.debugGrantAbilityLevel = grantAbilityLevelThisFrame;
+                snap.throwGrenade = false;
             });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
@@ -1365,6 +1368,8 @@ SDL_AppResult Game::iterate()
         // last physics tick's number.  Prior k_inputRedundancy
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
+        registry.view<LocalPlayer, InputSnapshot>().each(
+            [throwGrenadeThisFrame](InputSnapshot& snap) { snap.throwGrenade = throwGrenadeThisFrame; });
         systems::runInputSend(registry, *client);
         registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) { snap.throwGrenade = false; });
 

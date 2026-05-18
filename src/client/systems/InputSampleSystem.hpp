@@ -64,6 +64,13 @@ inline std::uint8_t grenadeRadialIndexFromAim()
     return bestIndex;
 }
 
+inline bool consumePendingGrenadeThrow()
+{
+    const bool shouldThrow = pendingGrenadeThrow;
+    pendingGrenadeThrow = false;
+    return shouldThrow;
+}
+
 /// @brief Sample mouse delta and accumulate into yaw / pitch.
 ///
 /// Must be called **every iterate() call** regardless of whether a physics
@@ -214,7 +221,7 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
         snap.shooting = leftDown && !altHeld;
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
-        snap.throwGrenade = snap.throwGrenade || pendingGrenadeThrow;
+        snap.throwGrenade = false;
         snap.grenadeMenuHeld = grenadeRadialActive;
         snap.grenadeSelectIndex = grenadeSelectIndex;
         snap.reload = kKeys[SDL_SCANCODE_R];
@@ -223,7 +230,6 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
         snap.abilitySelectLeft = selectLeftEdge;
         snap.abilitySelectRight = selectRightEdge;
     });
-    pendingGrenadeThrow = false;
 }
 
 /// @brief Legacy combined sampler — calls both runMouseLook and runMovementKeys.
