@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AudioMath.hpp"
 #include "SfxTypes.hpp"
 
 #include <cstdint>
@@ -178,6 +179,8 @@ struct AudioClipDef
     float gain = 1.0f;
     float priority = 1.0f;
     float cooldownSeconds = 0.0f;
+    float fullGainDistance = k_fullGainDistance;
+    float silentDistance = k_silentDistance;
     bool loop = false;
     bool spatial = false;
     std::uint16_t maxInstances = 0; // 0 = unlimited.
@@ -200,6 +203,7 @@ struct AudioNodeDef
     AudioClipId clip{};
     std::vector<AudioNodeChild> children;
     SwitchGroupId switchGroup{};
+    StateGroupId stateGroup{};
     RtpcId rtpc{};
     AudioNodeId defaultChild{};
     float gain = 1.0f;
@@ -242,6 +246,8 @@ struct AudioCommand
     float gain = 1.0f;
     float priority = 1.0f;
     float cooldownSeconds = 0.0f;
+    float fullGainDistance = k_fullGainDistance;
+    float silentDistance = k_silentDistance;
     bool loop = false;
     bool positional = false;
     std::uint16_t maxInstances = 0;

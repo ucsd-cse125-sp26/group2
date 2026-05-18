@@ -21,8 +21,18 @@
 #include <cstdint>
 #include <mutex>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <vector>
+
+struct SfxRuntimeStats
+{
+    std::uint64_t sourcesStarted = 0;
+    std::uint64_t droppedByCooldown = 0;
+    std::uint64_t droppedByLimit = 0;
+    std::uint64_t stolenSources = 0;
+    std::uint64_t virtualizedFrames = 0;
+};
 
 /// @brief Client-side sound effects system.
 ///
@@ -90,6 +100,7 @@ public:
     void setAudioSwitch(audio::AudioObjectId object, audio::SwitchGroupId group, audio::SwitchValueId value);
     void setAudioState(audio::StateGroupId group, audio::StateValueId value);
     void setAudioBusVolume(audio::AudioBusId bus, float volume);
+    bool reloadAudioManifest();
     SourceHandle
     postAudioEvent(std::string_view eventName, audio::AudioObjectId object = audio::kGlobalObject, float gain = 1.0f);
     void submitVoiceFrame(ClientId speaker,
@@ -115,6 +126,7 @@ public:
     bool isInitialized() const { return device_ != 0; }
     [[nodiscard]] const audio::AudioRuntime& audioRuntime() const noexcept { return audioRuntime_; }
     [[nodiscard]] const audio::AudioRuntimeStats& audioStats() const noexcept { return audioRuntime_.stats(); }
+    [[nodiscard]] const SfxRuntimeStats& sfxStats() const noexcept { return sfxStats_; }
 
 private:
     SDL_AudioDeviceID device_ = 0;           ///< Logical playback device (0 = not initialised).
@@ -140,6 +152,8 @@ private:
         float busGain = 1.0f;
         std::uint16_t maxInstances = 0;
         std::uint16_t maxBusInstances = 0;
+        float fullGainDistance = audio::k_fullGainDistance;
+        float silentDistance = audio::k_silentDistance;
         float age = 0.0f;
         float lowPassStateL = 0.0f;
         float lowPassStateR = 0.0f;
@@ -160,6 +174,8 @@ private:
     float masterVolume_ = 0.8f;
     std::array<float, static_cast<size_t>(SfxCategory::_Count)> categoryVolumes_{};
     audio::AudioRuntime audioRuntime_;
+    SfxRuntimeStats sfxStats_{};
+    std::string manifestPath_;
     audio::ListenerState listener_{};
     std::array<float, 48000> reverbDelayL_{};
     std::array<float, 48000> reverbDelayR_{};
@@ -201,7 +217,9 @@ private:
                              float busGain,
                              std::uint16_t maxInstances,
                              std::uint16_t maxBusInstances,
-                             float cooldownOverrideSeconds = -1.0f);
+                             float cooldownOverrideSeconds = -1.0f,
+                             float fullGainDistance = audio::k_fullGainDistance,
+                             float silentDistance = audio::k_silentDistance);
     SourceHandle playCommand(const audio::AudioCommand& command);
 
     /// @brief master × category × clip × extraGain.

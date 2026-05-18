@@ -43,12 +43,14 @@ float dopplerRatio(const glm::vec3& sourceToListener,
 SpatialParams evaluateSpatial(const glm::vec3& sourcePosition,
                               const glm::vec3& sourceVelocity,
                               const ListenerState& listener,
-                              bool occluded) noexcept
+                              bool occluded,
+                              float fullGainDistance,
+                              float silentDistance) noexcept
 {
     SpatialParams params;
     const glm::vec3 toSource = sourcePosition - listener.position;
     const float distance = glm::length(toSource);
-    params.gain = distanceAttenuation(distance);
+    params.gain = distanceAttenuation(distance, fullGainDistance, silentDistance);
     params.audible = params.gain > 0.0005f;
     if (!params.audible) {
         params.gain = 0.0f;
@@ -78,8 +80,8 @@ SpatialParams evaluateSpatial(const glm::vec3& sourcePosition,
         params.reverbSend = 0.23f;
     } else {
         params.lowPass = 1.0f;
-        params.reverbSend =
-            std::clamp((distance - k_fullGainDistance) / (k_silentDistance - k_fullGainDistance), 0.0f, 0.18f);
+        const float distanceSpan = std::max(1.0f, silentDistance - fullGainDistance);
+        params.reverbSend = std::clamp((distance - fullGainDistance) / distanceSpan, 0.0f, 0.18f);
     }
 
     return params;

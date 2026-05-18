@@ -42,6 +42,8 @@ struct SpatialParams
 [[nodiscard]] SpatialParams evaluateSpatial(const glm::vec3& sourcePosition,
                                             const glm::vec3& sourceVelocity,
                                             const ListenerState& listener,
-                                            bool occluded) noexcept;
+                                            bool occluded,
+                                            float fullGainDistance = k_fullGainDistance,
+                                            float silentDistance = k_silentDistance) noexcept;
 
 } // namespace audio

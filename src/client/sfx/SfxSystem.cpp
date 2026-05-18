@@ -114,15 +114,15 @@ bool SfxSystem::init()
 
     std::vector<std::string> manifestErrors;
     const char* base = SDL_GetBasePath();
-    const std::string manifestPath = std::string(base ? base : "") + "assets/audio/audio_manifest.toml";
-    if (!audioRuntime_.loadManifest(manifestPath, &manifestErrors)) {
+    manifestPath_ = std::string(base ? base : "") + "assets/audio/audio_manifest.toml";
+    if (!audioRuntime_.loadManifest(manifestPath_, &manifestErrors)) {
         audioRuntime_.loadDefaultManifest();
-        SDL_Log("[sfx] Audio manifest unavailable at '%s'; using built-in graph", manifestPath.c_str());
+        SDL_Log("[sfx] Audio manifest unavailable at '%s'; using built-in graph", manifestPath_.c_str());
         for (const std::string& error : manifestErrors)
             SDL_Log("[sfx]   manifest: %s", error.c_str());
     } else {
         SDL_Log("[sfx] Loaded audio manifest '%s' (%zu clips, %zu nodes, %zu events)",
-                manifestPath.c_str(),
+                manifestPath_.c_str(),
                 audioRuntime_.manifest().clips().size(),
                 audioRuntime_.manifest().nodes().size(),
                 audioRuntime_.manifest().events().size());
@@ -255,6 +255,19 @@ void SfxSystem::setAudioState(audio::StateGroupId group, audio::StateValueId val
 void SfxSystem::setAudioBusVolume(audio::AudioBusId bus, float volume)
 {
     audioRuntime_.setBusVolume(bus, volume);
+}
+
+bool SfxSystem::reloadAudioManifest()
+{
+    std::vector<std::string> errors;
+    if (manifestPath_.empty() || !audioRuntime_.loadManifest(manifestPath_, &errors)) {
+        SDL_Log("[sfx] Audio manifest reload failed; keeping current graph");
+        for (const std::string& error : errors)
+            SDL_Log("[sfx]   manifest: %s", error.c_str());
+        return false;
+    }
+    SDL_Log("[sfx] Reloaded audio manifest '%s'", manifestPath_.c_str());
+    return true;
 }
 
 SfxSystem::SourceHandle SfxSystem::postAudioEvent(std::string_view eventName, audio::AudioObjectId object, float gain)
@@ -619,6 +632,7 @@ SfxSystem::Source* SfxSystem::acquireSource(
             return nullptr;
         if (best->voiceStream)
             voiceSources_.erase(best->speaker.value);
+        ++sfxStats_.stolenSources;
         *best = Source{};
         return best;
     };
@@ -667,6 +681,7 @@ SfxSystem::Source* SfxSystem::acquireSource(
         return nullptr;
     if (best->voiceStream)
         voiceSources_.erase(best->speaker.value);
+    ++sfxStats_.stolenSources;
     *best = Source{};
     return best;
 }
@@ -706,7 +721,9 @@ SfxSystem::SourceHandle SfxSystem::startSource(SfxId id,
                                                float busGain,
                                                std::uint16_t maxInstances,
                                                std::uint16_t maxBusInstances,
-                                               float cooldownOverrideSeconds)
+                                               float cooldownOverrideSeconds,
+                                               float fullGainDistance,
+                                               float silentDistance)
 {
     if (!mixStream_)
         return kInvalidSource;
@@ -717,14 +734,18 @@ SfxSystem::SourceHandle SfxSystem::startSource(SfxId id,
     const SoundClip& clip = clips_[idx];
     if (!clip.loaded || clip.samples.empty())
         return kInvalidSource;
-    if (cooldowns_[idx] > 0.0f)
+    if (cooldowns_[idx] > 0.0f) {
+        ++sfxStats_.droppedByCooldown;
         return kInvalidSource;
+    }
     cooldowns_[idx] = cooldownOverrideSeconds >= 0.0f ? cooldownOverrideSeconds : clip.minCooldown;
 
     std::lock_guard lock(mixerMutex_);
     Source* source = acquireSource(priority, id, bus, maxInstances, maxBusInstances);
-    if (!source)
+    if (!source) {
+        ++sfxStats_.droppedByLimit;
         return kInvalidSource;
+    }
 
     const SourceHandle handle = nextSourceHandle_++;
     if (handle == kInvalidSource)
@@ -741,9 +762,12 @@ SfxSystem::SourceHandle SfxSystem::startSource(SfxId id,
     source->busGain = busGain;
     source->maxInstances = maxInstances;
     source->maxBusInstances = maxBusInstances;
+    source->fullGainDistance = fullGainDistance;
+    source->silentDistance = silentDistance;
     source->position = position;
     source->velocity = velocity;
     source->occluded = positional && isOccluded(position);
+    ++sfxStats_.sourcesStarted;
     return source->handle;
 }
 
@@ -764,7 +788,9 @@ SfxSystem::SourceHandle SfxSystem::playCommand(const audio::AudioCommand& comman
                        audioRuntime_.busGain(command.bus),
                        command.maxInstances,
                        command.maxBusInstances,
-                       command.cooldownSeconds);
+                       command.cooldownSeconds,
+                       command.fullGainDistance,
+                       command.silentDistance);
 }
 
 float SfxSystem::effectiveGain(SfxId id, float extraGain) const
@@ -882,13 +908,19 @@ void SfxSystem::mixIntoStream(SDL_AudioStream* stream, int additionalAmount)
 
             audio::SpatialParams spatial;
             if (source.positional)
-                spatial = audio::evaluateSpatial(source.position, source.velocity, listener_, source.occluded);
+                spatial = audio::evaluateSpatial(source.position,
+                                                 source.velocity,
+                                                 listener_,
+                                                 source.occluded,
+                                                 source.fullGainDistance,
+                                                 source.silentDistance);
             if (!spatial.audible) {
                 if (source.loop && !source.voiceStream && source.playingId != SfxId::_Count) {
                     const SoundClip& clip = clips_[static_cast<size_t>(source.playingId)];
                     if (clip.frameCount > 0)
                         source.cursor =
                             std::fmod(source.cursor + static_cast<float>(frames), static_cast<float>(clip.frameCount));
+                    sfxStats_.virtualizedFrames += static_cast<std::uint64_t>(frames);
                 }
                 continue;
             }

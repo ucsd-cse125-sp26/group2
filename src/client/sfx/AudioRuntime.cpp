@@ -184,6 +184,8 @@ bool AudioManifest::loadFromFile(std::string_view path, std::vector<std::string>
                     .gain = floatOr(*table, "gain", 1.0f),
                     .priority = floatOr(*table, "priority", 1.0f),
                     .cooldownSeconds = floatOr(*table, "cooldown", 0.0f),
+                    .fullGainDistance = floatOr(*table, "full_gain_distance", k_fullGainDistance),
+                    .silentDistance = floatOr(*table, "max_distance", k_silentDistance),
                     .loop = boolOr(*table, "loop", false),
                     .spatial = boolOr(*table, "spatial", false),
                     .maxInstances = u16Or(*table, "max_instances", 0),
@@ -205,6 +207,7 @@ bool AudioManifest::loadFromFile(std::string_view path, std::vector<std::string>
                 def.type = parseNodeType(strOr(*table, "type", "sound"));
                 def.clip = clipId(strOr(*table, "clip"));
                 def.switchGroup = switchGroupId(strOr(*table, "switch"));
+                def.stateGroup = stateGroupId(strOr(*table, "state"));
                 def.rtpc = rtpcId(strOr(*table, "rtpc"));
                 def.defaultChild = nodeId(strOr(*table, "default"));
                 def.gain = floatOr(*table, "gain", 1.0f);
@@ -676,7 +679,12 @@ void AudioRuntime::resolveNode(
         break;
     }
     case AudioNodeType::Switch: {
-        const SwitchValueId value = switchValue(object, node.switchGroup);
+        SwitchValueId value = switchValue(object, node.switchGroup);
+        if (value.value == 0 && node.stateGroup.value != 0) {
+            const auto stateIt = states_.find(node.stateGroup.value);
+            if (stateIt != states_.end())
+                value = SwitchValueId{stateIt->second};
+        }
         const AudioNodeChild* chosen = nullptr;
         for (const AudioNodeChild& child : node.children) {
             if (child.switchValue.value != 0 && child.switchValue == value) {
@@ -778,6 +786,8 @@ void AudioRuntime::appendClipCommand(const AudioClipDef& clip,
         .gain = gain * clip.gain,
         .priority = clip.priority + priorityOffset + busPriorityOffset(clip.bus),
         .cooldownSeconds = clip.cooldownSeconds,
+        .fullGainDistance = clip.fullGainDistance,
+        .silentDistance = clip.silentDistance,
         .loop = loopOverride.value_or(clip.loop),
         .positional = positional,
         .maxInstances = clip.maxInstances,

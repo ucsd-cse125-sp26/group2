@@ -67,6 +67,8 @@ sfx = "RocketFire"
 bus = "Weapons"
 spatial = true
 priority = 2.0
+full_gain_distance = 111.0
+max_distance = 1234.0
 
 [[nodes]]
 id = "node.a"
@@ -87,9 +89,22 @@ children = [
   { node = "node.b", switch = "rocket" },
 ]
 
+[[nodes]]
+id = "node.state"
+type = "switch"
+state = "game.phase"
+default = "node.a"
+children = [
+  { node = "node.b", switch = "combat" },
+]
+
 [[events]]
 id = "weapon.fire"
 actions = [{ type = "play", target = "node.switch" }]
+
+[[events]]
+id = "phase.fire"
+actions = [{ type = "play", target = "node.state" }]
 
 [[events]]
 id = "weapon.stop"
@@ -113,6 +128,16 @@ actions = [{ type = "stop", target = "node.switch" }]
     assert(commands.size() == 1);
     assert(commands[0].sfx == SfxId::RocketFire);
     assert(commands[0].maxBusInstances == 4);
+    assert(commands[0].fullGainDistance == 111.0f);
+    assert(commands[0].silentDistance == 1234.0f);
+
+    commands = runtime.postEvent("phase.fire", object);
+    assert(commands.size() == 1);
+    assert(commands[0].sfx == SfxId::RifleFire);
+    runtime.setState(audio::stateGroupId("game.phase"), audio::stateValueId("combat"));
+    commands = runtime.postEvent("phase.fire", object);
+    assert(commands.size() == 1);
+    assert(commands[0].sfx == SfxId::RocketFire);
 
     commands = runtime.postEvent("weapon.stop", object);
     assert(commands.size() >= 1);
