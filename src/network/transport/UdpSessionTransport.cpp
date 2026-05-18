@@ -226,9 +226,11 @@ UdpSessionTransport::createServerPeer(const UdpEndpointAddr& from, std::uint32_t
     if (viaRelay) {
         peer.relayAddr = from;
         peer.hasRelay = true;
+        peer.lastRelayHeardMs = peer.lastHeardMs;
     } else {
         peer.directAddr = from;
         peer.hasDirect = true;
+        peer.lastDirectHeardMs = peer.lastHeardMs;
     }
     connectionByClientNonce_[clientNonce] = connectionId;
     return peer;
@@ -345,6 +347,18 @@ bool UdpSessionTransport::sendPacket(Peer& peer, PacketHeader hdr, const void* p
     ChannelState& ch = peer.channels[channelIndex(channel)];
     hdr.ack = ch.recvHighest;
     hdr.ackBits = ch.recvAckBits;
+
+    const Uint64 now = SDL_GetTicks();
+    if (!preferRelay_ && peer.useRelay && peer.hasDirect && peer.lastDirectHeardMs != 0 &&
+        now - peer.lastDirectHeardMs <= k_routeUnhealthyMs)
+    {
+        peer.useRelay = false;
+    } else if (!peer.useRelay && peer.hasRelay && peer.lastDirectHeardMs != 0 &&
+               now - peer.lastDirectHeardMs > k_routeUnhealthyMs)
+    {
+        peer.useRelay = true;
+    }
+
     hdr.routeId = peer.useRelay ? 1 : 0;
 
     if (peer.useRelay && peer.hasRelay)
@@ -470,9 +484,11 @@ void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay
             peer.relayAddr = msg.from;
             peer.hasRelay = true;
             peer.useRelay = true;
+            peer.lastRelayHeardMs = peer.lastHeardMs;
         } else {
             peer.directAddr = msg.from;
             peer.hasDirect = true;
+            peer.lastDirectHeardMs = peer.lastHeardMs;
             if (!preferRelay_)
                 peer.useRelay = false;
         }
@@ -501,9 +517,11 @@ void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay
             peer.useRelay = true;
             peer.relayServerId = relayConfig_.serverId;
             peer.relayClientNonce = clientNonce_;
+            peer.lastRelayHeardMs = peer.lastHeardMs;
         } else {
             peer.directAddr = msg.from;
             peer.hasDirect = true;
+            peer.lastDirectHeardMs = peer.lastHeardMs;
             peer.useRelay = preferRelay_;
         }
         clientConnectionId_ = connId;
@@ -521,9 +539,11 @@ void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay
         peer->relayAddr = msg.from;
         peer->hasRelay = true;
         peer->useRelay = true;
+        peer->lastRelayHeardMs = peer->lastHeardMs;
     } else {
         peer->directAddr = msg.from;
         peer->hasDirect = true;
+        peer->lastDirectHeardMs = peer->lastHeardMs;
         if (!preferRelay_)
             peer->useRelay = false;
     }
@@ -706,6 +726,14 @@ void UdpSessionTransport::sendKeepAlives(Uint64 nowMs)
         hdr.connectionId = connId;
         hdr.channel = static_cast<std::uint8_t>(ChannelId::ControlReliableOrdered);
         sendPacket(peer, hdr, nullptr, 0, 1);
+
+        if (mode_ == Mode::Client && peer.useRelay && serverAddr_.addr) {
+            ChannelState& ch = peer.channels[channelIndex(ChannelId::ControlReliableOrdered)];
+            hdr.ack = ch.recvHighest;
+            hdr.ackBits = ch.recvAckBits;
+            hdr.routeId = 0;
+            sendDirect(serverAddr_, hdr, nullptr, 0, 1);
+        }
     }
 }
 

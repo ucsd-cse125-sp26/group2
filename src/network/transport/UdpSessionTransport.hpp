@@ -132,12 +132,15 @@ private:
         bool useRelay = false;
         bool connectedEventSent = false;
         Uint64 lastHeardMs = 0;
+        Uint64 lastDirectHeardMs = 0;
+        Uint64 lastRelayHeardMs = 0;
         Uint64 lastKeepAliveMs = 0;
         float rttMs = 0.0f;
         std::array<ChannelState, static_cast<std::size_t>(ChannelId::Count)> channels;
     };
 
     static constexpr Uint64 k_keepAliveMs = 1000;
+    static constexpr Uint64 k_routeUnhealthyMs = 3000;
     static constexpr Uint64 k_timeoutMs = 5000;
     static constexpr Uint64 k_retransmitFloorMs = 80;
     static constexpr std::size_t k_maxReliablePending = 256;
