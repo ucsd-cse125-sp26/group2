@@ -30,6 +30,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstdint>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
@@ -37,6 +38,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 /// @brief Top-level client game object.
@@ -290,6 +292,8 @@ private:
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
+    SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
+    std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
 
     // Hitmarker
     float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).

@@ -154,6 +154,61 @@ void appendBoundedUtf8(std::string& dst, const char* text)
     dst = std::move(candidate);
 }
 
+bool isFootstepClip(ClipId id) noexcept
+{
+    switch (id) {
+    case ClipId::Walk:
+    case ClipId::Run:
+    case ClipId::RunBackward:
+    case ClipId::SlowRun:
+    case ClipId::WallRun:
+    case ClipId::StrafeLeft:
+    case ClipId::StrafeRight:
+    case ClipId::StrafeLeftWalk:
+    case ClipId::StrafeRightWalk:
+    case ClipId::CrouchWalk:
+    case ClipId::CrouchWalkLeft:
+    case ClipId::CrouchWalkRight:
+    case ClipId::CrouchWalkBackward:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool footstepMarkerCrossed(float previous, float current, float marker) noexcept
+{
+    if (previous < 0.0f)
+        return false;
+    if (current < previous)
+        return marker > previous || marker <= current;
+    return marker > previous && marker <= current;
+}
+
+bool isHeavyFootstepClip(ClipId id) noexcept
+{
+    return id == ClipId::Run || id == ClipId::RunBackward || id == ClipId::SlowRun || id == ClipId::WallRun ||
+           id == ClipId::StrafeLeft || id == ClipId::StrafeRight;
+}
+
+std::optional<SfxId> fireSfxForWeapon(WeaponType type) noexcept
+{
+    switch (type) {
+    case WeaponType::Rifle:
+        return SfxId::RifleFire;
+    case WeaponType::Rocket:
+    case WeaponType::HEGrenade:
+    case WeaponType::Molotov:
+    case WeaponType::Impulse:
+        return SfxId::GrenadeThrow;
+    case WeaponType::RailGun:
+        return SfxId::ChargeRifleShoot;
+    case WeaponType::EnergyGun:
+        return SfxId::EnergyGunFire;
+    }
+    return std::nullopt;
+}
+
 std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
 {
     std::vector<RigMeshSource> sources;
@@ -506,12 +561,25 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
             particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
+            if (sfxSystem.isInitialized()) {
+                if (const auto sfx = fireSfxForWeapon(evt.weaponType))
+                    sfxSystem.play3D(*sfx, evtOrigin, glm::vec3{0.0f}, 0.82f, 1.6f);
+            }
             break;
         case ParticleEffectType::HitscanBeam:
             particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
+            if (sfxSystem.isInitialized()) {
+                if (const auto sfx = fireSfxForWeapon(evt.weaponType))
+                    sfxSystem.play3D(*sfx, evtOrigin, glm::vec3{0.0f}, 0.92f, 1.9f);
+            }
             break;
         case ParticleEffectType::Impact:
             particleSystem.spawnImpactEffect(evt.pos1, evt.pos2, evt.surfaceType, evt.weaponType);
+            if (sfxSystem.isInitialized() && evt.source != localPlayer) {
+                const SfxId impact = evt.surfaceType == SurfaceType::Flesh ? SfxId::FleshHit : SfxId::FootstepLight;
+                sfxSystem.play3D(
+                    impact, evt.pos1, glm::vec3{0.0f}, evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f, 0.7f);
+            }
             break;
         case ParticleEffectType::Explosion:
             particleSystem.spawnExplosion(evt.pos1, evt.param);
@@ -1739,9 +1807,13 @@ SDL_AppResult Game::iterate()
         bool isBeamNow = false;
         registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
         if (isBeamNow && !wasBeamActive_)
-            sfxSystem.play(SfxId::EnergyBeamLoop);
-        if (!isBeamNow && wasBeamActive_)
-            sfxSystem.stop(SfxId::EnergyBeamLoop);
+            beamLoopHandle_ = sfxSystem.startLoop(SfxId::EnergyBeamLoop, false, cachedEye_, 0.55f, 1.4f);
+        if (isBeamNow && beamLoopHandle_ != SfxSystem::kInvalidSource)
+            sfxSystem.updateSource(beamLoopHandle_, cachedEye_, audioListener.velocity, 0.55f);
+        if (!isBeamNow && wasBeamActive_) {
+            sfxSystem.stopSource(beamLoopHandle_);
+            beamLoopHandle_ = SfxSystem::kInvalidSource;
+        }
         wasBeamActive_ = isBeamNow;
 
         // Beam hitmarker: client-side raycast against player hitboxes while firing.
@@ -1911,6 +1983,7 @@ SDL_AppResult Game::iterate()
             entt::entity entity{};
             AnimatedCharacter* ac = nullptr;
             AnimationInputs ai;
+            glm::vec3 audioPosition{0.0f};
             glm::mat4 worldTransform{1.0f};
             glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< rgb=color, a=blend factor (0=no tint).
             bool sampleThisFrame = false;           ///< call animator->update()
@@ -1978,6 +2051,7 @@ SDL_AppResult Game::iterate()
                 c.entity = e;
                 c.ac = &ac;
                 c.isLocal = isLocal;
+                c.audioPosition = pos.value;
 
                 if constexpr (player_colors::k_enabled) {
                     if (const auto* pc = registry.try_get<PlayerColor>(e); pc != nullptr) {
@@ -2105,6 +2179,39 @@ SDL_AppResult Game::iterate()
                     dst.clipIdRaw = active ? static_cast<std::uint8_t>(src.id) : 0xFFu;
                     dst.timeRatio = active ? src.timeRatio : 0.0f;
                     dst.weight = active ? src.weight : 0.0f;
+                }
+
+                auto [phaseIt, inserted] = footstepPhases_.try_emplace(c.entity);
+                if (inserted)
+                    phaseIt->second.fill(-1.0f);
+                const bool canStep = c.ai.grounded || c.ai.moveMode == 2;
+                const float speed = glm::length(c.ai.velocityWorld);
+                if (sfxSystem.isInitialized() && canStep && speed > 65.0f) {
+                    for (std::size_t i = 0; i < samplers.size() && i < phaseIt->second.size(); ++i) {
+                        const ClipSampler& src = samplers[i];
+                        const bool audibleSampler = src.active && src.weight > 0.22f && isFootstepClip(src.id);
+                        if (!audibleSampler) {
+                            phaseIt->second[i] = src.active ? src.timeRatio : -1.0f;
+                            continue;
+                        }
+                        const float previous = phaseIt->second[i];
+                        const bool leftStep = footstepMarkerCrossed(previous, src.timeRatio, 0.18f);
+                        const bool rightStep = footstepMarkerCrossed(previous, src.timeRatio, 0.68f);
+                        if (leftStep || rightStep) {
+                            const SfxId stepId =
+                                isHeavyFootstepClip(src.id) ? SfxId::FootstepHeavy : SfxId::FootstepLight;
+                            const float gain = std::clamp(0.35f + src.weight * (speed / 900.0f), 0.25f, 0.85f);
+                            const glm::vec3 lateral = glm::normalize(
+                                glm::cross(glm::vec3{0.0f, 1.0f, 0.0f},
+                                           glm::vec3{std::sin(c.ai.yawRad), 0.0f, std::cos(c.ai.yawRad)}));
+                            const float side = leftStep ? -7.0f : 7.0f;
+                            sfxSystem.play3D(stepId, c.audioPosition + lateral * side, c.ai.velocityWorld, gain, 0.8f);
+                        }
+                        phaseIt->second[i] = src.timeRatio;
+                    }
+                } else {
+                    for (std::size_t i = 0; i < samplers.size() && i < phaseIt->second.size(); ++i)
+                        phaseIt->second[i] = samplers[i].active ? samplers[i].timeRatio : -1.0f;
                 }
             }
 
