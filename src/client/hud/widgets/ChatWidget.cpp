@@ -9,6 +9,37 @@
 #include <SDL3/SDL_timer.h>
 
 #include <algorithm>
+#include <string>
+#include <string_view>
+
+namespace
+{
+
+void trimLastUtf8Codepoint(std::string& text)
+{
+    if (text.empty())
+        return;
+    std::size_t firstByte = text.size() - 1;
+    while (firstByte > 0 && (static_cast<unsigned char>(text[firstByte]) & 0xc0u) == 0x80u)
+        --firstByte;
+    text.erase(firstByte);
+}
+
+std::string elideToWidth(HudContext& ctx, std::string_view text, float fontSize, float maxWidth)
+{
+    std::string out(text);
+    if (ctx.measureText(out.c_str(), fontSize) <= maxWidth)
+        return out;
+
+    constexpr std::string_view ellipsis = "...";
+    const float ellipsisW = ctx.measureText(ellipsis.data(), fontSize);
+    while (!out.empty() && ctx.measureText(out.c_str(), fontSize) + ellipsisW > maxWidth)
+        trimLastUtf8Codepoint(out);
+    out += ellipsis;
+    return out;
+}
+
+} // namespace
 
 ChatWidget::ChatWidget()
 {
@@ -68,12 +99,12 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
         const HudColor nameColor = it->fromLocal ? withAlpha(k_cyan, fade) : withAlpha(k_amber, fade);
         const HudColor textColor = withAlpha(k_text, fade);
 
-        ctx.pushClipRect(x + pad, cursorY - 1.f * s, w - pad * 2.f, lineH + 2.f * s);
         const float nameW = ctx.measureText(it->senderName.c_str(), font);
+        const float messageX = x + pad + nameW + 8.f * s;
+        const std::string message = elideToWidth(ctx, it->message, font, x + w - pad - messageX);
         ctx.text(it->senderName.c_str(), x + pad, cursorY, font, nameColor, HudAlign::Left);
         ctx.text(":", x + pad + nameW, cursorY, font, withAlpha(k_textDim, fade), HudAlign::Left);
-        ctx.text(it->message.c_str(), x + pad + nameW + 8.f * s, cursorY, font, textColor, HudAlign::Left);
-        ctx.popClipRect();
+        ctx.text(message.c_str(), messageX, cursorY, font, textColor, HudAlign::Left);
 
         cursorY += lineH;
         ++drawn;
@@ -106,7 +137,7 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
     std::string draft = "> " + chat_.draft;
     if (static_cast<int>(SDL_GetTicks() / 450u) % 2 == 0)
         draft.push_back('_');
-    ctx.pushClipRect(x + pad * 1.6f, inputY + 4.f * s, w - pad * 3.2f, inputH - 8.f * s);
-    ctx.text(draft.c_str(), x + pad * 1.6f, inputY + 4.f * s, font, k_textBright, HudAlign::Left);
-    ctx.popClipRect();
+    const float draftX = x + pad * 1.6f;
+    draft = elideToWidth(ctx, draft, font, x + w - pad * 1.6f - draftX);
+    ctx.text(draft.c_str(), draftX, inputY + 4.f * s, font, k_textBright, HudAlign::Left);
 }

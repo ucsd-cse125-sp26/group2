@@ -32,6 +32,7 @@
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <memory>
@@ -128,6 +129,7 @@ private:
     void closeChat();
     void submitChat();
     void appendChatMessage(ClientId sender, std::string_view message);
+    void appendLocalChatMessage(std::string_view message);
     void clearGameplayInputForChat();
 
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
@@ -340,6 +342,7 @@ private:
     std::vector<HudChatMessage> chatMessages_;
     std::vector<HudVoiceSpeaker> voiceSpeakers_;
     std::string chatDraft_;
+    std::deque<std::string> pendingLocalChatEchoes_;
     bool chatOpen_ = false;
 
     // (No additional bookkeeping needed — name strings are constructed
