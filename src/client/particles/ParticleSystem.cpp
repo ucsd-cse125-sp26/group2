@@ -16,6 +16,10 @@ bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL
         SDL_Log("ParticleSystem: ParticleRenderer init failed");
         return false;
     }
+    if (!volumeFire_.init(dev, colorFmt, shaderFmt)) {
+        SDL_Log("ParticleSystem: VolumeFireEffect init failed");
+        return false;
+    }
 
     // SDF font — scan common system font paths; silently skip if none found
     const char* fontPaths[] = {"/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf",       // Fedora / modern GNOME
@@ -46,6 +50,7 @@ bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL
 void ParticleSystem::quit()
 {
     sdf_.quit();
+    volumeFire_.quit();
     renderer_.quit();
 }
 
@@ -58,11 +63,13 @@ void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
     camForward_ = cam.getForward();
     camRight_ = cam.getRight();
     camUp_ = cam.getUp();
+    cameraSnapshot_ = cam;
 
     tracers_.update(dt, reg);
     ribbons_.update(dt, reg, camPos_);
     hitscan_.update(dt, camForward_);
     smoke_.update(dt, reg, camPos_, camForward_);
+    volumeFire_.update(dt, reg);
     impact_.update(dt);
     decals_.update(dt);
     explosions_.update(dt);
@@ -83,6 +90,7 @@ void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
     renderer_.uploadHitscan(cmd, hitscan_.beamData(), hitscan_.beamCount());
     renderer_.uploadArcs(cmd, hitscan_.arcData(), hitscan_.arcCount());
     renderer_.uploadSmoke(cmd, smoke_.data(), smoke_.count());
+    volumeFire_.uploadToGpu(cmd);
     renderer_.uploadDecals(cmd, decals_.data(), decals_.count());
     renderer_.uploadSdfWorld(cmd, sdf_.worldData(), sdf_.worldCount());
     renderer_.uploadSdfHud(cmd, sdf_.hudData(), sdf_.hudCount());
@@ -92,7 +100,8 @@ void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
 
 void ParticleSystem::render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd)
 {
-    renderer_.drawAll(pass, cmd, screenW_, screenH_);
+    volumeFire_.render(pass, cmd, cameraSnapshot_);
+    renderer_.drawAll(pass, cmd, cameraSnapshot_, screenW_, screenH_);
 }
 
 // Spawn API

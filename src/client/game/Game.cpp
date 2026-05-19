@@ -323,15 +323,12 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
     SDL_Log("[client] physics diagnostic %s", phaseDiagEnabled ? "ENABLED" : "disabled");
 
     // Particle system needs the device + formats from the renderer.
-    // colorFmt is the format particles draw into (RGBA16F was the legacy
-    // renderer's HDR target); kept here so the particle pipelines compile,
-    // but NewRenderer does not yet route particles into a render pass.
-    if (!particleSystem.init(
-            renderer->getDevice(), SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, renderer->getShaderFormat()))
-    {
+    // colorFmt must match NewRenderer's active color target because particle
+    // pipelines are now drawn directly into the main pass.
+    if (!particleSystem.init(renderer->getDevice(), renderer->getColorTargetFormat(), renderer->getShaderFormat())) {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
-        // TODO(renderer-migration): renderer->setParticleSystem(&particleSystem);
+        renderer->setParticleSystem(&particleSystem);
 
         // Wire dispatcher events to particle system.
         // NOTE: WeaponFiredEvent is NOT wired here — local weapon VFX (tracers,
@@ -3889,12 +3886,12 @@ void Game::quit()
         recorder.stopRecording();
     voiceChat_.quit();
     sfxSystem.quit();
-    particleSystem.quit();
-    hud_.quit();
     if (renderer) {
-        // TODO(renderer-migration): renderer->setParticleSystem(nullptr);
+        renderer->setParticleSystem(nullptr);
         renderer->setHudTexture(nullptr);
     }
+    particleSystem.quit();
+    hud_.quit();
     if (client) {
         client->onSnapshotApply({});
         client->onRawParticleEvent({});

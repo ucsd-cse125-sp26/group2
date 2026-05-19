@@ -14,6 +14,7 @@
 #include "effects/RibbonTrail.hpp"
 #include "effects/SmokeEffect.hpp"
 #include "effects/TracerEffect.hpp"
+#include "effects/VolumeFireEffect.hpp"
 #include "renderer-new/Camera.hpp"
 #include "sdf/SdfRenderer.hpp"
 
@@ -127,6 +128,8 @@ public:
     [[nodiscard]] uint32_t hitscanBeamCount() const { return hitscan_.activeBeamCount(); }
     [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount(); }
     [[nodiscard]] uint32_t smokeCount() const { return smoke_.count(); }
+    [[nodiscard]] uint32_t volumeFireCount() const { return volumeFire_.instanceCount(); }
+    [[nodiscard]] uint32_t volumeFireFrame() const { return volumeFire_.currentFrame(); }
     [[nodiscard]] uint32_t decalCount() const { return decals_.count(); }
     [[nodiscard]] bool sdfReady() const { return sdf_.ready(); }
 
@@ -139,6 +142,7 @@ private:
     RibbonTrail ribbons_;
     HitscanEffect hitscan_;
     SmokeEffect smoke_;
+    VolumeFireEffect volumeFire_;
     ImpactEffect impact_;
     BulletHoleDecal decals_;
     ExplosionEffect explosions_;
@@ -149,6 +153,7 @@ private:
     glm::vec3 camForward_{};
     glm::vec3 camRight_{};
     glm::vec3 camUp_{};
+    NewCamera cameraSnapshot_{};
     float screenW_ = 1280.f;
     float screenH_ = 720.f;
 

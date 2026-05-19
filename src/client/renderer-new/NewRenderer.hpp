@@ -95,6 +95,9 @@ public:
     /// reticle world-ray, frustum culling, etc.  Caller must not mutate.
     [[nodiscard]] const NewCamera& getCamera() const { return camera_; }
 
+    /// @brief Current main colour target format used by NewRenderer passes.
+    [[nodiscard]] SDL_GPUTextureFormat getColorTargetFormat() const { return colorTarget_; }
+
     /// @brief Number of models currently registered in the asset map.
     ///
     /// Used by the debug UI to display loaded-model counts.  Backed by

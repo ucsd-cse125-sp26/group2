@@ -6,6 +6,7 @@
 #include "GpuParticleBuffer.hpp"
 #include "ParticlePool.hpp"
 #include "ParticleTypes.hpp"
+#include "renderer-new/Camera.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -92,7 +93,8 @@ public:
     /// @param cmd     The command buffer (for push uniforms).
     /// @param screenW Window width in pixels for HUD uniform.
     /// @param screenH Window height in pixels for HUD uniform.
-    void drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, float screenW, float screenH);
+    void
+    drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const NewCamera& camera, float screenW, float screenH);
 
     // Smoke noise texture (created at init)
     [[nodiscard]] SDL_GPUTexture* smokeNoiseTex() const { return smokeNoise_; }

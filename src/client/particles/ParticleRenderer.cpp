@@ -707,8 +707,17 @@ struct alignas(16) ParticleUniforms
     float _p2;
 };
 
-void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, float screenW, float screenH)
+void ParticleRenderer::drawAll(
+    SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const NewCamera& camera, float screenW, float screenH)
 {
+    ParticleUniforms pu{};
+    pu.view = camera.getViewMatrix();
+    pu.proj = camera.getProjectionMatrix();
+    pu.camPos = camera.getEye();
+    pu.camRight = camera.getRight();
+    pu.camUp = camera.getUp();
+    SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+
     // Helper lambdas
     auto bindIndex = [&]() {
         if (!quadIndexBuf_)

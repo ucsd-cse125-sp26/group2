@@ -16,6 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
 include(FetchContent)
+include(CheckCXXSourceCompiles)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Doxygen.cmake")
@@ -25,6 +26,7 @@ option(ENABLE_ASAN  "Enable AddressSanitizer"                           OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
 option(GROUP2_ENABLE_VHACD "Build legacy V-HACD decomposition support for prototype props" OFF)
+option(GROUP2_ENABLE_VDB_VOLUME "Build OpenVDB converter for runtime fire volume caches" ON)
 
 # ---- Build acceleration ----
 
@@ -331,6 +333,126 @@ FetchContent_MakeAvailable(stb)
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
+# OpenVDB is used only by an offline/build-time converter. Runtime loads the
+# compact .g2vol cache and does not link OpenVDB into the game client.
+if(GROUP2_ENABLE_VDB_VOLUME)
+    find_package(OpenVDB CONFIG QUIET)
+    if(NOT OpenVDB_FOUND)
+        find_package(OpenVDB QUIET)
+    endif()
+    if(NOT OpenVDB_FOUND)
+        find_path(GROUP2_OPENVDB_INCLUDE_DIR
+            NAMES openvdb/openvdb.h
+            PATHS /opt/homebrew/opt/openvdb /usr/local/opt/openvdb /usr
+            PATH_SUFFIXES include
+        )
+        find_library(GROUP2_OPENVDB_LIBRARY
+            NAMES openvdb
+            PATHS /opt/homebrew/opt/openvdb /usr/local/opt/openvdb /usr
+            PATH_SUFFIXES lib
+        )
+        if(GROUP2_OPENVDB_INCLUDE_DIR AND GROUP2_OPENVDB_LIBRARY)
+            find_package(ZLIB REQUIRED)
+            find_library(GROUP2_TBB_LIBRARY
+                NAMES tbb
+                PATHS /opt/homebrew/opt/tbb /usr/local/opt/tbb /usr
+                PATH_SUFFIXES lib
+            )
+            find_library(GROUP2_BLOSC_LIBRARY
+                NAMES blosc
+                PATHS /opt/homebrew/opt/c-blosc /usr/local/opt/c-blosc /usr
+                PATH_SUFFIXES lib
+            )
+            find_library(GROUP2_BOOST_IOSTREAMS_LIBRARY
+                NAMES boost_iostreams
+                PATHS /opt/homebrew/opt/boost /usr/local/opt/boost /usr
+                PATH_SUFFIXES lib
+            )
+            find_library(GROUP2_BOOST_RANDOM_LIBRARY
+                NAMES boost_random
+                PATHS /opt/homebrew/opt/boost /usr/local/opt/boost /usr
+                PATH_SUFFIXES lib
+            )
+            find_library(GROUP2_BOOST_REGEX_LIBRARY
+                NAMES boost_regex
+                PATHS /opt/homebrew/opt/boost /usr/local/opt/boost /usr
+                PATH_SUFFIXES lib
+            )
+
+            set(GROUP2_OPENVDB_MISSING_DEPS)
+            foreach(dep_var IN ITEMS
+                GROUP2_TBB_LIBRARY
+                GROUP2_BLOSC_LIBRARY
+                GROUP2_BOOST_IOSTREAMS_LIBRARY
+                GROUP2_BOOST_RANDOM_LIBRARY
+                GROUP2_BOOST_REGEX_LIBRARY
+            )
+                if(NOT ${dep_var})
+                    list(APPEND GROUP2_OPENVDB_MISSING_DEPS "${dep_var}")
+                endif()
+            endforeach()
+            if(GROUP2_OPENVDB_MISSING_DEPS)
+                message(FATAL_ERROR
+                    "OpenVDB was found at ${GROUP2_OPENVDB_LIBRARY}, but the manual fallback could not find "
+                    "required transitive dependencies: ${GROUP2_OPENVDB_MISSING_DEPS}. "
+                    "Install them with: brew install openvdb tbb c-blosc boost")
+            endif()
+
+            add_library(group2_openvdb_imported UNKNOWN IMPORTED)
+            set_target_properties(group2_openvdb_imported PROPERTIES
+                IMPORTED_LOCATION "${GROUP2_OPENVDB_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${GROUP2_OPENVDB_INCLUDE_DIR}"
+                INTERFACE_LINK_LIBRARIES "${GROUP2_TBB_LIBRARY};${GROUP2_BLOSC_LIBRARY};${GROUP2_BOOST_IOSTREAMS_LIBRARY};${GROUP2_BOOST_RANDOM_LIBRARY};${GROUP2_BOOST_REGEX_LIBRARY};ZLIB::ZLIB"
+            )
+            set(GROUP2_OPENVDB_TARGET group2_openvdb_imported)
+            set(OpenVDB_FOUND TRUE)
+        endif()
+    endif()
+    if(NOT OpenVDB_FOUND)
+        message(FATAL_ERROR
+            "GROUP2_ENABLE_VDB_VOLUME=ON requires OpenVDB. Install it with:\n"
+            "  macOS:  brew install openvdb\n"
+            "  Ubuntu: sudo apt-get install libopenvdb-dev\n"
+            "or configure with -DGROUP2_ENABLE_VDB_VOLUME=OFF to skip VDB conversion.")
+    endif()
+    if(DEFINED GROUP2_OPENVDB_TARGET)
+        # Set by the Homebrew-style manual fallback above.
+    elseif(TARGET OpenVDB::openvdb)
+        set(GROUP2_OPENVDB_TARGET OpenVDB::openvdb)
+    elseif(TARGET openvdb)
+        set(GROUP2_OPENVDB_TARGET openvdb)
+    else()
+        message(FATAL_ERROR "OpenVDB was found but no usable CMake target was exported (expected OpenVDB::openvdb).")
+    endif()
+
+    add_executable(vdb_to_g2vol
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/vdb_to_g2vol.cpp"
+    )
+    target_compile_features(vdb_to_g2vol PRIVATE cxx_std_23)
+    target_link_libraries(vdb_to_g2vol PRIVATE ${GROUP2_OPENVDB_TARGET})
+
+    set(FIRE_01_VDB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/flipbooks/Fire_01")
+    set(FIRE_01_G2VOL "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated/fire_01.g2vol")
+    if(EXISTS "${FIRE_01_VDB_DIR}")
+        file(GLOB CONFIGURE_DEPENDS FIRE_01_VDBS "${FIRE_01_VDB_DIR}/embergen_fire_a_*.vdb")
+        add_custom_command(
+            OUTPUT "${FIRE_01_G2VOL}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated"
+            COMMAND $<TARGET_FILE:vdb_to_g2vol>
+                    "${FIRE_01_VDB_DIR}"
+                    "${FIRE_01_G2VOL}"
+                    --fps 24
+                    --max-dim 192
+            DEPENDS vdb_to_g2vol ${FIRE_01_VDBS}
+            COMMENT "Converting EmberGen Fire_01 VDB sequence to fire_01.g2vol"
+            VERBATIM
+        )
+        add_custom_target(generated_volume_assets DEPENDS "${FIRE_01_G2VOL}")
+    else()
+        message(WARNING "Fire_01 VDB directory not found; generated volume asset target not created")
+    endif()
+endif()
+
 # minimp3 — single-header MP3 decoder (used by SfxSystem to load MP3 sound assets).
 # Same FetchContent+INTERFACE pattern as stb above.
 FetchContent_Declare(
@@ -587,6 +709,7 @@ set(SHADER_SOURCES
     tracer.vert tracer.frag
     ribbon.vert ribbon.frag
     smoke.vert smoke.frag
+    volume_fire.vert volume_fire.frag
     lightning_arc.vert lightning_arc.frag
     hitscan_beam.vert hitscan_beam.frag
     decal.vert decal.frag
@@ -701,6 +824,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/VolumeFireEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/VolumeFireEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.cpp"
@@ -1003,6 +1128,9 @@ target_include_directories(group2 PRIVATE
 
 # Compile shaders before linking the binary.
 add_dependencies(group2 shaders)
+if(TARGET generated_volume_assets)
+    add_dependencies(group2 generated_volume_assets)
+endif()
 
 # Copy compiled SPIR-V shaders next to the binary so SDL_GetBasePath() finds them.
 add_custom_command(TARGET group2 POST_BUILD
@@ -1312,9 +1440,30 @@ target_include_directories(server PRIVATE
 # (<execution> + std::execution::par_unseq). On Linux it's installed
 # system-wide via setup-linux.sh / setup-archlinux.sh; we use
 # `find_package` so missing TBB produces a clear error rather than a
-# cryptic linker symbol miss. macOS / Windows builds with libc++ /
-# MSVC's stdlib don't need this — their parallel STL ships in stdlib.
+# cryptic linker symbol miss. Some stdlibs expose the policy only when
+# the backend is available; others, including Apple's libc++ here, do not
+# expose it at all. Probe the actual compiler/stdlib before enabling it.
 find_package(TBB QUIET)
+if(TBB_FOUND AND NOT DEFINED GROUP2_STD_EXECUTION_PAR_UNSEQ_COMPILES)
+    set(_GROUP2_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
+    set(CMAKE_REQUIRED_LIBRARIES TBB::tbb)
+    check_cxx_source_compiles([=[
+        #include <algorithm>
+        #include <execution>
+        #include <vector>
+
+        int main()
+        {
+            std::vector<int> values{1, 2, 3};
+            std::for_each(std::execution::par_unseq, values.begin(), values.end(), [](int& value) {
+                ++value;
+            });
+            return values[0] == 2 ? 0 : 1;
+        }
+    ]=] GROUP2_STD_EXECUTION_PAR_UNSEQ_COMPILES)
+    set(CMAKE_REQUIRED_LIBRARIES "${_GROUP2_SAVED_REQUIRED_LIBRARIES}")
+    unset(_GROUP2_SAVED_REQUIRED_LIBRARIES)
+endif()
 
 target_link_libraries(server PRIVATE
     SDL3::SDL3-static
@@ -1328,12 +1477,14 @@ target_link_libraries(server PRIVATE
     ozz_animation
     ozz_base
 )
-if(TBB_FOUND)
+if(TBB_FOUND AND GROUP2_STD_EXECUTION_PAR_UNSEQ_COMPILES)
     target_link_libraries(server PRIVATE TBB::tbb)
     target_compile_definitions(server PRIVATE GROUP2_HAVE_TBB=1)
     message(STATUS "Server: TBB found; std::execution::par_unseq enabled.")
+elseif(TBB_FOUND)
+    message(STATUS "Server: TBB found, but this compiler/stdlib has no std::execution::par_unseq; using std::thread fallback.")
 else()
-    message(STATUS "Server: TBB not found; std::execution policies will be sequential.")
+    message(STATUS "Server: TBB not found; using std::thread fallback.")
 endif()
 
 # ---- Server precompiled header ----

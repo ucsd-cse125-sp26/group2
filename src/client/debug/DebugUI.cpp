@@ -893,6 +893,7 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         {"Hitscan beams", ps.hitscanBeamCount(), 64},
         {"Arc verts", ps.arcVertexCount(), 2048},
         {"Smoke", ps.smokeCount(), 1024},
+        {"Volume fire", ps.volumeFireCount(), 128},
         {"Decals", ps.decalCount(), 512},
     };
 
@@ -918,6 +919,7 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         }
         ImGui::EndTable();
     }
+    ImGui::Text("Volume fire frame: %u", ps.volumeFireFrame());
 
     // Spawn Controls
     ImGui::SeparatorText("Spawn Controls");

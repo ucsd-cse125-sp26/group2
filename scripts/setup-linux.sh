@@ -26,7 +26,8 @@ echo "==> Installing shader tools..."
 # spirv-cross   — SPIR-V → MSL transpiler (required for macOS/Metal builds)
 sudo apt-get install -y --no-install-recommends \
     glslang-tools \
-    spirv-cross
+    spirv-cross \
+    libopenvdb-dev
 
 # Register the pinned version as the default so plain 'clang-format' resolves to -18.
 sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 18

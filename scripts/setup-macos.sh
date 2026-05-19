@@ -33,7 +33,8 @@ echo "==> Installing build tools..."
 # Using the same clang-format version locally and in CI prevents formatting drift.
 # glslang     — GLSL → SPIR-V compiler (glslangValidator)
 # spirv-cross — SPIR-V → MSL transpiler (required for Metal backend on macOS)
-brew install cmake ninja llvm@18 glslang spirv-cross git-lfs ccache
+# openvdb     — build-time converter for EmberGen VDB fire volumes
+brew install cmake ninja llvm@18 glslang spirv-cross git-lfs ccache openvdb
 
 LLVM18_BIN="$(brew --prefix llvm@18)/bin"
 

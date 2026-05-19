@@ -11,6 +11,7 @@
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
 #include "Boilerplate.hpp"
+#include "particles/ParticleSystem.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cstddef>
@@ -230,6 +231,10 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
             SDL_EndGPUCopyPass(copyPass);
         }
     }
+    if (particleSystem_) {
+        particleSystem_->setScreenSize(static_cast<float>(width), static_cast<float>(height));
+        particleSystem_->uploadToGpu(cmd);
+    }
 
     drawGeometryPass(swapchain, cmd);
     drawWeaponPass(swapchain, cmd);
@@ -269,6 +274,8 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawEntityModels(geometryPass, cmd);
 
     drawSkinnedModels(geometryPass, cmd);
+    if (particleSystem_)
+        particleSystem_->render(geometryPass, cmd);
 
     // drawWeapon(geometryPass, cmd);
 
@@ -619,11 +626,6 @@ void NewRenderer::setModelScenePass(int32_t modelIndex, bool drawInScene)
 
 void NewRenderer::setParticleSystem(ParticleSystem* ps)
 {
-    // TODO(graphics): inside `drawFrame`, before BeginRenderPass call
-    //   particleSystem_->uploadToGpu(cmd);
-    // and inside the main HDR pass call
-    //   particleSystem_->render(pass, cmd);
-    // See ParticleSystem.hpp doc-comment for the lifecycle (init/update/quit).
     particleSystem_ = ps;
 }
 
