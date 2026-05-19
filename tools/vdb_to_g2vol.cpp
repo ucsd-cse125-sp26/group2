@@ -1,5 +1,5 @@
 /// @file vdb_to_g2vol.cpp
-/// @brief Convert an EmberGen/OpenVDB temperature sequence into a compact runtime volume cache.
+/// @brief Convert an EmberGen/OpenVDB flame sequence into a compact runtime volume cache.
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@ namespace fs = std::filesystem;
 
 namespace
 {
-constexpr std::string_view k_gridName = "temperature";
+constexpr std::string_view k_gridName = "flames";
 constexpr uint32_t k_formatR16FloatNormalized = 1u;
 
 #pragma pack(push, 1)
@@ -38,8 +38,8 @@ struct G2VolHeader
     int32_t bboxMin[3];
     int32_t bboxMax[3];
     float voxelSize[3];
-    float temperatureMax;
-    float temperatureP995;
+    float valueMax;
+    float valueP995;
     uint32_t payloadFormat;
     uint32_t headerSize;
     uint64_t payloadBytes;
@@ -134,7 +134,7 @@ std::vector<fs::path> collectFrames(const fs::path& dir)
     return frames;
 }
 
-openvdb::FloatGrid::Ptr readTemperatureGrid(const fs::path& path)
+openvdb::FloatGrid::Ptr readFlameGrid(const fs::path& path)
 {
     openvdb::io::File file(path.string());
     file.open();
@@ -197,7 +197,7 @@ int main(int argc, char** argv)
         size_t emptyFrameCount = 0;
 
         for (const fs::path& frame : frames) {
-            openvdb::FloatGrid::Ptr grid = readTemperatureGrid(frame);
+            openvdb::FloatGrid::Ptr grid = readFlameGrid(frame);
             openvdb::CoordBBox bbox;
             if (!grid->tree().evalActiveVoxelBoundingBox(bbox)) {
                 ++emptyFrameCount;
@@ -212,7 +212,7 @@ int main(int argc, char** argv)
             }
         }
         if (!haveUnion) {
-            throw std::runtime_error("all temperature frames are empty");
+            throw std::runtime_error("all flame frames are empty");
         }
 
         const openvdb::Coord sourceDim = unionBBox.dim();
@@ -226,9 +226,9 @@ int main(int argc, char** argv)
             static_cast<uint32_t>(std::max(1, static_cast<int>(std::ceil(sourceDim.z() * resizeScale))));
         const uint64_t voxelsPerFrame = static_cast<uint64_t>(outW) * outH * outD;
 
-        float maxTemperature = 0.0f;
+        float maxValue = 0.0f;
         for (const fs::path& frame : frames) {
-            openvdb::FloatGrid::Ptr grid = readTemperatureGrid(frame);
+            openvdb::FloatGrid::Ptr grid = readFlameGrid(frame);
             const auto acc = grid->getConstAccessor();
             for (uint32_t z = 0; z < outD; ++z) {
                 const double sz = unionBBox.min().z() + ((z + 0.5) / outD) * sourceDim.z() - 0.5;
@@ -236,13 +236,13 @@ int main(int argc, char** argv)
                     const double sy = unionBBox.min().y() + ((y + 0.5) / outH) * sourceDim.y() - 0.5;
                     for (uint32_t x = 0; x < outW; ++x) {
                         const double sx = unionBBox.min().x() + ((x + 0.5) / outW) * sourceDim.x() - 0.5;
-                        maxTemperature = std::max(maxTemperature, sampleTrilinear(acc, sx, sy, sz));
+                        maxValue = std::max(maxValue, sampleTrilinear(acc, sx, sy, sz));
                     }
                 }
             }
         }
-        if (maxTemperature <= 0.0f)
-            throw std::runtime_error("temperature grid sampled to all zeros");
+        if (maxValue <= 0.0f)
+            throw std::runtime_error("flame grid sampled to all zeros");
 
         fs::create_directories(args.outputPath.parent_path());
         std::ofstream out(args.outputPath, std::ios::binary);
@@ -266,7 +266,7 @@ int main(int argc, char** argv)
         header.voxelSize[0] = static_cast<float>(voxelSize.x());
         header.voxelSize[1] = static_cast<float>(voxelSize.y());
         header.voxelSize[2] = static_cast<float>(voxelSize.z());
-        header.temperatureMax = maxTemperature;
+        header.valueMax = maxValue;
         header.payloadFormat = k_formatR16FloatNormalized;
         header.headerSize = sizeof(G2VolHeader);
         header.payloadBytes = voxelsPerFrame * frames.size() * sizeof(uint16_t);
@@ -278,7 +278,7 @@ int main(int argc, char** argv)
         uint64_t totalSamples = 0;
 
         for (const fs::path& frame : frames) {
-            openvdb::FloatGrid::Ptr grid = readTemperatureGrid(frame);
+            openvdb::FloatGrid::Ptr grid = readFlameGrid(frame);
             const auto acc = grid->getConstAccessor();
             size_t dst = 0;
             for (uint32_t z = 0; z < outD; ++z) {
@@ -287,8 +287,7 @@ int main(int argc, char** argv)
                     const double sy = unionBBox.min().y() + ((y + 0.5) / outH) * sourceDim.y() - 0.5;
                     for (uint32_t x = 0; x < outW; ++x) {
                         const double sx = unionBBox.min().x() + ((x + 0.5) / outW) * sourceDim.x() - 0.5;
-                        const float normalized =
-                            std::clamp(sampleTrilinear(acc, sx, sy, sz) / maxTemperature, 0.0f, 1.0f);
+                        const float normalized = std::clamp(sampleTrilinear(acc, sx, sy, sz) / maxValue, 0.0f, 1.0f);
                         const size_t bin = std::min<size_t>(histogram.size() - 1,
                                                             static_cast<size_t>(normalized * (histogram.size() - 1)));
                         ++histogram[bin];
@@ -309,15 +308,14 @@ int main(int argc, char** argv)
             if (cumulative >= percentileTarget)
                 break;
         }
-        header.temperatureP995 =
-            (static_cast<float>(percentileBin) / static_cast<float>(histogram.size() - 1)) * maxTemperature;
+        header.valueP995 = (static_cast<float>(percentileBin) / static_cast<float>(histogram.size() - 1)) * maxValue;
 
         out.seekp(0);
         out.write(reinterpret_cast<const char*>(&header), sizeof(header));
         out.close();
 
         std::cout << "Fire_01: " << frames.size() << " frames, grid '" << k_gridName << "', output " << outW << "x"
-                  << outH << "x" << outD << ", maxTemp=" << maxTemperature << ", p99.5Temp=" << header.temperatureP995
+                  << outH << "x" << outD << ", maxValue=" << maxValue << ", p99.5Value=" << header.valueP995
                   << ", emptyFrames=" << emptyFrameCount << ", bytes=" << (sizeof(header) + header.payloadBytes)
                   << "\n";
         return 0;

@@ -282,8 +282,8 @@ void VolumeFireEffect::update(float dt, Registry& registry)
     frameBlend_ = frameFloat - std::floor(frameFloat);
 
     auto makeInstance = [&](glm::vec3 anchor, glm::vec3 scale, float opacity) {
-        const glm::vec3 worldSize =
-            glm::vec3{static_cast<float>(width_), static_cast<float>(height_), static_cast<float>(depth_)} * scale;
+        const glm::vec3 vdbSize{static_cast<float>(width_), static_cast<float>(height_), static_cast<float>(depth_)};
+        const glm::vec3 worldSize{vdbSize.x * scale.x, vdbSize.z * scale.y, vdbSize.y * scale.z};
         return VolumeFireInstanceGPU{
             .boxMin = anchor + glm::vec3{-worldSize.x * 0.5f, 0.0f, -worldSize.z * 0.5f},
             .opacity = opacity,
@@ -298,7 +298,7 @@ void VolumeFireEffect::update(float dt, Registry& registry)
         if (instances_.size() >= k_maxInstances || field.radius <= 0.0f || field.remaining <= 0.0f)
             return;
 
-        const float horizontalDim = static_cast<float>(std::max(width_, depth_));
+        const float horizontalDim = static_cast<float>(std::max(width_, height_));
         const float scale = horizontalDim > 0.0f ? (field.radius * 2.0f) / horizontalDim : 1.0f;
         const float fade = std::clamp(field.remaining / 0.5f, 0.0f, 1.0f);
         instances_.push_back(makeInstance(field.position, glm::vec3{scale}, fade));
@@ -337,6 +337,15 @@ void VolumeFireEffect::uploadFrameToTexture(SDL_GPUCommandBuffer* cmd, uint32_t 
     textureFrame_[slot] = frameIndex;
 }
 
+uint32_t VolumeFireEffect::findTextureSlot(uint32_t frameIndex) const
+{
+    if (textureFrame_[0] == frameIndex)
+        return 0;
+    if (textureFrame_[1] == frameIndex)
+        return 1;
+    return UINT32_MAX;
+}
+
 void VolumeFireEffect::uploadToGpu(SDL_GPUCommandBuffer* cmd)
 {
     instanceBuf_.upload(
@@ -344,8 +353,19 @@ void VolumeFireEffect::uploadToGpu(SDL_GPUCommandBuffer* cmd)
     if (!ready_ || instances_.empty())
         return;
 
-    uploadFrameToTexture(cmd, 0, currentFrame_);
-    uploadFrameToTexture(cmd, 1, nextFrame_);
+    currentTextureSlot_ = findTextureSlot(currentFrame_);
+    if (currentTextureSlot_ == UINT32_MAX) {
+        const uint32_t uploadSlot = textureFrame_[0] == nextFrame_ ? 1u : 0u;
+        uploadFrameToTexture(cmd, uploadSlot, currentFrame_);
+        currentTextureSlot_ = uploadSlot;
+    }
+
+    nextTextureSlot_ = findTextureSlot(nextFrame_);
+    if (nextTextureSlot_ == UINT32_MAX) {
+        const uint32_t uploadSlot = currentTextureSlot_ == 0 ? 1u : 0u;
+        uploadFrameToTexture(cmd, uploadSlot, nextFrame_);
+        nextTextureSlot_ = uploadSlot;
+    }
 }
 
 void VolumeFireEffect::render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const NewCamera& camera)
@@ -364,14 +384,14 @@ void VolumeFireEffect::render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd
     VolumeFireParams fp{};
     fp.dimsAndBlend =
         glm::vec4{static_cast<float>(width_), static_cast<float>(height_), static_cast<float>(depth_), frameBlend_};
-    fp.render = glm::vec4{96.0f, 4.0f, 5.5f, 1.0f};
+    fp.render = glm::vec4{112.0f, 1.55f, 1.75f, 0.88f};
     SDL_PushGPUFragmentUniformData(cmd, 0, &fp, sizeof(fp));
 
     SDL_BindGPUGraphicsPipeline(pass, pipeline_);
     instanceBuf_.bindAsVertexStorage(pass, 0);
     SDL_GPUTextureSamplerBinding samplers[2] = {
-        SDL_GPUTextureSamplerBinding{frameTextures_[0], sampler_},
-        SDL_GPUTextureSamplerBinding{frameTextures_[1], sampler_},
+        SDL_GPUTextureSamplerBinding{frameTextures_[currentTextureSlot_], sampler_},
+        SDL_GPUTextureSamplerBinding{frameTextures_[nextTextureSlot_], sampler_},
     };
     SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
     SDL_DrawGPUPrimitives(pass, 36, instanceBuf_.liveCount(), 0, 0);

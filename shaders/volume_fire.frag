@@ -34,13 +34,13 @@ vec2 intersectAabb(vec3 origin, vec3 dir, vec3 bmin, vec3 bmax)
 
 vec3 fireColor(float t)
 {
-    vec3 deep = vec3(1.0, 0.12, 0.015);
-    vec3 orange = vec3(1.0, 0.42, 0.055);
-    vec3 yellow = vec3(1.0, 0.86, 0.22);
-    vec3 white = vec3(1.0, 0.96, 0.78);
-    vec3 c = mix(deep, orange, smoothstep(0.05, 0.35, t));
-    c = mix(c, yellow, smoothstep(0.28, 0.70, t));
-    c = mix(c, white, smoothstep(0.72, 1.0, t));
+    vec3 ember = vec3(0.82, 0.055, 0.01);
+    vec3 orange = vec3(1.0, 0.29, 0.035);
+    vec3 gold = vec3(1.0, 0.61, 0.13);
+    vec3 hot = vec3(1.0, 0.78, 0.34);
+    vec3 c = mix(ember, orange, smoothstep(0.04, 0.38, t));
+    c = mix(c, gold, smoothstep(0.34, 0.78, t));
+    c = mix(c, hot, smoothstep(0.86, 1.0, t));
     return c;
 }
 
@@ -64,14 +64,15 @@ void main()
 
         float t = tNear + (float(i) + 0.5) * dt;
         vec3 world = vCamPos + dir * t;
-        vec3 uvw = clamp((world - vBoxMin) / (vBoxMax - vBoxMin), vec3(0.0), vec3(1.0));
-        float temp0 = texture(fireFrame0, uvw).r;
-        float temp1 = texture(fireFrame1, uvw).r;
-        float temp = mix(temp0, temp1, vf.dimsAndBlend.w);
-        temp = smoothstep(0.018, 0.92, temp);
+        vec3 local = clamp((world - vBoxMin) / (vBoxMax - vBoxMin), vec3(0.0), vec3(1.0));
+        vec3 uvw = vec3(local.x, local.z, local.y);
+        float flame0 = texture(fireFrame0, uvw).r;
+        float flame1 = texture(fireFrame1, uvw).r;
+        float flame = mix(flame0, flame1, vf.dimsAndBlend.w);
+        flame = pow(smoothstep(0.012, 0.86, flame), 1.35);
 
-        float alpha = clamp(temp * temp * vf.render.y * 0.035, 0.0, 0.22);
-        vec3 color = fireColor(temp) * vf.render.z;
+        float alpha = clamp(pow(flame, 1.72) * vf.render.y * 0.022, 0.0, 0.10);
+        vec3 color = fireColor(flame) * vf.render.z;
         accum.rgb += (1.0 - accum.a) * color * alpha;
         accum.a += (1.0 - accum.a) * alpha;
     }
