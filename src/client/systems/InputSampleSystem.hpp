@@ -169,10 +169,11 @@ inline void runMovementKeys(Registry& registry, const InputBindings& bindings, b
 
 /// @brief Sample skip-respawn input while the local player is dead.
 ///
-/// Runs independently of Controllable — dead players can press Space to
-/// skip the remaining respawn timer and respawn immediately.
+/// Runs independently of Controllable — dead players can use the Jump binding
+/// to skip the remaining respawn timer and respawn immediately.
 ///
 /// @param registry  The ECS registry.
+/// @param bindings  The configured keyboard/mouse bindings.
 inline void runDeadInput(Registry& registry, const InputBindings& bindings)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);

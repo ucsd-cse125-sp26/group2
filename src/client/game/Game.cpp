@@ -3870,6 +3870,9 @@ SDL_AppResult Game::iterate()
     }
     if (pauseResult.exitToDesktop)
         return SDL_APP_SUCCESS;
+    if (pauseResult.returnToMainMenu) {
+        returnToMainMenuRequested_ = true;
+    }
 
     debugUI.render();
 
@@ -3926,6 +3929,15 @@ SDL_AppResult Game::iterate()
 bool Game::shouldReturnToLobby() const
 {
     return returnToLobbyRequested;
+}
+
+bool Game::consumeReturnToMainMenu()
+{
+    if (!returnToMainMenuRequested_)
+        return false;
+
+    returnToMainMenuRequested_ = false;
+    return true;
 }
 
 void Game::quit()

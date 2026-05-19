@@ -247,13 +247,24 @@ SDL_AppResult App::iterate()
         }
         break;
     }
-    case Screen::InGame:
+    case Screen::InGame: {
+        auto* game = dynamic_cast<Game*>(screen_.get());
+        if (!game)
+            break;
+
+        if (game->consumeReturnToMainMenu()) {
+            client.shutdown();
+            transitionTo(Screen::Home);
+            break;
+        }
+
         if (developerConfig.skipLobby)
             break;
-        if (auto* game = dynamic_cast<Game*>(screen_.get()); game != nullptr && game->shouldReturnToLobby()) {
+        if (game->shouldReturnToLobby()) {
             transitionTo(Screen::Lobby);
         }
         break;
+    }
     default:
         break;
     }

@@ -130,7 +130,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     ImDrawList* background = ImGui::GetBackgroundDrawList();
     background->AddRectFilled({0.0f, 0.0f}, display, IM_COL32(0, 0, 0, 150));
 
-    const ImVec2 windowSize = settingsOpen ? ImVec2{560.0f, 620.0f} : ImVec2{320.0f, 250.0f};
+    const ImVec2 windowSize = settingsOpen ? ImVec2{560.0f, 620.0f} : ImVec2{420.0f, 250.0f};
     ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
     ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
 
@@ -152,9 +152,18 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
 
             ImGui::Spacing();
-            if (ImGui::Button("Exit to Desktop", {buttonWidth, 36.0f})) {
+            const float halfWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+            if (ImGui::Button("Leave Match", {halfWidth, 36.0f})) {
+                result.returnToMainMenu = true;
+            }
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.58f, 0.12f, 0.12f, 1.0f});
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{0.72f, 0.16f, 0.16f, 1.0f});
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{0.45f, 0.08f, 0.08f, 1.0f});
+            if (ImGui::Button("Exit to Desktop", {halfWidth, 36.0f})) {
                 result.exitToDesktop = true;
             }
+            ImGui::PopStyleColor(3);
         } else {
             ImGui::TextUnformatted("Settings");
             ImGui::Separator();

@@ -101,6 +101,9 @@ public:
     /// @brief True once the server has returned the match phase to the lobby.
     bool shouldReturnToLobby() const;
 
+    /// @brief True if the user requested leaving the match for the main menu, then clear that request.
+    bool consumeReturnToMainMenu();
+
     /// @brief Shut down all subsystems in reverse-init order.
     void quit() override;
 
@@ -472,7 +475,8 @@ private:
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
-    bool returnToLobbyRequested = false; ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
+    bool returnToLobbyRequested = false;     ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
+    bool returnToMainMenuRequested_ = false; ///< Latched true when the pause menu requests leaving the match.
 
     // Kill Feed State
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
