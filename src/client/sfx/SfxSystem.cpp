@@ -281,6 +281,19 @@ SfxSystem::SourceHandle SfxSystem::postAudioEvent(std::string_view eventName, au
     return first;
 }
 
+SfxSystem::SourceHandle
+SfxSystem::postLocalAudioEvent(std::string_view eventName, audio::AudioObjectId object, float gain)
+{
+    SourceHandle first = kInvalidSource;
+    for (audio::AudioCommand command : audioRuntime_.postEvent(eventName, object, gain)) {
+        command.positional = false;
+        const SourceHandle handle = playCommand(command);
+        if (first == kInvalidSource && handle != kInvalidSource)
+            first = handle;
+    }
+    return first;
+}
+
 void SfxSystem::submitVoiceFrame(ClientId speaker,
                                  std::uint16_t sequence,
                                  std::span<const float> monoPcm48k,
@@ -356,18 +369,25 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
 {
     const audio::AudioObjectId object = audio::objectId("event.weapon_fire");
     setAudioObjectTransform(object, e.origin);
+    const auto postFireSound = [&](std::string_view eventName) {
+        if (e.localPlayer)
+            postLocalAudioEvent(eventName, object);
+        else
+            postAudioEvent(eventName, object);
+    };
+
     switch (e.type) {
     case WeaponType::Rifle:
-        postAudioEvent("weapon.rifle.fire", object);
+        postFireSound("weapon.rifle.fire");
         break;
     case WeaponType::Rocket:
-        postAudioEvent("weapon.rocket.fire", object);
+        postFireSound("weapon.rocket.fire");
         break;
     case WeaponType::RailGun:
-        postAudioEvent("weapon.railgun.fire", object);
+        postFireSound("weapon.railgun.fire");
         break;
     case WeaponType::EnergyGun:
-        postAudioEvent("weapon.energy.fire", object);
+        postFireSound("weapon.energy.fire");
         break;
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:

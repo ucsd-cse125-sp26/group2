@@ -552,10 +552,12 @@ bool Game::init(AppContext& ctx)
             // so the shoot sound plays and recoil kicks.
             if (evt.effectType == ParticleEffectType::HitscanBeam) {
                 WeaponFiredEvent wfe;
+                wfe.shooter = localPlayer;
                 wfe.type = evt.weaponType;
                 wfe.origin = evt.pos1;
                 wfe.direction = glm::normalize(evt.pos2 - evt.pos1);
                 wfe.isHitscan = true;
+                wfe.localPlayer = true;
                 wfe.hitPos = evt.pos2;
                 dispatcher.enqueue(wfe);
             }
@@ -578,7 +580,10 @@ bool Game::init(AppContext& ctx)
                 if (!eventName.empty()) {
                     const audio::AudioObjectId object = audioObjectForEntity(evt.source);
                     sfxSystem.setAudioObjectTransform(object, evtOrigin);
-                    sfxSystem.postAudioEvent(eventName, object, 0.82f);
+                    if (evt.source == localPlayer)
+                        sfxSystem.postLocalAudioEvent(eventName, object, 0.82f);
+                    else
+                        sfxSystem.postAudioEvent(eventName, object, 0.82f);
                 }
             }
             break;
@@ -589,7 +594,10 @@ bool Game::init(AppContext& ctx)
                 if (!eventName.empty()) {
                     const audio::AudioObjectId object = audioObjectForEntity(evt.source);
                     sfxSystem.setAudioObjectTransform(object, evtOrigin);
-                    sfxSystem.postAudioEvent(eventName, object, 0.92f);
+                    if (evt.source == localPlayer)
+                        sfxSystem.postLocalAudioEvent(eventName, object, 0.92f);
+                    else
+                        sfxSystem.postAudioEvent(eventName, object, 0.92f);
                 }
             }
             break;
@@ -1769,9 +1777,12 @@ SDL_AppResult Game::iterate()
             // stale flag (player held trigger when alt-tabbing into the
             // debug menu) doesn't keep firing while no input is being sampled.
             bool shooting = false;
+            entt::entity localShooter = entt::null;
             if (mouseCaptured) {
-                registry.view<LocalPlayer, InputSnapshot>().each(
-                    [&](const InputSnapshot& snap) { shooting = snap.shooting; });
+                registry.view<LocalPlayer, InputSnapshot>().each([&](entt::entity entity, const InputSnapshot& snap) {
+                    shooting = snap.shooting;
+                    localShooter = entity;
+                });
             }
 
             // Check ammo — don't spawn VFX if the magazine is empty.
@@ -1802,10 +1813,12 @@ SDL_AppResult Game::iterate()
 
                 // Dispatch weapon-fired event for any listeners
                 WeaponFiredEvent wfe;
+                wfe.shooter = localShooter;
                 wfe.type = currentEquippedType_;
                 wfe.origin = hip;
                 wfe.direction = cachedCamFwd_;
                 wfe.isHitscan = true;
+                wfe.localPlayer = true;
                 wfe.hitPos = hitPos;
                 dispatcher.enqueue(wfe);
 
@@ -2289,7 +2302,10 @@ SDL_AppResult Game::iterate()
                             sfxSystem.setAudioRtpc(object,
                                                    audio::rtpcId("movement.intensity"),
                                                    stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
-                            sfxSystem.postAudioEvent("footstep", object, gain);
+                            if (c.isLocal)
+                                sfxSystem.postLocalAudioEvent("footstep", object, gain);
+                            else
+                                sfxSystem.postAudioEvent("footstep", object, gain);
                         }
                         phaseIt->second[i] = src.timeRatio;
                     }

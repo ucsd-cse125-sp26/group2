@@ -101,6 +101,9 @@ public:
     bool reloadAudioManifest();
     SourceHandle
     postAudioEvent(std::string_view eventName, audio::AudioObjectId object = audio::kGlobalObject, float gain = 1.0f);
+    SourceHandle postLocalAudioEvent(std::string_view eventName,
+                                     audio::AudioObjectId object = audio::kGlobalObject,
+                                     float gain = 1.0f);
     void submitVoiceFrame(ClientId speaker,
                           std::uint16_t sequence,
                           std::span<const float> monoPcm48k,
