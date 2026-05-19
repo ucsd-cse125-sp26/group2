@@ -431,25 +431,61 @@ if(GROUP2_ENABLE_VDB_VOLUME)
     target_compile_features(vdb_to_g2vol PRIVATE cxx_std_23)
     target_link_libraries(vdb_to_g2vol PRIVATE ${GROUP2_OPENVDB_TARGET})
 
-    set(FIRE_01_VDB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/flipbooks/Fire_01")
-    set(FIRE_01_G2VOL "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated/fire_01.g2vol")
-    if(EXISTS "${FIRE_01_VDB_DIR}")
-        file(GLOB CONFIGURE_DEPENDS FIRE_01_VDBS "${FIRE_01_VDB_DIR}/embergen_fire_a_*.vdb")
-        add_custom_command(
-            OUTPUT "${FIRE_01_G2VOL}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated"
-            COMMAND $<TARGET_FILE:vdb_to_g2vol>
-                    "${FIRE_01_VDB_DIR}"
-                    "${FIRE_01_G2VOL}"
-                    --fps 24
-                    --max-dim 192
-            DEPENDS vdb_to_g2vol ${FIRE_01_VDBS}
-            COMMENT "Converting EmberGen Fire_01 VDB sequence to fire_01.g2vol"
-            VERBATIM
-        )
-        add_custom_target(generated_volume_assets DEPENDS "${FIRE_01_G2VOL}")
+    set(GROUP2_GENERATED_FLIPBOOKS)
+    function(group2_add_vdb_flipbook NAME INPUT_DIR GRID_NAME COLOR_MODE)
+        set(OUT_FLIP "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated/${NAME}.g2flip")
+        set(UNUSED_VOL "${CMAKE_CURRENT_BINARY_DIR}/${NAME}_unused.g2vol")
+        if(EXISTS "${INPUT_DIR}")
+            set(VDB_LIST_VAR "${NAME}_VDBS")
+            file(GLOB ${VDB_LIST_VAR} CONFIGURE_DEPENDS "${INPUT_DIR}/*.vdb")
+            if(NOT ${VDB_LIST_VAR})
+                message(WARNING "${NAME} VDB directory exists but contains no .vdb frames: ${INPUT_DIR}")
+                return()
+            endif()
+            add_custom_command(
+                OUTPUT "${OUT_FLIP}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated"
+                COMMAND $<TARGET_FILE:vdb_to_g2vol>
+                        "${INPUT_DIR}"
+                        "${UNUSED_VOL}"
+                        --fps 24
+                        --max-dim 192
+                        --grid "${GRID_NAME}"
+                        --color "${COLOR_MODE}"
+                        --flipbook-output "${OUT_FLIP}"
+                        --flipbook-size 384
+                        --flipbook-only
+                DEPENDS vdb_to_g2vol ${${VDB_LIST_VAR}}
+                COMMENT "Converting ${NAME} VDB sequence to high-quality flipbook cache"
+                VERBATIM
+            )
+            list(APPEND GROUP2_GENERATED_FLIPBOOKS "${OUT_FLIP}")
+            set(GROUP2_GENERATED_FLIPBOOKS "${GROUP2_GENERATED_FLIPBOOKS}" PARENT_SCOPE)
+        else()
+            message(WARNING "${NAME} VDB directory not found; skipping generated flipbook asset: ${INPUT_DIR}")
+        endif()
+    endfunction()
+
+    group2_add_vdb_flipbook(fire_01
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/flipbooks/Fire_01"
+        flames
+        fire
+    )
+    group2_add_vdb_flipbook(grenade_dust_impact
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/flipbooks/GrenadeDustImpactVDB"
+        density
+        dust
+    )
+    group2_add_vdb_flipbook(midair_explosion_01
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/flipbooks/Midair_Explosion_01"
+        flames
+        fire
+    )
+
+    if(GROUP2_GENERATED_FLIPBOOKS)
+        add_custom_target(generated_volume_assets DEPENDS ${GROUP2_GENERATED_FLIPBOOKS})
     else()
-        message(WARNING "Fire_01 VDB directory not found; generated volume asset target not created")
+        message(WARNING "No generated VDB flipbook asset targets were created")
     endif()
 endif()
 
@@ -710,6 +746,7 @@ set(SHADER_SOURCES
     ribbon.vert ribbon.frag
     smoke.vert smoke.frag
     volume_fire.vert volume_fire.frag
+    fire_flipbook.vert fire_flipbook.frag
     lightning_arc.vert lightning_arc.frag
     hitscan_beam.vert hitscan_beam.frag
     decal.vert decal.frag
@@ -1225,10 +1262,11 @@ endif()
 # find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
     add_custom_command(TARGET group2 POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets"
-                "$<TARGET_FILE_DIR:group2>/assets"
-        COMMENT "Copying assets to binary directory"
+        COMMAND ${CMAKE_COMMAND}
+                "-DGROUP2_ASSET_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/assets"
+                "-DGROUP2_ASSET_DEST=$<TARGET_FILE_DIR:group2>/assets"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_runtime_assets.cmake"
+        COMMENT "Copying runtime assets to binary directory"
         VERBATIM
     )
 else()

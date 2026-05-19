@@ -1,5 +1,5 @@
 /// @file VolumeFireEffect.cpp
-/// @brief Runtime playback and raymarched rendering for generated animated fire volumes.
+/// @brief Runtime playback for generated fire/explosion flipbook previews.
 
 #include "VolumeFireEffect.hpp"
 
@@ -15,6 +15,7 @@
 #include <fstream>
 #include <glm/ext/matrix_transform.hpp>
 #include <limits>
+#include <utility>
 
 namespace
 {
@@ -42,9 +43,33 @@ struct G2VolHeader
 
 static_assert(sizeof(G2VolHeader) == 256);
 
+#pragma pack(push, 1)
+struct G2FlipHeader
+{
+    char magic[8];
+    uint32_t version;
+    uint32_t tileWidth;
+    uint32_t tileHeight;
+    uint32_t atlasWidth;
+    uint32_t atlasHeight;
+    uint32_t columns;
+    uint32_t rows;
+    uint32_t frameCount;
+    float fps;
+    float worldWidth;
+    float worldHeight;
+    uint32_t payloadFormat;
+    uint32_t headerSize;
+    uint64_t payloadBytes;
+    uint8_t reserved[60];
+};
+#pragma pack(pop)
+
+static_assert(sizeof(G2FlipHeader) == 128);
+
 constexpr uint32_t k_cacheVersion = 1;
 constexpr uint32_t k_payloadR16FloatNormalized = 1;
-constexpr uint32_t k_maxInstances = 128;
+constexpr uint32_t k_flipPayloadRgba16FloatPremul = 1;
 
 struct alignas(16) ParticleUniforms
 {
@@ -62,6 +87,24 @@ struct alignas(16) VolumeFireParams
 {
     glm::vec4 dimsAndBlend; // xyz = volume dimensions, w = frame blend
     glm::vec4 render;       // x = max steps, y = density, z = brightness, w = alpha scale
+};
+
+struct alignas(16) FlipbookVertexUniforms
+{
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::vec3 camRight;
+    float halfWidth;
+    glm::vec3 camUp;
+    float halfHeight;
+    glm::vec3 center;
+    float opacity;
+};
+
+struct alignas(16) FlipbookFragmentUniforms
+{
+    glm::vec4 atlas;
+    glm::vec4 anim;
 };
 
 SDL_GPUColorTargetBlendState premulAlphaBlend()
@@ -82,27 +125,33 @@ bool VolumeFireEffect::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
 {
     device_ = dev;
     shaderFmt_ = shaderFmt;
-    instanceBuf_.init(dev, sizeof(VolumeFireInstanceGPU) * k_maxInstances);
 
     const char* base = SDL_GetBasePath();
-    const std::filesystem::path cachePath = std::filesystem::path(base ? base : "") / "assets/generated/fire_01.g2vol";
-    if (!loadCache(cachePath.string())) {
-        SDL_Log("VolumeFireEffect: fire volume cache unavailable at %s", cachePath.string().c_str());
+    const std::filesystem::path generatedPath = std::filesystem::path(base ? base : "") / "assets/generated";
+    if (!createSampler() || !buildFlipbookPipeline(colorFmt, shaderFmt)) {
+        SDL_Log("VolumeFireEffect: flipbook GPU setup failed; previews disabled");
         return true;
     }
 
-    if (!createGpuResources() || !buildPipeline(colorFmt, shaderFmt)) {
-        SDL_Log("VolumeFireEffect: GPU setup failed; volume fire disabled");
-        return true;
-    }
+    loadFlipbookPreview(
+        (generatedPath / "fire_01.g2flip").string(), glm::vec3{-300.0f, 50.0f, 500.0f}, 1.0f, 1.0f, "fire_01");
+    loadFlipbookPreview((generatedPath / "grenade_dust_impact.g2flip").string(),
+                        glm::vec3{-35.0f, 50.0f, 500.0f},
+                        1.15f,
+                        0.92f,
+                        "grenade_dust_impact");
+    loadFlipbookPreview((generatedPath / "midair_explosion_01.g2flip").string(),
+                        glm::vec3{240.0f, 115.0f, 500.0f},
+                        1.0f,
+                        1.0f,
+                        "midair_explosion_01");
 
-    ready_ = true;
-    SDL_Log("VolumeFireEffect: loaded fire_01.g2vol (%ux%ux%u, %u frames @ %.1f fps)",
-            width_,
-            height_,
-            depth_,
-            frameCount_,
-            static_cast<double>(fps_));
+    ready_ = !flipbookPreviews_.empty();
+    if (ready_) {
+        frameCount_ = flipbookPreviews_.front().frameCount;
+        fps_ = flipbookPreviews_.front().fps;
+    }
+    SDL_Log("VolumeFireEffect: loaded %zu flipbook-only VFX previews", flipbookPreviews_.size());
     return true;
 }
 
@@ -112,10 +161,19 @@ void VolumeFireEffect::quit()
         SDL_WaitForGPUIdle(device_);
         if (pipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
+        if (flipbookPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, flipbookPipeline_);
         for (SDL_GPUTexture*& texture : frameTextures_) {
             if (texture)
                 SDL_ReleaseGPUTexture(device_, texture);
             texture = nullptr;
+        }
+        if (flipbookTexture_)
+            SDL_ReleaseGPUTexture(device_, flipbookTexture_);
+        for (FlipbookPreview& preview : flipbookPreviews_) {
+            if (preview.texture)
+                SDL_ReleaseGPUTexture(device_, preview.texture);
+            preview.texture = nullptr;
         }
         if (sampler_)
             SDL_ReleaseGPUSampler(device_, sampler_);
@@ -124,12 +182,17 @@ void VolumeFireEffect::quit()
     }
 
     pipeline_ = nullptr;
+    flipbookPipeline_ = nullptr;
+    flipbookTexture_ = nullptr;
     sampler_ = nullptr;
     frameTransfer_ = nullptr;
     instanceBuf_.quit();
     frames_.clear();
+    flipbookPixels_.clear();
     instances_.clear();
+    flipbookPreviews_.clear();
     ready_ = false;
+    flipbookReady_ = false;
     device_ = nullptr;
 }
 
@@ -178,6 +241,209 @@ bool VolumeFireEffect::loadCache(const std::string& path)
     return true;
 }
 
+bool VolumeFireEffect::loadFlipbook(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return false;
+
+    G2FlipHeader header{};
+    in.read(reinterpret_cast<char*>(&header), sizeof(header));
+    if (!in)
+        return false;
+
+    if (std::memcmp(header.magic, "G2FLIP1", 7) != 0 || header.version != k_cacheVersion ||
+        header.payloadFormat != k_flipPayloadRgba16FloatPremul || header.headerSize < sizeof(G2FlipHeader))
+    {
+        SDL_Log("VolumeFireEffect: invalid flipbook header in %s", path.c_str());
+        return false;
+    }
+    if (header.tileWidth == 0 || header.tileHeight == 0 || header.atlasWidth == 0 || header.atlasHeight == 0 ||
+        header.columns == 0 || header.rows == 0 || header.frameCount == 0)
+    {
+        SDL_Log("VolumeFireEffect: invalid flipbook dimensions in %s", path.c_str());
+        return false;
+    }
+
+    const uint64_t expectedPayload =
+        static_cast<uint64_t>(header.atlasWidth) * header.atlasHeight * 4u * sizeof(uint16_t);
+    if (expectedPayload != header.payloadBytes) {
+        SDL_Log("VolumeFireEffect: flipbook payload size mismatch in %s", path.c_str());
+        return false;
+    }
+
+    flipbookTileWidth_ = header.tileWidth;
+    flipbookTileHeight_ = header.tileHeight;
+    flipbookAtlasWidth_ = header.atlasWidth;
+    flipbookAtlasHeight_ = header.atlasHeight;
+    flipbookColumns_ = header.columns;
+    flipbookRows_ = header.rows;
+    flipbookFrameCount_ = header.frameCount;
+    flipbookPayloadBytes_ = header.payloadBytes;
+
+    flipbookPixels_.resize(static_cast<size_t>(expectedPayload / sizeof(uint16_t)));
+    in.seekg(static_cast<std::streamoff>(header.headerSize), std::ios::beg);
+    in.read(reinterpret_cast<char*>(flipbookPixels_.data()), static_cast<std::streamsize>(expectedPayload));
+    if (!in) {
+        SDL_Log("VolumeFireEffect: failed reading flipbook payload in %s", path.c_str());
+        flipbookPixels_.clear();
+        return false;
+    }
+    return true;
+}
+
+bool VolumeFireEffect::createSampler()
+{
+    SDL_GPUSamplerCreateInfo sci{};
+    sci.min_filter = SDL_GPU_FILTER_LINEAR;
+    sci.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sci.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sampler_ = SDL_CreateGPUSampler(device_, &sci);
+    if (!sampler_) {
+        SDL_Log("VolumeFireEffect: SDL_CreateGPUSampler failed: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+bool VolumeFireEffect::loadFlipbookPreview(
+    const std::string& path, const glm::vec3& bottomCenter, float worldScale, float opacity, const std::string& name)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        SDL_Log("VolumeFireEffect: flipbook preview unavailable at %s", path.c_str());
+        return false;
+    }
+
+    G2FlipHeader header{};
+    in.read(reinterpret_cast<char*>(&header), sizeof(header));
+    if (!in)
+        return false;
+
+    if (std::memcmp(header.magic, "G2FLIP1", 7) != 0 || header.version != k_cacheVersion ||
+        header.payloadFormat != k_flipPayloadRgba16FloatPremul || header.headerSize < sizeof(G2FlipHeader))
+    {
+        SDL_Log("VolumeFireEffect: invalid flipbook header in %s", path.c_str());
+        return false;
+    }
+    if (header.tileWidth == 0 || header.tileHeight == 0 || header.atlasWidth == 0 || header.atlasHeight == 0 ||
+        header.columns == 0 || header.rows == 0 || header.frameCount == 0)
+    {
+        SDL_Log("VolumeFireEffect: invalid flipbook dimensions in %s", path.c_str());
+        return false;
+    }
+
+    const uint64_t expectedPayload =
+        static_cast<uint64_t>(header.atlasWidth) * header.atlasHeight * 4u * sizeof(uint16_t);
+    if (expectedPayload != header.payloadBytes) {
+        SDL_Log("VolumeFireEffect: flipbook payload size mismatch in %s", path.c_str());
+        return false;
+    }
+
+    std::vector<uint16_t> pixels(static_cast<size_t>(expectedPayload / sizeof(uint16_t)));
+    in.seekg(static_cast<std::streamoff>(header.headerSize), std::ios::beg);
+    in.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(expectedPayload));
+    if (!in) {
+        SDL_Log("VolumeFireEffect: failed reading flipbook payload in %s", path.c_str());
+        return false;
+    }
+
+    SDL_GPUTextureCreateInfo tci{};
+    tci.type = SDL_GPU_TEXTURETYPE_2D;
+    tci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+    tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    tci.width = header.atlasWidth;
+    tci.height = header.atlasHeight;
+    tci.layer_count_or_depth = 1;
+    tci.num_levels = 1;
+    tci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTexture* texture = SDL_CreateGPUTexture(device_, &tci);
+    if (!texture) {
+        SDL_Log("VolumeFireEffect: SDL_CreateGPUTexture(%s) failed: %s", name.c_str(), SDL_GetError());
+        return false;
+    }
+
+    SDL_GPUTransferBufferCreateInfo tbci{};
+    tbci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbci.size = static_cast<Uint32>(expectedPayload);
+    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device_, &tbci);
+    if (!transfer) {
+        SDL_Log("VolumeFireEffect: SDL_CreateGPUTransferBuffer(%s) failed: %s", name.c_str(), SDL_GetError());
+        SDL_ReleaseGPUTexture(device_, texture);
+        return false;
+    }
+
+    void* mapped = SDL_MapGPUTransferBuffer(device_, transfer, false);
+    if (!mapped) {
+        SDL_Log("VolumeFireEffect: SDL_MapGPUTransferBuffer(%s) failed: %s", name.c_str(), SDL_GetError());
+        SDL_ReleaseGPUTransferBuffer(device_, transfer);
+        SDL_ReleaseGPUTexture(device_, texture);
+        return false;
+    }
+    std::memcpy(mapped, pixels.data(), static_cast<size_t>(expectedPayload));
+    SDL_UnmapGPUTransferBuffer(device_, transfer);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
+    if (!cmd) {
+        SDL_Log("VolumeFireEffect: SDL_AcquireGPUCommandBuffer(%s) failed: %s", name.c_str(), SDL_GetError());
+        SDL_ReleaseGPUTransferBuffer(device_, transfer);
+        SDL_ReleaseGPUTexture(device_, texture);
+        return false;
+    }
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
+    if (!copyPass) {
+        SDL_Log("VolumeFireEffect: SDL_BeginGPUCopyPass(%s) failed: %s", name.c_str(), SDL_GetError());
+        SDL_CancelGPUCommandBuffer(cmd);
+        SDL_ReleaseGPUTransferBuffer(device_, transfer);
+        SDL_ReleaseGPUTexture(device_, texture);
+        return false;
+    }
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = transfer;
+    src.offset = 0;
+    src.pixels_per_row = header.atlasWidth;
+    src.rows_per_layer = header.atlasHeight;
+
+    SDL_GPUTextureRegion dst{};
+    dst.texture = texture;
+    dst.w = header.atlasWidth;
+    dst.h = header.atlasHeight;
+    dst.d = 1;
+    SDL_UploadToGPUTexture(copyPass, &src, &dst, false);
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(device_, transfer);
+
+    const float worldWidth = header.worldWidth > 0.0f ? header.worldWidth : static_cast<float>(header.tileWidth);
+    const float worldHeight = header.worldHeight > 0.0f ? header.worldHeight : static_cast<float>(header.tileHeight);
+    FlipbookPreview preview{};
+    preview.texture = texture;
+    preview.tileWidth = header.tileWidth;
+    preview.tileHeight = header.tileHeight;
+    preview.atlasWidth = header.atlasWidth;
+    preview.atlasHeight = header.atlasHeight;
+    preview.columns = header.columns;
+    preview.rows = header.rows;
+    preview.frameCount = header.frameCount;
+    preview.fps = header.fps > 0.0f ? header.fps : 24.0f;
+    preview.halfWidth = worldWidth * worldScale * 0.5f;
+    preview.halfHeight = worldHeight * worldScale * 0.5f;
+    preview.opacity = opacity;
+    preview.bottomCenter = bottomCenter;
+    preview.name = name;
+    flipbookPreviews_.push_back(std::move(preview));
+
+    SDL_Log("VolumeFireEffect: loaded %s flipbook (%ux%u atlas, %u frames)",
+            name.c_str(),
+            header.atlasWidth,
+            header.atlasHeight,
+            header.frameCount);
+    return true;
+}
+
 bool VolumeFireEffect::createGpuResources()
 {
     SDL_GPUTextureCreateInfo tci{};
@@ -220,6 +486,79 @@ bool VolumeFireEffect::createGpuResources()
         return false;
     }
 
+    if (!flipbookPixels_.empty() && !createFlipbookTexture()) {
+        SDL_Log("VolumeFireEffect: flipbook texture setup failed; flipbook preview disabled");
+        flipbookPixels_.clear();
+    }
+
+    return true;
+}
+
+bool VolumeFireEffect::createFlipbookTexture()
+{
+    SDL_GPUTextureCreateInfo tci{};
+    tci.type = SDL_GPU_TEXTURETYPE_2D;
+    tci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+    tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    tci.width = flipbookAtlasWidth_;
+    tci.height = flipbookAtlasHeight_;
+    tci.layer_count_or_depth = 1;
+    tci.num_levels = 1;
+    tci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    flipbookTexture_ = SDL_CreateGPUTexture(device_, &tci);
+    if (!flipbookTexture_) {
+        SDL_Log("VolumeFireEffect: SDL_CreateGPUTexture(flipbook) failed: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_GPUTransferBufferCreateInfo tbci{};
+    tbci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbci.size = static_cast<Uint32>(flipbookPayloadBytes_);
+    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device_, &tbci);
+    if (!transfer) {
+        SDL_Log("VolumeFireEffect: SDL_CreateGPUTransferBuffer(flipbook) failed: %s", SDL_GetError());
+        return false;
+    }
+
+    void* mapped = SDL_MapGPUTransferBuffer(device_, transfer, false);
+    if (!mapped) {
+        SDL_Log("VolumeFireEffect: SDL_MapGPUTransferBuffer(flipbook) failed: %s", SDL_GetError());
+        SDL_ReleaseGPUTransferBuffer(device_, transfer);
+        return false;
+    }
+    std::memcpy(mapped, flipbookPixels_.data(), static_cast<size_t>(flipbookPayloadBytes_));
+    SDL_UnmapGPUTransferBuffer(device_, transfer);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
+    if (!cmd) {
+        SDL_Log("VolumeFireEffect: SDL_AcquireGPUCommandBuffer(flipbook) failed: %s", SDL_GetError());
+        SDL_ReleaseGPUTransferBuffer(device_, transfer);
+        return false;
+    }
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
+    if (!copyPass) {
+        SDL_Log("VolumeFireEffect: SDL_BeginGPUCopyPass(flipbook) failed: %s", SDL_GetError());
+        SDL_CancelGPUCommandBuffer(cmd);
+        SDL_ReleaseGPUTransferBuffer(device_, transfer);
+        return false;
+    }
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = transfer;
+    src.offset = 0;
+    src.pixels_per_row = flipbookAtlasWidth_;
+    src.rows_per_layer = flipbookAtlasHeight_;
+
+    SDL_GPUTextureRegion dst{};
+    dst.texture = flipbookTexture_;
+    dst.w = flipbookAtlasWidth_;
+    dst.h = flipbookAtlasHeight_;
+    dst.d = 1;
+    SDL_UploadToGPUTexture(copyPass, &src, &dst, false);
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(device_, transfer);
+    flipbookPixels_.clear();
+    flipbookReady_ = true;
     return true;
 }
 
@@ -266,43 +605,74 @@ bool VolumeFireEffect::buildPipeline(SDL_GPUTextureFormat colorFmt, SDL_GPUShade
         SDL_Log("VolumeFireEffect: pipeline creation failed: %s", SDL_GetError());
         return false;
     }
+    if (flipbookReady_ && !buildFlipbookPipeline(colorFmt, shaderFmt)) {
+        SDL_Log("VolumeFireEffect: flipbook pipeline creation failed; flipbook preview disabled");
+        flipbookReady_ = false;
+    }
+    return true;
+}
+
+bool VolumeFireEffect::buildFlipbookPipeline(SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt)
+{
+    const char* base = SDL_GetBasePath();
+    const char* ext = (shaderFmt == SDL_GPU_SHADERFORMAT_MSL)    ? ".msl"
+                      : (shaderFmt == SDL_GPU_SHADERFORMAT_DXIL) ? ".dxil"
+                                                                 : ".spv";
+    char vp[512], fp[512];
+    SDL_snprintf(vp, sizeof(vp), "%sshaders/fire_flipbook.vert%s", base ? base : "", ext);
+    SDL_snprintf(fp, sizeof(fp), "%sshaders/fire_flipbook.frag%s", base ? base : "", ext);
+
+    SDL_GPUShader* vert = loadShader(device_, vp, shaderFmt, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 0, 0);
+    SDL_GPUShader* frag = loadShader(device_, fp, shaderFmt, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1, 0, 0);
+    if (!vert || !frag) {
+        SDL_ReleaseGPUShader(device_, vert);
+        SDL_ReleaseGPUShader(device_, frag);
+        return false;
+    }
+
+    SDL_GPUColorTargetDescription ctd{};
+    ctd.format = colorFmt;
+    ctd.blend_state = premulAlphaBlend();
+
+    SDL_GPUGraphicsPipelineCreateInfo pci{};
+    pci.vertex_shader = vert;
+    pci.fragment_shader = frag;
+    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pci.target_info.color_target_descriptions = &ctd;
+    pci.target_info.num_color_targets = 1;
+    pci.target_info.has_depth_stencil_target = true;
+    pci.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    pci.depth_stencil_state.enable_depth_test = true;
+    pci.depth_stencil_state.enable_depth_write = false;
+    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    flipbookPipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &pci);
+    SDL_ReleaseGPUShader(device_, vert);
+    SDL_ReleaseGPUShader(device_, frag);
+    if (!flipbookPipeline_) {
+        SDL_Log("VolumeFireEffect: flipbook pipeline creation failed: %s", SDL_GetError());
+        return false;
+    }
     return true;
 }
 
 void VolumeFireEffect::update(float dt, Registry& registry)
 {
+    (void)registry;
     instances_.clear();
     if (!ready_)
         return;
 
     animTime_ += std::max(0.0f, dt);
-    const float frameFloat = std::fmod(animTime_ * fps_, static_cast<float>(frameCount_));
-    currentFrame_ = static_cast<uint32_t>(std::floor(frameFloat)) % frameCount_;
-    nextFrame_ = (currentFrame_ + 1) % frameCount_;
-    frameBlend_ = frameFloat - std::floor(frameFloat);
-
-    auto makeInstance = [&](glm::vec3 anchor, glm::vec3 scale, float opacity) {
-        const glm::vec3 vdbSize{static_cast<float>(width_), static_cast<float>(height_), static_cast<float>(depth_)};
-        const glm::vec3 worldSize{vdbSize.x * scale.x, vdbSize.z * scale.y, vdbSize.y * scale.z};
-        return VolumeFireInstanceGPU{
-            .boxMin = anchor + glm::vec3{-worldSize.x * 0.5f, 0.0f, -worldSize.z * 0.5f},
-            .opacity = opacity,
-            .boxMax = anchor + glm::vec3{worldSize.x * 0.5f, worldSize.y, worldSize.z * 0.5f},
-            ._pad0 = 0.0f,
-        };
-    };
-
-    instances_.push_back(makeInstance(glm::vec3{-300.0f, 50.0f, 500.0f}, glm::vec3{1.0f}, 1.0f));
-
-    registry.view<FireField>().each([&](const FireField& field) {
-        if (instances_.size() >= k_maxInstances || field.radius <= 0.0f || field.remaining <= 0.0f)
-            return;
-
-        const float horizontalDim = static_cast<float>(std::max(width_, height_));
-        const float scale = horizontalDim > 0.0f ? (field.radius * 2.0f) / horizontalDim : 1.0f;
-        const float fade = std::clamp(field.remaining / 0.5f, 0.0f, 1.0f);
-        instances_.push_back(makeInstance(field.position, glm::vec3{scale}, fade));
-    });
+    if (!flipbookPreviews_.empty()) {
+        const FlipbookPreview& preview = flipbookPreviews_.front();
+        const float frameFloat = std::fmod(animTime_ * preview.fps, static_cast<float>(preview.frameCount));
+        currentFrame_ = static_cast<uint32_t>(std::floor(frameFloat)) % preview.frameCount;
+        nextFrame_ = (currentFrame_ + 1) % preview.frameCount;
+        frameBlend_ = frameFloat - std::floor(frameFloat);
+    }
 }
 
 void VolumeFireEffect::uploadFrameToTexture(SDL_GPUCommandBuffer* cmd, uint32_t slot, uint32_t frameIndex)
@@ -348,51 +718,45 @@ uint32_t VolumeFireEffect::findTextureSlot(uint32_t frameIndex) const
 
 void VolumeFireEffect::uploadToGpu(SDL_GPUCommandBuffer* cmd)
 {
-    instanceBuf_.upload(
-        cmd, instances_.data(), static_cast<uint32_t>(instances_.size()), sizeof(VolumeFireInstanceGPU));
-    if (!ready_ || instances_.empty())
-        return;
-
-    currentTextureSlot_ = findTextureSlot(currentFrame_);
-    if (currentTextureSlot_ == UINT32_MAX) {
-        const uint32_t uploadSlot = textureFrame_[0] == nextFrame_ ? 1u : 0u;
-        uploadFrameToTexture(cmd, uploadSlot, currentFrame_);
-        currentTextureSlot_ = uploadSlot;
-    }
-
-    nextTextureSlot_ = findTextureSlot(nextFrame_);
-    if (nextTextureSlot_ == UINT32_MAX) {
-        const uint32_t uploadSlot = currentTextureSlot_ == 0 ? 1u : 0u;
-        uploadFrameToTexture(cmd, uploadSlot, nextFrame_);
-        nextTextureSlot_ = uploadSlot;
-    }
+    (void)cmd;
 }
 
 void VolumeFireEffect::render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const NewCamera& camera)
 {
-    if (!ready_ || !pipeline_ || instanceBuf_.liveCount() == 0 || !frameTextures_[0] || !frameTextures_[1] || !sampler_)
+    if (!ready_ || !flipbookPipeline_ || flipbookPreviews_.empty() || !sampler_)
         return;
 
-    ParticleUniforms pu{};
-    pu.view = camera.getViewMatrix();
-    pu.proj = camera.getProjectionMatrix();
-    pu.camPos = camera.getEye();
-    pu.camRight = camera.getRight();
-    pu.camUp = camera.getUp();
-    SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+    SDL_BindGPUGraphicsPipeline(pass, flipbookPipeline_);
+    for (const FlipbookPreview& preview : flipbookPreviews_) {
+        if (!preview.texture || preview.frameCount == 0)
+            continue;
 
-    VolumeFireParams fp{};
-    fp.dimsAndBlend =
-        glm::vec4{static_cast<float>(width_), static_cast<float>(height_), static_cast<float>(depth_), frameBlend_};
-    fp.render = glm::vec4{112.0f, 1.55f, 1.75f, 0.88f};
-    SDL_PushGPUFragmentUniformData(cmd, 0, &fp, sizeof(fp));
+        const float frameFloat = std::fmod(animTime_ * preview.fps, static_cast<float>(preview.frameCount));
+        const uint32_t flipCurrent = static_cast<uint32_t>(std::floor(frameFloat)) % preview.frameCount;
+        const uint32_t flipNext = (flipCurrent + 1) % preview.frameCount;
+        const float flipBlend = frameFloat - std::floor(frameFloat);
 
-    SDL_BindGPUGraphicsPipeline(pass, pipeline_);
-    instanceBuf_.bindAsVertexStorage(pass, 0);
-    SDL_GPUTextureSamplerBinding samplers[2] = {
-        SDL_GPUTextureSamplerBinding{frameTextures_[currentTextureSlot_], sampler_},
-        SDL_GPUTextureSamplerBinding{frameTextures_[nextTextureSlot_], sampler_},
-    };
-    SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
-    SDL_DrawGPUPrimitives(pass, 36, instanceBuf_.liveCount(), 0, 0);
+        FlipbookVertexUniforms vu{};
+        vu.view = camera.getViewMatrix();
+        vu.proj = camera.getProjectionMatrix();
+        vu.camRight = camera.getRight();
+        vu.halfWidth = preview.halfWidth;
+        vu.camUp = camera.getUp();
+        vu.halfHeight = preview.halfHeight;
+        vu.center = preview.bottomCenter + glm::vec3{0.0f, preview.halfHeight, 0.0f};
+        vu.opacity = preview.opacity;
+        SDL_PushGPUVertexUniformData(cmd, 0, &vu, sizeof(vu));
+
+        FlipbookFragmentUniforms fu{};
+        fu.atlas = glm::vec4{static_cast<float>(preview.columns),
+                             static_cast<float>(preview.rows),
+                             static_cast<float>(flipCurrent),
+                             static_cast<float>(flipNext)};
+        fu.anim = glm::vec4{flipBlend, 0.0f, 0.0f, 0.0f};
+        SDL_PushGPUFragmentUniformData(cmd, 0, &fu, sizeof(fu));
+
+        SDL_GPUTextureSamplerBinding flipSampler{preview.texture, sampler_};
+        SDL_BindGPUFragmentSamplers(pass, 0, &flipSampler, 1);
+        SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
+    }
 }

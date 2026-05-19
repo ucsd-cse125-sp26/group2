@@ -1,5 +1,5 @@
 /// @file VolumeFireEffect.hpp
-/// @brief Runtime playback and raymarched rendering for generated animated fire volumes.
+/// @brief Runtime playback for generated fire/explosion flipbook previews.
 
 #pragma once
 
@@ -24,7 +24,7 @@ public:
     void uploadToGpu(SDL_GPUCommandBuffer* cmd);
     void render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const NewCamera& camera);
 
-    [[nodiscard]] uint32_t instanceCount() const { return static_cast<uint32_t>(instances_.size()); }
+    [[nodiscard]] uint32_t instanceCount() const { return static_cast<uint32_t>(flipbookPreviews_.size()); }
     [[nodiscard]] uint32_t currentFrame() const { return currentFrame_; }
     [[nodiscard]] bool ready() const { return ready_; }
 
@@ -38,16 +38,45 @@ private:
     };
     static_assert(sizeof(VolumeFireInstanceGPU) == 32);
 
+    struct FlipbookPreview
+    {
+        SDL_GPUTexture* texture = nullptr;
+        uint32_t tileWidth = 0;
+        uint32_t tileHeight = 0;
+        uint32_t atlasWidth = 0;
+        uint32_t atlasHeight = 0;
+        uint32_t columns = 0;
+        uint32_t rows = 0;
+        uint32_t frameCount = 0;
+        float fps = 24.0f;
+        float halfWidth = 0.0f;
+        float halfHeight = 0.0f;
+        float opacity = 1.0f;
+        glm::vec3 bottomCenter{0.0f};
+        std::string name;
+    };
+
     bool loadCache(const std::string& path);
+    bool loadFlipbook(const std::string& path);
+    bool loadFlipbookPreview(const std::string& path,
+                             const glm::vec3& bottomCenter,
+                             float worldScale,
+                             float opacity,
+                             const std::string& name);
+    bool createSampler();
     bool createGpuResources();
     bool buildPipeline(SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt);
+    bool buildFlipbookPipeline(SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt);
+    bool createFlipbookTexture();
     void uploadFrameToTexture(SDL_GPUCommandBuffer* cmd, uint32_t slot, uint32_t frameIndex);
     uint32_t findTextureSlot(uint32_t frameIndex) const;
 
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUShaderFormat shaderFmt_ = SDL_GPU_SHADERFORMAT_INVALID;
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* flipbookPipeline_ = nullptr;
     SDL_GPUTexture* frameTextures_[2]{};
+    SDL_GPUTexture* flipbookTexture_ = nullptr;
     SDL_GPUSampler* sampler_ = nullptr;
     SDL_GPUTransferBuffer* frameTransfer_ = nullptr;
     GpuParticleBuffer instanceBuf_;
@@ -63,9 +92,18 @@ private:
     float frameBlend_ = 0.0f;
     uint64_t frameBytes_ = 0;
     uint32_t textureFrame_[2] = {UINT32_MAX, UINT32_MAX};
-    uint32_t currentTextureSlot_ = 0;
-    uint32_t nextTextureSlot_ = 1;
+    uint32_t flipbookTileWidth_ = 0;
+    uint32_t flipbookTileHeight_ = 0;
+    uint32_t flipbookAtlasWidth_ = 0;
+    uint32_t flipbookAtlasHeight_ = 0;
+    uint32_t flipbookColumns_ = 0;
+    uint32_t flipbookRows_ = 0;
+    uint32_t flipbookFrameCount_ = 0;
+    uint64_t flipbookPayloadBytes_ = 0;
     std::vector<uint16_t> frames_;
+    std::vector<uint16_t> flipbookPixels_;
     std::vector<VolumeFireInstanceGPU> instances_;
+    std::vector<FlipbookPreview> flipbookPreviews_;
     bool ready_ = false;
+    bool flipbookReady_ = false;
 };

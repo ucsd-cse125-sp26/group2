@@ -44,6 +44,13 @@ vec3 fireColor(float t)
     return c;
 }
 
+float hash12(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
 void main()
 {
     vec3 dir = normalize(vWorldPos - vCamPos);
@@ -57,21 +64,22 @@ void main()
     float rayLen = tFar - tNear;
     float dt = rayLen / float(steps);
     vec4 accum = vec4(0.0);
+    float jitter = hash12(gl_FragCoord.xy + vec2(vf.dimsAndBlend.w * 97.13, vf.dimsAndBlend.w * 31.71));
 
     for (int i = 0; i < 192; ++i) {
         if (i >= steps || accum.a > 0.985)
             break;
 
-        float t = tNear + (float(i) + 0.5) * dt;
+        float t = tNear + (float(i) + jitter) * dt;
         vec3 world = vCamPos + dir * t;
         vec3 local = clamp((world - vBoxMin) / (vBoxMax - vBoxMin), vec3(0.0), vec3(1.0));
         vec3 uvw = vec3(local.x, local.z, local.y);
         float flame0 = texture(fireFrame0, uvw).r;
         float flame1 = texture(fireFrame1, uvw).r;
         float flame = mix(flame0, flame1, vf.dimsAndBlend.w);
-        flame = pow(smoothstep(0.012, 0.86, flame), 1.35);
+        flame = pow(smoothstep(0.009, 0.78, flame), 1.18);
 
-        float alpha = clamp(pow(flame, 1.72) * vf.render.y * 0.022, 0.0, 0.10);
+        float alpha = clamp(pow(flame, 1.55) * vf.render.y * 0.026, 0.0, 0.13);
         vec3 color = fireColor(flame) * vf.render.z;
         accum.rgb += (1.0 - accum.a) * color * alpha;
         accum.a += (1.0 - accum.a) * alpha;
