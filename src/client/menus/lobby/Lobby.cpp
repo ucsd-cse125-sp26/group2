@@ -12,13 +12,11 @@
 #include <glm/vec3.hpp>
 #include <imgui.h>
 
-bool Lobby::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+bool Lobby::init(AppContext& ctx)
 {
-    renderer = rendererPtr;
-    window = windowPtr;
-    client = clientPtr;
-    if (!renderer || !window)
-        return false;
+    renderer = &ctx.renderer;
+    window = &ctx.window;
+    client = &ctx.client;
 
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
         players = snapshot;

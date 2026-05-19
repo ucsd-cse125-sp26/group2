@@ -2,8 +2,10 @@
 /// @brief Top-level application object owning the window, renderer, and network client.
 
 #pragma once
+#include "AppContext.hpp"
 #include "DeveloperConfig.hpp"
 #include "IScreen.hpp"
+#include "config/UserSettings.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
@@ -11,6 +13,7 @@
 #include <SDL3/SDL.h>
 
 #include <memory>
+#include <string>
 
 /// @brief Root application class; owns shared resources and manages screen transitions.
 ///
@@ -51,6 +54,8 @@ private:
     NewRenderer renderer;             ///< SDL_GPU PBR renderer, shared across screens.
     NetworkConfig networkConfig;      ///< Host/port/transport loaded from config.toml.
     DeveloperConfig developerConfig;  ///< Developer toggles loaded from config.toml.
+    UserSettings userSettings;        ///< User-specific input and gameplay settings.
+    std::string userSettingsPath;     ///< Path used to load and save user settings.
     Client client;                    ///< Network client connected to the authoritative server.
 
     Screen current = Screen::Home;    ///< Which screen is currently active.
@@ -59,4 +64,7 @@ private:
 
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();
+
+    /// @brief Build a borrowed context for screen initialisation.
+    AppContext screenContext();
 };

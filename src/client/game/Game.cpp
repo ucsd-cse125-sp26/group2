@@ -243,13 +243,9 @@ std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
 }
 } // namespace
 
-bool Game::initDebugUI(SDL_Window* windowPtr)
+bool Game::initDebugUI(const AppContext& ctx)
 {
-    window = windowPtr;
-    if (!window) {
-        SDL_Log("Game DebugUI init failed: missing window");
-        return false;
-    }
+    window = &ctx.window;
 
     if (!debugUI.init(window)) {
         SDL_Log("DebugUI init failed");
@@ -302,15 +298,13 @@ bool Game::applyIncomingSnapshot(
     return true;
 }
 
-bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+bool Game::init(AppContext& ctx)
 {
-    renderer = rendererPtr;
-    window = windowPtr;
-    client = clientPtr;
-    if (!renderer || !window || !client) {
-        SDL_Log("Game init failed: missing App-owned dependency");
-        return false;
-    }
+    renderer = &ctx.renderer;
+    window = &ctx.window;
+    client = &ctx.client;
+    userSettings = &ctx.userSettings;
+    mouseSensitivity = userSettings->mouseSensitivity;
 
     if (const auto latestMatchState = client->getLatestMatchState()) {
         currentMatchPhase = latestMatchState->phase;
@@ -1489,8 +1483,8 @@ SDL_AppResult Game::iterate()
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
-            systems::runMovementKeys(registry, localGravFlipped);
-        systems::runWeaponKeys(registry, frameTime);
+            systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
+        systems::runWeaponKeys(registry, userSettings->inputBindings, frameTime);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
         // a player can use kbm and pad simultaneously without either source
@@ -1549,7 +1543,7 @@ SDL_AppResult Game::iterate()
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_) {
-            systems::runMovementKeys(registry, localGravFlipped);
+            systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
             systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
@@ -3884,6 +3878,9 @@ bool Game::shouldReturnToLobby() const
 
 void Game::quit()
 {
+    if (userSettings) {
+        userSettings->mouseSensitivity = mouseSensitivity;
+    }
     closeChat();
     if (recorder.isRecording())
         recorder.stopRecording();

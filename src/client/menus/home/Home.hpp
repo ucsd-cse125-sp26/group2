@@ -1,7 +1,10 @@
 /// @file Home.hpp
 /// @brief Main menu screen with server join form.
 
+#pragma once
+
 #include "IScreen.hpp"
+#include "app/AppContext.hpp"
 #include "menus/home/ui/HomeUI.hpp"
 #include "network/DiscoveryClient.hpp"
 #include "network/NetworkConfig.hpp"
@@ -30,7 +33,7 @@ class Home : public IScreen
 public:
     /// @brief Bind renderer and window; must be called before iterate().
     /// @return False if either pointer is null.
-    bool init(NewRenderer* rendererPtr, SDL_Window* windowPtr, const GlobalDiscoveryConfig& discoveryCfg = {});
+    bool init(AppContext& ctx);
 
     SDL_AppResult event(SDL_Event* event) override;
     SDL_AppResult iterate() override;

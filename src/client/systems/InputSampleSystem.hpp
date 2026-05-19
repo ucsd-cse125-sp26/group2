@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "config/InputBindings.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -129,30 +130,38 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
 /// Can also be called every iterate() when the sync toggle is off.
 ///
 /// @param registry        The ECS registry.
+/// @param bindings        Keyboard/mouse bindings to sample.
 /// @param gravityFlipped  When true, A/D are swapped so strafing feels
 ///                        correct while the camera is rolled 180°.
-inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
+inline void runMovementKeys(Registry& registry, const InputBindings& bindings, bool gravityFlipped = false)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+    const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
 
     // Edge-detect K key: only fire killSelf on the rising edge (key-down),
     // not while held.  Prevents respawn → immediate re-death loop.
-    const bool killKeyNow = kKeys[SDL_SCANCODE_K];
+    const bool killKeyNow = bindings.pressed(Action::KillSelf, kKeys, mouse);
     const bool killEdge = killKeyNow && !prevKillSelfKey;
     prevKillSelfKey = killKeyNow;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.forward = kKeys[SDL_SCANCODE_W];
-        snap.back = kKeys[SDL_SCANCODE_S];
+        // Movement keys
+        const bool forward = bindings.pressed(Action::Forward, kKeys, mouse);
+        const bool back = bindings.pressed(Action::Back, kKeys, mouse);
+        const bool left = bindings.pressed(Action::Left, kKeys, mouse);
+        const bool right = bindings.pressed(Action::Right, kKeys, mouse);
+
+        snap.forward = forward;
+        snap.back = back;
         // When gravity is flipped the camera is rolled 180°, which negates
         // the screen-space right vector.  Swapping A/D compensates so
         // pressing A still moves the player screen-left.
-        snap.left = gravityFlipped ? kKeys[SDL_SCANCODE_D] : kKeys[SDL_SCANCODE_A];
-        snap.right = gravityFlipped ? kKeys[SDL_SCANCODE_A] : kKeys[SDL_SCANCODE_D];
-        snap.jump = kKeys[SDL_SCANCODE_SPACE];
-        snap.crouch = kKeys[SDL_SCANCODE_LCTRL];
-        snap.ability1 = kKeys[SDL_SCANCODE_LSHIFT];
-        snap.ability2 = kKeys[SDL_SCANCODE_E];
+        snap.left = gravityFlipped ? right : left;
+        snap.right = gravityFlipped ? left : right;
+        snap.jump = bindings.pressed(Action::Jump, kKeys, mouse);
+        snap.crouch = bindings.pressed(Action::Crouch, kKeys, mouse);
+        snap.ability1 = bindings.pressed(Action::Ability1, kKeys, mouse);
+        snap.ability2 = bindings.pressed(Action::Ability2, kKeys, mouse);
         snap.killSelf = killEdge;
         snap.skipRespawn = false; // Clear stale flag from previous death.
     });
@@ -179,13 +188,17 @@ inline void runDeadInput(Registry& registry)
 /// Can also be called every iterate() when the sync toggle is off.
 ///
 /// @param registry  The ECS registry.
-inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
+/// @param bindings  The input bindings.
+inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, float dt = 0.0f)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
+    // TODO: ALT currently hardcoded bc InputBindings doesn't support chords of keys (e.g. Alt+LMB for ability select) —
+    // would be cleaner to have the chord logic in InputBindings so the system doesn't need to know about Alt at all.
     const bool altHeld = kKeys[SDL_SCANCODE_LALT] || kKeys[SDL_SCANCODE_RALT];
     const bool leftDown = (mouse & SDL_BUTTON_LMASK) != 0;
     const bool rightDown = (mouse & SDL_BUTTON_RMASK) != 0;
+    const bool shootDown = bindings.pressed(Action::Shoot, kKeys, mouse);
     const bool selectLeftNow = altHeld && leftDown;
     const bool selectRightNow = altHeld && rightDown;
     const bool selectLeftEdge = selectLeftNow && !prevAbilitySelectLeft;
@@ -193,7 +206,7 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
     prevAbilitySelectLeft = selectLeftNow;
     prevAbilitySelectRight = selectRightNow;
 
-    const bool grenadeKeyNow = kKeys[SDL_SCANCODE_G];
+    const bool grenadeKeyNow = bindings.pressed(Action::CycleGrenade, kKeys, mouse);
     if (grenadeKeyNow) {
         if (!prevGrenadeKey) {
             grenadeHeldSeconds = 0.0f;
@@ -218,14 +231,14 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
         grenadeRadialActive ? grenadeRadialIndexFromAim() : kInvalidGrenadeSelectIndex;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.shooting = leftDown && !altHeld;
-        snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
-        snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
+        snap.shooting = shootDown && !altHeld;
+        snap.switchToPrimary = bindings.pressed(Action::SwitchToPrimary, kKeys, mouse);
+        snap.switchToSecondary = bindings.pressed(Action::SwitchToSecondary, kKeys, mouse);
         snap.throwGrenade = false;
         snap.grenadeMenuHeld = grenadeRadialActive;
         snap.grenadeSelectIndex = grenadeSelectIndex;
-        snap.reload = kKeys[SDL_SCANCODE_R];
-        snap.pickup = kKeys[SDL_SCANCODE_F];
+        snap.reload = bindings.pressed(Action::Reload, kKeys, mouse);
+        snap.pickup = bindings.pressed(Action::Pickup, kKeys, mouse);
         snap.abilitySelectHeld = altHeld;
         snap.abilitySelectLeft = selectLeftEdge;
         snap.abilitySelectRight = selectRightEdge;
@@ -235,11 +248,11 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
 /// @brief Legacy combined sampler — calls both runMouseLook and runMovementKeys.
 /// @param registry          The ECS registry.
 /// @param mouseSensitivity  Radians per pixel (default 0.001).
-inline void runInputSample(Registry& registry, float mouseSensitivity = 0.001f)
+inline void runInputSample(Registry& registry, const InputBindings& bindings, float mouseSensitivity = 0.001f)
 {
     runMouseLook(registry, mouseSensitivity);
-    runMovementKeys(registry);
-    runWeaponKeys(registry);
+    runMovementKeys(registry, bindings);
+    runWeaponKeys(registry, bindings);
 }
 
 // ─── Gamepad samplers ────────────────────────────────────────────────────────

@@ -977,6 +977,7 @@ add_executable(group2
         src/ecs/abilities/GravityAbility.hpp
         src/ecs/abilities/RecallAbility.cpp
         src/ecs/abilities/RecallAbility.hpp
+        src/client/app/AppContext.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
         src/client/menus/lobby/Lobby.hpp
@@ -994,6 +995,10 @@ add_executable(group2
         src/ecs/systems/PowerupSpawnerSystem.hpp
         src/ecs/systems/PowerupSystem.cpp
         src/ecs/systems/PowerupSystem.hpp
+        src/client/config/InputBindings.cpp
+        src/client/config/InputBindings.hpp
+        src/client/config/UserSettings.cpp
+        src/client/config/UserSettings.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

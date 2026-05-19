@@ -8,6 +8,7 @@
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
 #include "animation/SkinningBackend.hpp"
+#include "app/AppContext.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/AssetRegistry.hpp"
@@ -50,11 +51,11 @@ class Game : public IScreen
 {
 public:
     /// @brief Create the Game-owned ImGui context before App initialises the renderer backend.
-    bool initDebugUI(SDL_Window* windowPtr);
+    bool initDebugUI(const AppContext& ctx);
 
     /// @brief Initialise all subsystems and spawn the local player entity.
     /// @return False on any fatal initialisation error.
-    bool init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
+    bool init(AppContext& ctx);
 
     /// @brief Forward an SDL event to ImGui and handle application-level keys.
     /// @param event  The SDL event to process.
@@ -150,6 +151,7 @@ private:
     NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
     Registry registry;                                             ///< The shared ECS registry.
     Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    UserSettings* userSettings = nullptr;                          ///< Borrowed user settings owned by App.
     std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
     std::optional<entt::entity>
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.

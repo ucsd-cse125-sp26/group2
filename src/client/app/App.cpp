@@ -100,6 +100,10 @@ bool App::init()
         developerConfig = loadDeveloperConfig(cfgPath.c_str());
     }
 
+    // Pull user-specific settings once; App owns the live copy while screens borrow it.
+    userSettingsPath = user_settings::getPath();
+    userSettings = user_settings::load(userSettingsPath);
+
     // ImGui context must exist before Renderer::init, which sets up the
     // SDL_GPU ImGui backend.  App owns the context lifetime so it survives
     // screen transitions (Lobby has no ImGui, Game uses it for DebugUI).
@@ -132,8 +136,9 @@ bool App::init()
             cleanup();
             return false;
         }
+        AppContext ctx = screenContext();
         auto game = std::make_unique<Game>();
-        if (!game->initDebugUI(window) || !game->init(&renderer, window, &client)) {
+        if (!game->initDebugUI(ctx) || !game->init(ctx)) {
             game->quit();
             cleanup();
             return false;
@@ -141,8 +146,9 @@ bool App::init()
         screen_ = std::move(game);
         current = Screen::InGame;
     } else {
+        AppContext ctx = screenContext();
         auto homeScreen = std::make_unique<Home>();
-        if (!homeScreen->init(&renderer, window, networkConfig.discovery)) {
+        if (!homeScreen->init(ctx)) {
             homeScreen->quit();
             cleanup();
             return false;
@@ -270,10 +276,11 @@ void App::transitionTo(Screen next)
         screen_.reset();
     }
 
+    AppContext ctx = screenContext();
     switch (next) {
     case Screen::InGame: {
         auto game = std::make_unique<Game>();
-        if (game->initDebugUI(window) && game->init(&renderer, window, &client)) {
+        if (game->initDebugUI(ctx) && game->init(ctx)) {
             screen_ = std::move(game);
             current = next;
         } else {
@@ -283,7 +290,7 @@ void App::transitionTo(Screen next)
     }
     case Screen::Lobby: {
         auto lobby = std::make_unique<Lobby>();
-        if (lobby->init(&renderer, window, &client)) {
+        if (lobby->init(ctx)) {
             screen_ = std::move(lobby);
             current = next;
         } else {
@@ -293,7 +300,7 @@ void App::transitionTo(Screen next)
     }
     case Screen::Home: {
         auto homeScreen = std::make_unique<Home>();
-        if (homeScreen->init(&renderer, window, networkConfig.discovery)) {
+        if (homeScreen->init(ctx)) {
             screen_ = std::move(homeScreen);
             current = next;
         } else {
@@ -310,6 +317,9 @@ void App::cleanup()
 {
     if (screen_) {
         screen_->quit();
+    }
+    if (!userSettingsPath.empty()) {
+        user_settings::save(userSettingsPath, userSettings);
     }
     client.shutdown();
     renderer.quit();
@@ -329,4 +339,16 @@ void App::cleanup()
 
     NET_Quit();
     SDL_Quit();
+}
+
+AppContext App::screenContext()
+{
+    return AppContext{
+        .window = *window,
+        .renderer = renderer,
+        .client = client,
+        .networkConfig = networkConfig,
+        .developerConfig = developerConfig,
+        .userSettings = userSettings,
+    };
 }
