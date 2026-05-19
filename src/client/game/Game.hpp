@@ -8,6 +8,7 @@
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
 #include "animation/SkinningBackend.hpp"
+#include "app/AppContext.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/AssetRegistry.hpp"
@@ -16,6 +17,7 @@
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "hud/Hud.hpp"
+#include "menus/pause/PauseMenu.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/RegistrySerialization.hpp"
@@ -50,11 +52,11 @@ class Game : public IScreen
 {
 public:
     /// @brief Create the Game-owned ImGui context before App initialises the renderer backend.
-    bool initDebugUI(SDL_Window* windowPtr);
+    bool initDebugUI(const AppContext& ctx);
 
     /// @brief Initialise all subsystems and spawn the local player entity.
     /// @return False on any fatal initialisation error.
-    bool init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
+    bool init(AppContext& ctx);
 
     /// @brief Forward an SDL event to ImGui and handle application-level keys.
     /// @param event  The SDL event to process.
@@ -98,6 +100,9 @@ public:
 
     /// @brief True once the server has returned the match phase to the lobby.
     bool shouldReturnToLobby() const;
+
+    /// @brief True if the user requested leaving the match for the main menu, then clear that request.
+    bool consumeReturnToMainMenu();
 
     /// @brief Shut down all subsystems in reverse-init order.
     void quit() override;
@@ -150,6 +155,8 @@ private:
     NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
     Registry registry;                                             ///< The shared ECS registry.
     Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    UserSettings* userSettings = nullptr;                          ///< Borrowed user settings owned by App.
+    std::string_view userSettingsPath_;                            ///< Borrowed save path for user settings.
     std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
     std::optional<entt::entity>
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
@@ -468,8 +475,11 @@ private:
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
-    bool returnToLobbyRequested = false; ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
+    bool returnToLobbyRequested = false;     ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
+    bool returnToMainMenuRequested_ = false; ///< Latched true when the pause menu requests leaving the match.
 
     // Kill Feed State
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
+
+    PauseMenu pauseMenu; ///< In-game pause menu (opened with ESC, blocks input to the game when active).
 };

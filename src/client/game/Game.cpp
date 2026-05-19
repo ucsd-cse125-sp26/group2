@@ -241,15 +241,19 @@ std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
 
     return sources;
 }
+
+void centerMouseInWindow(SDL_Window* window)
+{
+    int winW = 0;
+    int winH = 0;
+    SDL_GetWindowSize(window, &winW, &winH);
+    SDL_WarpMouseInWindow(window, static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f);
+}
 } // namespace
 
-bool Game::initDebugUI(SDL_Window* windowPtr)
+bool Game::initDebugUI(const AppContext& ctx)
 {
-    window = windowPtr;
-    if (!window) {
-        SDL_Log("Game DebugUI init failed: missing window");
-        return false;
-    }
+    window = &ctx.window;
 
     if (!debugUI.init(window)) {
         SDL_Log("DebugUI init failed");
@@ -302,15 +306,14 @@ bool Game::applyIncomingSnapshot(
     return true;
 }
 
-bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+bool Game::init(AppContext& ctx)
 {
-    renderer = rendererPtr;
-    window = windowPtr;
-    client = clientPtr;
-    if (!renderer || !window || !client) {
-        SDL_Log("Game init failed: missing App-owned dependency");
-        return false;
-    }
+    renderer = &ctx.renderer;
+    window = &ctx.window;
+    client = &ctx.client;
+    userSettings = &ctx.userSettings;
+    userSettingsPath_ = ctx.userSettingsPath;
+    mouseSensitivity = userSettings->mouseSensitivity;
 
     if (const auto latestMatchState = client->getLatestMatchState()) {
         currentMatchPhase = latestMatchState->phase;
@@ -907,6 +910,7 @@ void Game::clearGameplayInputForChat()
 {
     systems::grenadeRadialActive = false;
     systems::pendingGrenadeThrow = false;
+    systems::prevKillSelfKey = false;
     systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
     systems::prevAbilitySelectRight = false;
@@ -987,6 +991,30 @@ SDL_AppResult Game::event(SDL_Event* event)
     }
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
+        if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
+            if (pauseMenu.isOpen()) {
+                if (pauseMenu.handleEscape()) {
+                    pauseMenu.close();
+                    mouseCaptured = true;
+                    SDL_SetWindowRelativeMouseMode(window, true);
+                    float dx = 0.0f;
+                    float dy = 0.0f;
+                    SDL_GetRelativeMouseState(&dx, &dy);
+                    clearGameplayInputForChat();
+                }
+            } else {
+                pauseMenu.open();
+                mouseCaptured = false;
+                SDL_SetWindowRelativeMouseMode(window, false);
+                centerMouseInWindow(window);
+                clearGameplayInputForChat();
+            }
+            return SDL_APP_CONTINUE;
+        }
+
+        if (pauseMenu.consumeEvent(*event))
+            return SDL_APP_CONTINUE;
+
         switch (event->key.key) {
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
@@ -996,12 +1024,6 @@ SDL_AppResult Game::event(SDL_Event* event)
 
         case SDLK_MINUS:
             return SDL_APP_SUCCESS;
-
-        // ESC — toggle mouse capture so the player can reach the ImGui windows.
-        case SDLK_ESCAPE:
-            mouseCaptured = !mouseCaptured;
-            SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
-            break;
 
             // F1 — send a test hello packet to the server.
             // case SDLK_F1: {
@@ -1128,6 +1150,9 @@ SDL_AppResult Game::event(SDL_Event* event)
             activeGamepadId_ = 0;
         }
     }
+
+    if (pauseMenu.consumeEvent(*event))
+        return SDL_APP_CONTINUE;
 
     // Scroll wheel toggles between primary and secondary weapon slots.
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
@@ -1474,10 +1499,14 @@ SDL_AppResult Game::iterate()
     // Dead input runs regardless of mouse capture — allows skip-respawn.
     // Chat owns the keyboard while open, so gameplay inputs are cleared
     // instead of sampled.
-    if (chatOpen_)
+    const bool gamePaused = pauseMenu.isOpen();
+
+    if (gamePaused) {
+        clearGameplayInputForChat();
+    } else if (chatOpen_)
         clearGameplayInputForChat();
     else
-        systems::runDeadInput(registry);
+        systems::runDeadInput(registry, userSettings->inputBindings);
 
     // Query local player's gravity flip state — used for mouse/stick
     // inversion AND for swapping A-D / left-stick left-right.
@@ -1485,12 +1514,12 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
-    if (mouseCaptured && !chatOpen_) {
+    if (mouseCaptured && !chatOpen_ && !gamePaused) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
-            systems::runMovementKeys(registry, localGravFlipped);
-        systems::runWeaponKeys(registry, frameTime);
+            systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
+        systems::runWeaponKeys(registry, userSettings->inputBindings, frameTime);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
         // a player can use kbm and pad simultaneously without either source
@@ -1548,8 +1577,8 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_) {
-            systems::runMovementKeys(registry, localGravFlipped);
+        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused) {
+            systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
             systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
@@ -3825,6 +3854,26 @@ SDL_AppResult Game::iterate()
         pendingPickupNotifications_.clear();
     }
 
+    const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
+    if (pauseResult.settingsApplied) {
+        mouseSensitivity = userSettings->mouseSensitivity;
+        clearGameplayInputForChat();
+    }
+    if (pauseResult.resumeGame) {
+        pauseMenu.close();
+        mouseCaptured = true;
+        SDL_SetWindowRelativeMouseMode(window, true);
+        float dx = 0.0f;
+        float dy = 0.0f;
+        SDL_GetRelativeMouseState(&dx, &dy);
+        clearGameplayInputForChat();
+    }
+    if (pauseResult.exitToDesktop)
+        return SDL_APP_SUCCESS;
+    if (pauseResult.returnToMainMenu) {
+        returnToMainMenuRequested_ = true;
+    }
+
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
@@ -3882,8 +3931,20 @@ bool Game::shouldReturnToLobby() const
     return returnToLobbyRequested;
 }
 
+bool Game::consumeReturnToMainMenu()
+{
+    if (!returnToMainMenuRequested_)
+        return false;
+
+    returnToMainMenuRequested_ = false;
+    return true;
+}
+
 void Game::quit()
 {
+    if (userSettings) {
+        userSettings->mouseSensitivity = mouseSensitivity;
+    }
     closeChat();
     if (recorder.isRecording())
         recorder.stopRecording();

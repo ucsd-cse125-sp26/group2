@@ -3,6 +3,7 @@
 
 #pragma once
 #include "IScreen.hpp"
+#include "app/AppContext.hpp"
 #include "network/Client.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "renderer-new/NewRenderer.hpp"
@@ -19,7 +20,7 @@ class Lobby : public IScreen
 public:
     /// @brief Bind renderer, window, and network client; register lobby callbacks.
     /// @return False if renderer or window are null.
-    bool init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
+    bool init(AppContext& ctx);
 
     SDL_AppResult event(SDL_Event* event) override;
     SDL_AppResult iterate() override;
