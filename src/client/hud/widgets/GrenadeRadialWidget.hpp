@@ -5,6 +5,8 @@
 
 #include "hud/HudWidget.hpp"
 
+#include <string>
+
 struct GrenadeRadialWidget : HudWidget
 {
     float radius = 126.0f;
@@ -20,4 +22,5 @@ struct GrenadeRadialWidget : HudWidget
 
 private:
     HudGrenadeRadialState state_;
+    std::string keyLabel_ = "G";
 };

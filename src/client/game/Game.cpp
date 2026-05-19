@@ -3366,6 +3366,7 @@ SDL_AppResult Game::iterate()
     // Update and render HUD.
     if (hud_.getOutputTexture()) {
         HudGameState hudState{};
+        hudState.bindings = &userSettings->inputBindings;
 
         // ── Local player health, armor, alive ──
         registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
@@ -3583,9 +3584,9 @@ SDL_AppResult Game::iterate()
 
         // ── Weapon pickup prompt ──
         // Mirror the server pickup-detection rule (range + look cone via
-        // PickupGeometry) so the "Press F to pick up <Weapon>" hint appears
-        // exactly when pressing F would actually grant the weapon. Cheap
-        // O(N) sweep across world weapon spawners and dropped weapons.
+        // PickupGeometry) so the pickup hint appears exactly when pressing
+        // the configured binding would actually grant the weapon. Cheap O(N)
+        // sweep across world weapon spawners and dropped weapons.
         {
             glm::vec3 eye{0.f};
             glm::vec3 viewFwd{0.f, 0.f, 1.f};

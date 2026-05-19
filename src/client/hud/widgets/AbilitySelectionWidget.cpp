@@ -3,6 +3,7 @@
 
 #include "AbilitySelectionWidget.hpp"
 
+#include "config/InputBindings.hpp"
 #include "hud/HudContext.hpp"
 #include "hud/VoidfallStyle.hpp"
 
@@ -20,6 +21,9 @@ AbilitySelectionWidget::AbilitySelectionWidget()
 void AbilitySelectionWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     state_ = state.abilitySelection;
+    if (state.bindings) {
+        abilityMenuLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::AbilityMenu));
+    }
     visible = state.isAlive && state_.available;
 }
 
@@ -66,7 +70,9 @@ void AbilitySelectionWidget::draw(HudContext& ctx, float anchorX, float anchorY)
         drawPanel(ctx, x, y, panelW, panelH, HudColor{0.06f, 0.07f, 0.08f, 0.78f}, k_lineBright, 1.0f);
         drawCornerBrackets(ctx, x, y, panelW, panelH, 8.0f * s, 1.0f, 2.0f * s, k_lineBright);
         ctx.text(header, anchorX, y + 10.0f * s, headerFs, k_amber, HudAlign::Center, true);
-        ctx.text("HOLD ALT TO CHOOSE", anchorX, y + 34.0f * s, keyFs, k_textDim, HudAlign::Center, true);
+        char prompt[128];
+        std::snprintf(prompt, sizeof(prompt), "HOLD %s TO CHOOSE", abilityMenuLabel_.c_str());
+        ctx.text(prompt, anchorX, y + 34.0f * s, keyFs, k_textDim, HudAlign::Center, true);
         return;
     }
 
@@ -80,7 +86,9 @@ void AbilitySelectionWidget::draw(HudContext& ctx, float anchorX, float anchorY)
     const float bodyFs = bodyFontSize * s;
 
     ctx.text(header, anchorX, y0 - 42.0f * s, headerFs, k_amber, HudAlign::Center, true);
-    ctx.text("HOLD ALT", anchorX, y0 - 24.0f * s, keyFs, k_amber, HudAlign::Center, true);
+    char holdPrompt[96];
+    std::snprintf(holdPrompt, sizeof(holdPrompt), "HOLD %s", abilityMenuLabel_.c_str());
+    ctx.text(holdPrompt, anchorX, y0 - 24.0f * s, keyFs, k_amber, HudAlign::Center, true);
 
     for (int i = 0; i < 2; ++i) {
         const auto& choice = state_.choices[static_cast<std::size_t>(i)];

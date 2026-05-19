@@ -1,6 +1,7 @@
 /// @file PickupPrompt.cpp
 #include "PickupPrompt.hpp"
 
+#include "config/InputBindings.hpp"
 #include "hud/HudContext.hpp"
 #include "hud/VoidfallStyle.hpp"
 
@@ -43,6 +44,9 @@ void PickupPrompt::update(float /*dt*/, const HudGameState& state, HudTweenPool&
 {
     visible = state.isAlive && state.pickupAvailable;
     weaponId_ = state.pickupWeaponId;
+    if (state.bindings) {
+        keyLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Pickup));
+    }
 }
 
 void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
@@ -55,7 +59,7 @@ void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
     const float pad = keyBoxPadding * s;
     const float gap = spacing * s;
 
-    const char* keyStr = "F";
+    const char* keyStr = keyLabel_.c_str();
     char prompt[64];
     SDL_snprintf(prompt, sizeof(prompt), "to pick up %s", weaponDisplayName(weaponId_));
 
@@ -68,7 +72,7 @@ void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
     //
     // SDF font glyphs only fill ~72% of the EM size vertically (cap-height),
     // so basing the box on the font size yields a box ~2× too tall for the
-    // visible "F". Hug the cap-height instead.
+    // visible key glyph. Hug the cap-height instead.
     const float capHeight = kfs * 0.72f;
     const float keyTextW = ctx.measureText(keyStr, kfs);
     const float boxW = keyTextW + pad * 2.f;

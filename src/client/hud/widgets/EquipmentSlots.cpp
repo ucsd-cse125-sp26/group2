@@ -3,6 +3,7 @@
 
 #include "EquipmentSlots.hpp"
 
+#include "config/InputBindings.hpp"
 #include "hud/HudContext.hpp"
 #include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
@@ -23,6 +24,11 @@ EquipmentSlots::EquipmentSlots()
 void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     state_ = state.equipment;
+    if (state.bindings) {
+        primaryAbilityLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Ability1));
+        secondaryAbilityLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Ability2));
+        grenadeLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::CycleGrenade));
+    }
     visible = state.isAlive;
 }
 
@@ -46,7 +52,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
 
     struct SlotConfig
     {
-        const char* keyLabel;
+        const std::string* keyLabel;
         float charge;
         int count; // -1 = no count (show RDY/secs)
         std::string name;
@@ -58,7 +64,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
     };
 
     const SlotConfig slots[3] = {
-        {"SHIFT",
+        {&primaryAbilityLabel_,
          state_.primaryAbilityCharge,
          -1,
          state_.primaryAbilityAvailable ? state_.primaryAbilityName : "LOCKED",
@@ -67,7 +73,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
          state_.primaryAbilityName != "GRAPPLE",
          state_.primaryAbilityAvailable,
          false},
-        {"E",
+        {&secondaryAbilityLabel_,
          state_.secondaryAbilityCharge,
          -1,
          state_.secondaryAbilityAvailable ? state_.secondaryAbilityName : "LOCKED",
@@ -76,7 +82,15 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
          true,
          state_.secondaryAbilityAvailable,
          state_.secondaryAbilityMarked},
-        {"G", state_.grenadeCharge, state_.grenadeCount, state_.grenadeName, false, true, false, true, false},
+        {&grenadeLabel_,
+         state_.grenadeCharge,
+         state_.grenadeCount,
+         state_.grenadeName,
+         false,
+         true,
+         false,
+         true,
+         false},
     };
 
     for (int i = 0; i < slotCount; ++i) {
@@ -100,14 +114,19 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
             icons::tactical(ctx, ix, iy, iconSize, iconC);
 
         // Key tab (top-right).
-        const float keyFs = keyFontSize * s;
-        const float keyW = std::min(ss - pad * 2.f, ctx.measureText(sl.keyLabel, keyFs) + 6.f * s);
+        const char* keyLabel = sl.keyLabel->c_str();
+        const float maxKeyW = ss - pad * 2.f;
+        float keyFs = keyFontSize * s;
+        while (keyFs > 5.0f * s && ctx.measureText(keyLabel, keyFs) + 6.f * s > maxKeyW) {
+            keyFs -= 0.5f * s;
+        }
+        const float keyW = std::min(maxKeyW, ctx.measureText(keyLabel, keyFs) + 6.f * s);
         const float keyH = keyFs + 4.f * s;
         const float keyX = x + ss - pad - keyW;
         const float keyY = y + pad - 1.f * s;
         ctx.rect(keyX, keyY, keyW, keyH, HudColor{0.f, 0.f, 0.f, 0.45f});
         ctx.rectOutline(keyX, keyY, keyW, keyH, 1.f, k_lineBright);
-        ctx.text(sl.keyLabel, keyX + keyW * 0.5f, keyY + 1.f * s - keyFs * 0.18f, keyFs, k_textDim, HudAlign::Center);
+        ctx.text(keyLabel, keyX + keyW * 0.5f, keyY + 1.f * s - keyFs * 0.18f, keyFs, k_textDim, HudAlign::Center);
 
         // Cooldown overlay (covers (1-charge) of slot height from top).
         if (sl.available && !ready) {
