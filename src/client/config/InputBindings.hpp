@@ -18,6 +18,7 @@ enum class Action : uint8_t
     Right,             ///< Strafe right.
     Jump,              ///< Jump and skip respawn while dead.
     Crouch,            ///< Crouch.
+    AbilityMenu,       ///< Open the ability selection radial menu.
     Ability1,          ///< Activate the first ability slot.
     Ability2,          ///< Activate the second ability slot.
     Shoot,             ///< Fire the equipped weapon.
@@ -75,7 +76,6 @@ struct Binding
     };
 };
 
-// TODO: Support key chords (e.g. Alt+LMB for ability select) so the system doesn't need to know about Alt at all.
 /// @brief Stores action-to-input bindings and helper conversions for UI and persistence.
 class InputBindings
 {
@@ -101,6 +101,7 @@ public:
                 Action::Right,
                 Action::Jump,
                 Action::Crouch,
+                Action::AbilityMenu,
                 Action::Ability1,
                 Action::Ability2,
                 Action::Shoot,
