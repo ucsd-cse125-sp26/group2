@@ -669,6 +669,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/Client.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/DiscoveryClient.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/DiscoveryClient.hpp"
     # PR-11 (server-perf): client-side render-delay interpolation
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/network/EntityInterpolation.hpp"
@@ -1118,6 +1120,8 @@ add_executable(server
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/Server.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/DeveloperConfig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/DiscoveryServer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/network/DiscoveryServer.hpp"
     # PR-1 (server-perf): scoped profiler + 1 Hz aggregator.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/perf/Profiler.cpp"

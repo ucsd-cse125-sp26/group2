@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "network/DiscoveryClient.hpp"
 #include "network/discovery/GlobalDiscoveryProtocol.hpp"
 
 #include <string>
@@ -21,6 +22,7 @@ struct JoinMenuResult
 {
     bool connectClicked = false; ///< True if the user pressed "Join" this frame.
     bool refreshClicked = false; ///< True if the user requested a global browser refresh.
+    int localServerIndex = -1;   ///< Index of a discovered local server to join, or -1.
     int globalServerIndex = -1;  ///< Index of a discovered server to join, or -1.
 };
 
@@ -33,6 +35,7 @@ namespace home_ui
 /// @return Actions the caller should apply (connect request).
 JoinMenuResult buildJoinMenu(JoinMenuState& state,
                              std::string_view errorMessage,
+                             const std::vector<DiscoveryClient::DiscoveredServer>& localServers,
                              const std::vector<net::discovery::ServerInfo>& globalServers,
                              std::string_view browserError,
                              bool browserRefreshing);

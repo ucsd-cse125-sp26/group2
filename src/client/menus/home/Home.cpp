@@ -20,6 +20,9 @@ bool Home::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, const GlobalDis
     window = windowPtr;
     discoveryConfig = discoveryCfg;
     startGlobalRefresh(true);
+
+    localDiscoveryClient->start(9998);
+
     return true;
 }
 
@@ -36,6 +39,8 @@ void Home::quit()
 {
     if (browserThread.joinable())
         browserThread.join();
+
+    localDiscoveryClient->stop();
 }
 
 SDL_AppResult Home::iterate()
@@ -47,6 +52,9 @@ SDL_AppResult Home::iterate()
         startGlobalRefresh();
     }
 
+    localDiscoveryClient->poll();
+    localServers = localDiscoveryClient->getServers();
+
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -57,8 +65,12 @@ SDL_AppResult Home::iterate()
         servers = globalServers;
         globalError = browserError;
     }
-    JoinMenuResult result = home_ui::buildJoinMenu(
-        joinMenuState, joinError, servers, globalError, browserRefreshing.load(std::memory_order_relaxed));
+    JoinMenuResult result = home_ui::buildJoinMenu(joinMenuState,
+                                                   joinError,
+                                                   localServers,
+                                                   servers,
+                                                   globalError,
+                                                   browserRefreshing.load(std::memory_order_relaxed));
     if (result.refreshClicked) {
         startGlobalRefresh(true);
     }
@@ -79,7 +91,12 @@ SDL_AppResult Home::iterate()
         joinError.clear();
         pendingJoinRequest =
             JoinRequest{.serverIp = server.host, .serverPort = server.gamePort, .globalServerId = server.id};
+    } else if (result.localServerIndex >= 0 && result.localServerIndex < static_cast<int>(localServers.size())) {
+        const auto& server = localServers[static_cast<std::size_t>(result.localServerIndex)];
+        joinError.clear();
+        pendingJoinRequest = JoinRequest{.serverIp = server.hostIp, .serverPort = server.gamePort, .globalServerId = 0};
     }
+
     ImGui::Render();
     renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
     return SDL_APP_CONTINUE;

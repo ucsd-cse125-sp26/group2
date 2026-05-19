@@ -10,6 +10,7 @@ namespace home_ui
 {
 JoinMenuResult buildJoinMenu(JoinMenuState& state,
                              std::string_view errorMessage,
+                             const std::vector<DiscoveryClient::DiscoveredServer>& localServers,
                              const std::vector<net::discovery::ServerInfo>& globalServers,
                              std::string_view browserError,
                              bool browserRefreshing)
@@ -29,6 +30,34 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
             ImGui::Spacing();
             ImGui::TextColored(
                 ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "%.*s", static_cast<int>(errorMessage.size()), errorMessage.data());
+        }
+
+        ImGui::SeparatorText("Local Servers");
+        if (ImGui::BeginTable("LocalServerTable", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableSetupColumn("Address");
+            ImGui::TableSetupColumn("Players");
+            ImGui::TableSetupColumn("");
+            ImGui::TableHeadersRow();
+
+            for (int i = 0; i < static_cast<int>(localServers.size()); ++i) {
+                const auto& server = localServers[static_cast<std::size_t>(i)];
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(server.serverName.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%s:%u", server.hostIp.c_str(), server.gamePort);
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%u/%u", server.currentPlayers, server.maxPlayers);
+                ImGui::TableSetColumnIndex(3);
+                ImGui::PushID(i);
+                if (ImGui::SmallButton("Join")) {
+                    result.localServerIndex = i;
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::EndTable();
         }
 
         ImGui::SeparatorText("Global Servers");
