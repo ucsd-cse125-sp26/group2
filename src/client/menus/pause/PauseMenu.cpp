@@ -15,6 +15,10 @@ void PauseMenu::close()
     menuOpen = false;
     settingsOpen = false;
     listeningAction.reset();
+    dirty = false;
+    statusMessage.clear();
+    pendingConfirm_ = PendingConfirm::None;
+    confirm_.cancel();
 }
 
 bool PauseMenu::isOpen() const
@@ -29,14 +33,21 @@ bool PauseMenu::isSettingsOpen() const
 
 bool PauseMenu::handleEscape()
 {
+    if (confirm_.isOpen()) {
+        confirm_.cancel();
+        pendingConfirm_ = PendingConfirm::None;
+        return false;
+    }
     if (listeningAction) {
         listeningAction.reset();
         return false;
     }
     if (settingsOpen) {
-        settingsOpen = false;
-        statusMessage.clear();
-        dirty = false;
+        if (dirty) {
+            requestDiscardSettingsConfirm();
+        } else {
+            closeSettingsPage();
+        }
         return false;
     }
     return true;
@@ -50,6 +61,25 @@ void PauseMenu::openSettings(const UserSettings& settings)
     dirty = false;
     listeningAction.reset();
     statusMessage.clear();
+}
+
+void PauseMenu::closeSettingsPage()
+{
+    settingsOpen = false;
+    listeningAction.reset();
+    statusMessage.clear();
+    dirty = false;
+}
+
+void PauseMenu::requestDiscardSettingsConfirm()
+{
+    listeningAction.reset();
+    pendingConfirm_ = PendingConfirm::DiscardSettings;
+    confirm_.open({.title = "Discard Settings?",
+                   .message = "You have unsaved settings changes. Discard them?",
+                   .confirmText = "Discard",
+                   .cancelText = "Keep Editing",
+                   .confirmIsDanger = true});
 }
 
 bool PauseMenu::consumeEvent(const SDL_Event& event)
@@ -154,14 +184,24 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             ImGui::Spacing();
             const float halfWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
             if (ImGui::Button("Leave Match", {halfWidth, 36.0f})) {
-                result.returnToMainMenu = true;
+                pendingConfirm_ = PendingConfirm::LeaveMatch;
+                confirm_.open({.title = "Leave Match?",
+                               .message = "Leave the current match and return to the main menu?",
+                               .confirmText = "Leave Match",
+                               .cancelText = "Stay",
+                               .confirmIsDanger = true});
             }
             ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.58f, 0.12f, 0.12f, 1.0f});
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{0.72f, 0.16f, 0.16f, 1.0f});
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{0.45f, 0.08f, 0.08f, 1.0f});
             if (ImGui::Button("Exit to Desktop", {halfWidth, 36.0f})) {
-                result.exitToDesktop = true;
+                pendingConfirm_ = PendingConfirm::ExitDesktop;
+                confirm_.open({.title = "Exit to Desktop?",
+                               .message = "Exit the game and close the application?",
+                               .confirmText = "Exit",
+                               .cancelText = "Stay",
+                               .confirmIsDanger = true});
             }
             ImGui::PopStyleColor(3);
         } else {
@@ -225,10 +265,11 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
             ImGui::SameLine();
             if (ImGui::Button("Cancel", {halfWidth, 34.0f})) {
-                settingsOpen = false;
-                listeningAction.reset();
-                statusMessage.clear();
-                dirty = false;
+                if (dirty) {
+                    requestDiscardSettingsConfirm();
+                } else {
+                    closeSettingsPage();
+                }
             }
 
             if (dirty) {
@@ -237,6 +278,28 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
         }
     }
     ImGui::End();
+
+    const ConfirmResult confirmResult = confirm_.drawAndPoll();
+    if (confirmResult == ConfirmResult::Confirmed) {
+        switch (pendingConfirm_) {
+        case PendingConfirm::LeaveMatch:
+            result.returnToMainMenu = true;
+            break;
+        case PendingConfirm::ExitDesktop:
+            result.exitToDesktop = true;
+            break;
+        case PendingConfirm::DiscardSettings:
+            draftBindings = settings.inputBindings;
+            draftMouseSensitivity = settings.mouseSensitivity;
+            closeSettingsPage();
+            break;
+        case PendingConfirm::None:
+            break;
+        }
+        pendingConfirm_ = PendingConfirm::None;
+    } else if (confirmResult == ConfirmResult::Cancelled) {
+        pendingConfirm_ = PendingConfirm::None;
+    }
 
     return result;
 }

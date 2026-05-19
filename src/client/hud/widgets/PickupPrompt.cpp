@@ -65,7 +65,7 @@ void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
 
     // Lay the prompt out as one horizontally-centered block:
     //
-    //   [F]  to pick up Rocket Launcher
+    //   [key]  to pick up Rocket Launcher
     //
     // The key glyph sits in a rounded rect on the left; the descriptive
     // text is left-aligned to its right.

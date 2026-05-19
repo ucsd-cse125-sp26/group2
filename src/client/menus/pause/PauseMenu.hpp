@@ -2,6 +2,7 @@
 
 #include "config/InputBindings.hpp"
 #include "config/UserSettings.hpp"
+#include "menus/pause/ConfirmModal.hpp"
 
 #include <SDL3/SDL_events.h>
 
@@ -45,8 +46,19 @@ public:
     PauseMenuResult render(UserSettings& settings, std::string_view settingsPath);
 
 private:
+    enum class PendingConfirm
+    {
+        None,
+        LeaveMatch,
+        ExitDesktop,
+        DiscardSettings,
+    };
+
     /// @brief Enter settings page with a draft copy of the current live settings.
     void openSettings(const UserSettings& settings);
+
+    void closeSettingsPage();
+    void requestDiscardSettingsConfirm();
 
     bool menuOpen = false;                                   ///< True when any pause overlay page is open.
     bool settingsOpen = false;                               ///< True when the settings page is active.
@@ -55,4 +67,6 @@ private:
     bool dirty = false;                                      ///< True when draft settings differ from live settings.
     std::optional<Action> listeningAction;                   ///< Action waiting for the next key/button input.
     std::string statusMessage;                               ///< Save status shown in the settings page.
+    ConfirmModal confirm_;                                   ///< Reusable modal for destructive/lossy actions.
+    PendingConfirm pendingConfirm_ = PendingConfirm::None;   ///< Action awaiting confirmation.
 };
