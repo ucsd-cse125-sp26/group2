@@ -20,7 +20,11 @@ vec2 atlasUV(float frameIndex, vec2 localUV)
     float rows = max(f.atlas.y, 1.0);
     float col = mod(frameIndex, cols);
     float row = floor(frameIndex / cols);
+    vec2 atlasSize = vec2(textureSize(fireFlipbookAtlas, 0));
+    vec2 tileSize = atlasSize / vec2(cols, rows);
+    vec2 texelInset = 0.5 / max(tileSize, vec2(1.0));
     vec2 tileUV = vec2(localUV.x, 1.0 - localUV.y);
+    tileUV = mix(texelInset, vec2(1.0) - texelInset, clamp(tileUV, 0.0, 1.0));
     return (vec2(col, row) + tileUV) / vec2(cols, rows);
 }
 

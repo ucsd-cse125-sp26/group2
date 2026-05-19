@@ -134,6 +134,8 @@ void ParticleSystem::spawnHitscanBeam(glm::vec3 origin, glm::vec3 hitPos, Weapon
 void ParticleSystem::spawnImpactEffect(glm::vec3 pos, glm::vec3 normal, SurfaceType surf, WeaponType wt)
 {
     impact_.spawn(pos, normal, surf, frameDt_);
+    if (surf == SurfaceType::Flesh)
+        volumeFire_.spawnBloodHit(pos, normal);
     // Don't leave bullet-hole decals on players — only on world surfaces.
     if (surf != SurfaceType::Flesh)
         spawnBulletHole(pos, normal, wt);

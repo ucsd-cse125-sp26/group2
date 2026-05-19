@@ -14,6 +14,7 @@ layout(set = 2, binding = 1) uniform sampler3D fireFrame1;
 layout(set = 3, binding = 0) uniform VolumeFireParams {
     vec4 dimsAndBlend;
     vec4 render;
+    vec4 tint;
 } vf;
 
 layout(location = 0) out vec4 outColor;
@@ -74,13 +75,13 @@ void main()
         vec3 world = vCamPos + dir * t;
         vec3 local = clamp((world - vBoxMin) / (vBoxMax - vBoxMin), vec3(0.0), vec3(1.0));
         vec3 uvw = vec3(local.x, local.z, local.y);
-        float flame0 = texture(fireFrame0, uvw).r;
-        float flame1 = texture(fireFrame1, uvw).r;
-        float flame = mix(flame0, flame1, vf.dimsAndBlend.w);
-        flame = pow(smoothstep(0.009, 0.78, flame), 1.18);
+        float density0 = texture(fireFrame0, uvw).r;
+        float density1 = texture(fireFrame1, uvw).r;
+        float density = mix(density0, density1, vf.dimsAndBlend.w);
+        density = pow(smoothstep(0.018, 0.82, density), 1.12);
 
-        float alpha = clamp(pow(flame, 1.55) * vf.render.y * 0.026, 0.0, 0.13);
-        vec3 color = fireColor(flame) * vf.render.z;
+        float alpha = clamp(pow(density, 1.25) * vf.render.y * 0.028, 0.0, 0.12);
+        vec3 color = mix(vec3(0.16, 0.0, 0.002), vf.tint.rgb, smoothstep(0.05, 0.78, density)) * vf.render.z;
         accum.rgb += (1.0 - accum.a) * color * alpha;
         accum.a += (1.0 - accum.a) * alpha;
     }

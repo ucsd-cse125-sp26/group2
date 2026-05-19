@@ -27,6 +27,7 @@ option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer"                 OFF)
 option(ENABLE_TSAN  "Enable ThreadSanitizer"                            OFF)
 option(GROUP2_ENABLE_VHACD "Build legacy V-HACD decomposition support for prototype props" OFF)
 option(GROUP2_ENABLE_VDB_VOLUME "Build OpenVDB converter for runtime fire volume caches" ON)
+option(GROUP2_ENABLE_ALEMBIC_BLOOD "Build Alembic converter for runtime blood hit caches" ON)
 
 # ---- Build acceleration ----
 
@@ -454,6 +455,7 @@ if(GROUP2_ENABLE_VDB_VOLUME)
                         --color "${COLOR_MODE}"
                         --flipbook-output "${OUT_FLIP}"
                         --flipbook-size 384
+                        --flipbook-padding 0.22
                         --flipbook-only
                 DEPENDS vdb_to_g2vol ${${VDB_LIST_VAR}}
                 COMMENT "Converting ${NAME} VDB sequence to high-quality flipbook cache"
@@ -486,6 +488,48 @@ if(GROUP2_ENABLE_VDB_VOLUME)
         add_custom_target(generated_volume_assets DEPENDS ${GROUP2_GENERATED_FLIPBOOKS})
     else()
         message(WARNING "No generated VDB flipbook asset targets were created")
+    endif()
+endif()
+
+if(GROUP2_ENABLE_ALEMBIC_BLOOD)
+    find_package(Alembic QUIET)
+    if(NOT Alembic_FOUND)
+        message(WARNING
+            "GROUP2_ENABLE_ALEMBIC_BLOOD=ON requires Alembic. Install it with:\n"
+            "  macOS:  brew install alembic\n"
+            "  Ubuntu: sudo apt-get install libalembic-dev\n"
+            "Skipping generated blood hit caches for this configure.")
+    else()
+        add_executable(abc_blood_to_g2fx
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/abc_blood_to_g2fx.cpp"
+        )
+        target_compile_features(abc_blood_to_g2fx PRIVATE cxx_std_23)
+        target_link_libraries(abc_blood_to_g2fx PRIVATE Alembic::Alembic)
+
+        set(GROUP2_BLOOD_ABC
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/flipbooks/BloodHitAlembic/blood_019_fast_speed_Low_Res.abc")
+        set(GROUP2_BLOOD_FLIP "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated/blood_hit.g2flip")
+        set(GROUP2_BLOOD_VOL "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated/blood_hit.g2vol")
+        if(EXISTS "${GROUP2_BLOOD_ABC}")
+            add_custom_command(
+                OUTPUT "${GROUP2_BLOOD_FLIP}" "${GROUP2_BLOOD_VOL}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets/generated"
+                COMMAND $<TARGET_FILE:abc_blood_to_g2fx>
+                        "${GROUP2_BLOOD_ABC}"
+                        "${GROUP2_BLOOD_FLIP}"
+                        "${GROUP2_BLOOD_VOL}"
+                        --fps 24
+                        --flipbook-size 384
+                        --volume-max-dim 96
+                        --padding 0.18
+                DEPENDS abc_blood_to_g2fx "${GROUP2_BLOOD_ABC}"
+                COMMENT "Converting blood Alembic mesh to flipbook and volume caches"
+                VERBATIM
+            )
+            add_custom_target(generated_blood_assets DEPENDS "${GROUP2_BLOOD_FLIP}" "${GROUP2_BLOOD_VOL}")
+        else()
+            message(WARNING "Blood Alembic source asset not found; skipping generated blood hit caches: ${GROUP2_BLOOD_ABC}")
+        endif()
     endif()
 endif()
 
@@ -1167,6 +1211,9 @@ target_include_directories(group2 PRIVATE
 add_dependencies(group2 shaders)
 if(TARGET generated_volume_assets)
     add_dependencies(group2 generated_volume_assets)
+endif()
+if(TARGET generated_blood_assets)
+    add_dependencies(group2 generated_blood_assets)
 endif()
 
 # Copy compiled SPIR-V shaders next to the binary so SDL_GetBasePath() finds them.

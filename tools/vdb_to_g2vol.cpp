@@ -86,6 +86,7 @@ struct Args
     float fps = 24.0f;
     int maxDim = 192;
     int flipbookSize = 256;
+    float flipbookPadding = 0.22f;
     bool flipbookOnly = false;
 };
 
@@ -136,7 +137,7 @@ Args parseArgs(int argc, char** argv)
     if (argc < 3) {
         throw std::runtime_error("usage: vdb_to_g2vol <input-dir> <output.g2vol> [--fps N] [--max-dim N] "
                                  "[--grid NAME] [--color fire|explosion|dust] [--flipbook-output output.g2flip] "
-                                 "[--flipbook-size N] [--flipbook-only]");
+                                 "[--flipbook-size N] [--flipbook-padding N] [--flipbook-only]");
     }
 
     Args args;
@@ -153,6 +154,8 @@ Args parseArgs(int argc, char** argv)
             args.flipbookPath = argv[++i];
         } else if (arg == "--flipbook-size" && i + 1 < argc) {
             args.flipbookSize = std::stoi(argv[++i]);
+        } else if (arg == "--flipbook-padding" && i + 1 < argc) {
+            args.flipbookPadding = std::stof(argv[++i]);
         } else if (arg == "--grid" && i + 1 < argc) {
             args.gridName = argv[++i];
         } else if (arg == "--color" && i + 1 < argc) {
@@ -170,6 +173,8 @@ Args parseArgs(int argc, char** argv)
         throw std::runtime_error("--max-dim must be positive");
     if (args.flipbookSize <= 0)
         throw std::runtime_error("--flipbook-size must be positive");
+    if (args.flipbookPadding < 0.0f || args.flipbookPadding > 0.75f)
+        throw std::runtime_error("--flipbook-padding must be in the range [0, 0.75]");
     if (args.gridName.empty())
         throw std::runtime_error("--grid must not be empty");
     if (args.colorMode != "fire" && args.colorMode != "explosion" && args.colorMode != "dust")
@@ -298,6 +303,15 @@ float sampleDenseTrilinear(
     const float c0 = c00 + (c10 - c00) * ty;
     const float c1 = c01 + (c11 - c01) * ty;
     return c0 + (c1 - c0) * tz;
+}
+
+float sampleDenseTrilinearZero(
+    const std::vector<float>& values, uint32_t width, uint32_t height, uint32_t depth, float x, float y, float z)
+{
+    if (x < 0.0f || y < 0.0f || z < 0.0f || x > static_cast<float>(width - 1) || y > static_cast<float>(height - 1) ||
+        z > static_cast<float>(depth - 1))
+        return 0.0f;
+    return sampleDenseTrilinear(values, width, height, depth, x, y, z);
 }
 
 float smoothstep(float edge0, float edge1, float x)
@@ -437,16 +451,23 @@ void compositeFlipbookFrame(std::vector<uint16_t>& atlas,
                             uint32_t width,
                             uint32_t height,
                             uint32_t depth,
-                            const std::string& colorMode)
+                            const std::string& colorMode,
+                            float padding)
 {
     const uint32_t depthSamples = std::min<uint32_t>(128, std::max<uint32_t>(32, height));
     const PixelLabProfile profile = pixelLabProfile(colorMode);
+    const float marginX = static_cast<float>(width - 1) * padding;
+    const float marginZ = static_cast<float>(depth - 1) * padding;
+    const float sampleMinX = -marginX;
+    const float sampleMaxX = static_cast<float>(width - 1) + marginX;
+    const float sampleMinZ = -marginZ;
+    const float sampleMaxZ = static_cast<float>(depth - 1) + marginZ;
     for (uint32_t py = 0; py < tileSize; ++py) {
-        const float z =
-            (1.0f - (static_cast<float>(py) + 0.5f) / static_cast<float>(tileSize)) * static_cast<float>(depth - 1);
+        const float v = (static_cast<float>(py) + 0.5f) / static_cast<float>(tileSize);
+        const float z = sampleMaxZ + (sampleMinZ - sampleMaxZ) * v;
         for (uint32_t px = 0; px < tileSize; ++px) {
-            const float x =
-                ((static_cast<float>(px) + 0.5f) / static_cast<float>(tileSize)) * static_cast<float>(width - 1);
+            const float u = (static_cast<float>(px) + 0.5f) / static_cast<float>(tileSize);
+            const float x = sampleMinX + (sampleMaxX - sampleMinX) * u;
             float accumR = 0.0f;
             float accumG = 0.0f;
             float accumB = 0.0f;
@@ -458,22 +479,22 @@ void compositeFlipbookFrame(std::vector<uint16_t>& atlas,
                 const float density =
                     frame.values[static_cast<size_t>(Channel::Density)].empty()
                         ? 0.0f
-                        : sampleDenseTrilinear(
+                        : sampleDenseTrilinearZero(
                               frame.values[static_cast<size_t>(Channel::Density)], width, height, depth, x, y, z);
                 const float temperature =
                     frame.values[static_cast<size_t>(Channel::Temperature)].empty()
                         ? 0.0f
-                        : sampleDenseTrilinear(
+                        : sampleDenseTrilinearZero(
                               frame.values[static_cast<size_t>(Channel::Temperature)], width, height, depth, x, y, z);
                 const float flames =
                     frame.values[static_cast<size_t>(Channel::Flames)].empty()
                         ? 0.0f
-                        : sampleDenseTrilinear(
+                        : sampleDenseTrilinearZero(
                               frame.values[static_cast<size_t>(Channel::Flames)], width, height, depth, x, y, z);
                 const float fuel =
                     frame.values[static_cast<size_t>(Channel::Fuel)].empty()
                         ? 0.0f
-                        : sampleDenseTrilinear(
+                        : sampleDenseTrilinearZero(
                               frame.values[static_cast<size_t>(Channel::Fuel)], width, height, depth, x, y, z);
 
                 const float tempSource = std::max({temperature, flames, fuel});
@@ -713,7 +734,8 @@ int main(int argc, char** argv)
                                        outW,
                                        outH,
                                        outD,
-                                       args.colorMode);
+                                       args.colorMode,
+                                       args.flipbookPadding);
             }
         }
 
@@ -750,8 +772,9 @@ int main(int argc, char** argv)
             flipHeader.rows = flipRows;
             flipHeader.frameCount = static_cast<uint32_t>(frames.size());
             flipHeader.fps = args.fps;
-            flipHeader.worldWidth = static_cast<float>(outW);
-            flipHeader.worldHeight = static_cast<float>(outD);
+            const float paddedWorldScale = 1.0f + args.flipbookPadding * 2.0f;
+            flipHeader.worldWidth = static_cast<float>(outW) * paddedWorldScale;
+            flipHeader.worldHeight = static_cast<float>(outD) * paddedWorldScale;
             flipHeader.payloadFormat = k_flipPayloadRgba16FloatPremul;
             flipHeader.headerSize = sizeof(G2FlipHeader);
             flipHeader.payloadBytes = static_cast<uint64_t>(flipAtlas.size()) * sizeof(uint16_t);

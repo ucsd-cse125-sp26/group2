@@ -23,8 +23,12 @@ public:
     void update(float dt, Registry& registry);
     void uploadToGpu(SDL_GPUCommandBuffer* cmd);
     void render(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const NewCamera& camera);
+    void spawnBloodHit(glm::vec3 pos, glm::vec3 normal);
 
-    [[nodiscard]] uint32_t instanceCount() const { return static_cast<uint32_t>(flipbookPreviews_.size()); }
+    [[nodiscard]] uint32_t instanceCount() const
+    {
+        return static_cast<uint32_t>(flipbookPreviews_.size() + transientFlipbooks_.size() + instances_.size());
+    }
     [[nodiscard]] uint32_t currentFrame() const { return currentFrame_; }
     [[nodiscard]] bool ready() const { return ready_; }
 
@@ -56,6 +60,17 @@ private:
         std::string name;
     };
 
+    struct TransientFlipbook
+    {
+        uint32_t previewIndex = UINT32_MAX;
+        glm::vec3 center{0.0f};
+        float halfWidth = 0.0f;
+        float halfHeight = 0.0f;
+        float opacity = 1.0f;
+        float age = 0.0f;
+        float lifetime = 0.0f;
+    };
+
     bool loadCache(const std::string& path);
     bool loadFlipbook(const std::string& path);
     bool loadFlipbookPreview(const std::string& path,
@@ -63,6 +78,16 @@ private:
                              float worldScale,
                              float opacity,
                              const std::string& name);
+    void renderFlipbook(SDL_GPURenderPass* pass,
+                        SDL_GPUCommandBuffer* cmd,
+                        const NewCamera& camera,
+                        const FlipbookPreview& preview,
+                        const glm::vec3& center,
+                        float halfWidth,
+                        float halfHeight,
+                        float opacity,
+                        float age,
+                        bool loop) const;
     bool createSampler();
     bool createGpuResources();
     bool buildPipeline(SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt);
@@ -104,6 +129,12 @@ private:
     std::vector<uint16_t> flipbookPixels_;
     std::vector<VolumeFireInstanceGPU> instances_;
     std::vector<FlipbookPreview> flipbookPreviews_;
+    std::vector<TransientFlipbook> transientFlipbooks_;
+    uint32_t bloodFlipbookIndex_ = UINT32_MAX;
+    glm::vec3 volumeBottomCenter_{660.0f, 50.0f, 500.0f};
+    glm::vec3 volumeWorldSize_{120.0f};
+    float volumeOpacity_ = 0.92f;
+    bool volumeReady_ = false;
     bool ready_ = false;
     bool flipbookReady_ = false;
 };
