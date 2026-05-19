@@ -26,6 +26,7 @@ namespace
 constexpr uint32_t k_formatR16FloatNormalized = 1u;
 constexpr uint32_t k_flipPayloadRgba16FloatPremul = 1u;
 constexpr size_t k_channelCount = 4;
+using Color3 = std::array<float, 3>;
 
 #pragma pack(push, 1)
 struct G2VolHeader
@@ -204,20 +205,6 @@ std::vector<fs::path> collectFrames(const fs::path& dir)
     return frames;
 }
 
-openvdb::FloatGrid::Ptr readFloatGrid(const fs::path& path, const std::string& gridName)
-{
-    openvdb::io::File file(path.string());
-    file.open();
-    openvdb::GridBase::Ptr base = file.readGrid(gridName);
-    file.close();
-
-    openvdb::FloatGrid::Ptr grid = openvdb::gridPtrCast<openvdb::FloatGrid>(base);
-    if (!grid) {
-        throw std::runtime_error(path.string() + " does not contain a FloatGrid named '" + gridName + "'");
-    }
-    return grid;
-}
-
 openvdb::FloatGrid::Ptr readOptionalFloatGrid(openvdb::io::File& file, const std::string& gridName)
 {
     if (!file.hasGrid(gridName))
@@ -319,52 +306,126 @@ float smoothstep(float edge0, float edge1, float x)
     return t * t * (3.0f - 2.0f * t);
 }
 
-std::array<float, 3> fireColor(float t)
+float saturate(float value)
 {
-    const std::array<float, 3> ember{0.82f, 0.055f, 0.01f};
-    const std::array<float, 3> orange{1.0f, 0.29f, 0.035f};
-    const std::array<float, 3> gold{1.0f, 0.61f, 0.13f};
-    const std::array<float, 3> hot{1.0f, 0.78f, 0.34f};
-    auto mix3 = [](const std::array<float, 3>& a, const std::array<float, 3>& b, float f) {
-        return std::array<float, 3>{a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f};
-    };
+    return std::clamp(value, 0.0f, 1.0f);
+}
 
-    std::array<float, 3> c = mix3(ember, orange, smoothstep(0.04f, 0.38f, t));
-    c = mix3(c, gold, smoothstep(0.34f, 0.78f, t));
-    c = mix3(c, hot, smoothstep(0.86f, 1.0f, t));
+float remapClamped(float value, float inputLow, float inputHigh, float targetLow, float targetHigh)
+{
+    const float t =
+        saturate((value - inputLow) / std::max(inputHigh - inputLow, std::numeric_limits<float>::epsilon()));
+    return targetLow + (targetHigh - targetLow) * t;
+}
+
+Color3 mixColor(const Color3& a, const Color3& b, float f)
+{
+    return Color3{a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f};
+}
+
+Color3 blackbodyFireColor(float t)
+{
+    const Color3 deep{0.62f, 0.035f, 0.0f};
+    const Color3 red{1.0f, 0.12f, 0.015f};
+    const Color3 orange{1.0f, 0.38f, 0.045f};
+    const Color3 yellow{1.0f, 0.78f, 0.22f};
+    const Color3 white{1.0f, 0.96f, 0.72f};
+
+    Color3 c = mixColor(deep, red, smoothstep(0.02f, 0.22f, t));
+    c = mixColor(c, orange, smoothstep(0.18f, 0.48f, t));
+    c = mixColor(c, yellow, smoothstep(0.42f, 0.78f, t));
+    c = mixColor(c, white, smoothstep(0.82f, 1.0f, t));
     return c;
 }
 
-std::array<float, 3> blackbodyFireColor(float t)
+struct PixelLabProfile
 {
-    const std::array<float, 3> deep{0.62f, 0.035f, 0.0f};
-    const std::array<float, 3> red{1.0f, 0.12f, 0.015f};
-    const std::array<float, 3> orange{1.0f, 0.38f, 0.045f};
-    const std::array<float, 3> yellow{1.0f, 0.78f, 0.22f};
-    const std::array<float, 3> white{1.0f, 0.96f, 0.72f};
-    auto mix3 = [](const std::array<float, 3>& a, const std::array<float, 3>& b, float f) {
-        return std::array<float, 3>{a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f};
-    };
+    float densityInputLow = 0.0f;
+    float densityInputHigh = 1.0f;
+    float densityTargetLow = 0.0f;
+    float densityTargetHigh = 1.0f;
+    float tempInputLow = 0.0f;
+    float tempInputHigh = 1.0f;
+    float tempTargetLow = 0.0f;
+    float tempTargetHigh = 1.0f;
+    float extinction = 1.0f;
+    float temperatureEmissiveStrength = 1.0f;
+    float scatterColorBias = 0.0f;
+    float emissiveColorBias = 0.0f;
+    float syntheticDensityFromTemperature = 0.0f;
+    float stepAlphaScale = 1.0f;
+    float scatterVisibility = 1.0f;
+    bool useBlackbodyColor = false;
+    bool emissiveColorFromScatter = false;
+    Color3 scatterColor1{0.0f, 0.0f, 0.0f};
+    Color3 scatterColor2{1.0f, 1.0f, 1.0f};
+    Color3 coolColor{1.0f, 0.08f, 0.015f};
+    Color3 hotColor{1.0f, 0.82f, 0.34f};
+};
 
-    std::array<float, 3> c = mix3(deep, red, smoothstep(0.02f, 0.22f, t));
-    c = mix3(c, orange, smoothstep(0.18f, 0.48f, t));
-    c = mix3(c, yellow, smoothstep(0.42f, 0.78f, t));
-    c = mix3(c, white, smoothstep(0.82f, 1.0f, t));
-    return c;
+PixelLabProfile pixelLabProfile(const std::string& colorMode)
+{
+    PixelLabProfile profile{};
+    if (colorMode == "dust") {
+        profile.densityInputLow = 0.002f;
+        profile.densityInputHigh = 0.40f;
+        profile.densityTargetHigh = 1.0f;
+        profile.extinction = 3.6f;
+        profile.temperatureEmissiveStrength = 0.0f;
+        profile.stepAlphaScale = 3.35f;
+        profile.scatterVisibility = 2.35f;
+        profile.scatterColorBias = 0.18f;
+        profile.scatterColor1 = Color3{0.12f, 0.105f, 0.085f};
+        profile.scatterColor2 = Color3{0.82f, 0.70f, 0.50f};
+        return profile;
+    }
+
+    if (colorMode == "explosion") {
+        profile.densityInputLow = 0.002f;
+        profile.densityInputHigh = 0.52f;
+        profile.tempInputLow = 0.006f;
+        profile.tempInputHigh = 0.78f;
+        profile.extinction = 1.72f;
+        profile.temperatureEmissiveStrength = 10.5f;
+        profile.stepAlphaScale = 2.15f;
+        profile.scatterVisibility = 1.45f;
+        profile.scatterColorBias = 0.10f;
+        profile.emissiveColorBias = 0.06f;
+        profile.syntheticDensityFromTemperature = 0.30f;
+        profile.useBlackbodyColor = true;
+        profile.scatterColor1 = Color3{0.045f, 0.040f, 0.035f};
+        profile.scatterColor2 = Color3{0.68f, 0.48f, 0.24f};
+        profile.coolColor = Color3{1.0f, 0.12f, 0.015f};
+        profile.hotColor = Color3{1.0f, 0.82f, 0.30f};
+        return profile;
+    }
+
+    profile.densityInputLow = 0.004f;
+    profile.densityInputHigh = 0.74f;
+    profile.tempInputLow = 0.006f;
+    profile.tempInputHigh = 0.82f;
+    profile.extinction = 0.78f;
+    profile.temperatureEmissiveStrength = 7.25f;
+    profile.stepAlphaScale = 1.85f;
+    profile.scatterVisibility = 0.70f;
+    profile.scatterColorBias = 0.08f;
+    profile.emissiveColorBias = 0.04f;
+    profile.syntheticDensityFromTemperature = 0.38f;
+    profile.useBlackbodyColor = true;
+    profile.scatterColor1 = Color3{0.05f, 0.024f, 0.010f};
+    profile.scatterColor2 = Color3{0.75f, 0.18f, 0.035f};
+    profile.coolColor = Color3{1.0f, 0.075f, 0.015f};
+    profile.hotColor = Color3{1.0f, 0.78f, 0.28f};
+    return profile;
 }
 
-std::array<float, 3> dustColor(float t)
+Color3 pixelLabEmissiveColor(const PixelLabProfile& profile, float temperature, const Color3& scatterColor)
 {
-    const std::array<float, 3> dark{0.21f, 0.18f, 0.15f};
-    const std::array<float, 3> mid{0.48f, 0.40f, 0.30f};
-    const std::array<float, 3> lit{0.77f, 0.68f, 0.50f};
-    auto mix3 = [](const std::array<float, 3>& a, const std::array<float, 3>& b, float f) {
-        return std::array<float, 3>{a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f};
-    };
-
-    std::array<float, 3> c = mix3(dark, mid, smoothstep(0.05f, 0.55f, t));
-    c = mix3(c, lit, smoothstep(0.62f, 1.0f, t));
-    return c;
+    if (profile.emissiveColorFromScatter)
+        return scatterColor;
+    if (profile.useBlackbodyColor)
+        return blackbodyFireColor(temperature);
+    return mixColor(profile.coolColor, profile.hotColor, saturate(temperature + profile.emissiveColorBias));
 }
 
 void compositeFlipbookFrame(std::vector<uint16_t>& atlas,
@@ -379,6 +440,7 @@ void compositeFlipbookFrame(std::vector<uint16_t>& atlas,
                             const std::string& colorMode)
 {
     const uint32_t depthSamples = std::min<uint32_t>(128, std::max<uint32_t>(32, height));
+    const PixelLabProfile profile = pixelLabProfile(colorMode);
     for (uint32_t py = 0; py < tileSize; ++py) {
         const float z =
             (1.0f - (static_cast<float>(py) + 0.5f) / static_cast<float>(tileSize)) * static_cast<float>(depth - 1);
@@ -413,45 +475,37 @@ void compositeFlipbookFrame(std::vector<uint16_t>& atlas,
                         ? 0.0f
                         : sampleDenseTrilinear(
                               frame.values[static_cast<size_t>(Channel::Fuel)], width, height, depth, x, y, z);
-                float alpha = 0.0f;
-                float brightness = 1.0f;
-                std::array<float, 3> color{};
-                if (colorMode == "dust") {
-                    const float body = std::pow(smoothstep(0.004f, 0.58f, density), 0.62f);
-                    alpha = std::clamp((0.020f + body * 0.082f) * body, 0.0f, 0.34f);
-                    brightness = 2.55f;
-                    color = dustColor(body);
-                } else if (colorMode == "explosion") {
-                    const float heat = std::max(std::pow(smoothstep(0.010f, 0.72f, flames), 0.86f),
-                                                std::pow(smoothstep(0.006f, 0.46f, temperature), 0.72f));
-                    const float smoke = std::pow(smoothstep(0.004f, 0.44f, density), 0.78f);
-                    const float fuelGlow = std::pow(smoothstep(0.02f, 0.76f, fuel), 1.1f) * 0.25f;
-                    const float emission = std::clamp(heat + fuelGlow, 0.0f, 1.0f);
-                    const float smokeAlpha = smoke * 0.026f;
-                    const float fireAlpha = std::pow(emission, 1.08f) * 0.070f;
-                    alpha = std::clamp(smokeAlpha + fireAlpha, 0.0f, 0.34f);
-                    const std::array<float, 3> fire = blackbodyFireColor(std::max(temperature, flames));
-                    const std::array<float, 3> smokeColor = dustColor(smoke);
-                    const float fireMix = std::clamp(emission * 1.55f, 0.0f, 1.0f);
-                    color = {smokeColor[0] + (fire[0] - smokeColor[0]) * fireMix,
-                             smokeColor[1] + (fire[1] - smokeColor[1]) * fireMix,
-                             smokeColor[2] + (fire[2] - smokeColor[2]) * fireMix};
-                    brightness = 1.45f + emission * 6.8f;
-                } else {
-                    const float heat = std::max(std::pow(smoothstep(0.010f, 0.72f, flames), 0.95f),
-                                                std::pow(smoothstep(0.006f, 0.58f, temperature), 0.82f));
-                    const float smoke = std::pow(smoothstep(0.008f, 0.55f, density), 0.9f);
-                    alpha = std::clamp(std::pow(heat, 1.22f) * 0.058f + smoke * 0.010f, 0.0f, 0.26f);
-                    brightness = 4.6f + heat * 2.2f;
-                    const std::array<float, 3> hotColor = blackbodyFireColor(std::max(temperature, flames));
-                    const std::array<float, 3> rampColor = fireColor(heat);
-                    color = {rampColor[0] * 0.35f + hotColor[0] * 0.65f,
-                             rampColor[1] * 0.35f + hotColor[1] * 0.65f,
-                             rampColor[2] * 0.35f + hotColor[2] * 0.65f};
-                }
-                accumR += (1.0f - accumA) * color[0] * brightness * alpha;
-                accumG += (1.0f - accumA) * color[1] * brightness * alpha;
-                accumB += (1.0f - accumA) * color[2] * brightness * alpha;
+
+                const float tempSource = std::max({temperature, flames, fuel});
+                const float densitySource =
+                    density > 0.0f ? density : tempSource * profile.syntheticDensityFromTemperature;
+                const float remappedDensity = remapClamped(densitySource,
+                                                           profile.densityInputLow,
+                                                           profile.densityInputHigh,
+                                                           profile.densityTargetLow,
+                                                           profile.densityTargetHigh);
+                const float remappedTemp = remapClamped(tempSource,
+                                                        profile.tempInputLow,
+                                                        profile.tempInputHigh,
+                                                        profile.tempTargetLow,
+                                                        profile.tempTargetHigh);
+                const float extinction = remappedDensity * profile.extinction;
+                const float alpha =
+                    std::clamp(1.0f - std::exp(-extinction * profile.stepAlphaScale / static_cast<float>(depthSamples)),
+                               0.0f,
+                               0.42f);
+                const Color3 scatterColor = mixColor(
+                    profile.scatterColor1, profile.scatterColor2, saturate(remappedDensity + profile.scatterColorBias));
+                const Color3 emissiveColor = pixelLabEmissiveColor(profile, saturate(remappedTemp), scatterColor);
+                const float emissiveStrength =
+                    profile.temperatureEmissiveStrength * std::pow(saturate(remappedTemp), 1.05f);
+
+                const Color3 color{scatterColor[0] * profile.scatterVisibility + emissiveColor[0] * emissiveStrength,
+                                   scatterColor[1] * profile.scatterVisibility + emissiveColor[1] * emissiveStrength,
+                                   scatterColor[2] * profile.scatterVisibility + emissiveColor[2] * emissiveStrength};
+                accumR += (1.0f - accumA) * color[0] * alpha;
+                accumG += (1.0f - accumA) * color[1] * alpha;
+                accumB += (1.0f - accumA) * color[2] * alpha;
                 accumA += (1.0f - accumA) * alpha;
             }
 
