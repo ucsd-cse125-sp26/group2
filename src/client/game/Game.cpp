@@ -241,6 +241,14 @@ std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
 
     return sources;
 }
+
+void centerMouseInWindow(SDL_Window* window)
+{
+    int winW = 0;
+    int winH = 0;
+    SDL_GetWindowSize(window, &winW, &winH);
+    SDL_WarpMouseInWindow(window, static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f);
+}
 } // namespace
 
 bool Game::initDebugUI(const AppContext& ctx)
@@ -981,6 +989,27 @@ SDL_AppResult Game::event(SDL_Event* event)
     }
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
+        if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
+            if (pauseMenu.isOpen()) {
+                pauseMenu.close();
+                mouseCaptured = true;
+                SDL_SetWindowRelativeMouseMode(window, true);
+                float dx = 0.0f;
+                float dy = 0.0f;
+                SDL_GetRelativeMouseState(&dx, &dy);
+            } else {
+                pauseMenu.open();
+                mouseCaptured = false;
+                SDL_SetWindowRelativeMouseMode(window, false);
+                centerMouseInWindow(window);
+                clearGameplayInputForChat();
+            }
+            return SDL_APP_CONTINUE;
+        }
+
+        if (pauseMenu.consumeEvent(*event))
+            return SDL_APP_CONTINUE;
+
         switch (event->key.key) {
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
@@ -990,12 +1019,6 @@ SDL_AppResult Game::event(SDL_Event* event)
 
         case SDLK_MINUS:
             return SDL_APP_SUCCESS;
-
-        // ESC — toggle mouse capture so the player can reach the ImGui windows.
-        case SDLK_ESCAPE:
-            mouseCaptured = !mouseCaptured;
-            SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
-            break;
 
             // F1 — send a test hello packet to the server.
             // case SDLK_F1: {
@@ -1122,6 +1145,9 @@ SDL_AppResult Game::event(SDL_Event* event)
             activeGamepadId_ = 0;
         }
     }
+
+    if (pauseMenu.consumeEvent(*event))
+        return SDL_APP_CONTINUE;
 
     // Scroll wheel toggles between primary and secondary weapon slots.
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
@@ -1468,7 +1494,11 @@ SDL_AppResult Game::iterate()
     // Dead input runs regardless of mouse capture — allows skip-respawn.
     // Chat owns the keyboard while open, so gameplay inputs are cleared
     // instead of sampled.
-    if (chatOpen_)
+    const bool gamePaused = pauseMenu.isOpen();
+
+    if (gamePaused) {
+        clearGameplayInputForChat();
+    } else if (chatOpen_)
         clearGameplayInputForChat();
     else
         systems::runDeadInput(registry);
@@ -1479,7 +1509,7 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
-    if (mouseCaptured && !chatOpen_) {
+    if (mouseCaptured && !chatOpen_ && !gamePaused) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
@@ -1542,7 +1572,7 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_) {
+        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused) {
             systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
@@ -3818,6 +3848,18 @@ SDL_AppResult Game::iterate()
         // Drain pickup notifications now that the HUD has consumed them.
         pendingPickupNotifications_.clear();
     }
+
+    const PauseMenuResult pauseResult = pauseMenu.render();
+    if (pauseResult.resumeGame) {
+        pauseMenu.close();
+        mouseCaptured = true;
+        SDL_SetWindowRelativeMouseMode(window, true);
+        float dx = 0.0f;
+        float dy = 0.0f;
+        SDL_GetRelativeMouseState(&dx, &dy);
+    }
+    if (pauseResult.exitToDesktop)
+        return SDL_APP_SUCCESS;
 
     debugUI.render();
 

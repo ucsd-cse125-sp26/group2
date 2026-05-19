@@ -17,6 +17,7 @@
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "hud/Hud.hpp"
+#include "menus/pause/PauseMenu.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/RegistrySerialization.hpp"
@@ -474,4 +475,6 @@ private:
 
     // Kill Feed State
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
+
+    PauseMenu pauseMenu; ///< In-game pause menu (opened with ESC, blocks input to the game when active).
 };
