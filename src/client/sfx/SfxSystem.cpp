@@ -387,16 +387,11 @@ void SfxSystem::handleEvent(const SDL_Event& event)
 {
 #ifdef __APPLE__
     if (event.type == SDL_EVENT_AUDIO_DEVICE_REMOVED && !event.adevice.recording) {
-        if (physicalDeviceId_ != 0 && event.adevice.which == physicalDeviceId_) {
-            SDL_Log("[sfx] Playback device removed (id=%u), scheduling reopen",
-                    static_cast<unsigned>(physicalDeviceId_));
-            pendingReopenDeviceId_ = 0;
-            pendingReopen_ = true;
-        }
+        SDL_Log("[sfx] Playback device removed (id=%u), scheduling reopen", static_cast<unsigned>(event.adevice.which));
+        pendingReopen_ = true;
     } else if (event.type == SDL_EVENT_AUDIO_DEVICE_ADDED && !event.adevice.recording) {
-        SDL_Log("[sfx] New playback device available (id=%u), scheduling switch",
+        SDL_Log("[sfx] New playback device available (id=%u), scheduling reopen",
                 static_cast<unsigned>(event.adevice.which));
-        pendingReopenDeviceId_ = event.adevice.which;
         pendingReopen_ = true;
     }
 #else
@@ -816,30 +811,17 @@ bool SfxSystem::openDevice()
 
 #ifdef __APPLE__
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
-    SDL_AudioDeviceID targetPhysical = pendingReopenDeviceId_;
-    if (!targetPhysical) {
-        int count = 0;
-        SDL_AudioDeviceID* devs = SDL_GetAudioPlaybackDevices(&count);
-        if (devs && count > 0) {
-            targetPhysical = devs[0];
-            SDL_free(devs);
-        }
-    }
-    physicalDeviceId_ = targetPhysical;
-    mixStream_ = SDL_OpenAudioDeviceStream(targetPhysical ? targetPhysical : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                           &mixerSpec_,
-                                           &SfxSystem::mixCallback,
-                                           this);
-#else
+#endif
+
     mixStream_ =
         SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &mixerSpec_, &SfxSystem::mixCallback, this);
-#endif
 
     if (!mixStream_) {
         SDL_Log("[sfx] SDL_OpenAudioDeviceStream failed: %s", SDL_GetError());
         return false;
     }
     device_ = SDL_GetAudioStreamDevice(mixStream_);
+    physicalDeviceId_ = device_;
     SDL_ResumeAudioStreamDevice(mixStream_);
     return true;
 }
@@ -862,13 +844,10 @@ void SfxSystem::reopenDevice()
 
     if (openDevice()) {
         warmUpDevice();
-        SDL_Log("[sfx] Reopened audio on physical device %u (logical %u)",
-                static_cast<unsigned>(physicalDeviceId_),
-                static_cast<unsigned>(device_));
+        SDL_Log("[sfx] Reopened audio on device %u", static_cast<unsigned>(device_));
     } else {
         SDL_Log("[sfx] No audio device available after reopen — running mute");
     }
-    pendingReopenDeviceId_ = 0;
     stateInitialized_ = false;
 }
 
