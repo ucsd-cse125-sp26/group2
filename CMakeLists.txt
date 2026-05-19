@@ -479,7 +479,7 @@ if(GROUP2_ENABLE_VDB_VOLUME)
     group2_add_vdb_flipbook(midair_explosion_01
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/flipbooks/Midair_Explosion_01"
         flames
-        fire
+        explosion
     )
 
     if(GROUP2_GENERATED_FLIPBOOKS)

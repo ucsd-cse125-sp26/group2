@@ -12,6 +12,7 @@
 #include <iostream>
 #include <limits>
 #include <openvdb/openvdb.h>
+#include <optional>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -24,6 +25,7 @@ namespace
 {
 constexpr uint32_t k_formatR16FloatNormalized = 1u;
 constexpr uint32_t k_flipPayloadRgba16FloatPremul = 1u;
+constexpr size_t k_channelCount = 4;
 
 #pragma pack(push, 1)
 struct G2VolHeader
@@ -86,6 +88,25 @@ struct Args
     bool flipbookOnly = false;
 };
 
+enum class Channel : size_t
+{
+    Density = 0,
+    Temperature = 1,
+    Flames = 2,
+    Fuel = 3,
+};
+
+struct FrameGrids
+{
+    openvdb::FloatGrid::Ptr primary;
+    std::array<openvdb::FloatGrid::Ptr, k_channelCount> channels{};
+};
+
+struct FrameChannels
+{
+    std::array<std::vector<float>, k_channelCount> values;
+};
+
 uint16_t floatToHalf(float value)
 {
     uint32_t bits = 0;
@@ -113,7 +134,7 @@ Args parseArgs(int argc, char** argv)
 {
     if (argc < 3) {
         throw std::runtime_error("usage: vdb_to_g2vol <input-dir> <output.g2vol> [--fps N] [--max-dim N] "
-                                 "[--grid NAME] [--color fire|dust] [--flipbook-output output.g2flip] "
+                                 "[--grid NAME] [--color fire|explosion|dust] [--flipbook-output output.g2flip] "
                                  "[--flipbook-size N] [--flipbook-only]");
     }
 
@@ -150,8 +171,8 @@ Args parseArgs(int argc, char** argv)
         throw std::runtime_error("--flipbook-size must be positive");
     if (args.gridName.empty())
         throw std::runtime_error("--grid must not be empty");
-    if (args.colorMode != "fire" && args.colorMode != "dust")
-        throw std::runtime_error("--color must be either 'fire' or 'dust'");
+    if (args.colorMode != "fire" && args.colorMode != "explosion" && args.colorMode != "dust")
+        throw std::runtime_error("--color must be 'fire', 'explosion', or 'dust'");
     if (args.flipbookOnly && args.flipbookPath.empty())
         throw std::runtime_error("--flipbook-only requires --flipbook-output");
     return args;
@@ -195,6 +216,32 @@ openvdb::FloatGrid::Ptr readFloatGrid(const fs::path& path, const std::string& g
         throw std::runtime_error(path.string() + " does not contain a FloatGrid named '" + gridName + "'");
     }
     return grid;
+}
+
+openvdb::FloatGrid::Ptr readOptionalFloatGrid(openvdb::io::File& file, const std::string& gridName)
+{
+    if (!file.hasGrid(gridName))
+        return nullptr;
+    return openvdb::gridPtrCast<openvdb::FloatGrid>(file.readGrid(gridName));
+}
+
+FrameGrids readFrameGrids(const fs::path& path, const std::string& primaryGrid)
+{
+    openvdb::io::File file(path.string());
+    file.open();
+
+    FrameGrids grids{};
+    grids.primary = readOptionalFloatGrid(file, primaryGrid);
+    grids.channels[static_cast<size_t>(Channel::Density)] = readOptionalFloatGrid(file, "density");
+    grids.channels[static_cast<size_t>(Channel::Temperature)] = readOptionalFloatGrid(file, "temperature");
+    grids.channels[static_cast<size_t>(Channel::Flames)] = readOptionalFloatGrid(file, "flames");
+    grids.channels[static_cast<size_t>(Channel::Fuel)] = readOptionalFloatGrid(file, "fuel");
+    file.close();
+
+    if (!grids.primary) {
+        throw std::runtime_error(path.string() + " does not contain a FloatGrid named '" + primaryGrid + "'");
+    }
+    return grids;
 }
 
 float sampleTrilinear(const openvdb::FloatGrid::ConstAccessor& acc, double x, double y, double z)
@@ -288,6 +335,24 @@ std::array<float, 3> fireColor(float t)
     return c;
 }
 
+std::array<float, 3> blackbodyFireColor(float t)
+{
+    const std::array<float, 3> deep{0.62f, 0.035f, 0.0f};
+    const std::array<float, 3> red{1.0f, 0.12f, 0.015f};
+    const std::array<float, 3> orange{1.0f, 0.38f, 0.045f};
+    const std::array<float, 3> yellow{1.0f, 0.78f, 0.22f};
+    const std::array<float, 3> white{1.0f, 0.96f, 0.72f};
+    auto mix3 = [](const std::array<float, 3>& a, const std::array<float, 3>& b, float f) {
+        return std::array<float, 3>{a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f};
+    };
+
+    std::array<float, 3> c = mix3(deep, red, smoothstep(0.02f, 0.22f, t));
+    c = mix3(c, orange, smoothstep(0.18f, 0.48f, t));
+    c = mix3(c, yellow, smoothstep(0.42f, 0.78f, t));
+    c = mix3(c, white, smoothstep(0.82f, 1.0f, t));
+    return c;
+}
+
 std::array<float, 3> dustColor(float t)
 {
     const std::array<float, 3> dark{0.21f, 0.18f, 0.15f};
@@ -307,7 +372,7 @@ void compositeFlipbookFrame(std::vector<uint16_t>& atlas,
                             uint32_t tileSize,
                             uint32_t tileX,
                             uint32_t tileY,
-                            const std::vector<float>& frameValues,
+                            const FrameChannels& frame,
                             uint32_t width,
                             uint32_t height,
                             uint32_t depth,
@@ -328,20 +393,61 @@ void compositeFlipbookFrame(std::vector<uint16_t>& atlas,
             for (uint32_t s = 0; s < depthSamples && accumA < 0.985f; ++s) {
                 const float y = ((static_cast<float>(s) + 0.5f) / static_cast<float>(depthSamples)) *
                                 static_cast<float>(height - 1);
-                float value = sampleDenseTrilinear(frameValues, width, height, depth, x, y, z);
+                const float density =
+                    frame.values[static_cast<size_t>(Channel::Density)].empty()
+                        ? 0.0f
+                        : sampleDenseTrilinear(
+                              frame.values[static_cast<size_t>(Channel::Density)], width, height, depth, x, y, z);
+                const float temperature =
+                    frame.values[static_cast<size_t>(Channel::Temperature)].empty()
+                        ? 0.0f
+                        : sampleDenseTrilinear(
+                              frame.values[static_cast<size_t>(Channel::Temperature)], width, height, depth, x, y, z);
+                const float flames =
+                    frame.values[static_cast<size_t>(Channel::Flames)].empty()
+                        ? 0.0f
+                        : sampleDenseTrilinear(
+                              frame.values[static_cast<size_t>(Channel::Flames)], width, height, depth, x, y, z);
+                const float fuel =
+                    frame.values[static_cast<size_t>(Channel::Fuel)].empty()
+                        ? 0.0f
+                        : sampleDenseTrilinear(
+                              frame.values[static_cast<size_t>(Channel::Fuel)], width, height, depth, x, y, z);
                 float alpha = 0.0f;
                 float brightness = 1.0f;
                 std::array<float, 3> color{};
                 if (colorMode == "dust") {
-                    value = std::pow(smoothstep(0.025f, 0.82f, value), 1.02f);
-                    alpha = std::clamp(std::pow(value, 1.12f) * 0.035f, 0.0f, 0.16f);
-                    brightness = 1.15f;
-                    color = dustColor(value);
+                    const float body = std::pow(smoothstep(0.004f, 0.58f, density), 0.62f);
+                    alpha = std::clamp((0.020f + body * 0.082f) * body, 0.0f, 0.34f);
+                    brightness = 2.55f;
+                    color = dustColor(body);
+                } else if (colorMode == "explosion") {
+                    const float heat = std::max(std::pow(smoothstep(0.010f, 0.72f, flames), 0.86f),
+                                                std::pow(smoothstep(0.006f, 0.46f, temperature), 0.72f));
+                    const float smoke = std::pow(smoothstep(0.004f, 0.44f, density), 0.78f);
+                    const float fuelGlow = std::pow(smoothstep(0.02f, 0.76f, fuel), 1.1f) * 0.25f;
+                    const float emission = std::clamp(heat + fuelGlow, 0.0f, 1.0f);
+                    const float smokeAlpha = smoke * 0.026f;
+                    const float fireAlpha = std::pow(emission, 1.08f) * 0.070f;
+                    alpha = std::clamp(smokeAlpha + fireAlpha, 0.0f, 0.34f);
+                    const std::array<float, 3> fire = blackbodyFireColor(std::max(temperature, flames));
+                    const std::array<float, 3> smokeColor = dustColor(smoke);
+                    const float fireMix = std::clamp(emission * 1.55f, 0.0f, 1.0f);
+                    color = {smokeColor[0] + (fire[0] - smokeColor[0]) * fireMix,
+                             smokeColor[1] + (fire[1] - smokeColor[1]) * fireMix,
+                             smokeColor[2] + (fire[2] - smokeColor[2]) * fireMix};
+                    brightness = 1.45f + emission * 6.8f;
                 } else {
-                    value = std::pow(smoothstep(0.009f, 0.78f, value), 1.18f);
-                    alpha = std::clamp(std::pow(value, 1.55f) * 0.050f, 0.0f, 0.22f);
-                    brightness = 3.85f;
-                    color = fireColor(value);
+                    const float heat = std::max(std::pow(smoothstep(0.010f, 0.72f, flames), 0.95f),
+                                                std::pow(smoothstep(0.006f, 0.58f, temperature), 0.82f));
+                    const float smoke = std::pow(smoothstep(0.008f, 0.55f, density), 0.9f);
+                    alpha = std::clamp(std::pow(heat, 1.22f) * 0.058f + smoke * 0.010f, 0.0f, 0.26f);
+                    brightness = 4.6f + heat * 2.2f;
+                    const std::array<float, 3> hotColor = blackbodyFireColor(std::max(temperature, flames));
+                    const std::array<float, 3> rampColor = fireColor(heat);
+                    color = {rampColor[0] * 0.35f + hotColor[0] * 0.65f,
+                             rampColor[1] * 0.35f + hotColor[1] * 0.65f,
+                             rampColor[2] * 0.35f + hotColor[2] * 0.65f};
                 }
                 accumR += (1.0f - accumA) * color[0] * brightness * alpha;
                 accumG += (1.0f - accumA) * color[1] * brightness * alpha;
@@ -377,22 +483,30 @@ int main(int argc, char** argv)
         size_t emptyFrameCount = 0;
 
         for (const fs::path& frame : frames) {
-            openvdb::FloatGrid::Ptr grid = readFloatGrid(frame, args.gridName);
-            openvdb::CoordBBox bbox;
-            if (!grid->tree().evalActiveVoxelBoundingBox(bbox)) {
+            FrameGrids grids = readFrameGrids(frame, args.gridName);
+            bool frameHasActiveVoxels = false;
+            for (const openvdb::FloatGrid::Ptr& grid : grids.channels) {
+                if (!grid)
+                    continue;
+
+                openvdb::CoordBBox bbox;
+                if (!grid->tree().evalActiveVoxelBoundingBox(bbox))
+                    continue;
+
+                frameHasActiveVoxels = true;
+                if (!haveUnion) {
+                    unionBBox = bbox;
+                    voxelSize = grid->transform().voxelSize();
+                    haveUnion = true;
+                } else {
+                    unionBBox.expand(bbox);
+                }
+            }
+            if (!frameHasActiveVoxels)
                 ++emptyFrameCount;
-                continue;
-            }
-            if (!haveUnion) {
-                unionBBox = bbox;
-                voxelSize = grid->transform().voxelSize();
-                haveUnion = true;
-            } else {
-                unionBBox.expand(bbox);
-            }
         }
         if (!haveUnion) {
-            throw std::runtime_error("all '" + args.gridName + "' frames are empty");
+            throw std::runtime_error("all renderable grids are empty");
         }
 
         const openvdb::Coord sourceDim = unionBBox.dim();
@@ -407,16 +521,26 @@ int main(int argc, char** argv)
         const uint64_t voxelsPerFrame = static_cast<uint64_t>(outW) * outH * outD;
 
         float maxValue = 0.0f;
+        std::array<float, k_channelCount> channelMax{};
         for (const fs::path& frame : frames) {
-            openvdb::FloatGrid::Ptr grid = readFloatGrid(frame, args.gridName);
-            const auto acc = grid->getConstAccessor();
+            FrameGrids grids = readFrameGrids(frame, args.gridName);
+            std::array<std::optional<openvdb::FloatGrid::ConstAccessor>, k_channelCount> accessors;
+            for (size_t i = 0; i < grids.channels.size(); ++i) {
+                if (grids.channels[i])
+                    accessors[i].emplace(grids.channels[i]->getConstAccessor());
+            }
+            const auto primaryAcc = grids.primary->getConstAccessor();
             for (uint32_t z = 0; z < outD; ++z) {
                 const double sz = unionBBox.min().z() + ((z + 0.5) / outD) * sourceDim.z() - 0.5;
                 for (uint32_t y = 0; y < outH; ++y) {
                     const double sy = unionBBox.min().y() + ((y + 0.5) / outH) * sourceDim.y() - 0.5;
                     for (uint32_t x = 0; x < outW; ++x) {
                         const double sx = unionBBox.min().x() + ((x + 0.5) / outW) * sourceDim.x() - 0.5;
-                        maxValue = std::max(maxValue, sampleTrilinear(acc, sx, sy, sz));
+                        maxValue = std::max(maxValue, sampleTrilinear(primaryAcc, sx, sy, sz));
+                        for (size_t i = 0; i < accessors.size(); ++i) {
+                            if (accessors[i])
+                                channelMax[i] = std::max(channelMax[i], sampleTrilinear(*accessors[i], sx, sy, sz));
+                        }
                     }
                 }
             }
@@ -457,7 +581,13 @@ int main(int argc, char** argv)
         }
 
         std::vector<uint16_t> halfFrame(writeVolume ? static_cast<size_t>(voxelsPerFrame) : 0);
-        std::vector<float> normalizedFrame(args.flipbookPath.empty() ? 0 : static_cast<size_t>(voxelsPerFrame));
+        FrameChannels normalizedFrame;
+        if (!args.flipbookPath.empty()) {
+            for (size_t i = 0; i < normalizedFrame.values.size(); ++i) {
+                if (channelMax[i] > 0.0f)
+                    normalizedFrame.values[i].resize(static_cast<size_t>(voxelsPerFrame));
+            }
+        }
         std::array<uint64_t, 4096> histogram{};
         uint64_t totalSamples = 0;
 
@@ -475,8 +605,13 @@ int main(int argc, char** argv)
 
         for (size_t frameOrdinal = 0; frameOrdinal < frames.size(); ++frameOrdinal) {
             const fs::path& frame = frames[frameOrdinal];
-            openvdb::FloatGrid::Ptr grid = readFloatGrid(frame, args.gridName);
-            const auto acc = grid->getConstAccessor();
+            FrameGrids grids = readFrameGrids(frame, args.gridName);
+            const auto primaryAcc = grids.primary->getConstAccessor();
+            std::array<std::optional<openvdb::FloatGrid::ConstAccessor>, k_channelCount> accessors;
+            for (size_t i = 0; i < grids.channels.size(); ++i) {
+                if (grids.channels[i])
+                    accessors[i].emplace(grids.channels[i]->getConstAccessor());
+            }
             size_t dst = 0;
             for (uint32_t z = 0; z < outD; ++z) {
                 const double sz = unionBBox.min().z() + ((z + 0.5) / outD) * sourceDim.z() - 0.5;
@@ -484,15 +619,25 @@ int main(int argc, char** argv)
                     const double sy = unionBBox.min().y() + ((y + 0.5) / outH) * sourceDim.y() - 0.5;
                     for (uint32_t x = 0; x < outW; ++x) {
                         const double sx = unionBBox.min().x() + ((x + 0.5) / outW) * sourceDim.x() - 0.5;
-                        const float normalized = std::clamp(sampleTrilinear(acc, sx, sy, sz) / maxValue, 0.0f, 1.0f);
+                        const float normalized =
+                            std::clamp(sampleTrilinear(primaryAcc, sx, sy, sz) / maxValue, 0.0f, 1.0f);
                         const size_t bin = std::min<size_t>(histogram.size() - 1,
                                                             static_cast<size_t>(normalized * (histogram.size() - 1)));
                         ++histogram[bin];
                         ++totalSamples;
                         if (writeVolume)
                             halfFrame[dst] = floatToHalf(normalized);
-                        if (writeFlipbook)
-                            normalizedFrame[dst] = normalized;
+                        if (writeFlipbook) {
+                            for (size_t i = 0; i < accessors.size(); ++i) {
+                                if (!normalizedFrame.values[i].empty()) {
+                                    const float raw = accessors[i] ? sampleTrilinear(*accessors[i], sx, sy, sz) : 0.0f;
+                                    normalizedFrame.values[i][dst] =
+                                        std::clamp(raw / std::max(channelMax[i], std::numeric_limits<float>::epsilon()),
+                                                   0.0f,
+                                                   1.0f);
+                                }
+                            }
+                        }
                         ++dst;
                     }
                 }
