@@ -82,6 +82,8 @@
 
 namespace
 {
+constexpr float kMinFootstepIntervalSeconds = 0.14f;
+
 int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
     return assets.add(
@@ -2278,6 +2280,8 @@ SDL_AppResult Game::iterate()
                 const bool canStep = c.ai.grounded || c.ai.moveMode == 2;
                 const float speed = glm::length(c.ai.velocityWorld);
                 if (sfxSystem.isInitialized() && canStep && speed > 65.0f) {
+                    float& footstepCooldown = footstepCooldowns_[c.entity];
+                    footstepCooldown = std::max(0.0f, footstepCooldown - frameTime);
                     for (std::size_t i = 0; i < samplers.size() && i < phaseIt->second.size(); ++i) {
                         const ClipSampler& src = samplers[i];
                         const bool audibleSampler = src.active && src.weight > 0.22f && isFootstepClip(src.id);
@@ -2288,7 +2292,7 @@ SDL_AppResult Game::iterate()
                         const float previous = phaseIt->second[i];
                         const bool leftStep = footstepMarkerCrossed(previous, src.timeRatio, 0.18f);
                         const bool rightStep = footstepMarkerCrossed(previous, src.timeRatio, 0.68f);
-                        if (leftStep || rightStep) {
+                        if ((leftStep || rightStep) && footstepCooldown <= 0.0f) {
                             const SfxId stepId =
                                 isHeavyFootstepClip(src.id) ? SfxId::FootstepHeavy : SfxId::FootstepLight;
                             const float gain = std::clamp(0.35f + src.weight * (speed / 900.0f), 0.25f, 0.85f);
@@ -2306,6 +2310,7 @@ SDL_AppResult Game::iterate()
                                 sfxSystem.postLocalAudioEvent("footstep", object, gain);
                             else
                                 sfxSystem.postAudioEvent("footstep", object, gain);
+                            footstepCooldown = kMinFootstepIntervalSeconds;
                         }
                         phaseIt->second[i] = src.timeRatio;
                     }

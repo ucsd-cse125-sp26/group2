@@ -43,9 +43,26 @@ enum class SfxId : uint8_t
     Healing,        ///< Voicy_Syringe SFX .mp3
     ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
 
-    // Movement / equipment placeholders. These synthesize if final assets are absent.
+    // Movement / equipment placeholders. FootstepLight/Heavy still back simple impact fallbacks.
     FootstepLight,
     FootstepHeavy,
+    ConcreteFootstep01,
+    ConcreteFootstep02,
+    ConcreteFootstep03,
+    ConcreteFootstep04,
+    ConcreteFootstep05,
+    ConcreteFootstep06,
+    ConcreteFootstep07,
+    ConcreteFootstep08,
+    ConcreteFootstep09,
+    ConcreteFootstep10,
+    ConcreteFootstep11,
+    ConcreteFootstep12,
+    ConcreteFootstep13,
+    ConcreteFootstep14,
+    ConcreteFootstep15,
+    ConcreteFootstep16,
+    ConcreteFootstep17,
     GrenadeThrow,
     VoiceStart,
     VoiceStop,
@@ -120,6 +137,40 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "FootstepLight";
     case SfxId::FootstepHeavy:
         return "FootstepHeavy";
+    case SfxId::ConcreteFootstep01:
+        return "ConcreteFootstep01";
+    case SfxId::ConcreteFootstep02:
+        return "ConcreteFootstep02";
+    case SfxId::ConcreteFootstep03:
+        return "ConcreteFootstep03";
+    case SfxId::ConcreteFootstep04:
+        return "ConcreteFootstep04";
+    case SfxId::ConcreteFootstep05:
+        return "ConcreteFootstep05";
+    case SfxId::ConcreteFootstep06:
+        return "ConcreteFootstep06";
+    case SfxId::ConcreteFootstep07:
+        return "ConcreteFootstep07";
+    case SfxId::ConcreteFootstep08:
+        return "ConcreteFootstep08";
+    case SfxId::ConcreteFootstep09:
+        return "ConcreteFootstep09";
+    case SfxId::ConcreteFootstep10:
+        return "ConcreteFootstep10";
+    case SfxId::ConcreteFootstep11:
+        return "ConcreteFootstep11";
+    case SfxId::ConcreteFootstep12:
+        return "ConcreteFootstep12";
+    case SfxId::ConcreteFootstep13:
+        return "ConcreteFootstep13";
+    case SfxId::ConcreteFootstep14:
+        return "ConcreteFootstep14";
+    case SfxId::ConcreteFootstep15:
+        return "ConcreteFootstep15";
+    case SfxId::ConcreteFootstep16:
+        return "ConcreteFootstep16";
+    case SfxId::ConcreteFootstep17:
+        return "ConcreteFootstep17";
     case SfxId::GrenadeThrow:
         return "GrenadeThrow";
     case SfxId::VoiceStart:

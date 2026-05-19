@@ -231,6 +231,176 @@ spatial = true
 max_instances = 16
 
 [[clips]]
+id = "footstep_concrete_01"
+sfx = "ConcreteFootstep01"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_02"
+sfx = "ConcreteFootstep02"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_03"
+sfx = "ConcreteFootstep03"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_04"
+sfx = "ConcreteFootstep04"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_05"
+sfx = "ConcreteFootstep05"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_06"
+sfx = "ConcreteFootstep06"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_07"
+sfx = "ConcreteFootstep07"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_08"
+sfx = "ConcreteFootstep08"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_09"
+sfx = "ConcreteFootstep09"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_10"
+sfx = "ConcreteFootstep10"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_11"
+sfx = "ConcreteFootstep11"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_12"
+sfx = "ConcreteFootstep12"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_13"
+sfx = "ConcreteFootstep13"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_14"
+sfx = "ConcreteFootstep14"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_15"
+sfx = "ConcreteFootstep15"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_16"
+sfx = "ConcreteFootstep16"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_concrete_17"
+sfx = "ConcreteFootstep17"
+bus = "Footsteps"
+gain = 0.92
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
 id = "voice_start"
 sfx = "VoiceStart"
 bus = "VoiceChat"
@@ -353,6 +523,114 @@ children = [
 ]
 
 [[nodes]]
+id = "node.footstep_concrete_01"
+type = "sound"
+clip = "footstep_concrete_01"
+
+[[nodes]]
+id = "node.footstep_concrete_02"
+type = "sound"
+clip = "footstep_concrete_02"
+
+[[nodes]]
+id = "node.footstep_concrete_03"
+type = "sound"
+clip = "footstep_concrete_03"
+
+[[nodes]]
+id = "node.footstep_concrete_04"
+type = "sound"
+clip = "footstep_concrete_04"
+
+[[nodes]]
+id = "node.footstep_concrete_05"
+type = "sound"
+clip = "footstep_concrete_05"
+
+[[nodes]]
+id = "node.footstep_concrete_06"
+type = "sound"
+clip = "footstep_concrete_06"
+
+[[nodes]]
+id = "node.footstep_concrete_07"
+type = "sound"
+clip = "footstep_concrete_07"
+
+[[nodes]]
+id = "node.footstep_concrete_08"
+type = "sound"
+clip = "footstep_concrete_08"
+
+[[nodes]]
+id = "node.footstep_concrete_09"
+type = "sound"
+clip = "footstep_concrete_09"
+
+[[nodes]]
+id = "node.footstep_concrete_10"
+type = "sound"
+clip = "footstep_concrete_10"
+
+[[nodes]]
+id = "node.footstep_concrete_11"
+type = "sound"
+clip = "footstep_concrete_11"
+
+[[nodes]]
+id = "node.footstep_concrete_12"
+type = "sound"
+clip = "footstep_concrete_12"
+
+[[nodes]]
+id = "node.footstep_concrete_13"
+type = "sound"
+clip = "footstep_concrete_13"
+
+[[nodes]]
+id = "node.footstep_concrete_14"
+type = "sound"
+clip = "footstep_concrete_14"
+
+[[nodes]]
+id = "node.footstep_concrete_15"
+type = "sound"
+clip = "footstep_concrete_15"
+
+[[nodes]]
+id = "node.footstep_concrete_16"
+type = "sound"
+clip = "footstep_concrete_16"
+
+[[nodes]]
+id = "node.footstep_concrete_17"
+type = "sound"
+clip = "footstep_concrete_17"
+
+[[nodes]]
+id = "node.footstep.concrete"
+type = "random"
+children = [
+  { node = "node.footstep_concrete_01", weight = 1.0 },
+  { node = "node.footstep_concrete_02", weight = 1.0 },
+  { node = "node.footstep_concrete_03", weight = 1.0 },
+  { node = "node.footstep_concrete_04", weight = 1.0 },
+  { node = "node.footstep_concrete_05", weight = 1.0 },
+  { node = "node.footstep_concrete_06", weight = 1.0 },
+  { node = "node.footstep_concrete_07", weight = 1.0 },
+  { node = "node.footstep_concrete_08", weight = 1.0 },
+  { node = "node.footstep_concrete_09", weight = 1.0 },
+  { node = "node.footstep_concrete_10", weight = 1.0 },
+  { node = "node.footstep_concrete_11", weight = 1.0 },
+  { node = "node.footstep_concrete_12", weight = 1.0 },
+  { node = "node.footstep_concrete_13", weight = 1.0 },
+  { node = "node.footstep_concrete_14", weight = 1.0 },
+  { node = "node.footstep_concrete_15", weight = 1.0 },
+  { node = "node.footstep_concrete_16", weight = 1.0 },
+  { node = "node.footstep_concrete_17", weight = 1.0 },
+]
+
+[[nodes]]
 id = "node.voice_start"
 type = "sound"
 clip = "voice_start"
@@ -432,7 +710,7 @@ actions = [{ type = "play", target = "node.healing" }]
 
 [[events]]
 id = "footstep"
-actions = [{ type = "play", target = "node.footstep.by_weight" }]
+actions = [{ type = "play", target = "node.footstep.concrete" }]
 
 [[events]]
 id = "footstep.light"

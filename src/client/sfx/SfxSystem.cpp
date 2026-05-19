@@ -106,6 +106,23 @@ bool SfxSystem::init()
 
     synthesizeClip(SfxId::FootstepLight, SfxCategory::Footsteps, 0.40f, 0.06f);
     synthesizeClip(SfxId::FootstepHeavy, SfxCategory::Footsteps, 0.55f, 0.06f);
+    loadClip(SfxId::ConcreteFootstep01, "Footsteps/concrete_ct_01.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep02, "Footsteps/concrete_ct_02.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep03, "Footsteps/concrete_ct_03.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep04, "Footsteps/concrete_ct_04.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep05, "Footsteps/concrete_ct_05.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep06, "Footsteps/concrete_ct_06.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep07, "Footsteps/concrete_ct_07.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep08, "Footsteps/concrete_ct_08.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep09, "Footsteps/concrete_ct_09.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep10, "Footsteps/concrete_ct_10.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep11, "Footsteps/concrete_ct_11.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep12, "Footsteps/concrete_ct_12.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep13, "Footsteps/concrete_ct_13.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep14, "Footsteps/concrete_ct_14.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep15, "Footsteps/concrete_ct_15.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep16, "Footsteps/concrete_ct_16.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep17, "Footsteps/concrete_ct_17.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
     synthesizeClip(SfxId::GrenadeThrow, SfxCategory::Weapons, 0.45f, 0.12f);
     synthesizeClip(SfxId::VoiceStart, SfxCategory::Voice, 0.20f, 0.05f);
     synthesizeClip(SfxId::VoiceStop, SfxCategory::Voice, 0.14f, 0.05f);

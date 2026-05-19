@@ -303,6 +303,7 @@ private:
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
     SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
     std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
+    std::unordered_map<entt::entity, float> footstepCooldowns_;
 
     // Hitmarker
     float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
