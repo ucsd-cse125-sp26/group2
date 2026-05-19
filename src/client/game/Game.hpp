@@ -153,6 +153,7 @@ private:
     Registry registry;                                             ///< The shared ECS registry.
     Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
     UserSettings* userSettings = nullptr;                          ///< Borrowed user settings owned by App.
+    std::string_view userSettingsPath_;                            ///< Borrowed save path for user settings.
     std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
     std::optional<entt::entity>
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.

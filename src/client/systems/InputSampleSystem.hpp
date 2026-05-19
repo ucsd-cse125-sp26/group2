@@ -173,12 +173,15 @@ inline void runMovementKeys(Registry& registry, const InputBindings& bindings, b
 /// skip the remaining respawn timer and respawn immediately.
 ///
 /// @param registry  The ECS registry.
-inline void runDeadInput(Registry& registry)
+inline void runDeadInput(Registry& registry, const InputBindings& bindings)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+    const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
 
     registry.view<InputSnapshot, LocalPlayer, RespawnTimer>().each(
-        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn = kKeys[SDL_SCANCODE_SPACE]; });
+        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) {
+            snap.skipRespawn = bindings.pressed(Action::Jump, kKeys, mouse);
+        });
 }
 
 /// @brief Sample keyboard state into the weapon flags.

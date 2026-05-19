@@ -312,6 +312,7 @@ bool Game::init(AppContext& ctx)
     window = &ctx.window;
     client = &ctx.client;
     userSettings = &ctx.userSettings;
+    userSettingsPath_ = ctx.userSettingsPath;
     mouseSensitivity = userSettings->mouseSensitivity;
 
     if (const auto latestMatchState = client->getLatestMatchState()) {
@@ -909,6 +910,7 @@ void Game::clearGameplayInputForChat()
 {
     systems::grenadeRadialActive = false;
     systems::pendingGrenadeThrow = false;
+    systems::prevKillSelfKey = false;
     systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
     systems::prevAbilitySelectRight = false;
@@ -991,12 +993,15 @@ SDL_AppResult Game::event(SDL_Event* event)
     if (event->type == SDL_EVENT_KEY_DOWN) {
         if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
             if (pauseMenu.isOpen()) {
-                pauseMenu.close();
-                mouseCaptured = true;
-                SDL_SetWindowRelativeMouseMode(window, true);
-                float dx = 0.0f;
-                float dy = 0.0f;
-                SDL_GetRelativeMouseState(&dx, &dy);
+                if (pauseMenu.handleEscape()) {
+                    pauseMenu.close();
+                    mouseCaptured = true;
+                    SDL_SetWindowRelativeMouseMode(window, true);
+                    float dx = 0.0f;
+                    float dy = 0.0f;
+                    SDL_GetRelativeMouseState(&dx, &dy);
+                    clearGameplayInputForChat();
+                }
             } else {
                 pauseMenu.open();
                 mouseCaptured = false;
@@ -1501,7 +1506,7 @@ SDL_AppResult Game::iterate()
     } else if (chatOpen_)
         clearGameplayInputForChat();
     else
-        systems::runDeadInput(registry);
+        systems::runDeadInput(registry, userSettings->inputBindings);
 
     // Query local player's gravity flip state — used for mouse/stick
     // inversion AND for swapping A-D / left-stick left-right.
@@ -3849,7 +3854,11 @@ SDL_AppResult Game::iterate()
         pendingPickupNotifications_.clear();
     }
 
-    const PauseMenuResult pauseResult = pauseMenu.render();
+    const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
+    if (pauseResult.settingsApplied) {
+        mouseSensitivity = userSettings->mouseSensitivity;
+        clearGameplayInputForChat();
+    }
     if (pauseResult.resumeGame) {
         pauseMenu.close();
         mouseCaptured = true;
@@ -3857,6 +3866,7 @@ SDL_AppResult Game::iterate()
         float dx = 0.0f;
         float dy = 0.0f;
         SDL_GetRelativeMouseState(&dx, &dy);
+        clearGameplayInputForChat();
     }
     if (pauseResult.exitToDesktop)
         return SDL_APP_SUCCESS;

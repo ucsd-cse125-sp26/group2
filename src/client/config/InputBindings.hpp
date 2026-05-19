@@ -6,6 +6,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <string_view>
 
 enum class Action : uint8_t
 {
@@ -75,6 +77,32 @@ public:
     [[nodiscard]] Binding get(Action a) const;
     void rebind(Action a, Binding b);
     bool pressed(Action a, const bool* keyStates, SDL_MouseButtonFlags mouseState) const;
+
+    static constexpr std::array<Action, size_t(Action::Count)> actions()
+    {
+        return {Action::Forward,
+                Action::Back,
+                Action::Left,
+                Action::Right,
+                Action::Jump,
+                Action::Crouch,
+                Action::Ability1,
+                Action::Ability2,
+                Action::Shoot,
+                Action::Reload,
+                Action::Pickup,
+                Action::SwitchToPrimary,
+                Action::SwitchToSecondary,
+                Action::CycleGrenade,
+                Action::KillSelf};
+    }
+
+    static std::string_view actionLabel(Action a);
+    static std::string_view configKey(Action a);
+    static bool actionFromConfigKey(std::string_view key, Action& out);
+    static std::string bindingLabel(Binding b);
+    static std::string bindingConfigValue(Binding b);
+    static bool bindingFromConfigValue(std::string_view value, Binding& out);
 
 private:
     std::array<Binding, size_t(Action::Count)> bindings;

@@ -350,5 +350,6 @@ AppContext App::screenContext()
         .networkConfig = networkConfig,
         .developerConfig = developerConfig,
         .userSettings = userSettings,
+        .userSettingsPath = userSettingsPath,
     };
 }
