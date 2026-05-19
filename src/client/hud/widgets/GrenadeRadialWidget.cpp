@@ -3,6 +3,7 @@
 
 #include "GrenadeRadialWidget.hpp"
 
+#include "config/InputBindings.hpp"
 #include "hud/HudContext.hpp"
 #include "hud/VoidfallStyle.hpp"
 
@@ -20,6 +21,9 @@ GrenadeRadialWidget::GrenadeRadialWidget()
 void GrenadeRadialWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     state_ = state.grenadeRadial;
+    if (state.bindings) {
+        keyLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::CycleGrenade));
+    }
     visible = state.isAlive && state_.open;
 }
 
@@ -35,14 +39,15 @@ constexpr std::array<float, kHudGrenadeSlots * 2> k_dirs = {
     0.5f,
 };
 
-void drawKeyTag(HudContext& ctx, float x, float y, float fs)
+void drawKeyTag(HudContext& ctx, const char* label, float x, float y, float fs)
 {
     using namespace voidfall;
-    const float w = 26.0f;
+    const float padX = 8.0f;
+    const float w = std::max(26.0f, ctx.measureText(label, fs) + padX * 2.0f);
     const float h = 20.0f;
     ctx.rect(x - w * 0.5f, y - h * 0.5f, w, h, HudColor{0.0f, 0.0f, 0.0f, 0.58f});
     ctx.rectOutline(x - w * 0.5f, y - h * 0.5f, w, h, 1.0f, k_amber);
-    ctx.text("G", x, y - fs * 0.42f, fs, k_amber, HudAlign::Center, true);
+    ctx.text(label, x, y - fs * 0.42f, fs, k_amber, HudAlign::Center, true);
 }
 
 } // namespace
@@ -59,7 +64,7 @@ void GrenadeRadialWidget::draw(HudContext& ctx, float anchorX, float anchorY)
     const float countFs = countFontSize * s;
     const float keyFs = keyFontSize * s;
 
-    drawKeyTag(ctx, anchorX, anchorY, keyFs);
+    drawKeyTag(ctx, keyLabel_.c_str(), anchorX, anchorY, keyFs);
 
     for (std::size_t i = 0; i < state_.items.size(); ++i) {
         const float dx = k_dirs[i * 2] * r;

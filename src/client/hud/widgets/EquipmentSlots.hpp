@@ -16,6 +16,8 @@
 
 #include "hud/HudWidget.hpp"
 
+#include <string>
+
 struct EquipmentSlots : HudWidget
 {
     float slotSize = 64.f;
@@ -31,4 +33,7 @@ struct EquipmentSlots : HudWidget
 
 private:
     HudEquipmentState state_;
+    std::string primaryAbilityLabel_ = "Left Shift";
+    std::string secondaryAbilityLabel_ = "E";
+    std::string grenadeLabel_ = "G";
 };

@@ -999,6 +999,8 @@ add_executable(group2
         src/client/config/InputBindings.hpp
         src/client/config/UserSettings.cpp
         src/client/config/UserSettings.hpp
+        src/client/menus/pause/ConfirmModal.hpp
+        src/client/menus/pause/ConfirmModal.cpp
         src/client/menus/pause/PauseMenu.hpp
         src/client/menus/pause/PauseMenu.cpp
 )

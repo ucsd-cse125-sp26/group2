@@ -197,14 +197,12 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, flo
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
-    // TODO: ALT currently hardcoded bc InputBindings doesn't support chords of keys (e.g. Alt+LMB for ability select) —
-    // would be cleaner to have the chord logic in InputBindings so the system doesn't need to know about Alt at all.
-    const bool altHeld = kKeys[SDL_SCANCODE_LALT] || kKeys[SDL_SCANCODE_RALT];
+    const bool abilityMenuHeld = bindings.pressed(Action::AbilityMenu, kKeys, mouse);
     const bool leftDown = (mouse & SDL_BUTTON_LMASK) != 0;
     const bool rightDown = (mouse & SDL_BUTTON_RMASK) != 0;
     const bool shootDown = bindings.pressed(Action::Shoot, kKeys, mouse);
-    const bool selectLeftNow = altHeld && leftDown;
-    const bool selectRightNow = altHeld && rightDown;
+    const bool selectLeftNow = abilityMenuHeld && leftDown;
+    const bool selectRightNow = abilityMenuHeld && rightDown;
     const bool selectLeftEdge = selectLeftNow && !prevAbilitySelectLeft;
     const bool selectRightEdge = selectRightNow && !prevAbilitySelectRight;
     prevAbilitySelectLeft = selectLeftNow;
@@ -235,7 +233,7 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, flo
         grenadeRadialActive ? grenadeRadialIndexFromAim() : kInvalidGrenadeSelectIndex;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.shooting = shootDown && !altHeld;
+        snap.shooting = shootDown && !abilityMenuHeld;
         snap.switchToPrimary = bindings.pressed(Action::SwitchToPrimary, kKeys, mouse);
         snap.switchToSecondary = bindings.pressed(Action::SwitchToSecondary, kKeys, mouse);
         snap.throwGrenade = false;
@@ -243,7 +241,7 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, flo
         snap.grenadeSelectIndex = grenadeSelectIndex;
         snap.reload = bindings.pressed(Action::Reload, kKeys, mouse);
         snap.pickup = bindings.pressed(Action::Pickup, kKeys, mouse);
-        snap.abilitySelectHeld = altHeld;
+        snap.abilitySelectHeld = abilityMenuHeld;
         snap.abilitySelectLeft = selectLeftEdge;
         snap.abilitySelectRight = selectRightEdge;
     });

@@ -87,6 +87,7 @@ InputBindings InputBindings::defaults()
     b.rebind(Action::Right, Binding::bindKeyboard(SDL_SCANCODE_D));
     b.rebind(Action::Jump, Binding::bindKeyboard(SDL_SCANCODE_SPACE));
     b.rebind(Action::Crouch, Binding::bindKeyboard(SDL_SCANCODE_LCTRL));
+    b.rebind(Action::AbilityMenu, Binding::bindKeyboard(SDL_SCANCODE_LALT));
     b.rebind(Action::Ability1, Binding::bindKeyboard(SDL_SCANCODE_LSHIFT));
     b.rebind(Action::Ability2, Binding::bindKeyboard(SDL_SCANCODE_E));
     b.rebind(Action::Shoot, Binding::bindMouse(MouseButton::Left));
@@ -115,6 +116,8 @@ std::string_view InputBindings::actionLabel(Action a)
         return "Jump";
     case Action::Crouch:
         return "Crouch";
+    case Action::AbilityMenu:
+        return "Ability Menu";
     case Action::Ability1:
         return "Ability 1";
     case Action::Ability2:
@@ -154,6 +157,8 @@ std::string_view InputBindings::configKey(Action a)
         return "jump";
     case Action::Crouch:
         return "crouch";
+    case Action::AbilityMenu:
+        return "ability-menu";
     case Action::Ability1:
         return "ability-1";
     case Action::Ability2:
