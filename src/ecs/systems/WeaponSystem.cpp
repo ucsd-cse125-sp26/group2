@@ -480,16 +480,16 @@ inline void handleGrenadeInput(Registry& registry,
 inline void handleScope(Registry& registry, entt::entity shooter, const InputSnapshot& input, WeaponState& weapon, float dt)
 {
     GunInstance& gun = getEquippedGun(weapon);
+    const WeaponConfig& config = getWeaponConfig(gun.type);
 
-    if (!input.scoped || gun.fireCooldown > 0.0f) {
+    if (!config.isCharge || gun.fireCooldown > 0.0f) {
         return;
     }
 
-    const WeaponConfig& config = getWeaponConfig(gun.type);
-    if (config.isCharge) {
-        if (input.scoped) {
-            gun.chargeTime = std::min((gun.chargeTime + dt), config.maxChargeTime);
-        }
+    if (input.scoped) {
+        gun.chargeTime = std::min((gun.chargeTime + dt), config.maxChargeTime);
+    } else {
+        gun.chargeTime = 0;
     }
 }
 
