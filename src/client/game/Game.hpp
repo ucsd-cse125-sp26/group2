@@ -396,6 +396,11 @@ private:
     int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
     bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
 
+    // Hand mount tuning (shared by first-person hand meshes and third-person IK)
+    WeaponHandMountParams weaponHandMountParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
+    int handMountTuneWeaponIdx_ = 0;                 ///< Which weapon type is being tuned.
+    bool showHandMountUI_ = false;                   ///< Show the Hand Mount Tweaker window.
+
     // Weapon spawner model tuning (per weapon type, live-adjustable via ImGui)
     WeaponSpawnerModelParams spawnerWeaponParams_[4]; ///< Runtime-tunable copy; initialised from spawner defaults.
     int spawnerTuneWeaponIdx_ = 0;                    ///< Which weapon type is being tuned.

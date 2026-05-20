@@ -96,6 +96,18 @@ struct ArmIkChain
     std::vector<bool> upperDescendants;
     std::vector<bool> foreDescendants;
     std::vector<bool> handDescendants;
+    struct FingerIkChain
+    {
+        std::array<int, 4> joints{-1, -1, -1, -1};
+        std::array<std::vector<bool>, 4> descendants;
+
+        [[nodiscard]] bool valid() const noexcept
+        {
+            return joints[0] >= 0 && joints[1] >= 0 && joints[2] >= 0 && joints[3] >= 0 && !descendants[0].empty() &&
+                   !descendants[1].empty() && !descendants[2].empty();
+        }
+    };
+    std::array<FingerIkChain, kHandFingerIkCount> fingers{};
 
     [[nodiscard]] bool valid() const noexcept
     {
@@ -276,11 +288,25 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
                     descCount - 1);
         }
 
-        auto makeArmChain = [&](const char* upper, const char* fore, const char* hand) {
+        auto makeFingerChain = [&](const char* prefix) {
+            ArmIkChain::FingerIkChain finger;
+            for (int i = 0; i < 4; ++i) {
+                const std::string jointName = std::string(prefix) + std::to_string(i + 1);
+                const auto it = jm.find(jointName);
+                if (it == jm.end())
+                    return finger;
+                finger.joints[static_cast<size_t>(i)] = it->second;
+                finger.descendants[static_cast<size_t>(i)] = buildDescendantMask(rig.skeleton(), it->second);
+            }
+            return finger;
+        };
+
+        auto makeArmChain = [&](const char* side) {
             ArmIkChain chain;
-            const auto upperIt = jm.find(upper);
-            const auto foreIt = jm.find(fore);
-            const auto handIt = jm.find(hand);
+            const std::string sidePrefix = std::string("mixamorig:") + side;
+            const auto upperIt = jm.find(sidePrefix + "Arm");
+            const auto foreIt = jm.find(sidePrefix + "ForeArm");
+            const auto handIt = jm.find(sidePrefix + "Hand");
             if (upperIt == jm.end() || foreIt == jm.end() || handIt == jm.end())
                 return chain;
             chain.upperArm = upperIt->second;
@@ -289,10 +315,15 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
             chain.upperDescendants = buildDescendantMask(rig.skeleton(), chain.upperArm);
             chain.foreDescendants = buildDescendantMask(rig.skeleton(), chain.foreArm);
             chain.handDescendants = buildDescendantMask(rig.skeleton(), chain.hand);
+            chain.fingers[0] = makeFingerChain((sidePrefix + "HandThumb").c_str());
+            chain.fingers[1] = makeFingerChain((sidePrefix + "HandIndex").c_str());
+            chain.fingers[2] = makeFingerChain((sidePrefix + "HandMiddle").c_str());
+            chain.fingers[3] = makeFingerChain((sidePrefix + "HandRing").c_str());
+            chain.fingers[4] = makeFingerChain((sidePrefix + "HandPinky").c_str());
             return chain;
         };
-        impl_->leftArm = makeArmChain("mixamorig:LeftArm", "mixamorig:LeftForeArm", "mixamorig:LeftHand");
-        impl_->rightArm = makeArmChain("mixamorig:RightArm", "mixamorig:RightForeArm", "mixamorig:RightHand");
+        impl_->leftArm = makeArmChain("Left");
+        impl_->rightArm = makeArmChain("Right");
     }
 }
 
@@ -380,8 +411,44 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         return true;
     };
 
-    const bool changedLeft = solveArm(impl_->leftArm, targets.left);
-    const bool changedRight = solveArm(impl_->rightArm, targets.right);
+    auto solveFinger = [&](const ArmIkChain::FingerIkChain& chain, const glm::vec3& targetPos) {
+        if (!chain.valid())
+            return false;
+
+        bool changed = false;
+        for (int iter = 0; iter < 3; ++iter) {
+            for (int jointSlot = 2; jointSlot >= 0; --jointSlot) {
+                const int jointIdx = chain.joints[static_cast<size_t>(jointSlot)];
+                const int tipIdx = chain.joints[3];
+                const glm::vec3 jointPos = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(jointIdx)]);
+                const glm::vec3 tipPos = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(tipIdx)]);
+                const glm::vec3 toTip = tipPos - jointPos;
+                const glm::vec3 toTarget = targetPos - jointPos;
+                if (glm::length(toTip) < 0.0001f || glm::length(toTarget) < 0.0001f)
+                    continue;
+                const glm::quat rot = rotationBetween(toTip, toTarget);
+                applyDeltaToMask(impl_->jointModelMats,
+                                 chain.descendants[static_cast<size_t>(jointSlot)],
+                                 rotateAround(jointPos, rot));
+                changed = true;
+            }
+        }
+        return changed;
+    };
+
+    auto solveFingers = [&](const ArmIkChain& chain, const ArmIkTarget& target) {
+        bool changed = false;
+        for (size_t i = 0; i < kHandFingerIkCount; ++i) {
+            if (target.fingerEnabled[i])
+                changed |= solveFinger(chain.fingers[i], target.fingerPositionsModel[i]);
+        }
+        return changed;
+    };
+
+    bool changedLeft = solveArm(impl_->leftArm, targets.left);
+    bool changedRight = solveArm(impl_->rightArm, targets.right);
+    changedLeft |= solveFingers(impl_->leftArm, targets.left);
+    changedRight |= solveFingers(impl_->rightArm, targets.right);
     if (!changedLeft && !changedRight)
         return;
 

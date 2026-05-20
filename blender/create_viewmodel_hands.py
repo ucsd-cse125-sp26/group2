@@ -38,6 +38,8 @@ SIDE_CONFIG = {
         "asset": ASSETS_DIR / "viewmodel_hand_left.glb",
         "anchor_bone": "mixamorig:LeftHand",
         "groups": (
+            "mixamorig:LeftShoulder",
+            "mixamorig:LeftArm",
             "mixamorig:LeftForeArm",
             "mixamorig:LeftHand",
             "mixamorig:LeftHandThumb",
@@ -52,6 +54,8 @@ SIDE_CONFIG = {
         "asset": ASSETS_DIR / "viewmodel_hand_right.glb",
         "anchor_bone": "mixamorig:RightHand",
         "groups": (
+            "mixamorig:RightShoulder",
+            "mixamorig:RightArm",
             "mixamorig:RightForeArm",
             "mixamorig:RightHand",
             "mixamorig:RightHandThumb",

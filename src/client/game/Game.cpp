@@ -72,7 +72,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
+#include <iomanip>
 #include <numeric>
+#include <sstream>
 #include <string_view>
 
 #if defined(__linux__)
@@ -134,17 +136,25 @@ glm::mat4 handMountRotation(const HandMountPoint& mount)
 
 struct WeaponAttachmentPose
 {
+    struct HandPose
+    {
+        glm::vec3 palm{0.0f};
+        std::array<glm::vec3, kHandFingerMountCount> fingers{};
+    };
+
     glm::mat4 weaponWorld{1.0f};
     glm::mat4 weaponOrientation{1.0f};
     glm::vec3 origin{0.0f};
-    glm::vec3 rightHandWorld{0.0f};
-    glm::vec3 leftHandWorld{0.0f};
+    HandPose rightHand{};
+    HandPose leftHand{};
 };
 
-WeaponAttachmentPose buildThirdPersonWeaponAttachment(
-    const glm::vec3& playerPos, float yaw, float pitch, WeaponType type, const ThirdPersonWeaponParams& tp)
+WeaponAttachmentPose buildThirdPersonWeaponAttachment(const glm::vec3& playerPos,
+                                                      float yaw,
+                                                      float pitch,
+                                                      const ThirdPersonWeaponParams& tp,
+                                                      const WeaponHandMountParams& mounts)
 {
-    const auto& mounts = getWeaponHandMountParams(type);
     const glm::vec3 playerFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
     const glm::vec3 playerRight = glm::normalize(glm::cross(playerFwd, glm::vec3{0, 1, 0}));
     const glm::vec3 origin =
@@ -158,8 +168,15 @@ WeaponAttachmentPose buildThirdPersonWeaponAttachment(
     WeaponAttachmentPose pose;
     pose.origin = origin;
     pose.weaponOrientation = orientation;
-    pose.rightHandWorld = origin + transformDirection(orientation, mounts.rightHand.offset);
-    pose.leftHandWorld = origin + transformDirection(orientation, mounts.leftHand.offset);
+    auto resolveHand = [&](const HandMountSet& hand) {
+        WeaponAttachmentPose::HandPose handPose;
+        handPose.palm = origin + transformDirection(orientation, hand.palm.offset);
+        for (size_t i = 0; i < kHandFingerMountCount; ++i)
+            handPose.fingers[i] = origin + transformDirection(orientation, hand.fingers[i].offset);
+        return handPose;
+    };
+    pose.rightHand = resolveHand(mounts.rightHand);
+    pose.leftHand = resolveHand(mounts.leftHand);
     pose.weaponWorld = glm::translate(glm::mat4(1.0f), origin) * orientation;
     pose.weaponWorld = glm::scale(pose.weaponWorld, glm::vec3(tp.scale));
     return pose;
@@ -176,6 +193,53 @@ glm::mat4 makeViewmodelHandTransform(const glm::vec3& weaponOrigin,
     handWorld *= handMountRotation(mount);
     handWorld = glm::scale(handWorld, glm::vec3(handScale));
     return handWorld;
+}
+
+void copyHandMountPoint(std::ostringstream& out, const HandMountPoint& point)
+{
+    out << "{.offset = {" << point.offset.x << "f, " << point.offset.y << "f, " << point.offset.z
+        << "f}, .rotationDegrees = {" << point.rotationDegrees.x << "f, " << point.rotationDegrees.y << "f, "
+        << point.rotationDegrees.z << "f}}";
+}
+
+void copyHandMountSet(std::ostringstream& out, const char* label, const HandMountSet& hand)
+{
+    out << "." << label << " = {.palm = ";
+    copyHandMountPoint(out, hand.palm);
+    out << ", .fingers = {{\n";
+    for (const HandMountPoint& finger : hand.fingers) {
+        out << "    ";
+        copyHandMountPoint(out, finger);
+        out << ",\n";
+    }
+    out << "}}}";
+}
+
+std::string buildHandMountClipboardText(const WeaponHandMountParams* mountParams,
+                                        const ThirdPersonWeaponParams* tpParams)
+{
+    static constexpr const char* k_weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(3);
+    out << "// Current third-person weapon settings\n";
+    for (int i = 0; i < 4; ++i) {
+        const auto& tp = tpParams[i];
+        out << "// " << k_weaponNames[i] << ": scale=" << tp.scale << "f handOffset={" << tp.handOffset.x << "f, "
+            << tp.handOffset.y << "f, " << tp.handOffset.z << "f} yaw=" << tp.yawOffset << "f pitch=" << tp.pitchOffset
+            << "f roll=" << tp.rollOffset << "f\n";
+    }
+    out << "\n// Current WeaponHandMountParams entries\n";
+    out << "static const std::array<WeaponHandMountParams, 4> k_params{{\n";
+    for (int i = 0; i < 4; ++i) {
+        out << "    // " << k_weaponNames[i] << "\n";
+        out << "    {";
+        copyHandMountSet(out, "rightHand", mountParams[i].rightHand);
+        out << ",\n     ";
+        copyHandMountSet(out, "leftHand", mountParams[i].leftHand);
+        out << ",\n     .viewmodelHandScale = " << mountParams[i].viewmodelHandScale << "f},\n";
+    }
+    out << "}};\n";
+    return out.str();
 }
 
 /// @brief Resolve a `ClientId` to its display nickname.
@@ -742,6 +806,7 @@ bool Game::init(AppContext& ctx)
     // Initialize runtime 3P weapon params from defaults
     for (int i = 0; i < 4; ++i) {
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
+        weaponHandMountParams_[i] = getWeaponHandMountParams(static_cast<WeaponType>(i));
         spawnerWeaponParams_[i] = defaultSpawnerModelParams(static_cast<WeaponType>(i));
     }
 
@@ -2295,13 +2360,22 @@ SDL_AppResult Game::iterate()
                         const GunInstance& gun = getEquippedGun(*ws);
                         if (isRenderableGunType(gun.type)) {
                             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
+                            const auto& mounts = weaponHandMountParams_[static_cast<int>(gun.type)];
                             const WeaponAttachmentPose pose =
-                                buildThirdPersonWeaponAttachment(renderPos, renderYaw, inp.pitch, gun.type, tp);
+                                buildThirdPersonWeaponAttachment(renderPos, renderYaw, inp.pitch, tp, mounts);
                             const glm::mat4 invWorld = glm::inverse(world);
                             c.handIk.right.enabled = true;
                             c.handIk.left.enabled = true;
-                            c.handIk.right.positionModel = glm::vec3(invWorld * glm::vec4(pose.rightHandWorld, 1.0f));
-                            c.handIk.left.positionModel = glm::vec3(invWorld * glm::vec4(pose.leftHandWorld, 1.0f));
+                            c.handIk.right.positionModel = glm::vec3(invWorld * glm::vec4(pose.rightHand.palm, 1.0f));
+                            c.handIk.left.positionModel = glm::vec3(invWorld * glm::vec4(pose.leftHand.palm, 1.0f));
+                            for (size_t i = 0; i < kHandFingerMountCount && i < kHandFingerIkCount; ++i) {
+                                c.handIk.right.fingerEnabled[i] = true;
+                                c.handIk.left.fingerEnabled[i] = true;
+                                c.handIk.right.fingerPositionsModel[i] =
+                                    glm::vec3(invWorld * glm::vec4(pose.rightHand.fingers[i], 1.0f));
+                                c.handIk.left.fingerPositionsModel[i] =
+                                    glm::vec3(invWorld * glm::vec4(pose.leftHand.fingers[i], 1.0f));
+                            }
                             c.sampleThisFrame = true;
                         }
                     }
@@ -2716,8 +2790,8 @@ SDL_AppResult Game::iterate()
                 return;
 
             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
-            const WeaponAttachmentPose pose =
-                buildThirdPersonWeaponAttachment(playerPos, yaw, input.pitch, gun.type, tp);
+            const auto& mounts = weaponHandMountParams_[static_cast<int>(gun.type)];
+            const WeaponAttachmentPose pose = buildThirdPersonWeaponAttachment(playerPos, yaw, input.pitch, tp, mounts);
 
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = pose.weaponWorld});
         });
@@ -3053,18 +3127,18 @@ SDL_AppResult Game::iterate()
             weaponWorld = glm::scale(weaponWorld, glm::vec3(-vmScale, vmScale, vmScale));
 
             vm.transform = weaponWorld;
-            const auto& handMounts = getWeaponHandMountParams(currentEquippedType_);
+            const auto& handMounts = weaponHandMountParams_[static_cast<int>(currentEquippedType_)];
             if (viewmodelRightHandModelIdx_ >= 0) {
                 vm.hands.right.modelIndex = viewmodelRightHandModelIdx_;
                 vm.hands.right.visible = true;
                 vm.hands.right.transform = makeViewmodelHandTransform(
-                    weaponPos, weaponOrientation, handMounts.rightHand, handMounts.viewmodelHandScale);
+                    weaponPos, weaponOrientation, handMounts.rightHand.palm, handMounts.viewmodelHandScale);
             }
             if (viewmodelLeftHandModelIdx_ >= 0) {
                 vm.hands.left.modelIndex = viewmodelLeftHandModelIdx_;
                 vm.hands.left.visible = true;
                 vm.hands.left.transform = makeViewmodelHandTransform(
-                    weaponPos, weaponOrientation, handMounts.leftHand, handMounts.viewmodelHandScale);
+                    weaponPos, weaponOrientation, handMounts.leftHand.palm, handMounts.viewmodelHandScale);
             }
         }
         renderer->setWeaponViewmodel(vm);
@@ -3155,6 +3229,7 @@ SDL_AppResult Game::iterate()
             {"HUD Tweaker", &showHudDebug_},
             {"Viewmodel Tweaker", &showViewmodelUI},
             {"3P Weapon Tweaker", &showTPWeaponUI_},
+            {"Hand Mount Tweaker", &showHandMountUI_},
             {"Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_},
             {"Dynamic Lighting", &showDynLightUI_},
             {"Animation Tester", &animUI_.show},
@@ -3364,7 +3439,7 @@ SDL_AppResult Game::iterate()
             ImGui::DragFloat("TP Roll", &tp.rollOffset, 1.0f, -180.0f, 180.0f, "%.1f");
 
             ImGui::SeparatorText("Scale");
-            ImGui::DragFloat("TP Scale", &tp.scale, 0.0001f, 0.0001f, 10.0f, "%.5f");
+            ImGui::DragFloat("TP Scale", &tp.scale, 0.05f, 0.0001f, 30.0f, "%.3f");
 
             ImGui::Separator();
             if (ImGui::Button("Reset to defaults")) {
@@ -3381,6 +3456,47 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(tp.yawOffset),
                         static_cast<double>(tp.pitchOffset),
                         static_cast<double>(tp.rollOffset));
+            }
+        }
+        ImGui::End();
+    }
+
+    // Hand mount tweaker — shared mount table for first-person hands and third-person IK.
+    if (showHandMountUI_) {
+        if (ImGui::Begin("Hand Mount Tweaker", &showHandMountUI_)) {
+            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun / Charge Rifle", "EnergyGun"};
+            ImGui::Combo("Weapon", &handMountTuneWeaponIdx_, weaponNames, 4);
+
+            auto& mounts = weaponHandMountParams_[handMountTuneWeaponIdx_];
+            ImGui::DragFloat("Viewmodel Hand Scale", &mounts.viewmodelHandScale, 0.25f, 1.0f, 120.0f, "%.2f");
+
+            auto drawMountPoint = [](const char* label, HandMountPoint& point) {
+                ImGui::PushID(label);
+                ImGui::SeparatorText(label);
+                ImGui::DragFloat3("Offset", &point.offset.x, 0.25f, -80.0f, 80.0f, "%.2f");
+                ImGui::DragFloat3("Rotation", &point.rotationDegrees.x, 1.0f, -180.0f, 180.0f, "%.1f");
+                ImGui::PopID();
+            };
+
+            auto drawHand = [&](const char* label, HandMountSet& hand) {
+                if (!ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen))
+                    return;
+                drawMountPoint("Palm", hand.palm);
+                for (size_t i = 0; i < kHandFingerMountCount; ++i)
+                    drawMountPoint(kHandFingerMountNames[i], hand.fingers[i]);
+            };
+
+            drawHand("Right Hand", mounts.rightHand);
+            drawHand("Left Hand", mounts.leftHand);
+
+            ImGui::Separator();
+            if (ImGui::Button("Reset Selected Weapon")) {
+                mounts = getWeaponHandMountParams(static_cast<WeaponType>(handMountTuneWeaponIdx_));
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Copy All Current Settings")) {
+                const std::string text = buildHandMountClipboardText(weaponHandMountParams_, tpWeaponParams_);
+                ImGui::SetClipboardText(text.c_str());
             }
         }
         ImGui::End();

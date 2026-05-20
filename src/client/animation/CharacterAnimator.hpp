@@ -48,10 +48,14 @@ struct ClipSampler
     bool active = false;        ///< False = slot unused this frame.
 };
 
+static constexpr size_t kHandFingerIkCount = 5;
+
 /// @brief Model-space IK target for one player hand.
 struct ArmIkTarget
 {
     glm::vec3 positionModel{0.0f};
+    std::array<glm::vec3, kHandFingerIkCount> fingerPositionsModel{};
+    std::array<bool, kHandFingerIkCount> fingerEnabled{};
     bool enabled = false;
 };
 
