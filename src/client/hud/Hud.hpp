@@ -61,7 +61,6 @@ private:
     std::vector<std::unique_ptr<HudWidget>> widgets_;
 
     float screenW_ = 0.f, screenH_ = 0.f;
-    bool railgunScoped_ = false;
 
     /// @brief Resolve anchor + offset to pixel coordinates.
     void resolveAnchor(const HudWidget& w, float& outX, float& outY) const;

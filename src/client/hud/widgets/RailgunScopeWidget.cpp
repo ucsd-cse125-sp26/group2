@@ -68,7 +68,6 @@ RailgunScopeWidget::RailgunScopeWidget()
 {
     anchor = HudAnchor::TopLeft;
     visible = false;
-    visibleWhileScoped = true;
 }
 
 void RailgunScopeWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
