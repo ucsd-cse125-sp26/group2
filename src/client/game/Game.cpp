@@ -102,12 +102,80 @@ WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
     return getWeaponSpawnerModelParams(type);
 }
 
+bool isRenderableGunType(WeaponType type)
+{
+    return static_cast<std::size_t>(type) < kWeaponAssets.size();
+}
+
 glm::quat spawnerModelRotation(const WeaponSpawnerModelParams& params, float timeSeconds, bool active)
 {
     const glm::vec3 r = glm::radians(glm::vec3{params.pitchOffset, params.yawOffset, params.rollOffset});
     const float spin = active ? glm::radians(params.spinDegreesPerSecond) * timeSeconds : 0.0f;
     return glm::angleAxis(spin + r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
            glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
+}
+
+glm::mat4 weaponRotationMatrix(float yawDegrees, float pitchDegrees, float rollDegrees)
+{
+    return glm::rotate(glm::mat4(1.0f), glm::radians(yawDegrees), glm::vec3{0, 1, 0}) *
+           glm::rotate(glm::mat4(1.0f), glm::radians(pitchDegrees), glm::vec3{1, 0, 0}) *
+           glm::rotate(glm::mat4(1.0f), glm::radians(rollDegrees), glm::vec3{0, 0, 1});
+}
+
+glm::vec3 transformDirection(const glm::mat4& basis, const glm::vec3& direction)
+{
+    return glm::vec3(basis * glm::vec4(direction, 0.0f));
+}
+
+glm::mat4 handMountRotation(const HandMountPoint& mount)
+{
+    return weaponRotationMatrix(mount.rotationDegrees.y, mount.rotationDegrees.x, mount.rotationDegrees.z);
+}
+
+struct WeaponAttachmentPose
+{
+    glm::mat4 weaponWorld{1.0f};
+    glm::mat4 weaponOrientation{1.0f};
+    glm::vec3 origin{0.0f};
+    glm::vec3 rightHandWorld{0.0f};
+    glm::vec3 leftHandWorld{0.0f};
+};
+
+WeaponAttachmentPose buildThirdPersonWeaponAttachment(
+    const glm::vec3& playerPos, float yaw, float pitch, WeaponType type, const ThirdPersonWeaponParams& tp)
+{
+    const auto& mounts = getWeaponHandMountParams(type);
+    const glm::vec3 playerFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
+    const glm::vec3 playerRight = glm::normalize(glm::cross(playerFwd, glm::vec3{0, 1, 0}));
+    const glm::vec3 origin =
+        playerPos + playerRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + playerFwd * tp.handOffset.z;
+
+    const float clampedPitch = std::clamp(pitch, glm::radians(-30.0f), glm::radians(30.0f));
+    glm::mat4 orientation = glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
+    orientation *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
+    orientation *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
+
+    WeaponAttachmentPose pose;
+    pose.origin = origin;
+    pose.weaponOrientation = orientation;
+    pose.rightHandWorld = origin + transformDirection(orientation, mounts.rightHand.offset);
+    pose.leftHandWorld = origin + transformDirection(orientation, mounts.leftHand.offset);
+    pose.weaponWorld = glm::translate(glm::mat4(1.0f), origin) * orientation;
+    pose.weaponWorld = glm::scale(pose.weaponWorld, glm::vec3(tp.scale));
+    return pose;
+}
+
+glm::mat4 makeViewmodelHandTransform(const glm::vec3& weaponOrigin,
+                                     const glm::mat4& weaponOrientation,
+                                     const HandMountPoint& mount,
+                                     float handScale)
+{
+    const glm::vec3 target = weaponOrigin + transformDirection(weaponOrientation, mount.offset);
+    glm::mat4 handWorld = glm::translate(glm::mat4(1.0f), target);
+    handWorld *= weaponOrientation;
+    handWorld *= handMountRotation(mount);
+    handWorld = glm::scale(handWorld, glm::vec3(handScale));
+    return handWorld;
 }
 
 /// @brief Resolve a `ClientId` to its display nickname.
@@ -463,6 +531,15 @@ bool Game::init(AppContext& ctx)
 
             if (rocketProjectileModelIdx_ < 0)
                 SDL_Log("[client] WARNING: rocket projectile model '%s' failed to load", kRocketProjectile.filename);
+        }
+
+        viewmodelLeftHandModelIdx_ = renderer->loadSceneModel("viewmodel_hand_left.glb", glm::vec3{0.0f}, 1.0f, false);
+        viewmodelRightHandModelIdx_ =
+            renderer->loadSceneModel("viewmodel_hand_right.glb", glm::vec3{0.0f}, 1.0f, false);
+        renderer->setModelScenePass(viewmodelLeftHandModelIdx_, false);
+        renderer->setModelScenePass(viewmodelRightHandModelIdx_, false);
+        if (viewmodelLeftHandModelIdx_ < 0 || viewmodelRightHandModelIdx_ < 0) {
+            SDL_Log("[client] WARNING: viewmodel hand assets failed to load — first-person hands disabled");
         }
     }
 
@@ -2079,6 +2156,7 @@ SDL_AppResult Game::iterate()
             glm::vec3 audioPosition{0.0f};
             glm::mat4 worldTransform{1.0f};
             glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< rgb=color, a=blend factor (0=no tint).
+            HandIkTargets handIk{};
             bool sampleThisFrame = false;           ///< call animator->update()
             bool drawThisFrame = false;             ///< write to instance/palette slots
             bool isLocal = false;
@@ -2212,6 +2290,21 @@ SDL_AppResult Game::iterate()
                     world *= glm::mat4_cast(orient);
                     world = glm::scale(world, scale);
                     c.worldTransform = world;
+
+                    if (const auto* ws = registry.try_get<WeaponState>(e); ws != nullptr) {
+                        const GunInstance& gun = getEquippedGun(*ws);
+                        if (isRenderableGunType(gun.type)) {
+                            const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
+                            const WeaponAttachmentPose pose =
+                                buildThirdPersonWeaponAttachment(renderPos, renderYaw, inp.pitch, gun.type, tp);
+                            const glm::mat4 invWorld = glm::inverse(world);
+                            c.handIk.right.enabled = true;
+                            c.handIk.left.enabled = true;
+                            c.handIk.right.positionModel = glm::vec3(invWorld * glm::vec4(pose.rightHandWorld, 1.0f));
+                            c.handIk.left.positionModel = glm::vec3(invWorld * glm::vec4(pose.leftHandWorld, 1.0f));
+                            c.sampleThisFrame = true;
+                        }
+                    }
                 }
 
                 candidates.push_back(c);
@@ -2252,6 +2345,9 @@ SDL_AppResult Game::iterate()
         }
 
         for (const auto& c : candidates) {
+            if (c.drawThisFrame && c.ac != nullptr && c.ac->animator)
+                c.ac->animator->applyHandIkTargets(c.handIk);
+
             if (c.sampleThisFrame) {
                 auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
                 jm.matrices = c.ac->animator->jointModelMatrices();
@@ -2613,29 +2709,17 @@ SDL_AppResult Game::iterate()
                 return;
 
             const GunInstance& gun = getEquippedGun(ws);
+            if (!isRenderableGunType(gun.type))
+                return;
             const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
             if (wpnIdx < 0)
                 return;
 
             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
+            const WeaponAttachmentPose pose =
+                buildThirdPersonWeaponAttachment(playerPos, yaw, input.pitch, gun.type, tp);
 
-            // Player orientation vectors (horizontal plane)
-            const glm::vec3 pFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
-            const glm::vec3 pRight = glm::normalize(glm::cross(pFwd, glm::vec3{0, 1, 0}));
-
-            // Weapon world position = player center + hand offset
-            glm::vec3 wpnPos =
-                playerPos + pRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + pFwd * tp.handOffset.z;
-
-            // Build transform: translate -> yaw -> pitch -> roll -> scale
-            glm::mat4 wpnWorld = glm::translate(glm::mat4(1.0f), wpnPos);
-            wpnWorld *= glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
-            float clampedPitch = std::clamp(input.pitch, glm::radians(-30.0f), glm::radians(30.0f));
-            wpnWorld *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
-            wpnWorld *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
-            wpnWorld = glm::scale(wpnWorld, glm::vec3(tp.scale));
-
-            entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = wpnWorld});
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = pose.weaponWorld});
         });
 
         // // Glow sphere — always rendered at a fixed world position for bloom testing.
@@ -2960,15 +3044,28 @@ SDL_AppResult Game::iterate()
                 glm::rotate(glm::mat4(1.0f), glm::radians(vmYawOffset), glm::vec3(0, 1, 0)) *
                 glm::rotate(glm::mat4(1.0f), glm::radians(vmPitchOffset + recoilPitch_), glm::vec3(1, 0, 0)) *
                 glm::rotate(glm::mat4(1.0f), glm::radians(vmRollOffset + recoilRoll_), glm::vec3(0, 0, 1));
+            const glm::mat4 weaponOrientation = cameraOrient * localRot;
 
             glm::mat4 weaponWorld = glm::translate(glm::mat4(1.0f), weaponPos);
-            weaponWorld *= cameraOrient;
-            weaponWorld *= localRot;
+            weaponWorld *= weaponOrientation;
             // Negate X to cancel the reflection in the camera orient matrix
             // (right, up, forward has det = -1).
             weaponWorld = glm::scale(weaponWorld, glm::vec3(-vmScale, vmScale, vmScale));
 
             vm.transform = weaponWorld;
+            const auto& handMounts = getWeaponHandMountParams(currentEquippedType_);
+            if (viewmodelRightHandModelIdx_ >= 0) {
+                vm.hands.right.modelIndex = viewmodelRightHandModelIdx_;
+                vm.hands.right.visible = true;
+                vm.hands.right.transform = makeViewmodelHandTransform(
+                    weaponPos, weaponOrientation, handMounts.rightHand, handMounts.viewmodelHandScale);
+            }
+            if (viewmodelLeftHandModelIdx_ >= 0) {
+                vm.hands.left.modelIndex = viewmodelLeftHandModelIdx_;
+                vm.hands.left.visible = true;
+                vm.hands.left.transform = makeViewmodelHandTransform(
+                    weaponPos, weaponOrientation, handMounts.leftHand, handMounts.viewmodelHandScale);
+            }
         }
         renderer->setWeaponViewmodel(vm);
     }

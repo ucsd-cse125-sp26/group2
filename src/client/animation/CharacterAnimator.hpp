@@ -48,6 +48,20 @@ struct ClipSampler
     bool active = false;        ///< False = slot unused this frame.
 };
 
+/// @brief Model-space IK target for one player hand.
+struct ArmIkTarget
+{
+    glm::vec3 positionModel{0.0f};
+    bool enabled = false;
+};
+
+/// @brief Optional per-frame IK targets for both hands.
+struct HandIkTargets
+{
+    ArmIkTarget left;
+    ArmIkTarget right;
+};
+
 /// @brief Per-entity animator.
 ///
 /// Runs a small state machine that chooses which clips play, samples + blends
@@ -115,6 +129,12 @@ public:
 
     /// @brief Playback-speed multiplier applied in debug-override mode.
     void setDebugPlaybackSpeed(float mul) noexcept;
+
+    /// @brief Move the arm chains so hands reach weapon-authored grip targets.
+    ///
+    /// Targets are in rig model space and should be applied after sampling for
+    /// the frame, before copying joint/skinning matrices into renderer buffers.
+    void applyHandIkTargets(const HandIkTargets& targets);
 
     /// @brief Number of joints in the underlying rig.
     [[nodiscard]] int numJoints() const noexcept;

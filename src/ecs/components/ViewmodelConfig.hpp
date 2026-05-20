@@ -25,6 +25,24 @@ struct ThirdPersonWeaponParams
     float yawOffset, pitchOffset, rollOffset; // degrees
 };
 
+/// @brief A weapon-local grip point for either hand.
+///
+/// `offset` is measured in render/world units after the weapon has been placed:
+/// x = weapon right, y = weapon up, z = weapon forward.
+struct HandMountPoint
+{
+    glm::vec3 offset{0.0f};
+    glm::vec3 rotationDegrees{0.0f};
+};
+
+/// @brief Per-weapon hand mount targets used by first-person hands and 3P arm IK.
+struct WeaponHandMountParams
+{
+    HandMountPoint rightHand;
+    HandMountPoint leftHand;
+    float viewmodelHandScale = 45.0f;
+};
+
 /// @brief World weapon spawner model params.
 struct WeaponSpawnerModelParams
 {
@@ -115,6 +133,31 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
         {.scale = 1.0f, .handOffset = {7.5f, 7.5f, 15.0f}, .yawOffset = 0.0f, .pitchOffset = 96.0f, .rollOffset = 2.0f},
         // EnergyGun
         {.scale = 1.0f, .handOffset = {7.5f, 7.0f, 6.0f}, .yawOffset = 6.0f, .pitchOffset = 94.0f, .rollOffset = 0.0f},
+    }};
+
+    return k_params[static_cast<std::size_t>(type)];
+}
+
+/// @brief Returns hand grip/mount points for a weapon type.
+inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
+{
+    static const std::array<WeaponHandMountParams, 4> k_params{{
+        // Rifle: trigger hand near the rear grip, support hand forward under the barrel.
+        {.rightHand = {.offset = {2.5f, -4.0f, -7.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .leftHand = {.offset = {-8.0f, -4.5f, 13.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .viewmodelHandScale = 45.0f},
+        // Rocket launcher: wider support stance.
+        {.rightHand = {.offset = {3.0f, -5.5f, -12.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .leftHand = {.offset = {-10.0f, -5.0f, 18.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .viewmodelHandScale = 45.0f},
+        // Railgun: long front support grip.
+        {.rightHand = {.offset = {2.5f, -4.5f, -8.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .leftHand = {.offset = {-8.0f, -4.5f, 16.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .viewmodelHandScale = 42.0f},
+        // Energy gun / pistol: compact two-hand grip.
+        {.rightHand = {.offset = {2.0f, -4.0f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .leftHand = {.offset = {-5.5f, -4.5f, 5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+         .viewmodelHandScale = 42.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];

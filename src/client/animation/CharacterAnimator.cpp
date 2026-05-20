@@ -27,6 +27,8 @@
 #include <algorithm>
 #include <cmath>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace
 {
@@ -86,6 +88,88 @@ enum WallSideValue
     WallSideRight = 2,
 };
 
+struct ArmIkChain
+{
+    int upperArm = -1;
+    int foreArm = -1;
+    int hand = -1;
+    std::vector<bool> upperDescendants;
+    std::vector<bool> foreDescendants;
+    std::vector<bool> handDescendants;
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        return upperArm >= 0 && foreArm >= 0 && hand >= 0 && !upperDescendants.empty() && !foreDescendants.empty() &&
+               !handDescendants.empty();
+    }
+};
+
+glm::vec3 matrixTranslation(const glm::mat4& m)
+{
+    return glm::vec3(m[3]);
+}
+
+glm::vec3 normalizedOr(const glm::vec3& v, const glm::vec3& fallback)
+{
+    const float len = glm::length(v);
+    return len > 0.0001f ? v / len : fallback;
+}
+
+glm::quat rotationBetween(glm::vec3 from, glm::vec3 to)
+{
+    from = normalizedOr(from, glm::vec3{1.0f, 0.0f, 0.0f});
+    to = normalizedOr(to, from);
+    const float cosTheta = std::clamp(glm::dot(from, to), -1.0f, 1.0f);
+    if (cosTheta > 0.9995f)
+        return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    if (cosTheta < -0.9995f) {
+        glm::vec3 axis = glm::cross(glm::vec3{0.0f, 1.0f, 0.0f}, from);
+        if (glm::dot(axis, axis) < 0.0001f)
+            axis = glm::cross(glm::vec3{1.0f, 0.0f, 0.0f}, from);
+        return glm::angleAxis(glm::pi<float>(), glm::normalize(axis));
+    }
+    const glm::vec3 axis = glm::cross(from, to);
+    return glm::normalize(glm::quat(1.0f + cosTheta, axis.x, axis.y, axis.z));
+}
+
+glm::mat4 rotateAround(const glm::vec3& pivot, const glm::quat& rotation)
+{
+    return glm::translate(glm::mat4(1.0f), pivot) * glm::mat4_cast(rotation) * glm::translate(glm::mat4(1.0f), -pivot);
+}
+
+std::vector<bool> buildDescendantMask(const ozz::animation::Skeleton* skeleton, int root)
+{
+    std::vector<bool> mask;
+    if (skeleton == nullptr || root < 0)
+        return mask;
+
+    const int jointCount = skeleton->num_joints();
+    mask.assign(static_cast<size_t>(jointCount), false);
+    mask[static_cast<size_t>(root)] = true;
+
+    const auto parents = skeleton->joint_parents();
+    for (int joint = 0; joint < jointCount; ++joint) {
+        int parent = static_cast<int>(parents[static_cast<size_t>(joint)]);
+        while (parent >= 0) {
+            if (parent == root) {
+                mask[static_cast<size_t>(joint)] = true;
+                break;
+            }
+            parent = static_cast<int>(parents[static_cast<size_t>(parent)]);
+        }
+    }
+    return mask;
+}
+
+void applyDeltaToMask(std::vector<glm::mat4>& matrices, const std::vector<bool>& mask, const glm::mat4& delta)
+{
+    const size_t count = std::min(matrices.size(), mask.size());
+    for (size_t i = 0; i < count; ++i) {
+        if (mask[i])
+            matrices[i] = delta * matrices[i];
+    }
+}
+
 } // namespace
 
 struct CharacterAnimator::Impl
@@ -126,6 +210,10 @@ struct CharacterAnimator::Impl
     // Head-look procedural pitch.
     int headJointIdx = -1;              ///< Runtime index of "mixamorig:Head" (-1 = not found).
     std::vector<bool> isHeadDescendant; ///< Per-joint flag: true for head + all children.
+
+    // Weapon grip IK chains.
+    ArmIkChain leftArm;
+    ArmIkChain rightArm;
 
     // Debug override.
     ClipId debugOverrideId = ClipId::_Count;
@@ -187,6 +275,24 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
                     impl_->headJointIdx,
                     descCount - 1);
         }
+
+        auto makeArmChain = [&](const char* upper, const char* fore, const char* hand) {
+            ArmIkChain chain;
+            const auto upperIt = jm.find(upper);
+            const auto foreIt = jm.find(fore);
+            const auto handIt = jm.find(hand);
+            if (upperIt == jm.end() || foreIt == jm.end() || handIt == jm.end())
+                return chain;
+            chain.upperArm = upperIt->second;
+            chain.foreArm = foreIt->second;
+            chain.hand = handIt->second;
+            chain.upperDescendants = buildDescendantMask(rig.skeleton(), chain.upperArm);
+            chain.foreDescendants = buildDescendantMask(rig.skeleton(), chain.foreArm);
+            chain.handDescendants = buildDescendantMask(rig.skeleton(), chain.hand);
+            return chain;
+        };
+        impl_->leftArm = makeArmChain("mixamorig:LeftArm", "mixamorig:LeftForeArm", "mixamorig:LeftHand");
+        impl_->rightArm = makeArmChain("mixamorig:RightArm", "mixamorig:RightForeArm", "mixamorig:RightHand");
     }
 }
 
@@ -218,6 +324,71 @@ const std::array<ClipSampler, kNumSamplerSlots>& CharacterAnimator::samplers() c
 void CharacterAnimator::setDebugPlaybackSpeed(float mul) noexcept
 {
     impl_->debugPlaybackSpeedMul = std::max(0.0f, mul);
+}
+
+void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
+{
+    if (!impl_->rig || impl_->jointModelMats.empty() || impl_->skinMats.empty())
+        return;
+
+    auto solveArm = [&](const ArmIkChain& chain, const ArmIkTarget& target) {
+        if (!target.enabled || !chain.valid())
+            return false;
+
+        const glm::vec3 shoulder = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.upperArm)]);
+        const glm::vec3 elbow = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.foreArm)]);
+        const glm::vec3 wrist = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.hand)]);
+
+        const float upperLen = glm::length(elbow - shoulder);
+        const float foreLen = glm::length(wrist - elbow);
+        if (upperLen < 0.0001f || foreLen < 0.0001f)
+            return false;
+
+        glm::vec3 targetPos = target.positionModel;
+        glm::vec3 toTarget = targetPos - shoulder;
+        float targetDist = glm::length(toTarget);
+        if (targetDist < 0.0001f)
+            return false;
+
+        const float maxReach = std::max(0.0001f, upperLen + foreLen - 0.001f);
+        const float minReach = std::max(0.0001f, std::abs(upperLen - foreLen) + 0.001f);
+        const float solvedDist = std::clamp(targetDist, minReach, maxReach);
+        const glm::vec3 reachDir = toTarget / targetDist;
+        targetPos = shoulder + reachDir * solvedDist;
+
+        const glm::vec3 currentPoleBase = shoulder + reachDir * glm::dot(elbow - shoulder, reachDir);
+        glm::vec3 pole = elbow - currentPoleBase;
+        if (glm::dot(pole, pole) < 0.0001f) {
+            pole = glm::cross(reachDir, glm::vec3{0.0f, 1.0f, 0.0f});
+            if (glm::dot(pole, pole) < 0.0001f)
+                pole = glm::cross(reachDir, glm::vec3{1.0f, 0.0f, 0.0f});
+        }
+        pole = glm::normalize(pole);
+
+        const float along = std::clamp(
+            (upperLen * upperLen + solvedDist * solvedDist - foreLen * foreLen) / (2.0f * solvedDist), 0.0f, upperLen);
+        const float height = std::sqrt(std::max(0.0f, upperLen * upperLen - along * along));
+        const glm::vec3 solvedElbow = shoulder + reachDir * along + pole * height;
+
+        const glm::quat upperRot = rotationBetween(elbow - shoulder, solvedElbow - shoulder);
+        applyDeltaToMask(impl_->jointModelMats, chain.upperDescendants, rotateAround(shoulder, upperRot));
+
+        const glm::vec3 currentElbow = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.foreArm)]);
+        const glm::vec3 currentWrist = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.hand)]);
+        const glm::quat foreRot = rotationBetween(currentWrist - currentElbow, targetPos - currentElbow);
+        applyDeltaToMask(impl_->jointModelMats, chain.foreDescendants, rotateAround(currentElbow, foreRot));
+        return true;
+    };
+
+    const bool changedLeft = solveArm(impl_->leftArm, targets.left);
+    const bool changedRight = solveArm(impl_->rightArm, targets.right);
+    if (!changedLeft && !changedRight)
+        return;
+
+    const std::vector<glm::mat4>& inverseBind = impl_->rig->inverseBindMatrices();
+    const size_t count = std::min(impl_->skinMats.size(), inverseBind.size());
+    for (size_t i = 0; i < count; ++i)
+        impl_->skinMats[i] = impl_->jointModelMats[i] * inverseBind[i];
 }
 
 int CharacterAnimator::numJoints() const noexcept

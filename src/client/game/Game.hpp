@@ -272,6 +272,8 @@ private:
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
     int weaponModelIndices_[4] = {-1, -1, -1, -1};
     int weaponAssetIds_[4] = {-1, -1, -1, -1};
+    int viewmodelLeftHandModelIdx_ = -1;
+    int viewmodelRightHandModelIdx_ = -1;
 
     int rocketProjectileModelIdx_ = -1;
 
