@@ -388,7 +388,7 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         targetPos = shoulder + reachDir * solvedDist;
 
         const glm::vec3 currentPoleBase = shoulder + reachDir * glm::dot(elbow - shoulder, reachDir);
-        glm::vec3 pole = elbow - currentPoleBase;
+        glm::vec3 pole = target.elbowEnabled ? target.elbowPositionModel - currentPoleBase : elbow - currentPoleBase;
         if (glm::dot(pole, pole) < 0.0001f) {
             pole = glm::cross(reachDir, glm::vec3{0.0f, 1.0f, 0.0f});
             if (glm::dot(pole, pole) < 0.0001f)
@@ -408,6 +408,19 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         const glm::vec3 currentWrist = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.hand)]);
         const glm::quat foreRot = rotationBetween(currentWrist - currentElbow, targetPos - currentElbow);
         applyDeltaToMask(impl_->jointModelMats, chain.foreDescendants, rotateAround(currentElbow, foreRot));
+        return true;
+    };
+
+    auto orientHand = [&](const ArmIkChain& chain, const ArmIkTarget& target) {
+        if (!target.orientationEnabled || !chain.valid())
+            return false;
+
+        const size_t handIdx = static_cast<size_t>(chain.hand);
+        const glm::vec3 wrist = matrixTranslation(impl_->jointModelMats[handIdx]);
+        const glm::quat current = glm::normalize(glm::quat_cast(glm::mat3(impl_->jointModelMats[handIdx])));
+        const glm::quat desired = glm::normalize(target.orientationModel);
+        const glm::quat delta = desired * glm::inverse(current);
+        applyDeltaToMask(impl_->jointModelMats, chain.handDescendants, rotateAround(wrist, delta));
         return true;
     };
 
@@ -447,6 +460,8 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
 
     bool changedLeft = solveArm(impl_->leftArm, targets.left);
     bool changedRight = solveArm(impl_->rightArm, targets.right);
+    changedLeft |= orientHand(impl_->leftArm, targets.left);
+    changedRight |= orientHand(impl_->rightArm, targets.right);
     changedLeft |= solveFingers(impl_->leftArm, targets.left);
     changedRight |= solveFingers(impl_->rightArm, targets.right);
     if (!changedLeft && !changedRight)

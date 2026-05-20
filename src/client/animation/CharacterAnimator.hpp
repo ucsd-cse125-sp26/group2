@@ -10,6 +10,7 @@
 
 #include <array>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <vector>
 
@@ -54,9 +55,13 @@ static constexpr size_t kHandFingerIkCount = 5;
 struct ArmIkTarget
 {
     glm::vec3 positionModel{0.0f};
+    glm::vec3 elbowPositionModel{0.0f};
+    glm::quat orientationModel{1.0f, 0.0f, 0.0f, 0.0f};
     std::array<glm::vec3, kHandFingerIkCount> fingerPositionsModel{};
     std::array<bool, kHandFingerIkCount> fingerEnabled{};
     bool enabled = false;
+    bool elbowEnabled = false;
+    bool orientationEnabled = false;
 };
 
 /// @brief Optional per-frame IK targets for both hands.
