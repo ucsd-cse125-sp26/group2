@@ -95,9 +95,24 @@ struct PlayerFrame
     char note[48] = {0}; ///< Free-form annotation slot (e.g., "wallrun-enter").
 };
 
-/// @brief Enable / disable telemetry.  When disabled, every `recordFrame`
-/// call is a wait-free no-op.  Toggle from DebugUI.
-void setEnabled(bool on) noexcept;
+/// @brief Set the filename prefix used for this process's diagnostic CSVs.
+///
+/// Call once during startup with a short role like "client" or "server" so
+/// both processes can record from the same working directory without
+/// clobbering each other's files.
+void setFilePrefix(std::string_view prefix);
+
+/// @brief Start a fresh telemetry session.  New CSV files are created lazily
+/// as each data source emits its first row.
+void startRecording();
+
+/// @brief Stop telemetry and close every open CSV file.
+void stopRecording();
+
+/// @brief Enable / disable telemetry.  Enabling starts a fresh session;
+/// disabling stops and closes the current session.  When disabled, every
+/// `recordFrame` call is a wait-free no-op.  Toggle from DebugUI.
+void setEnabled(bool on);
 [[nodiscard]] bool isEnabled() noexcept;
 
 /// @brief Append a player's per-tick frame to the open CSV log.  Opens the

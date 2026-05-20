@@ -328,7 +328,13 @@ public:
     };
     void buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels);
 
-    bool showDebugMenu = false;             ///< Master toggle for the unified debug menu window.
+    bool showDebugMenu = false; ///< Master toggle for the unified debug menu window.
+
+    /// @brief Consume a start/stop request from the physics CSV button.
+    ///
+    /// The DebugUI toggles local client recording immediately; Game consumes
+    /// this request to mirror the same state to the authoritative server.
+    bool consumePhysicsCsvRecordingRequest(bool& enabled) noexcept;
 
     bool pendingAmmoRefill_ = false;        ///< Set by Weapon HUD button, consumed by Game::iterate().
     bool pendingAbilityLevelGrant_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
@@ -339,6 +345,9 @@ private:
     bool showNetworkStats = false; ///< Show the Network Stats window.
     bool showNetworkSim = false;   ///< Show the Network Simulator (latency + loss) window.
     bool showWeaponHud = false;    ///< Show the Weapon HUD debug window (disabled by default).
+
+    bool pendingPhysicsCsvRecordingRequest_ = false;
+    bool pendingPhysicsCsvRecordingEnabled_ = false;
 
     /// @brief Phase 6 testing: simulated round-trip latency in ms.
     /// Written by the Network Simulator window's slider, read by

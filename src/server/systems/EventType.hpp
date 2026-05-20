@@ -20,6 +20,7 @@ enum class EventType
     /// historical snapshot at the rewound tick.
     ShotIntent,
 
-    TextChat,  ///< Client submitted a bounded all-chat message.
-    VoiceFrame ///< Client submitted one Opus voice frame for proximity routing.
+    TextChat,            ///< Client submitted a bounded all-chat message.
+    VoiceFrame,          ///< Client submitted one Opus voice frame for proximity routing.
+    PhysicsDiagRecording ///< Client toggled authoritative physics CSV recording.
 };

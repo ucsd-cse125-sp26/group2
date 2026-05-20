@@ -136,6 +136,9 @@ public:
     /// @brief Send an all-chat message to the authoritative server.
     bool sendChatMessage(std::string_view message);
 
+    /// @brief Ask the server to start/stop authoritative physics CSV recording.
+    bool sendPhysicsDiagRecording(bool enabled);
+
     /// @brief Send one Opus-encoded voice frame. Voice rides unreliable sequenced UDP.
     bool sendVoiceFrame(std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus);
 

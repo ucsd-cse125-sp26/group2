@@ -322,6 +322,7 @@ bool Game::init(AppContext& ctx)
         countdownTimer = latestMatchState->countdownTimer;
     }
 
+    physics::diag::setFilePrefix("client");
     const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
     const bool phaseDiagEnabled = phaseDiagEnv != nullptr && phaseDiagEnv[0] != '\0' && phaseDiagEnv[0] != '0';
     physics::diag::setEnabled(phaseDiagEnabled);
@@ -2834,8 +2835,8 @@ SDL_AppResult Game::iterate()
     {
         WeaponViewmodel vm;
         const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
-        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() &&
-            !hideRailgunViewmodelForScope) {
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() && !hideRailgunViewmodelForScope)
+        {
             vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
 
@@ -3068,6 +3069,9 @@ SDL_AppResult Game::iterate()
             {"Dynamic Lighting", &showDynLightUI_},
             {"Animation Tester", &animUI_.show},
         });
+        bool physicsCsvRecording = false;
+        if (debugUI.consumePhysicsCsvRecordingRequest(physicsCsvRecording) && client != nullptr)
+            client->sendPhysicsDiagRecording(physicsCsvRecording);
 
         debugUI.buildUI(registry,
                         tickCount,

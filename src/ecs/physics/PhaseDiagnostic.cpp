@@ -10,6 +10,7 @@
 #include <cstring>
 #include <ctime>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 namespace physics::diag
@@ -20,15 +21,22 @@ namespace
 
 std::atomic<bool> enabledFlag{false};
 
+std::mutex sessionMutex;
+std::string filePrefix = "physics";
+std::string sessionStamp;
+
 std::mutex logMutex;
 FILE* logFile = nullptr;
 bool wroteHeader = false;
+uint64_t phaseRowIndex = 0;
 
 std::mutex movementLogMutex;
 FILE* movementLogFile = nullptr;
+uint64_t movementRowIndex = 0;
 
 std::mutex kccTimingLogMutex;
 FILE* kccTimingLogFile = nullptr;
+uint64_t kccTimingRowIndex = 0;
 
 std::mutex annotationMutex;
 std::unordered_map<entt::entity, std::string> pendingAnnotations;
@@ -37,26 +45,72 @@ std::unordered_map<entt::entity, std::string> pendingAnnotations;
 // path never serializes on the per-tick frame log.
 std::mutex depenLogMutex;
 FILE* depenLogFile = nullptr;
+uint64_t depenRowIndex = 0;
 
-void openLazily()
+std::string makeTimestamp()
 {
-    if (logFile != nullptr)
-        return;
-
-    // Embed the wall-clock start time in the filename so consecutive runs
-    // don't trample each other.  Stays in the binary's working directory
-    // (next to the executable for both client and server).
     const auto now = std::chrono::system_clock::now();
     const auto t = std::chrono::system_clock::to_time_t(now);
-    char nameBuf[64];
+    char stampBuf[32];
     std::tm tmbuf{};
 #if defined(_WIN32)
     ::localtime_s(&tmbuf, &t);
 #else
     ::localtime_r(&t, &tmbuf);
 #endif
-    std::strftime(nameBuf, sizeof(nameBuf), "phase-diag-%Y%m%d-%H%M%S.csv", &tmbuf);
-    logFile = std::fopen(nameBuf, "w");
+    std::strftime(stampBuf, sizeof(stampBuf), "%Y%m%d-%H%M%S", &tmbuf);
+    return stampBuf;
+}
+
+std::string makeLogPath(const char* kind)
+{
+    std::lock_guard<std::mutex> lk(sessionMutex);
+    if (sessionStamp.empty())
+        sessionStamp = makeTimestamp();
+    return filePrefix + "-" + kind + "-" + sessionStamp + ".csv";
+}
+
+void closeLog(FILE*& file) noexcept
+{
+    if (file != nullptr) {
+        std::fflush(file);
+        std::fclose(file);
+        file = nullptr;
+    }
+}
+
+void closeAllLogs() noexcept
+{
+    {
+        std::lock_guard<std::mutex> lk(logMutex);
+        closeLog(logFile);
+        wroteHeader = false;
+        phaseRowIndex = 0;
+    }
+    {
+        std::lock_guard<std::mutex> lk(movementLogMutex);
+        closeLog(movementLogFile);
+        movementRowIndex = 0;
+    }
+    {
+        std::lock_guard<std::mutex> lk(kccTimingLogMutex);
+        closeLog(kccTimingLogFile);
+        kccTimingRowIndex = 0;
+    }
+    {
+        std::lock_guard<std::mutex> lk(depenLogMutex);
+        closeLog(depenLogFile);
+        depenRowIndex = 0;
+    }
+}
+
+void openLazily()
+{
+    if (logFile != nullptr)
+        return;
+
+    const std::string path = makeLogPath("phase-diag");
+    logFile = std::fopen(path.c_str(), "w");
     if (logFile == nullptr)
         return;
 
@@ -82,17 +136,8 @@ void openMovementLazily()
     if (movementLogFile != nullptr)
         return;
 
-    const auto now = std::chrono::system_clock::now();
-    const auto t = std::chrono::system_clock::to_time_t(now);
-    char nameBuf[64];
-    std::tm tmbuf{};
-#if defined(_WIN32)
-    ::localtime_s(&tmbuf, &t);
-#else
-    ::localtime_r(&t, &tmbuf);
-#endif
-    std::strftime(nameBuf, sizeof(nameBuf), "movement-diag-%Y%m%d-%H%M%S.csv", &tmbuf);
-    movementLogFile = std::fopen(nameBuf, "w");
+    const std::string path = makeLogPath("movement-diag");
+    movementLogFile = std::fopen(path.c_str(), "w");
     if (movementLogFile == nullptr)
         return;
 
@@ -114,17 +159,8 @@ void openKccTimingLazily()
     if (kccTimingLogFile != nullptr)
         return;
 
-    const auto now = std::chrono::system_clock::now();
-    const auto t = std::chrono::system_clock::to_time_t(now);
-    char nameBuf[64];
-    std::tm tmbuf{};
-#if defined(_WIN32)
-    ::localtime_s(&tmbuf, &t);
-#else
-    ::localtime_r(&t, &tmbuf);
-#endif
-    std::strftime(nameBuf, sizeof(nameBuf), "kcc-timing-%Y%m%d-%H%M%S.csv", &tmbuf);
-    kccTimingLogFile = std::fopen(nameBuf, "w");
+    const std::string path = makeLogPath("kcc-timing");
+    kccTimingLogFile = std::fopen(path.c_str(), "w");
     if (kccTimingLogFile == nullptr)
         return;
 
@@ -177,17 +213,8 @@ void openDepenLazily()
 {
     if (depenLogFile != nullptr)
         return;
-    const auto now = std::chrono::system_clock::now();
-    const auto t = std::chrono::system_clock::to_time_t(now);
-    char nameBuf[64];
-    std::tm tmbuf{};
-#if defined(_WIN32)
-    ::localtime_s(&tmbuf, &t);
-#else
-    ::localtime_r(&t, &tmbuf);
-#endif
-    std::strftime(nameBuf, sizeof(nameBuf), "depen-trace-%Y%m%d-%H%M%S.csv", &tmbuf);
-    depenLogFile = std::fopen(nameBuf, "w");
+    const std::string path = makeLogPath("depen-trace");
+    depenLogFile = std::fopen(path.c_str(), "w");
     if (depenLogFile == nullptr)
         return;
     // depthOverR is depth / R - useful sort key: 2.0 = saturated back-face (the
@@ -201,9 +228,37 @@ void openDepenLazily()
 
 } // namespace
 
-void setEnabled(bool on) noexcept
+void setFilePrefix(std::string_view prefix)
 {
-    enabledFlag.store(on, std::memory_order_relaxed);
+    if (prefix.empty())
+        return;
+    std::lock_guard<std::mutex> lk(sessionMutex);
+    filePrefix.assign(prefix.data(), prefix.size());
+}
+
+void startRecording()
+{
+    enabledFlag.store(false, std::memory_order_relaxed);
+    closeAllLogs();
+    {
+        std::lock_guard<std::mutex> lk(sessionMutex);
+        sessionStamp = makeTimestamp();
+    }
+    enabledFlag.store(true, std::memory_order_relaxed);
+}
+
+void stopRecording()
+{
+    enabledFlag.store(false, std::memory_order_relaxed);
+    closeAllLogs();
+}
+
+void setEnabled(bool on)
+{
+    if (on)
+        startRecording();
+    else
+        stopRecording();
 }
 
 bool isEnabled() noexcept
@@ -247,8 +302,7 @@ void recordFrame(const PlayerFrame& f) noexcept
     // Monotonic row counter — the caller-supplied `tick` field is unused
     // because we don't have a server tick counter plumbed into the
     // collision kernel.  Row order in the CSV preserves chronology.
-    static uint64_t rowIndex = 0;
-    const uint64_t tickForRow = (f.tick > 0) ? f.tick : ++rowIndex;
+    const uint64_t tickForRow = (f.tick > 0) ? f.tick : ++phaseRowIndex;
 
     const glm::vec3 actualDelta = f.posAfter - f.posBefore;
     const glm::vec3 expectedDelta = f.velBefore * (1.0f / 128.0f); // assume 128 Hz; precise dt not exposed here
@@ -336,8 +390,7 @@ void recordMovementFrame(const MovementFrame& f) noexcept
     if (movementLogFile == nullptr)
         return;
 
-    static uint64_t rowIndex = 0;
-    ++rowIndex;
+    ++movementRowIndex;
 
     PhaseFlag flags = f.flags;
     const bool finite = finiteVec3(f.posBefore) && finiteVec3(f.posAfter) && finiteVec3(f.velBefore) &&
@@ -365,7 +418,7 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
                  "%.3f,%.3f,%.3f,%.6f,%.6f,"
                  "0x%X,%d,%s\n",
-                 static_cast<unsigned long>(rowIndex),
+                 static_cast<unsigned long>(movementRowIndex),
                  entt::to_integral(f.entity),
                  moveModeName(f.modeBefore),
                  moveModeName(f.modeAfter),
@@ -434,12 +487,11 @@ void recordKccTimingFrame(const KccTimingFrame& f) noexcept
     if (kccTimingLogFile == nullptr)
         return;
 
-    static uint64_t rowIndex = 0;
-    ++rowIndex;
+    ++kccTimingRowIndex;
 
     std::fprintf(kccTimingLogFile,
                  "%lu,%u,%lu,%d,%d,%d,%d,%d,%d,%d,%d,%s\n",
-                 static_cast<unsigned long>(rowIndex),
+                 static_cast<unsigned long>(kccTimingRowIndex),
                  entt::to_integral(f.entity),
                  static_cast<unsigned long>(f.elapsedUs),
                  f.substeps,
@@ -464,8 +516,7 @@ void recordDepenContact(const DepenContact& c) noexcept
     if (depenLogFile == nullptr)
         return;
 
-    static uint64_t row = 0;
-    ++row;
+    ++depenRowIndex;
 
     const float depthOverR = (c.minkowskiR > 1e-6f) ? (c.depth / c.minkowskiR) : 0.0f;
 
@@ -476,7 +527,7 @@ void recordDepenContact(const DepenContact& c) noexcept
                  "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
                  "%.4f,%.4f,%.4f,%.3f,"
                  "%s,0x%X,0x%X\n",
-                 static_cast<unsigned long>(row),
+                 static_cast<unsigned long>(depenRowIndex),
                  c.triId,
                  static_cast<double>(c.playerPos.x),
                  static_cast<double>(c.playerPos.y),
