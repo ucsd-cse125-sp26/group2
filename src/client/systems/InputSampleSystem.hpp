@@ -234,7 +234,7 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, flo
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting = shootDown && !abilityMenuHeld;
-        snap.scoped = rightDown && !altHeld;
+        snap.scoped = rightDown && !abilityMenuHeld;
         snap.switchToPrimary = bindings.pressed(Action::SwitchToPrimary, kKeys, mouse);
         snap.switchToSecondary = bindings.pressed(Action::SwitchToSecondary, kKeys, mouse);
         snap.throwGrenade = false;
