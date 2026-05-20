@@ -2759,6 +2759,11 @@ SDL_AppResult Game::iterate()
         currentEquippedType_ = gun.type;
     });
 
+    bool hideRailgunViewmodelForScope = false;
+    registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& input) {
+        hideRailgunViewmodelForScope = currentEquippedType_ == WeaponType::RailGun && input.scoped;
+    });
+
     // Auto-apply per-weapon viewmodel defaults when weapon changes
     if (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_) {
         const auto& vp = getViewmodelParams(currentEquippedType_);
@@ -2779,7 +2784,8 @@ SDL_AppResult Game::iterate()
     {
         WeaponViewmodel vm;
         const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
-        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end()) {
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() &&
+            !hideRailgunViewmodelForScope) {
             vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
 
