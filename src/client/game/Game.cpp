@@ -82,6 +82,8 @@
 
 namespace
 {
+constexpr float kMinFootstepIntervalSeconds = 0.14f;
+
 int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
     return assets.add(
@@ -241,15 +243,19 @@ std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
 
     return sources;
 }
+
+void centerMouseInWindow(SDL_Window* window)
+{
+    int winW = 0;
+    int winH = 0;
+    SDL_GetWindowSize(window, &winW, &winH);
+    SDL_WarpMouseInWindow(window, static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f);
+}
 } // namespace
 
-bool Game::initDebugUI(SDL_Window* windowPtr)
+bool Game::initDebugUI(const AppContext& ctx)
 {
-    window = windowPtr;
-    if (!window) {
-        SDL_Log("Game DebugUI init failed: missing window");
-        return false;
-    }
+    window = &ctx.window;
 
     if (!debugUI.init(window)) {
         SDL_Log("DebugUI init failed");
@@ -302,15 +308,14 @@ bool Game::applyIncomingSnapshot(
     return true;
 }
 
-bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+bool Game::init(AppContext& ctx)
 {
-    renderer = rendererPtr;
-    window = windowPtr;
-    client = clientPtr;
-    if (!renderer || !window || !client) {
-        SDL_Log("Game init failed: missing App-owned dependency");
-        return false;
-    }
+    renderer = &ctx.renderer;
+    window = &ctx.window;
+    client = &ctx.client;
+    userSettings = &ctx.userSettings;
+    userSettingsPath_ = ctx.userSettingsPath;
+    mouseSensitivity = userSettings->mouseSensitivity;
 
     if (const auto latestMatchState = client->getLatestMatchState()) {
         currentMatchPhase = latestMatchState->phase;
@@ -549,10 +554,12 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
             // so the shoot sound plays and recoil kicks.
             if (evt.effectType == ParticleEffectType::HitscanBeam) {
                 WeaponFiredEvent wfe;
+                wfe.shooter = localPlayer;
                 wfe.type = evt.weaponType;
                 wfe.origin = evt.pos1;
                 wfe.direction = glm::normalize(evt.pos2 - evt.pos1);
                 wfe.isHitscan = true;
+                wfe.localPlayer = true;
                 wfe.hitPos = evt.pos2;
                 dispatcher.enqueue(wfe);
             }
@@ -575,7 +582,10 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
                 if (!eventName.empty()) {
                     const audio::AudioObjectId object = audioObjectForEntity(evt.source);
                     sfxSystem.setAudioObjectTransform(object, evtOrigin);
-                    sfxSystem.postAudioEvent(eventName, object, 0.82f);
+                    if (evt.source == localPlayer)
+                        sfxSystem.postLocalAudioEvent(eventName, object, 0.82f);
+                    else
+                        sfxSystem.postAudioEvent(eventName, object, 0.82f);
                 }
             }
             break;
@@ -586,7 +596,10 @@ bool Game::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientP
                 if (!eventName.empty()) {
                     const audio::AudioObjectId object = audioObjectForEntity(evt.source);
                     sfxSystem.setAudioObjectTransform(object, evtOrigin);
-                    sfxSystem.postAudioEvent(eventName, object, 0.92f);
+                    if (evt.source == localPlayer)
+                        sfxSystem.postLocalAudioEvent(eventName, object, 0.92f);
+                    else
+                        sfxSystem.postAudioEvent(eventName, object, 0.92f);
                 }
             }
             break;
@@ -907,6 +920,7 @@ void Game::clearGameplayInputForChat()
 {
     systems::grenadeRadialActive = false;
     systems::pendingGrenadeThrow = false;
+    systems::prevKillSelfKey = false;
     systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
     systems::prevAbilitySelectRight = false;
@@ -987,6 +1001,30 @@ SDL_AppResult Game::event(SDL_Event* event)
     }
 
     if (event->type == SDL_EVENT_KEY_DOWN) {
+        if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
+            if (pauseMenu.isOpen()) {
+                if (pauseMenu.handleEscape()) {
+                    pauseMenu.close();
+                    mouseCaptured = true;
+                    SDL_SetWindowRelativeMouseMode(window, true);
+                    float dx = 0.0f;
+                    float dy = 0.0f;
+                    SDL_GetRelativeMouseState(&dx, &dy);
+                    clearGameplayInputForChat();
+                }
+            } else {
+                pauseMenu.open();
+                mouseCaptured = false;
+                SDL_SetWindowRelativeMouseMode(window, false);
+                centerMouseInWindow(window);
+                clearGameplayInputForChat();
+            }
+            return SDL_APP_CONTINUE;
+        }
+
+        if (pauseMenu.consumeEvent(*event))
+            return SDL_APP_CONTINUE;
+
         switch (event->key.key) {
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
@@ -996,12 +1034,6 @@ SDL_AppResult Game::event(SDL_Event* event)
 
         case SDLK_MINUS:
             return SDL_APP_SUCCESS;
-
-        // ESC — toggle mouse capture so the player can reach the ImGui windows.
-        case SDLK_ESCAPE:
-            mouseCaptured = !mouseCaptured;
-            SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
-            break;
 
             // F1 — send a test hello packet to the server.
             // case SDLK_F1: {
@@ -1128,6 +1160,9 @@ SDL_AppResult Game::event(SDL_Event* event)
             activeGamepadId_ = 0;
         }
     }
+
+    if (pauseMenu.consumeEvent(*event))
+        return SDL_APP_CONTINUE;
 
     // Scroll wheel toggles between primary and secondary weapon slots.
     if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
@@ -1474,10 +1509,14 @@ SDL_AppResult Game::iterate()
     // Dead input runs regardless of mouse capture — allows skip-respawn.
     // Chat owns the keyboard while open, so gameplay inputs are cleared
     // instead of sampled.
-    if (chatOpen_)
+    const bool gamePaused = pauseMenu.isOpen();
+
+    if (gamePaused) {
+        clearGameplayInputForChat();
+    } else if (chatOpen_)
         clearGameplayInputForChat();
     else
-        systems::runDeadInput(registry);
+        systems::runDeadInput(registry, userSettings->inputBindings);
 
     // Query local player's gravity flip state — used for mouse/stick
     // inversion AND for swapping A-D / left-stick left-right.
@@ -1485,12 +1524,12 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
-    if (mouseCaptured && !chatOpen_) {
+    if (mouseCaptured && !chatOpen_ && !gamePaused) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
-            systems::runMovementKeys(registry, localGravFlipped);
-        systems::runWeaponKeys(registry, frameTime);
+            systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
+        systems::runWeaponKeys(registry, userSettings->inputBindings, frameTime);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
         // a player can use kbm and pad simultaneously without either source
@@ -1548,8 +1587,8 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_) {
-            systems::runMovementKeys(registry, localGravFlipped);
+        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused) {
+            systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
             systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
@@ -1740,9 +1779,12 @@ SDL_AppResult Game::iterate()
             // stale flag (player held trigger when alt-tabbing into the
             // debug menu) doesn't keep firing while no input is being sampled.
             bool shooting = false;
+            entt::entity localShooter = entt::null;
             if (mouseCaptured) {
-                registry.view<LocalPlayer, InputSnapshot>().each(
-                    [&](const InputSnapshot& snap) { shooting = snap.shooting; });
+                registry.view<LocalPlayer, InputSnapshot>().each([&](entt::entity entity, const InputSnapshot& snap) {
+                    shooting = snap.shooting;
+                    localShooter = entity;
+                });
             }
 
             // Check ammo — don't spawn VFX if the magazine is empty.
@@ -1773,10 +1815,12 @@ SDL_AppResult Game::iterate()
 
                 // Dispatch weapon-fired event for any listeners
                 WeaponFiredEvent wfe;
+                wfe.shooter = localShooter;
                 wfe.type = currentEquippedType_;
                 wfe.origin = hip;
                 wfe.direction = cachedCamFwd_;
                 wfe.isHitscan = true;
+                wfe.localPlayer = true;
                 wfe.hitPos = hitPos;
                 dispatcher.enqueue(wfe);
 
@@ -2236,6 +2280,8 @@ SDL_AppResult Game::iterate()
                 const bool canStep = c.ai.grounded || c.ai.moveMode == 2;
                 const float speed = glm::length(c.ai.velocityWorld);
                 if (sfxSystem.isInitialized() && canStep && speed > 65.0f) {
+                    float& footstepCooldown = footstepCooldowns_[c.entity];
+                    footstepCooldown = std::max(0.0f, footstepCooldown - frameTime);
                     for (std::size_t i = 0; i < samplers.size() && i < phaseIt->second.size(); ++i) {
                         const ClipSampler& src = samplers[i];
                         const bool audibleSampler = src.active && src.weight > 0.22f && isFootstepClip(src.id);
@@ -2246,7 +2292,7 @@ SDL_AppResult Game::iterate()
                         const float previous = phaseIt->second[i];
                         const bool leftStep = footstepMarkerCrossed(previous, src.timeRatio, 0.18f);
                         const bool rightStep = footstepMarkerCrossed(previous, src.timeRatio, 0.68f);
-                        if (leftStep || rightStep) {
+                        if ((leftStep || rightStep) && footstepCooldown <= 0.0f) {
                             const SfxId stepId =
                                 isHeavyFootstepClip(src.id) ? SfxId::FootstepHeavy : SfxId::FootstepLight;
                             const float gain = std::clamp(0.35f + src.weight * (speed / 900.0f), 0.25f, 0.85f);
@@ -2260,7 +2306,11 @@ SDL_AppResult Game::iterate()
                             sfxSystem.setAudioRtpc(object,
                                                    audio::rtpcId("movement.intensity"),
                                                    stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
-                            sfxSystem.postAudioEvent("footstep", object, gain);
+                            if (c.isLocal)
+                                sfxSystem.postLocalAudioEvent("footstep", object, gain);
+                            else
+                                sfxSystem.postAudioEvent("footstep", object, gain);
+                            footstepCooldown = kMinFootstepIntervalSeconds;
                         }
                         phaseIt->second[i] = src.timeRatio;
                     }
@@ -3343,6 +3393,7 @@ SDL_AppResult Game::iterate()
     // Update and render HUD.
     if (hud_.getOutputTexture()) {
         HudGameState hudState{};
+        hudState.bindings = &userSettings->inputBindings;
 
         // ── Local player health, armor, alive ──
         registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
@@ -3564,9 +3615,9 @@ SDL_AppResult Game::iterate()
 
         // ── Weapon pickup prompt ──
         // Mirror the server pickup-detection rule (range + look cone via
-        // PickupGeometry) so the "Press F to pick up <Weapon>" hint appears
-        // exactly when pressing F would actually grant the weapon. Cheap
-        // O(N) sweep across world weapon spawners and dropped weapons.
+        // PickupGeometry) so the pickup hint appears exactly when pressing
+        // the configured binding would actually grant the weapon. Cheap O(N)
+        // sweep across world weapon spawners and dropped weapons.
         {
             glm::vec3 eye{0.f};
             glm::vec3 viewFwd{0.f, 0.f, 1.f};
@@ -3835,6 +3886,26 @@ SDL_AppResult Game::iterate()
         pendingPickupNotifications_.clear();
     }
 
+    const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
+    if (pauseResult.settingsApplied) {
+        mouseSensitivity = userSettings->mouseSensitivity;
+        clearGameplayInputForChat();
+    }
+    if (pauseResult.resumeGame) {
+        pauseMenu.close();
+        mouseCaptured = true;
+        SDL_SetWindowRelativeMouseMode(window, true);
+        float dx = 0.0f;
+        float dy = 0.0f;
+        SDL_GetRelativeMouseState(&dx, &dy);
+        clearGameplayInputForChat();
+    }
+    if (pauseResult.exitToDesktop)
+        return SDL_APP_SUCCESS;
+    if (pauseResult.returnToMainMenu) {
+        returnToMainMenuRequested_ = true;
+    }
+
     debugUI.render();
 
     // Smooth camera roll interpolation (degrees → radians).
@@ -3892,8 +3963,20 @@ bool Game::shouldReturnToLobby() const
     return returnToLobbyRequested;
 }
 
+bool Game::consumeReturnToMainMenu()
+{
+    if (!returnToMainMenuRequested_)
+        return false;
+
+    returnToMainMenuRequested_ = false;
+    return true;
+}
+
 void Game::quit()
 {
+    if (userSettings) {
+        userSettings->mouseSensitivity = mouseSensitivity;
+    }
     closeChat();
     if (recorder.isRecording())
         recorder.stopRecording();

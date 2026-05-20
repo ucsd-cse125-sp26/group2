@@ -16,6 +16,8 @@
 
 #include "hud/HudWidget.hpp"
 
+#include <string>
+
 /// @brief Apex-style weapon cluster: weapon body up top with a type-color
 /// underline + bracketed fire-mode tag, then **two slot tabs side-by-side**
 /// at the bottom (one per slot, both visible). The active tab gets the
@@ -30,7 +32,7 @@ struct AmmoCounter : HudWidget
     float nameFontSize = 18.f;          ///< Weapon name.
     float fireModeFontSize = 11.f;      ///< Fire-mode tag.
     float slotFontSize = 12.f;          ///< Bottom slot-tab text.
-    float slotIndexFontSize = 10.f;     ///< Slot-tab index pill ("1"/"2").
+    float slotIndexFontSize = 10.f;     ///< Slot-tab binding pill.
     float slotTabHeight = 26.f;         ///< Height of each bottom slot tab.
     float typeUnderlineThickness = 2.f; ///< Underline below weapon body, in type color.
 
@@ -48,5 +50,7 @@ private:
     int secondaryReserve_ = 0;
     int secondaryMag_ = 0;
     int secondaryWeaponId_ = -1;
-    int secondaryKeybind_ = 2; ///< Keybind label for the inactive slot ("1" or "2").
+    int secondaryKeybind_ = 2; ///< Inactive slot index used to infer which slot is active.
+    std::string switchToPrimaryLabel_ = "1";
+    std::string switchToSecondaryLabel_ = "2";
 };

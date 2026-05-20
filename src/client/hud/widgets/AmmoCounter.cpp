@@ -3,6 +3,7 @@
 
 #include "AmmoCounter.hpp"
 
+#include "config/InputBindings.hpp"
 #include "hud/HudContext.hpp"
 #include "hud/VoidfallStyle.hpp"
 
@@ -69,6 +70,10 @@ void AmmoCounter::update(float /*dt*/, const HudGameState& state, HudTweenPool& 
     secondaryReserve_ = state.secondaryReserve;
     secondaryMag_ = state.secondaryMagCapacity;
     secondaryKeybind_ = state.secondaryKeybind;
+    if (state.bindings) {
+        switchToPrimaryLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::SwitchToPrimary));
+        switchToSecondaryLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::SwitchToSecondary));
+    }
 }
 
 void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
@@ -152,7 +157,7 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
 
     // 5) Bottom row: two slot tabs side-by-side.  PRIMARY = slot 1,
     //    SECONDARY = slot 2.  The active slot is whichever isn't pointed
-    //    at by `secondaryKeybind` (which advertises the *swap* key).
+    //    at by `secondaryKeybind`.
     //
     // Tab fields per slot:
     //   - weapon id  (drives type color + name)
@@ -190,7 +195,7 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
 
         // Index pill (filled with accent color, inverse text).
         const float pillFs = slotIndexFontSize * s;
-        const char idxStr[2] = {static_cast<char>('0' + slotIdx), '\0'};
+        const char* idxStr = slotIdx == 1 ? switchToPrimaryLabel_.c_str() : switchToSecondaryLabel_.c_str();
         const float pillTextW = ctx.measureText(idxStr, pillFs);
         const float pillPad = 4.f * s;
         const float pillH = pillFs + 4.f * s;

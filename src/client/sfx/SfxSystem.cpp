@@ -106,6 +106,23 @@ bool SfxSystem::init()
 
     synthesizeClip(SfxId::FootstepLight, SfxCategory::Footsteps, 0.40f, 0.06f);
     synthesizeClip(SfxId::FootstepHeavy, SfxCategory::Footsteps, 0.55f, 0.06f);
+    loadClip(SfxId::ConcreteFootstep01, "Footsteps/concrete_ct_01.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep02, "Footsteps/concrete_ct_02.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep03, "Footsteps/concrete_ct_03.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep04, "Footsteps/concrete_ct_04.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep05, "Footsteps/concrete_ct_05.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep06, "Footsteps/concrete_ct_06.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep07, "Footsteps/concrete_ct_07.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep08, "Footsteps/concrete_ct_08.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep09, "Footsteps/concrete_ct_09.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep10, "Footsteps/concrete_ct_10.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep11, "Footsteps/concrete_ct_11.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep12, "Footsteps/concrete_ct_12.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep13, "Footsteps/concrete_ct_13.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep14, "Footsteps/concrete_ct_14.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep15, "Footsteps/concrete_ct_15.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep16, "Footsteps/concrete_ct_16.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep17, "Footsteps/concrete_ct_17.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
     synthesizeClip(SfxId::GrenadeThrow, SfxCategory::Weapons, 0.45f, 0.12f);
     synthesizeClip(SfxId::VoiceStart, SfxCategory::Voice, 0.20f, 0.05f);
     synthesizeClip(SfxId::VoiceStop, SfxCategory::Voice, 0.14f, 0.05f);
@@ -281,6 +298,19 @@ SfxSystem::SourceHandle SfxSystem::postAudioEvent(std::string_view eventName, au
     return first;
 }
 
+SfxSystem::SourceHandle
+SfxSystem::postLocalAudioEvent(std::string_view eventName, audio::AudioObjectId object, float gain)
+{
+    SourceHandle first = kInvalidSource;
+    for (audio::AudioCommand command : audioRuntime_.postEvent(eventName, object, gain)) {
+        command.positional = false;
+        const SourceHandle handle = playCommand(command);
+        if (first == kInvalidSource && handle != kInvalidSource)
+            first = handle;
+    }
+    return first;
+}
+
 void SfxSystem::submitVoiceFrame(ClientId speaker,
                                  std::uint16_t sequence,
                                  std::span<const float> monoPcm48k,
@@ -356,18 +386,25 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
 {
     const audio::AudioObjectId object = audio::objectId("event.weapon_fire");
     setAudioObjectTransform(object, e.origin);
+    const auto postFireSound = [&](std::string_view eventName) {
+        if (e.localPlayer)
+            postLocalAudioEvent(eventName, object);
+        else
+            postAudioEvent(eventName, object);
+    };
+
     switch (e.type) {
     case WeaponType::Rifle:
-        postAudioEvent("weapon.rifle.fire", object);
+        postFireSound("weapon.rifle.fire");
         break;
     case WeaponType::Rocket:
-        postAudioEvent("weapon.rocket.fire", object);
+        postFireSound("weapon.rocket.fire");
         break;
     case WeaponType::RailGun:
-        postAudioEvent("weapon.railgun.fire", object);
+        postFireSound("weapon.railgun.fire");
         break;
     case WeaponType::EnergyGun:
-        postAudioEvent("weapon.energy.fire", object);
+        postFireSound("weapon.energy.fire");
         break;
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
@@ -387,16 +424,11 @@ void SfxSystem::handleEvent(const SDL_Event& event)
 {
 #ifdef __APPLE__
     if (event.type == SDL_EVENT_AUDIO_DEVICE_REMOVED && !event.adevice.recording) {
-        if (physicalDeviceId_ != 0 && event.adevice.which == physicalDeviceId_) {
-            SDL_Log("[sfx] Playback device removed (id=%u), scheduling reopen",
-                    static_cast<unsigned>(physicalDeviceId_));
-            pendingReopenDeviceId_ = 0;
-            pendingReopen_ = true;
-        }
+        SDL_Log("[sfx] Playback device removed (id=%u), scheduling reopen", static_cast<unsigned>(event.adevice.which));
+        pendingReopen_ = true;
     } else if (event.type == SDL_EVENT_AUDIO_DEVICE_ADDED && !event.adevice.recording) {
-        SDL_Log("[sfx] New playback device available (id=%u), scheduling switch",
+        SDL_Log("[sfx] New playback device available (id=%u), scheduling reopen",
                 static_cast<unsigned>(event.adevice.which));
-        pendingReopenDeviceId_ = event.adevice.which;
         pendingReopen_ = true;
     }
 #else
@@ -816,30 +848,17 @@ bool SfxSystem::openDevice()
 
 #ifdef __APPLE__
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
-    SDL_AudioDeviceID targetPhysical = pendingReopenDeviceId_;
-    if (!targetPhysical) {
-        int count = 0;
-        SDL_AudioDeviceID* devs = SDL_GetAudioPlaybackDevices(&count);
-        if (devs && count > 0) {
-            targetPhysical = devs[0];
-            SDL_free(devs);
-        }
-    }
-    physicalDeviceId_ = targetPhysical;
-    mixStream_ = SDL_OpenAudioDeviceStream(targetPhysical ? targetPhysical : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                           &mixerSpec_,
-                                           &SfxSystem::mixCallback,
-                                           this);
-#else
+#endif
+
     mixStream_ =
         SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &mixerSpec_, &SfxSystem::mixCallback, this);
-#endif
 
     if (!mixStream_) {
         SDL_Log("[sfx] SDL_OpenAudioDeviceStream failed: %s", SDL_GetError());
         return false;
     }
     device_ = SDL_GetAudioStreamDevice(mixStream_);
+    physicalDeviceId_ = device_;
     SDL_ResumeAudioStreamDevice(mixStream_);
     return true;
 }
@@ -862,13 +881,10 @@ void SfxSystem::reopenDevice()
 
     if (openDevice()) {
         warmUpDevice();
-        SDL_Log("[sfx] Reopened audio on physical device %u (logical %u)",
-                static_cast<unsigned>(physicalDeviceId_),
-                static_cast<unsigned>(device_));
+        SDL_Log("[sfx] Reopened audio on device %u", static_cast<unsigned>(device_));
     } else {
         SDL_Log("[sfx] No audio device available after reopen — running mute");
     }
-    pendingReopenDeviceId_ = 0;
     stateInitialized_ = false;
 }
 

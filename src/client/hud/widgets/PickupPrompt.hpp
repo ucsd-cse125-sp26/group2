@@ -1,10 +1,12 @@
 /// @file PickupPrompt.hpp
-/// @brief On-screen "Press F to pick up <Weapon>" hint shown when a weapon
-///        pickup is currently actionable for the local player.
+/// @brief On-screen "Press <binding> to pick up <Weapon>" hint shown when a
+///        weapon pickup is currently actionable for the local player.
 
 #pragma once
 
 #include "hud/HudWidget.hpp"
+
+#include <string>
 
 /// @brief Centered prompt rendered just below the crosshair while the local
 ///        player is in range of, and looking at, an available weapon spawner.
@@ -16,7 +18,7 @@
 struct PickupPrompt : HudWidget
 {
     float fontSize = 24.f;     ///< Size of the descriptive text (logical px).
-    float keyFontSize = 26.f;  ///< Size of the "F" key glyph (logical px).
+    float keyFontSize = 26.f;  ///< Size of the key glyph (logical px).
     float keyBoxPadding = 5.f; ///< Padding inside the key glyph box.
     float keyBoxRadius = 4.f;  ///< Corner radius of the key glyph box.
     float spacing = 10.f;      ///< Gap between the key glyph box and the text.
@@ -27,4 +29,5 @@ struct PickupPrompt : HudWidget
 
 private:
     int weaponId_ = 0;
+    std::string keyLabel_ = "F";
 };

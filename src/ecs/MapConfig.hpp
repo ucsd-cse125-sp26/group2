@@ -196,40 +196,47 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
         }
 
         if (node->mMetaData) {
-            for (unsigned int i = 0; i < node->mMetaData->mNumProperties; i++) {
-                if (std::string(node->mMetaData->mKeys[i].C_Str()) == "entity_type") {
-                    int32_t entity_type = *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "entity_type"));
-                    switch (entity_type) {
-                    case 0: // Player spawn point
-                    {
-                        const aiMatrix4x4& t = node->mTransformation;
-                        glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        spawnPoints_.push_back(pos);
+            void* entity_type_ptr = getMetadataValue(node->mMetaData, "entity_type");
+            if (entity_type_ptr != nullptr) {
+                const int32_t entity_type = *static_cast<int32_t*>(entity_type_ptr);
+                const char* const nodeName = node->mName.C_Str();
+                switch (entity_type) {
+                case 0: // Player spawn point
+                {
+                    const aiMatrix4x4& t = node->mTransformation;
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    spawnPoints_.push_back(pos);
+                    break;
+                }
+                case 1: // Weapon spawn point
+                {
+                    void* weapon_type_ptr = getMetadataValue(node->mMetaData, "weapon_type");
+                    if (weapon_type_ptr == nullptr) {
+                        SDL_Log("Weapon spawner '%s' missing 'weapon_type' metadata — skipping", nodeName);
                         break;
                     }
-                    case 1: // Weapon spawn point
-                    {
-                        const aiMatrix4x4& t = node->mTransformation;
-
-                        WeaponType weapon_type = static_cast<WeaponType>(
-                            *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "weapon_type")));
-                        glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        weaponSpawner_.push_back(WeaponSpawner{.type = weapon_type, .pos = pos});
+                    const aiMatrix4x4& t = node->mTransformation;
+                    WeaponType weapon_type = static_cast<WeaponType>(*static_cast<int32_t*>(weapon_type_ptr));
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    weaponSpawner_.push_back(WeaponSpawner{.type = weapon_type, .pos = pos});
+                    break;
+                }
+                case 2: // Power up spawn point
+                {
+                    void* powerup_type_ptr = getMetadataValue(node->mMetaData, "powerup_type");
+                    if (powerup_type_ptr == nullptr) {
+                        SDL_Log("Powerup spawner '%s' missing 'powerup_type' metadata — skipping", nodeName);
                         break;
                     }
-                    case 2: // Power up spawn point
-                    {
-                        const aiMatrix4x4& t = node->mTransformation;
-                        PowerupType powerup_type = static_cast<PowerupType>(
-                            *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "powerup_type")));
-                        glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        powerupSpawner_.push_back(PowerupSpawner{.type = powerup_type, .pos = pos});
-                        break;
-                    }
-                    default:
-                        SDL_Log("Unknown entity type found: %d", entity_type);
-                        break;
-                    }
+                    const aiMatrix4x4& t = node->mTransformation;
+                    PowerupType powerup_type = static_cast<PowerupType>(*static_cast<int32_t*>(powerup_type_ptr));
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    powerupSpawner_.push_back(PowerupSpawner{.type = powerup_type, .pos = pos});
+                    break;
+                }
+                default:
+                    SDL_Log("Unknown entity_type %d on node '%s' — skipping", entity_type, nodeName);
+                    break;
                 }
             }
         }

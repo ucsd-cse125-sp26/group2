@@ -10,6 +10,8 @@
 #include <span>
 #include <string>
 
+class InputBindings;
+
 // ── Colors ──────────────────────────────────────────────────────────────────
 
 /// @brief RGBA color for HUD elements (linear space, straight alpha).
@@ -251,6 +253,8 @@ struct HudMatchInfo
 /// Filled by Game from ECS data. The HUD never imports ECS headers.
 struct HudGameState
 {
+    const InputBindings* bindings = nullptr; ///< Live input bindings for HUD key prompts.
+
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
     float abilityLevelProgress = 0.f; ///< accumDamage / systems::dmgThreshold, clamped 0..1.
@@ -292,7 +296,7 @@ struct HudGameState
 
     // Weapon pickup prompt — populated by Game when the local player is in
     // range of (and looking at) an available weapon spawner. The HUD reads
-    // these to render a "Press F to pick up <Weapon>" hint.
+    // these to render a "Press <binding> to pick up <Weapon>" hint.
     bool pickupAvailable = false; ///< True when a pickup is currently actionable.
     int pickupWeaponId = 0;       ///< Mirrors WeaponType: 0=Rifle, 1=Rocket, 2=RailGun, 3=EnergyGun.
 
@@ -308,8 +312,8 @@ struct HudGameState
     HudMatchInfo matchInfo;   ///< Match elapsed time + frag target (top-center header).
     int gravityDirection = 0; ///< 0=down, 1=left, 2=up, 3=right (HUD compass arrow).
 
-    // Inactive-slot weapon snapshot (drives the small "[1] ARC-9  …" or
-    // "[2] PULSAR  …" sub-row at the bottom of the weapon panel — i.e. the
+    // Inactive-slot weapon snapshot (drives the small weapon slot sub-row at
+    // the bottom of the weapon panel — i.e. the
     // *other* weapon, whichever the player isn't currently holding).
     int secondaryWeaponId = -1; ///< -1 = no inactive weapon loaded.
     int secondaryClip = 0;      ///< Mag count of the inactive weapon.

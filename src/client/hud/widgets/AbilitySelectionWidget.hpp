@@ -5,6 +5,8 @@
 
 #include "hud/HudWidget.hpp"
 
+#include <string>
+
 struct AbilitySelectionWidget : HudWidget
 {
     float panelWidth = 520.f;
@@ -22,4 +24,5 @@ struct AbilitySelectionWidget : HudWidget
 
 private:
     HudAbilitySelectionState state_;
+    std::string abilityMenuLabel_ = "Left Alt";
 };

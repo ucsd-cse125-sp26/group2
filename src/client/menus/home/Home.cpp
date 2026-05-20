@@ -11,14 +11,11 @@
 #include <imgui.h>
 #include <utility>
 
-bool Home::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, const GlobalDiscoveryConfig& discoveryCfg)
+bool Home::init(AppContext& ctx)
 {
-    if (!rendererPtr || !windowPtr)
-        return false;
-
-    renderer = rendererPtr;
-    window = windowPtr;
-    discoveryConfig = discoveryCfg;
+    renderer = &ctx.renderer;
+    window = &ctx.window;
+    discoveryConfig = ctx.networkConfig.discovery;
     startGlobalRefresh(true);
 
     localDiscoveryClient->start(9998);
