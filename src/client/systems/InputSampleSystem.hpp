@@ -219,6 +219,7 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting = leftDown && !altHeld;
+        snap.scoped = rightDown && !altHeld;
         snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
         snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
         snap.throwGrenade = false;
