@@ -15,6 +15,7 @@ class HudTweenPool;
 struct HudWidget
 {
     bool visible = true;
+    bool visibleWhileScoped = false;
 
     HudAnchor anchor = HudAnchor::TopLeft;
     float offsetX = 0.f, offsetY = 0.f;

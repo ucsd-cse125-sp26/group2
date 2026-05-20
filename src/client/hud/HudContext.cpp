@@ -360,6 +360,13 @@ void HudContext::vignette(float screenW, float screenH, HudColor color)
     emitQuad(0.f, 0.f, screenW, screenH, 0.f, 0.f, 1.f, 1.f, color, 4.f);
 }
 
+void HudContext::scopeMask(float screenW, float screenH, float radiusPx, HudColor color)
+{
+    // Full-screen quad with texMode=5. shapeData carries viewport size and the
+    // cut-out radius so the fragment shader can compute a true pixel circle.
+    emitQuad(0.f, 0.f, screenW, screenH, 0.f, 0.f, 1.f, 1.f, color, 5.f, screenW, screenH, radiusPx);
+}
+
 // ── Clipping ────────────────────────────────────────────────────────────────
 
 void HudContext::pushClipRect(float x, float y, float w, float h)

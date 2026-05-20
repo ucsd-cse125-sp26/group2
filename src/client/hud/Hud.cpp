@@ -24,6 +24,7 @@
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
+#include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/VignetteWidget.hpp"
 
@@ -87,6 +88,7 @@ void Hud::processEvent(const SDL_Event* event)
 void Hud::update(float dt, const HudGameState& state)
 {
     tweens_.update(dt);
+    railgunScoped_ = state.railgunScoped && state.isAlive;
     const float scale = screenH_ / 1080.f;
     // Update ALL widgets (not just visible ones) so data stays fresh
     // when toggled on (e.g. Scoreboard on TAB shows current frame data).
@@ -102,6 +104,8 @@ void Hud::render()
 
     for (auto& w : widgets_) {
         if (!w->visible)
+            continue;
+        if (railgunScoped_ && !w->visibleWhileScoped)
             continue;
         float drawX = 0.f, drawY = 0.f;
         resolveAnchor(*w, drawX, drawY);
@@ -173,6 +177,8 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
 void Hud::createWidgets()
 {
     // Widgets added in draw order (back to front).
+    widgets_.push_back(std::make_unique<RailgunScopeWidget>());
+
     // Vignette goes first (full-screen overlay behind everything else).
     widgets_.push_back(std::make_unique<VignetteWidget>());
 

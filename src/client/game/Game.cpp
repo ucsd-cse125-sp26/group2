@@ -3378,7 +3378,9 @@ SDL_AppResult Game::iterate()
                 }
             }
         });
+        bool scopeHeld = false;
         registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+            scopeHeld = snap.scoped;
             hudState.abilitySelection.modifierHeld = snap.abilitySelectHeld;
             hudState.grenadeRadial.open = snap.grenadeMenuHeld;
             if (snap.grenadeSelectIndex < kHudGrenadeSlots) {
@@ -3392,6 +3394,8 @@ SDL_AppResult Game::iterate()
             hudState.ammoClip = gun.currentMagAmmo;
             hudState.ammoReserve = gun.totalAmmo;
             hudState.weaponId = static_cast<int>(gun.type);
+            hudState.railgunScoped = scopeHeld && gun.type == WeaponType::RailGun;
+            hudState.railgunChargeTime = gun.type == WeaponType::RailGun ? gun.chargeTime : 0.f;
             // Mag capacity comes straight from the static WeaponConfig table,
             // so the "47/30" rifle bug (HUD hardcoded /30 vs. real /50) is
             // gone — the HUD reads exactly what gameplay says.

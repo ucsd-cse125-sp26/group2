@@ -257,6 +257,8 @@ struct HudGameState
     int abilityLevel = 0;
     int ammoClip = 30, ammoReserve = 90;
     int weaponId = 0;
+    bool railgunScoped = false;    ///< True while the local player holds right click with the railgun equipped.
+    float railgunChargeTime = 0.f; ///< Current GunInstance::chargeTime for the equipped railgun.
     float roundTimeRemaining = 0.f;
     bool isAlive = true;
     bool isBuyPhase = false;
