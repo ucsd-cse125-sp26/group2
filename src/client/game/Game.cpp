@@ -2809,6 +2809,11 @@ SDL_AppResult Game::iterate()
         currentEquippedType_ = gun.type;
     });
 
+    bool hideRailgunViewmodelForScope = false;
+    registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& input) {
+        hideRailgunViewmodelForScope = currentEquippedType_ == WeaponType::RailGun && input.scoped;
+    });
+
     // Auto-apply per-weapon viewmodel defaults when weapon changes
     if (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_) {
         const auto& vp = getViewmodelParams(currentEquippedType_);
@@ -2829,7 +2834,8 @@ SDL_AppResult Game::iterate()
     {
         WeaponViewmodel vm;
         const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
-        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end()) {
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() &&
+            !hideRailgunViewmodelForScope) {
             vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
 
@@ -3429,7 +3435,9 @@ SDL_AppResult Game::iterate()
                 }
             }
         });
+        bool scopeHeld = false;
         registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+            scopeHeld = snap.scoped;
             hudState.abilitySelection.modifierHeld = snap.abilitySelectHeld;
             hudState.grenadeRadial.open = snap.grenadeMenuHeld;
             if (snap.grenadeSelectIndex < kHudGrenadeSlots) {
@@ -3443,6 +3451,8 @@ SDL_AppResult Game::iterate()
             hudState.ammoClip = gun.currentMagAmmo;
             hudState.ammoReserve = gun.totalAmmo;
             hudState.weaponId = static_cast<int>(gun.type);
+            hudState.railgunScoped = scopeHeld && gun.type == WeaponType::RailGun;
+            hudState.railgunChargeTime = gun.type == WeaponType::RailGun ? gun.chargeTime : 0.f;
             // Mag capacity comes straight from the static WeaponConfig table,
             // so the "47/30" rifle bug (HUD hardcoded /30 vs. real /50) is
             // gone — the HUD reads exactly what gameplay says.

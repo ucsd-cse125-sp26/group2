@@ -24,6 +24,7 @@ struct WeaponConfig
     float dps = 0.0f;           ///< Damage per second (beam weapons only; discrete weapons use `damage`).
     float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
     float chargeDamage = 0.0f;  ///< Damage dealt on release (charge weapons only).
+    float maxChargeTime = 0.0f; ///< in seconds
 };
 
 struct ProjectileConfig
@@ -76,12 +77,13 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .fireCooldown = 0.30f,
             .magazineSize = 8,
             .defaultAmmoCapacity = 32,
-            .damage = 60.0f,
+            .damage = 50.0f,
             .hitscan = true,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isCharge = true,
-            .chargeDamage = 150.0f,
+            .chargeDamage = 100.0f,
+            .maxChargeTime = 1.0f,
         }, // RailGun
         WeaponConfig{
             .fireCooldown = 0.0f,

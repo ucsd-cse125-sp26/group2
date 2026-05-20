@@ -24,6 +24,7 @@
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
+#include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/VignetteWidget.hpp"
 
@@ -173,6 +174,8 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
 void Hud::createWidgets()
 {
     // Widgets added in draw order (back to front).
+    widgets_.push_back(std::make_unique<RailgunScopeWidget>());
+
     // Vignette goes first (full-screen overlay behind everything else).
     widgets_.push_back(std::make_unique<VignetteWidget>());
 
