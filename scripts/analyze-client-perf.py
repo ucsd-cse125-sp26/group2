@@ -39,6 +39,20 @@ SECTION_COLUMNS = [
     "pause_menu_ms",
     "imgui_render_ms",
     "draw_frame_ms",
+    "draw_acquire_ms",
+    "draw_record_ms",
+    "draw_submit_ms",
+    "renderer_swapchain_acquire_ms",
+    "renderer_depth_ensure_ms",
+    "renderer_camera_update_ms",
+    "renderer_static_batch_rebuild_ms",
+    "renderer_skinned_upload_ms",
+    "renderer_geometry_pass_ms",
+    "renderer_weapon_pass_ms",
+    "renderer_ui_pass_ms",
+    "renderer_imgui_prepare_ms",
+    "renderer_hud_draw_ms",
+    "renderer_imgui_draw_ms",
     "frame_limiter_ms",
 ]
 
@@ -51,6 +65,13 @@ COUNTER_COLUMNS = [
     "reconcile_skipped_exact",
     "reconcile_replay_forced",
     "reconcile_missing_history",
+    "renderer_static_batch_draws",
+    "renderer_dynamic_draws",
+    "renderer_material_binds",
+    "renderer_texture_binds",
+    "renderer_static_triangles",
+    "renderer_frame_submitted",
+    "renderer_swapchain_skipped",
     "perf_movement_calls",
     "perf_movement_players",
     "perf_collision_calls",
@@ -146,6 +167,17 @@ def main() -> int:
         f"p5={fps(pct(wall, 0.95)):.1f} p1={fps(pct(wall, 0.99)):.1f} min={fps(wall[-1]):.1f}"
     )
     print(f"cpu ms:  avg={avg(cpu):.3f} p95={pct(cpu, 0.95):.3f} p99={pct(cpu, 0.99):.3f}")
+    present_modes = sorted({row.get("renderer_present_mode", "") for row in rows if row.get("renderer_present_mode", "")})
+    if present_modes:
+        counts = {mode: sum(1 for row in rows if row.get("renderer_present_mode", "") == mode) for mode in present_modes}
+        print("renderer present modes: " + ", ".join(f"{mode}={count}" for mode, count in counts.items()))
+    submitted = sum(1 for row in rows if f(row, "renderer_frame_submitted") > 0.0)
+    skipped = sum(1 for row in rows if f(row, "renderer_swapchain_skipped") > 0.0)
+    duration_ms = f(rows[-1], "timestamp_ms") - f(rows[0], "timestamp_ms")
+    submitted_rows = [row for row in rows if f(row, "renderer_frame_submitted") > 0.0]
+    if submitted > 0 or skipped > 0:
+        submitted_fps = submitted * 1000.0 / duration_ms if duration_ms > 0.0 else 0.0
+        print(f"renderer submitted frames: {submitted}/{len(rows)} ({submitted_fps:.1f}/s), swapchain skipped={skipped}")
 
     slow_cutoff = pct(wall, 0.99)
     slow_rows = [r for r in rows if f(r, "wall_frame_ms") >= slow_cutoff]
@@ -153,6 +185,12 @@ def main() -> int:
     section_avgs = [(name, avg(f(r, name) for r in slow_rows)) for name in SECTION_COLUMNS]
     for name, value in sorted(section_avgs, key=lambda item: item[1], reverse=True)[:16]:
         print(f"  {name:20s} {value:8.3f}")
+
+    if submitted_rows:
+        print("\nsubmitted-frame avg section ms:")
+        submitted_section_avgs = [(name, avg(f(r, name) for r in submitted_rows)) for name in SECTION_COLUMNS]
+        for name, value in sorted(submitted_section_avgs, key=lambda item: item[1], reverse=True)[:16]:
+            print(f"  {name:20s} {value:8.3f}")
 
     print("\nphysics tick distribution:")
     for tick_value in sorted({int(f(r, "physics_ticks")) for r in rows}):
@@ -187,6 +225,14 @@ def main() -> int:
             f"recErrV={f(row, 'reconcile_error_velocity'):.3f} "
             f"refreshP={f(row, 'refresh_players_ms'):.3f}ms cam={f(row, 'camera_resolve_ms'):.3f}ms "
             f"draw={f(row, 'draw_frame_ms'):.3f}ms acq={f(row, 'draw_acquire_ms'):.3f}ms "
+            f"record={f(row, 'draw_record_ms'):.3f}ms sub={f(row, 'draw_submit_ms'):.3f}ms "
+            f"swap={f(row, 'renderer_swapchain_acquire_ms'):.3f}ms "
+            f"geom={f(row, 'renderer_geometry_pass_ms'):.3f}ms "
+            f"weapon={f(row, 'renderer_weapon_pass_ms'):.3f}ms uiPass={f(row, 'renderer_ui_pass_ms'):.3f}ms "
+            f"imguiPrep={f(row, 'renderer_imgui_prepare_ms'):.3f}ms "
+            f"hudDraw={f(row, 'renderer_hud_draw_ms'):.3f}ms imguiDraw={f(row, 'renderer_imgui_draw_ms'):.3f}ms "
+            f"pmode={row.get('renderer_present_mode', 'n/a')} "
+            f"submitted={row.get('renderer_frame_submitted', '0')} skip={row.get('renderer_swapchain_skipped', '0')} "
             f"phys_ticks={row.get('physics_ticks', '0')} rec_ticks={row.get('reconcile_replayed_ticks', '0')} "
             f"kcc={row.get('perf_kcc_calls', '0')} sweepTri={row.get('perf_sweep_capsule_trimesh_tris', '0')} "
             f"closestTri={row.get('perf_closest_point_mesh_tris', '0')} "
@@ -196,6 +242,9 @@ def main() -> int:
             f"wallBroad={row.get('perf_wall_attachment_broadphase_fallbacks', '0')} "
             f"wallProbeTri={row.get('perf_closest_point_wall_probe_tris', '0')} "
             f"wallAttachTri={row.get('perf_closest_point_wall_attachment_tris', '0')} "
+            f"staticBatch={row.get('renderer_static_batch_draws', '0')} "
+            f"dynDraws={row.get('renderer_dynamic_draws', '0')} "
+            f"matBinds={row.get('renderer_material_binds', '0')} "
             f"draws={row.get('renderer_mesh_draws', '0')} tris={row.get('renderer_triangles', '0')}"
         )
 

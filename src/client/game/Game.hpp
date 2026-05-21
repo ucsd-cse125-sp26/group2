@@ -489,6 +489,7 @@ private:
     // stderr, then quits.  Powers `scripts/perf-100bots.sh`.
     float benchSeconds_ = 0.0f;                         ///< Bench duration in seconds (0 = disabled).
     Uint64 benchStartTime_ = 0;                         ///< Perf counter at first iterate() in bench mode.
+    Uint64 benchLastSubmittedTick_ = 0;                 ///< Perf counter for the previous submitted bench frame.
     bool benchActive_ = false;                          ///< True after BENCH_SECONDS read at init.
     static constexpr float k_benchWarmupSeconds = 2.0f; ///< Skip the first N seconds (pipeline warmup).
     std::vector<float> benchFrameTimesMs_;              ///< Per-frame ms after warmup; reservation in init().

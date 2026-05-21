@@ -17,6 +17,8 @@
 #include <cstddef>
 #include <filesystem>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/geometric.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/trigonometric.hpp>
 #include <imgui.h>
 #include <iostream>
@@ -31,10 +33,69 @@ float ticksToMs(Uint64 elapsed, Uint64 freq)
     return freq == 0 ? 0.0f : (static_cast<float>(elapsed) * 1000.0f) / static_cast<float>(freq);
 }
 
+class ScopedRendererTimer
+{
+public:
+    ScopedRendererTimer(float& outMs, Uint64 freq) : outMs_(outMs), freq_(freq), start_(SDL_GetPerformanceCounter()) {}
+    ~ScopedRendererTimer() { outMs_ += ticksToMs(SDL_GetPerformanceCounter() - start_, freq_); }
+
+private:
+    float& outMs_;
+    Uint64 freq_ = 0;
+    Uint64 start_ = 0;
+};
+
 /// Side-table for per-model emissive overrides set via `setModelEmissive`.
 /// TODO(graphics): consume these inside `drawModel` when building the
 /// material UBO — currently captured but unused.
 std::unordered_map<int32_t, glm::vec4> g_emissiveOverrides;
+
+struct StaticBatchKey
+{
+    MaterialIdInt materialId = 0;
+    TexIdInt textureId = 0;
+    bool useTexture = false;
+
+    bool operator==(const StaticBatchKey& other) const noexcept
+    {
+        return materialId == other.materialId && textureId == other.textureId && useTexture == other.useTexture;
+    }
+};
+
+struct StaticBatchKeyHash
+{
+    std::size_t operator()(const StaticBatchKey& key) const noexcept
+    {
+        std::size_t h = static_cast<std::size_t>(key.materialId);
+        h ^= static_cast<std::size_t>(key.textureId) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+        h ^= static_cast<std::size_t>(key.useTexture ? 1u : 0u) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+        return h;
+    }
+};
+
+struct StaticBatchBuildData
+{
+    StaticBatchKey key{};
+    SDL_GPUTexture* texture = nullptr;
+    bool useTexture = false;
+    glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
+    std::vector<Asset::Vertex> vertices;
+    std::vector<uint32_t> indices;
+};
+
+const char* presentModeName(SDL_GPUPresentMode presentMode)
+{
+    switch (presentMode) {
+    case SDL_GPU_PRESENTMODE_VSYNC:
+        return "vsync";
+    case SDL_GPU_PRESENTMODE_IMMEDIATE:
+        return "immediate";
+    case SDL_GPU_PRESENTMODE_MAILBOX:
+        return "mailbox";
+    default:
+        return "unknown";
+    }
+}
 
 float verticalFovDegreesFromHorizontal(float horizontalFovDegrees, float aspect)
 {
@@ -198,6 +259,14 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     const Uint64 freq = SDL_GetPerformanceFrequency();
     const Uint64 t0 = SDL_GetPerformanceCounter();
+    lastAcquireMs_ = 0.0f;
+    lastRecordMs_ = 0.0f;
+    lastSubmitMs_ = 0.0f;
+    lastFrameStats_ = {};
+    lastFrameStats_.entityCmds = static_cast<Uint32>(entities_.size());
+    lastFrameStats_.pointLights = static_cast<Uint32>(pointLights_.size());
+    lastFrameStats_.skinnedInstances = static_cast<Uint32>(skinnedRenderer_.pendingInstanceCount());
+    lastFrameStats_.presentMode = static_cast<Uint32>(presentMode_);
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
@@ -210,29 +279,47 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     SDL_GPUTexture* swapchain = nullptr;
     Uint32 width = 0;
     Uint32 height = 0;
-    if (!SDL_AcquireGPUSwapchainTexture(cmd, window_, &swapchain, &width, &height)) {
-        SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUSwapchainTexture failed: %s", SDL_GetError());
-        SDL_CancelGPUCommandBuffer(cmd);
-        return;
+    {
+        ScopedRendererTimer timer(lastFrameStats_.swapchainAcquireMs, freq);
+        if (!SDL_AcquireGPUSwapchainTexture(cmd, window_, &swapchain, &width, &height)) {
+            SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUSwapchainTexture failed: %s", SDL_GetError());
+            SDL_CancelGPUCommandBuffer(cmd);
+            return;
+        }
     }
 
     if (!swapchain) {
         // Swapchain not ready (e.g. minimised) — drop the frame silently.
+        lastFrameStats_.swapchainSkipped = 1;
         SDL_CancelGPUCommandBuffer(cmd);
         return;
     }
+    lastFrameStats_.swapchainWidth = width;
+    lastFrameStats_.swapchainHeight = height;
 
-    if (!ensureDepthTextureSize(width, height)) {
-        SDL_Log("NewRenderer::drawFrame: ensureDepthTextureSize failed");
-        SDL_CancelGPUCommandBuffer(cmd);
-        return;
+    {
+        ScopedRendererTimer timer(lastFrameStats_.depthEnsureMs, freq);
+        if (!ensureDepthTextureSize(width, height)) {
+            SDL_Log("NewRenderer::drawFrame: ensureDepthTextureSize failed");
+            SDL_CancelGPUCommandBuffer(cmd);
+            return;
+        }
     }
 
-    setMainCamera(eye, yaw, pitch, roll, width, height);
+    {
+        ScopedRendererTimer timer(lastFrameStats_.cameraUpdateMs, freq);
+        setMainCamera(eye, yaw, pitch, roll, width, height);
+    }
+
+    if (staticBatchesDirty_) {
+        ScopedRendererTimer timer(lastFrameStats_.staticBatchRebuildMs, freq);
+        rebuildStaticBatches(cmd);
+    }
 
     // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
     // the first render pass so the copy is sequenced ahead of the draws.
-    {
+    if (skinnedRenderer_.pendingInstanceCount() > 0) {
+        ScopedRendererTimer timer(lastFrameStats_.skinnedUploadMs, freq);
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
         if (copyPass) {
             skinnedRenderer_.uploadFrame(cmd, copyPass);
@@ -240,14 +327,24 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
     }
 
-    drawGeometryPass(swapchain, cmd);
-    drawWeaponPass(swapchain, cmd);
-    drawUIPass(swapchain, cmd);
+    {
+        ScopedRendererTimer timer(lastFrameStats_.geometryPassMs, freq);
+        drawGeometryPass(swapchain, cmd);
+    }
+    {
+        ScopedRendererTimer timer(lastFrameStats_.weaponPassMs, freq);
+        drawWeaponPass(swapchain, cmd);
+    }
+    {
+        ScopedRendererTimer timer(lastFrameStats_.uiPassMs, freq);
+        drawUIPass(swapchain, cmd);
+    }
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
     lastRecordMs_ = ticksToMs(t2 - t1, freq);
 
     SDL_SubmitGPUCommandBuffer(cmd);
+    lastFrameStats_.frameSubmitted = 1;
 
     const Uint64 t3 = SDL_GetPerformanceCounter();
     lastSubmitMs_ = ticksToMs(t3 - t2, freq);
@@ -279,7 +376,8 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);
 
-    drawSkinnedModels(geometryPass, cmd);
+    if (skinnedRenderer_.pendingInstanceCount() > 0)
+        drawSkinnedModels(geometryPass, cmd);
 
     // drawWeapon(geometryPass, cmd);
 
@@ -288,6 +386,11 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
 
 void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
+    if (!weapon_.visible)
+        return;
+    if (weapon_.modelIndex < 0 || static_cast<size_t>(weapon_.modelIndex) >= Asset::modelInstances_.size())
+        return;
+
     SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
 
     SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_; // copy
@@ -320,6 +423,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
         return;
     }
 
+    lastFrameStats_.weaponDrawn = 1;
     drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
 }
 
@@ -330,10 +434,55 @@ void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUComman
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
+    if (!staticBatches_.empty()) {
+        lastFrameStats_.worldInstances = staticBatchWorldInstances_;
+        drawStaticBatches(renderPass, cmd);
+        return;
+    }
+
     for (const auto& mInstance : Asset::modelInstances_) {
         if (!mInstance.drawInScenePass)
             continue;
-        drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+        ++lastFrameStats_.worldInstances;
+        drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd, false);
+    }
+}
+
+void NewRenderer::drawStaticBatches(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+{
+    const glm::mat4 identity{1.0f};
+    SDL_PushGPUVertexUniformData(cmd, 1, &identity, sizeof(glm::mat4));
+
+    for (const StaticBatch& batch : staticBatches_) {
+        if (batch.vertexBuffer == nullptr || batch.indexBuffer == nullptr || batch.indexCount == 0)
+            continue;
+
+        SDL_GPUTexture* texture = batch.texture != nullptr ? batch.texture : texture_;
+        SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture, sampler_);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
+        ++lastFrameStats_.textureBinds;
+
+        const Uint32 useTextureUniform = batch.useTexture ? 1u : 0u;
+        SDL_PushGPUFragmentUniformData(cmd, 0, &batch.materialDiffuse, sizeof(batch.materialDiffuse));
+        SDL_PushGPUFragmentUniformData(cmd, 1, &useTextureUniform, sizeof(useTextureUniform));
+        ++lastFrameStats_.materialBinds;
+
+        SDL_GPUBufferBinding vertexBufferBinding{};
+        vertexBufferBinding.buffer = batch.vertexBuffer;
+        vertexBufferBinding.offset = 0;
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBufferBinding, 1);
+
+        SDL_GPUBufferBinding indexBufferBinding{};
+        indexBufferBinding.buffer = batch.indexBuffer;
+        indexBufferBinding.offset = 0;
+        SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_DrawGPUIndexedPrimitives(renderPass, batch.indexCount, 1, 0, 0, 0);
+        ++lastFrameStats_.staticBatchDraws;
+        ++lastFrameStats_.meshDraws;
+        ++lastFrameStats_.indexedDraws;
+        lastFrameStats_.triangles += batch.triangleCount;
+        lastFrameStats_.staticTriangles += batch.triangleCount;
     }
 }
 
@@ -349,6 +498,7 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
         ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(entityCmd.modelIndex)).modelId_;
         // TODO(graphics): pass entityCmd.tint into the per-mesh material UBO
         // so tinted entities (e.g. team colors, hit flashes) render correctly.
+        ++lastFrameStats_.entityDraws;
         drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
     }
 }
@@ -356,9 +506,11 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
 void NewRenderer::drawModel(ModelIdInt modelId,
                             const glm::mat4& modelTransform,
                             SDL_GPURenderPass* renderPass,
-                            SDL_GPUCommandBuffer* cmd)
+                            SDL_GPUCommandBuffer* cmd,
+                            bool countDynamicDraws)
 {
     Asset::Model& model = Asset::models_.at(modelId);
+    ++lastFrameStats_.modelDraws;
     for (auto& element : model.modelElements_) {
         const Asset::Material* material = nullptr;
         if (Asset::materials_.contains(element.materialId_))
@@ -377,6 +529,7 @@ void NewRenderer::drawModel(ModelIdInt modelId,
 
         SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture, sampler_);
         SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
+        ++lastFrameStats_.textureBinds;
 
         glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
         if (material != nullptr)
@@ -384,16 +537,19 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         Uint32 useTextureUniform = useTexture ? 1u : 0u;
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         SDL_PushGPUFragmentUniformData(cmd, 1, &useTextureUniform, sizeof(useTextureUniform));
+        ++lastFrameStats_.materialBinds;
 
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
 
         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
         drawMesh(renderPass, mesh);
+        if (countDynamicDraws)
+            ++lastFrameStats_.dynamicDraws;
     }
 }
 
-void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
+void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh)
 {
     SDL_GPUBufferBinding vertexBufferBinding{};
     vertexBufferBinding.buffer = mesh.vBufferInfo_.gpuBuff;
@@ -407,6 +563,150 @@ void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mes
 
     const Uint32 indexCount = static_cast<Uint32>(mesh.iBufferInfo_.bufferSize / sizeof(Uint32));
     SDL_DrawGPUIndexedPrimitives(renderPass, indexCount, 1, 0, 0, 0);
+    ++lastFrameStats_.meshDraws;
+    ++lastFrameStats_.indexedDraws;
+    lastFrameStats_.triangles += indexCount / 3;
+}
+
+void NewRenderer::releaseStaticBatches()
+{
+    if (device_ == nullptr) {
+        staticBatches_.clear();
+        staticBatchWorldInstances_ = 0;
+        staticBatchTriangles_ = 0;
+        return;
+    }
+
+    for (StaticBatch& batch : staticBatches_) {
+        if (batch.vertexBuffer != nullptr)
+            SDL_ReleaseGPUBuffer(device_, batch.vertexBuffer);
+        if (batch.indexBuffer != nullptr)
+            SDL_ReleaseGPUBuffer(device_, batch.indexBuffer);
+    }
+    staticBatches_.clear();
+    staticBatchWorldInstances_ = 0;
+    staticBatchTriangles_ = 0;
+}
+
+void NewRenderer::rebuildStaticBatches(SDL_GPUCommandBuffer* cmd)
+{
+    staticBatchesDirty_ = false;
+    releaseStaticBatches();
+    if (device_ == nullptr || cmd == nullptr)
+        return;
+
+    std::vector<StaticBatchBuildData> buildBatches;
+    std::unordered_map<StaticBatchKey, std::size_t, StaticBatchKeyHash> batchByKey;
+
+    for (const Asset::ModelInstance& instance : Asset::modelInstances_) {
+        if (!instance.drawInScenePass)
+            continue;
+
+        const auto modelIt = Asset::models_.find(instance.modelId_);
+        if (modelIt == Asset::models_.end())
+            continue;
+
+        ++staticBatchWorldInstances_;
+        const Asset::Model& model = modelIt->second;
+        for (const Asset::ModelElement& element : model.modelElements_) {
+            const auto meshIt = Asset::meshes_.find(element.meshId_);
+            if (meshIt == Asset::meshes_.end())
+                continue;
+
+            const Asset::Material* material = nullptr;
+            if (const auto materialIt = Asset::materials_.find(element.materialId_);
+                materialIt != Asset::materials_.end())
+                material = &materialIt->second;
+
+            TexIdInt textureId = 0;
+            SDL_GPUTexture* texture = nullptr;
+            if (material != nullptr) {
+                const TexIdInt candidateTexId = material->texId_[0];
+                const auto textureIt = Asset::textures_.find(candidateTexId);
+                if (textureIt != Asset::textures_.end() && textureIt->second.tex != nullptr) {
+                    textureId = candidateTexId;
+                    texture = textureIt->second.tex;
+                }
+            }
+
+            const bool useTexture = texture != nullptr || material == nullptr || !material->hasPhongData_;
+            const StaticBatchKey key{
+                .materialId = element.materialId_,
+                .textureId = textureId,
+                .useTexture = useTexture,
+            };
+
+            std::size_t batchIndex = 0;
+            const auto batchIt = batchByKey.find(key);
+            if (batchIt == batchByKey.end()) {
+                StaticBatchBuildData build{};
+                build.key = key;
+                build.texture = texture;
+                build.useTexture = useTexture;
+                if (material != nullptr)
+                    build.materialDiffuse = glm::vec4(material->kDiffuse_, 1.0f);
+                batchIndex = buildBatches.size();
+                batchByKey.emplace(key, batchIndex);
+                buildBatches.push_back(std::move(build));
+            } else {
+                batchIndex = batchIt->second;
+            }
+
+            StaticBatchBuildData& batch = buildBatches[batchIndex];
+            const Asset::Mesh& mesh = meshIt->second;
+            const uint32_t baseVertex = static_cast<uint32_t>(batch.vertices.size());
+            const glm::mat4 elementTransform = instance.transform_ * element.cachedTransform_;
+            const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(elementTransform)));
+
+            batch.vertices.reserve(batch.vertices.size() + mesh.vertexData_.size());
+            for (const Asset::Vertex& vertex : mesh.vertexData_) {
+                Asset::Vertex baked = vertex;
+                baked.position = glm::vec3(elementTransform * glm::vec4(vertex.position, 1.0f));
+                const glm::vec3 transformedNormal = normalMatrix * vertex.normal;
+                if (glm::dot(transformedNormal, transformedNormal) > 1e-10f)
+                    baked.normal = glm::normalize(transformedNormal);
+                batch.vertices.push_back(baked);
+            }
+
+            batch.indices.reserve(batch.indices.size() + mesh.indexData_.size());
+            for (uint32_t index : mesh.indexData_)
+                batch.indices.push_back(baseVertex + index);
+        }
+    }
+
+    std::vector<Boilerplate::BufferUpload> uploads;
+    staticBatches_.reserve(buildBatches.size());
+    for (const StaticBatchBuildData& build : buildBatches) {
+        if (build.vertices.empty() || build.indices.empty())
+            continue;
+
+        const size_t vertexBytes = build.vertices.size() * sizeof(Asset::Vertex);
+        const size_t indexBytes = build.indices.size() * sizeof(uint32_t);
+
+        StaticBatch batch{};
+        batch.vertexBuffer = Boilerplate::createBuffer(device_, vertexBytes, SDL_GPU_BUFFERUSAGE_VERTEX);
+        batch.indexBuffer = Boilerplate::createBuffer(device_, indexBytes, SDL_GPU_BUFFERUSAGE_INDEX);
+        if (batch.vertexBuffer == nullptr || batch.indexBuffer == nullptr) {
+            if (batch.vertexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, batch.vertexBuffer);
+            if (batch.indexBuffer != nullptr)
+                SDL_ReleaseGPUBuffer(device_, batch.indexBuffer);
+            continue;
+        }
+
+        batch.texture = build.texture;
+        batch.useTexture = build.useTexture;
+        batch.materialDiffuse = build.materialDiffuse;
+        batch.indexCount = static_cast<Uint32>(build.indices.size());
+        batch.triangleCount = static_cast<Uint32>(build.indices.size() / 3u);
+        staticBatchTriangles_ += batch.triangleCount;
+
+        uploads.push_back({batch.vertexBuffer, build.vertices.data(), static_cast<Uint32>(vertexBytes)});
+        uploads.push_back({batch.indexBuffer, build.indices.data(), static_cast<Uint32>(indexBytes)});
+        staticBatches_.push_back(batch);
+    }
+
+    Boilerplate::uploadBuffers(device_, cmd, uploads);
 }
 
 bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
@@ -431,20 +731,32 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
 
 void NewRenderer::drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
-    ImDrawData* drawData = ImGui::GetDrawData();
-    if (drawData)
+    ImDrawData* drawData = imguiEnabled ? ImGui::GetDrawData() : nullptr;
+    const bool drawImgui = drawData != nullptr && drawData->CmdListsCount > 0;
+    const bool drawHudTexture = hudTexture_ != nullptr;
+    if (!drawHudTexture && !drawImgui)
+        return;
+
+    const Uint64 freq = SDL_GetPerformanceFrequency();
+    if (drawImgui) {
+        ScopedRendererTimer timer(lastFrameStats_.imguiPrepareMs, freq);
         ImGui_ImplSDLGPU3_PrepareDrawData(drawData, cmd);
+    }
 
     SDL_GPUColorTargetInfo uiColorTarget = Boilerplate::makeColorTargetLoad(swapchain);
 
     SDL_GPURenderPass* uiPass = SDL_BeginGPURenderPass(cmd, &uiColorTarget, 1, nullptr);
-    SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
 
-    if (hudTexture_ != nullptr)
+    if (drawHudTexture) {
+        ScopedRendererTimer timer(lastFrameStats_.hudDrawMs, freq);
+        SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
         drawHud(uiPass);
+    }
 
-    if (drawData && imguiEnabled)
+    if (drawImgui) {
+        ScopedRendererTimer timer(lastFrameStats_.imguiDrawMs, freq);
         ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
+    }
 
     SDL_EndGPURenderPass(uiPass);
 }
@@ -466,6 +778,8 @@ void NewRenderer::quit()
 {
     if (device_) {
         SDL_WaitForGPUIdle(device_);
+
+        releaseStaticBatches();
 
         if (depthTarget_.texture)
             SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
@@ -584,6 +898,7 @@ int NewRenderer::loadSceneModel(
     SDL_SubmitGPUCommandBuffer(cmd);
     SDL_WaitForGPUIdle(device_);
 
+    staticBatchesDirty_ = true;
     return static_cast<int>(Asset::modelInstances_.size() - 1);
 }
 
@@ -626,6 +941,7 @@ void NewRenderer::setModelScenePass(int32_t modelIndex, bool drawInScene)
     if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= Asset::modelInstances_.size())
         return;
     Asset::modelInstances_.at(static_cast<size_t>(modelIndex)).drawInScenePass = drawInScene;
+    staticBatchesDirty_ = true;
 }
 
 void NewRenderer::setParticleSystem(ParticleSystem* ps)
@@ -638,14 +954,35 @@ void NewRenderer::setParticleSystem(ParticleSystem* ps)
     particleSystem_ = ps;
 }
 
+bool NewRenderer::setPresentMode(SDL_GPUPresentMode presentMode)
+{
+    if (!device_ || !window_)
+        return false;
+
+    if (!SDL_WindowSupportsGPUPresentMode(device_, window_, presentMode)) {
+        SDL_Log("NewRenderer: requested present mode is unsupported (%d)", static_cast<int>(presentMode));
+        return false;
+    }
+
+    if (!SDL_SetGPUSwapchainParameters(device_, window_, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, presentMode)) {
+        SDL_Log("NewRenderer: SDL_SetGPUSwapchainParameters failed: %s", SDL_GetError());
+        return false;
+    }
+
+    vsyncEnabled_ = presentMode == SDL_GPU_PRESENTMODE_VSYNC;
+    presentMode_ = presentMode;
+    SDL_Log("NewRenderer: present mode = %s", presentModeName(presentMode));
+    return true;
+}
+
 bool NewRenderer::setVSync(bool enabled)
 {
-    // TODO(graphics): apply via SDL_SetGPUSwapchainParameters with
-    //   SDL_GPU_PRESENTMODE_VSYNC (or MAILBOX) when enabled, and
-    //   SDL_GPU_PRESENTMODE_IMMEDIATE when disabled.  Check the format
-    //   you currently use for the swapchain so you preserve it.
-    vsyncEnabled_ = enabled;
-    return true;
+    if (enabled)
+        return setPresentMode(SDL_GPU_PRESENTMODE_VSYNC);
+
+    if (device_ && window_ && SDL_WindowSupportsGPUPresentMode(device_, window_, SDL_GPU_PRESENTMODE_MAILBOX))
+        return setPresentMode(SDL_GPU_PRESENTMODE_MAILBOX);
+    return setPresentMode(SDL_GPU_PRESENTMODE_IMMEDIATE);
 }
 
 void NewRenderer::requestScreenshot(const std::string& path)

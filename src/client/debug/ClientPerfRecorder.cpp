@@ -70,7 +70,10 @@ void writeHeader(std::ofstream& out)
            "refresh_dropped_weapons_ms,refresh_powerups_ms,camera_resolve_ms,camera_ms,local_vfx_ms,"
            "dispatch_ms,particles_ms,audio_ms,interpolation_ms,animation_ms,entity_cmds_ms,viewmodel_ms,"
            "recorder_fps_ms,imgui_ms,hud_ms,pause_menu_ms,imgui_render_ms,draw_frame_ms,draw_acquire_ms,"
-           "draw_record_ms,draw_submit_ms,frame_limiter_ms,"
+           "draw_record_ms,draw_submit_ms,renderer_swapchain_acquire_ms,renderer_depth_ensure_ms,"
+           "renderer_camera_update_ms,renderer_static_batch_rebuild_ms,renderer_skinned_upload_ms,"
+           "renderer_geometry_pass_ms,renderer_weapon_pass_ms,renderer_ui_pass_ms,renderer_imgui_prepare_ms,"
+           "renderer_hud_draw_ms,renderer_imgui_draw_ms,frame_limiter_ms,"
            "physics_ticks,tick_count,snapshot_apply_count,snapshot_applied,reconcile_requested_ticks,"
            "reconcile_replayed_ticks,reconcile_missing_ticks,reconcile_skipped_exact,reconcile_replay_forced,"
            "reconcile_missing_history,client_predict_tick,server_acked_client_tick,reconcile_error_position,"
@@ -84,7 +87,9 @@ void writeHeader(std::ofstream& out)
            "rtt_ms,avg_rtt_ms,recv_kbps,send_kbps,registry_update_kb,"
            "swapchain_width,swapchain_height,renderer_world_instances,renderer_entity_cmds,renderer_entity_draws,"
            "renderer_point_lights,renderer_skinned_instances,renderer_weapon_drawn,renderer_model_draws,"
-           "renderer_mesh_draws,renderer_indexed_draws,renderer_triangles,"
+           "renderer_mesh_draws,renderer_indexed_draws,renderer_triangles,renderer_static_batch_draws,"
+           "renderer_dynamic_draws,renderer_material_binds,renderer_texture_binds,renderer_static_triangles,"
+           "renderer_present_mode,renderer_frame_submitted,renderer_swapchain_skipped,"
            "imgui_draw_lists,imgui_vertices,imgui_indices,"
            "perf_movement_calls,perf_movement_players,perf_collision_calls,perf_collision_players,"
            "perf_kcc_calls,perf_kcc_bump_hits,perf_kcc_ca_iterations,perf_kcc_sweep_hits,"
@@ -112,30 +117,37 @@ void writeFrame(std::ofstream& out, const ClientPerfFrame& f)
         << ',' << f.audioMs << ',' << f.interpolationMs << ',' << f.animationMs << ',' << f.entityCmdsMs << ','
         << f.viewmodelMs << ',' << f.recorderFpsMs << ',' << f.imguiMs << ',' << f.hudMs << ',' << f.pauseMenuMs << ','
         << f.imguiRenderMs << ',' << f.drawFrameMs << ',' << f.drawAcquireMs << ',' << f.drawRecordMs << ','
-        << f.drawSubmitMs << ',' << f.frameLimiterMs << ',' << f.physicsTicks << ',' << f.tickCount << ','
-        << f.snapshotApplyCount << ',' << f.snapshotApplied << ',' << f.reconcileRequestedTicks << ','
-        << f.reconcileReplayedTicks << ',' << f.reconcileMissingTicks << ',' << f.reconcileSkippedExact << ','
-        << f.reconcileReplayForced << ',' << f.reconcileMissingHistory << ',' << f.clientPredictTick << ','
-        << f.serverAckedClientTick << ',' << f.reconcileErrorPosition << ',' << f.reconcileErrorVelocity << ','
-        << f.accumulatorMs << ',' << f.measuredPhysicsHz << ',' << f.fpsCurrent << ',' << f.fps1pLow << ','
-        << f.fps5pLow << ',' << f.playerEntities << ',' << f.localPlayers << ',' << f.renderableEntities << ','
-        << f.projectileEntities << ',' << f.fireFields << ',' << f.animatedCandidates << ',' << f.animatedSampled << ','
-        << f.animatedDrawn << ',' << f.skinnedInstances << ',' << f.boneMatrices << ',' << f.entityRenderCmds << ','
-        << f.pointLights << ',' << f.beamPointLights << ',' << f.impactParticles << ',' << f.tracerParticles << ','
-        << f.ribbonVertices << ',' << f.hitscanBeams << ',' << f.arcVertices << ',' << f.smokeParticles << ','
-        << f.decals << ',' << f.audioSourcesActive << ',' << f.voiceSourcesActive << ',' << f.audioEventsPosted << ','
+        << f.drawSubmitMs << ',' << f.rendererSwapchainAcquireMs << ',' << f.rendererDepthEnsureMs << ','
+        << f.rendererCameraUpdateMs << ',' << f.rendererStaticBatchRebuildMs << ',' << f.rendererSkinnedUploadMs << ','
+        << f.rendererGeometryPassMs << ',' << f.rendererWeaponPassMs << ',' << f.rendererUiPassMs << ','
+        << f.rendererImguiPrepareMs << ',' << f.rendererHudDrawMs << ',' << f.rendererImguiDrawMs << ','
+        << f.frameLimiterMs << ',' << f.physicsTicks << ',' << f.tickCount << ',' << f.snapshotApplyCount << ','
+        << f.snapshotApplied << ',' << f.reconcileRequestedTicks << ',' << f.reconcileReplayedTicks << ','
+        << f.reconcileMissingTicks << ',' << f.reconcileSkippedExact << ',' << f.reconcileReplayForced << ','
+        << f.reconcileMissingHistory << ',' << f.clientPredictTick << ',' << f.serverAckedClientTick << ','
+        << f.reconcileErrorPosition << ',' << f.reconcileErrorVelocity << ',' << f.accumulatorMs << ','
+        << f.measuredPhysicsHz << ',' << f.fpsCurrent << ',' << f.fps1pLow << ',' << f.fps5pLow << ','
+        << f.playerEntities << ',' << f.localPlayers << ',' << f.renderableEntities << ',' << f.projectileEntities
+        << ',' << f.fireFields << ',' << f.animatedCandidates << ',' << f.animatedSampled << ',' << f.animatedDrawn
+        << ',' << f.skinnedInstances << ',' << f.boneMatrices << ',' << f.entityRenderCmds << ',' << f.pointLights
+        << ',' << f.beamPointLights << ',' << f.impactParticles << ',' << f.tracerParticles << ',' << f.ribbonVertices
+        << ',' << f.hitscanBeams << ',' << f.arcVertices << ',' << f.smokeParticles << ',' << f.decals << ','
+        << f.audioSourcesActive << ',' << f.voiceSourcesActive << ',' << f.audioEventsPosted << ','
         << f.audioCommandsGenerated << ',' << f.audioSourcesStarted << ',' << f.audioDroppedByCooldown << ','
         << f.audioDroppedByLimit << ',' << f.audioStolenSources << ',' << f.rttMs << ',' << f.avgRttMs << ','
         << f.recvKBps << ',' << f.sendKBps << ',' << f.registryUpdateKB << ',' << f.swapchainWidth << ','
         << f.swapchainHeight << ',' << f.rendererWorldInstances << ',' << f.rendererEntityCmds << ','
         << f.rendererEntityDraws << ',' << f.rendererPointLights << ',' << f.rendererSkinnedInstances << ','
         << f.rendererWeaponDrawn << ',' << f.rendererModelDraws << ',' << f.rendererMeshDraws << ','
-        << f.rendererIndexedDraws << ',' << f.rendererTriangles << ',' << f.imguiDrawLists << ',' << f.imguiVertices
-        << ',' << f.imguiIndices << ',' << f.perfMovementCalls << ',' << f.perfMovementPlayers << ','
-        << f.perfCollisionCalls << ',' << f.perfCollisionPlayers << ',' << f.perfKccCalls << ',' << f.perfKccBumpHits
-        << ',' << f.perfKccCaIterations << ',' << f.perfKccSweepHits << ',' << f.perfWallDetectCalls << ','
-        << f.perfWallMeshProbes << ',' << f.perfWallMeshProbeMeshes << ',' << f.perfWallSphereFallbacks << ','
-        << f.perfWallAttachmentCalls << ',' << f.perfWallAttachmentMeshes << ',' << f.perfWallDetectSkippedByGate << ','
+        << f.rendererIndexedDraws << ',' << f.rendererTriangles << ',' << f.rendererStaticBatchDraws << ','
+        << f.rendererDynamicDraws << ',' << f.rendererMaterialBinds << ',' << f.rendererTextureBinds << ','
+        << f.rendererStaticTriangles << ',' << f.rendererPresentMode << ',' << f.rendererFrameSubmitted << ','
+        << f.rendererSwapchainSkipped << ',' << f.imguiDrawLists << ',' << f.imguiVertices << ',' << f.imguiIndices
+        << ',' << f.perfMovementCalls << ',' << f.perfMovementPlayers << ',' << f.perfCollisionCalls << ','
+        << f.perfCollisionPlayers << ',' << f.perfKccCalls << ',' << f.perfKccBumpHits << ',' << f.perfKccCaIterations
+        << ',' << f.perfKccSweepHits << ',' << f.perfWallDetectCalls << ',' << f.perfWallMeshProbes << ','
+        << f.perfWallMeshProbeMeshes << ',' << f.perfWallSphereFallbacks << ',' << f.perfWallAttachmentCalls << ','
+        << f.perfWallAttachmentMeshes << ',' << f.perfWallDetectSkippedByGate << ','
         << f.perfWallAttachmentPrevTriangleHits << ',' << f.perfWallAttachmentNeighborHits << ','
         << f.perfWallAttachmentBroadphaseFallbacks << ',' << f.perfStaticBroadphaseQueries << ','
         << f.perfStaticBroadphaseMeshes << ',' << f.perfSweepAabbAllCalls << ',' << f.perfSweepCapsuleAllCalls << ','
@@ -319,6 +331,9 @@ void ClientPerfRecorder::writeSummary() const
         const ClientPerfFrame& f = *slow[i];
         out << "frame=" << f.frameNumber << " wall_ms=" << f.wallFrameMs << " cpu_ms=" << f.cpuFrameMs
             << " max_section_ms=" << maxSection(f) << " draw_ms=" << f.drawFrameMs << " acquire_ms=" << f.drawAcquireMs
+            << " record_ms=" << f.drawRecordMs << " submit_ms=" << f.drawSubmitMs
+            << " swapchain_ms=" << f.rendererSwapchainAcquireMs << " geom_pass_ms=" << f.rendererGeometryPassMs
+            << " weapon_pass_ms=" << f.rendererWeaponPassMs << " ui_pass_ms=" << f.rendererUiPassMs
             << " physics_ms=" << f.physicsMs << " poll_ms=" << f.networkPollMs
             << " snapshot_apply_ms=" << f.snapshotApplyMs << " reconcile_ms=" << f.reconciliationMs
             << " reconcile_ticks=" << f.reconcileReplayedTicks << " reconcile_skip=" << f.reconcileSkippedExact
@@ -326,7 +341,10 @@ void ClientPerfRecorder::writeSummary() const
             << " refresh_players_ms=" << f.refreshPlayersMs << " animation_ms=" << f.animationMs
             << " hud_ms=" << f.hudMs << " imgui_ms=" << f.imguiMs << " limiter_ms=" << f.frameLimiterMs
             << " entity_cmds=" << f.entityRenderCmds << " skinned=" << f.skinnedInstances
-            << " triangles=" << f.rendererTriangles << " kcc=" << f.perfKccCalls
+            << " triangles=" << f.rendererTriangles << " static_batch_draws=" << f.rendererStaticBatchDraws
+            << " dynamic_draws=" << f.rendererDynamicDraws << " submitted=" << f.rendererFrameSubmitted
+            << " swapchain_skip=" << f.rendererSwapchainSkipped << " material_binds=" << f.rendererMaterialBinds
+            << " texture_binds=" << f.rendererTextureBinds << " kcc=" << f.perfKccCalls
             << " sweep_capsule_tris=" << f.perfSweepCapsuleTriMeshTris
             << " closest_point_tris=" << f.perfClosestPointMeshTris << " wall_skip=" << f.perfWallDetectSkippedByGate
             << " wall_prev=" << f.perfWallAttachmentPrevTriangleHits
