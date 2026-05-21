@@ -1580,15 +1580,23 @@ SDL_AppResult Game::iterate()
         // effect — `activeGamepad_` is nullptr and the function early-outs.
         // Both effects are gated on stick actuation ≥ 5 % so a player
         // holding still keeps full manual control.
-        systems::runGamepadAimAssist(registry,
-                                     activeGamepad_,
-                                     aimAssistCfg_,
-                                     aimAssistState_,
-                                     userSettings->gamepadPitchSensitivity,
-                                     userSettings->gamepadYawSensitivity,
-                                     userSettings->gamepadLookDeadzone,
-                                     userSettings->gamepadMoveDeadzone,
-                                     frameTime);
+        if (userSettings->aimAssistEnabled) {
+            systems::GamepadAimAssistConfig effectiveAimAssistCfg = aimAssistCfg_;
+            const float aimAssistStrength = std::clamp(userSettings->aimAssistStrength, 0.0f, 1.0f);
+            effectiveAimAssistCfg.enabled = userSettings->aimAssistEnabled;
+            effectiveAimAssistCfg.rotationalCompensation *= aimAssistStrength;
+            effectiveAimAssistCfg.slowdownStrength =
+                std::clamp(1.0f - (1.0f - aimAssistCfg_.slowdownStrength) * aimAssistStrength, 0.0f, 1.0f);
+            systems::runGamepadAimAssist(registry,
+                                         activeGamepad_,
+                                         effectiveAimAssistCfg,
+                                         aimAssistState_,
+                                         userSettings->gamepadPitchSensitivity,
+                                         userSettings->gamepadYawSensitivity,
+                                         userSettings->gamepadLookDeadzone,
+                                         userSettings->gamepadMoveDeadzone,
+                                         frameTime);
+        }
         if (!inputSyncedWithPhysics)
             systems::runGamepadMovement(registry,
                                         activeGamepad_,
