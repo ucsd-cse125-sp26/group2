@@ -291,6 +291,28 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
     SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
 }
 
+SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height)
+{
+
+    SDL_GPUTextureCreateInfo textureInfo{};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    textureInfo.width = width;
+    textureInfo.height = height;
+    textureInfo.layer_count_or_depth = 1;
+    textureInfo.num_levels = 1;
+    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &textureInfo);
+    if (!texture) {
+        SDL_Log("createTextureRGBA8: SDL_CreateGPUTexture failed: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    return texture;
+}
+
 SDL_GPUTexture* createTextureRGBA8(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data)
 {
     SDL_GPUTextureCreateInfo textureInfo{};

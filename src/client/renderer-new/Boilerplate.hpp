@@ -158,6 +158,14 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
 /// @param height Texture height in pixels.
 /// @param data Pointer to RGBA8 pixel data.
 /// @return The created GPU texture, or nullptr on failure.
+SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height);
+
+/// @brief Create a 2D RGBA8 texture and upload pixel data to it.
+/// @param device The GPU device.
+/// @param width Texture width in pixels.
+/// @param height Texture height in pixels.
+/// @param data Pointer to RGBA8 pixel data.
+/// @return The created GPU texture, or nullptr on failure.
 SDL_GPUTexture* createTextureRGBA8(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data);
 
 /// @brief Load an image file from disk and create a GPU texture from it.

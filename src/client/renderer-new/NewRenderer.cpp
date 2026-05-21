@@ -184,6 +184,11 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 
 // ─── Per-frame entry point ──────────────────────────────────────────────────
 
+void NewRenderer::setupSceneSSBOs()
+{
+
+
+}
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
 
@@ -219,7 +224,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
-    setMainCamera(eye, yaw, pitch, roll, width, height);
 
     // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
     // the first render pass so the copy is sequenced ahead of the draws.
@@ -231,6 +235,17 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
     }
 
+    ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
+    // uint32_t shadowSize = 10;
+    // SDL_GPUTexture* shadowMap = Boilerplate::createEmptyTextureD32F(device_,shadowSize,shadowSize);
+    //
+    //
+    // setMainCamera(glm::vec3(0.0f), yaw, pitch, 0.0f, shadowSize, shadowSize);
+    // drawGeometryPass(shadowMap, cmd);
+
+    ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
+
+    setMainCamera(eye, yaw, pitch, roll, width, height);
     drawGeometryPass(swapchain, cmd);
     drawWeaponPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
@@ -257,13 +272,15 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
 
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUColorTargetInfo colorTarget =
-        Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
+    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
+        //Boilerplate::makeColorTargetLoad(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+
+
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);

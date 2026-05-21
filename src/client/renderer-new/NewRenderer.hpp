@@ -350,6 +350,7 @@ private:
     void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
+    void setupSceneSSBOs();
 
     // ─── Member state ────────────────────────────────────────────────────────
 
