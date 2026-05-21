@@ -24,12 +24,15 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
+#include "ecs/physics/SweptCollision.hpp"
+#include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/DroppedWeaponSystem.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
 #include <ecs/components/RespawnPoint.hpp>
+#include <algorithm>
 #include <limits>
 #include <random>
 #include <vector>
@@ -60,6 +63,65 @@ void applyHeal(float amount, Health& playerHealth)
 
 /// @brief Cooldown duration set on a spawn point after a player spawns there.
 inline constexpr float k_spawnPointCooldown = 5.0f;
+inline constexpr float k_spawnPushback = 0.03125f;
+
+inline float standingHalfHeight(const CollisionShape& shape)
+{
+    if (shape.type == CollisionShapeType::Capsule) {
+        return shape.radius + shape.halfHeight;
+    }
+
+    return shape.halfExtents.y;
+}
+
+inline physics::CapsuleShape spawnCapsuleFor(const CollisionShape& shape)
+{
+    return physics::CapsuleShape{
+        .radius = shape.type == CollisionShapeType::Capsule ? shape.radius
+                                                            : std::max(shape.halfExtents.x, shape.halfExtents.z),
+        .halfHeight = shape.type == CollisionShapeType::Capsule
+                          ? shape.halfHeight
+                          : std::max(0.0f, shape.halfExtents.y - shape.halfExtents.x),
+        .up = glm::vec3{0.0f, 1.0f, 0.0f},
+    };
+}
+
+inline glm::vec3 resolveRespawnPosition(Registry& registry, entt::entity player, glm::vec3 feetPosition)
+{
+    CollisionShape shape{};
+    if (const auto* existingShape = registry.try_get<CollisionShape>(player)) {
+        shape = *existingShape;
+    }
+
+    glm::vec3 resolved = feetPosition + glm::vec3{0.0f, standingHalfHeight(shape), 0.0f};
+    glm::vec3 zeroVelocity{0.0f};
+    const physics::CapsuleShape capsule = spawnCapsuleFor(shape);
+    const physics::WorldGeometry& world = physics::activeWorld();
+
+    const float maxSpawnRecovery = std::max(256.0f, standingHalfHeight(shape) * 4.0f);
+    const physics::DepenetrationResult depen = physics::depenetrateCapsuleVsWorldDetailed(
+        resolved,
+        zeroVelocity,
+        capsule,
+        world,
+        physics::DepenetrationOptions{.maxPushDistance = maxSpawnRecovery, .allowEmergencyUnstick = true});
+
+    if (depen.unresolvedOverlap) {
+        SDL_Log("[respawn] spawn point at %.1f %.1f %.1f remained embedded after recovery",
+                static_cast<double>(feetPosition.x),
+                static_cast<double>(feetPosition.y),
+                static_cast<double>(feetPosition.z));
+    }
+
+    const physics::GroundProbeResult ground = physics::probeGround(capsule, resolved, k_spawnPushback * 2.0f, world);
+    if (ground.hit && ground.walkable) {
+        const float targetAlongUp =
+            ground.point.y + ground.normal.y * (k_spawnPushback + capsule.minkowskiExtent(ground.normal));
+        resolved.y += targetAlongUp - resolved.y;
+    }
+
+    return resolved;
+}
 
 /// @brief Choose a respawn point with cooldown-aware selection.
 ///
@@ -123,12 +185,14 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
 {
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+    const glm::vec3 respawnFeet = chooseRespawnPoint(registry);
+    const glm::vec3 respawnCenter = resolveRespawnPosition(registry, player, respawnFeet);
 
     registry.erase<RespawnTimer>(player);
     registry.erase<DeathInfo>(player);
     registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = true; });
     registry.emplace_or_replace<InputSnapshot>(player);
-    registry.emplace_or_replace<Position>(player, chooseRespawnPoint(registry));
+    registry.emplace_or_replace<Position>(player, respawnCenter);
     registry.emplace_or_replace<Velocity>(player);
     registry.emplace_or_replace<PlayerVisState>(player);
     registry.emplace_or_replace<PlayerSimState>(player);

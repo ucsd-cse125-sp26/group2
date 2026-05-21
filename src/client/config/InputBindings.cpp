@@ -149,7 +149,7 @@ bool keyboardMouseBindingPressed(Binding binding, const bool* keyStates, SDL_Mou
 
 bool controllerBindingPressed(Binding binding, SDL_Gamepad* gamepad)
 {
-    if (!gamepad)
+    if (!gamepad || !SDL_GamepadConnected(gamepad))
         return false;
 
     switch (binding.kind) {
