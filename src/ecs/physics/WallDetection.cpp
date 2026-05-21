@@ -3,6 +3,8 @@
 
 #include "WallDetection.hpp"
 
+#include "PhysicsPerfStats.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <glm/common.hpp>
@@ -71,6 +73,7 @@ MeshWallProbe probeTriMeshWalls(glm::vec3 pos,
                                 float sphereRadius)
 {
     MeshWallProbe best;
+    perf::add(&perf::FrameStats::wallMeshProbes);
     if (glm::dot(dir, dir) < 1e-8f)
         return best;
 
@@ -85,6 +88,8 @@ MeshWallProbe probeTriMeshWalls(glm::vec3 pos,
     const float maxAxisDistance = checkDist + sphereRadius;
 
     auto considerMesh = [&](uint32_t meshIndex, const WorldTriMesh& tm) {
+        perf::add(&perf::FrameStats::wallMeshProbeMeshes);
+        perf::ScopedClosestPointContext closestPointScope(perf::ClosestPointContext::WallProbe);
         const ClosestPointOnMeshResult cp = closestPointOnMesh(segA, segB, maxAxisDistance, tm);
         if (!cp.found || !isWallNormal(cp.normal))
             return;
@@ -109,7 +114,7 @@ MeshWallProbe probeTriMeshWalls(glm::vec3 pos,
 
     const WorldAABB query = wallProbeBounds(segA, segB, dir, checkDist, sphereRadius);
     if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
-        queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+        queryStaticWorldBroadphaseFast(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
             if (meshIndex < world.triMeshes.size())
                 considerMesh(meshIndex, world.triMeshes[meshIndex]);
             return true;
@@ -136,6 +141,7 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
                                            TriRegion previousRegion)
 {
     WallAttachmentResult best;
+    perf::add(&perf::FrameStats::wallAttachmentCalls);
     float bestScore = 1e30f;
     const float maxAxisDist = capsule.radius + checkDist + 8.0f;
     const bool hasContinuity = glm::length(continuityNormal) > 0.5f;
@@ -176,13 +182,15 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
 
     auto considerNeighbor = [&](uint32_t meshIndex, const WorldTriMesh& mesh, uint32_t neighborTri) {
         if (neighborTri == UINT32_MAX || neighborTri == previousTriId)
-            return;
+            return false;
 
+        perf::ScopedClosestPointContext closestPointScope(perf::ClosestPointContext::WallAttachment);
         const ClosestPointOnMeshResult cp = closestPointOnMeshTriangle(capsule, pos, maxAxisDist, mesh, neighborTri);
         if (!cp.found)
-            return;
+            return false;
         if (hasTravel && glm::dot(travel, cp.normal) > 0.25f)
-            return;
+            return false;
+        const float beforeScore = bestScore;
         considerClosest(meshIndex, cp, false, -capsule.radius);
 
         if (hasLookahead) {
@@ -190,23 +198,26 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
                 closestPointOnMeshTriangle(capsule, lookaheadPos, maxAxisDist, mesh, neighborTri);
             considerClosest(meshIndex, lookaheadCp, true, -capsule.radius);
         }
+        return bestScore < beforeScore;
     };
 
     auto considerPreviousTriangleAdjacency = [&](uint32_t meshIndex, const WorldTriMesh& mesh) {
         if (meshIndex != previousMeshIndex || previousTriId == UINT32_MAX)
-            return;
+            return false;
 
+        perf::ScopedClosestPointContext closestPointScope(perf::ClosestPointContext::WallAttachment);
         const ClosestPointOnMeshResult prevCp =
             closestPointOnMeshTriangle(capsule, pos, maxAxisDist, mesh, previousTriId);
         if (!prevCp.found)
-            return;
+            return false;
 
+        bool anyChanged = false;
         auto considerSeamRegion = [&](TriRegion seamRegion) {
             const int edge = edgeIndexForRegion(seamRegion);
             if (edge >= 0) {
                 const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(edge);
                 if (neighborIndex < mesh.edgeNeighbor.size())
-                    considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
+                    anyChanged = considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]) || anyChanged;
                 return;
             }
 
@@ -216,16 +227,56 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
                     continue;
                 const size_t neighborIndex = static_cast<size_t>(previousTriId) * 3u + static_cast<size_t>(vertexEdge);
                 if (neighborIndex < mesh.edgeNeighbor.size())
-                    considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]);
+                    anyChanged = considerNeighbor(meshIndex, mesh, mesh.edgeNeighbor[neighborIndex]) || anyChanged;
             }
         };
 
         considerSeamRegion(prevCp.region);
         if (previousRegion != prevCp.region)
             considerSeamRegion(previousRegion);
+        return anyChanged;
+    };
+
+    auto tryPreviousTopology = [&]() {
+        if (previousMeshIndex == UINT32_MAX || previousTriId == UINT32_MAX || previousMeshIndex >= world.triMeshes.size())
+            return false;
+
+        const WorldTriMesh& mesh = world.triMeshes[previousMeshIndex];
+        if (previousRegion != TriRegion::Face && considerPreviousTriangleAdjacency(previousMeshIndex, mesh)) {
+            perf::add(&perf::FrameStats::wallAttachmentNeighborHits);
+            return true;
+        }
+
+        if (!hasLookahead) {
+            perf::ScopedClosestPointContext closestPointScope(perf::ClosestPointContext::WallAttachment);
+            const float beforeScore = bestScore;
+            const ClosestPointOnMeshResult prevCp =
+                closestPointOnMeshTriangle(capsule, pos, maxAxisDist, mesh, previousTriId);
+            if (previousRegion == TriRegion::Face && prevCp.region == TriRegion::Face) {
+                considerClosest(previousMeshIndex, prevCp, false, -capsule.radius);
+                if (hasLookahead) {
+                    const ClosestPointOnMeshResult lookaheadCp =
+                        closestPointOnMeshTriangle(capsule, lookaheadPos, maxAxisDist, mesh, previousTriId);
+                    considerClosest(previousMeshIndex, lookaheadCp, true, -capsule.radius);
+                }
+            }
+            if (bestScore < beforeScore) {
+                perf::add(&perf::FrameStats::wallAttachmentPrevTriangleHits);
+                return true;
+            }
+        }
+
+        if (considerPreviousTriangleAdjacency(previousMeshIndex, mesh)) {
+            perf::add(&perf::FrameStats::wallAttachmentNeighborHits);
+            return true;
+        }
+
+        return false;
     };
 
     auto considerMesh = [&](uint32_t meshIndex, const WorldTriMesh& mesh) {
+        perf::add(&perf::FrameStats::wallAttachmentMeshes);
+        perf::ScopedClosestPointContext closestPointScope(perf::ClosestPointContext::WallAttachment);
         considerClosest(meshIndex, closestPointOnMesh(capsule, pos, maxAxisDist, mesh), false);
         if (hasLookahead)
             considerClosest(meshIndex, closestPointOnMesh(capsule, lookaheadPos, maxAxisDist, mesh), true);
@@ -235,8 +286,12 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
     const glm::vec3 queryMin = glm::min(pos, lookaheadPos) - capsule.enclosingHalfExtents() - glm::vec3(maxAxisDist);
     const glm::vec3 queryMax = glm::max(pos, lookaheadPos) + capsule.enclosingHalfExtents() + glm::vec3(maxAxisDist);
     const WorldAABB query{.min = queryMin, .max = queryMax};
+    if (tryPreviousTopology())
+        return best;
+
+    perf::add(&perf::FrameStats::wallAttachmentBroadphaseFallbacks);
     if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
-        queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+        queryStaticWorldBroadphaseFast(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
             if (meshIndex < world.triMeshes.size())
                 considerMesh(meshIndex, world.triMeshes[meshIndex]);
             return true;
@@ -256,9 +311,11 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                                 float checkDist,
                                 float sphereRadius,
                                 glm::vec3 prevWallNormal,
-                                bool gravityFlipped)
+                                bool gravityFlipped,
+                                bool includeGroundDistance)
 {
     WallDetectionResult result;
+    perf::add(&perf::FrameStats::wallDetectCalls);
     const glm::vec3 worldUp{0.0f, gravityFlipped ? -1.0f : 1.0f, 0.0f};
 
     // Player's local axes in world space.
@@ -281,6 +338,7 @@ WallDetectionResult detectWalls(glm::vec3 pos,
             result.rightTriId = meshHit.triId;
             result.rightRegion = meshHit.region;
         } else {
+            perf::add(&perf::FrameStats::wallSphereFallbacks);
             const glm::vec3 k_rightEnd = pos + k_right * checkDist;
             const SphereHitResult k_hr = sphereCast(sphereRadius, pos, k_rightEnd, world);
             if (k_hr.hit && isWallNormal(k_hr.normal)) {
@@ -300,6 +358,7 @@ WallDetectionResult detectWalls(glm::vec3 pos,
             result.leftTriId = meshHit.triId;
             result.leftRegion = meshHit.region;
         } else {
+            perf::add(&perf::FrameStats::wallSphereFallbacks);
             const glm::vec3 k_leftEnd = pos - k_right * checkDist;
             const SphereHitResult k_hr = sphereCast(sphereRadius, pos, k_leftEnd, world);
             if (k_hr.hit && isWallNormal(k_hr.normal)) {
@@ -365,6 +424,7 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                 }
             }
         } else {
+            perf::add(&perf::FrameStats::wallSphereFallbacks);
             const glm::vec3 k_traceEnd = pos + k_towardWall * checkDist;
             const SphereHitResult k_hr = sphereCast(sphereRadius, pos, k_traceEnd, world);
 
@@ -411,6 +471,7 @@ WallDetectionResult detectWalls(glm::vec3 pos,
             result.frontTriId = meshHit.triId;
             result.frontRegion = meshHit.region;
         } else {
+            perf::add(&perf::FrameStats::wallSphereFallbacks);
             const glm::vec3 k_frontEnd = pos + k_forward * checkDist;
             const SphereHitResult k_hr = sphereCast(sphereRadius, pos, k_frontEnd, world);
             if (k_hr.hit && isWallNormal(k_hr.normal)) {
@@ -421,19 +482,26 @@ WallDetectionResult detectWalls(glm::vec3 pos,
         }
     }
 
-    // Ground distance probe
-    {
-        const CapsuleShape groundProbeCapsule{
-            .radius = sphereRadius,
-            .halfHeight = std::max(halfExtents.y - sphereRadius, 0.0f),
-            .up = worldUp,
-        };
-        const GroundProbeResult ground = probeGround(groundProbeCapsule, pos, 500.0f, world);
-        if (ground.hit)
-            result.groundDistance = ground.distance;
-    }
+    if (includeGroundDistance)
+        result.groundDistance = probeWallrunGroundDistance(pos, halfExtents, world, sphereRadius, gravityFlipped);
 
     return result;
+}
+
+float probeWallrunGroundDistance(glm::vec3 pos,
+                                 glm::vec3 halfExtents,
+                                 const WorldGeometry& world,
+                                 float sphereRadius,
+                                 bool gravityFlipped)
+{
+    const glm::vec3 worldUp{0.0f, gravityFlipped ? -1.0f : 1.0f, 0.0f};
+    const CapsuleShape groundProbeCapsule{
+        .radius = sphereRadius,
+        .halfHeight = std::max(halfExtents.y - sphereRadius, 0.0f),
+        .up = worldUp,
+    };
+    const GroundProbeResult ground = probeGround(groundProbeCapsule, pos, 500.0f, world);
+    return ground.hit ? ground.distance : 1e10f;
 }
 
 } // namespace physics

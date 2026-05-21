@@ -128,6 +128,8 @@ public:
     [[nodiscard]] const audio::AudioRuntime& audioRuntime() const noexcept { return audioRuntime_; }
     [[nodiscard]] const audio::AudioRuntimeStats& audioStats() const noexcept { return audioRuntime_.stats(); }
     [[nodiscard]] const SfxRuntimeStats& sfxStats() const noexcept { return sfxStats_; }
+    [[nodiscard]] std::uint32_t activeSourceCount() const noexcept;
+    [[nodiscard]] std::uint32_t activeVoiceSourceCount() const noexcept;
 
 private:
     SDL_AudioDeviceID device_ = 0;           ///< Logical playback device (0 = not initialised).

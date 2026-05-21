@@ -1026,3 +1026,23 @@ void SfxSystem::mixIntoStream(SDL_AudioStream* stream, int additionalAmount)
 
     SDL_PutAudioStreamData(stream, mix.data(), static_cast<int>(mix.size() * sizeof(float)));
 }
+
+std::uint32_t SfxSystem::activeSourceCount() const noexcept
+{
+    std::uint32_t count = 0;
+    for (const Source& source : sources_) {
+        if (source.active)
+            ++count;
+    }
+    return count;
+}
+
+std::uint32_t SfxSystem::activeVoiceSourceCount() const noexcept
+{
+    std::uint32_t count = 0;
+    for (const Source& source : sources_) {
+        if (source.active && source.voiceStream)
+            ++count;
+    }
+    return count;
+}

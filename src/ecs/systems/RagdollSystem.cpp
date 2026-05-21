@@ -4,6 +4,7 @@
 #include "ecs/systems/RagdollSystem.hpp"
 
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/Orientation.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Ragdoll.hpp"
@@ -230,6 +231,7 @@ static_assert(std::size(k_joints) == 14u, "14 joints expected for 15-body tree")
 entt::entity createBone(
     Registry& registry, entt::entity character, const BoneDesc& bd, glm::vec3 charCenter, glm::vec3 charLinearVel)
 {
+    const ClientId characterId = registry.all_of<ClientId>(character) ? registry.get<ClientId>(character) : ClientId{};
     entt::entity body = registry.create();
     registry.emplace<Position>(body, Position{.value = charCenter + bd.centerOffset});
     registry.emplace<Velocity>(body, Velocity{.value = charLinearVel});
@@ -251,9 +253,18 @@ entt::entity createBone(
     rb.angularDamping = 0.3f;
     registry.emplace<RigidBody>(body, rb);
 
-    registry.emplace<RagdollBoneTag>(body, RagdollBoneTag{.character = character, .bone = bd.bone});
+    registry.emplace<RagdollBoneTag>(body,
+                                     RagdollBoneTag{.character = character, .characterId = characterId, .bone = bd.bone});
 
     return body;
+}
+
+void destroyIfOwnedChild(Registry& registry, entt::entity owner, entt::entity child)
+{
+    if (child == entt::null || child == owner || !registry.valid(child))
+        return;
+
+    registry.destroy(child);
 }
 
 entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bodyB, const JointDesc& jd)
@@ -348,6 +359,20 @@ entt::entity spawnRagdoll(Registry& registry, entt::entity character)
 
     registry.emplace<Ragdoll>(character, rag);
     return character;
+}
+
+void destroyRagdoll(Registry& registry, entt::entity character)
+{
+    Ragdoll* ragdoll = registry.try_get<Ragdoll>(character);
+    if (ragdoll == nullptr)
+        return;
+
+    for (const entt::entity joint : ragdoll->joints)
+        destroyIfOwnedChild(registry, character, joint);
+    for (const entt::entity body : ragdoll->bodies)
+        destroyIfOwnedChild(registry, character, body);
+
+    registry.remove<Ragdoll>(character);
 }
 
 void runRagdolls(Registry& registry, float dt)
