@@ -14,9 +14,12 @@
 
 #pragma once
 
+#include "ecs/components/ClientId.hpp"
+
 #include <array>
 #include <cstdint>
 #include <entt/entt.hpp>
+#include <type_traits>
 
 /// @brief Standard humanoid bone indices for the 15-body ragdoll.
 /// Order matches the joint table in `Ragdoll::buildHumanoid`.
@@ -45,8 +48,12 @@ enum class RagdollBone : uint8_t
 struct RagdollBoneTag
 {
     entt::entity character{entt::null};
+    ClientId characterId{};
     RagdollBone bone{RagdollBone::Torso};
 };
+
+static_assert(std::is_trivially_copyable_v<RagdollBoneTag>,
+              "RagdollBoneTag must be trivially copyable for network serialization");
 
 /// @brief Parent component on the dead character; holds the 15 ragdoll
 /// body entities and the joint entities connecting them.  Destroying this

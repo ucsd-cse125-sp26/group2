@@ -136,6 +136,16 @@ jobs:
           key: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
           restore-keys: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
+      - name: Drop cached PCH files (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $buildDir = "build/${{ matrix.preset }}"
+          if (Test-Path $buildDir) {
+            Get-ChildItem $buildDir -Recurse -File -Include *.pch,cmake_pch*.obj |
+              Remove-Item -Force
+          }
+
       - name: Configure
         shell: bash
         env:

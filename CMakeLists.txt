@@ -680,6 +680,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/ClientPerfRecorder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/ClientPerfRecorder.hpp"
     # Util
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.hpp"
@@ -1690,6 +1692,19 @@ target_link_libraries(physics_trimesh_tests PRIVATE
 )
 add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
 
+add_executable(ragdoll_system_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/ragdoll_system_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.cpp"
+)
+target_include_directories(ragdoll_system_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(ragdoll_system_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+add_test(NAME ragdoll_system_tests COMMAND ragdoll_system_tests)
+
 add_executable(input_bindings_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/input_bindings_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/InputBindings.cpp"
@@ -1816,6 +1831,7 @@ set_compiler_warnings(server)
 set_compiler_warnings(directory_server)
 set_compiler_warnings(clientbot)
 set_compiler_warnings(physics_trimesh_tests)
+set_compiler_warnings(ragdoll_system_tests)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
@@ -1823,6 +1839,7 @@ enable_sanitizers(server)
 enable_sanitizers(directory_server)
 enable_sanitizers(clientbot)
 enable_sanitizers(physics_trimesh_tests)
+enable_sanitizers(ragdoll_system_tests)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
 # without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on

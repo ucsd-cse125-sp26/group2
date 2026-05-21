@@ -80,7 +80,12 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                                 float checkDist,
                                 float sphereRadius,
                                 glm::vec3 prevWallNormal = glm::vec3(0.0f),
-                                bool gravityFlipped = false);
+                                bool gravityFlipped = false,
+                                bool includeGroundDistance = true);
+
+/// @brief Probe only the downward ground distance used by wallrun entry gates.
+float probeWallrunGroundDistance(
+    glm::vec3 pos, glm::vec3 halfExtents, const WorldGeometry& world, float sphereRadius, bool gravityFlipped = false);
 
 /// @brief Find the best triangle-mesh wallrun attachment, with optional
 /// lookahead along the current travel direction.
