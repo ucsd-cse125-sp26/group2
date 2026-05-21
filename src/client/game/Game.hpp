@@ -359,6 +359,21 @@ private:
     std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
     std::unordered_map<entt::entity, float> footstepCooldowns_;
 
+    // Movement / ability transition tracking for SFX.
+    struct PlayerSfxState
+    {
+        bool initialized = false;
+        bool grounded = false;
+        bool isDead = false;
+        int moveMode = 0;
+        bool gravityFlipped = false;
+        bool grappleActive = false;
+        float primaryCooldown = 0.0f;
+        float secondaryCooldown = 0.0f;
+        SfxSystem::SourceHandle slideLoopHandle = SfxSystem::kInvalidSource;
+    };
+    std::unordered_map<entt::entity, PlayerSfxState> playerSfxState_;
+
     // Hitmarker
     float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
     bool hitmarkerIsHeadshot_ = false;  ///< True when the current hitmarker was a headshot.

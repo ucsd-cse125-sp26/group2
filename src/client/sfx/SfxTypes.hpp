@@ -63,6 +63,25 @@ enum class SfxId : uint8_t
     ConcreteFootstep15,
     ConcreteFootstep16,
     ConcreteFootstep17,
+    DirtFootstep01,
+    DirtFootstep02,
+    DirtFootstep03,
+    DirtFootstep04,
+    DirtFootstep05,
+    DirtFootstep06,
+    DirtFootstep07,
+    DirtFootstep08,
+    DirtFootstep09,
+    DirtFootstep10,
+    DirtFootstep11,
+    DirtFootstep12,
+    DirtFootstep13,
+    DirtFootstep14,
+    Slide,            ///< sliding.mp3 — looped while in Slide mode.
+    DashSfx,          ///< Synth: dash whoosh.
+    GravityFlipSfx,   ///< Synth: gravity flip warble.
+    GrappleSfx,       ///< Synth: grapple twang/launch.
+    RecallSfx,        ///< Synth: recall rewind.
     GrenadeThrow,
     VoiceStart,
     VoiceStop,
@@ -171,6 +190,44 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "ConcreteFootstep16";
     case SfxId::ConcreteFootstep17:
         return "ConcreteFootstep17";
+    case SfxId::DirtFootstep01:
+        return "DirtFootstep01";
+    case SfxId::DirtFootstep02:
+        return "DirtFootstep02";
+    case SfxId::DirtFootstep03:
+        return "DirtFootstep03";
+    case SfxId::DirtFootstep04:
+        return "DirtFootstep04";
+    case SfxId::DirtFootstep05:
+        return "DirtFootstep05";
+    case SfxId::DirtFootstep06:
+        return "DirtFootstep06";
+    case SfxId::DirtFootstep07:
+        return "DirtFootstep07";
+    case SfxId::DirtFootstep08:
+        return "DirtFootstep08";
+    case SfxId::DirtFootstep09:
+        return "DirtFootstep09";
+    case SfxId::DirtFootstep10:
+        return "DirtFootstep10";
+    case SfxId::DirtFootstep11:
+        return "DirtFootstep11";
+    case SfxId::DirtFootstep12:
+        return "DirtFootstep12";
+    case SfxId::DirtFootstep13:
+        return "DirtFootstep13";
+    case SfxId::DirtFootstep14:
+        return "DirtFootstep14";
+    case SfxId::Slide:
+        return "Slide";
+    case SfxId::DashSfx:
+        return "DashSfx";
+    case SfxId::GravityFlipSfx:
+        return "GravityFlipSfx";
+    case SfxId::GrappleSfx:
+        return "GrappleSfx";
+    case SfxId::RecallSfx:
+        return "RecallSfx";
     case SfxId::GrenadeThrow:
         return "GrenadeThrow";
     case SfxId::VoiceStart:

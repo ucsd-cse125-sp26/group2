@@ -13,6 +13,7 @@
 #include "Boilerplate.hpp"
 #include "particles/ParticleSystem.hpp"
 
+#include <algorithm>
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
 #include <cstddef>
@@ -263,7 +264,10 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
     camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
     const float aspect = height == 0 ? 1.0f : static_cast<float>(width) / static_cast<float>(height);
-    camera_.setFov(verticalFovDegreesFromHorizontal(mainHorizontalFovDegrees, aspect));
+    // Apply scope zoom by dividing the horizontal FOV. Standard game-engine
+    // convention for an "Nx scope" — at 1.5x, a 90° FOV narrows to 60°.
+    const float zoomedHorizFov = mainHorizontalFovDegrees / std::max(scopeZoom, 0.01f);
+    camera_.setFov(verticalFovDegreesFromHorizontal(zoomedHorizFov, aspect));
     camera_.computeViewProjectionMatrix();
 }
 
