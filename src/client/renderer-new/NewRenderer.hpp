@@ -124,6 +124,9 @@ public:
     /// @brief Most-recent `SDL_SubmitGPUCommandBuffer` cost in milliseconds.
     [[nodiscard]] float getLastSubmitMs() const { return lastSubmitMs_; }
 
+    /// @brief Most-recent renderer workload counters for perf analysis.
+    [[nodiscard]] const RendererFrameStats& getLastFrameStats() const { return lastFrameStats_; }
+
     // ─── Per-frame submit setters (data-capture stubs) ───────────────────────
     //
     // Called by Game.cpp every frame BEFORE drawFrame.  Each stores the
@@ -265,6 +268,7 @@ public:
     ///
     /// DATA SOURCE: Game.cpp toggles this when entering/leaving menus or via
     /// debug UI.
+    bool setPresentMode(SDL_GPUPresentMode presentMode);
     bool setVSync(bool enabled);
 
     /// @brief Request a screenshot to be saved to disk after the next frame.
@@ -342,15 +346,19 @@ private:
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void drawStaticBatches(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
-                   SDL_GPUCommandBuffer* cmd);
+                   SDL_GPUCommandBuffer* cmd,
+                   bool countDynamicDraws = true);
     void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
-    void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
+    void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh);
     void drawHud(SDL_GPURenderPass* pass);
+    void rebuildStaticBatches(SDL_GPUCommandBuffer* cmd);
+    void releaseStaticBatches();
 
     // ─── Member state ────────────────────────────────────────────────────────
 
@@ -384,13 +392,31 @@ private:
 
     // Settings captured state ─────────────────────────────────────────────────
     bool vsyncEnabled_ = true;
+    SDL_GPUPresentMode presentMode_ = SDL_GPU_PRESENTMODE_VSYNC;
     std::string pendingScreenshotPath_;
 
     // Skinned-character subsystem (see SkinnedRenderer.hpp) ──────────────────
     SkinnedRenderer skinnedRenderer_;
 
+    struct StaticBatch
+    {
+        SDL_GPUBuffer* vertexBuffer = nullptr;
+        SDL_GPUBuffer* indexBuffer = nullptr;
+        SDL_GPUTexture* texture = nullptr;
+        bool useTexture = false;
+        glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
+        Uint32 indexCount = 0;
+        Uint32 triangleCount = 0;
+    };
+
+    std::vector<StaticBatch> staticBatches_;
+    bool staticBatchesDirty_ = true;
+    Uint32 staticBatchWorldInstances_ = 0;
+    Uint32 staticBatchTriangles_ = 0;
+
     // Telemetry counters (filled by drawFrame) ────────────────────────────────
     float lastAcquireMs_ = 0.0f;
     float lastRecordMs_ = 0.0f;
     float lastSubmitMs_ = 0.0f;
+    RendererFrameStats lastFrameStats_{};
 };

@@ -51,6 +51,17 @@ struct ClientPerfFrame
     float drawAcquireMs = 0.0f;
     float drawRecordMs = 0.0f;
     float drawSubmitMs = 0.0f;
+    float rendererSwapchainAcquireMs = 0.0f;
+    float rendererDepthEnsureMs = 0.0f;
+    float rendererCameraUpdateMs = 0.0f;
+    float rendererStaticBatchRebuildMs = 0.0f;
+    float rendererSkinnedUploadMs = 0.0f;
+    float rendererGeometryPassMs = 0.0f;
+    float rendererWeaponPassMs = 0.0f;
+    float rendererUiPassMs = 0.0f;
+    float rendererImguiPrepareMs = 0.0f;
+    float rendererHudDrawMs = 0.0f;
+    float rendererImguiDrawMs = 0.0f;
     float frameLimiterMs = 0.0f;
 
     std::uint32_t physicsTicks = 0;
@@ -122,6 +133,14 @@ struct ClientPerfFrame
     std::uint32_t rendererMeshDraws = 0;
     std::uint32_t rendererIndexedDraws = 0;
     std::uint32_t rendererTriangles = 0;
+    std::uint32_t rendererStaticBatchDraws = 0;
+    std::uint32_t rendererDynamicDraws = 0;
+    std::uint32_t rendererMaterialBinds = 0;
+    std::uint32_t rendererTextureBinds = 0;
+    std::uint32_t rendererStaticTriangles = 0;
+    std::uint32_t rendererPresentMode = 0;
+    std::uint32_t rendererFrameSubmitted = 0;
+    std::uint32_t rendererSwapchainSkipped = 0;
 
     std::uint32_t imguiDrawLists = 0;
     std::uint32_t imguiVertices = 0;

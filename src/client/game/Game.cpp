@@ -88,6 +88,25 @@ namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
 
+bool parseBenchPresentMode(const char* value, SDL_GPUPresentMode& outMode)
+{
+    if (value == nullptr || value[0] == '\0')
+        return false;
+    if (std::strcmp(value, "vsync") == 0) {
+        outMode = SDL_GPU_PRESENTMODE_VSYNC;
+        return true;
+    }
+    if (std::strcmp(value, "mailbox") == 0) {
+        outMode = SDL_GPU_PRESENTMODE_MAILBOX;
+        return true;
+    }
+    if (std::strcmp(value, "immediate") == 0) {
+        outMode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+        return true;
+    }
+    return false;
+}
+
 int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
     return assets.add(
@@ -1017,6 +1036,7 @@ bool Game::init(AppContext& ctx)
             benchSeconds_ = seconds;
             benchActive_ = true;
             benchStartTime_ = prevTime;
+            benchLastSubmittedTick_ = 0;
             // Reserve enough room for ~5000 fps × bench duration (worst case),
             // so push_back never reallocates inside the hot path.
             benchFrameTimesMs_.reserve(static_cast<size_t>(seconds * 5000.0f));
@@ -1487,6 +1507,17 @@ void Game::applyFrameRateLimit()
     if (mode && mode->refresh_rate > 0.0f)
         monitorHz = static_cast<int>(std::ceil(mode->refresh_rate));
 
+    if (const char* forcedPresent = SDL_getenv("BENCH_PRESENT"); forcedPresent != nullptr && forcedPresent[0] != '\0') {
+        SDL_GPUPresentMode presentMode = SDL_GPU_PRESENTMODE_MAILBOX;
+        if (parseBenchPresentMode(forcedPresent, presentMode)) {
+            softLimitPeriod = 0;
+            if (renderer)
+                renderer->setPresentMode(presentMode);
+            return;
+        }
+        SDL_Log("[client] ignoring invalid BENCH_PRESENT='%s' (expected vsync, mailbox, or immediate)", forcedPresent);
+    }
+
     if (limitFPSToMonitor && monitorHz >= k_physicsHz) {
         // Monitor is fast enough; rely on the renderer's default present mode.
         softLimitPeriod = 0;
@@ -1620,10 +1651,6 @@ SDL_AppResult Game::iterate()
     // print + quit when the duration is up.
     if (benchActive_) {
         const float benchElapsed = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
-        // Record this frame's wall-clock time once we're past the warmup window.
-        if (benchElapsed >= k_benchWarmupSeconds && frameTime > 0.0f && frameTime < 0.25f)
-            benchFrameTimesMs_.push_back(frameTime * 1000.0f);
-
         if (benchElapsed >= benchSeconds_) {
             const auto countSamples = benchFrameTimesMs_.size();
             if (countSamples == 0) {
@@ -1689,6 +1716,13 @@ SDL_AppResult Game::iterate()
                     medAvg.entityCmdsMs += sortedStats[i].entityCmdsMs;
                     medAvg.imguiMs += sortedStats[i].imguiMs;
                     medAvg.drawFrameMs += sortedStats[i].drawFrameMs;
+                    medAvg.drawAcquireMs += sortedStats[i].drawAcquireMs;
+                    medAvg.drawRecordMs += sortedStats[i].drawRecordMs;
+                    medAvg.drawSubmitMs += sortedStats[i].drawSubmitMs;
+                    medAvg.rendererSwapchainAcquireMs += sortedStats[i].rendererSwapchainAcquireMs;
+                    medAvg.rendererGeometryPassMs += sortedStats[i].rendererGeometryPassMs;
+                    medAvg.rendererWeaponPassMs += sortedStats[i].rendererWeaponPassMs;
+                    medAvg.rendererUiPassMs += sortedStats[i].rendererUiPassMs;
                     ++medCount;
                 }
                 for (size_t i = slowLo; i < n; ++i) {
@@ -1701,6 +1735,13 @@ SDL_AppResult Game::iterate()
                     slowAvg.entityCmdsMs += sortedStats[i].entityCmdsMs;
                     slowAvg.imguiMs += sortedStats[i].imguiMs;
                     slowAvg.drawFrameMs += sortedStats[i].drawFrameMs;
+                    slowAvg.drawAcquireMs += sortedStats[i].drawAcquireMs;
+                    slowAvg.drawRecordMs += sortedStats[i].drawRecordMs;
+                    slowAvg.drawSubmitMs += sortedStats[i].drawSubmitMs;
+                    slowAvg.rendererSwapchainAcquireMs += sortedStats[i].rendererSwapchainAcquireMs;
+                    slowAvg.rendererGeometryPassMs += sortedStats[i].rendererGeometryPassMs;
+                    slowAvg.rendererWeaponPassMs += sortedStats[i].rendererWeaponPassMs;
+                    slowAvg.rendererUiPassMs += sortedStats[i].rendererUiPassMs;
                     ++slowCount;
                 }
                 auto avgRow = [&](ClientPerfFrame& s, size_t c) {
@@ -1715,13 +1756,21 @@ SDL_AppResult Game::iterate()
                     s.entityCmdsMs /= static_cast<float>(c);
                     s.imguiMs /= static_cast<float>(c);
                     s.drawFrameMs /= static_cast<float>(c);
+                    s.drawAcquireMs /= static_cast<float>(c);
+                    s.drawRecordMs /= static_cast<float>(c);
+                    s.drawSubmitMs /= static_cast<float>(c);
+                    s.rendererSwapchainAcquireMs /= static_cast<float>(c);
+                    s.rendererGeometryPassMs /= static_cast<float>(c);
+                    s.rendererWeaponPassMs /= static_cast<float>(c);
+                    s.rendererUiPassMs /= static_cast<float>(c);
                 };
                 avgRow(medAvg, medCount);
                 avgRow(slowAvg, slowCount);
 
                 std::fprintf(stderr,
                              "[bench] median-band  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
-                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f "
+                             "(acq=%4.2f record=%4.2f sub=%4.2f swap=%4.2f geom=%4.2f weapon=%4.2f uiPass=%4.2f)\n",
                              static_cast<double>(medAvg.cpuFrameMs),
                              static_cast<double>(medAvg.physicsMs),
                              static_cast<double>(medAvg.networkPollMs),
@@ -1729,10 +1778,18 @@ SDL_AppResult Game::iterate()
                              static_cast<double>(medAvg.particlesMs),
                              static_cast<double>(medAvg.entityCmdsMs),
                              static_cast<double>(medAvg.imguiMs),
-                             static_cast<double>(medAvg.drawFrameMs));
+                             static_cast<double>(medAvg.drawFrameMs),
+                             static_cast<double>(medAvg.drawAcquireMs),
+                             static_cast<double>(medAvg.drawRecordMs),
+                             static_cast<double>(medAvg.drawSubmitMs),
+                             static_cast<double>(medAvg.rendererSwapchainAcquireMs),
+                             static_cast<double>(medAvg.rendererGeometryPassMs),
+                             static_cast<double>(medAvg.rendererWeaponPassMs),
+                             static_cast<double>(medAvg.rendererUiPassMs));
                 std::fprintf(stderr,
                              "[bench] slowest-1%%  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
-                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
+                             "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f "
+                             "(acq=%4.2f record=%4.2f sub=%4.2f swap=%4.2f geom=%4.2f weapon=%4.2f uiPass=%4.2f)\n",
                              static_cast<double>(slowAvg.cpuFrameMs),
                              static_cast<double>(slowAvg.physicsMs),
                              static_cast<double>(slowAvg.networkPollMs),
@@ -1740,7 +1797,14 @@ SDL_AppResult Game::iterate()
                              static_cast<double>(slowAvg.particlesMs),
                              static_cast<double>(slowAvg.entityCmdsMs),
                              static_cast<double>(slowAvg.imguiMs),
-                             static_cast<double>(slowAvg.drawFrameMs));
+                             static_cast<double>(slowAvg.drawFrameMs),
+                             static_cast<double>(slowAvg.drawAcquireMs),
+                             static_cast<double>(slowAvg.drawRecordMs),
+                             static_cast<double>(slowAvg.drawSubmitMs),
+                             static_cast<double>(slowAvg.rendererSwapchainAcquireMs),
+                             static_cast<double>(slowAvg.rendererGeometryPassMs),
+                             static_cast<double>(slowAvg.rendererWeaponPassMs),
+                             static_cast<double>(slowAvg.rendererUiPassMs));
 
                 // Top 5 slowest frames, full breakdown — to spot one-off
                 // stalls (e.g. a single drawFrame=120ms in an otherwise
@@ -1751,7 +1815,8 @@ SDL_AppResult Game::iterate()
                     const auto& s = sortedStats[i];
                     std::fprintf(stderr,
                                  "[bench]   total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
-                                 "ui=%4.2f draw=%5.2f (acq=%4.2f rec=%4.2f sub=%4.2f)\n",
+                                 "ui=%4.2f draw=%5.2f "
+                                 "(acq=%4.2f record=%4.2f sub=%4.2f swap=%4.2f geom=%4.2f weapon=%4.2f uiPass=%4.2f)\n",
                                  static_cast<double>(s.cpuFrameMs),
                                  static_cast<double>(s.physicsMs),
                                  static_cast<double>(s.networkPollMs),
@@ -1762,7 +1827,11 @@ SDL_AppResult Game::iterate()
                                  static_cast<double>(s.drawFrameMs),
                                  static_cast<double>(s.drawAcquireMs),
                                  static_cast<double>(s.drawRecordMs),
-                                 static_cast<double>(s.drawSubmitMs));
+                                 static_cast<double>(s.drawSubmitMs),
+                                 static_cast<double>(s.rendererSwapchainAcquireMs),
+                                 static_cast<double>(s.rendererGeometryPassMs),
+                                 static_cast<double>(s.rendererWeaponPassMs),
+                                 static_cast<double>(s.rendererUiPassMs));
                 }
             }
 
@@ -4449,6 +4518,39 @@ SDL_AppResult Game::iterate()
         phaseStats.sendKBps = netStats.sendBytesPerSec / 1024.0f;
         phaseStats.registryUpdateKB = static_cast<float>(netStats.registryUpdateSize) / 1024.0f;
 
+        const RendererFrameStats& rendererStats = renderer->getLastFrameStats();
+        phaseStats.swapchainWidth = rendererStats.swapchainWidth;
+        phaseStats.swapchainHeight = rendererStats.swapchainHeight;
+        phaseStats.rendererWorldInstances = rendererStats.worldInstances;
+        phaseStats.rendererEntityCmds = rendererStats.entityCmds;
+        phaseStats.rendererEntityDraws = rendererStats.entityDraws;
+        phaseStats.rendererPointLights = rendererStats.pointLights;
+        phaseStats.rendererSkinnedInstances = rendererStats.skinnedInstances;
+        phaseStats.rendererWeaponDrawn = rendererStats.weaponDrawn;
+        phaseStats.rendererModelDraws = rendererStats.modelDraws;
+        phaseStats.rendererMeshDraws = rendererStats.meshDraws;
+        phaseStats.rendererIndexedDraws = rendererStats.indexedDraws;
+        phaseStats.rendererTriangles = rendererStats.triangles;
+        phaseStats.rendererStaticBatchDraws = rendererStats.staticBatchDraws;
+        phaseStats.rendererDynamicDraws = rendererStats.dynamicDraws;
+        phaseStats.rendererMaterialBinds = rendererStats.materialBinds;
+        phaseStats.rendererTextureBinds = rendererStats.textureBinds;
+        phaseStats.rendererStaticTriangles = rendererStats.staticTriangles;
+        phaseStats.rendererPresentMode = rendererStats.presentMode;
+        phaseStats.rendererFrameSubmitted = rendererStats.frameSubmitted;
+        phaseStats.rendererSwapchainSkipped = rendererStats.swapchainSkipped;
+        phaseStats.rendererSwapchainAcquireMs = rendererStats.swapchainAcquireMs;
+        phaseStats.rendererDepthEnsureMs = rendererStats.depthEnsureMs;
+        phaseStats.rendererCameraUpdateMs = rendererStats.cameraUpdateMs;
+        phaseStats.rendererStaticBatchRebuildMs = rendererStats.staticBatchRebuildMs;
+        phaseStats.rendererSkinnedUploadMs = rendererStats.skinnedUploadMs;
+        phaseStats.rendererGeometryPassMs = rendererStats.geometryPassMs;
+        phaseStats.rendererWeaponPassMs = rendererStats.weaponPassMs;
+        phaseStats.rendererUiPassMs = rendererStats.uiPassMs;
+        phaseStats.rendererImguiPrepareMs = rendererStats.imguiPrepareMs;
+        phaseStats.rendererHudDrawMs = rendererStats.hudDrawMs;
+        phaseStats.rendererImguiDrawMs = rendererStats.imguiDrawMs;
+
         const physics::perf::FrameStats physicsPerf = physics::perf::snapshot();
         phaseStats.perfMovementCalls = physicsPerf.movementCalls;
         phaseStats.perfMovementPlayers = physicsPerf.movementPlayers;
@@ -4491,16 +4593,28 @@ SDL_AppResult Game::iterate()
         phaseStats.perfClosestPointWallAttachmentTris = physicsPerf.closestPointWallAttachmentTris;
     }
 
+    Uint64 endTick = 0;
     if (collectPerf) {
-        const Uint64 endTick = SDL_GetPerformanceCounter();
+        endTick = SDL_GetPerformanceCounter();
         phaseStats.cpuFrameMs = static_cast<float>(endTick - k_now) * 1000.0f / static_cast<float>(k_perfFreq);
     }
 
     if (benchActive_) {
-        // Only retain frames that match what benchFrameTimesMs_ collects (post-warmup).
+        // Only retain submitted render frames after warmup; swapchain-skipped loop
+        // iterations still go to GROUP2_CLIENT_PERF but should not inflate bench FPS.
         const float benchElapsedNow = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
-        if (benchElapsedNow >= k_benchWarmupSeconds && phaseStats.cpuFrameMs > 0.0f && phaseStats.cpuFrameMs < 250.0f)
+        if (benchElapsedNow >= k_benchWarmupSeconds && phaseStats.rendererFrameSubmitted != 0 && endTick != 0 &&
+            phaseStats.cpuFrameMs > 0.0f && phaseStats.cpuFrameMs < 250.0f)
+        {
+            if (benchLastSubmittedTick_ != 0) {
+                const float submittedFrameMs =
+                    static_cast<float>(endTick - benchLastSubmittedTick_) * 1000.0f / static_cast<float>(k_perfFreq);
+                if (submittedFrameMs > 0.0f && submittedFrameMs < 250.0f)
+                    benchFrameTimesMs_.push_back(submittedFrameMs);
+            }
+            benchLastSubmittedTick_ = endTick;
             benchFrameStats_.push_back(phaseStats);
+        }
     }
 
     if (limitFPSToMonitor != prevLimitFPS)

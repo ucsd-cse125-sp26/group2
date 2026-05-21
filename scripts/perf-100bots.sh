@@ -59,17 +59,17 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# 1. Server (background) — wait until it logs "listening"
+# 1. Server (background) — wait until it logs a ready/listening line.
 # Map loading + V-HACD decomposition can take 10-30s on a cold start, so
 # we poll for up to 60s.
 "$BUILD_DIR/server" >>"$LOG" 2>&1 &
 SERVER_PID=$!
 for _ in {1..600}; do
-    if grep -q "Server: listening" "$LOG" 2>/dev/null; then break; fi
+    if grep -Eq "Server: listening|Server: UDP session listening" "$LOG" 2>/dev/null; then break; fi
     sleep 0.1
 done
-if ! grep -q "Server: listening" "$LOG"; then
-    echo "[perf] FAILED — server never logged 'listening'" >&2
+if ! grep -Eq "Server: listening|Server: UDP session listening" "$LOG"; then
+    echo "[perf] FAILED — server never logged a listening line" >&2
     exit 3
 fi
 

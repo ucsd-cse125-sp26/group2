@@ -93,6 +93,43 @@ struct WeaponViewmodel
     bool visible = false;      ///< False = skip drawing this frame (e.g. weapon hidden).
 };
 
+/// @brief Renderer workload counters captured for the client perf recorder.
+struct RendererFrameStats
+{
+    uint32_t swapchainWidth = 0;
+    uint32_t swapchainHeight = 0;
+    uint32_t worldInstances = 0;
+    uint32_t entityCmds = 0;
+    uint32_t entityDraws = 0;
+    uint32_t pointLights = 0;
+    uint32_t skinnedInstances = 0;
+    uint32_t weaponDrawn = 0;
+    uint32_t modelDraws = 0;
+    uint32_t meshDraws = 0;
+    uint32_t indexedDraws = 0;
+    uint32_t triangles = 0;
+    uint32_t staticBatchDraws = 0;
+    uint32_t dynamicDraws = 0;
+    uint32_t materialBinds = 0;
+    uint32_t textureBinds = 0;
+    uint32_t staticTriangles = 0;
+    uint32_t presentMode = 0;
+    uint32_t frameSubmitted = 0;
+    uint32_t swapchainSkipped = 0;
+
+    float swapchainAcquireMs = 0.0f;
+    float depthEnsureMs = 0.0f;
+    float cameraUpdateMs = 0.0f;
+    float staticBatchRebuildMs = 0.0f;
+    float skinnedUploadMs = 0.0f;
+    float geometryPassMs = 0.0f;
+    float weaponPassMs = 0.0f;
+    float uiPassMs = 0.0f;
+    float imguiPrepareMs = 0.0f;
+    float hudDrawMs = 0.0f;
+    float imguiDrawMs = 0.0f;
+};
+
 // ─── Skinned-character types (NEW) ───────────────────────────────────────────
 //
 // These three types form the interface between the animation system and the

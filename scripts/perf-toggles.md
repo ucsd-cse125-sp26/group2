@@ -8,7 +8,7 @@ so prefixing the script call with `KEY=VALUE …` flips a toggle for one run.
 
 | Env var | Default | Effect |
 |---|---|---|
-| `BENCH_SECONDS=N` | unset | Runs for N seconds, prints per-section profile + p1/p5/p99 fps, exits.  Forces vsync off, disables ImGui submit (see `imguiEnabled` flag). |
+| `BENCH_SECONDS=N` | unset | Runs for N seconds, prints submitted-frame profile + p1/p5/p99 fps, exits. Forces uncapped mailbox present by default and disables ImGui submit (see `imguiEnabled` flag). |
 | `GROUP2_BOT_AI=1` | off | Each bot becomes a stochastic agent (random walk, aim sweep, jump, fire).  The "in-game" workload — without it bots stand idle. |
 | `GROUP2_NO_IMGUI=1` | off | Skips ImGui prepare + render-data submission.  Bench mode flips this on automatically.  +19 % median fps in single-run direct comparison. |
 | `GROUP2_CLIENT_CORES="0,1,2,3"` | unset | `pthread_setaffinity_np` on the main render thread to those CPU cores (Linux only).  Stops the kernel migrating us onto cores busy with server / bot threads. |
@@ -68,13 +68,13 @@ GROUP2_BOT_AI=1 BENCH_PRESENT=immediate bash scripts/perf-100bots.sh 100 25
 [bench] median-band  total=Tms phys=… net=… anim=… part=… ent=… ui=… draw=…
 [bench] slowest-1%   total=Tms phys=… net=… anim=… part=… ent=… ui=… draw=…
 [bench] top-5 slowest individual frames:
-[bench]   total=Tms phys=… net=… anim=… … draw=… (acq=… rec=… sub=…)
+[bench]   total=Tms phys=… net=… anim=… … draw=… (acq=… record=… sub=…)
 ```
 
 * `median-band` = average of frames near the 50 %-ile; the typical-frame cost.
 * `slowest-1%` = average of the 1 % slowest frames; what the p1 tail is made of.
 * `acq` = `SDL_AcquireGPUSwapchainTexture` blocking time (swap-queue back-pressure).
-* `rec` = CPU time recording the GPU command buffer.
+* `record` = CPU time recording the GPU command buffer.
 * `sub` = `SDL_SubmitGPUCommandBuffer` blocking time (rare with MAILBOX).
 * If `acq` dominates the slow tail, you're GPU-saturated waiting on a swap image.
 * If `rec` dominates, you're CPU-bound recording.
