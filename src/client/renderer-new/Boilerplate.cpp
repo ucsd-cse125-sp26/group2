@@ -10,6 +10,7 @@
 
 namespace Boilerplate
 {
+
 ImGui_ImplSDLGPU3_InitInfo createImGuiInfo(SDL_GPUDevice* device, SDL_Window* window)
 {
     ImGui_ImplSDLGPU3_InitInfo info{};
@@ -149,6 +150,66 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
                       shaderInfo.storageTextureCount);
 }
 
+SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
+                                                     PipelineDescription pipelineDesc
+                                                     )
+{
+    SDL_GPUShader* vertexShader;
+    SDL_GPUShader* fragmentShader;
+
+    if (pipelineDesc.vertexShaderInfo) {
+         vertexShader = loadShader(device, *pipelineDesc.vertexShaderInfo, pipelineDesc.shaderFormat);
+    } else {
+        return nullptr;
+    }
+
+    if (!vertexShader) {
+        SDL_ReleaseGPUShader(device, vertexShader);
+        return nullptr;
+    }
+
+    if (!pipelineDesc.vertexInputLayout) {
+        return nullptr;
+    }
+
+    if (pipelineDesc.fragmentShaderInfo) {
+        fragmentShader = loadShader(device, *pipelineDesc.fragmentShaderInfo, pipelineDesc.shaderFormat);
+    }
+
+    SDL_GPUVertexInputState vertexInputState{};
+    vertexInputState.num_vertex_buffers = static_cast<Uint32>(pipelineDesc.vertexInputLayout->bufferDescriptions.size());
+    vertexInputState.vertex_buffer_descriptions = pipelineDesc.vertexInputLayout->bufferDescriptions.data();
+    vertexInputState.num_vertex_attributes = static_cast<Uint32>(pipelineDesc.vertexInputLayout->attributes.size());
+    vertexInputState.vertex_attributes = pipelineDesc.vertexInputLayout->attributes.data();
+
+    SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.vertex_shader = vertexShader;
+    pipelineInfo.fragment_shader = fragmentShader;
+    pipelineInfo.vertex_input_state = vertexInputState;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pipelineInfo.target_info.color_target_descriptions = &colorTarget;
+    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.has_depth_stencil_target = enableDepth;
+    pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pipelineInfo.depth_stencil_state.enable_depth_test = enableDepth;
+    pipelineInfo.depth_stencil_state.enable_depth_write = enableDepth;
+
+    pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
+
+    SDL_ReleaseGPUShader(device, vertexShader);
+
+    if (fragmentShader) {
+        SDL_ReleaseGPUShader(device, fragmentShader);
+        return nullptr;
+    }
+
+    return pipeline;
+}
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 SDL_GPUTextureFormat& colorFormat,
                                                 SDL_GPUShaderFormat shaderFormat,

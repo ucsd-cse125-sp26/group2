@@ -13,6 +13,7 @@
 namespace Boilerplate
 {
 /// @brief Descriptor for a single shader stage: file path, stage, and resource counts.
+///
 struct ShaderInfo
 {
     const char* path = nullptr;
@@ -30,6 +31,23 @@ struct VertexInputLayout
     std::vector<SDL_GPUVertexBufferDescription> bufferDescriptions;
     std::vector<SDL_GPUVertexAttribute> attributes;
 };
+
+struct PipelineDescription
+{
+    const ShaderInfo* vertexShaderInfo = nullptr;
+    const ShaderInfo* fragmentShaderInfo = nullptr;
+
+    SDL_GPUShaderFormat shaderFormat;
+
+    const VertexInputLayout* vertexInputLayout = nullptr;
+    const SDL_GPUColorTargetDescription colorTarget;
+
+    bool depthTest = false;
+    bool depthWrite = true;
+
+    SDL_GPUCullMode cullMode = SDL_GPU_CULLMODE_BACK;
+};
+
 
 /// @brief Describes a pending CPU-to-GPU buffer upload: target buffer, source data, and byte size.
 struct BufferUpload
