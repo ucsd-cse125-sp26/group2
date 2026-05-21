@@ -143,7 +143,7 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .explosionRadius = 250.0f,
             .explosionFalloffExponent = 3.0f, // Cubic: direct hits 1-shot, ~2m away ≈ 65 dmg, ~3m ≈ chip.
             .selfDamageMultiplier = 0.4f,     // 40% self-damage so rocket jumps don't suicide.
-            .maxKnockback = 800.0f,           // Feet-rocket pop ≈ 2.4× normal jump (k_jumpSpeed=330).
+            .maxKnockback = 800.0f,           // Feet-rocket pop scaled against k_jumpSpeed=660; retune if too soft.
             .knockbackFalloffExponent = 2.0f, // Quadratic: push reaches further than damage.
         },                                    // Rocket
         ProjectileConfig{},                   // RailGun

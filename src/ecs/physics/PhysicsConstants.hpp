@@ -8,14 +8,23 @@
 /// **Units:** Quake units (1 unit ≈ 1 inch), Y-up coordinate system.
 ///
 /// Starting values target a Titanfall-to-Quake movement feel.
-/// Tune iteratively — `k_gravity` and `k_jumpSpeed` must always be tuned together:
-/// `jump height = k_jumpSpeed^2 / (2 × k_gravity)`.
+/// Tune iteratively — `k_playerGravity` and `k_jumpSpeed` must always be tuned together:
+/// `jump height = k_jumpSpeed^2 / (2 × k_playerGravity)`.
 namespace physics
 {
 
 // Gravity & jumping
-constexpr float k_gravity = 1000.0f;  ///< Downward acceleration (units/s^2). Faster than real-world for snappy arcs.
-constexpr float k_jumpSpeed = 330.0f; ///< Initial upward velocity on jump (units/s). Gives apex ~ 54 units (~4.5 ft).
+constexpr float k_gravity = 1000.0f; ///< Downward acceleration (units/s^2) for projectiles / dynamics. Real-world-ish
+                                     ///< scale for grenades and rigid bodies. The player uses k_playerGravity instead.
+constexpr float k_playerGravity =
+    2.0f * k_gravity; ///< Player-specific gravity (units/s^2). Doubled vs. k_gravity so the player's apex height and
+                      ///< air-time match what the previous (buggy) KCC integration produced — the older KCC
+                      ///< double-integrated vertical motion per tick, so all jump-related velocities and the player's
+                      ///< gravity are doubled here to preserve the established gameplay feel with the corrected
+                      ///< single-integration KCC.
+constexpr float k_jumpSpeed =
+    660.0f; ///< Initial upward velocity on jump (units/s). Apex = k_jumpSpeed^2 / (2*k_playerGravity) ~ 54 units (~4.5
+            ///< ft). Mirrored by tms::k_jumpSpeed.
 
 // Ground movement
 // Ground wish speed is stance-dependent — see tms::k_walkSpeed / k_sprintSpeed / k_crouchSpeed

@@ -20,8 +20,16 @@ namespace physics
 /// @param dt      Delta time in seconds.
 /// @param flipped True when the player's gravity is inverted.
 /// @return        New velocity with gravity applied.
-/// @note          Call every tick when the entity is airborne (not grounded).
+/// @note          Use for projectiles / dynamics. For the player KCC use
+///                `applyPlayerGravity` so the corrected single-integration
+///                KCC produces the same apex/air-time as the legacy code.
 glm::vec3 applyGravity(glm::vec3 vel, float dt, bool flipped = false);
+
+/// @brief Apply the player's gravity for one tick (`k_playerGravity`).
+///
+/// Same shape as `applyGravity` but uses the player-specific constant so
+/// projectile and grenade tuning is unaffected by player jump tuning.
+glm::vec3 applyPlayerGravity(glm::vec3 vel, float dt, bool flipped = false);
 
 /// @brief Apply Quake-style ground friction to horizontal (XZ) velocity.
 ///
