@@ -16,6 +16,7 @@
 #pragma once
 
 #include "PlayerVisState.hpp" // for PlayerStateRef + transitively PlayerStateEnums
+#include "ecs/physics/KccFrameResult.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 
 #include <cstdint>
@@ -79,8 +80,21 @@ struct PlayerSimState
     float wallCornerTimer{0.0f};                                   ///< Time spent in the active corner transition (s).
     glm::vec3 wallCornerIgnoreNormal{0.0f}; ///< Source wall briefly ignored after a corner commit.
     float wallCornerIgnoreTimer{0.0f};      ///< Remaining time to suppress source-wall backtracking.
-    bool wasWallRunning{false};             ///< Set briefly after leaving wallrun (coyote wall jump).
-    glm::vec3 pendingKccCorrection{0.0f};   ///< One-tick collision-owned correction requested by movement.
+    bool wallrunBlockerActive{false}; ///< True while collision is sliding/holding against a non-traversable blocker.
+    glm::vec3 wallrunBlockerNormal{0.0f};       ///< Collision normal of the active wallrun blocker.
+    float wallrunBlockerTimer{0.0f};            ///< Time since the blocker was last confirmed by KCC.
+    int wallrunBlockedFrames{0};                ///< Consecutive frames constrained by the active blocker.
+    float wallrunCeilingConstrainedTimer{0.0f}; ///< Short grace after head/ceiling contact while wallrun remains valid.
+    bool wasWallRunning{false};                 ///< Set briefly after leaving wallrun (coyote wall jump).
+    glm::vec3 pendingKccCorrection{0.0f};       ///< One-tick collision-owned correction requested by movement.
+
+    physics::KccFrameResult lastKccResult{};    ///< Last collision feedback frame emitted by KCC.
+    bool hasLastKccResult{false};               ///< True after the first KCC frame has been recorded.
+    glm::vec3 kccPreviousPosBefore{0.0f};       ///< Previous KCC input position for oscillation detection.
+    glm::vec3 kccPreviousPosAfter{0.0f};        ///< Previous KCC output position for oscillation detection.
+    glm::vec3 kccPreviousDepenDelta{0.0f};      ///< Previous depenetration push for oscillation detection.
+    bool kccPreviousFrameValid{false};          ///< True once previous KCC frame fields are initialized.
+    int kccOscillationFrames{0};                ///< Consecutive ABAB-style KCC oscillation detections.
 
     // Wall blacklist: stores the last wall's normal + height to prevent regrab.
     glm::vec3 wallBlacklistNormal{0.0f};

@@ -56,6 +56,12 @@ enum class PhaseFlag : uint32_t
     /// @brief A position, velocity, normal, or stored movement vector was
     /// non-finite. This is the "stop and inspect nearby rows" failure mode.
     InvalidState = 1u << 12,
+    /// @brief Wallrun was constrained by a non-traversable blocker contact.
+    WallrunBlocked = 1u << 13,
+    /// @brief Wallrun was vertically constrained by a head/ceiling contact.
+    WallrunCeilingConstrained = 1u << 14,
+    /// @brief KCC detected and resolved a repeated ABAB depen/sweep oscillation.
+    KccOscillationResolved = 1u << 15,
 };
 
 inline PhaseFlag operator|(PhaseFlag a, PhaseFlag b) noexcept

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <glm/geometric.hpp>
+#include <span>
 
 namespace systems
 {
@@ -48,6 +49,25 @@ bool capsuleIsSafeAt(physics::CapsuleShape capsule, glm::vec3 pos, const physics
         return false;
     const physics::ClearanceResult clearance = physics::clearanceCapsuleVsWorld(capsule, pos, world);
     return clearance.distance >= -k_pushback;
+}
+
+glm::vec3 chooseBlockingNormal(std::span<const glm::vec3> normals, glm::vec3 attemptedDelta)
+{
+    if (normals.empty())
+        return glm::vec3{0.0f};
+
+    const float attemptedLen = glm::length(attemptedDelta);
+    const glm::vec3 attemptedDir = attemptedLen > 1e-5f ? attemptedDelta / attemptedLen : glm::vec3{0.0f};
+    glm::vec3 best = normals.front();
+    float bestScore = glm::dot(best, attemptedDir);
+    for (glm::vec3 normal : normals) {
+        const float score = glm::dot(normal, attemptedDir);
+        if (score < bestScore) {
+            bestScore = score;
+            best = normal;
+        }
+    }
+    return best;
 }
 
 glm::vec3 takePendingKccCorrection(PlayerSimState* simState)
@@ -94,21 +114,24 @@ bool resolveGround(physics::CapsuleShape capsule,
 
 } // namespace
 
-void runKinematicCharacterController(glm::vec3& pos,
-                                     glm::vec3& vel,
-                                     const CollisionShape& shape,
-                                     PlayerVisState& state,
-                                     float dt,
-                                     const physics::WorldGeometry& world,
-                                     entt::entity entity,
-                                     bool jumpedThisTick,
-                                     PlayerSimState* simState)
+physics::KccFrameResult runKinematicCharacterController(glm::vec3& pos,
+                                                        glm::vec3& vel,
+                                                        const CollisionShape& shape,
+                                                        PlayerVisState& state,
+                                                        float dt,
+                                                        const physics::WorldGeometry& world,
+                                                        entt::entity entity,
+                                                        bool jumpedThisTick,
+                                                        PlayerSimState* simState)
 {
     const bool k_wasGrounded = state.grounded;
     state.grounded = false;
 
     const physics::CapsuleShape capsule = makeCapsuleQuery(shape, state.gravityFlipped);
     const glm::vec3 worldUp = capsule.up; // direction opposite gravity
+    physics::KccFrameResult result;
+    result.posBefore = pos;
+    result.velBefore = vel;
 
     const bool diagOn = physics::diag::isEnabled();
     physics::diag::PlayerFrame diagFrame{};
@@ -121,6 +144,7 @@ void runKinematicCharacterController(glm::vec3& pos,
     }
 
     const bool useWalkCapsule = k_wasGrounded && !state.grappleActive;
+    result.usedWalkCapsule = useWalkCapsule;
     const physics::CapsuleShape sweepCapsule = useWalkCapsule ? capsule.walkShape(physics::k_stepHeight) : capsule;
     const glm::vec3 sweepCenterOffset =
         useWalkCapsule ? capsule.walkCenterOffset(physics::k_stepHeight) : glm::vec3{0.0f};
@@ -167,6 +191,8 @@ void runKinematicCharacterController(glm::vec3& pos,
         }
     }
     pos = recoveryPos - sweepCenterOffset;
+    result.depenDelta = pos - result.posBefore;
+    result.depenPushDistance = glm::length(result.depenDelta);
 
     if (diagOn) {
         diagFrame.posAfterDepen = pos;
@@ -181,6 +207,7 @@ void runKinematicCharacterController(glm::vec3& pos,
 
     glm::vec3 correctionVel = dt > 0.0f ? pendingCorrection / dt : glm::vec3{0.0f};
     glm::vec3 sweepVel = phaseVel + correctionVel;
+    result.attemptedDelta = sweepVel * dt;
 
     const float fullStep = glm::length(sweepVel) * dt;
     const float maxSafeStep = sweepCapsule.radius * physics::k_substepSafetyRatio;
@@ -194,6 +221,7 @@ void runKinematicCharacterController(glm::vec3& pos,
     int clearanceQueries = 0;
     int sweepQueries = 0;
     int sweepHits = 0;
+    bool resolvedContactStall = false;
 
     for (int sub = 0; sub < numSubsteps; ++sub) {
         float remainingTime = subDt;
@@ -282,6 +310,26 @@ void runKinematicCharacterController(glm::vec3& pos,
                 ++diagFrame.bumpHits;
                 diagFrame.lastHitNormal = hit.normal;
             }
+            ++result.bumpHits;
+            result.lastHitNormal = hit.normal;
+            if (glm::dot(result.firstHitNormal, result.firstHitNormal) < 1e-8f)
+                result.firstHitNormal = hit.normal;
+
+            const bool hitFloor = glm::dot(hit.normal, worldUp) >= physics::k_floorAngleCos;
+            const bool hitCeiling = glm::dot(hit.normal, worldUp) <= -physics::k_floorAngleCos;
+            if (hitFloor) {
+                result.hitFloor = true;
+                result.floorNormal = hit.normal;
+            } else if (hitCeiling) {
+                result.hitCeiling = true;
+                result.ceilingNormal = hit.normal;
+            } else {
+                result.hitWall = true;
+                if (glm::dot(phaseVel, hit.normal) < -0.01f || glm::dot(correctionVel, hit.normal) < -0.01f) {
+                    result.hitBlocker = true;
+                    result.blockerNormal = hit.normal;
+                }
+            }
             if (physics::debug::isEnabled()) {
                 const float r = sweepCapsule.minkowskiExtent(hit.normal);
                 physics::debug::pushSweepContact(
@@ -347,8 +395,24 @@ void runKinematicCharacterController(glm::vec3& pos,
             }
             pos += hit.normal * k_pushback;
         }
-        if (iter >= k_maxCAIterations && remainingTime > 1e-5f)
-            caExhaustedAnySubstep = true;
+        if (iter >= k_maxCAIterations && remainingTime > 1e-5f) {
+            if (contactNormalCount > 0) {
+                const glm::vec3 stallNormal = chooseBlockingNormal(
+                    std::span<const glm::vec3>(contactNormals.data(), static_cast<size_t>(contactNormalCount)),
+                    result.attemptedDelta);
+                result.hitBlocker = true;
+                result.blockerNormal = stallNormal;
+                result.resolvedOscillation = true;
+                resolvedContactStall = true;
+                if (capsuleIsSafeAt(capsule, result.posBefore, world))
+                    pos = result.posBefore;
+                phaseVel = glm::vec3{0.0f};
+                correctionVel = glm::vec3{0.0f};
+                remainingTime = 0.0f;
+            } else {
+                caExhaustedAnySubstep = true;
+            }
+        }
     }
 
     if (useWalkCapsule) {
@@ -380,14 +444,30 @@ void runKinematicCharacterController(glm::vec3& pos,
                 pos = vTarget;
             } else {
                 ++sweepHits;
+                ++result.bumpHits;
+                result.lastHitNormal = vHit.normal;
+                if (glm::dot(result.firstHitNormal, result.firstHitNormal) < 1e-8f)
+                    result.firstHitNormal = vHit.normal;
                 pos += vMotion * vHit.tFirst * dt;
                 pos += vHit.normal * k_pushback;
                 const bool landed = glm::dot(vHit.normal, worldUp) >= physics::k_floorAngleCos;
+                const bool ceiling = glm::dot(vHit.normal, worldUp) <= -physics::k_floorAngleCos;
                 if (landed) {
+                    result.hitFloor = true;
+                    result.floorNormal = vHit.normal;
                     state.grounded = true;
                     state.groundNormal = vHit.normal;
                     vel = physics::clipVelocity(vel, vHit.normal, physics::k_overbounceFloor);
+                } else if (ceiling) {
+                    result.hitCeiling = true;
+                    result.ceilingNormal = vHit.normal;
+                    vel = physics::clipVelocity(vel, vHit.normal, physics::k_overbounceWall);
                 } else {
+                    result.hitWall = true;
+                    if (glm::dot(vMotion, vHit.normal) < -0.01f) {
+                        result.hitBlocker = true;
+                        result.blockerNormal = vHit.normal;
+                    }
                     vel = physics::clipVelocity(vel, vHit.normal, physics::k_overbounceWall);
                 }
             }
@@ -397,6 +477,50 @@ void runKinematicCharacterController(glm::vec3& pos,
     if (simState != nullptr && capsuleIsSafeAt(capsule, pos, world)) {
         simState->lastSafePosition = pos;
         simState->lastSafePositionValid = true;
+    }
+
+    result.posAfter = pos;
+    result.velAfter = vel;
+    result.actualDelta = result.posAfter - result.posBefore;
+    result.caIterations = caIterations;
+    result.sweepHits = sweepHits;
+    result.caExhausted = caExhaustedAnySubstep;
+    if (result.caExhausted && result.hitWall && glm::dot(result.blockerNormal, result.blockerNormal) < 1e-8f) {
+        result.hitBlocker = true;
+        result.blockerNormal = result.lastHitNormal;
+    }
+    const float attemptedLen = glm::length(result.attemptedDelta);
+    result.progressRatio =
+        attemptedLen > 1e-5f ? std::clamp(glm::length(result.actualDelta) / attemptedLen, 0.0f, 1.0f) : 1.0f;
+
+    if (simState != nullptr) {
+        const bool abab = simState->kccPreviousFrameValid &&
+                          glm::length(result.posBefore - simState->kccPreviousPosAfter) < 0.05f &&
+                          glm::length(result.posAfter - simState->kccPreviousPosBefore) < 1.25f &&
+                          (result.depenPushDistance > 0.25f || glm::length(simState->kccPreviousDepenDelta) > 0.25f);
+        simState->kccOscillationFrames = abab ? simState->kccOscillationFrames + 1 : 0;
+        if (simState->kccOscillationFrames >= 2) {
+            result.resolvedOscillation = true;
+            result.hitBlocker = result.hitBlocker || result.hitWall;
+            if (glm::dot(result.blockerNormal, result.blockerNormal) < 1e-8f)
+                result.blockerNormal = result.lastHitNormal;
+            if (capsuleIsSafeAt(capsule, result.posBefore, world))
+                pos = result.posBefore;
+            vel = glm::vec3{0.0f};
+            result.posAfter = pos;
+            result.velAfter = vel;
+            result.actualDelta = result.posAfter - result.posBefore;
+            result.progressRatio = 0.0f;
+        }
+        if (resolvedContactStall)
+            simState->kccOscillationFrames = std::max(simState->kccOscillationFrames, 1);
+
+        simState->kccPreviousPosBefore = result.posBefore;
+        simState->kccPreviousPosAfter = result.posAfter;
+        simState->kccPreviousDepenDelta = result.depenDelta;
+        simState->kccPreviousFrameValid = true;
+        simState->lastKccResult = result;
+        simState->hasLastKccResult = true;
     }
 
     if (diagOn) {
@@ -428,6 +552,13 @@ void runKinematicCharacterController(glm::vec3& pos,
             diagFrame.flags |= physics::diag::PhaseFlag::Sliding;
         if (jumpedThisTick)
             diagFrame.flags |= physics::diag::PhaseFlag::DoubleJumped;
+        const bool wallrunMode = state.moveMode == MoveMode::WallRunning;
+        if (wallrunMode && result.hitBlocker)
+            diagFrame.flags |= physics::diag::PhaseFlag::WallrunBlocked;
+        if (wallrunMode && result.hitCeiling)
+            diagFrame.flags |= physics::diag::PhaseFlag::WallrunCeilingConstrained;
+        if (wallrunMode && result.resolvedOscillation)
+            diagFrame.flags |= physics::diag::PhaseFlag::KccOscillationResolved;
         physics::diag::recordFrame(diagFrame);
         physics::diag::recordKccTimingFrame(physics::diag::KccTimingFrame{
             .entity = entity,
@@ -443,6 +574,8 @@ void runKinematicCharacterController(glm::vec3& pos,
             .moveMode = static_cast<int>(state.moveMode),
         });
     }
+
+    return result;
 }
 
 } // namespace systems

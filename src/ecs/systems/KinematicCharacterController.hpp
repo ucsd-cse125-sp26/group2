@@ -5,6 +5,7 @@
 
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/PlayerVisState.hpp"
+#include "ecs/physics/KccFrameResult.hpp"
 #include "ecs/physics/SweptCollision.hpp"
 
 #include <entt/entity/fwd.hpp>
@@ -20,14 +21,14 @@ namespace systems
 /// MovementSystem owns intent and velocity shaping. This module owns the
 /// collision-side KCC work: capsule depenetration, walk-capsule horizontal
 /// sweep, ground snap, vertical sweep, final grounded state, and diagnostics.
-void runKinematicCharacterController(glm::vec3& pos,
-                                     glm::vec3& vel,
-                                     const CollisionShape& shape,
-                                     PlayerVisState& state,
-                                     float dt,
-                                     const physics::WorldGeometry& world,
-                                     entt::entity entity,
-                                     bool jumpedThisTick,
-                                     PlayerSimState* simState = nullptr);
+physics::KccFrameResult runKinematicCharacterController(glm::vec3& pos,
+                                                        glm::vec3& vel,
+                                                        const CollisionShape& shape,
+                                                        PlayerVisState& state,
+                                                        float dt,
+                                                        const physics::WorldGeometry& world,
+                                                        entt::entity entity,
+                                                        bool jumpedThisTick,
+                                                        PlayerSimState* simState = nullptr);
 
 } // namespace systems

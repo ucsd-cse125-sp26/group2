@@ -57,6 +57,24 @@ bool finiteVec3(glm::vec3 value)
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
+physics::KccFrameResult
+runMovementAndKccTick(Registry& registry, entt::entity player, const physics::WorldGeometry& world, float dt)
+{
+    systems::runMovement(registry, dt, world);
+
+    auto& pos = registry.get<Position>(player);
+    auto& vel = registry.get<Velocity>(player);
+    auto& shape = registry.get<CollisionShape>(player);
+    auto& vis = registry.get<PlayerVisState>(player);
+    auto& sim = registry.get<PlayerSimState>(player);
+    const auto& input = registry.get<InputSnapshot>(player);
+
+    const physics::KccFrameResult result = systems::runKinematicCharacterController(
+        pos.value, vel.value, shape, vis, dt, world, player, sim.jumpedThisTick, &sim);
+    systems::reconcileMovementAfterKcc(pos.value, vel.value, shape, vis, sim, input, world, result, dt);
+    return result;
+}
+
 WorldTriMesh makeCookedMesh(std::initializer_list<glm::vec3> vertices, std::initializer_list<uint32_t> indices)
 {
     WorldTriMesh mesh;
@@ -315,6 +333,94 @@ std::array<WorldTriMesh, 2> makeCapturedBalconyDiagonalCornerSegment()
     return {diagonalWall, balconySide};
 }
 
+std::array<WorldTriMesh, 2> makeDisconnectedOctagonFaceTransition()
+{
+    constexpr float yMin = -260.0f;
+    constexpr float yMax = 80.0f;
+    constexpr float oldWallX = 429.920f;
+    constexpr float oldWallEndZ = -1076.756f;
+    constexpr float newWallStartX = 429.920f;
+    constexpr float newWallStartZ = -1070.000f;
+    constexpr float diagLen = 180.0f;
+
+    WorldTriMesh approachWall = makeCookedMesh(
+        {
+            {oldWallX, yMin, -1220.0f},
+            {oldWallX, yMin, oldWallEndZ},
+            {oldWallX, yMax, oldWallEndZ},
+            {oldWallX, yMax, -1220.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+
+    WorldTriMesh continuationWall = makeCookedMesh(
+        {
+            {newWallStartX, yMin, newWallStartZ},
+            {newWallStartX - diagLen, yMin, newWallStartZ + diagLen},
+            {newWallStartX - diagLen, yMax, newWallStartZ + diagLen},
+            {newWallStartX, yMax, newWallStartZ},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+
+    return {approachWall, continuationWall};
+}
+
+std::array<WorldTriMesh, 2> makeCapturedMapOctagonFirstFaceTransition()
+{
+    // Extracted from assets/maps/map1.glb around the first octagon handoff in
+    // server-movement-diag-20260520-211330.csv rows 396-399. These are the
+    // actual authored collision planes that meet at x=429.9,z=-1047.4.
+    constexpr float yMin = -216.0f;
+    constexpr float yMax = 12.9f;
+
+    WorldTriMesh approachWall = makeCookedMesh(
+        {
+            {429.9f, yMax, -1129.6f},
+            {429.9f, yMax, -1047.4f},
+            {429.9f, yMin, -1047.4f},
+            {429.9f, yMin, -1129.6f},
+        },
+        {
+            0,
+            2,
+            3,
+            0,
+            1,
+            2,
+        });
+
+    WorldTriMesh continuationWall = makeCookedMesh(
+        {
+            {429.9f, yMax, -1047.4f},
+            {188.3f, yMax, -805.7f},
+            {188.3f, yMin, -805.7f},
+            {429.9f, yMin, -1047.4f},
+        },
+        {
+            0,
+            2,
+            3,
+            0,
+            1,
+            2,
+        });
+
+    return {approachWall, continuationWall};
+}
+
 WorldTriMesh makeTwoTriangleFloor()
 {
     return makeCookedMesh(
@@ -455,6 +561,25 @@ WorldTriMesh makeThinCeiling()
             {64.0f, 44.0f, -64.0f},
             {64.0f, 44.0f, 64.0f},
             {-64.0f, 44.0f, 64.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+}
+
+WorldTriMesh makeShortThinCeiling(float z0, float z1)
+{
+    return makeCookedMesh(
+        {
+            {-64.0f, 44.0f, z0},
+            {64.0f, 44.0f, z0},
+            {64.0f, 44.0f, z1},
+            {-64.0f, 44.0f, z1},
         },
         {
             0,
@@ -1237,16 +1362,7 @@ bool wallrunMapExternalLCornerContinuesWithKcc()
     bool wallrunningEveryFrame = true;
     float minHorizSpeed = 1e30f;
     for (int frame = 0; frame < 24; ++frame) {
-        systems::runMovement(registry, 1.0f / 128.0f, world);
-        systems::runKinematicCharacterController(registry.get<Position>(player).value,
-                                                 registry.get<Velocity>(player).value,
-                                                 registry.get<CollisionShape>(player),
-                                                 registry.get<PlayerVisState>(player),
-                                                 1.0f / 128.0f,
-                                                 world,
-                                                 player,
-                                                 registry.get<PlayerSimState>(player).jumpedThisTick,
-                                                 &registry.get<PlayerSimState>(player));
+        runMovementAndKccTick(registry, player, world, 1.0f / 128.0f);
 
         const auto& stepVis = registry.get<PlayerVisState>(player);
         const auto& stepVel = registry.get<Velocity>(player);
@@ -1609,22 +1725,14 @@ bool wallrunCapturedBalconyCornerDoesNotDropIntoJitter()
         input.yaw = frame < 2 ? -0.615024f : (frame < 4 ? -0.625524f : (frame < 6 ? -0.642324f : -0.648624f));
         registry.replace<InputSnapshot>(player, input);
 
-        systems::runMovement(registry, 1.0f / 128.0f, world);
-        systems::runKinematicCharacterController(registry.get<Position>(player).value,
-                                                 registry.get<Velocity>(player).value,
-                                                 registry.get<CollisionShape>(player),
-                                                 registry.get<PlayerVisState>(player),
-                                                 1.0f / 128.0f,
-                                                 world,
-                                                 player,
-                                                 registry.get<PlayerSimState>(player).jumpedThisTick,
-                                                 &registry.get<PlayerSimState>(player));
+        const physics::KccFrameResult kcc = runMovementAndKccTick(registry, player, world, 1.0f / 128.0f);
 
         const auto& stepPos = registry.get<Position>(player);
         const auto& stepVis = registry.get<PlayerVisState>(player);
+        const auto& stepSim = registry.get<PlayerSimState>(player);
         const glm::vec3 stepDelta = stepPos.value - previousPos;
         maxReverseOrDepenStep = std::max(maxReverseOrDepenStep, std::max(0.0f, -glm::dot(stepDelta, sim.wallForward)));
-        if (frame >= 6) {
+        if (stepSim.wallrunBlockerActive || kcc.hitBlocker) {
             if (!sawBlockedFrame) {
                 sawBlockedFrame = true;
                 firstBlockedPos = stepPos.value;
@@ -1641,12 +1749,14 @@ bool wallrunCapturedBalconyCornerDoesNotDropIntoJitter()
 
     const auto& outPos = registry.get<Position>(player);
     const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
 
     bool ok = true;
-    ok &= expect(droppedFromWallrun, "captured balcony corner should drop once wallrun speed is exhausted");
-    ok &=
-        expect(outVis.moveMode == MoveMode::OnFoot, "captured balcony corner should end in OnFoot after the slow drop");
-    ok &= expect(!outVis.exitingWall, "captured balcony slow drop should not start a global reattach cooldown");
+    ok &= expect(sawBlockedFrame, "captured balcony corner should classify the obstruction as a wallrun blocker");
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning,
+                 "captured balcony blocker should hold wallrun while the original wall remains valid");
+    ok &= expect(outSim.wallrunBlockerActive, "captured balcony blocker should remain latched while input is held");
+    ok &= expect(!outVis.exitingWall, "captured balcony blocker hold should not start a global reattach cooldown");
     ok &= expect(!reattachedAfterDrop, "captured balcony corner should not reattach into a low-speed jitter loop");
     ok &= expect(maxReverseOrDepenStep < 1.0f,
                  "captured balcony corner should not alternate between depenetration positions");
@@ -2063,6 +2173,388 @@ bool wallrunMapCorridorEndDoesNotAttachToAirSide()
                      "corridor end should not attach to the east/air side of the main-room wall");
         ok &= expect(outVel.value.x <= 0.0f, "corridor end should not reverse back into the corridor");
     }
+    return ok;
+}
+
+bool wallrunSolidEndcapSlidesAsBlockerWithoutWrongWallHandoff()
+{
+    std::array<WorldTriMesh, 2> meshes = makeCapturedBalconyDiagonalCornerSegment();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{227.053f, -22.001f, -867.158f});
+    registry.emplace<Velocity>(player, glm::vec3{-565.685f, 75.743f, 565.686f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 16.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {16.0f, 36.0f, 16.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    const glm::vec3 originalWallNormal = glm::normalize(glm::vec3{-1.0f, 0.0f, -1.0f});
+    PlayerSimState sim;
+    sim.wallNormal = originalWallNormal;
+    sim.wallForward = glm::normalize(glm::vec3{-1.0f, 0.0f, 1.0f});
+    sim.wallAnchor = {238.389f, -22.001f, -855.822f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 0u;
+    sim.wallRegion = physics::TriRegion::Face;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.left = true;
+    registry.emplace<InputSnapshot>(player, input);
+
+    bool sawBlocker = false;
+    bool exhaustedAfterBlocker = false;
+    bool wrongWallHandoff = false;
+    bool droppedAfterBlocker = false;
+    float maxReverseStep = 0.0f;
+    glm::vec3 previousPos = registry.get<Position>(player).value;
+
+    for (int frame = 0; frame < 64; ++frame) {
+        input.yaw = frame < 2 ? -0.615024f : (frame < 4 ? -0.625524f : (frame < 6 ? -0.642324f : -0.648624f));
+        registry.replace<InputSnapshot>(player, input);
+
+        const physics::KccFrameResult kcc = runMovementAndKccTick(registry, player, world, 1.0f / 128.0f);
+        const auto& stepPos = registry.get<Position>(player);
+        const auto& stepVis = registry.get<PlayerVisState>(player);
+        const auto& stepSim = registry.get<PlayerSimState>(player);
+
+        const glm::vec3 delta = stepPos.value - previousPos;
+        maxReverseStep = std::max(maxReverseStep, std::max(0.0f, -glm::dot(delta, sim.wallForward)));
+        previousPos = stepPos.value;
+
+        sawBlocker = sawBlocker || stepSim.wallrunBlockerActive || kcc.hitBlocker;
+        if (sawBlocker && kcc.caExhausted)
+            exhaustedAfterBlocker = true;
+        if (sawBlocker && stepVis.moveMode != MoveMode::WallRunning)
+            droppedAfterBlocker = true;
+        if (sawBlocker && glm::dot(stepSim.wallNormal, originalWallNormal) < 0.9f)
+            wrongWallHandoff = true;
+    }
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(sawBlocker, "solid endcap wallrun should classify the obstacle as a blocker");
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning, "solid endcap blocker should keep wallrun mode attached");
+    ok &= expect(outSim.wallrunBlockerActive, "solid endcap should latch blocker state while held against it");
+    ok &= expect(!wrongWallHandoff, "solid endcap blocker should not become the wallrun attachment wall");
+    ok &= expect(!droppedAfterBlocker, "solid endcap blocker should slide or hold instead of dropping");
+    ok &= expect(!exhaustedAfterBlocker, "blocker reconciliation should prevent repeated KCC exhaustion");
+    ok &= expect(maxReverseStep < 1.0f, "blocker reconciliation should not ping-pong backward along the wall");
+    ok &= expect(glm::length(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}) < tms::k_wallrunMaxSpeed + 1.0f,
+                 "blocker slide should preserve bounded horizontal wallrun velocity");
+    return ok;
+}
+
+bool wallrunDisconnectedOctagonFrontFaceContinuesInsteadOfDropping()
+{
+    std::array<WorldTriMesh, 2> meshes = makeDisconnectedOctagonFaceTransition();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{413.889f, -36.136f, -1073.429f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 146.507f, 425.815f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 16.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {16.0f, 36.0f, 16.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {429.920f, -36.136f, -1076.756f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 0u;
+    sim.wallRegion = physics::TriRegion::Edge1;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.085659f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    systems::runMovement(registry, 1.0f / 128.0f, world);
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning,
+                 "disconnected octagon face ahead should continue wallrun instead of dropping");
+    ok &= expect(outSim.wallNormal.x < -0.5f && outSim.wallNormal.z < -0.5f,
+                 "octagon transition should attach to the front continuation face");
+    ok &= expect(glm::length(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}) > 300.0f,
+                 "octagon transition should preserve wallrun speed");
+    return ok;
+}
+
+bool wallrunCapturedMapOctagonTransitionDoesNotDropAcrossKcc()
+{
+    std::array<WorldTriMesh, 2> meshes = makeCapturedMapOctagonFirstFaceTransition();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{413.889f, -43.124f, -1083.318f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 154.340f, 414.096f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 16.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {16.0f, 36.0f, 16.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {429.9f, -43.124f, -1083.318f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 1u;
+    sim.wallRegion = physics::TriRegion::Face;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.085659f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    bool wallrunningEveryFrame = true;
+    float minHorizSpeed = 1e30f;
+    for (int frame = 0; frame < 16; ++frame) {
+        runMovementAndKccTick(registry, player, world, 1.0f / 128.0f);
+        const auto& stepVis = registry.get<PlayerVisState>(player);
+        const auto& stepVel = registry.get<Velocity>(player);
+        wallrunningEveryFrame &= stepVis.moveMode == MoveMode::WallRunning;
+        minHorizSpeed = std::min(minHorizSpeed, glm::length(glm::vec3{stepVel.value.x, 0.0f, stepVel.value.z}));
+    }
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+    const auto& outVel = registry.get<Velocity>(player);
+
+    bool ok = true;
+    ok &= expect(wallrunningEveryFrame, "captured map octagon transition should not drop during movement/KCC");
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning, "captured map octagon transition should stay wallrunning");
+    ok &= expect(outSim.wallNormal.x < -0.5f && outSim.wallNormal.z < -0.5f,
+                 "captured map octagon transition should attach to the diagonal continuation face");
+    ok &= expect(glm::dot(glm::vec3{outVel.value.x, 0.0f, outVel.value.z}, outSim.wallForward) > 300.0f,
+                 "captured map octagon transition should keep forward wallrun speed");
+    ok &= expect(minHorizSpeed > 300.0f, "captured map octagon transition should not stall between faces");
+    return ok;
+}
+
+bool wallrunKccContactOnContinuationFaceDoesNotBecomeBlocker()
+{
+    const glm::vec3 continuationNormal = glm::normalize(glm::vec3{1.0f, 0.0f, -1.0f});
+    const WorldTriMesh continuationWall = makeCookedMesh(
+        {
+            {0.0f, -64.0f, 0.0f},
+            {-160.0f, -64.0f, -160.0f},
+            {-160.0f, 96.0f, -160.0f},
+            {0.0f, 96.0f, 0.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&continuationWall, 1),
+    };
+
+    glm::vec3 pos{-16.0f, 0.0f, -16.0f};
+    glm::vec3 vel{0.0f, 110.0f, -590.0f};
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 16.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {16.0f, 36.0f, 16.0f};
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+
+    PlayerSimState sim;
+    sim.wallNormal = {1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, -1.0f};
+    sim.wallAnchor = {-16.0f, 0.0f, 0.0f};
+    sim.wallAttachmentValid = true;
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 3.14159265f;
+
+    physics::KccFrameResult kcc;
+    kcc.posBefore = pos;
+    kcc.posAfter = pos + glm::vec3{0.0f, 0.0f, -1.0f};
+    kcc.velBefore = vel;
+    kcc.velAfter = vel;
+    kcc.attemptedDelta = glm::vec3{0.0f, 0.0f, -4.6f};
+    kcc.actualDelta = kcc.posAfter - kcc.posBefore;
+    kcc.progressRatio = 0.2f;
+    kcc.hitWall = true;
+    kcc.hitBlocker = true;
+    kcc.blockerNormal = continuationNormal;
+    kcc.lastHitNormal = continuationNormal;
+
+    systems::reconcileMovementAfterKcc(pos, vel, shape, vis, sim, input, world, kcc, 1.0f / 128.0f);
+
+    bool ok = true;
+    ok &= expect(vis.moveMode == MoveMode::WallRunning,
+                 "KCC contact on a valid continuation face should keep wallrun mode");
+    ok &= expect(!sim.wallrunBlockerActive, "valid continuation face should not be latched as a wallrun blocker");
+    ok &= expect(glm::dot(sim.wallNormal, continuationNormal) > 0.95f,
+                 "valid continuation contact should update the wall attachment normal");
+    ok &= expect(glm::length(glm::vec3{vel.x, 0.0f, vel.z}) > 300.0f,
+                 "valid continuation contact should preserve horizontal wallrun speed");
+    return ok;
+}
+
+bool wallrunCeilingConstraintKeepsWallrunAfterCeilingEnds()
+{
+    std::array<WorldTriMesh, 2> meshes{makeThinWallSegment(-128.0f, 192.0f), makeShortThinCeiling(-48.0f, 48.0f)};
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(meshes),
+    };
+
+    Registry registry;
+    const entt::entity player = registry.create();
+    registry.emplace<Position>(player, glm::vec3{-16.03125f, 4.0f, -40.0f});
+    registry.emplace<Velocity>(player, glm::vec3{0.0f, 320.0f, 520.0f});
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 16.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {16.0f, 36.0f, 16.0f};
+    registry.emplace<CollisionShape>(player, shape);
+
+    PlayerVisState vis;
+    vis.moveMode = MoveMode::WallRunning;
+    vis.wallRunSide = WallSide::Right;
+    vis.grounded = false;
+    registry.emplace<PlayerVisState>(player, vis);
+
+    PlayerSimState sim;
+    sim.wallNormal = {-1.0f, 0.0f, 0.0f};
+    sim.wallForward = {0.0f, 0.0f, 1.0f};
+    sim.wallAnchor = {0.0f, 4.0f, -40.0f};
+    sim.wallMeshIndex = 0u;
+    sim.wallTriId = 0u;
+    sim.wallRegion = physics::TriRegion::Face;
+    sim.wallAttachmentValid = true;
+    registry.emplace<PlayerSimState>(player, sim);
+
+    InputSnapshot input;
+    input.jump = true;
+    input.forward = true;
+    input.yaw = 0.0f;
+    registry.emplace<InputSnapshot>(player, input);
+
+    bool sawCeiling = false;
+    bool detachedAfterCeiling = false;
+    bool pastCeilingEnd = false;
+    float maxY = registry.get<Position>(player).value.y;
+
+    for (int frame = 0; frame < 40; ++frame) {
+        const physics::KccFrameResult kcc = runMovementAndKccTick(registry, player, world, 1.0f / 128.0f);
+        const auto& stepPos = registry.get<Position>(player);
+        const auto& stepVis = registry.get<PlayerVisState>(player);
+        const auto& stepSim = registry.get<PlayerSimState>(player);
+
+        sawCeiling = sawCeiling || kcc.hitCeiling || stepSim.wallrunCeilingConstrainedTimer > 0.0f;
+        pastCeilingEnd = pastCeilingEnd || stepPos.value.z > 56.0f;
+        maxY = std::max(maxY, stepPos.value.y);
+        if (sawCeiling && pastCeilingEnd && stepVis.moveMode != MoveMode::WallRunning)
+            detachedAfterCeiling = true;
+    }
+
+    const auto& outVis = registry.get<PlayerVisState>(player);
+    const auto& outSim = registry.get<PlayerSimState>(player);
+
+    bool ok = true;
+    ok &= expect(sawCeiling, "wallrun should report ceiling constraint when capsule head hits the ceiling");
+    ok &= expect(pastCeilingEnd, "wallrun test should travel beyond the short ceiling segment");
+    ok &=
+        expect(!detachedAfterCeiling, "wallrun should not detach when a ceiling constraint ends and the wall remains");
+    ok &= expect(outVis.moveMode == MoveMode::WallRunning, "wallrun should still be active after leaving the ceiling");
+    ok &= expect(outSim.wallAttachmentValid, "wall attachment identity should survive ceiling constraint");
+    ok &= expect(maxY <= 8.1f, "ceiling constraint should prevent the wallrun from rising through the ceiling");
     return ok;
 }
 
@@ -2516,6 +3008,11 @@ int main()
     ok &= wallrunSameWallBlacklistIsSpeedBased();
     ok &= wallrunRollScalesWithViewAngle();
     ok &= wallrunMapCorridorEndDoesNotAttachToAirSide();
+    ok &= wallrunSolidEndcapSlidesAsBlockerWithoutWrongWallHandoff();
+    ok &= wallrunDisconnectedOctagonFrontFaceContinuesInsteadOfDropping();
+    ok &= wallrunCapturedMapOctagonTransitionDoesNotDropAcrossKcc();
+    ok &= wallrunKccContactOnContinuationFaceDoesNotBecomeBlocker();
+    ok &= wallrunCeilingConstraintKeepsWallrunAfterCeilingEnds();
     ok &= wallrunStandoffCorrectionDoesNotMovePositionBeforeKcc();
     ok &= wallrunStandoffCorrectionIsSolvedByKccWithoutChangingVelocity();
     ok &= kccDeepOverlapRollsBackToLastSafePosition();

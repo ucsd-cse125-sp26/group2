@@ -122,7 +122,7 @@ void openLazily()
                  "actualDelta,expectedDelta,depenPush,bumpHits,moveMode,wallrunSide,jumpCount,"
                  "lastNormalX,lastNormalY,lastNormalZ,flagsHex,grounded,wallrun,sliding,"
                  "grapple,doubleJumped,gravFlipped,depenCancelled,deepPenetration,bumpExhausted,suspectedPhase,"
-                 "invalidState,note\n");
+                 "invalidState,wallrunBlocked,wallrunCeilingConstrained,kccOscillationResolved,note\n");
     wroteHeader = true;
 }
 
@@ -148,7 +148,7 @@ void openMovementLazily()
                  "inputF,inputB,inputL,inputR,inputJump,inputCrouch,inputGrapple,yaw,pitch,"
                  "wallFront,groundDistance,"
                  "frontNx,frontNy,frontNz,frontPx,frontPy,frontPz,"
-                 "flagsHex,invalidState,note\n");
+                 "flagsHex,invalidState,wallrunBlocked,wallrunCeilingConstrained,kccOscillationResolved,note\n");
 }
 
 void openKccTimingLazily()
@@ -326,7 +326,7 @@ void recordFrame(const PlayerFrame& f) noexcept
                  "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
                  "%.3f,%.3f,%.3f,%d,%s,%d,%d,"
                  "%.4f,%.4f,%.4f,0x%X,"
-                 "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
+                 "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
                  "%s\n",
                  static_cast<unsigned long>(tickForRow),
                  entt::to_integral(f.entity),
@@ -367,6 +367,9 @@ void recordFrame(const PlayerFrame& f) noexcept
                  (flagBits & static_cast<uint32_t>(PhaseFlag::BumpExhausted)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::SuspectedPhase)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::InvalidState)) ? 1 : 0,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::WallrunBlocked)) ? 1 : 0,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::WallrunCeilingConstrained)) ? 1 : 0,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::KccOscillationResolved)) ? 1 : 0,
                  note);
     std::fflush(logFile);
 }
@@ -403,7 +406,7 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  "%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,"
                  "%d,%.3f,"
                  "%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,"
-                 "0x%X,%d,%s\n",
+                 "0x%X,%d,%d,%d,%d,%s\n",
                  static_cast<unsigned long>(movementRowIndex),
                  entt::to_integral(f.entity),
                  moveModeName(f.modeBefore),
@@ -441,6 +444,9 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  static_cast<double>(f.frontPoint.z),
                  flagBits,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::InvalidState)) ? 1 : 0,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::WallrunBlocked)) ? 1 : 0,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::WallrunCeilingConstrained)) ? 1 : 0,
+                 (flagBits & static_cast<uint32_t>(PhaseFlag::KccOscillationResolved)) ? 1 : 0,
                  note);
     std::fflush(movementLogFile);
 }
