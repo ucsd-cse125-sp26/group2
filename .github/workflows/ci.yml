@@ -159,16 +159,20 @@ jobs:
           key: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
           restore-keys: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      - name: Drop cached PCH files (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      # Runner images periodically refresh system headers (Linux:
+      # asm-generic/errno-base.h, macOS: SDK rev, Windows: clang-cl PCH
+      # ties to _MSC_FULL_VER). A cached PCH built against the previous
+      # mtime then fails with "file has been modified since the precompiled
+      # header was built". Drop just the PCHs from both the FetchContent
+      # deps cache and the project build tree — the rest of the caches
+      # stay valid and the PCH regenerates on the next build.
+      - name: Drop cached PCH files
+        shell: bash
         run: |
-          $buildDir = "build/${{ matrix.preset }}"
-          if (Test-Path $buildDir) {
-            Get-ChildItem -Path $buildDir -Recurse -File |
-              Where-Object { $_.Name -like "*.pch" -or $_.Name -like "cmake_pch*.obj" } |
-              Remove-Item -Force
-          }
+          for dir in ".deps/${{ matrix.preset }}" "build/${{ matrix.preset }}"; do
+            [ -d "$dir" ] || continue
+            find "$dir" -type f \( -name "*.pch" -o -name "cmake_pch*.obj" \) -print -delete
+          done
 
       - name: Configure
         shell: bash
@@ -401,16 +405,20 @@ jobs:
           key: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
           restore-keys: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      - name: Drop cached PCH files (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      # Runner images periodically refresh system headers (Linux:
+      # asm-generic/errno-base.h, macOS: SDK rev, Windows: clang-cl PCH
+      # ties to _MSC_FULL_VER). A cached PCH built against the previous
+      # mtime then fails with "file has been modified since the precompiled
+      # header was built". Drop just the PCHs from both the FetchContent
+      # deps cache and the project build tree — the rest of the caches
+      # stay valid and the PCH regenerates on the next build.
+      - name: Drop cached PCH files
+        shell: bash
         run: |
-          $buildDir = "build/${{ matrix.preset }}"
-          if (Test-Path $buildDir) {
-            Get-ChildItem -Path $buildDir -Recurse -File |
-              Where-Object { $_.Name -like "*.pch" -or $_.Name -like "cmake_pch*.obj" } |
-              Remove-Item -Force
-          }
+          for dir in ".deps/${{ matrix.preset }}" "build/${{ matrix.preset }}"; do
+            [ -d "$dir" ] || continue
+            find "$dir" -type f \( -name "*.pch" -o -name "cmake_pch*.obj" \) -print -delete
+          done
 
       - name: Configure
         shell: bash
