@@ -208,6 +208,20 @@ Goal: prove the HUD reports real bandwidth without regressing legacy transport.
 - Sanity-check the legacy transport path (`usingUdpSession_ == false`) still
   reports bandwidth, since its accounting remains client-side.
 
+Status: complete.
+
+Verification performed:
+
+- `just build-debug` passes after Phase 4.
+- Manual HUD verification passed with a server/client run: SEND and RECV now
+  display correctly on the UDP-session path.
+
+Remaining optional sanity check:
+
+- Toggle or configure the legacy transport path and confirm its SEND/RECV
+  accounting is unchanged. The implementation does not alter the legacy
+  accounting path.
+
 ## Critical Files
 
 - `src/client/network/Client.cpp`
