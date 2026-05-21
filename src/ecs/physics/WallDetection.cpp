@@ -238,7 +238,8 @@ WallAttachmentResult findWallRunAttachment(CapsuleShape capsule,
     };
 
     auto tryPreviousTopology = [&]() {
-        if (previousMeshIndex == UINT32_MAX || previousTriId == UINT32_MAX || previousMeshIndex >= world.triMeshes.size())
+        if (previousMeshIndex == UINT32_MAX || previousTriId == UINT32_MAX ||
+            previousMeshIndex >= world.triMeshes.size())
             return false;
 
         const WorldTriMesh& mesh = world.triMeshes[previousMeshIndex];
@@ -488,11 +489,8 @@ WallDetectionResult detectWalls(glm::vec3 pos,
     return result;
 }
 
-float probeWallrunGroundDistance(glm::vec3 pos,
-                                 glm::vec3 halfExtents,
-                                 const WorldGeometry& world,
-                                 float sphereRadius,
-                                 bool gravityFlipped)
+float probeWallrunGroundDistance(
+    glm::vec3 pos, glm::vec3 halfExtents, const WorldGeometry& world, float sphereRadius, bool gravityFlipped)
 {
     const glm::vec3 worldUp{0.0f, gravityFlipped ? -1.0f : 1.0f, 0.0f};
     const CapsuleShape groundProbeCapsule{

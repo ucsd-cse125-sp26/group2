@@ -3,8 +3,8 @@
 
 #include "ecs/systems/RagdollSystem.hpp"
 
-#include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/ClientId.hpp"
+#include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Orientation.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Ragdoll.hpp"
@@ -253,8 +253,8 @@ entt::entity createBone(
     rb.angularDamping = 0.3f;
     registry.emplace<RigidBody>(body, rb);
 
-    registry.emplace<RagdollBoneTag>(body,
-                                     RagdollBoneTag{.character = character, .characterId = characterId, .bone = bd.bone});
+    registry.emplace<RagdollBoneTag>(
+        body, RagdollBoneTag{.character = character, .characterId = characterId, .bone = bd.bone});
 
     return body;
 }

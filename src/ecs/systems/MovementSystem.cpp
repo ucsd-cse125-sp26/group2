@@ -12,10 +12,10 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/Forces.hpp"
-#include "ecs/physics/PhysicsPerfStats.hpp"
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "ecs/physics/PhysicsPerfStats.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/physics/WallDetection.hpp"
@@ -2018,8 +2018,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 bool groundDistanceKnown = false;
                 float knownGroundDistance = walls.groundDistance;
 
-                if (!shouldProbeWalls && state.vis.moveMode == MoveMode::OnFoot && !state.vis.grounded &&
-                    input.jump && glm::length(horizVel(vel.value)) >= tms::k_wallrunMinAttachSpeed)
+                if (!shouldProbeWalls && state.vis.moveMode == MoveMode::OnFoot && !state.vis.grounded && input.jump &&
+                    glm::length(horizVel(vel.value)) >= tms::k_wallrunMinAttachSpeed)
                 {
                     walls.groundDistance = physics::probeWallrunGroundDistance(
                         pos.value, shape.halfExtents, world, tms::k_wallrunSphereRadius, state.vis.gravityFlipped);

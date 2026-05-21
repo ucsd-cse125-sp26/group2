@@ -164,12 +164,13 @@ void queryStaticWorldBroadphase(const StaticWorldBroadphase& broadphase,
 
 [[nodiscard]] inline bool broadphaseAabbOverlap(const WorldAABB& a, const WorldAABB& b) noexcept
 {
-    return a.max.x >= b.min.x && a.min.x <= b.max.x && a.max.y >= b.min.y && a.min.y <= b.max.y &&
-           a.max.z >= b.min.z && a.min.z <= b.max.z;
+    return a.max.x >= b.min.x && a.min.x <= b.max.x && a.max.y >= b.min.y && a.min.y <= b.max.y && a.max.z >= b.min.z &&
+           a.min.z <= b.max.z;
 }
 
 template <class Visit>
-inline void queryStaticWorldBroadphaseFast(const StaticWorldBroadphase& broadphase, const WorldAABB& query, Visit&& visit)
+inline void
+queryStaticWorldBroadphaseFast(const StaticWorldBroadphase& broadphase, const WorldAABB& query, Visit&& visit)
 {
     perf::add(&perf::FrameStats::staticBroadphaseQueries);
     if (broadphase.nodes.empty())

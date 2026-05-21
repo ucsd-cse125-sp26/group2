@@ -180,23 +180,22 @@ constexpr RagdollJointBinding kRagdollJointBindings[] = {
 std::unordered_map<ClientId, ClientRagdollPose> collectClientRagdollPoses(Registry& registry)
 {
     std::unordered_map<ClientId, ClientRagdollPose> poses;
-    registry.view<RagdollBoneTag, Position>().each(
-        [&](entt::entity e, const RagdollBoneTag& tag, const Position& pos) {
-            if (tag.characterId.value < 0)
-                return;
+    registry.view<RagdollBoneTag, Position>().each([&](entt::entity e, const RagdollBoneTag& tag, const Position& pos) {
+        if (tag.characterId.value < 0)
+            return;
 
-            const size_t boneIndex = static_cast<size_t>(tag.bone);
-            if (boneIndex >= static_cast<size_t>(RagdollBone::Count))
-                return;
+        const size_t boneIndex = static_cast<size_t>(tag.bone);
+        if (boneIndex >= static_cast<size_t>(RagdollBone::Count))
+            return;
 
-            auto& bone = poses[tag.characterId][boneIndex];
-            bone.position = pos.value;
-            if (const auto* orientation = registry.try_get<Orientation>(e))
-                bone.orientation = orientation->value;
-            else
-                bone.orientation = glm::quat{1.0f, 0.0f, 0.0f, 0.0f};
-            bone.present = true;
-        });
+        auto& bone = poses[tag.characterId][boneIndex];
+        bone.position = pos.value;
+        if (const auto* orientation = registry.try_get<Orientation>(e))
+            bone.orientation = orientation->value;
+        else
+            bone.orientation = glm::quat{1.0f, 0.0f, 0.0f, 0.0f};
+        bone.present = true;
+    });
     return poses;
 }
 
@@ -437,8 +436,8 @@ void Game::storePredictedPlayerState(std::uint32_t tick)
 
 const Game::PredictedPlayerState* Game::predictedStateForTick(std::uint32_t tick) const noexcept
 {
-    const PredictedPlayerState& state = predictedStateHistory_[static_cast<std::size_t>(
-        tick % InputRingBuffer::k_capacity)];
+    const PredictedPlayerState& state =
+        predictedStateHistory_[static_cast<std::size_t>(tick % InputRingBuffer::k_capacity)];
     if (!state.valid || state.tick != tick)
         return nullptr;
     return &state;
@@ -460,10 +459,10 @@ void Game::restoreLocalPredictedState(const PredictedPlayerState& state)
     registry.emplace_or_replace<InputSnapshot>(local, state.input);
 }
 
-Game::ReconciliationDecision Game::evaluateReconciliationSkip(
-    const PredictedPlayerState& authoritative,
-    const PredictedPlayerState* predictedAtAck,
-    const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept
+Game::ReconciliationDecision
+Game::evaluateReconciliationSkip(const PredictedPlayerState& authoritative,
+                                 const PredictedPlayerState* predictedAtAck,
+                                 const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept
 {
     ReconciliationDecision decision{};
     if (predictedAtAck == nullptr || !currentBeforeSnapshot) {
@@ -482,17 +481,17 @@ Game::ReconciliationDecision Game::evaluateReconciliationSkip(
 
     const PlayerVisState& a = authoritative.vis;
     const PlayerVisState& p = predictedAtAck->vis;
-    const bool visMatches =
-        a.moveMode == p.moveMode && a.wallRunSide == p.wallRunSide && a.jumpCount == p.jumpCount &&
-        a.isDead == p.isDead && a.grounded == p.grounded && a.crouching == p.crouching &&
-        a.sprinting == p.sprinting && a.pendingUncrouch == p.pendingUncrouch && a.exitingWall == p.exitingWall &&
-        a.grappleActive == p.grappleActive && a.gravityFlipped == p.gravityFlipped &&
-        glm::length(a.groundNormal - p.groundNormal) <= kNormalTolerance &&
-        glm::length(a.grapplePoint - p.grapplePoint) <= kPointTolerance &&
-        std::abs(a.targetCameraTilt - p.targetCameraTilt) <= kCameraTiltTolerance;
+    const bool visMatches = a.moveMode == p.moveMode && a.wallRunSide == p.wallRunSide && a.jumpCount == p.jumpCount &&
+                            a.isDead == p.isDead && a.grounded == p.grounded && a.crouching == p.crouching &&
+                            a.sprinting == p.sprinting && a.pendingUncrouch == p.pendingUncrouch &&
+                            a.exitingWall == p.exitingWall && a.grappleActive == p.grappleActive &&
+                            a.gravityFlipped == p.gravityFlipped &&
+                            glm::length(a.groundNormal - p.groundNormal) <= kNormalTolerance &&
+                            glm::length(a.grapplePoint - p.grapplePoint) <= kPointTolerance &&
+                            std::abs(a.targetCameraTilt - p.targetCameraTilt) <= kCameraTiltTolerance;
 
-    decision.skip = visMatches && decision.positionError <= kPositionTolerance &&
-                    decision.velocityError <= kVelocityTolerance;
+    decision.skip =
+        visMatches && decision.positionError <= kPositionTolerance && decision.velocityError <= kVelocityTolerance;
     return decision;
 }
 
@@ -524,8 +523,8 @@ bool Game::applyIncomingSnapshot(
     client->recordInterpolationSamples(registry, captureNs);
     if (collectSnapshotPerf) {
         const Uint64 freq = SDL_GetPerformanceFrequency();
-        perfSnapshotApplyMs_ += static_cast<float>(SDL_GetPerformanceCounter() - perfStart) * 1000.0f /
-                                static_cast<float>(freq);
+        perfSnapshotApplyMs_ +=
+            static_cast<float>(SDL_GetPerformanceCounter() - perfStart) * 1000.0f / static_cast<float>(freq);
         ++perfSnapshotApplyCount_;
     }
     return true;
@@ -1668,9 +1667,10 @@ SDL_AppResult Game::iterate()
             // frames so we can see the actual stalls.
             if (!benchFrameStats_.empty()) {
                 auto sortedStats = benchFrameStats_;
-                std::sort(sortedStats.begin(), sortedStats.end(), [](const ClientPerfFrame& a, const ClientPerfFrame& b) {
-                    return a.cpuFrameMs < b.cpuFrameMs;
-                });
+                std::sort(
+                    sortedStats.begin(), sortedStats.end(), [](const ClientPerfFrame& a, const ClientPerfFrame& b) {
+                        return a.cpuFrameMs < b.cpuFrameMs;
+                    });
 
                 const size_t n = sortedStats.size();
                 const size_t medLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.45f);
@@ -1775,8 +1775,8 @@ SDL_AppResult Game::iterate()
     // handling, stats ring update, bench summary check) is the preamble.
     if (collectPerf) {
         const Uint64 preambleEnd = SDL_GetPerformanceCounter();
-        phaseStats.preambleMs = static_cast<float>(preambleEnd - phaseLastTick) * 1000.0f /
-                                static_cast<float>(k_perfFreq);
+        phaseStats.preambleMs =
+            static_cast<float>(preambleEnd - phaseLastTick) * 1000.0f / static_cast<float>(k_perfFreq);
         phaseLastTick = preambleEnd;
     }
 
@@ -2496,8 +2496,8 @@ SDL_AppResult Game::iterate()
         };
 
         uint32_t drawSlot = 0;
-	        registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
-	            [&](entt::entity e,
+        registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
+            [&](entt::entity e,
                 AnimatedCharacter& ac,
                 const Position& pos,
                 const Velocity& vel,
@@ -2719,60 +2719,59 @@ SDL_AppResult Game::iterate()
         }
 
         if (charRig_.isLoaded() && numJoints > 0) {
-            registry.view<AnimatedCharacter, Position, PlayerVisState, ClientId>().each(
-                [&](entt::entity e,
-                    AnimatedCharacter& ac,
-                    const Position& pos,
-                    const PlayerVisState& ps,
-                    const ClientId& clientId) {
-                    if (!ps.isDead || !ac.animator)
-                        return;
-                    if (registry.all_of<LocalPlayer>(e) && !animUI_.showLocalBody)
-                        return;
+            registry.view<AnimatedCharacter, Position, PlayerVisState, ClientId>().each([&](entt::entity e,
+                                                                                            AnimatedCharacter& ac,
+                                                                                            const Position& pos,
+                                                                                            const PlayerVisState& ps,
+                                                                                            const ClientId& clientId) {
+                if (!ps.isDead || !ac.animator)
+                    return;
+                if (registry.all_of<LocalPlayer>(e) && !animUI_.showLocalBody)
+                    return;
 
-                    const auto poseIt = ragdollPoses.find(clientId);
-                    if (poseIt == ragdollPoses.end())
-                        return;
+                const auto poseIt = ragdollPoses.find(clientId);
+                if (poseIt == ragdollPoses.end())
+                    return;
 
-                    const size_t torsoIndex = static_cast<size_t>(RagdollBone::Torso);
-                    const glm::vec3 cullCenter =
-                        poseIt->second[torsoIndex].present ? poseIt->second[torsoIndex].position : pos.value;
-                    if (!inFrustum(cullCenter, charRadius))
-                        return;
+                const size_t torsoIndex = static_cast<size_t>(RagdollBone::Torso);
+                const glm::vec3 cullCenter =
+                    poseIt->second[torsoIndex].present ? poseIt->second[torsoIndex].position : pos.value;
+                if (!inFrustum(cullCenter, charRadius))
+                    return;
 
-                    std::vector<glm::mat4> ragdollSkinMatrices = ac.animator->skinMatrices();
-                    if (ragdollSkinMatrices.size() != static_cast<size_t>(numJoints))
-                        return;
+                std::vector<glm::mat4> ragdollSkinMatrices = ac.animator->skinMatrices();
+                if (ragdollSkinMatrices.size() != static_cast<size_t>(numJoints))
+                    return;
 
-                    glm::vec3 translation(0.0f);
-                    glm::vec3 scale(kRigScale_);
-                    glm::quat orient{1.0f, 0.0f, 0.0f, 0.0f};
-                    if (const auto* rend = registry.try_get<Renderable>(e)) {
-                        translation = rend->translation;
-                        scale = rend->scale;
-                        orient = rend->orientation;
-                    } else if (const auto* shape = registry.try_get<CollisionShape>(e)) {
-                        translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                glm::vec3 translation(0.0f);
+                glm::vec3 scale(kRigScale_);
+                glm::quat orient{1.0f, 0.0f, 0.0f, 0.0f};
+                if (const auto* rend = registry.try_get<Renderable>(e)) {
+                    translation = rend->translation;
+                    scale = rend->scale;
+                    orient = rend->orientation;
+                } else if (const auto* shape = registry.try_get<CollisionShape>(e)) {
+                    translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                }
+
+                glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + translation);
+                world *= glm::mat4_cast(orient);
+                world = glm::scale(world, scale);
+
+                applyRagdollPoseToSkinPalette(ragdollSkinMatrices, charRig_, poseIt->second, world);
+
+                SkinnedInstance instance;
+                instance.worldTransform = world;
+                instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
+                if constexpr (player_colors::k_enabled) {
+                    if (const auto* pc = registry.try_get<PlayerColor>(e); pc != nullptr) {
+                        instance.tint = glm::vec4(pc->rgb, player_colors::k_blendFactor);
                     }
+                }
 
-                    glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + translation);
-                    world *= glm::mat4_cast(orient);
-                    world = glm::scale(world, scale);
-
-                    applyRagdollPoseToSkinPalette(ragdollSkinMatrices, charRig_, poseIt->second, world);
-
-                    SkinnedInstance instance;
-                    instance.worldTransform = world;
-                    instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
-                    if constexpr (player_colors::k_enabled) {
-                        if (const auto* pc = registry.try_get<PlayerColor>(e); pc != nullptr) {
-                            instance.tint = glm::vec4(pc->rgb, player_colors::k_blendFactor);
-                        }
-                    }
-
-                    bonePalette.insert(bonePalette.end(), ragdollSkinMatrices.begin(), ragdollSkinMatrices.end());
-                    skinnedInstances.push_back(instance);
-                });
+                bonePalette.insert(bonePalette.end(), ragdollSkinMatrices.begin(), ragdollSkinMatrices.end());
+                skinnedInstances.push_back(instance);
+            });
         }
         renderer->setSkinnedFrame(bonePalette, skinnedInstances);
         if (collectPerf) {
@@ -4524,8 +4523,8 @@ SDL_AppResult Game::iterate()
     }
     if (collectPerf) {
         const Uint64 limiterEnd = SDL_GetPerformanceCounter();
-        phaseStats.frameLimiterMs = static_cast<float>(limiterEnd - limiterStart) * 1000.0f /
-                                    static_cast<float>(k_perfFreq);
+        phaseStats.frameLimiterMs =
+            static_cast<float>(limiterEnd - limiterStart) * 1000.0f / static_cast<float>(k_perfFreq);
         perfRecorder_.record(phaseStats);
     }
 

@@ -104,52 +104,49 @@ void writeHeader(std::ofstream& out)
 
 void writeFrame(std::ofstream& out, const ClientPerfFrame& f)
 {
-    out << f.frameNumber << ',' << f.timestampMs << ',' << f.wallFrameMs << ',' << f.cpuFrameMs << ','
-        << f.preambleMs << ',' << f.inputMs << ',' << f.networkStatsMs << ',' << f.physicsMs << ','
-        << f.networkPollMs << ',' << f.snapshotApplyMs << ',' << f.reconciliationMs << ',' << f.refreshPlayersMs
-        << ',' << f.refreshProjectilesMs << ',' << f.refreshRespawnsMs << ',' << f.refreshDroppedWeaponsMs << ','
-        << f.refreshPowerupsMs << ',' << f.cameraResolveMs << ',' << f.cameraMs << ',' << f.localVfxMs << ','
-        << f.dispatchMs << ','
-        << f.particlesMs << ',' << f.audioMs << ',' << f.interpolationMs << ',' << f.animationMs << ','
-        << f.entityCmdsMs << ',' << f.viewmodelMs << ',' << f.recorderFpsMs << ',' << f.imguiMs << ','
-        << f.hudMs << ',' << f.pauseMenuMs << ',' << f.imguiRenderMs << ',' << f.drawFrameMs << ','
-        << f.drawAcquireMs << ',' << f.drawRecordMs << ',' << f.drawSubmitMs << ',' << f.frameLimiterMs << ','
-        << f.physicsTicks << ',' << f.tickCount << ',' << f.snapshotApplyCount << ',' << f.snapshotApplied << ','
-        << f.reconcileRequestedTicks << ',' << f.reconcileReplayedTicks << ',' << f.reconcileMissingTicks << ','
-        << f.reconcileSkippedExact << ',' << f.reconcileReplayForced << ',' << f.reconcileMissingHistory << ','
-        << f.clientPredictTick << ',' << f.serverAckedClientTick << ',' << f.reconcileErrorPosition << ','
-        << f.reconcileErrorVelocity << ',' << f.accumulatorMs << ',' << f.measuredPhysicsHz << ',' << f.fpsCurrent
-        << ',' << f.fps1pLow << ',' << f.fps5pLow << ',' << f.playerEntities << ','
-        << f.localPlayers << ',' << f.renderableEntities << ',' << f.projectileEntities << ',' << f.fireFields << ','
-        << f.animatedCandidates << ',' << f.animatedSampled << ',' << f.animatedDrawn << ',' << f.skinnedInstances
-        << ',' << f.boneMatrices << ',' << f.entityRenderCmds << ',' << f.pointLights << ',' << f.beamPointLights
-        << ',' << f.impactParticles << ',' << f.tracerParticles << ',' << f.ribbonVertices << ','
-        << f.hitscanBeams << ',' << f.arcVertices << ',' << f.smokeParticles << ',' << f.decals << ','
-        << f.audioSourcesActive << ',' << f.voiceSourcesActive << ',' << f.audioEventsPosted << ','
+    out << f.frameNumber << ',' << f.timestampMs << ',' << f.wallFrameMs << ',' << f.cpuFrameMs << ',' << f.preambleMs
+        << ',' << f.inputMs << ',' << f.networkStatsMs << ',' << f.physicsMs << ',' << f.networkPollMs << ','
+        << f.snapshotApplyMs << ',' << f.reconciliationMs << ',' << f.refreshPlayersMs << ',' << f.refreshProjectilesMs
+        << ',' << f.refreshRespawnsMs << ',' << f.refreshDroppedWeaponsMs << ',' << f.refreshPowerupsMs << ','
+        << f.cameraResolveMs << ',' << f.cameraMs << ',' << f.localVfxMs << ',' << f.dispatchMs << ',' << f.particlesMs
+        << ',' << f.audioMs << ',' << f.interpolationMs << ',' << f.animationMs << ',' << f.entityCmdsMs << ','
+        << f.viewmodelMs << ',' << f.recorderFpsMs << ',' << f.imguiMs << ',' << f.hudMs << ',' << f.pauseMenuMs << ','
+        << f.imguiRenderMs << ',' << f.drawFrameMs << ',' << f.drawAcquireMs << ',' << f.drawRecordMs << ','
+        << f.drawSubmitMs << ',' << f.frameLimiterMs << ',' << f.physicsTicks << ',' << f.tickCount << ','
+        << f.snapshotApplyCount << ',' << f.snapshotApplied << ',' << f.reconcileRequestedTicks << ','
+        << f.reconcileReplayedTicks << ',' << f.reconcileMissingTicks << ',' << f.reconcileSkippedExact << ','
+        << f.reconcileReplayForced << ',' << f.reconcileMissingHistory << ',' << f.clientPredictTick << ','
+        << f.serverAckedClientTick << ',' << f.reconcileErrorPosition << ',' << f.reconcileErrorVelocity << ','
+        << f.accumulatorMs << ',' << f.measuredPhysicsHz << ',' << f.fpsCurrent << ',' << f.fps1pLow << ','
+        << f.fps5pLow << ',' << f.playerEntities << ',' << f.localPlayers << ',' << f.renderableEntities << ','
+        << f.projectileEntities << ',' << f.fireFields << ',' << f.animatedCandidates << ',' << f.animatedSampled << ','
+        << f.animatedDrawn << ',' << f.skinnedInstances << ',' << f.boneMatrices << ',' << f.entityRenderCmds << ','
+        << f.pointLights << ',' << f.beamPointLights << ',' << f.impactParticles << ',' << f.tracerParticles << ','
+        << f.ribbonVertices << ',' << f.hitscanBeams << ',' << f.arcVertices << ',' << f.smokeParticles << ','
+        << f.decals << ',' << f.audioSourcesActive << ',' << f.voiceSourcesActive << ',' << f.audioEventsPosted << ','
         << f.audioCommandsGenerated << ',' << f.audioSourcesStarted << ',' << f.audioDroppedByCooldown << ','
         << f.audioDroppedByLimit << ',' << f.audioStolenSources << ',' << f.rttMs << ',' << f.avgRttMs << ','
         << f.recvKBps << ',' << f.sendKBps << ',' << f.registryUpdateKB << ',' << f.swapchainWidth << ','
         << f.swapchainHeight << ',' << f.rendererWorldInstances << ',' << f.rendererEntityCmds << ','
         << f.rendererEntityDraws << ',' << f.rendererPointLights << ',' << f.rendererSkinnedInstances << ','
         << f.rendererWeaponDrawn << ',' << f.rendererModelDraws << ',' << f.rendererMeshDraws << ','
-        << f.rendererIndexedDraws << ',' << f.rendererTriangles << ',' << f.imguiDrawLists << ','
-        << f.imguiVertices << ',' << f.imguiIndices << ',' << f.perfMovementCalls << ',' << f.perfMovementPlayers
-        << ',' << f.perfCollisionCalls << ',' << f.perfCollisionPlayers << ',' << f.perfKccCalls << ','
-        << f.perfKccBumpHits << ',' << f.perfKccCaIterations << ',' << f.perfKccSweepHits << ','
-        << f.perfWallDetectCalls << ',' << f.perfWallMeshProbes << ',' << f.perfWallMeshProbeMeshes << ','
-        << f.perfWallSphereFallbacks << ',' << f.perfWallAttachmentCalls << ',' << f.perfWallAttachmentMeshes << ','
-        << f.perfWallDetectSkippedByGate << ',' << f.perfWallAttachmentPrevTriangleHits << ','
-        << f.perfWallAttachmentNeighborHits << ',' << f.perfWallAttachmentBroadphaseFallbacks << ','
-        << f.perfStaticBroadphaseQueries << ',' << f.perfStaticBroadphaseMeshes << ',' << f.perfSweepAabbAllCalls
-        << ',' << f.perfSweepCapsuleAllCalls << ',' << f.perfSweepCapsuleTriMeshCalls << ','
-        << f.perfSweepCapsuleTriMeshNodes << ',' << f.perfSweepCapsuleTriMeshTris << ','
-        << f.perfDeepestCapsuleCalls << ',' << f.perfDeepestCapsuleTriMeshCalls << ','
-        << f.perfDeepestCapsuleTriMeshNodes << ',' << f.perfDeepestCapsuleTriMeshTris << ','
-        << f.perfClosestPointMeshCalls << ',' << f.perfClosestPointMeshNodes << ','
-        << f.perfClosestPointMeshTris << ',' << f.perfClosestPointTriangleCalls << ','
-        << f.perfClosestPointWallProbeCalls << ',' << f.perfClosestPointWallProbeNodes << ','
-        << f.perfClosestPointWallProbeTris << ',' << f.perfClosestPointWallAttachmentCalls << ','
-        << f.perfClosestPointWallAttachmentNodes << ',' << f.perfClosestPointWallAttachmentTris << '\n';
+        << f.rendererIndexedDraws << ',' << f.rendererTriangles << ',' << f.imguiDrawLists << ',' << f.imguiVertices
+        << ',' << f.imguiIndices << ',' << f.perfMovementCalls << ',' << f.perfMovementPlayers << ','
+        << f.perfCollisionCalls << ',' << f.perfCollisionPlayers << ',' << f.perfKccCalls << ',' << f.perfKccBumpHits
+        << ',' << f.perfKccCaIterations << ',' << f.perfKccSweepHits << ',' << f.perfWallDetectCalls << ','
+        << f.perfWallMeshProbes << ',' << f.perfWallMeshProbeMeshes << ',' << f.perfWallSphereFallbacks << ','
+        << f.perfWallAttachmentCalls << ',' << f.perfWallAttachmentMeshes << ',' << f.perfWallDetectSkippedByGate << ','
+        << f.perfWallAttachmentPrevTriangleHits << ',' << f.perfWallAttachmentNeighborHits << ','
+        << f.perfWallAttachmentBroadphaseFallbacks << ',' << f.perfStaticBroadphaseQueries << ','
+        << f.perfStaticBroadphaseMeshes << ',' << f.perfSweepAabbAllCalls << ',' << f.perfSweepCapsuleAllCalls << ','
+        << f.perfSweepCapsuleTriMeshCalls << ',' << f.perfSweepCapsuleTriMeshNodes << ','
+        << f.perfSweepCapsuleTriMeshTris << ',' << f.perfDeepestCapsuleCalls << ',' << f.perfDeepestCapsuleTriMeshCalls
+        << ',' << f.perfDeepestCapsuleTriMeshNodes << ',' << f.perfDeepestCapsuleTriMeshTris << ','
+        << f.perfClosestPointMeshCalls << ',' << f.perfClosestPointMeshNodes << ',' << f.perfClosestPointMeshTris << ','
+        << f.perfClosestPointTriangleCalls << ',' << f.perfClosestPointWallProbeCalls << ','
+        << f.perfClosestPointWallProbeNodes << ',' << f.perfClosestPointWallProbeTris << ','
+        << f.perfClosestPointWallAttachmentCalls << ',' << f.perfClosestPointWallAttachmentNodes << ','
+        << f.perfClosestPointWallAttachmentTris << '\n';
 }
 
 float maxSection(const ClientPerfFrame& f)
@@ -321,20 +318,17 @@ void ClientPerfRecorder::writeSummary() const
     for (std::size_t i = 0; i < count; ++i) {
         const ClientPerfFrame& f = *slow[i];
         out << "frame=" << f.frameNumber << " wall_ms=" << f.wallFrameMs << " cpu_ms=" << f.cpuFrameMs
-            << " max_section_ms=" << maxSection(f) << " draw_ms=" << f.drawFrameMs
-            << " acquire_ms=" << f.drawAcquireMs << " physics_ms=" << f.physicsMs
-            << " poll_ms=" << f.networkPollMs << " snapshot_apply_ms=" << f.snapshotApplyMs
-            << " reconcile_ms=" << f.reconciliationMs << " reconcile_ticks=" << f.reconcileReplayedTicks
-            << " reconcile_skip=" << f.reconcileSkippedExact
-            << " reconcile_err_pos=" << f.reconcileErrorPosition
-            << " reconcile_err_vel=" << f.reconcileErrorVelocity
+            << " max_section_ms=" << maxSection(f) << " draw_ms=" << f.drawFrameMs << " acquire_ms=" << f.drawAcquireMs
+            << " physics_ms=" << f.physicsMs << " poll_ms=" << f.networkPollMs
+            << " snapshot_apply_ms=" << f.snapshotApplyMs << " reconcile_ms=" << f.reconciliationMs
+            << " reconcile_ticks=" << f.reconcileReplayedTicks << " reconcile_skip=" << f.reconcileSkippedExact
+            << " reconcile_err_pos=" << f.reconcileErrorPosition << " reconcile_err_vel=" << f.reconcileErrorVelocity
             << " refresh_players_ms=" << f.refreshPlayersMs << " animation_ms=" << f.animationMs
-            << " hud_ms=" << f.hudMs << " imgui_ms=" << f.imguiMs
-            << " limiter_ms=" << f.frameLimiterMs << " entity_cmds=" << f.entityRenderCmds
-            << " skinned=" << f.skinnedInstances << " triangles=" << f.rendererTriangles
-            << " kcc=" << f.perfKccCalls << " sweep_capsule_tris=" << f.perfSweepCapsuleTriMeshTris
-            << " closest_point_tris=" << f.perfClosestPointMeshTris
-            << " wall_skip=" << f.perfWallDetectSkippedByGate
+            << " hud_ms=" << f.hudMs << " imgui_ms=" << f.imguiMs << " limiter_ms=" << f.frameLimiterMs
+            << " entity_cmds=" << f.entityRenderCmds << " skinned=" << f.skinnedInstances
+            << " triangles=" << f.rendererTriangles << " kcc=" << f.perfKccCalls
+            << " sweep_capsule_tris=" << f.perfSweepCapsuleTriMeshTris
+            << " closest_point_tris=" << f.perfClosestPointMeshTris << " wall_skip=" << f.perfWallDetectSkippedByGate
             << " wall_prev=" << f.perfWallAttachmentPrevTriangleHits
             << " wall_neighbor=" << f.perfWallAttachmentNeighborHits
             << " wall_broad=" << f.perfWallAttachmentBroadphaseFallbacks

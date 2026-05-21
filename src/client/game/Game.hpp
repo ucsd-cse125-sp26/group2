@@ -165,10 +165,10 @@ private:
     [[nodiscard]] std::optional<PredictedPlayerState> captureLocalPredictedState() const;
     [[nodiscard]] const PredictedPlayerState* predictedStateForTick(std::uint32_t tick) const noexcept;
     void restoreLocalPredictedState(const PredictedPlayerState& state);
-    [[nodiscard]] ReconciliationDecision evaluateReconciliationSkip(
-        const PredictedPlayerState& authoritative,
-        const PredictedPlayerState* predictedAtAck,
-        const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept;
+    [[nodiscard]] ReconciliationDecision
+    evaluateReconciliationSkip(const PredictedPlayerState& authoritative,
+                               const PredictedPlayerState* predictedAtAck,
+                               const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept;
 
     /// @brief Enter chat input mode and release normal gameplay input capture.
     void openChat();
