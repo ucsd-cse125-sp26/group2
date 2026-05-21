@@ -252,6 +252,7 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
     camera_.setEye(eye);
     camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
+    camera_.setFov(mainFovDegrees);
     camera_.computeViewProjectionMatrix();
 }
 

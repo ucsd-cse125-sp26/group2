@@ -323,6 +323,7 @@ public:
 
     AAMode aaMode = AAMode::SMAA_T2x;            ///< Anti-aliasing mode.  Re-applied at the start of each frame.
     float renderScale = 1.0f;                    ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
+    float mainFovDegrees = 60.0f;                ///< Main camera vertical field of view in degrees.
     bool imguiEnabled = true;                    ///< Master toggle for the ImGui debug overlay.
     RenderToggles toggles{};                     ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
     std::vector<std::string> availableHDRFiles;  ///< Filled by `scanHDRFiles()`; consumed by debug UI.

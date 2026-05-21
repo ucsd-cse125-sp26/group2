@@ -37,7 +37,7 @@ public:
     void resize(uint32_t newW, uint32_t newH);
 
     /// @brief Forward an SDL event to interactive widgets (buy menu, scoreboard).
-    void processEvent(const SDL_Event* event);
+    void processEvent(const SDL_Event* event, const InputBindings* bindings);
 
     /// @brief Tick widget animations and consume game events.
     void update(float dt, const HudGameState& state);

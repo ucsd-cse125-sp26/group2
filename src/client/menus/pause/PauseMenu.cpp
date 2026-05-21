@@ -5,6 +5,65 @@
 #include <algorithm>
 #include <imgui.h>
 
+namespace
+{
+constexpr float k_minMouseSensitivity = 0.0001f;
+constexpr float k_maxMouseSensitivity = 0.005f;
+constexpr float k_minFovDegrees = 50.0f;
+constexpr float k_maxFovDegrees = 120.0f;
+
+MouseButton mouseButtonFromSdl(uint8_t button)
+{
+    switch (button) {
+    case SDL_BUTTON_LEFT:
+        return MouseButton::Left;
+    case SDL_BUTTON_MIDDLE:
+        return MouseButton::Middle;
+    case SDL_BUTTON_RIGHT:
+        return MouseButton::Right;
+    case SDL_BUTTON_X1:
+        return MouseButton::X1;
+    case SDL_BUTTON_X2:
+        return MouseButton::X2;
+    default:
+        return MouseButton::None;
+    }
+}
+
+std::optional<Binding> keyboardMouseBindingFromEvent(const SDL_Event& event)
+{
+    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
+        return Binding::bindKeyboard(event.key.scancode);
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        const MouseButton button = mouseButtonFromSdl(event.button.button);
+        if (button != MouseButton::None)
+            return Binding::bindMouse(button);
+    }
+    if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+        if (event.wheel.y > 0.0f)
+            return Binding::bindMouseWheel(MouseWheelDirection::Up);
+        if (event.wheel.y < 0.0f)
+            return Binding::bindMouseWheel(MouseWheelDirection::Down);
+    }
+    return std::nullopt;
+}
+
+std::optional<Binding> controllerBindingFromEvent(const SDL_Event& event)
+{
+    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+        return Binding::bindGamepadButton(static_cast<SDL_GamepadButton>(event.gbutton.button));
+    if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+        if (event.gaxis.value < 16384)
+            return std::nullopt;
+        if (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER)
+            return Binding::bindGamepadAxis(GamepadAxisBinding::LeftTrigger);
+        if (event.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
+            return Binding::bindGamepadAxis(GamepadAxisBinding::RightTrigger);
+    }
+    return std::nullopt;
+}
+} // namespace
+
 void PauseMenu::open()
 {
     menuOpen = true;
@@ -14,7 +73,7 @@ void PauseMenu::close()
 {
     menuOpen = false;
     settingsOpen = false;
-    listeningAction.reset();
+    listeningBinding.reset();
     dirty = false;
     statusMessage.clear();
     pendingConfirm_ = PendingConfirm::None;
@@ -38,8 +97,8 @@ bool PauseMenu::handleEscape()
         pendingConfirm_ = PendingConfirm::None;
         return false;
     }
-    if (listeningAction) {
-        listeningAction.reset();
+    if (listeningBinding) {
+        listeningBinding.reset();
         return false;
     }
     if (settingsOpen) {
@@ -58,22 +117,24 @@ void PauseMenu::openSettings(const UserSettings& settings)
     settingsOpen = true;
     draftBindings = settings.inputBindings;
     draftMouseSensitivity = settings.mouseSensitivity;
+    draftFovDegrees = settings.fovDegrees;
+    draftShowControllerBindings = settings.showControllerBindings;
     dirty = false;
-    listeningAction.reset();
+    listeningBinding.reset();
     statusMessage.clear();
 }
 
 void PauseMenu::closeSettingsPage()
 {
     settingsOpen = false;
-    listeningAction.reset();
+    listeningBinding.reset();
     statusMessage.clear();
     dirty = false;
 }
 
 void PauseMenu::requestDiscardSettingsConfirm()
 {
-    listeningAction.reset();
+    listeningBinding.reset();
     pendingConfirm_ = PendingConfirm::DiscardSettings;
     confirm_.open({.title = "Discard Settings?",
                    .message = "You have unsaved settings changes. Discard them?",
@@ -87,52 +148,48 @@ bool PauseMenu::consumeEvent(const SDL_Event& event)
     if (!menuOpen)
         return false;
 
-    if (listeningAction) {
+    if (listeningBinding) {
         if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
             if (event.key.key == SDLK_ESCAPE) {
-                listeningAction.reset();
+                listeningBinding.reset();
             } else if (event.key.key == SDLK_BACKSPACE || event.key.key == SDLK_DELETE) {
-                draftBindings.rebind(*listeningAction, Binding::unbound());
-                listeningAction.reset();
+                draftBindings.rebind(
+                    listeningBinding->action, Binding::unbound(), listeningBinding->device, listeningBinding->slot);
+                listeningBinding.reset();
                 dirty = true;
             } else {
-                draftBindings.rebind(*listeningAction, Binding::bindKeyboard(event.key.scancode));
-                listeningAction.reset();
-                dirty = true;
+                if (listeningBinding->device == BindingDevice::KeyboardMouse) {
+                    draftBindings.rebind(listeningBinding->action,
+                                         Binding::bindKeyboard(event.key.scancode),
+                                         listeningBinding->device,
+                                         listeningBinding->slot);
+                    listeningBinding.reset();
+                    dirty = true;
+                }
             }
             return true;
         }
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-            MouseButton button = MouseButton::None;
-            switch (event.button.button) {
-            case SDL_BUTTON_LEFT:
-                button = MouseButton::Left;
-                break;
-            case SDL_BUTTON_MIDDLE:
-                button = MouseButton::Middle;
-                break;
-            case SDL_BUTTON_RIGHT:
-                button = MouseButton::Right;
-                break;
-            case SDL_BUTTON_X1:
-                button = MouseButton::X1;
-                break;
-            case SDL_BUTTON_X2:
-                button = MouseButton::X2;
-                break;
-            default:
-                break;
-            }
-            if (button != MouseButton::None) {
-                draftBindings.rebind(*listeningAction, Binding::bindMouse(button));
-                dirty = true;
-            }
-            listeningAction.reset();
+
+        const std::optional<Binding> candidate = listeningBinding->device == BindingDevice::Controller
+                                                     ? controllerBindingFromEvent(event)
+                                                     : keyboardMouseBindingFromEvent(event);
+        if (candidate) {
+            draftBindings.rebind(
+                listeningBinding->action, *candidate, listeningBinding->device, listeningBinding->slot);
+            listeningBinding.reset();
+            dirty = true;
+            return true;
+        }
+
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_WHEEL ||
+            event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION)
+        {
             return true;
         }
         return event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
                event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
-               event.type == SDL_EVENT_TEXT_INPUT;
+               event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+               event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION;
     }
 
     switch (event.type) {
@@ -143,6 +200,9 @@ bool PauseMenu::consumeEvent(const SDL_Event& event)
     case SDL_EVENT_MOUSE_MOTION:
     case SDL_EVENT_MOUSE_WHEEL:
     case SDL_EVENT_TEXT_INPUT:
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
         return true;
     default:
         return false;
@@ -160,7 +220,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     ImDrawList* background = ImGui::GetBackgroundDrawList();
     background->AddRectFilled({0.0f, 0.0f}, display, IM_COL32(0, 0, 0, 150));
 
-    const ImVec2 windowSize = settingsOpen ? ImVec2{560.0f, 620.0f} : ImVec2{420.0f, 250.0f};
+    const ImVec2 windowSize = settingsOpen ? ImVec2{740.0f, 760.0f} : ImVec2{420.0f, 250.0f};
     ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
     ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
 
@@ -209,31 +269,58 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             ImGui::Separator();
 
             const float previousSensitivity = draftMouseSensitivity;
-            ImGui::SliderFloat("Mouse Sensitivity", &draftMouseSensitivity, 0.0001f, 0.005f, "%.4f");
-            draftMouseSensitivity = std::clamp(draftMouseSensitivity, 0.0001f, 0.005f);
+            ImGui::SliderFloat(
+                "Mouse Sensitivity", &draftMouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity, "%.4f");
+            draftMouseSensitivity = std::clamp(draftMouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity);
             if (draftMouseSensitivity != previousSensitivity)
                 dirty = true;
 
+            const float previousFov = draftFovDegrees;
+            ImGui::SliderFloat("FOV", &draftFovDegrees, k_minFovDegrees, k_maxFovDegrees, "%.0f");
+            draftFovDegrees = std::clamp(draftFovDegrees, k_minFovDegrees, k_maxFovDegrees);
+            if (draftFovDegrees != previousFov)
+                dirty = true;
+
+            const bool previousShowControllerBindings = draftShowControllerBindings;
+            ImGui::Checkbox("Controller Bindings", &draftShowControllerBindings);
+            if (draftShowControllerBindings != previousShowControllerBindings) {
+                listeningBinding.reset();
+                dirty = true;
+            }
+
             ImGui::Spacing();
-            if (ImGui::BeginTable("bindings", 2, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg)) {
+            const BindingDevice visibleDevice =
+                draftShowControllerBindings ? BindingDevice::Controller : BindingDevice::KeyboardMouse;
+            if (ImGui::BeginTable("bindings", 3, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg)) {
                 ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f);
+                ImGui::TableSetupColumn("Alt Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f);
                 ImGui::TableHeadersRow();
 
                 for (Action action : InputBindings::actions()) {
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
                     ImGui::TextUnformatted(InputBindings::actionLabel(action).data());
-                    ImGui::TableSetColumnIndex(1);
-                    const bool listening = listeningAction && *listeningAction == action;
-                    const std::string label = listening ? std::string("Press a key or button")
-                                                        : InputBindings::bindingLabel(draftBindings.get(action));
-                    ImGui::PushID(static_cast<int>(action));
-                    if (ImGui::Button(label.c_str(), {-1.0f, 0.0f})) {
-                        listeningAction = action;
-                        statusMessage.clear();
+
+                    for (std::size_t slot = 0; slot < InputBindings::kBindingSlots; ++slot) {
+                        ImGui::TableSetColumnIndex(static_cast<int>(slot + 1));
+                        const bool listening = listeningBinding && listeningBinding->action == action &&
+                                               listeningBinding->device == visibleDevice &&
+                                               listeningBinding->slot == slot;
+                        const std::string label =
+                            listening ? std::string(draftShowControllerBindings ? "Press controller input"
+                                                                                : "Press key, mouse, or wheel")
+                                      : InputBindings::bindingLabel(draftBindings.get(action, visibleDevice, slot));
+                        ImGui::PushID(static_cast<int>(action));
+                        ImGui::PushID(static_cast<int>(slot));
+                        if (ImGui::Button(label.c_str(), {-1.0f, 0.0f})) {
+                            listeningBinding =
+                                ListeningBinding{.action = action, .device = visibleDevice, .slot = slot};
+                            statusMessage.clear();
+                        }
+                        ImGui::PopID();
+                        ImGui::PopID();
                     }
-                    ImGui::PopID();
                 }
 
                 ImGui::EndTable();
@@ -248,7 +335,9 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f})) {
                 draftBindings = InputBindings::defaults();
                 draftMouseSensitivity = 0.0007f;
-                listeningAction.reset();
+                draftFovDegrees = 60.0f;
+                draftShowControllerBindings = false;
+                listeningBinding.reset();
                 dirty = true;
                 statusMessage.clear();
             }
@@ -257,10 +346,12 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             if (ImGui::Button("Apply", {halfWidth, 34.0f})) {
                 settings.inputBindings = draftBindings;
                 settings.mouseSensitivity = draftMouseSensitivity;
+                settings.fovDegrees = draftFovDegrees;
+                settings.showControllerBindings = draftShowControllerBindings;
                 const bool saved = user_settings::save(std::string(settingsPath), settings);
                 statusMessage = saved ? "Settings saved." : "Settings could not be saved.";
                 dirty = false;
-                listeningAction.reset();
+                listeningBinding.reset();
                 result.settingsApplied = true;
             }
             ImGui::SameLine();
@@ -291,6 +382,8 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
         case PendingConfirm::DiscardSettings:
             draftBindings = settings.inputBindings;
             draftMouseSensitivity = settings.mouseSensitivity;
+            draftFovDegrees = settings.fovDegrees;
+            draftShowControllerBindings = settings.showControllerBindings;
             closeSettingsPage();
             break;
         case PendingConfirm::None:

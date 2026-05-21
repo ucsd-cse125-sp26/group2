@@ -1690,6 +1690,28 @@ target_link_libraries(physics_trimesh_tests PRIVATE
 )
 add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
 
+add_executable(input_bindings_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/input_bindings_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/InputBindings.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/InputBindings.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/UserSettings.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/UserSettings.hpp"
+)
+target_include_directories(input_bindings_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(input_bindings_tests PRIVATE
+    SDL3::SDL3-static
+    tomlplusplus::tomlplusplus
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(input_bindings_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(input_bindings_tests)
+enable_sanitizers(input_bindings_tests)
+add_test(NAME input_bindings_tests COMMAND input_bindings_tests)
+
 add_executable(udp_session_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/udp_session_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
