@@ -77,11 +77,11 @@ enum class SfxId : uint8_t
     DirtFootstep12,
     DirtFootstep13,
     DirtFootstep14,
-    Slide,            ///< sliding.mp3 — looped while in Slide mode.
-    DashSfx,          ///< Synth: dash whoosh.
-    GravityFlipSfx,   ///< Synth: gravity flip warble.
-    GrappleSfx,       ///< Synth: grapple twang/launch.
-    RecallSfx,        ///< Synth: recall rewind.
+    Slide,          ///< sliding.mp3 — looped while in Slide mode.
+    DashSfx,        ///< Synth: dash whoosh.
+    GravityFlipSfx, ///< Synth: gravity flip warble.
+    GrappleSfx,     ///< Synth: grapple twang/launch.
+    RecallSfx,      ///< Synth: recall rewind.
     GrenadeThrow,
     VoiceStart,
     VoiceStop,

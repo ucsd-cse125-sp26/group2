@@ -771,7 +771,7 @@ bool Game::init(AppContext& ctx)
         //   - Impacts: local prediction only spawns tracers; all impact VFX
         //     (sparks, blood, bullet holes) come from server so player hits
         //     always get the correct surface type and normal.
-        if (evt.source == localPlayer) {            
+        if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
             const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
                                                evt.effectType == ParticleEffectType::Smoke ||
@@ -2541,9 +2541,7 @@ SDL_AppResult Game::iterate()
 
                     // Landing: airborne → grounded. Skip dead/respawn-frame and
                     // slide entry (slide has its own cue).
-                    if (!tracked.grounded && vis.grounded && !tracked.isDead && !vis.isDead &&
-                        newMode != slidingMode)
-                    {
+                    if (!tracked.grounded && vis.grounded && !tracked.isDead && !vis.isDead && newMode != slidingMode) {
                         const float vy = std::abs(vel.value.y);
                         const float gain = std::clamp(0.55f + vy / 1400.0f, 0.55f, 1.0f);
                         post("player.land", gain);
@@ -2555,8 +2553,7 @@ SDL_AppResult Game::iterate()
                             sfxSystem.stopSource(tracked.slideLoopHandle);
                             tracked.slideLoopHandle = SfxSystem::kInvalidSource;
                         }
-                        tracked.slideLoopHandle =
-                            sfxSystem.startLoop(SfxId::Slide, !isLocal, pos.value, 0.9f, 1.4f);
+                        tracked.slideLoopHandle = sfxSystem.startLoop(SfxId::Slide, !isLocal, pos.value, 0.9f, 1.4f);
                     } else if (tracked.moveMode == slidingMode && newMode != slidingMode) {
                         if (tracked.slideLoopHandle != SfxSystem::kInvalidSource) {
                             sfxSystem.stopSource(tracked.slideLoopHandle);
@@ -2579,8 +2576,7 @@ SDL_AppResult Game::iterate()
                     if (abil != nullptr) {
                         const auto rose = [](float prev, float cur) { return cur > prev + 0.05f; };
                         if (rose(tracked.primaryCooldown, abil->primaryCooldown) &&
-                            abil->primary == AbilityType::Dash)
-                        {
+                            abil->primary == AbilityType::Dash) {
                             post("ability.dash", 1.0f);
                         }
                         if (rose(tracked.secondaryCooldown, abil->secondaryCooldown) &&
