@@ -202,6 +202,43 @@ jobs:
             | xargs clang-format-18 --dry-run --Werror
 
   # ------------------------------------------------------------------ #
+  #  Fetch shared assets from the CSE125 server                         #
+  #                                                                      #
+  #  Runs once on Linux and uploads as a workflow artifact so each       #
+  #  matrix release-build can download it without needing rsync          #
+  #  available on Windows runners — and we only hit the server once.   #
+  # ------------------------------------------------------------------ #
+  fetch-assets:
+    name: Fetch Assets
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Set up SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 222 cse125.ucsd.edu >> ~/.ssh/known_hosts
+
+      - name: Fetch assets via rsync
+        run: |
+          mkdir -p assets
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key -p 222 -o StrictHostKeyChecking=yes" \
+            dkatulevskiy@cse125.ucsd.edu:/home/dkatulevskiy/group2-assets/ \
+            ./assets/
+
+      - name: Upload assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-assets
+          path: assets/
+          retention-days: 1
+          include-hidden-files: true
+
+  # ------------------------------------------------------------------ #
   #  Release builds — optimised, no sanitizers                          #
   #  Runs on: push to main  →  auto-versioned release (semver)         #
   #                                                                      #
@@ -211,14 +248,10 @@ jobs:
   release-build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    needs: fetch-assets
     if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
-      # Google Drive file ID for the shared assets zip.  Refreshed by a
-      # maintainer when new art lands — gdown's per-file rate limit makes
-      # the folder-download approach unreliable for 50+ files on shared
-      # public links, so we go back to a single archive download here.
-      ASSETS_GDRIVE_ID: "132BZgV26Gc2N-kx5urCRz2pH8q0AkYEI"
     strategy:
       fail-fast: false
       matrix:
@@ -300,12 +333,6 @@ jobs:
         with:
           vulkan_version: latest
           cache: true
-
-      # Ensure Python is available consistently across all runners (for gdown).
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
 
       # Strawberry Perl ships a ccache.exe that hijacks compiler launcher
       # invocations and breaks RC (resource compiler) dep tracking.
@@ -401,22 +428,13 @@ jobs:
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --target group2 server clientbot --parallel
 
-      # Download the shared assets zip from Google Drive (cached across runs).
-      # The cache key is the file ID, so a maintainer refreshing the Drive
-      # zip should also bump ASSETS_GDRIVE_ID above to invalidate the cache.
-      - name: Cache assets
-        id: assets-cache
-        uses: actions/cache@v4
+      # Pull the shared assets fetched by the fetch-assets job (rsync'd
+      # fresh from cse125.ucsd.edu on each workflow run).
+      - name: Download assets artifact
+        uses: actions/download-artifact@v4
         with:
-          path: assets.zip
-          key: assets-${{ env.ASSETS_GDRIVE_ID }}
-
-      - name: Download assets
-        if: steps.assets-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          pip install --quiet gdown
-          gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
+          name: shared-assets
+          path: assets
 
       # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
@@ -438,8 +456,8 @@ jobs:
           cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
           cp -r "${{ matrix.build_dir }}/shaders-new" "$STAGE/"
 
-          # Assets from Google Drive (cross-platform extraction via Python)
-          python3 -c "import zipfile; zipfile.ZipFile('assets.zip').extractall('$STAGE')"
+          # Assets rsync'd from the cse125 server by the fetch-assets job.
+          cp -r assets "$STAGE/"
 
           # Create release zip.
           # Linux/macOS have zip pre-installed; Windows has 7z instead.
