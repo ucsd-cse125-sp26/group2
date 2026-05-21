@@ -433,7 +433,11 @@ physics::KccFrameResult runKinematicCharacterController(glm::vec3& pos,
         }
     }
 
-    if (!state.grounded && !state.grappleActive) {
+    // The main CA sweep already integrates gameplay vertical motion whenever
+    // it uses the full capsule. This axis-only pass is only for the grounded
+    // walk-capsule path above, where phaseVel was deliberately flattened for
+    // step/stair handling.
+    if (useWalkCapsule && !state.grounded && !state.grappleActive) {
         const float k_vAlongUp = glm::dot(vel, worldUp);
         const glm::vec3 vMotion = worldUp * k_vAlongUp;
         if (glm::dot(vMotion, vMotion) > 1e-12f) {
@@ -444,6 +448,10 @@ physics::KccFrameResult runKinematicCharacterController(glm::vec3& pos,
                 pos = vTarget;
             } else {
                 ++sweepHits;
+                if (diagOn) {
+                    ++diagFrame.bumpHits;
+                    diagFrame.lastHitNormal = vHit.normal;
+                }
                 ++result.bumpHits;
                 result.lastHitNormal = vHit.normal;
                 if (glm::dot(result.firstHitNormal, result.firstHitNormal) < 1e-8f)
@@ -457,18 +465,20 @@ physics::KccFrameResult runKinematicCharacterController(glm::vec3& pos,
                     result.floorNormal = vHit.normal;
                     state.grounded = true;
                     state.groundNormal = vHit.normal;
-                    vel = physics::clipVelocity(vel, vHit.normal, physics::k_overbounceFloor);
+                    if (k_vAlongUp < 0.0f)
+                        vel -= worldUp * k_vAlongUp;
                 } else if (ceiling) {
                     result.hitCeiling = true;
                     result.ceilingNormal = vHit.normal;
-                    vel = physics::clipVelocity(vel, vHit.normal, physics::k_overbounceWall);
+                    if (k_vAlongUp > 0.0f)
+                        vel -= worldUp * k_vAlongUp;
                 } else {
                     result.hitWall = true;
                     if (glm::dot(vMotion, vHit.normal) < -0.01f) {
                         result.hitBlocker = true;
                         result.blockerNormal = vHit.normal;
+                        vel -= worldUp * k_vAlongUp;
                     }
-                    vel = physics::clipVelocity(vel, vHit.normal, physics::k_overbounceWall);
                 }
             }
         }

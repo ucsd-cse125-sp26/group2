@@ -609,6 +609,28 @@ WorldTriMesh makeSlopedCeiling()
         });
 }
 
+WorldTriMesh makeShallowSlopedCeiling()
+{
+    constexpr float slope = 0.049f;
+    auto yAtZ = [](float z) { return 180.0f - slope * z; };
+
+    return makeCookedMesh(
+        {
+            {-300.0f, yAtZ(-900.0f), -900.0f},
+            {300.0f, yAtZ(-900.0f), -900.0f},
+            {300.0f, yAtZ(100.0f), 100.0f},
+            {-300.0f, yAtZ(100.0f), 100.0f},
+        },
+        {
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+        });
+}
+
 WorldTriMesh makeThinRamp()
 {
     return makeCookedMesh(
@@ -921,6 +943,52 @@ bool airborneKccDoesNotSnapToSlopedCeiling()
     ok &= expect(finiteVec3(pos), "sloped ceiling snap regression should keep position finite");
     ok &= expect(pos.y < 1.0f, "airborne KCC should not snap upward to the underside of a sloped ceiling");
     ok &= expect(!state.grounded, "underside of a sloped ceiling should not classify as grounded support");
+    return ok;
+}
+
+bool airborneKccDoesNotGainLiftFromSeparatingSlopedCeiling()
+{
+    const WorldTriMesh ceiling = makeShallowSlopedCeiling();
+    const physics::WorldGeometry world{
+        .planes = {},
+        .boxes = {},
+        .brushes = {},
+        .cylinders = {},
+        .spheres = {},
+        .triMeshes = std::span<const WorldTriMesh>(&ceiling, 1),
+    };
+
+    CollisionShape shape;
+    shape.type = CollisionShapeType::Capsule;
+    shape.radius = 16.0f;
+    shape.halfHeight = 20.0f;
+    shape.halfExtents = {16.0f, 36.0f, 16.0f};
+
+    PlayerVisState state;
+    state.grounded = false;
+
+    constexpr float slope = 0.049f;
+    constexpr float dt = 1.0f / 128.0f;
+    const glm::vec3 ceilingNormal = glm::normalize(glm::vec3{0.0f, -1.0f, -slope});
+    const CapsuleShape capsule{.radius = shape.radius, .halfHeight = shape.halfHeight, .up = {0.0f, 1.0f, 0.0f}};
+    const float support = capsule.minkowskiExtent(ceilingNormal);
+
+    glm::vec3 pos{0.0f, 180.0f + (support + 0.05f) / ceilingNormal.y, 0.0f};
+    glm::vec3 vel{44.2f, 18.9f, -546.3f};
+    const glm::vec3 beforePos = pos;
+    const glm::vec3 beforeVel = vel;
+
+    const physics::KccFrameResult result =
+        systems::runKinematicCharacterController(pos, vel, shape, state, dt, world, entt::null, false);
+
+    bool ok = true;
+    ok &= expect(glm::dot(beforeVel, ceilingNormal) > 0.0f,
+                 "test setup should move away from the sloped ceiling plane");
+    ok &= expect(!result.hitCeiling, "separating diagonal motion should not be turned into a ceiling hit");
+    ok &= expect(vel.y <= beforeVel.y + 0.001f, "sloped ceiling contact should not add upward velocity");
+    ok &= expect(pos.y <= beforePos.y + beforeVel.y * dt + 0.01f,
+                 "separating sloped ceiling should not add extra vertical displacement");
+    ok &= expect(!state.grounded, "sloped ceiling underside should not ground the player");
     return ok;
 }
 
@@ -2984,6 +3052,7 @@ int main()
     ok &= kccAscendsThinTrimeshStaircaseAtSprintSpeed();
     ok &= thinCeilingPlaneBlocksUpwardCapsuleMotion();
     ok &= airborneKccDoesNotSnapToSlopedCeiling();
+    ok &= airborneKccDoesNotGainLiftFromSeparatingSlopedCeiling();
     ok &= rampGroundProbeKeepsAuthoredNormal();
     ok &= staticCapsuleDepenUsesSurfaceFeatureNormal();
     ok &= twoTriangleFloorHasStableSurfaceOverlap();

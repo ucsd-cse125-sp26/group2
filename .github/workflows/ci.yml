@@ -115,26 +115,49 @@ jobs:
           key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      # Cache the project build tree for incremental cmake reconfigure.
-      # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja
-      # tracks source deps, so stale objects are never used.
-      #
-      # Cache-key segments:
-      #   ImageVersion    bumps when GHA refreshes the runner image
-      #                   (clang/glibc/SDK churn).
-      #   VCToolsVersion  Windows only. Microsoft ships MSVC point
-      #                   releases (e.g. 19.44.35225 -> 19.44.35226)
-      #                   within the same image; PCH files reject the
-      #                   mismatch with "Microsoft Visual C/C++ Version
-      #                   differs in PCH file vs. current file". Set by
-      #                   ilammy/msvc-dev-cmd via GITHUB_ENV; empty
-      #                   (harmless) on non-Windows runners.
+      # Cache the project build tree for incremental CMake reconfigure.
+      # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
+      # source deps, but generated PCH/object files are still tied to the
+      # exact compiler identity. On Windows, clang-cl encodes _MSC_FULL_VER in
+      # its PCH target, which can change even when VCToolsVersion does not.
+      - name: Compute compiler cache fingerprint
+        id: compiler-cache
+        shell: bash
+        env:
+          CC: ${{ matrix.cc || '' }}
+          CXX: ${{ matrix.cxx || '' }}
+        run: |
+          # GHA's `shell: bash` runs with `-e -o pipefail`. Both probes below
+          # close the pipe early (head -n 1, awk … exit), which sends SIGPIPE
+          # to the compiler and surfaces as a non-zero pipe stage that
+          # pipefail would propagate. Disable pipefail for this whole probe
+          # — partial fingerprint data is fine, the fallback inputs
+          # (VCToolsVersion, WindowsSDKVersion) still vary the cache key.
+          set +o pipefail
+          compiler="${CXX:-${CC:-c++}}"
+          version="$("$compiler" --version 2>&1 | head -n 1 | tr -d '\r' || true)"
+          msvc_full_ver=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            msvc_full_ver="$(printf '' | "$compiler" /nologo /EP /clang:-dM /TP - 2>/dev/null \
+              | awk '/#define _MSC_FULL_VER/ { print $3; exit }' || true)"
+          fi
+          fingerprint="${RUNNER_OS}|${compiler}|${version}|${VCToolsVersion:-}|${WindowsSDKVersion:-}|${msvc_full_ver}"
+          echo "Compiler cache fingerprint: $fingerprint"
+          if command -v sha256sum >/dev/null 2>&1; then
+            key="$(printf '%s' "$fingerprint" | sha256sum | cut -d' ' -f1)"
+          else
+            key="$(printf '%s' "$fingerprint" | shasum -a 256 | cut -d' ' -f1)"
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Compiler cache fingerprint: \`$fingerprint\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache build tree
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       - name: Drop cached PCH files (Windows)
         if: runner.os == 'Windows'
@@ -142,7 +165,8 @@ jobs:
         run: |
           $buildDir = "build/${{ matrix.preset }}"
           if (Test-Path $buildDir) {
-            Get-ChildItem $buildDir -Recurse -File -Include *.pch,cmake_pch*.obj |
+            Get-ChildItem -Path $buildDir -Recurse -File |
+              Where-Object { $_.Name -like "*.pch" -or $_.Name -like "cmake_pch*.obj" } |
               Remove-Item -Force
           }
 
@@ -306,16 +330,60 @@ jobs:
           key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      # Cache the project build tree for incremental cmake reconfigure.
-      # See the matching comment in the `build:` job above for why
-      # VCToolsVersion is part of the key — short version: prevents
-      # PCH version-mismatch failures after MSVC point updates.
+      # Cache the project build tree for incremental CMake reconfigure.
+      # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
+      # source deps, but generated PCH/object files are still tied to the
+      # exact compiler identity. On Windows, clang-cl encodes _MSC_FULL_VER in
+      # its PCH target, which can change even when VCToolsVersion does not.
+      - name: Compute compiler cache fingerprint
+        id: compiler-cache
+        shell: bash
+        env:
+          CC: ${{ matrix.cc || '' }}
+          CXX: ${{ matrix.cxx || '' }}
+        run: |
+          # GHA's `shell: bash` runs with `-e -o pipefail`. Both probes below
+          # close the pipe early (head -n 1, awk … exit), which sends SIGPIPE
+          # to the compiler and surfaces as a non-zero pipe stage that
+          # pipefail would propagate. Disable pipefail for this whole probe
+          # — partial fingerprint data is fine, the fallback inputs
+          # (VCToolsVersion, WindowsSDKVersion) still vary the cache key.
+          set +o pipefail
+          compiler="${CXX:-${CC:-c++}}"
+          version="$("$compiler" --version 2>&1 | head -n 1 | tr -d '\r' || true)"
+          msvc_full_ver=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            msvc_full_ver="$(printf '' | "$compiler" /nologo /EP /clang:-dM /TP - 2>/dev/null \
+              | awk '/#define _MSC_FULL_VER/ { print $3; exit }' || true)"
+          fi
+          fingerprint="${RUNNER_OS}|${compiler}|${version}|${VCToolsVersion:-}|${WindowsSDKVersion:-}|${msvc_full_ver}"
+          echo "Compiler cache fingerprint: $fingerprint"
+          if command -v sha256sum >/dev/null 2>&1; then
+            key="$(printf '%s' "$fingerprint" | sha256sum | cut -d' ' -f1)"
+          else
+            key="$(printf '%s' "$fingerprint" | shasum -a 256 | cut -d' ' -f1)"
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Compiler cache fingerprint: \`$fingerprint\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache build tree
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-
+
+      - name: Drop cached PCH files (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $buildDir = "build/${{ matrix.preset }}"
+          if (Test-Path $buildDir) {
+            Get-ChildItem -Path $buildDir -Recurse -File |
+              Where-Object { $_.Name -like "*.pch" -or $_.Name -like "cmake_pch*.obj" } |
+              Remove-Item -Force
+          }
 
       - name: Configure
         shell: bash

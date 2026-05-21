@@ -2095,7 +2095,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                     if (glm::length(k_wishDir) > 0.001f)
                         vel.value = physics::accelerate(vel.value, k_wishDir, k_wishSpeed, physics::k_groundAccel, dt);
                 } else {
-                    vel.value = physics::applyGravity(vel.value, dt, state.vis.gravityFlipped);
+                    vel.value = physics::applyPlayerGravity(vel.value, dt, state.vis.gravityFlipped);
                     if (glm::length(k_wishDir) > 0.001f) {
                         // Air wish-speed depends on current horizontal speed:
                         // generous when stalled, classic Quake floor at speed.
