@@ -20,8 +20,12 @@ constexpr float k_minFovDegrees = 70.0f;
 constexpr float k_maxFovDegrees = 120.0f;
 constexpr float k_minGamepadSensitivity = 1.0f;
 constexpr float k_maxGamepadSensitivity = 10.0f;
-constexpr float k_minStrength = 0.0f;
-constexpr float k_maxStrength = 1.0f;
+constexpr float k_minGamepadLookDeadzone = 0.0f;
+constexpr float k_maxGamepadLookDeadzone = 0.4f;
+constexpr float k_minGamepadMoveDeadzone = 0.0f;
+constexpr float k_maxGamepadMoveDeadzone = 0.5f;
+constexpr float k_minAimAssistStrength = 0.0f;
+constexpr float k_maxAimAssistStrength = 1.0f;
 
 std::string altKey(std::string_view key)
 {
@@ -76,16 +80,16 @@ UserSettings load(const std::string& path)
         settings.gamepadPitchSensitivity = std::clamp(*v, k_minGamepadSensitivity, k_maxGamepadSensitivity);
     }
     if (auto v = input["gamepad-look-deadzone"].value<float>()) {
-        settings.gamepadLookDeadzone = std::clamp(*v, k_minStrength, k_maxStrength);
+        settings.gamepadLookDeadzone = std::clamp(*v, k_minGamepadLookDeadzone, k_maxGamepadLookDeadzone);
     }
     if (auto v = input["gamepad-move-deadzone"].value<float>()) {
-        settings.gamepadMoveDeadzone = std::clamp(*v, k_minStrength, k_maxStrength);
+        settings.gamepadMoveDeadzone = std::clamp(*v, k_minGamepadMoveDeadzone, k_maxGamepadMoveDeadzone);
     }
     if (auto v = input["aim-assist-enabled"].value<bool>()) {
         settings.aimAssistEnabled = *v;
     }
     if (auto v = input["aim-assist-strength"].value<float>()) {
-        settings.aimAssistStrength = std::clamp(*v, k_minStrength, k_maxStrength);
+        settings.aimAssistStrength = std::clamp(*v, k_minAimAssistStrength, k_maxAimAssistStrength);
     }
     if (auto v = input["gamepad-swap-sticks"].value<bool>()) {
         settings.gamepadSwapSticks = *v;
@@ -141,10 +145,13 @@ bool save(const std::string& path, const UserSettings& settings)
         << std::clamp(settings.gamepadYawSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity) << "\n";
     out << "gamepad-pitch-sensitivity = "
         << std::clamp(settings.gamepadPitchSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity) << "\n";
-    out << "gamepad-look-deadzone = " << std::clamp(settings.gamepadLookDeadzone, k_minStrength, k_maxStrength) << "\n";
-    out << "gamepad-move-deadzone = " << std::clamp(settings.gamepadMoveDeadzone, k_minStrength, k_maxStrength) << "\n";
+    out << "gamepad-look-deadzone = "
+        << std::clamp(settings.gamepadLookDeadzone, k_minGamepadLookDeadzone, k_maxGamepadLookDeadzone) << "\n";
+    out << "gamepad-move-deadzone = "
+        << std::clamp(settings.gamepadMoveDeadzone, k_minGamepadMoveDeadzone, k_maxGamepadMoveDeadzone) << "\n";
     out << "aim-assist-enabled = " << (settings.aimAssistEnabled ? "true" : "false") << "\n";
-    out << "aim-assist-strength = " << std::clamp(settings.aimAssistStrength, k_minStrength, k_maxStrength) << "\n";
+    out << "aim-assist-strength = "
+        << std::clamp(settings.aimAssistStrength, k_minAimAssistStrength, k_maxAimAssistStrength) << "\n";
     out << "gamepad-swap-sticks = " << (settings.gamepadSwapSticks ? "true" : "false") << "\n";
 
     out << "\n[input.keyboard]\n";

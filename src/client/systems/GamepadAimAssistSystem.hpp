@@ -222,6 +222,8 @@ inline void runGamepadAimAssist(Registry& registry,
                                 GamepadAimAssistState& state,
                                 float pitchSensitivity,
                                 float yawSensitivity,
+                                float lookDeadzone,
+                                float moveDeadzone,
                                 float dt)
 {
     if (!gamepadConnected(gamepad) || !cfg.enabled) {
@@ -234,10 +236,10 @@ inline void runGamepadAimAssist(Registry& registry,
     }
 
     // ── Activation gate ───────────────────────────────────────────────────
-    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
-    const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-    const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX), moveDeadzone);
+    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY), moveDeadzone);
+    const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX), lookDeadzone);
+    const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY), lookDeadzone);
 
     const float moveStickMag = std::sqrt(lx * lx + ly * ly);
     const float lookStickMag = std::sqrt(rx * rx + ry * ry);

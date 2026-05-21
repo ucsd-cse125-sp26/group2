@@ -330,14 +330,15 @@ inline void runGamepadLook(Registry& registry,
                            SDL_Gamepad* gamepad,
                            float pitchSensitivity,
                            float yawSensitivity,
+                           float deadzone,
                            float dt,
                            bool gravityFlipped = false)
 {
     if (!gamepadConnected(gamepad))
         return;
 
-    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX), deadzone);
+    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY), deadzone);
 
     if (rx == 0.0f && ry == 0.0f)
         return;
@@ -375,14 +376,17 @@ inline void runGamepadLook(Registry& registry,
 /// @param bindings         Controller bindings to sample.
 /// @param gravityFlipped   When true, left/right stick are swapped to match
 ///                         the 180° camera roll.
-inline void
-runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings, bool gravityFlipped = false)
+inline void runGamepadMovement(Registry& registry,
+                               SDL_Gamepad* gamepad,
+                               const InputBindings& bindings,
+                               float deadzone,
+                               bool gravityFlipped = false)
 {
     if (!gamepadConnected(gamepad))
         return;
 
-    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
+    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX), deadzone);
+    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY), deadzone);
 
     // Movement booleans are derived from a stronger threshold than the deadzone
     // so a player resting their thumb on the stick doesn't drift-walk.  0.3 is

@@ -12,13 +12,13 @@ constexpr float k_maxMouseSensitivity = 0.005f;
 constexpr float k_minFovDegrees = 50.0f;
 constexpr float k_maxFovDegrees = 120.0f;
 constexpr float k_minGamepadSensitivity = 1.0f;
-constexpr float k_maxGamepadSensitivity = 20.0f;
+constexpr float k_maxGamepadSensitivity = 10.0f;
 constexpr float k_minGamepadLookDeadzone = 0.0f;
 constexpr float k_maxGamepadLookDeadzone = 0.4f;
 constexpr float k_minGamepadMoveDeadzone = 0.0f;
 constexpr float k_maxGamepadMoveDeadzone = 0.5f;
 constexpr float k_minAimAssistStrength = 0.0f;
-constexpr float k_maxAimAssistStrength = 1.5f;
+constexpr float k_maxAimAssistStrength = 1.0f;
 
 MouseButton mouseButtonFromSdl(uint8_t button)
 {

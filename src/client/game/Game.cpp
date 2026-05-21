@@ -1570,6 +1570,7 @@ SDL_AppResult Game::iterate()
                                 activeGamepad_,
                                 userSettings->gamepadPitchSensitivity,
                                 userSettings->gamepadYawSensitivity,
+                                userSettings->gamepadLookDeadzone,
                                 frameTime,
                                 localGravFlipped);
         // AAA-style aim assist runs IMMEDIATELY after the look sampler so it
@@ -1585,9 +1586,15 @@ SDL_AppResult Game::iterate()
                                      aimAssistState_,
                                      userSettings->gamepadPitchSensitivity,
                                      userSettings->gamepadYawSensitivity,
+                                     userSettings->gamepadLookDeadzone,
+                                     userSettings->gamepadMoveDeadzone,
                                      frameTime);
         if (!inputSyncedWithPhysics)
-            systems::runGamepadMovement(registry, activeGamepad_, userSettings->inputBindings, localGravFlipped);
+            systems::runGamepadMovement(registry,
+                                        activeGamepad_,
+                                        userSettings->inputBindings,
+                                        userSettings->gamepadMoveDeadzone,
+                                        localGravFlipped);
         systems::runGamepadWeapon(registry, activeGamepad_, userSettings->inputBindings);
 
         // Apply scroll-wheel weapon switch, constrained to primary/secondary.
@@ -1631,7 +1638,11 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
-            systems::runGamepadMovement(registry, activeGamepad_, userSettings->inputBindings, localGravFlipped);
+            systems::runGamepadMovement(registry,
+                                        activeGamepad_,
+                                        userSettings->inputBindings,
+                                        userSettings->gamepadMoveDeadzone,
+                                        localGravFlipped);
         }
 
         // PR-24 (off-by-one + capsule staleness fix): the fire detection
