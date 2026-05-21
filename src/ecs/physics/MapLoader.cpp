@@ -1050,9 +1050,9 @@ void extractMeshCollision(const aiMesh* mesh,
     }
 
     // --- Auto-detection ---
-    // Used by prototype/debug maps and standalone prop collision only.
-    // Production separated maps pass forceType="meshes" above and never
-    // enter this primitive-guessing path.
+    // Used by standalone prop collision only. Map loading always passes
+    // forceType="meshes" so authored geometry is preserved exactly, including
+    // all-mesh collision maps.
     // Order: AABB → cylinder → sphere → brush → fallback.
     // Cylinder before sphere because a cylinder whose height ≈ diameter has a
     // roughly cubic AABB and near-equal vertex radii — it would pass the sphere
@@ -1187,11 +1187,11 @@ void extractCollision(const aiNode* node,
     if (isCollision) {
         const glm::mat4 world = accumulatedTransform(node);
 
-        // Prototype mode auto-detects cheap primitives because every render
-        // mesh is collision. Separated production mode always preserves
-        // collision nodes as authored triangle surfaces; no primitive guessing
-        // or V-HACD is allowed in the map path.
-        const std::string forceType = allAreCollision ? std::string{} : std::string{"meshes"};
+        // Map collision is always loaded as authored triangle surfaces. In
+        // all-mesh mode, every render mesh is included; in separated mode,
+        // only matching collision nodes are included. Neither path guesses
+        // cheaper primitive shapes.
+        const std::string forceType = "meshes";
 
         for (unsigned int mi = 0; mi < node->mNumMeshes; ++mi) {
             const aiMesh* mesh = scene->mMeshes[node->mMeshes[mi]];
@@ -1235,7 +1235,7 @@ bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapL
         out.boxes.size() + out.brushes.size() + out.cylinders.size() + out.spheres.size() + out.triMeshes.size();
     if (total == 0) {
         if (opts.allMeshesAreCollision) {
-            SDL_Log("MapLoader: WARNING — no prototype collision geometry extracted from '%s'", path.c_str());
+            SDL_Log("MapLoader: WARNING — no all-mesh collision geometry extracted from '%s'", path.c_str());
         } else {
             SDL_Log("MapLoader: WARNING — no authored collision geometry extracted from '%s' (expected nodes under or "
                     "named like '%s')",
@@ -1297,7 +1297,7 @@ bool loadPropCollision(
     // Build the prop transform: translate to world position, then uniform scale.
     const glm::mat4 propTransform = glm::scale(glm::translate(glm::mat4(1.0f), position), glm::vec3(scale));
 
-    // Walk the scene graph — treat all meshes as collision (like prototype mode),
+    // Walk the scene graph — treat all meshes as collision,
     // but bake the prop's world position into the transform.
     const auto prevBoxes = out.boxes.size();
     const auto prevCyls = out.cylinders.size();

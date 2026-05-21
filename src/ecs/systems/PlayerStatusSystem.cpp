@@ -188,6 +188,7 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     const glm::vec3 respawnFeet = chooseRespawnPoint(registry);
     const glm::vec3 respawnCenter = resolveRespawnPosition(registry, player, respawnFeet);
 
+    destroyRagdoll(registry, player);
     registry.erase<RespawnTimer>(player);
     registry.erase<DeathInfo>(player);
     registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = true; });
@@ -273,6 +274,7 @@ inline void handleDeath(entt::entity& player,
         // The renderer hides the kinematic player (Renderable visible=false)
         // and instead reads the 15 ragdoll bone transforms via
         // `RagdollBoneTag` to drive the skinned-mesh palette.
+        destroyRagdoll(registry, player);
         spawnRagdoll(registry, player);
 
         // Update death

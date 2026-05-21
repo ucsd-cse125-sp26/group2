@@ -939,6 +939,7 @@ void ServerGame::deletePlayerEntity(ClientId clientId)
                     }
                 }
             }
+            systems::destroyRagdoll(registry, player);
             registry.destroy(player);
         }
         clientEntities.erase(it);

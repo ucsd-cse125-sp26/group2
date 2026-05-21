@@ -3,9 +3,8 @@
 ///
 /// `spawnRagdoll(character)` allocates 15 capsule rigid bodies sized to
 /// match a typical 72-unit Quake-style character, links them with point
-/// + hinge joints (the cone-twist joints are stubbed in Phase 11 and
-/// substituted with point joints — adequate for visual ragdolls), and
-/// attaches the parent `Ragdoll` component to the character entity.
+/// / hinge / cone-twist joints, and attaches the parent `Ragdoll`
+/// component to the character entity.
 ///
 /// The character's `Velocity` (linear) and `AngularVelocity` (if present)
 /// are inherited by the torso so the corpse keeps the player's pre-death
@@ -29,6 +28,13 @@ namespace systems
 ///
 /// @return The created `Ragdoll` parent entity (== `character`).
 entt::entity spawnRagdoll(Registry& registry, entt::entity character);
+
+/// @brief Destroy the ragdoll bodies and joints owned by a character.
+///
+/// Called when the player respawns or disconnects. This removes the
+/// transient physics entities immediately instead of letting every death
+/// leave orphan registry entries behind.
+void destroyRagdoll(Registry& registry, entt::entity character);
 
 /// @brief Per-tick ragdoll bookkeeping: advance `age`, optionally tick
 /// the cleanup timer for old corpses.  Called from the same tick that

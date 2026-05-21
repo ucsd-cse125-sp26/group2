@@ -22,6 +22,7 @@
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/Orientation.hpp"
 #include "ecs/components/ParticleEmitterTag.hpp"
 #include "ecs/components/PlayerColor.hpp"
 #include "ecs/components/PlayerColors.hpp"
@@ -33,6 +34,7 @@
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Projectile.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -42,6 +44,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/DebugCollisionDraw.hpp"
 #include "ecs/physics/PhaseDiagnostic.hpp"
+#include "ecs/physics/PhysicsPerfStats.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
@@ -74,6 +77,7 @@
 #include <imgui.h>
 #include <numeric>
 #include <string_view>
+#include <unordered_map>
 
 #if defined(__linux__)
 #include <pthread.h>
@@ -131,6 +135,101 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
     }
     SDL_snprintf(outBuf, bufSize, "Player #%d", cid.value);
     return outBuf;
+}
+
+struct ClientRagdollBonePose
+{
+    glm::vec3 position{0.0f};
+    glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    bool present = false;
+};
+
+using ClientRagdollPose = std::array<ClientRagdollBonePose, static_cast<size_t>(RagdollBone::Count)>;
+
+struct RagdollJointBinding
+{
+    RagdollBone bone;
+    const char* jointName;
+};
+
+constexpr RagdollJointBinding kRagdollJointBindings[] = {
+    {RagdollBone::Pelvis, "mixamorig:Hips"},
+    {RagdollBone::Torso, "mixamorig:Spine"},
+    {RagdollBone::Torso, "mixamorig:Spine1"},
+    {RagdollBone::Torso, "mixamorig:Spine2"},
+    {RagdollBone::Head, "mixamorig:Neck"},
+    {RagdollBone::Head, "mixamorig:Head"},
+    {RagdollBone::UpperArmL, "mixamorig:LeftShoulder"},
+    {RagdollBone::UpperArmL, "mixamorig:LeftArm"},
+    {RagdollBone::ForearmL, "mixamorig:LeftForeArm"},
+    {RagdollBone::HandL, "mixamorig:LeftHand"},
+    {RagdollBone::UpperArmR, "mixamorig:RightShoulder"},
+    {RagdollBone::UpperArmR, "mixamorig:RightArm"},
+    {RagdollBone::ForearmR, "mixamorig:RightForeArm"},
+    {RagdollBone::HandR, "mixamorig:RightHand"},
+    {RagdollBone::UpperLegL, "mixamorig:LeftUpLeg"},
+    {RagdollBone::LowerLegL, "mixamorig:LeftLeg"},
+    {RagdollBone::FootL, "mixamorig:LeftFoot"},
+    {RagdollBone::FootL, "mixamorig:LeftToeBase"},
+    {RagdollBone::UpperLegR, "mixamorig:RightUpLeg"},
+    {RagdollBone::LowerLegR, "mixamorig:RightLeg"},
+    {RagdollBone::FootR, "mixamorig:RightFoot"},
+    {RagdollBone::FootR, "mixamorig:RightToeBase"},
+};
+
+std::unordered_map<ClientId, ClientRagdollPose> collectClientRagdollPoses(Registry& registry)
+{
+    std::unordered_map<ClientId, ClientRagdollPose> poses;
+    registry.view<RagdollBoneTag, Position>().each([&](entt::entity e, const RagdollBoneTag& tag, const Position& pos) {
+        if (tag.characterId.value < 0)
+            return;
+
+        const size_t boneIndex = static_cast<size_t>(tag.bone);
+        if (boneIndex >= static_cast<size_t>(RagdollBone::Count))
+            return;
+
+        auto& bone = poses[tag.characterId][boneIndex];
+        bone.position = pos.value;
+        if (const auto* orientation = registry.try_get<Orientation>(e))
+            bone.orientation = orientation->value;
+        else
+            bone.orientation = glm::quat{1.0f, 0.0f, 0.0f, 0.0f};
+        bone.present = true;
+    });
+    return poses;
+}
+
+void applyRagdollPoseToSkinPalette(std::vector<glm::mat4>& skinMatrices,
+                                   const CharacterRig& rig,
+                                   const ClientRagdollPose& pose,
+                                   const glm::mat4& instanceWorld)
+{
+    const auto& jointMap = rig.jointMap();
+    const auto& inverseBind = rig.inverseBindMatrices();
+    const glm::mat4 inverseInstanceWorld = glm::inverse(instanceWorld);
+
+    for (const RagdollJointBinding& binding : kRagdollJointBindings) {
+        const size_t boneIndex = static_cast<size_t>(binding.bone);
+        if (boneIndex >= pose.size() || !pose[boneIndex].present)
+            continue;
+
+        const auto jointIt = jointMap.find(binding.jointName);
+        if (jointIt == jointMap.end())
+            continue;
+
+        const int jointIndex = jointIt->second;
+        if (jointIndex < 0 || static_cast<size_t>(jointIndex) >= skinMatrices.size() ||
+            static_cast<size_t>(jointIndex) >= inverseBind.size())
+        {
+            continue;
+        }
+
+        const ClientRagdollBonePose& bone = pose[boneIndex];
+        const glm::mat4 boneWorld =
+            glm::translate(glm::mat4(1.0f), bone.position) * glm::mat4_cast(glm::normalize(bone.orientation));
+        const glm::mat4 modelSpaceBone = inverseInstanceWorld * boneWorld;
+        skinMatrices[static_cast<size_t>(jointIndex)] = modelSpaceBone * inverseBind[static_cast<size_t>(jointIndex)];
+    }
 }
 
 void popUtf8Codepoint(std::string& text)
@@ -278,6 +377,7 @@ void Game::handleLocalPlayerReady(entt::entity local)
     registry.emplace<InputSnapshot>(local);
     registry.emplace_or_replace<PreviousPosition>(local, registry.get<Position>(local).value);
     registry.emplace_or_replace<PlayerSimState>(local);
+    clearPredictedStateHistory();
 
     if (!registry.all_of<RespawnTimer>(local))
         registry.emplace<Controllable>(local);
@@ -288,9 +388,118 @@ void Game::handleLocalPlayerReady(entt::entity local)
     SDL_Log("[client] local player entity assigned: %d", static_cast<int>(local));
 }
 
+void Game::clearPredictedStateHistory() noexcept
+{
+    for (PredictedPlayerState& state : predictedStateHistory_)
+        state.valid = false;
+}
+
+std::optional<Game::PredictedPlayerState> Game::captureLocalPredictedState() const
+{
+    if (!mappedLocalPlayerEntity_)
+        return std::nullopt;
+    const entt::entity local = *mappedLocalPlayerEntity_;
+    if (!registry.valid(local))
+        return std::nullopt;
+
+    const auto* position = registry.try_get<Position>(local);
+    const auto* previousPosition = registry.try_get<PreviousPosition>(local);
+    const auto* velocity = registry.try_get<Velocity>(local);
+    const auto* vis = registry.try_get<PlayerVisState>(local);
+    const auto* sim = registry.try_get<PlayerSimState>(local);
+    const auto* input = registry.try_get<InputSnapshot>(local);
+    if (position == nullptr || previousPosition == nullptr || velocity == nullptr || vis == nullptr || sim == nullptr ||
+        input == nullptr)
+        return std::nullopt;
+
+    PredictedPlayerState state;
+    state.tick = input->tick;
+    state.position = *position;
+    state.previousPosition = *previousPosition;
+    state.velocity = *velocity;
+    state.vis = *vis;
+    state.sim = *sim;
+    state.input = *input;
+    state.valid = true;
+    return state;
+}
+
+void Game::storePredictedPlayerState(std::uint32_t tick)
+{
+    std::optional<PredictedPlayerState> state = captureLocalPredictedState();
+    if (!state)
+        return;
+    state->tick = tick;
+    const std::size_t idx = static_cast<std::size_t>(tick % InputRingBuffer::k_capacity);
+    predictedStateHistory_[idx] = *state;
+}
+
+const Game::PredictedPlayerState* Game::predictedStateForTick(std::uint32_t tick) const noexcept
+{
+    const PredictedPlayerState& state =
+        predictedStateHistory_[static_cast<std::size_t>(tick % InputRingBuffer::k_capacity)];
+    if (!state.valid || state.tick != tick)
+        return nullptr;
+    return &state;
+}
+
+void Game::restoreLocalPredictedState(const PredictedPlayerState& state)
+{
+    if (!mappedLocalPlayerEntity_)
+        return;
+    const entt::entity local = *mappedLocalPlayerEntity_;
+    if (!registry.valid(local))
+        return;
+
+    registry.emplace_or_replace<Position>(local, state.position);
+    registry.emplace_or_replace<PreviousPosition>(local, state.previousPosition);
+    registry.emplace_or_replace<Velocity>(local, state.velocity);
+    registry.emplace_or_replace<PlayerVisState>(local, state.vis);
+    registry.emplace_or_replace<PlayerSimState>(local, state.sim);
+    registry.emplace_or_replace<InputSnapshot>(local, state.input);
+}
+
+Game::ReconciliationDecision
+Game::evaluateReconciliationSkip(const PredictedPlayerState& authoritative,
+                                 const PredictedPlayerState* predictedAtAck,
+                                 const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept
+{
+    ReconciliationDecision decision{};
+    if (predictedAtAck == nullptr || !currentBeforeSnapshot) {
+        decision.missingHistory = true;
+        return decision;
+    }
+
+    decision.positionError = glm::length(authoritative.position.value - predictedAtAck->position.value);
+    decision.velocityError = glm::length(authoritative.velocity.value - predictedAtAck->velocity.value);
+
+    constexpr float kPositionTolerance = 0.35f;
+    constexpr float kVelocityTolerance = 2.0f;
+    constexpr float kNormalTolerance = 0.01f;
+    constexpr float kPointTolerance = 0.5f;
+    constexpr float kCameraTiltTolerance = 0.5f;
+
+    const PlayerVisState& a = authoritative.vis;
+    const PlayerVisState& p = predictedAtAck->vis;
+    const bool visMatches = a.moveMode == p.moveMode && a.wallRunSide == p.wallRunSide && a.jumpCount == p.jumpCount &&
+                            a.isDead == p.isDead && a.grounded == p.grounded && a.crouching == p.crouching &&
+                            a.sprinting == p.sprinting && a.pendingUncrouch == p.pendingUncrouch &&
+                            a.exitingWall == p.exitingWall && a.grappleActive == p.grappleActive &&
+                            a.gravityFlipped == p.gravityFlipped &&
+                            glm::length(a.groundNormal - p.groundNormal) <= kNormalTolerance &&
+                            glm::length(a.grapplePoint - p.grapplePoint) <= kPointTolerance &&
+                            std::abs(a.targetCameraTilt - p.targetCameraTilt) <= kCameraTiltTolerance;
+
+    decision.skip =
+        visMatches && decision.positionError <= kPositionTolerance && decision.velocityError <= kVelocityTolerance;
+    return decision;
+}
+
 bool Game::applyIncomingSnapshot(
     std::uint32_t /*snapshotTick*/, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick)
 {
+    const bool collectSnapshotPerf = benchActive_ || perfRecorder_.isRecording();
+    const Uint64 perfStart = collectSnapshotPerf ? SDL_GetPerformanceCounter() : 0;
     registry.view<Position, PreviousPosition>(entt::exclude<LocalPlayer>)
         .each([](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
 
@@ -312,6 +521,12 @@ bool Game::applyIncomingSnapshot(
     }
 
     client->recordInterpolationSamples(registry, captureNs);
+    if (collectSnapshotPerf) {
+        const Uint64 freq = SDL_GetPerformanceFrequency();
+        perfSnapshotApplyMs_ +=
+            static_cast<float>(SDL_GetPerformanceCounter() - perfStart) * 1000.0f / static_cast<float>(freq);
+        ++perfSnapshotApplyCount_;
+    }
     return true;
 }
 
@@ -767,6 +982,11 @@ bool Game::init(AppContext& ctx)
 
     prevTime = SDL_GetPerformanceCounter();
     statsPrevTime = prevTime;
+    {
+        const char* base = SDL_GetBasePath();
+        perfRecorder_.configureFromEnv(base);
+        perfRecorder_.start();
+    }
 
     // Spin up the per-frame worker pool.  Default to half the host's logical
     // cores so we leave headroom for the rest of the system; clamp to [0, 7]
@@ -787,6 +1007,13 @@ bool Game::init(AppContext& ctx)
         SDL_Log("[client] WorkerPool: %d worker(s)", workers);
     }
 
+    if (const char* uncapped = SDL_getenv("GROUP2_CLIENT_UNCAPPED");
+        uncapped != nullptr && uncapped[0] != '\0' && uncapped[0] != '0')
+    {
+        limitFPSToMonitor = false;
+        SDL_Log("[client] frame limiter disabled by GROUP2_CLIENT_UNCAPPED=1");
+    }
+
     // Apply the default frame-rate-limit setting now that the renderer is ready.
     applyFrameRateLimit();
 
@@ -805,6 +1032,7 @@ bool Game::init(AppContext& ctx)
             benchFrameStats_.reserve(static_cast<size_t>(seconds * 5000.0f));
             // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
             limitFPSToMonitor = false;
+            applyFrameRateLimit();
             SDL_Log("[bench] running for %.1fs then exiting (warmup %.1fs)",
                     static_cast<double>(seconds),
                     static_cast<double>(k_benchWarmupSeconds));
@@ -819,6 +1047,12 @@ bool Game::init(AppContext& ctx)
     // unconditionally.  The CMake/release pipeline can pre-set this for
     // shipping builds that never need a debug menu.  Independent of bench
     // mode so it can be combined with normal play.
+    if (const char* noImgui = SDL_getenv("GROUP2_NO_IMGUI");
+        noImgui != nullptr && noImgui[0] != '\0' && noImgui[0] != '0')
+    {
+        renderer->imguiEnabled = false;
+        SDL_Log("[client] ImGui GPU submission disabled by GROUP2_NO_IMGUI=1");
+    }
 
     // GROUP2_CLIENT_CORES="0,1,2,3" — pin the main render thread to the
     // listed CPU cores via pthread_setaffinity_np.  Stops the OS scheduler
@@ -1265,13 +1499,19 @@ void Game::applyFrameRateLimit()
     if (limitFPSToMonitor && monitorHz >= k_physicsHz) {
         // Monitor is fast enough; rely on the renderer's default present mode.
         softLimitPeriod = 0;
+        if (renderer)
+            renderer->setVSync(true);
     } else if (monitorHz < k_physicsHz) {
         softLimitPeriod = SDL_GetPerformanceFrequency() / static_cast<Uint64>(k_physicsHz);
         softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+        if (renderer)
+            renderer->setVSync(false);
         SDL_Log(
             "[client] monitor %d Hz < physics %d Hz — software limiter at %d fps", monitorHz, k_physicsHz, k_physicsHz);
     } else {
         softLimitPeriod = 0;
+        if (renderer)
+            renderer->setVSync(false);
     }
 }
 
@@ -1297,13 +1537,19 @@ SDL_AppResult Game::iterate()
     const Uint64 k_perfFreq = SDL_GetPerformanceFrequency();
     const Uint64 k_now = SDL_GetPerformanceCounter();
 
-    // Per-frame phase timer state (only consumed in bench mode).  We track
-    // monotonic wall-clock per phase via a single "lastTick" cursor; phases
-    // are sequential in iterate() so a section's elapsed = current - last.
-    FrameSectionMs phaseStats{};
+    // Per-frame phase timer state.  Completely dormant unless bench mode or
+    // GROUP2_CLIENT_PERF=1 is active; disabled builds pay one branch per marker.
+    ClientPerfFrame phaseStats{};
+    const bool collectPerf = benchActive_ || perfRecorder_.isRecording();
+    physics::perf::setEnabled(collectPerf);
+    if (collectPerf) {
+        physics::perf::resetFrame();
+        perfSnapshotApplyMs_ = 0.0f;
+        perfSnapshotApplyCount_ = 0;
+    }
     Uint64 phaseLastTick = k_now;
     const auto phaseSnap = [&](float& outMs) {
-        if (!benchActive_)
+        if (!collectPerf)
             return;
         const Uint64 nowTick = SDL_GetPerformanceCounter();
         outMs = static_cast<float>(nowTick - phaseLastTick) * 1000.0f / static_cast<float>(k_perfFreq);
@@ -1334,6 +1580,11 @@ SDL_AppResult Game::iterate()
         frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
         prevTime = k_now;
         accumulator += frameTime;
+    }
+    if (collectPerf) {
+        phaseStats.frameNumber = frameCount;
+        phaseStats.timestampMs = static_cast<double>(SDL_GetTicksNS()) / 1000000.0;
+        phaseStats.wallFrameMs = frameTime * 1000.0f;
     }
 
     static int iterCount = 0;
@@ -1425,53 +1676,54 @@ SDL_AppResult Game::iterate()
             // frames so we can see the actual stalls.
             if (!benchFrameStats_.empty()) {
                 auto sortedStats = benchFrameStats_;
-                std::sort(sortedStats.begin(), sortedStats.end(), [](const FrameSectionMs& a, const FrameSectionMs& b) {
-                    return a.total < b.total;
-                });
+                std::sort(
+                    sortedStats.begin(), sortedStats.end(), [](const ClientPerfFrame& a, const ClientPerfFrame& b) {
+                        return a.cpuFrameMs < b.cpuFrameMs;
+                    });
 
                 const size_t n = sortedStats.size();
                 const size_t medLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.45f);
                 const size_t medHi = static_cast<size_t>(static_cast<float>(n - 1) * 0.55f);
                 const size_t slowLo = static_cast<size_t>(static_cast<float>(n - 1) * 0.99f);
 
-                FrameSectionMs medAvg{}, slowAvg{};
+                ClientPerfFrame medAvg{}, slowAvg{};
                 size_t medCount = 0, slowCount = 0;
                 for (size_t i = medLo; i <= medHi; ++i) {
-                    medAvg.total += sortedStats[i].total;
-                    medAvg.input += sortedStats[i].input;
-                    medAvg.physics += sortedStats[i].physics;
-                    medAvg.networkPoll += sortedStats[i].networkPoll;
-                    medAvg.particles += sortedStats[i].particles;
-                    medAvg.animation += sortedStats[i].animation;
-                    medAvg.entityCmds += sortedStats[i].entityCmds;
-                    medAvg.imgui += sortedStats[i].imgui;
-                    medAvg.drawFrame += sortedStats[i].drawFrame;
+                    medAvg.cpuFrameMs += sortedStats[i].cpuFrameMs;
+                    medAvg.inputMs += sortedStats[i].inputMs;
+                    medAvg.physicsMs += sortedStats[i].physicsMs;
+                    medAvg.networkPollMs += sortedStats[i].networkPollMs;
+                    medAvg.particlesMs += sortedStats[i].particlesMs;
+                    medAvg.animationMs += sortedStats[i].animationMs;
+                    medAvg.entityCmdsMs += sortedStats[i].entityCmdsMs;
+                    medAvg.imguiMs += sortedStats[i].imguiMs;
+                    medAvg.drawFrameMs += sortedStats[i].drawFrameMs;
                     ++medCount;
                 }
                 for (size_t i = slowLo; i < n; ++i) {
-                    slowAvg.total += sortedStats[i].total;
-                    slowAvg.input += sortedStats[i].input;
-                    slowAvg.physics += sortedStats[i].physics;
-                    slowAvg.networkPoll += sortedStats[i].networkPoll;
-                    slowAvg.particles += sortedStats[i].particles;
-                    slowAvg.animation += sortedStats[i].animation;
-                    slowAvg.entityCmds += sortedStats[i].entityCmds;
-                    slowAvg.imgui += sortedStats[i].imgui;
-                    slowAvg.drawFrame += sortedStats[i].drawFrame;
+                    slowAvg.cpuFrameMs += sortedStats[i].cpuFrameMs;
+                    slowAvg.inputMs += sortedStats[i].inputMs;
+                    slowAvg.physicsMs += sortedStats[i].physicsMs;
+                    slowAvg.networkPollMs += sortedStats[i].networkPollMs;
+                    slowAvg.particlesMs += sortedStats[i].particlesMs;
+                    slowAvg.animationMs += sortedStats[i].animationMs;
+                    slowAvg.entityCmdsMs += sortedStats[i].entityCmdsMs;
+                    slowAvg.imguiMs += sortedStats[i].imguiMs;
+                    slowAvg.drawFrameMs += sortedStats[i].drawFrameMs;
                     ++slowCount;
                 }
-                auto avgRow = [&](FrameSectionMs& s, size_t c) {
+                auto avgRow = [&](ClientPerfFrame& s, size_t c) {
                     if (c == 0)
                         return;
-                    s.total /= static_cast<float>(c);
-                    s.input /= static_cast<float>(c);
-                    s.physics /= static_cast<float>(c);
-                    s.networkPoll /= static_cast<float>(c);
-                    s.particles /= static_cast<float>(c);
-                    s.animation /= static_cast<float>(c);
-                    s.entityCmds /= static_cast<float>(c);
-                    s.imgui /= static_cast<float>(c);
-                    s.drawFrame /= static_cast<float>(c);
+                    s.cpuFrameMs /= static_cast<float>(c);
+                    s.inputMs /= static_cast<float>(c);
+                    s.physicsMs /= static_cast<float>(c);
+                    s.networkPollMs /= static_cast<float>(c);
+                    s.particlesMs /= static_cast<float>(c);
+                    s.animationMs /= static_cast<float>(c);
+                    s.entityCmdsMs /= static_cast<float>(c);
+                    s.imguiMs /= static_cast<float>(c);
+                    s.drawFrameMs /= static_cast<float>(c);
                 };
                 avgRow(medAvg, medCount);
                 avgRow(slowAvg, slowCount);
@@ -1479,25 +1731,25 @@ SDL_AppResult Game::iterate()
                 std::fprintf(stderr,
                              "[bench] median-band  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
                              "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
-                             static_cast<double>(medAvg.total),
-                             static_cast<double>(medAvg.physics),
-                             static_cast<double>(medAvg.networkPoll),
-                             static_cast<double>(medAvg.animation),
-                             static_cast<double>(medAvg.particles),
-                             static_cast<double>(medAvg.entityCmds),
-                             static_cast<double>(medAvg.imgui),
-                             static_cast<double>(medAvg.drawFrame));
+                             static_cast<double>(medAvg.cpuFrameMs),
+                             static_cast<double>(medAvg.physicsMs),
+                             static_cast<double>(medAvg.networkPollMs),
+                             static_cast<double>(medAvg.animationMs),
+                             static_cast<double>(medAvg.particlesMs),
+                             static_cast<double>(medAvg.entityCmdsMs),
+                             static_cast<double>(medAvg.imguiMs),
+                             static_cast<double>(medAvg.drawFrameMs));
                 std::fprintf(stderr,
                              "[bench] slowest-1%%  total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f "
                              "part=%4.2f ent=%4.2f ui=%4.2f draw=%5.2f\n",
-                             static_cast<double>(slowAvg.total),
-                             static_cast<double>(slowAvg.physics),
-                             static_cast<double>(slowAvg.networkPoll),
-                             static_cast<double>(slowAvg.animation),
-                             static_cast<double>(slowAvg.particles),
-                             static_cast<double>(slowAvg.entityCmds),
-                             static_cast<double>(slowAvg.imgui),
-                             static_cast<double>(slowAvg.drawFrame));
+                             static_cast<double>(slowAvg.cpuFrameMs),
+                             static_cast<double>(slowAvg.physicsMs),
+                             static_cast<double>(slowAvg.networkPollMs),
+                             static_cast<double>(slowAvg.animationMs),
+                             static_cast<double>(slowAvg.particlesMs),
+                             static_cast<double>(slowAvg.entityCmdsMs),
+                             static_cast<double>(slowAvg.imguiMs),
+                             static_cast<double>(slowAvg.drawFrameMs));
 
                 // Top 5 slowest frames, full breakdown — to spot one-off
                 // stalls (e.g. a single drawFrame=120ms in an otherwise
@@ -1509,17 +1761,17 @@ SDL_AppResult Game::iterate()
                     std::fprintf(stderr,
                                  "[bench]   total=%5.2fms phys=%4.2f net=%4.2f anim=%4.2f part=%4.2f ent=%4.2f "
                                  "ui=%4.2f draw=%5.2f (acq=%4.2f rec=%4.2f sub=%4.2f)\n",
-                                 static_cast<double>(s.total),
-                                 static_cast<double>(s.physics),
-                                 static_cast<double>(s.networkPoll),
-                                 static_cast<double>(s.animation),
-                                 static_cast<double>(s.particles),
-                                 static_cast<double>(s.entityCmds),
-                                 static_cast<double>(s.imgui),
-                                 static_cast<double>(s.drawFrame),
-                                 static_cast<double>(s.drawAcquire),
-                                 static_cast<double>(s.drawRecord),
-                                 static_cast<double>(s.drawSubmit));
+                                 static_cast<double>(s.cpuFrameMs),
+                                 static_cast<double>(s.physicsMs),
+                                 static_cast<double>(s.networkPollMs),
+                                 static_cast<double>(s.animationMs),
+                                 static_cast<double>(s.particlesMs),
+                                 static_cast<double>(s.entityCmdsMs),
+                                 static_cast<double>(s.imguiMs),
+                                 static_cast<double>(s.drawFrameMs),
+                                 static_cast<double>(s.drawAcquireMs),
+                                 static_cast<double>(s.drawRecordMs),
+                                 static_cast<double>(s.drawSubmitMs));
                 }
             }
 
@@ -1528,10 +1780,14 @@ SDL_AppResult Game::iterate()
         }
     }
 
-    // Mark the start of the input phase for the bench profiler.  Anything
-    // before this (suspend handling, stats ring update, bench summary check)
-    // is bundled into the implicit "preamble" attributable to "total".
-    phaseLastTick = SDL_GetPerformanceCounter();
+    // Mark the start of the input phase.  Anything before this (suspend
+    // handling, stats ring update, bench summary check) is the preamble.
+    if (collectPerf) {
+        const Uint64 preambleEnd = SDL_GetPerformanceCounter();
+        phaseStats.preambleMs =
+            static_cast<float>(preambleEnd - phaseLastTick) * 1000.0f / static_cast<float>(k_perfFreq);
+        phaseLastTick = preambleEnd;
+    }
 
     // 3. Input
     //
@@ -1633,7 +1889,7 @@ SDL_AppResult Game::iterate()
     }
 
     // Network stats: send periodic pings and update bandwidth counters
-    phaseSnap(phaseStats.input);
+    phaseSnap(phaseStats.inputMs);
 
     client->updateStats(frameTime);
     pingTimer += frameTime;
@@ -1641,6 +1897,7 @@ SDL_AppResult Game::iterate()
         client->sendPing();
         pingTimer = 0.0f;
     }
+    phaseSnap(phaseStats.networkStatsMs);
 
     // 4. Physics -- always 128 Hz, up to k_maxTicksPerFrame catch-up
     bool physicsRan = false;
@@ -1734,6 +1991,7 @@ SDL_AppResult Game::iterate()
             registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
             systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
+            storePredictedPlayerState(clientPredictTick);
 
             ++tickCount;
             ++ticksThisFrame;
@@ -1751,12 +2009,16 @@ SDL_AppResult Game::iterate()
         systems::runInputSend(registry, *client);
         registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) { snap.throwGrenade = false; });
 
-        phaseSnap(phaseStats.physics);
+        phaseSnap(phaseStats.physicsMs);
 
+        const std::optional<PredictedPlayerState> currentBeforeSnapshot = captureLocalPredictedState();
         if (!client->poll()) {
             // TODO: Update so reset to menu or some other non-crash state
             return SDL_APP_SUCCESS;
         }
+        phaseSnap(phaseStats.networkPollMs);
+        phaseStats.snapshotApplyMs = perfSnapshotApplyMs_;
+        phaseStats.snapshotApplyCount = perfSnapshotApplyCount_;
 
         // Phase 5b: a snapshot just applied (overwriting the local
         // player's Position with the server's authoritative value at the
@@ -1764,19 +2026,49 @@ SDL_AppResult Game::iterate()
         // then to restore the predicted state at the *current* predict
         // tick — net effect is "server-side correction folded in,
         // client-side immediate response preserved".
-        if (client->consumeSnapshotApplied()) {
+        const bool snapshotApplied = client->consumeSnapshotApplied();
+        phaseStats.snapshotApplied = snapshotApplied ? 1u : 0u;
+        if (snapshotApplied) {
             const uint32_t ackedTick = client->getServerAckedClientTick();
+            phaseStats.serverAckedClientTick = ackedTick;
+            phaseStats.clientPredictTick = clientPredictTick;
             if (ackedTick != 0 && clientPredictTick > ackedTick) {
-                systems::runReconciliation(
-                    registry, inputRing_, ackedTick, clientPredictTick, k_physicsDt, physics::activeWorld());
+                phaseStats.reconcileRequestedTicks = clientPredictTick - ackedTick;
+                const std::optional<PredictedPlayerState> authoritativeAtAck = captureLocalPredictedState();
+                const PredictedPlayerState* predictedAtAck = predictedStateForTick(ackedTick);
+                if (authoritativeAtAck) {
+                    const ReconciliationDecision decision =
+                        evaluateReconciliationSkip(*authoritativeAtAck, predictedAtAck, currentBeforeSnapshot);
+                    phaseStats.reconcileErrorPosition = decision.positionError;
+                    phaseStats.reconcileErrorVelocity = decision.velocityError;
+                    phaseStats.reconcileMissingHistory = decision.missingHistory ? 1u : 0u;
+                    if (decision.skip && currentBeforeSnapshot) {
+                        restoreLocalPredictedState(*currentBeforeSnapshot);
+                        phaseStats.reconcileSkippedExact = 1u;
+                    } else {
+                        phaseStats.reconcileReplayForced = 1u;
+                        const systems::ReconciliationStats reconcileStats = systems::runReconciliation(
+                            registry, inputRing_, ackedTick, clientPredictTick, k_physicsDt, physics::activeWorld());
+                        phaseStats.reconcileRequestedTicks = reconcileStats.requestedTicks;
+                        phaseStats.reconcileReplayedTicks = reconcileStats.replayedTicks;
+                        phaseStats.reconcileMissingTicks = reconcileStats.missingTicks;
+                        storePredictedPlayerState(clientPredictTick);
+                    }
+                }
             }
         }
+        phaseSnap(phaseStats.reconciliationMs);
 
         refreshRemotePlayerRenderables();
+        phaseSnap(phaseStats.refreshPlayersMs);
         refreshRemoteProjectileRenderables();
+        phaseSnap(phaseStats.refreshProjectilesMs);
         refreshRemoteRespawnRenderables();
+        phaseSnap(phaseStats.refreshRespawnsMs);
         refreshDroppedWeaponRenderables();
+        phaseSnap(phaseStats.refreshDroppedWeaponsMs);
         refreshRemotePowerupRenderables();
+        phaseSnap(phaseStats.refreshPowerupsMs);
     }
 
     // 5. Bail out early if there is nothing new to render
@@ -1829,6 +2121,8 @@ SDL_AppResult Game::iterate()
                 targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     }
+    phaseSnap(phaseStats.cameraResolveMs);
+    phaseStats.cameraMs = phaseStats.cameraResolveMs;
 
     // Local weapon VFX — fires continuously while the fire input is held,
     // respecting cooldown.  Mirrors the server's fire rate so the local
@@ -1927,13 +2221,11 @@ SDL_AppResult Game::iterate()
             }
         }
     }
-
-    // The "physics" phase already captured at the top of the tick loop —
-    // here we close out the *post-tick* network/snapshot path separately.
-    phaseSnap(phaseStats.networkPoll);
+    phaseSnap(phaseStats.localVfxMs);
 
     // Flush dispatcher events (weapon fired, impact, explosion)
     dispatcher.update();
+    phaseSnap(phaseStats.dispatchMs);
 
     // Drive fire VFX from replicated FireField entities (Molotov AoE).
     // Server replicates `FireField` only; the renderer pulls fire emission
@@ -1950,7 +2242,7 @@ SDL_AppResult Game::iterate()
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer->getCamera(), registry);
-    phaseSnap(phaseStats.particles);
+    phaseSnap(phaseStats.particlesMs);
 
     audio::ListenerState audioListener;
     audioListener.position = cachedEye_;
@@ -2050,6 +2342,7 @@ SDL_AppResult Game::iterate()
                 });
         }
     }
+    phaseSnap(phaseStats.audioMs);
 
     // Draw persistent HUD text each frame
     // particleSystem.drawScreenText({10.f, 10.f}, "HP 100", {0.9f, 1.f, 0.9f, 1.f}, 22.f);
@@ -2130,6 +2423,7 @@ SDL_AppResult Game::iterate()
     // source-of-truth — no body-vs-tracer mismatch.  No-op when
     // `GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS=0`.
     client->applyInterpolatedTransforms(registry);
+    phaseSnap(phaseStats.interpolationMs);
 
     // Update skeletal animation + build the renderer's per-frame skinned
     // palette + instance arrays (perf Phase 1B).
@@ -2178,6 +2472,7 @@ SDL_AppResult Game::iterate()
         // front to avoid reallocs across frames.
         std::vector<AnimCandidate> candidates;
         candidates.reserve(128);
+        const auto ragdollPoses = collectClientRagdollPoses(registry);
 
         // Frustum extraction (Gribb-Hartmann).
         const glm::mat4 vp = renderer->getCamera().getViewProjectionMatrix();
@@ -2221,8 +2516,8 @@ SDL_AppResult Game::iterate()
                     return;
                 const bool isLocal = registry.all_of<LocalPlayer>(e);
 
-                // Skip dead remote players — their mesh should not be visible.
-                if (!isLocal && ps.isDead)
+                // Dead players are rendered from replicated ragdoll bones below.
+                if (ps.isDead)
                     return;
 
                 const bool visible = isLocal || inFrustum(pos.value, charRadius);
@@ -2302,9 +2597,17 @@ SDL_AppResult Game::iterate()
                     world = glm::scale(world, scale);
                     c.worldTransform = world;
                 }
-
                 candidates.push_back(c);
             });
+        if (collectPerf) {
+            phaseStats.animatedCandidates = static_cast<std::uint32_t>(candidates.size());
+            for (const AnimCandidate& c : candidates) {
+                if (c.sampleThisFrame)
+                    ++phaseStats.animatedSampled;
+                if (c.drawThisFrame)
+                    ++phaseStats.animatedDrawn;
+            }
+        }
 
         // ─── Phase 2: parallel ozz-sample ──────────────────────────────────
         // Updates each candidate's animator state.  Used to also build
@@ -2423,7 +2726,67 @@ SDL_AppResult Game::iterate()
                 skinnedInstances.push_back(instance);
             }
         }
+
+        if (charRig_.isLoaded() && numJoints > 0) {
+            registry.view<AnimatedCharacter, Position, PlayerVisState, ClientId>().each([&](entt::entity e,
+                                                                                            AnimatedCharacter& ac,
+                                                                                            const Position& pos,
+                                                                                            const PlayerVisState& ps,
+                                                                                            const ClientId& clientId) {
+                if (!ps.isDead || !ac.animator)
+                    return;
+                if (registry.all_of<LocalPlayer>(e) && !animUI_.showLocalBody)
+                    return;
+
+                const auto poseIt = ragdollPoses.find(clientId);
+                if (poseIt == ragdollPoses.end())
+                    return;
+
+                const size_t torsoIndex = static_cast<size_t>(RagdollBone::Torso);
+                const glm::vec3 cullCenter =
+                    poseIt->second[torsoIndex].present ? poseIt->second[torsoIndex].position : pos.value;
+                if (!inFrustum(cullCenter, charRadius))
+                    return;
+
+                std::vector<glm::mat4> ragdollSkinMatrices = ac.animator->skinMatrices();
+                if (ragdollSkinMatrices.size() != static_cast<size_t>(numJoints))
+                    return;
+
+                glm::vec3 translation(0.0f);
+                glm::vec3 scale(kRigScale_);
+                glm::quat orient{1.0f, 0.0f, 0.0f, 0.0f};
+                if (const auto* rend = registry.try_get<Renderable>(e)) {
+                    translation = rend->translation;
+                    scale = rend->scale;
+                    orient = rend->orientation;
+                } else if (const auto* shape = registry.try_get<CollisionShape>(e)) {
+                    translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                }
+
+                glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + translation);
+                world *= glm::mat4_cast(orient);
+                world = glm::scale(world, scale);
+
+                applyRagdollPoseToSkinPalette(ragdollSkinMatrices, charRig_, poseIt->second, world);
+
+                SkinnedInstance instance;
+                instance.worldTransform = world;
+                instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
+                if constexpr (player_colors::k_enabled) {
+                    if (const auto* pc = registry.try_get<PlayerColor>(e); pc != nullptr) {
+                        instance.tint = glm::vec4(pc->rgb, player_colors::k_blendFactor);
+                    }
+                }
+
+                bonePalette.insert(bonePalette.end(), ragdollSkinMatrices.begin(), ragdollSkinMatrices.end());
+                skinnedInstances.push_back(instance);
+            });
+        }
         renderer->setSkinnedFrame(bonePalette, skinnedInstances);
+        if (collectPerf) {
+            phaseStats.skinnedInstances = static_cast<std::uint32_t>(skinnedInstances.size());
+            phaseStats.boneMatrices = static_cast<std::uint32_t>(bonePalette.size());
+        }
 
         // Update hitbox capsules from bone transforms (client-side for debug visualization).
         if (charRig_.isLoaded())
@@ -2572,7 +2935,7 @@ SDL_AppResult Game::iterate()
                 });
         }
     }
-    phaseSnap(phaseStats.animation);
+    phaseSnap(phaseStats.animationMs);
 
     // Build entity render list
     {
@@ -2800,12 +3163,15 @@ SDL_AppResult Game::iterate()
         //     });
         // });
 
+        if (collectPerf)
+            phaseStats.entityRenderCmds = static_cast<std::uint32_t>(entityCmds.size());
         renderer->setEntityRenderList(std::move(entityCmds));
         /////////////////////////////////////////// Entity Render List ///////////////////////////////////////////
 
         ////////////////////////////////////// Point Lights ///////////////////////////////////////////
         // Build dynamic point lights list.
         std::vector<PointLight> dynLights;
+        std::uint32_t beamPointLights = 0;
         // // Static glow sphere point light.
         // dynLights.push_back(PointLight{
         //     .position = glowSpherePos,
@@ -2885,12 +3251,18 @@ SDL_AppResult Game::iterate()
                     .intensity = 3.0f,
                     .range = 200.0f,
                 });
+                ++beamPointLights;
             }
         });
 
+        if (collectPerf) {
+            phaseStats.pointLights = static_cast<std::uint32_t>(dynLights.size());
+            phaseStats.beamPointLights = beamPointLights;
+        }
         renderer->setPointLights(std::move(dynLights));
         /////////////////////////////////////////// Point Lights ///////////////////////////////////////////
     }
+    phaseSnap(phaseStats.entityCmdsMs);
 
     // Determine equipped weapon type from WeaponState
     registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
@@ -3067,6 +3439,7 @@ SDL_AppResult Game::iterate()
         }
         renderer->setWeaponViewmodel(vm);
     }
+    phaseSnap(phaseStats.viewmodelMs);
 
     // 7. Frame recording (R key) -- anchored to physics ticks
     if (physicsRan && recorder.isRecording()) {
@@ -3135,13 +3508,12 @@ SDL_AppResult Game::iterate()
     prevRenderTime = k_now;
 
     ++frameCount;
+    phaseSnap(phaseStats.recorderFpsMs);
 
     // 9. VSync toggle -- apply when limitFPSToMonitor changes
     // buildUI may modify limitFPSToMonitor, so we snapshot it before and
     // call setVSync only when it actually flips (avoids per-frame API calls).
     const bool prevLimitFPS = limitFPSToMonitor;
-
-    phaseSnap(phaseStats.entityCmds);
 
     // 10. Render
     debugUI.newFrame();
@@ -3487,6 +3859,7 @@ SDL_AppResult Game::iterate()
         }
         ImGui::End();
     }
+    phaseSnap(phaseStats.imguiMs);
 
     // Update and render HUD.
     if (hud_.getOutputTexture()) {
@@ -3983,6 +4356,7 @@ SDL_AppResult Game::iterate()
         // Drain pickup notifications now that the HUD has consumed them.
         pendingPickupNotifications_.clear();
     }
+    phaseSnap(phaseStats.hudMs);
 
     const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
     if (pauseResult.settingsApplied) {
@@ -4005,8 +4379,16 @@ SDL_AppResult Game::iterate()
     if (pauseResult.returnToMainMenu) {
         returnToMainMenuRequested_ = true;
     }
+    phaseSnap(phaseStats.pauseMenuMs);
 
     debugUI.render();
+    if (collectPerf) {
+        if (ImDrawData* drawData = ImGui::GetDrawData()) {
+            phaseStats.imguiDrawLists = static_cast<std::uint32_t>(drawData->CmdListsCount);
+            phaseStats.imguiVertices = static_cast<std::uint32_t>(drawData->TotalVtxCount);
+            phaseStats.imguiIndices = static_cast<std::uint32_t>(drawData->TotalIdxCount);
+        }
+    }
 
     // Smooth camera roll interpolation (degrees → radians).
     // Uses shortest-path delta so that a 0→180° gravity flip rolls the
@@ -4024,17 +4406,109 @@ SDL_AppResult Game::iterate()
         if (std::abs(currentCameraRoll_) < 0.001f && std::abs(k_targetRad) < 0.001f)
             currentCameraRoll_ = 0.0f;
     }
-    phaseSnap(phaseStats.imgui);
+    phaseSnap(phaseStats.imguiRenderMs);
     renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
     renderer->drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
-    phaseSnap(phaseStats.drawFrame);
+    phaseSnap(phaseStats.drawFrameMs);
+    if (collectPerf) {
+        phaseStats.drawAcquireMs = renderer->getLastAcquireMs();
+        phaseStats.drawRecordMs = renderer->getLastRecordMs();
+        phaseStats.drawSubmitMs = renderer->getLastSubmitMs();
+
+        phaseStats.physicsTicks = static_cast<std::uint32_t>(ticksThisFrame);
+        phaseStats.tickCount = static_cast<std::uint32_t>(tickCount);
+        phaseStats.clientPredictTick = clientPredictTick;
+        if (phaseStats.serverAckedClientTick == 0)
+            phaseStats.serverAckedClientTick = client->getServerAckedClientTick();
+        phaseStats.accumulatorMs = accumulator * 1000.0f;
+        phaseStats.measuredPhysicsHz = measuredPhysicsHz;
+        phaseStats.fpsCurrent = statsFPSCurrent;
+        phaseStats.fps1pLow = statsFPS1pLow;
+        phaseStats.fps5pLow = statsFPS5pLow;
+
+        phaseStats.playerEntities = static_cast<std::uint32_t>(registry.view<ClientId, PlayerVisState>().size_hint());
+        phaseStats.localPlayers = static_cast<std::uint32_t>(registry.storage<LocalPlayer>().size());
+        phaseStats.renderableEntities = static_cast<std::uint32_t>(registry.storage<Renderable>().size());
+        phaseStats.projectileEntities = static_cast<std::uint32_t>(registry.storage<Projectile>().size());
+        phaseStats.fireFields = static_cast<std::uint32_t>(registry.storage<FireField>().size());
+
+        phaseStats.impactParticles = particleSystem.impactCount();
+        phaseStats.tracerParticles = particleSystem.tracerCount();
+        phaseStats.ribbonVertices = particleSystem.ribbonVertexCount();
+        phaseStats.hitscanBeams = particleSystem.hitscanBeamCount();
+        phaseStats.arcVertices = particleSystem.arcVertexCount();
+        phaseStats.smokeParticles = particleSystem.smokeCount();
+        phaseStats.decals = particleSystem.decalCount();
+
+        phaseStats.audioSourcesActive = sfxSystem.activeSourceCount();
+        phaseStats.voiceSourcesActive = sfxSystem.activeVoiceSourceCount();
+        const auto& audioStats = sfxSystem.audioStats();
+        phaseStats.audioEventsPosted = audioStats.postedEvents;
+        phaseStats.audioCommandsGenerated = audioStats.commandsGenerated;
+        const auto& sfxStats = sfxSystem.sfxStats();
+        phaseStats.audioSourcesStarted = sfxStats.sourcesStarted;
+        phaseStats.audioDroppedByCooldown = sfxStats.droppedByCooldown;
+        phaseStats.audioDroppedByLimit = sfxStats.droppedByLimit;
+        phaseStats.audioStolenSources = sfxStats.stolenSources;
+
+        const NetworkStats& netStats = client->getNetStats();
+        phaseStats.rttMs = netStats.rttMs;
+        phaseStats.avgRttMs = netStats.avgRttMs;
+        phaseStats.recvKBps = netStats.recvBytesPerSec / 1024.0f;
+        phaseStats.sendKBps = netStats.sendBytesPerSec / 1024.0f;
+        phaseStats.registryUpdateKB = static_cast<float>(netStats.registryUpdateSize) / 1024.0f;
+
+        const physics::perf::FrameStats physicsPerf = physics::perf::snapshot();
+        phaseStats.perfMovementCalls = physicsPerf.movementCalls;
+        phaseStats.perfMovementPlayers = physicsPerf.movementPlayers;
+        phaseStats.perfCollisionCalls = physicsPerf.collisionCalls;
+        phaseStats.perfCollisionPlayers = physicsPerf.collisionPlayers;
+        phaseStats.perfKccCalls = physicsPerf.kccCalls;
+        phaseStats.perfKccBumpHits = physicsPerf.kccBumpHits;
+        phaseStats.perfKccCaIterations = physicsPerf.kccCaIterations;
+        phaseStats.perfKccSweepHits = physicsPerf.kccSweepHits;
+        phaseStats.perfWallDetectCalls = physicsPerf.wallDetectCalls;
+        phaseStats.perfWallMeshProbes = physicsPerf.wallMeshProbes;
+        phaseStats.perfWallMeshProbeMeshes = physicsPerf.wallMeshProbeMeshes;
+        phaseStats.perfWallSphereFallbacks = physicsPerf.wallSphereFallbacks;
+        phaseStats.perfWallAttachmentCalls = physicsPerf.wallAttachmentCalls;
+        phaseStats.perfWallAttachmentMeshes = physicsPerf.wallAttachmentMeshes;
+        phaseStats.perfWallDetectSkippedByGate = physicsPerf.wallDetectSkippedByGate;
+        phaseStats.perfWallAttachmentPrevTriangleHits = physicsPerf.wallAttachmentPrevTriangleHits;
+        phaseStats.perfWallAttachmentNeighborHits = physicsPerf.wallAttachmentNeighborHits;
+        phaseStats.perfWallAttachmentBroadphaseFallbacks = physicsPerf.wallAttachmentBroadphaseFallbacks;
+        phaseStats.perfStaticBroadphaseQueries = physicsPerf.staticBroadphaseQueries;
+        phaseStats.perfStaticBroadphaseMeshes = physicsPerf.staticBroadphaseMeshes;
+        phaseStats.perfSweepAabbAllCalls = physicsPerf.sweepAabbAllCalls;
+        phaseStats.perfSweepCapsuleAllCalls = physicsPerf.sweepCapsuleAllCalls;
+        phaseStats.perfSweepCapsuleTriMeshCalls = physicsPerf.sweepCapsuleTriMeshCalls;
+        phaseStats.perfSweepCapsuleTriMeshNodes = physicsPerf.sweepCapsuleTriMeshNodes;
+        phaseStats.perfSweepCapsuleTriMeshTris = physicsPerf.sweepCapsuleTriMeshTris;
+        phaseStats.perfDeepestCapsuleCalls = physicsPerf.deepestCapsuleCalls;
+        phaseStats.perfDeepestCapsuleTriMeshCalls = physicsPerf.deepestCapsuleTriMeshCalls;
+        phaseStats.perfDeepestCapsuleTriMeshNodes = physicsPerf.deepestCapsuleTriMeshNodes;
+        phaseStats.perfDeepestCapsuleTriMeshTris = physicsPerf.deepestCapsuleTriMeshTris;
+        phaseStats.perfClosestPointMeshCalls = physicsPerf.closestPointMeshCalls;
+        phaseStats.perfClosestPointMeshNodes = physicsPerf.closestPointMeshNodes;
+        phaseStats.perfClosestPointMeshTris = physicsPerf.closestPointMeshTris;
+        phaseStats.perfClosestPointTriangleCalls = physicsPerf.closestPointTriangleCalls;
+        phaseStats.perfClosestPointWallProbeCalls = physicsPerf.closestPointWallProbeCalls;
+        phaseStats.perfClosestPointWallProbeNodes = physicsPerf.closestPointWallProbeNodes;
+        phaseStats.perfClosestPointWallProbeTris = physicsPerf.closestPointWallProbeTris;
+        phaseStats.perfClosestPointWallAttachmentCalls = physicsPerf.closestPointWallAttachmentCalls;
+        phaseStats.perfClosestPointWallAttachmentNodes = physicsPerf.closestPointWallAttachmentNodes;
+        phaseStats.perfClosestPointWallAttachmentTris = physicsPerf.closestPointWallAttachmentTris;
+    }
+
+    if (collectPerf) {
+        const Uint64 endTick = SDL_GetPerformanceCounter();
+        phaseStats.cpuFrameMs = static_cast<float>(endTick - k_now) * 1000.0f / static_cast<float>(k_perfFreq);
+    }
 
     if (benchActive_) {
-        const Uint64 endTick = SDL_GetPerformanceCounter();
-        phaseStats.total = static_cast<float>(endTick - k_now) * 1000.0f / static_cast<float>(k_perfFreq);
         // Only retain frames that match what benchFrameTimesMs_ collects (post-warmup).
         const float benchElapsedNow = static_cast<float>(k_now - benchStartTime_) / static_cast<float>(k_perfFreq);
-        if (benchElapsedNow >= k_benchWarmupSeconds && phaseStats.total > 0.0f && phaseStats.total < 250.0f)
+        if (benchElapsedNow >= k_benchWarmupSeconds && phaseStats.cpuFrameMs > 0.0f && phaseStats.cpuFrameMs < 250.0f)
             benchFrameStats_.push_back(phaseStats);
     }
 
@@ -4042,6 +4516,7 @@ SDL_AppResult Game::iterate()
         applyFrameRateLimit();
 
     // Software frame limiter: sleep + spin-wait when targeting above monitor refresh.
+    const Uint64 limiterStart = collectPerf ? SDL_GetPerformanceCounter() : 0;
     if (softLimitPeriod != 0) {
         const Uint64 perfFreq = SDL_GetPerformanceFrequency();
         const Uint64 now = SDL_GetPerformanceCounter();
@@ -4054,6 +4529,12 @@ SDL_AppResult Game::iterate()
             }
         }
         softLimitNextFrame = SDL_GetPerformanceCounter() + softLimitPeriod;
+    }
+    if (collectPerf) {
+        const Uint64 limiterEnd = SDL_GetPerformanceCounter();
+        phaseStats.frameLimiterMs =
+            static_cast<float>(limiterEnd - limiterStart) * 1000.0f / static_cast<float>(k_perfFreq);
+        perfRecorder_.record(phaseStats);
     }
 
     return SDL_APP_CONTINUE;
@@ -4082,6 +4563,7 @@ void Game::quit()
     closeChat();
     if (recorder.isRecording())
         recorder.stopRecording();
+    perfRecorder_.stop();
     voiceChat_.quit();
     sfxSystem.quit();
     particleSystem.quit();

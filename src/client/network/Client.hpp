@@ -415,6 +415,8 @@ private:
     // Bandwidth tracking — accumulated between updateStats() calls.
     uint64_t bytesSentWindow = 0;
     uint64_t bytesRecvWindow = 0;
+    uint64_t udpSessionLastBytesSent_ = 0;
+    uint64_t udpSessionLastBytesRecv_ = 0;
     uint32_t registryUpdatesWindow = 0;
     float statsAccumulator = 0.0f;
 

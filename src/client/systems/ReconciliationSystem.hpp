@@ -45,6 +45,13 @@
 namespace systems
 {
 
+struct ReconciliationStats
+{
+    std::uint32_t requestedTicks = 0;
+    std::uint32_t replayedTicks = 0;
+    std::uint32_t missingTicks = 0;
+};
+
 /// @brief Replay stored inputs from `ackedTick + 1` through `currentTick`
 ///        on the local player, restoring its predicted state after a
 ///        snapshot apply rewrote it to the server-authoritative value.
@@ -63,21 +70,23 @@ namespace systems
 ///                      (inclusive).
 /// @param dt            Physics delta (match server: 1/128 s).
 /// @param world         World geometry (must match server).
-inline void runReconciliation(Registry& registry,
-                              const InputRingBuffer& ring,
-                              uint32_t ackedTick,
-                              uint32_t currentTick,
-                              float dt,
-                              const physics::WorldGeometry& world)
+inline ReconciliationStats runReconciliation(Registry& registry,
+                                             const InputRingBuffer& ring,
+                                             uint32_t ackedTick,
+                                             uint32_t currentTick,
+                                             float dt,
+                                             const physics::WorldGeometry& world)
 {
+    ReconciliationStats stats{};
     if (currentTick <= ackedTick)
-        return; // already up to date — server state is the latest predicted state.
+        return stats; // already up to date — server state is the latest predicted state.
+    stats.requestedTicks = currentTick - ackedTick;
 
     // Find the local player. Reconciliation is meaningless without one.
     auto localView = registry.view<LocalPlayer, InputSnapshot>();
     auto it = localView.begin();
     if (it == localView.end())
-        return;
+        return stats;
     const entt::entity local = *it;
 
     // Replay forward, one physics tick per stored input.
@@ -101,6 +110,8 @@ inline void runReconciliation(Registry& registry,
         runCollision(registry, dt, world);
         ++replayed;
     }
+    stats.replayedTicks = static_cast<std::uint32_t>(replayed);
+    stats.missingTicks = static_cast<std::uint32_t>(missing);
 
     if (missing > 0) {
         // Diagnostic: a non-trivial gap in the ring is unusual at sane
@@ -112,6 +123,7 @@ inline void runReconciliation(Registry& registry,
                 ackedTick + 1,
                 currentTick);
     }
+    return stats;
 }
 
 } // namespace systems

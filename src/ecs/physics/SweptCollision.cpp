@@ -5,6 +5,7 @@
 
 #include "Movement.hpp"
 #include "PhysicsConstants.hpp"
+#include "PhysicsPerfStats.hpp"
 #include "TriMeshCollision.hpp"
 
 #include <algorithm>
@@ -96,7 +97,7 @@ template <typename Fn>
 void forTriMeshCandidates(const WorldGeometry& world, const WorldAABB& query, Fn&& visit)
 {
     if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
-        queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+        queryStaticWorldBroadphaseFast(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
             if (meshIndex < world.triMeshes.size())
                 visit(world.triMeshes[meshIndex]);
             return true;
@@ -217,35 +218,7 @@ void queryStaticWorldBroadphase(const StaticWorldBroadphase& broadphase,
                                 const WorldAABB& query,
                                 const std::function<bool(uint32_t meshIndex)>& visit)
 {
-    if (broadphase.nodes.empty())
-        return;
-
-    std::vector<int> stack;
-    stack.reserve(64);
-    stack.push_back(0);
-
-    while (!stack.empty()) {
-        const int nodeIdx = stack.back();
-        stack.pop_back();
-
-        const BVHNode& node = broadphase.nodes[static_cast<size_t>(nodeIdx)];
-        const WorldAABB nodeBounds{.min = node.boundsMin, .max = node.boundsMax};
-        if (!aabbOverlap(nodeBounds, query))
-            continue;
-
-        if (node.count > 0) {
-            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
-                const uint32_t meshIndex = broadphase.meshIndices[static_cast<size_t>(i)];
-                if (meshIndex >= broadphase.meshBounds.size() || !aabbOverlap(broadphase.meshBounds[meshIndex], query))
-                    continue;
-                if (!visit(meshIndex))
-                    return;
-            }
-        } else {
-            stack.push_back(node.leftFirst);
-            stack.push_back(node.leftFirst + 1);
-        }
-    }
+    queryStaticWorldBroadphaseFast(broadphase, query, visit);
 }
 
 HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::span<const Plane> planes)
@@ -882,6 +855,7 @@ HitResult sweepCapsuleVsSphere(CapsuleShape capsule, glm::vec3 start, glm::vec3 
 
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
+    perf::add(&perf::FrameStats::sweepAabbAllCalls);
     const glm::vec3 delta = end - start;
     HitResult best = sweepAABB(halfExtents, start, end, world.planes);
 
@@ -920,6 +894,7 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
 
 HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
+    perf::add(&perf::FrameStats::sweepCapsuleAllCalls);
     const glm::vec3 delta = end - start;
     HitResult best = sweepCapsuleVsPlanes(capsule, start, end, world.planes);
 
@@ -1356,6 +1331,7 @@ DepenContact deepestVsSphere(CapsuleShape capsule, glm::vec3 pos, const WorldSph
 
 DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldGeometry& world)
 {
+    perf::add(&perf::FrameStats::deepestCapsuleCalls);
     DepenContact best;
     auto consider = [&](DepenContact c) {
         if (c.valid && c.depth > best.depth)
