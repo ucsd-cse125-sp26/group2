@@ -2587,15 +2587,12 @@ SDL_AppResult Game::iterate()
                     // by the grappleActive edge above, Gravity by the flip edge.
                     if (abil != nullptr) {
                         const auto rose = [](float prev, float cur) { return cur > prev + 0.05f; };
-                        if (rose(tracked.primaryCooldown, abil->primaryCooldown) &&
-                            abil->primary == AbilityType::Dash) {
+                        const bool primaryFired = rose(tracked.primaryCooldown, abil->primaryCooldown);
+                        const bool secondaryFired = rose(tracked.secondaryCooldown, abil->secondaryCooldown);
+                        if (primaryFired && abil->primary == AbilityType::Dash)
                             post("ability.dash", 1.0f);
-                        }
-                        if (rose(tracked.secondaryCooldown, abil->secondaryCooldown) &&
-                            abil->secondary == AbilityType::Recall)
-                        {
+                        if (secondaryFired && abil->secondary == AbilityType::Recall)
                             post("ability.recall", 1.0f);
-                        }
                     }
 
                     // Respawn: dead → alive.
