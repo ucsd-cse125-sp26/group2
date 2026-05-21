@@ -74,7 +74,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .explosive = true,
         }, // Rocket
         WeaponConfig{
-            .fireCooldown = 0.30f,
+            .fireCooldown = 0.5f,
             .magazineSize = 8,
             .defaultAmmoCapacity = 32,
             .damage = 50.0f,
@@ -82,7 +82,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isCharge = true,
-            .chargeDamage = 100.0f,
+            .chargeDamage = 80.0f,
             .maxChargeTime = 1.0f,
         }, // RailGun
         WeaponConfig{
