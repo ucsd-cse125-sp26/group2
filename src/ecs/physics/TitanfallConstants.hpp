@@ -19,6 +19,9 @@ constexpr float k_walkSpeed =
     550.0f; ///< Max wish speed when walking (u/s). Sprint removed; this is the only base speed.
 constexpr float k_sprintSpeed = 550.0f; ///< Deprecated: sprint removed. Kept equal to k_walkSpeed for safety.
 constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s).
+constexpr float k_adsSpeed = 280.0f;    ///< Max wish speed while ADS-ing a precision (charge) weapon (u/s).
+                                        ///< 20% slower than crouch — keeps the charge rifle's RMB stance
+                                        ///< deliberate without freezing the player in place.
 
 // Jumping
 
