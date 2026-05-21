@@ -10,6 +10,7 @@
 #include "ecs/physics/PhysicsConstants.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -197,6 +198,46 @@ void runKinematicCharacterController(glm::vec3& pos,
     for (int sub = 0; sub < numSubsteps; ++sub) {
         float remainingTime = subDt;
         int iter = 0;
+        // Keep every plane hit in this substep active, so acute finite-edge
+        // corners resolve to a stable crease/stop instead of alternating
+        // between one-plane clips and depenetration on later ticks.
+        std::array<glm::vec3, k_maxCAIterations> contactNormals{};
+        int contactNormalCount = 0;
+
+        auto addContactNormal = [&](glm::vec3 normal) {
+            if (!finiteVec3(normal) || glm::dot(normal, normal) < 1e-8f)
+                return;
+            normal = glm::normalize(normal);
+            for (int i = 0; i < contactNormalCount; ++i) {
+                if (glm::dot(contactNormals[static_cast<size_t>(i)], normal) > 0.98f)
+                    return;
+            }
+            if (contactNormalCount < static_cast<int>(contactNormals.size()))
+                contactNormals[static_cast<size_t>(contactNormalCount++)] = normal;
+        };
+
+        auto clipVelocityAgainstContacts = [&](glm::vec3& velocity, float overbounce) {
+            for (int pass = 0; pass < 2; ++pass) {
+                bool clipped = false;
+                for (int i = 0; i < contactNormalCount; ++i) {
+                    const glm::vec3 normal = contactNormals[static_cast<size_t>(i)];
+                    if (glm::dot(velocity, normal) < 0.0f) {
+                        velocity = physics::clipVelocity(velocity, normal, overbounce);
+                        clipped = true;
+                    }
+                }
+                if (!clipped)
+                    break;
+            }
+
+            for (int i = 0; i < contactNormalCount; ++i) {
+                if (glm::dot(velocity, contactNormals[static_cast<size_t>(i)]) < -0.01f) {
+                    velocity = glm::vec3{0.0f};
+                    return;
+                }
+            }
+        };
+
         for (; iter < k_maxCAIterations && remainingTime > 1e-5f; ++iter) {
             ++caIterations;
             const glm::vec3 sweepStart = pos + sweepCenterOffset;
@@ -246,6 +287,7 @@ void runKinematicCharacterController(glm::vec3& pos,
                 physics::debug::pushSweepContact(
                     pos + sweepCenterOffset - hit.normal * r, hit.normal, physics::debug::ContactSource::PlaneSweep);
             }
+            addContactNormal(hit.normal);
 
             bool clipGameplayVelocity = glm::dot(phaseVel, hit.normal) < 0.0f;
             glm::vec3 gameplayClipNormal = hit.normal;
@@ -267,27 +309,41 @@ void runKinematicCharacterController(glm::vec3& pos,
                     }
                 }
             }
+            if (clipGameplayVelocity)
+                addContactNormal(gameplayClipNormal);
 
             if (!useWalkCapsule) {
                 const bool landed = glm::dot(hit.normal, worldUp) >= physics::k_floorAngleCos;
                 if (landed) {
                     state.grounded = true;
                     state.groundNormal = hit.normal;
-                    if (clipGameplayVelocity)
+                    if (clipGameplayVelocity) {
                         phaseVel = physics::clipVelocity(phaseVel, gameplayClipNormal, physics::k_overbounceFloor);
-                    if (glm::dot(correctionVel, hit.normal) < 0.0f)
+                        clipVelocityAgainstContacts(phaseVel, physics::k_overbounceFloor);
+                    }
+                    if (glm::dot(correctionVel, hit.normal) < 0.0f) {
                         correctionVel = physics::clipVelocity(correctionVel, hit.normal, physics::k_overbounceFloor);
+                        clipVelocityAgainstContacts(correctionVel, physics::k_overbounceFloor);
+                    }
                 } else {
-                    if (clipGameplayVelocity)
+                    if (clipGameplayVelocity) {
                         phaseVel = physics::clipVelocity(phaseVel, gameplayClipNormal, physics::k_overbounceWall);
-                    if (glm::dot(correctionVel, hit.normal) < 0.0f)
+                        clipVelocityAgainstContacts(phaseVel, physics::k_overbounceWall);
+                    }
+                    if (glm::dot(correctionVel, hit.normal) < 0.0f) {
                         correctionVel = physics::clipVelocity(correctionVel, hit.normal, physics::k_overbounceWall);
+                        clipVelocityAgainstContacts(correctionVel, physics::k_overbounceWall);
+                    }
                 }
             } else {
-                if (clipGameplayVelocity)
+                if (clipGameplayVelocity) {
                     phaseVel = physics::clipVelocity(phaseVel, gameplayClipNormal, physics::k_overbounceWall);
-                if (glm::dot(correctionVel, hit.normal) < 0.0f)
+                    clipVelocityAgainstContacts(phaseVel, physics::k_overbounceWall);
+                }
+                if (glm::dot(correctionVel, hit.normal) < 0.0f) {
                     correctionVel = physics::clipVelocity(correctionVel, hit.normal, physics::k_overbounceWall);
+                    clipVelocityAgainstContacts(correctionVel, physics::k_overbounceWall);
+                }
             }
             pos += hit.normal * k_pushback;
         }

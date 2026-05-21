@@ -54,8 +54,8 @@ constexpr float k_jumpLurchSpeedLoss = 0.125f;     ///< Fraction of speed lost o
 
 // Sliding
 
-constexpr float k_slideMinStartSpeed = 300.0f;       ///< Min horizontal speed to enter slide (u/s).
-constexpr float k_slideMinSpeed = 100.0f;            ///< Slide cancels below this speed (u/s).
+constexpr float k_slideMinStartSpeed = 400.0f;       ///< Min horizontal speed to enter slide (u/s).
+constexpr float k_slideMinSpeed = 200.0f;            ///< Slide cancels below this speed (u/s).
 constexpr float k_slideBoostMin = 180.0f;            ///< Min speed boost on slide entry (u/s).
 constexpr float k_slideBoostMax = 380.0f;            ///< Max speed boost on slide entry (u/s).
 constexpr float k_slideBoostCooldown = 1.5f;         ///< Cooldown between slide boosts (s).
@@ -75,6 +75,9 @@ constexpr int k_slideFatigueMax = 4;                 ///< Max fatigue levels (bo
 constexpr float k_wallrunCheckDist = 35.0f;                ///< Sphere-cast distance for side walls (u).
 constexpr float k_wallrunSphereRadius = 12.0f;             ///< Sphere-cast radius for wall detection (u).
 constexpr float k_wallrunMinGroundDist = 50.0f;            ///< Min height above ground to wallrun (u).
+constexpr float k_wallrunMinAttachSpeed = 200.0f;          ///< Min horizontal speed required to enter wallrun (u/s).
+constexpr float k_wallrunMinStaySpeed = 100.0f;            ///< Drop wallrun below this horizontal speed (u/s).
+constexpr float k_wallrunSameWallReattachSpeed = 100.0f;   ///< Min inward speed to reattach a blacklisted wall (u/s).
 constexpr float k_wallrunMaxSpeed = 800.0f;                ///< Max speed while wallrunning (u/s).
 constexpr float k_wallrunAccel = 500.0f;                   ///< Forward acceleration along wall (u/s^2).
 constexpr float k_wallrunPushForce = 800.0f;               ///< Force pushing player toward wall (u/s^2).

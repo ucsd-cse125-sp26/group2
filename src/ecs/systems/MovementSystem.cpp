@@ -587,19 +587,20 @@ constexpr float k_wallrunCornerSourceIgnoreTime = 0.16f;
 
 /// @brief Check if a wall normal matches the blacklist (same wall).
 /// @param normal    Wall normal to test.
-/// @param height    Current entity height.
+/// @param velocity  Current entity velocity.
 /// @param blNormal  Blacklisted wall normal.
-/// @param blHeight  Height at which the blacklisted wall was recorded.
 /// @param active    Whether the blacklist is active.
 /// @return True if the wall is blacklisted.
-bool isBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNormal, float blHeight, bool active)
+bool isBlacklisted(const glm::vec3& normal, glm::vec3 velocity, const glm::vec3& blNormal, bool active)
 {
     if (!active)
         return false;
-    // Same wall = similar normal. Must be at a lower height to regrab.
-    if (glm::dot(normal, blNormal) > 0.9f && height >= blHeight)
-        return true;
-    return false;
+    if (glm::dot(normalizedOrZero(normal), normalizedOrZero(blNormal)) <= 0.9f)
+        return false;
+
+    const glm::vec3 horizontalVelocity = horizVel(velocity);
+    const float inwardSpeed = std::max(0.0f, -glm::dot(horizontalVelocity, normalizedOrZero(blNormal)));
+    return inwardSpeed < tms::k_wallrunSameWallReattachSpeed;
 }
 
 physics::CapsuleShape capsuleQueryForWallrun(const CollisionShape& shape)
@@ -758,6 +759,135 @@ glm::vec3 redirectWallForwardTowardAnchor(
     return redirectWallForward(oldForward, oldNormal, newNormal);
 }
 
+float desiredWallrunStandoff(const CollisionShape& shape, glm::vec3 normal);
+void finishWallrunFrame(
+    glm::vec3& vel, PlayerStateRef state, const InputSnapshot& input, float dt, float standoffCorrection);
+
+// Thin balcony lips often arrive as side/front blockers instead of adjacency
+// from the currently attached triangle. Continue along the blocker using the
+// player's actual velocity projected onto that wall.
+bool blockingWallHandoffForward(
+    glm::vec3 oldForward, glm::vec3 oldNormal, glm::vec3 newNormal, glm::vec3 velocity, glm::vec3& outForward)
+{
+    if (!usableNormal(newNormal))
+        return false;
+
+    newNormal = normalizedOrZero(newNormal);
+    oldNormal = normalizedOrZero(oldNormal);
+    oldForward = normalizedOrZero(oldForward);
+    if (glm::dot(oldNormal, newNormal) > 0.95f)
+        return false;
+
+    const glm::vec3 horizontalVelocity = horizVel(velocity);
+    const float horizontalSpeed = glm::length(horizontalVelocity);
+    if (horizontalSpeed < 1.0f)
+        return false;
+
+    const glm::vec3 velocityDir = horizontalVelocity / horizontalSpeed;
+    if (glm::dot(velocityDir, newNormal) > -0.15f)
+        return false;
+
+    glm::vec3 projected = horizontalVelocity - newNormal * glm::dot(horizontalVelocity, newNormal);
+    projected.y = 0.0f;
+    const float projectedLen = glm::length(projected);
+    if (projectedLen < 1.0f)
+        return false;
+
+    projected /= projectedLen;
+    if (glm::dot(projected, oldForward) < -0.05f)
+        return false;
+
+    outForward = projected;
+    return true;
+}
+
+bool tryBlockingWallHandoff(glm::vec3 pos,
+                            glm::vec3& vel,
+                            PlayerStateRef state,
+                            const InputSnapshot& input,
+                            const physics::WallDetectionResult& walls,
+                            const CollisionShape& shape,
+                            float dt,
+                            float preAttachHorizSpeed,
+                            glm::vec3 oldNormal,
+                            glm::vec3 oldForward)
+{
+    WallAttachmentProbe best;
+    glm::vec3 bestForward{0.0f};
+    float bestScore = -1.0f;
+    const glm::vec3 horizontalVelocity = horizVel(vel);
+    const float horizontalSpeed = glm::length(horizontalVelocity);
+    const glm::vec3 velocityDir = horizontalSpeed > 1.0f ? horizontalVelocity / horizontalSpeed : glm::vec3{0.0f};
+
+    auto consider = [&](bool found,
+                        glm::vec3 point,
+                        glm::vec3 normal,
+                        uint32_t meshIndex,
+                        uint32_t triId,
+                        physics::TriRegion region) {
+        if (!found)
+            return;
+        if (state.sim.wallCornerIgnoreTimer > 0.0f &&
+            glm::dot(normalizedOrZero(normal), state.sim.wallCornerIgnoreNormal) > 0.95f)
+            return;
+
+        glm::vec3 handoffForward{0.0f};
+        if (!blockingWallHandoffForward(oldForward, oldNormal, normal, vel, handoffForward))
+            return;
+
+        const float score = std::max(0.0f, -glm::dot(velocityDir, normalizedOrZero(normal)));
+        if (score <= bestScore)
+            return;
+
+        bestScore = score;
+        best.found = true;
+        best.anchor = point;
+        best.normal = normalizedOrZero(normal);
+        best.meshIndex = meshIndex;
+        best.triId = triId;
+        best.region = region;
+        bestForward = handoffForward;
+    };
+
+    consider(walls.wallRight,
+             walls.rightPoint,
+             walls.rightNormal,
+             walls.rightMeshIndex,
+             walls.rightTriId,
+             walls.rightRegion);
+    consider(walls.wallLeft, walls.leftPoint, walls.leftNormal, walls.leftMeshIndex, walls.leftTriId, walls.leftRegion);
+    consider(walls.wallFront,
+             walls.frontPoint,
+             walls.frontNormal,
+             walls.frontMeshIndex,
+             walls.frontTriId,
+             walls.frontRegion);
+
+    if (!best.found)
+        return false;
+
+    state.sim.wallAnchor = best.anchor;
+    state.sim.wallNormal = best.normal;
+    state.sim.wallForward = bestForward;
+    state.sim.wallMeshIndex = best.meshIndex;
+    state.sim.wallTriId = best.triId;
+    state.sim.wallRegion = best.region;
+    state.sim.wallAttachmentValid = true;
+    clearWallCornerTransition(state);
+    state.sim.wallCornerIgnoreNormal = normalizedOrZero(oldNormal);
+    state.sim.wallCornerIgnoreTimer = k_wallrunCornerSourceIgnoreTime;
+
+    const float desiredStandoff = desiredWallrunStandoff(shape, state.sim.wallNormal);
+    const float currentStandoff = glm::dot(pos - state.sim.wallAnchor, state.sim.wallNormal);
+    const float standoffCorrection = desiredStandoff - currentStandoff;
+
+    const float verticalVel = vel.y;
+    vel = state.sim.wallForward * preAttachHorizSpeed;
+    vel.y = verticalVel;
+    finishWallrunFrame(vel, state, input, dt, standoffCorrection);
+    return true;
+}
+
 void queueWallrunKccCorrection(PlayerStateRef state, glm::vec3 normal, float correction)
 {
     if (!std::isfinite(correction) || !usableNormal(normal))
@@ -819,12 +949,13 @@ void tryEnterWallrun(glm::vec3& vel,
                      const physics::WallDetectionResult& walls,
                      const CollisionShape& shape,
                      const physics::WorldGeometry& world,
-                     glm::vec3 pos,
-                     float posY)
+                     glm::vec3 pos)
 {
     if (state.vis.moveMode != MoveMode::OnFoot)
         return;
-    if (state.vis.grounded || state.vis.exitingWall)
+    if (state.vis.grounded)
+        return;
+    if (glm::length(horizVel(vel)) < tms::k_wallrunMinAttachSpeed)
         return;
     if (walls.groundDistance < tms::k_wallrunMinGroundDist)
         return;
@@ -850,11 +981,7 @@ void tryEnterWallrun(glm::vec3& vel,
                        WallSide side) {
         if (!hasWall)
             return false;
-        if (isBlacklisted(wallNorm,
-                          posY,
-                          state.sim.wallBlacklistNormal,
-                          state.sim.wallBlacklistHeight,
-                          state.sim.wallBlacklistActive))
+        if (isBlacklisted(wallNorm, vel, state.sim.wallBlacklistNormal, state.sim.wallBlacklistActive))
             return false;
         // Intent check is per-side because it depends on this wall's normal.
         if (glm::dot(k_wishDir, -wallNorm) < tms::k_wallrunIntentThreshold)
@@ -927,14 +1054,14 @@ void tryEnterWallrun(glm::vec3& vel,
                 WallSide::Left);
 }
 
-/// @brief Exit wallrun mode and start cooldown timers.
+/// @brief Exit wallrun mode while preserving same-wall reattach context.
 /// @param state  Player state (modified in place).
 /// @param posY   Current vertical position for blacklist height.
 void exitWallrun(PlayerStateRef state, float posY)
 {
     state.vis.moveMode = MoveMode::OnFoot;
-    state.vis.exitingWall = true;
-    state.sim.exitWallTimer = tms::k_wallrunExitTime;
+    state.vis.exitingWall = false;
+    state.sim.exitWallTimer = 0.0f;
     state.sim.wasWallRunning = true;
     state.sim.coyoteTimer = tms::k_coyoteTime;
     state.sim.wallBlacklistActive = true;
@@ -995,11 +1122,6 @@ bool handleWallCornerTransition(glm::vec3& pos,
     const bool clearOfOldWall = progress >= clearance;
 
     if (!clearOfOldWall) {
-        if (state.sim.wallCornerTimer > k_wallrunCornerMaxTransitionTime) {
-            exitWallrun(state, posY);
-            return true;
-        }
-
         WallAttachmentProbe oldAttachment = findWallAttachment(pos,
                                                                shape,
                                                                world,
@@ -1012,7 +1134,8 @@ bool handleWallCornerTransition(glm::vec3& pos,
         state.sim.wallNormal = fromNormal;
         state.sim.wallForward = fromForward;
         float standoffCorrection = 0.0f;
-        if (oldAttachment.found && glm::dot(oldAttachment.normal, fromNormal) > 0.95f) {
+        const bool stillHoldingOldWall = oldAttachment.found && glm::dot(oldAttachment.normal, fromNormal) > 0.95f;
+        if (stillHoldingOldWall) {
             state.sim.wallAnchor = oldAttachment.anchor;
             state.sim.wallMeshIndex = oldAttachment.meshIndex;
             state.sim.wallTriId = oldAttachment.triId;
@@ -1021,6 +1144,11 @@ bool handleWallCornerTransition(glm::vec3& pos,
             const float desiredStandoff = desiredWallrunStandoff(shape, state.sim.wallNormal);
             const float currentStandoff = glm::dot(pos - state.sim.wallAnchor, state.sim.wallNormal);
             standoffCorrection = desiredStandoff - currentStandoff;
+        }
+
+        if (state.sim.wallCornerTimer > k_wallrunCornerMaxTransitionTime) {
+            exitWallrun(state, posY);
+            return true;
         }
 
         const float verticalVel = vel.y;
@@ -1108,9 +1236,16 @@ void handleWallRunning(glm::vec3& pos,
     const glm::vec3 oldNormal = state.sim.wallNormal;
     const glm::vec3 oldForward = state.sim.wallForward;
     const float preAttachHorizSpeed = glm::length(horizVel(vel));
+    if (preAttachHorizSpeed < tms::k_wallrunMinStaySpeed) {
+        exitWallrun(state, posY);
+        return;
+    }
     const float handoffLookahead = std::clamp(preAttachHorizSpeed * dt + 4.0f, 4.0f, shape.radius);
 
     if (handleWallCornerTransition(pos, vel, state, input, shape, world, posY, dt, preAttachHorizSpeed))
+        return;
+
+    if (tryBlockingWallHandoff(pos, vel, state, input, walls, shape, dt, preAttachHorizSpeed, oldNormal, oldForward))
         return;
 
     WallAttachmentProbe attachment = findWallAttachment(pos,
@@ -1123,18 +1258,46 @@ void handleWallRunning(glm::vec3& pos,
                                                         state.sim.wallTriId,
                                                         state.sim.wallRegion);
     if (!attachment.found) {
-        const bool fallbackRight = walls.wallRight && glm::dot(walls.rightNormal, oldNormal) > -0.05f;
-        const bool fallbackLeft = walls.wallLeft && glm::dot(walls.leftNormal, oldNormal) > -0.05f;
-        if (fallbackRight || fallbackLeft) {
-            const bool useRight = fallbackRight && (!fallbackLeft || glm::dot(walls.rightNormal, oldNormal) >=
-                                                                         glm::dot(walls.leftNormal, oldNormal));
+        float bestFallbackContinuity = -1.0f;
+        auto considerFallback = [&](bool found,
+                                    glm::vec3 point,
+                                    glm::vec3 normal,
+                                    uint32_t meshIndex,
+                                    uint32_t triId,
+                                    physics::TriRegion region) {
+            if (!found)
+                return;
+
+            normal = normalizedOrZero(normal);
+            const float continuity = glm::dot(normal, oldNormal);
+            if (continuity <= -0.05f || continuity <= bestFallbackContinuity)
+                return;
+
+            bestFallbackContinuity = continuity;
             attachment.found = true;
-            attachment.anchor = useRight ? walls.rightPoint : walls.leftPoint;
-            attachment.normal = useRight ? walls.rightNormal : walls.leftNormal;
-            attachment.meshIndex = useRight ? walls.rightMeshIndex : walls.leftMeshIndex;
-            attachment.triId = useRight ? walls.rightTriId : walls.leftTriId;
-            attachment.region = useRight ? walls.rightRegion : walls.leftRegion;
-        } else {
+            attachment.anchor = point;
+            attachment.normal = normal;
+            attachment.meshIndex = meshIndex;
+            attachment.triId = triId;
+            attachment.region = region;
+        };
+
+        considerFallback(walls.wallRight,
+                         walls.rightPoint,
+                         walls.rightNormal,
+                         walls.rightMeshIndex,
+                         walls.rightTriId,
+                         walls.rightRegion);
+        considerFallback(
+            walls.wallLeft, walls.leftPoint, walls.leftNormal, walls.leftMeshIndex, walls.leftTriId, walls.leftRegion);
+        considerFallback(walls.wallFront,
+                         walls.frontPoint,
+                         walls.frontNormal,
+                         walls.frontMeshIndex,
+                         walls.frontTriId,
+                         walls.frontRegion);
+
+        if (!attachment.found) {
             exitWallrun(state, posY);
             return;
         }
@@ -1155,8 +1318,51 @@ void handleWallRunning(glm::vec3& pos,
         if (currentWallAttachment.found && glm::dot(currentWallAttachment.normal, oldNormal) > 0.95f) {
             attachment = currentWallAttachment;
         } else {
-            exitWallrun(state, posY);
-            return;
+            WallAttachmentProbe detectedCurrentWall;
+            auto considerDetectedCurrentWall = [&](bool found,
+                                                   glm::vec3 point,
+                                                   glm::vec3 normal,
+                                                   uint32_t meshIndex,
+                                                   uint32_t triId,
+                                                   physics::TriRegion region) {
+                if (detectedCurrentWall.found || !found)
+                    return;
+                normal = normalizedOrZero(normal);
+                if (glm::dot(normal, oldNormal) <= 0.95f)
+                    return;
+
+                detectedCurrentWall.found = true;
+                detectedCurrentWall.anchor = point;
+                detectedCurrentWall.normal = normal;
+                detectedCurrentWall.meshIndex = meshIndex;
+                detectedCurrentWall.triId = triId;
+                detectedCurrentWall.region = region;
+            };
+
+            considerDetectedCurrentWall(walls.wallRight,
+                                        walls.rightPoint,
+                                        walls.rightNormal,
+                                        walls.rightMeshIndex,
+                                        walls.rightTriId,
+                                        walls.rightRegion);
+            considerDetectedCurrentWall(walls.wallLeft,
+                                        walls.leftPoint,
+                                        walls.leftNormal,
+                                        walls.leftMeshIndex,
+                                        walls.leftTriId,
+                                        walls.leftRegion);
+            considerDetectedCurrentWall(walls.wallFront,
+                                        walls.frontPoint,
+                                        walls.frontNormal,
+                                        walls.frontMeshIndex,
+                                        walls.frontTriId,
+                                        walls.frontRegion);
+
+            if (!detectedCurrentWall.found) {
+                exitWallrun(state, posY);
+                return;
+            }
+            attachment = detectedCurrentWall;
         }
     }
 
@@ -1548,7 +1754,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // 3. State transitions (try enter new modes)
             // Order matters: wallrun > slide
             if (state.vis.moveMode == MoveMode::OnFoot)
-                tryEnterWallrun(vel.value, state, input, walls, shape, world, pos.value, pos.value.y);
+                tryEnterWallrun(vel.value, state, input, walls, shape, world, pos.value);
             if (state.vis.moveMode == MoveMode::OnFoot)
                 tryEnterSlide(vel.value, state, shape, pos, input);
 
