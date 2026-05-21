@@ -168,6 +168,17 @@ udpSessionLastBytesSent_ = bytesSent;
 udpSessionLastBytesRecv_ = bytesRecv;
 ```
 
+Status: complete.
+
+Implementation note:
+
+- The UDP-session `networkLoop()` branch now copies RTT and byte totals out of
+  `session_.stats()` after pumping and event delivery.
+- It mirrors only monotonic byte deltas into `bytesSentWindow`,
+  `bytesRecvWindow`, `stats.bytesSentTotal`, and `stats.bytesRecvTotal`.
+- If a sampled transport total is lower than the previous baseline, the delta
+  is treated as `0` and the baseline is advanced to the sampled value.
+
 ### Phase 5: Build and Runtime Verification
 
 Goal: prove the HUD reports real bandwidth without regressing legacy transport.

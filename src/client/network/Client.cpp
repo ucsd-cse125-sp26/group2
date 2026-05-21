@@ -796,10 +796,28 @@ void Client::networkLoop()
                 }
             }
 
-            const auto& s = session_.stats();
-            stats.rttMs = s.rttMs;
-            if (s.rttMs > 0.0f)
-                stats.avgRttMs = stats.avgRttMs <= 0.0f ? s.rttMs : stats.avgRttMs * 0.8f + s.rttMs * 0.2f;
+            const auto& sessionStats = session_.stats();
+            const float rttMs = sessionStats.rttMs;
+            const std::uint64_t bytesSent = sessionStats.bytesSent;
+            const std::uint64_t bytesRecv = sessionStats.bytesRecv;
+
+            stats.rttMs = rttMs;
+            if (rttMs > 0.0f)
+                stats.avgRttMs = stats.avgRttMs <= 0.0f ? rttMs : stats.avgRttMs * 0.8f + rttMs * 0.2f;
+
+            {
+                std::lock_guard<std::mutex> lock(stateMutex_);
+                const std::uint64_t sentDelta =
+                    bytesSent >= udpSessionLastBytesSent_ ? bytesSent - udpSessionLastBytesSent_ : 0;
+                const std::uint64_t recvDelta =
+                    bytesRecv >= udpSessionLastBytesRecv_ ? bytesRecv - udpSessionLastBytesRecv_ : 0;
+                udpSessionLastBytesSent_ = bytesSent;
+                udpSessionLastBytesRecv_ = bytesRecv;
+                stats.bytesSentTotal += sentDelta;
+                stats.bytesRecvTotal += recvDelta;
+                bytesSentWindow += sentDelta;
+                bytesRecvWindow += recvDelta;
+            }
 
             SDL_Delay(1);
         }
