@@ -28,25 +28,62 @@ namespace systems
 inline bool prevKillSelfKey = false;
 /// @brief Tracks previous-frame G key state for grenade quick-throw / radial behavior.
 inline bool prevGrenadeKey = false;
+/// @brief Seconds the grenade key has been continuously held.
 inline float grenadeHeldSeconds = 0.0f;
+/// @brief True while the grenade radial selector is open.
 inline bool grenadeRadialActive = false;
+/// @brief Current mouse-relative aim vector inside the grenade radial selector.
 inline glm::vec2 grenadeRadialAim{0.0f, -1.0f};
+/// @brief Latched quick-throw request consumed by HUD/gameplay code.
 inline bool pendingGrenadeThrow = false;
+/// @brief Hold duration before the grenade quick-throw becomes radial selection.
 inline constexpr float k_grenadeRadialHoldSeconds = 0.24f;
+/// @brief Minimum radial aim distance required to choose a grenade slot.
 inline constexpr float k_grenadeRadialDeadzone = 18.0f;
+/// @brief Maximum stored cursor distance from the grenade radial center.
 inline constexpr float k_grenadeRadialMaxDistance = 130.0f;
 /// @brief Tracks previous-frame Alt+LMB state for ability choice edge detection.
 inline bool prevAbilitySelectLeft = false;
 /// @brief Tracks previous-frame Alt+RMB state for ability choice edge detection.
 inline bool prevAbilitySelectRight = false;
+/// @brief Tracks previous-frame gamepad left ability-select chord for edge detection.
 inline bool prevGamepadAbilitySelectLeft = false;
+/// @brief Tracks previous-frame gamepad right ability-select chord for edge detection.
 inline bool prevGamepadAbilitySelectRight = false;
 
+/// @brief Gamepad axis mapping configuration for look and move axes, used to support stick swapping in user settings.
+struct JoystickAxis
+{
+    SDL_GamepadAxis x;
+    SDL_GamepadAxis y;
+};
+
+/// @brief Return the SDL axes used for camera look, honoring the stick-swap setting.
+inline JoystickAxis getLookJoystickAxes(bool swapSticks)
+{
+    return {
+        .x = swapSticks ? SDL_GAMEPAD_AXIS_LEFTX : SDL_GAMEPAD_AXIS_RIGHTX,
+        .y = swapSticks ? SDL_GAMEPAD_AXIS_LEFTY : SDL_GAMEPAD_AXIS_RIGHTY,
+    };
+}
+
+/// @brief Return the SDL axes used for movement, honoring the stick-swap setting.
+inline JoystickAxis getMoveJoystickAxes(bool swapSticks)
+{
+    return {
+        .x = swapSticks ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_LEFTX,
+        .y = swapSticks ? SDL_GAMEPAD_AXIS_RIGHTY : SDL_GAMEPAD_AXIS_LEFTY,
+    };
+}
+
+/// @brief True when a gamepad handle is non-null and still connected.
 inline bool gamepadConnected(SDL_Gamepad* gamepad)
 {
     return gamepad != nullptr && SDL_GamepadConnected(gamepad);
 }
 
+/// @brief Convert the current grenade radial aim vector into a grenade slot index.
+/// @return Selected grenade slot, or kInvalidGrenadeSelectIndex inside the radial deadzone.
 inline std::uint8_t grenadeRadialIndexFromAim()
 {
     if (glm::dot(grenadeRadialAim, grenadeRadialAim) < k_grenadeRadialDeadzone * k_grenadeRadialDeadzone) {
@@ -72,6 +109,7 @@ inline std::uint8_t grenadeRadialIndexFromAim()
     return bestIndex;
 }
 
+/// @brief Consume and clear the queued grenade quick-throw request.
 inline bool consumePendingGrenadeThrow()
 {
     const bool shouldThrow = pendingGrenadeThrow;
@@ -200,6 +238,7 @@ inline void runDeadInput(Registry& registry, const InputBindings& bindings)
 ///
 /// @param registry  The ECS registry.
 /// @param bindings  The input bindings.
+/// @param dt        Frame delta time in seconds, used to detect grenade radial hold duration.
 inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, float dt = 0.0f)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
@@ -297,17 +336,17 @@ inline constexpr float k_triggerThreshold = 0.5f;
 ///
 /// Applies a radial deadzone and rescales so the live range is still [-1, 1]
 /// (otherwise full stick deflection would only feel like ~0.85 of the range).
-inline float normaliseAxis(Sint16 raw)
+inline float normaliseAxis(Sint16 raw, float deadzone = k_stickDeadzone)
 {
     // SDL_Gamepad axes are int16; normalise to [-1, 1].  -32768 is one larger
     // in magnitude than 32767 — divide by 32767 and clamp to keep the range
     // symmetric (otherwise full-down on a stick reads as -1.0000305...).
     const float v = std::clamp(static_cast<float>(raw) / 32767.0f, -1.0f, 1.0f);
-    if (std::fabs(v) < k_stickDeadzone)
+    if (std::fabs(v) < deadzone)
         return 0.0f;
     // Rescale [deadzone, 1] → [0, 1] so the user gets the full output range.
     const float sign = v < 0.0f ? -1.0f : 1.0f;
-    return sign * (std::fabs(v) - k_stickDeadzone) / (1.0f - k_stickDeadzone);
+    return sign * (std::fabs(v) - deadzone) / (1.0f - deadzone);
 }
 
 } // namespace gamepad
@@ -323,17 +362,28 @@ inline float normaliseAxis(Sint16 raw)
 ///
 /// @param registry          The ECS registry.
 /// @param gamepad           Open gamepad, or nullptr to no-op.
-/// @param lookSensitivity   Radians per second at full stick deflection.
+/// @param pitchSensitivity  Pitch radians per second at full stick deflection.
+/// @param yawSensitivity    Yaw radians per second at full stick deflection.
+/// @param deadzone          Stick deadzone as a fraction of full deflection.
 /// @param dt                Frame delta time in seconds.
 /// @param gravityFlipped    When true, both axes are inverted for 180° camera roll.
-inline void
-runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, float dt, bool gravityFlipped = false)
+/// @param swapSticks        When true, use the left stick for look instead of the right stick.
+inline void runGamepadLook(Registry& registry,
+                           SDL_Gamepad* gamepad,
+                           float pitchSensitivity,
+                           float yawSensitivity,
+                           float deadzone,
+                           float dt,
+                           bool gravityFlipped = false,
+                           bool swapSticks = false)
 {
     if (!gamepadConnected(gamepad))
         return;
 
-    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+    JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
+
+    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x), deadzone);
+    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.y), deadzone);
 
     if (rx == 0.0f && ry == 0.0f)
         return;
@@ -347,12 +397,12 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
         // Sign convention matches runMouseLook: stick-right (positive rx)
         // should look right, which means yaw decreases (see runMouseLook
         // comment for why the negation is correct).
-        snap.yaw -= rx * lookSensitivity * dt;
+        snap.yaw -= rx * yawSensitivity * dt;
         snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
 
         // SDL gamepad Y axis is +down/-up (screen-coord convention) — same as
         // mouse mdy — so adding directly matches mouse-down = pitch+ behaviour.
-        snap.pitch = std::clamp(snap.pitch + ry * lookSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
+        snap.pitch = std::clamp(snap.pitch + ry * pitchSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
     });
 }
 
@@ -369,16 +419,24 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
 /// @param registry        The ECS registry.
 /// @param gamepad          Open gamepad, or nullptr to no-op.
 /// @param bindings         Controller bindings to sample.
+/// @param deadzone         Stick deadzone as a fraction of full deflection.
 /// @param gravityFlipped   When true, left/right stick are swapped to match
 ///                         the 180° camera roll.
-inline void
-runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings, bool gravityFlipped = false)
+/// @param swapSticks       When true, use the right stick for movement instead of the left stick.
+inline void runGamepadMovement(Registry& registry,
+                               SDL_Gamepad* gamepad,
+                               const InputBindings& bindings,
+                               float deadzone,
+                               bool gravityFlipped = false,
+                               bool swapSticks = false)
 {
     if (!gamepadConnected(gamepad))
         return;
 
-    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
+    JoystickAxis moveAxis = getMoveJoystickAxes(swapSticks);
+
+    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.x), deadzone);
+    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.y), deadzone);
 
     // Movement booleans are derived from a stronger threshold than the deadzone
     // so a player resting their thumb on the stick doesn't drift-walk.  0.3 is
@@ -452,6 +510,9 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
 }
 
 /// @brief Sample controller skip-respawn input while the local player is dead.
+/// @param registry  The ECS registry.
+/// @param gamepad   Open gamepad, or nullptr to no-op.
+/// @param bindings  Controller bindings to sample.
 inline void runGamepadDeadInput(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings)
 {
     if (!gamepadConnected(gamepad))

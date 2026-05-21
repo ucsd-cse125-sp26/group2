@@ -74,6 +74,13 @@ private:
     float draftMouseSensitivity = 0.0007f;                   ///< Editable mouse-sensitivity draft.
     float draftHorizontalFovDegrees = 90.0f;                 ///< Editable horizontal-FOV draft.
     bool draftShowControllerBindings = false;                ///< Editable binding device selector.
+    float draftGamepadYawSensitivity = 6.0f;                 ///< Editable gamepad yaw-sensitivity draft.
+    float draftGamepadPitchSensitivity = 6.0f;               ///< Editable gamepad pitch-sensitivity draft.
+    float draftGamepadLookDeadzone = 0.0f;                   ///< Editable gamepad look-stick deadzone draft.
+    float draftGamepadMoveDeadzone = 0.0f;                   ///< Editable gamepad move-stick deadzone draft.
+    bool draftAimAssistEnabled = true;                       ///< Editable aim-assist enabled draft.
+    float draftAimAssistStrength = 1.0f;                     ///< Editable aim-assist strength draft.
+    bool draftGamepadSwapSticks = false;                     ///< Editable southpaw stick-layout draft.
     bool dirty = false;                                      ///< True when draft settings differ from live settings.
     std::optional<ListeningBinding> listeningBinding;        ///< Binding slot waiting for the next input.
     std::string statusMessage;                               ///< Save status shown in the settings page.

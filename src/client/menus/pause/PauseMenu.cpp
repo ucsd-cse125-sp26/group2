@@ -11,6 +11,14 @@ constexpr float k_minMouseSensitivity = 0.0001f;
 constexpr float k_maxMouseSensitivity = 0.005f;
 constexpr float k_minFovDegrees = 50.0f;
 constexpr float k_maxFovDegrees = 120.0f;
+constexpr float k_minGamepadSensitivity = 1.0f;
+constexpr float k_maxGamepadSensitivity = 10.0f;
+constexpr float k_minGamepadLookDeadzone = 0.0f;
+constexpr float k_maxGamepadLookDeadzone = 0.4f;
+constexpr float k_minGamepadMoveDeadzone = 0.0f;
+constexpr float k_maxGamepadMoveDeadzone = 0.5f;
+constexpr float k_minAimAssistStrength = 0.0f;
+constexpr float k_maxAimAssistStrength = 1.0f;
 
 MouseButton mouseButtonFromSdl(uint8_t button)
 {
@@ -119,6 +127,13 @@ void PauseMenu::openSettings(const UserSettings& settings)
     draftMouseSensitivity = settings.mouseSensitivity;
     draftHorizontalFovDegrees = settings.horizontalFovDegrees;
     draftShowControllerBindings = settings.showControllerBindings;
+    draftGamepadYawSensitivity = settings.gamepadYawSensitivity;
+    draftGamepadPitchSensitivity = settings.gamepadPitchSensitivity;
+    draftGamepadLookDeadzone = settings.gamepadLookDeadzone;
+    draftGamepadMoveDeadzone = settings.gamepadMoveDeadzone;
+    draftAimAssistEnabled = settings.aimAssistEnabled;
+    draftAimAssistStrength = settings.aimAssistStrength;
+    draftGamepadSwapSticks = settings.gamepadSwapSticks;
     dirty = false;
     listeningBinding.reset();
     statusMessage.clear();
@@ -281,6 +296,73 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             if (draftHorizontalFovDegrees != previousFov)
                 dirty = true;
 
+            ImGui::Spacing();
+            ImGui::SeparatorText("Controller");
+
+            const float previousGamepadYawSensitivity = draftGamepadYawSensitivity;
+            ImGui::SliderFloat("Horizontal Look Sensitivity",
+                               &draftGamepadYawSensitivity,
+                               k_minGamepadSensitivity,
+                               k_maxGamepadSensitivity,
+                               "%.1f rad/s");
+            draftGamepadYawSensitivity =
+                std::clamp(draftGamepadYawSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity);
+            if (draftGamepadYawSensitivity != previousGamepadYawSensitivity)
+                dirty = true;
+
+            const float previousGamepadPitchSensitivity = draftGamepadPitchSensitivity;
+            ImGui::SliderFloat("Vertical Look Sensitivity",
+                               &draftGamepadPitchSensitivity,
+                               k_minGamepadSensitivity,
+                               k_maxGamepadSensitivity,
+                               "%.1f rad/s");
+            draftGamepadPitchSensitivity =
+                std::clamp(draftGamepadPitchSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity);
+            if (draftGamepadPitchSensitivity != previousGamepadPitchSensitivity)
+                dirty = true;
+
+            const float previousGamepadLookDeadzone = draftGamepadLookDeadzone;
+            ImGui::SliderFloat("Right Stick Deadzone",
+                               &draftGamepadLookDeadzone,
+                               k_minGamepadLookDeadzone,
+                               k_maxGamepadLookDeadzone,
+                               "%.2f");
+            draftGamepadLookDeadzone =
+                std::clamp(draftGamepadLookDeadzone, k_minGamepadLookDeadzone, k_maxGamepadLookDeadzone);
+            if (draftGamepadLookDeadzone != previousGamepadLookDeadzone)
+                dirty = true;
+
+            const float previousGamepadMoveDeadzone = draftGamepadMoveDeadzone;
+            ImGui::SliderFloat("Left Stick Deadzone",
+                               &draftGamepadMoveDeadzone,
+                               k_minGamepadMoveDeadzone,
+                               k_maxGamepadMoveDeadzone,
+                               "%.2f");
+            draftGamepadMoveDeadzone =
+                std::clamp(draftGamepadMoveDeadzone, k_minGamepadMoveDeadzone, k_maxGamepadMoveDeadzone);
+            if (draftGamepadMoveDeadzone != previousGamepadMoveDeadzone)
+                dirty = true;
+
+            const bool previousGamepadSwapSticks = draftGamepadSwapSticks;
+            ImGui::Checkbox("Swap Sticks (southpaw)", &draftGamepadSwapSticks);
+            if (draftGamepadSwapSticks != previousGamepadSwapSticks)
+                dirty = true;
+
+            const bool previousAimAssistEnabled = draftAimAssistEnabled;
+            ImGui::Checkbox("Aim Assist", &draftAimAssistEnabled);
+            if (draftAimAssistEnabled != previousAimAssistEnabled)
+                dirty = true;
+
+            const float previousAimAssistStrength = draftAimAssistStrength;
+            ImGui::BeginDisabled(!draftAimAssistEnabled);
+            ImGui::SliderFloat(
+                "Aim Assist Strength", &draftAimAssistStrength, k_minAimAssistStrength, k_maxAimAssistStrength, "%.2f");
+            ImGui::EndDisabled();
+            draftAimAssistStrength = std::clamp(draftAimAssistStrength, k_minAimAssistStrength, k_maxAimAssistStrength);
+            if (draftAimAssistStrength != previousAimAssistStrength)
+                dirty = true;
+
+            ImGui::Spacing();
             const bool previousShowControllerBindings = draftShowControllerBindings;
             ImGui::Checkbox("Controller Bindings", &draftShowControllerBindings);
             if (draftShowControllerBindings != previousShowControllerBindings) {
@@ -333,10 +415,18 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
 
             ImGui::Spacing();
             if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f})) {
-                draftBindings = InputBindings::defaults();
-                draftMouseSensitivity = 0.0007f;
-                draftHorizontalFovDegrees = 90.0f;
-                draftShowControllerBindings = false;
+                const UserSettings defaults;
+                draftBindings = defaults.inputBindings;
+                draftMouseSensitivity = defaults.mouseSensitivity;
+                draftHorizontalFovDegrees = defaults.horizontalFovDegrees;
+                draftShowControllerBindings = defaults.showControllerBindings;
+                draftGamepadYawSensitivity = defaults.gamepadYawSensitivity;
+                draftGamepadPitchSensitivity = defaults.gamepadPitchSensitivity;
+                draftGamepadLookDeadzone = defaults.gamepadLookDeadzone;
+                draftGamepadMoveDeadzone = defaults.gamepadMoveDeadzone;
+                draftAimAssistEnabled = defaults.aimAssistEnabled;
+                draftAimAssistStrength = defaults.aimAssistStrength;
+                draftGamepadSwapSticks = defaults.gamepadSwapSticks;
                 listeningBinding.reset();
                 dirty = true;
                 statusMessage.clear();
@@ -348,6 +438,13 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 settings.mouseSensitivity = draftMouseSensitivity;
                 settings.horizontalFovDegrees = draftHorizontalFovDegrees;
                 settings.showControllerBindings = draftShowControllerBindings;
+                settings.gamepadYawSensitivity = draftGamepadYawSensitivity;
+                settings.gamepadPitchSensitivity = draftGamepadPitchSensitivity;
+                settings.gamepadLookDeadzone = draftGamepadLookDeadzone;
+                settings.gamepadMoveDeadzone = draftGamepadMoveDeadzone;
+                settings.aimAssistEnabled = draftAimAssistEnabled;
+                settings.aimAssistStrength = draftAimAssistStrength;
+                settings.gamepadSwapSticks = draftGamepadSwapSticks;
                 const bool saved = user_settings::save(std::string(settingsPath), settings);
                 statusMessage = saved ? "Settings saved." : "Settings could not be saved.";
                 dirty = false;
@@ -384,6 +481,13 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             draftMouseSensitivity = settings.mouseSensitivity;
             draftHorizontalFovDegrees = settings.horizontalFovDegrees;
             draftShowControllerBindings = settings.showControllerBindings;
+            draftGamepadYawSensitivity = settings.gamepadYawSensitivity;
+            draftGamepadPitchSensitivity = settings.gamepadPitchSensitivity;
+            draftGamepadLookDeadzone = settings.gamepadLookDeadzone;
+            draftGamepadMoveDeadzone = settings.gamepadMoveDeadzone;
+            draftAimAssistEnabled = settings.aimAssistEnabled;
+            draftAimAssistStrength = settings.aimAssistStrength;
+            draftGamepadSwapSticks = settings.gamepadSwapSticks;
             closeSettingsPage();
             break;
         case PendingConfirm::None:

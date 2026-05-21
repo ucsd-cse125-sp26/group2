@@ -118,6 +118,8 @@ public:
 
     /// @brief Reset Renderable visibility for players transitioning through respawn.
     void refreshRemoteRespawnRenderables();
+
+    /// @brief Assign or update Renderable components for replicated powerup entities.
     void refreshRemotePowerupRenderables();
 
     /// @brief Assign Renderable components to dropped-weapon entities (mirrors spawner visuals).
@@ -130,11 +132,23 @@ private:
         std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
     /// @brief Emplace player-control components onto the mapped local entity and record it.
     void handleLocalPlayerReady(entt::entity local);
+
+    /// @brief Enter chat input mode and release normal gameplay input capture.
     void openChat();
+
+    /// @brief Leave chat input mode and restore normal gameplay input capture.
     void closeChat();
+
+    /// @brief Send the current chat draft to the server and close the chat box.
     void submitChat();
+
+    /// @brief Queue a replicated chat message for HUD display.
     void appendChatMessage(ClientId sender, std::string_view message);
+
+    /// @brief Queue a locally-authored chat echo while waiting for server replication.
     void appendLocalChatMessage(std::string_view message);
+
+    /// @brief Clear held gameplay actions so typing chat cannot leak into movement or weapons.
     void clearGameplayInputForChat();
 
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
