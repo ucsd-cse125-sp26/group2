@@ -193,13 +193,7 @@ std::vector<uint8_t> frameMessage(const void* data, uint32_t len)
 bool Client::send(const void* data, uint32_t len)
 {
     if (usingUdpSession_) {
-        const bool ok =
-            session_.send(connectionId_, net::ChannelId::ControlReliableOrdered, data, static_cast<int>(len));
-        if (ok) {
-            stats.bytesSentTotal += len + sizeof(net::PacketHeader);
-            bytesSentWindow += len + sizeof(net::PacketHeader);
-        }
-        return ok;
+        return session_.send(connectionId_, net::ChannelId::ControlReliableOrdered, data, static_cast<int>(len));
     }
 
     // Frame outside the lock; lock briefly to push into the outbound queue.
