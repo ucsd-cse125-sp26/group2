@@ -297,17 +297,17 @@ inline constexpr float k_triggerThreshold = 0.5f;
 ///
 /// Applies a radial deadzone and rescales so the live range is still [-1, 1]
 /// (otherwise full stick deflection would only feel like ~0.85 of the range).
-inline float normaliseAxis(Sint16 raw)
+inline float normaliseAxis(Sint16 raw, float deadzone = k_stickDeadzone)
 {
     // SDL_Gamepad axes are int16; normalise to [-1, 1].  -32768 is one larger
     // in magnitude than 32767 — divide by 32767 and clamp to keep the range
     // symmetric (otherwise full-down on a stick reads as -1.0000305...).
     const float v = std::clamp(static_cast<float>(raw) / 32767.0f, -1.0f, 1.0f);
-    if (std::fabs(v) < k_stickDeadzone)
+    if (std::fabs(v) < deadzone)
         return 0.0f;
     // Rescale [deadzone, 1] → [0, 1] so the user gets the full output range.
     const float sign = v < 0.0f ? -1.0f : 1.0f;
-    return sign * (std::fabs(v) - k_stickDeadzone) / (1.0f - k_stickDeadzone);
+    return sign * (std::fabs(v) - deadzone) / (1.0f - deadzone);
 }
 
 } // namespace gamepad
@@ -326,8 +326,12 @@ inline float normaliseAxis(Sint16 raw)
 /// @param lookSensitivity   Radians per second at full stick deflection.
 /// @param dt                Frame delta time in seconds.
 /// @param gravityFlipped    When true, both axes are inverted for 180° camera roll.
-inline void
-runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, float dt, bool gravityFlipped = false)
+inline void runGamepadLook(Registry& registry,
+                           SDL_Gamepad* gamepad,
+                           float pitchSensitivity,
+                           float yawSensitivity,
+                           float dt,
+                           bool gravityFlipped = false)
 {
     if (!gamepadConnected(gamepad))
         return;
@@ -347,12 +351,12 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
         // Sign convention matches runMouseLook: stick-right (positive rx)
         // should look right, which means yaw decreases (see runMouseLook
         // comment for why the negation is correct).
-        snap.yaw -= rx * lookSensitivity * dt;
+        snap.yaw -= rx * yawSensitivity * dt;
         snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
 
         // SDL gamepad Y axis is +down/-up (screen-coord convention) — same as
         // mouse mdy — so adding directly matches mouse-down = pitch+ behaviour.
-        snap.pitch = std::clamp(snap.pitch + ry * lookSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
+        snap.pitch = std::clamp(snap.pitch + ry * pitchSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
     });
 }
 

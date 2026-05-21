@@ -18,6 +18,10 @@ constexpr float k_minMouseSensitivity = 0.0001f;
 constexpr float k_maxMouseSensitivity = 0.0050f;
 constexpr float k_minFovDegrees = 70.0f;
 constexpr float k_maxFovDegrees = 120.0f;
+constexpr float k_minGamepadSensitivity = 1.0f;
+constexpr float k_maxGamepadSensitivity = 10.0f;
+constexpr float k_minStrength = 0.0f;
+constexpr float k_maxStrength = 1.0f;
 
 std::string altKey(std::string_view key)
 {
@@ -64,6 +68,27 @@ UserSettings load(const std::string& path)
     }
     if (auto v = input["show-controller-bindings"].value<bool>()) {
         settings.showControllerBindings = *v;
+    }
+    if (auto v = input["gamepad-yaw-sensitivity"].value<float>()) {
+        settings.gamepadYawSensitivity = std::clamp(*v, k_minGamepadSensitivity, k_maxGamepadSensitivity);
+    }
+    if (auto v = input["gamepad-pitch-sensitivity"].value<float>()) {
+        settings.gamepadPitchSensitivity = std::clamp(*v, k_minGamepadSensitivity, k_maxGamepadSensitivity);
+    }
+    if (auto v = input["gamepad-look-deadzone"].value<float>()) {
+        settings.gamepadLookDeadzone = std::clamp(*v, k_minStrength, k_maxStrength);
+    }
+    if (auto v = input["gamepad-move-deadzone"].value<float>()) {
+        settings.gamepadMoveDeadzone = std::clamp(*v, k_minStrength, k_maxStrength);
+    }
+    if (auto v = input["aim-assist-enabled"].value<bool>()) {
+        settings.aimAssistEnabled = *v;
+    }
+    if (auto v = input["aim-assist-strength"].value<float>()) {
+        settings.aimAssistStrength = std::clamp(*v, k_minStrength, k_maxStrength);
+    }
+    if (auto v = input["gamepad-swap-sticks"].value<bool>()) {
+        settings.gamepadSwapSticks = *v;
     }
 
     auto loadBindingTable = [&](const auto table, BindingDevice device) {
@@ -112,6 +137,15 @@ bool save(const std::string& path, const UserSettings& settings)
     out << "horizontal-fov-degrees = " << std::clamp(settings.horizontalFovDegrees, k_minFovDegrees, k_maxFovDegrees)
         << "\n";
     out << "show-controller-bindings = " << (settings.showControllerBindings ? "true" : "false") << "\n";
+    out << "gamepad-yaw-sensitivity = "
+        << std::clamp(settings.gamepadYawSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity) << "\n";
+    out << "gamepad-pitch-sensitivity = "
+        << std::clamp(settings.gamepadPitchSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity) << "\n";
+    out << "gamepad-look-deadzone = " << std::clamp(settings.gamepadLookDeadzone, k_minStrength, k_maxStrength) << "\n";
+    out << "gamepad-move-deadzone = " << std::clamp(settings.gamepadMoveDeadzone, k_minStrength, k_maxStrength) << "\n";
+    out << "aim-assist-enabled = " << (settings.aimAssistEnabled ? "true" : "false") << "\n";
+    out << "aim-assist-strength = " << std::clamp(settings.aimAssistStrength, k_minStrength, k_maxStrength) << "\n";
+    out << "gamepad-swap-sticks = " << (settings.gamepadSwapSticks ? "true" : "false") << "\n";
 
     out << "\n[input.keyboard]\n";
     for (Action action : InputBindings::actions()) {

@@ -220,7 +220,8 @@ inline void runGamepadAimAssist(Registry& registry,
                                 SDL_Gamepad* gamepad,
                                 const GamepadAimAssistConfig& cfg,
                                 GamepadAimAssistState& state,
-                                float lookSens,
+                                float pitchSensitivity,
+                                float yawSensitivity,
                                 float dt)
 {
     if (!gamepadConnected(gamepad) || !cfg.enabled) {
@@ -424,8 +425,8 @@ inline void runGamepadAimAssist(Registry& registry,
             effectiveSlowdown = std::clamp(effectiveSlowdown, 0.0f, 1.0f);
 
             const float refund = (1.0f - effectiveSlowdown) * strength;
-            snap.yaw += rx * lookSens * dt * refund;
-            snap.pitch -= ry * lookSens * dt * refund;
+            snap.yaw += rx * yawSensitivity * dt * refund;
+            snap.pitch -= ry * pitchSensitivity * dt * refund;
         }
 
         // ── 2. Movement-tracking rotational pull.
