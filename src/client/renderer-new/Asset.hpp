@@ -100,6 +100,8 @@ struct Model
 {
     std::vector<ModelNode> modelNodes_;
     std::vector<ModelElement> modelElements_;
+    bool hasMuzzle = false;
+    glm::vec3 muzzleLocalPos{};
 };
 
 struct ModelInstance

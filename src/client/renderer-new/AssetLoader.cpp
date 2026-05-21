@@ -138,6 +138,9 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     std::stack<uint32_t> nodeTraversalStack;
     nodeTraversalStack.push(0); // Note: if clang gives an error under push, that is a clang bug
 
+    std::stack<glm::mat4> transformStack;
+    transformStack.push(glm::mat4(1.0f));
+
     Asset::ModelNode modelRootNode;
     newModel.modelNodes_.push_back(modelRootNode);
 
@@ -157,14 +160,31 @@ bool AssetLoader::loadModel(const ModelIdInt id,
             continue;
         }
 
+        glm::mat4 parentTransform = transformStack.top();
+        transformStack.pop();
+
+        glm::mat4 localTransform = glmFromAiTransform(currentNode.mTransformation);
+        glm::mat4 nodeModelTransform = parentTransform * localTransform;
+
+        if (hasMetadataKey(currentNode, "is_muzzle")) {
+            newModel.hasMuzzle = true;
+            newModel.muzzleLocalPos = glm::vec3(nodeModelTransform * glm::vec4(0, 0, 0, 1));
+            SDL_Log("AssetLoader: found muzzle on node '%s' at local pos %.2f %.2f %.2f",
+                    currentNode.mName.C_Str(),
+                    newModel.muzzleLocalPos.x,
+                    newModel.muzzleLocalPos.y,
+                    newModel.muzzleLocalPos.z);
+        }
+        
         Asset::ModelNode& currentModelNode = newModel.modelNodes_[currentModelNodeIndex];
-        currentModelNode.transform_ = glmFromAiTransform(currentNode.mTransformation);
+        currentModelNode.transform_ = localTransform;
         currentModelNode.childIndices_.reserve(currentNode.mNumChildren);
 
         pushAiNodeMeshesToModelElements(assetIdNameSpace, currentNode, sceneAi, id, currentModelNodeIndex);
 
         for (unsigned int i = 0; i < currentNode.mNumChildren; i++) {
             sceneAiDFSStack.push(currentNode.mChildren[i]);
+            transformStack.push(nodeModelTransform);
 
             Asset::ModelNode newNode_i;
             newModel.modelNodes_.push_back(newNode_i);

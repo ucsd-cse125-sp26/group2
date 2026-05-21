@@ -518,4 +518,8 @@ private:
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
 
     PauseMenu pauseMenu; ///< In-game pause menu (opened with ESC, blocks input to the game when active).
+
+    // Bullet tracer muzzle
+    glm::vec3 cachedMuzzleWorld_{0.0f};
+    bool cachedMuzzleValid_ = false;
 };

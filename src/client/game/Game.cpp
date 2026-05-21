@@ -801,6 +801,9 @@ bool Game::init(AppContext& ctx)
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const float cs = cachedGravFlipped_ ? -1.0f : 1.0f;
             evtOrigin = cachedEye_ + right * (cs * 15.f) - glm::vec3{0, 1, 0} * (cs * 8.f) + cachedCamFwd_ * 5.f;
+            if (cachedMuzzleValid_) {
+                evtOrigin = cachedMuzzleWorld_;
+            }
         }
 
         switch (evt.effectType) {
@@ -1317,8 +1320,11 @@ SDL_AppResult Game::event(SDL_Event* event)
             // Energy beam — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const float ts = cachedGravFlipped_ ? -1.0f : 1.0f;
-            const glm::vec3 hip =
+            glm::vec3 hip =
                 cachedEye_ + right * (ts * 15.f) - glm::vec3{0, 1, 0} * (ts * 8.f) + cachedCamFwd_ * 5.f;
+            if (cachedMuzzleValid_) {
+                hip = cachedMuzzleWorld_;
+            }
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -1337,8 +1343,11 @@ SDL_AppResult Game::event(SDL_Event* event)
             // Bullet tracer — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const float ds = cachedGravFlipped_ ? -1.0f : 1.0f;
-            const glm::vec3 hip =
+            glm::vec3 hip =
                 cachedEye_ + right * (ds * 15.f) - glm::vec3{0, 1, 0} * (ds * 8.f) + cachedCamFwd_ * 5.f;
+            if (cachedMuzzleValid_) {
+                hip = cachedMuzzleWorld_;
+            }
             float dist = 500.f;
             glm::vec3 hitN = -cachedCamFwd_;
             if (cachedCamFwd_.y < -0.001f) {
@@ -2178,8 +2187,11 @@ SDL_AppResult Game::iterate()
                 // offsets so the tracer still originates at screen bottom-right
                 // (where the viewmodel muzzle is).
                 const float hSign = localGravFlipped ? -1.0f : 1.0f;
-                const glm::vec3 hip =
+                glm::vec3 hip =
                     cachedEye_ + right * (hSign * 15.f) - glm::vec3{0, 1, 0} * (hSign * 8.f) + cachedCamFwd_ * 5.f;
+                if (cachedMuzzleValid_) {
+                    hip = cachedMuzzleWorld_;
+                }
 
                 // Raycast world geometry for tracer endpoint.  Impact effects
                 // (sparks / blood / bullet holes) are NOT spawned here — they
@@ -3430,6 +3442,24 @@ SDL_AppResult Game::iterate()
             weaponWorld = glm::scale(weaponWorld, glm::vec3(-vmScale, vmScale, vmScale));
 
             vm.transform = weaponWorld;
+
+            cachedMuzzleValid_ = false;
+
+            if (currentWeaponModelIdx >= 0 &&
+                static_cast<size_t>(currentWeaponModelIdx) < Asset::modelInstances_.size())
+            {
+                const ModelIdInt modelId = Asset::modelInstances_[currentWeaponModelIdx].modelId_;
+
+                if (Asset::models_.contains(modelId)) {
+                    const Asset::Model& model = Asset::models_.at(modelId);
+
+                    if (model.hasMuzzle) {
+                        cachedMuzzleWorld_ =
+                            glm::vec3(weaponWorld * glm::vec4(model.muzzleLocalPos, 1.0f));
+                        cachedMuzzleValid_ = true;
+                    }
+                }
+            }
         }
         renderer->setWeaponViewmodel(vm);
     }
