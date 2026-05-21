@@ -117,7 +117,7 @@ void PauseMenu::openSettings(const UserSettings& settings)
     settingsOpen = true;
     draftBindings = settings.inputBindings;
     draftMouseSensitivity = settings.mouseSensitivity;
-    draftFovDegrees = settings.fovDegrees;
+    draftHorizontalFovDegrees = settings.horizontalFovDegrees;
     draftShowControllerBindings = settings.showControllerBindings;
     dirty = false;
     listeningBinding.reset();
@@ -275,10 +275,10 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             if (draftMouseSensitivity != previousSensitivity)
                 dirty = true;
 
-            const float previousFov = draftFovDegrees;
-            ImGui::SliderFloat("FOV", &draftFovDegrees, k_minFovDegrees, k_maxFovDegrees, "%.0f");
-            draftFovDegrees = std::clamp(draftFovDegrees, k_minFovDegrees, k_maxFovDegrees);
-            if (draftFovDegrees != previousFov)
+            const float previousFov = draftHorizontalFovDegrees;
+            ImGui::SliderFloat("Horizontal FOV", &draftHorizontalFovDegrees, k_minFovDegrees, k_maxFovDegrees, "%.0f");
+            draftHorizontalFovDegrees = std::clamp(draftHorizontalFovDegrees, k_minFovDegrees, k_maxFovDegrees);
+            if (draftHorizontalFovDegrees != previousFov)
                 dirty = true;
 
             const bool previousShowControllerBindings = draftShowControllerBindings;
@@ -335,7 +335,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f})) {
                 draftBindings = InputBindings::defaults();
                 draftMouseSensitivity = 0.0007f;
-                draftFovDegrees = 60.0f;
+                draftHorizontalFovDegrees = 90.0f;
                 draftShowControllerBindings = false;
                 listeningBinding.reset();
                 dirty = true;
@@ -346,7 +346,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             if (ImGui::Button("Apply", {halfWidth, 34.0f})) {
                 settings.inputBindings = draftBindings;
                 settings.mouseSensitivity = draftMouseSensitivity;
-                settings.fovDegrees = draftFovDegrees;
+                settings.horizontalFovDegrees = draftHorizontalFovDegrees;
                 settings.showControllerBindings = draftShowControllerBindings;
                 const bool saved = user_settings::save(std::string(settingsPath), settings);
                 statusMessage = saved ? "Settings saved." : "Settings could not be saved.";
@@ -382,7 +382,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
         case PendingConfirm::DiscardSettings:
             draftBindings = settings.inputBindings;
             draftMouseSensitivity = settings.mouseSensitivity;
-            draftFovDegrees = settings.fovDegrees;
+            draftHorizontalFovDegrees = settings.horizontalFovDegrees;
             draftShowControllerBindings = settings.showControllerBindings;
             closeSettingsPage();
             break;

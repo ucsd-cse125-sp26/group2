@@ -98,7 +98,7 @@ bool testSettingsPersistence()
 
     UserSettings settings;
     settings.mouseSensitivity = 0.0015f;
-    settings.fovDegrees = 103.0f;
+    settings.horizontalFovDegrees = 103.0f;
     settings.showControllerBindings = true;
     settings.inputBindings.rebind(
         Action::Ability2, Binding::bindKeyboard(SDL_SCANCODE_Q), BindingDevice::KeyboardMouse, 1);
@@ -108,7 +108,7 @@ bool testSettingsPersistence()
     bool ok = expect(user_settings::save(path.string(), settings), "settings save should succeed");
     const UserSettings loaded = user_settings::load(path.string());
     ok &= expect(loaded.mouseSensitivity == settings.mouseSensitivity, "mouse sensitivity should round-trip");
-    ok &= expect(loaded.fovDegrees == settings.fovDegrees, "fov should round-trip");
+    ok &= expect(loaded.horizontalFovDegrees == settings.horizontalFovDegrees, "horizontal fov should round-trip");
     ok &= expect(loaded.showControllerBindings, "controller binding view flag should round-trip");
     ok &= expect(loaded.inputBindings.get(Action::Ability2, BindingDevice::KeyboardMouse, 1).key == SDL_SCANCODE_Q,
                  "keyboard alternate binding should round-trip");

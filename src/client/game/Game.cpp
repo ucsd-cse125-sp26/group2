@@ -251,6 +251,13 @@ void centerMouseInWindow(SDL_Window* window)
     SDL_GetWindowSize(window, &winW, &winH);
     SDL_WarpMouseInWindow(window, static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f);
 }
+
+float verticalFovRadiansFromHorizontal(float horizontalFovDegrees, float aspect)
+{
+    const float safeAspect = aspect > 0.0f ? aspect : 1.0f;
+    const float horizontalRadians = glm::radians(horizontalFovDegrees);
+    return 2.0f * std::atan(std::tan(horizontalRadians * 0.5f) / safeAspect);
+}
 } // namespace
 
 bool Game::initDebugUI(const AppContext& ctx)
@@ -316,8 +323,8 @@ bool Game::init(AppContext& ctx)
     userSettings = &ctx.userSettings;
     userSettingsPath_ = ctx.userSettingsPath;
     mouseSensitivity = userSettings->mouseSensitivity;
-    fovDegrees = userSettings->fovDegrees;
-    renderer->mainFovDegrees = fovDegrees;
+    horizontalFovDegrees = userSettings->horizontalFovDegrees;
+    renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
 
     if (const auto latestMatchState = client->getLatestMatchState()) {
         currentMatchPhase = latestMatchState->phase;
@@ -3016,8 +3023,11 @@ SDL_AppResult Game::iterate()
         const float cosPitch = std::cos(renderPitch);
         const glm::vec3 fwd{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
         const glm::mat4 view = glm::lookAt(renderEye, renderEye + fwd, glm::vec3{0, 1, 0});
-        const glm::mat4 proj =
-            glm::perspective(glm::radians(fovDegrees), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+        const glm::mat4 proj = glm::perspective(
+            verticalFovRadiansFromHorizontal(horizontalFovDegrees, (winHf > 0.0f) ? winWf / winHf : 1.0f),
+            (winHf > 0.0f) ? winWf / winHf : 1.0f,
+            5.0f,
+            15000.0f);
         const glm::mat4 vp = proj * view;
 
         const auto toScreen = [&](glm::vec3 p) -> glm::vec2 {
@@ -3133,8 +3143,11 @@ SDL_AppResult Game::iterate()
             const float winWf = static_cast<float>(winW);
             const float winHf = static_cast<float>(winH);
             const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
-            const glm::mat4 hbProj =
-                glm::perspective(glm::radians(fovDegrees), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+            const glm::mat4 hbProj = glm::perspective(
+                verticalFovRadiansFromHorizontal(horizontalFovDegrees, (winHf > 0.0f) ? winWf / winHf : 1.0f),
+                (winHf > 0.0f) ? winWf / winHf : 1.0f,
+                5.0f,
+                15000.0f);
             const glm::mat4 hbVP = hbProj * hbView;
             debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
@@ -3903,8 +3916,8 @@ SDL_AppResult Game::iterate()
     const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
     if (pauseResult.settingsApplied) {
         mouseSensitivity = userSettings->mouseSensitivity;
-        fovDegrees = userSettings->fovDegrees;
-        renderer->mainFovDegrees = fovDegrees;
+        horizontalFovDegrees = userSettings->horizontalFovDegrees;
+        renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
         clearGameplayInputForChat();
     }
     if (pauseResult.resumeGame) {
@@ -3941,7 +3954,7 @@ SDL_AppResult Game::iterate()
             currentCameraRoll_ = 0.0f;
     }
     phaseSnap(phaseStats.imgui);
-    renderer->mainFovDegrees = fovDegrees;
+    renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
     renderer->drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
     phaseSnap(phaseStats.drawFrame);
 
@@ -3993,7 +4006,7 @@ void Game::quit()
 {
     if (userSettings) {
         userSettings->mouseSensitivity = mouseSensitivity;
-        userSettings->fovDegrees = fovDegrees;
+        userSettings->horizontalFovDegrees = horizontalFovDegrees;
     }
     closeChat();
     if (recorder.isRecording())

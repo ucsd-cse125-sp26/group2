@@ -16,7 +16,7 @@ namespace
 {
 constexpr float k_minMouseSensitivity = 0.0001f;
 constexpr float k_maxMouseSensitivity = 0.0050f;
-constexpr float k_minFovDegrees = 50.0f;
+constexpr float k_minFovDegrees = 70.0f;
 constexpr float k_maxFovDegrees = 120.0f;
 
 std::string altKey(std::string_view key)
@@ -59,8 +59,8 @@ UserSettings load(const std::string& path)
     if (auto v = input["mouse-sensitivity"].value<float>()) {
         settings.mouseSensitivity = std::clamp(*v, k_minMouseSensitivity, k_maxMouseSensitivity);
     }
-    if (auto v = input["fov-degrees"].value<float>()) {
-        settings.fovDegrees = std::clamp(*v, k_minFovDegrees, k_maxFovDegrees);
+    if (auto v = input["horizontal-fov-degrees"].value<float>()) {
+        settings.horizontalFovDegrees = std::clamp(*v, k_minFovDegrees, k_maxFovDegrees);
     }
     if (auto v = input["show-controller-bindings"].value<bool>()) {
         settings.showControllerBindings = *v;
@@ -109,7 +109,8 @@ bool save(const std::string& path, const UserSettings& settings)
     out << "[input]\n";
     out << "mouse-sensitivity = " << std::clamp(settings.mouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity)
         << "\n";
-    out << "fov-degrees = " << std::clamp(settings.fovDegrees, k_minFovDegrees, k_maxFovDegrees) << "\n";
+    out << "horizontal-fov-degrees = " << std::clamp(settings.horizontalFovDegrees, k_minFovDegrees, k_maxFovDegrees)
+        << "\n";
     out << "show-controller-bindings = " << (settings.showControllerBindings ? "true" : "false") << "\n";
 
     out << "\n[input.keyboard]\n";

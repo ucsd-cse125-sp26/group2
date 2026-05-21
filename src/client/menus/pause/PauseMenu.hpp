@@ -72,7 +72,7 @@ private:
     bool settingsOpen = false;                               ///< True when the settings page is active.
     InputBindings draftBindings = InputBindings::defaults(); ///< Editable binding draft.
     float draftMouseSensitivity = 0.0007f;                   ///< Editable mouse-sensitivity draft.
-    float draftFovDegrees = 60.0f;                           ///< Editable FOV draft.
+    float draftHorizontalFovDegrees = 90.0f;                 ///< Editable horizontal-FOV draft.
     bool draftShowControllerBindings = false;                ///< Editable binding device selector.
     bool dirty = false;                                      ///< True when draft settings differ from live settings.
     std::optional<ListeningBinding> listeningBinding;        ///< Binding slot waiting for the next input.
