@@ -284,6 +284,7 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawEntityModels(geometryPass, cmd);
 
     drawSkinnedModels(geometryPass, cmd);
+    drawParticles(geometryPass, cmd);
 
     // drawWeapon(geometryPass, cmd);
 
@@ -305,7 +306,6 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
 
     drawWeapon(geometryPass, cmd);
-    drawParticles(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 }
