@@ -347,6 +347,7 @@ bool Game::init(AppContext& ctx)
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
         // TODO(renderer-migration): renderer->setParticleSystem(&particleSystem);
+        renderer->setParticleSystem(&particleSystem);
 
         // Wire dispatcher events to particle system.
         // NOTE: WeaponFiredEvent is NOT wired here — local weapon VFX (tracers,
@@ -407,6 +408,7 @@ bool Game::init(AppContext& ctx)
         assets_.setModelIndex(mapId, mapModelIdx);
         if (mapModelIdx >= 0) {
             // TODO(renderer-migration): renderer->setModelScenePass(mapModelIdx, true);
+            renderer->setModelScenePass(mapModelIdx, true);
             SDL_Log("[client] map visual loaded (model index %d, exclude='%s')", mapModelIdx, visualExclude.c_str());
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
@@ -430,6 +432,7 @@ bool Game::init(AppContext& ctx)
             assets_.setModelIndex(id, modelIdx);
             if (modelIdx >= 0) {
                 // TODO(renderer-migration): renderer->setModelScenePass(modelIdx, true);
+                renderer->setModelScenePass(modelIdx, true);
             }
 
             // Load collision at the same position/scale.
@@ -505,6 +508,10 @@ bool Game::init(AppContext& ctx)
     });
 
     client->onRawParticleEvent([this](const NetParticleEvent& rawEvt) {
+        SDL_Log("raw particle effect=%d source=%d",
+            static_cast<int>(rawEvt.effectType),
+            static_cast<int>(entt::to_integral(rawEvt.source)));
+
         if (!snapshotLoader_ || !mappedLocalPlayerEntity_)
             return;
 
@@ -553,6 +560,8 @@ bool Game::init(AppContext& ctx)
         //     (sparks, blood, bullet holes) come from server so player hits
         //     always get the correct surface type and normal.
         if (evt.source == localPlayer) {
+            SDL_Log("particle event from local player effect=%d", static_cast<int>(evt.effectType));
+            
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
             const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
                                                evt.effectType == ParticleEffectType::Smoke ||
@@ -4079,6 +4088,7 @@ void Game::quit()
     hud_.quit();
     if (renderer) {
         // TODO(renderer-migration): renderer->setParticleSystem(nullptr);
+        renderer->setParticleSystem(nullptr);
         renderer->setHudTexture(nullptr);
     }
     if (client) {

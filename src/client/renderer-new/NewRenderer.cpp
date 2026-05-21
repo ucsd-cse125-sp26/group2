@@ -11,6 +11,7 @@
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
 #include "Boilerplate.hpp"
+#include "particles/ParticleSystem.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <cmath>
@@ -268,6 +269,9 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
 
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
+    if (particleSystem_)
+        particleSystem_->uploadToGpu(cmd); //Must be before render pass
+
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
@@ -301,8 +305,36 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
 
     drawWeapon(geometryPass, cmd);
+    drawParticles(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
+}
+
+void NewRenderer::drawParticles(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd) const
+{
+    //if (toggles.particles && particleSystem) {
+    if (particleSystem_) {
+        struct alignas(16) ParticleUniforms
+        {
+            glm::mat4 view;
+            glm::mat4 proj;
+            glm::vec3 camPos;
+            float _p0;
+            glm::vec3 camRight;
+            float _p1;
+            glm::vec3 camUp;
+            float _p2;
+        };
+        ParticleUniforms pu{};
+        pu.view = camera_.getViewMatrix();
+        pu.proj = camera_.getProjectionMatrix();
+        pu.camPos = camera_.getEye();
+        pu.camRight = camera_.getRight();
+        pu.camUp = camera_.getUp();
+        SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+        particleSystem_->setScreenSize(static_cast<float>(depthWidth_), static_cast<float>(depthHeight_));
+        particleSystem_->render(renderPass, cmd);
+    }
 }
 
 void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
