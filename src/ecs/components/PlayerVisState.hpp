@@ -47,6 +47,8 @@ struct PlayerVisState
     bool grounded{false};        ///< True when touching a floor surface this tick.
     bool crouching{false};       ///< True when crouch input is held.
     bool sprinting{false};       ///< True when sprint is active.
+    bool ads{false};             ///< True when ADS-ing a precision (charge) weapon — caps wish speed
+                                 ///< to k_adsSpeed. Derived each tick from input.scoped + equipped weapon.
     bool pendingUncrouch{false}; ///< Deferred uncrouch (e.g. after slidehop); applied when safe.
     bool exitingWall{false};     ///< Brief grace window after leaving a wall.
     bool grappleActive{false};   ///< True while being pulled toward the grapple anchor.

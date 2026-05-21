@@ -78,6 +78,7 @@
 #include <numeric>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 #if defined(__linux__)
 #include <pthread.h>
@@ -770,7 +771,7 @@ bool Game::init(AppContext& ctx)
         //   - Impacts: local prediction only spawns tracers; all impact VFX
         //     (sparks, blood, bullet holes) come from server so player hits
         //     always get the correct surface type and normal.
-        if (evt.source == localPlayer) {            
+        if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
             const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
                                                evt.effectType == ParticleEffectType::Smoke ||
@@ -2509,6 +2510,120 @@ SDL_AppResult Game::iterate()
                     return false;
             return true;
         };
+
+        // Detect movement-state transitions for SFX (landing, slide, abilities, respawn).
+        // Runs over ALL PlayerVisState entities — dead, off-screen, and remote alike —
+        // so a respawn or slide-stop is never missed because the entity was culled.
+        if (sfxSystem.isInitialized()) {
+            std::unordered_set<entt::entity> alive;
+            alive.reserve(playerSfxState_.size() + 4);
+            registry.view<PlayerVisState, Position, Velocity>().each(
+                [&](entt::entity e, const PlayerVisState& vis, const Position& pos, const Velocity& vel) {
+                    alive.insert(e);
+                    const bool isLocal = registry.all_of<LocalPlayer>(e);
+                    const auto* abil = registry.try_get<AbilityState>(e);
+                    PlayerSfxState& tracked = playerSfxState_[e];
+
+                    const audio::AudioObjectId object = audioObjectForEntity(e);
+                    sfxSystem.setAudioObjectTransform(object, pos.value, vel.value);
+                    const auto post = [&](std::string_view eventName, float gain) {
+                        if (isLocal)
+                            sfxSystem.postLocalAudioEvent(eventName, object, gain);
+                        else
+                            sfxSystem.postAudioEvent(eventName, object, gain);
+                    };
+
+                    const int slidingMode = static_cast<int>(MoveMode::Sliding);
+
+                    if (!tracked.initialized) {
+                        tracked.grounded = vis.grounded;
+                        tracked.isDead = vis.isDead;
+                        tracked.moveMode = static_cast<int>(vis.moveMode);
+                        tracked.gravityFlipped = vis.gravityFlipped;
+                        tracked.grappleActive = vis.grappleActive;
+                        if (abil != nullptr) {
+                            tracked.primaryCooldown = abil->primaryCooldown;
+                            tracked.secondaryCooldown = abil->secondaryCooldown;
+                        }
+                        tracked.initialized = true;
+                        return;
+                    }
+
+                    const int newMode = static_cast<int>(vis.moveMode);
+
+                    // Landing: airborne → grounded. Skip dead/respawn-frame and
+                    // slide entry (slide has its own cue).
+                    if (!tracked.grounded && vis.grounded && !tracked.isDead && !vis.isDead && newMode != slidingMode) {
+                        const float vy = std::abs(vel.value.y);
+                        const float gain = std::clamp(0.55f + vy / 1400.0f, 0.55f, 1.0f);
+                        post("player.land", gain);
+                    }
+
+                    // Slide entry / exit: track MoveMode::Sliding edge.
+                    if (tracked.moveMode != slidingMode && newMode == slidingMode) {
+                        if (tracked.slideLoopHandle != SfxSystem::kInvalidSource) {
+                            sfxSystem.stopSource(tracked.slideLoopHandle);
+                            tracked.slideLoopHandle = SfxSystem::kInvalidSource;
+                        }
+                        tracked.slideLoopHandle = sfxSystem.startLoop(SfxId::Slide, !isLocal, pos.value, 0.9f, 1.4f);
+                    } else if (tracked.moveMode == slidingMode && newMode != slidingMode) {
+                        if (tracked.slideLoopHandle != SfxSystem::kInvalidSource) {
+                            sfxSystem.stopSource(tracked.slideLoopHandle);
+                            tracked.slideLoopHandle = SfxSystem::kInvalidSource;
+                        }
+                    } else if (tracked.slideLoopHandle != SfxSystem::kInvalidSource && newMode == slidingMode) {
+                        sfxSystem.updateSource(tracked.slideLoopHandle, pos.value, vel.value, 0.9f);
+                    }
+
+                    // Gravity flip ability: gravityFlipped toggled this frame.
+                    if (tracked.gravityFlipped != vis.gravityFlipped)
+                        post("ability.gravity", 1.0f);
+
+                    // Grapple ability: rising edge of grappleActive.
+                    if (!tracked.grappleActive && vis.grappleActive)
+                        post("ability.grapple", 1.0f);
+
+                    // Ability cooldown rising edge → activation. Grapple is covered
+                    // by the grappleActive edge above, Gravity by the flip edge.
+                    if (abil != nullptr) {
+                        const auto rose = [](float prev, float cur) { return cur > prev + 0.05f; };
+                        if (rose(tracked.primaryCooldown, abil->primaryCooldown) &&
+                            abil->primary == AbilityType::Dash) {
+                            post("ability.dash", 1.0f);
+                        }
+                        if (rose(tracked.secondaryCooldown, abil->secondaryCooldown) &&
+                            abil->secondary == AbilityType::Recall)
+                        {
+                            post("ability.recall", 1.0f);
+                        }
+                    }
+
+                    // Respawn: dead → alive.
+                    if (tracked.isDead && !vis.isDead)
+                        post("player.respawn", 1.0f);
+
+                    tracked.grounded = vis.grounded;
+                    tracked.isDead = vis.isDead;
+                    tracked.moveMode = newMode;
+                    tracked.gravityFlipped = vis.gravityFlipped;
+                    tracked.grappleActive = vis.grappleActive;
+                    if (abil != nullptr) {
+                        tracked.primaryCooldown = abil->primaryCooldown;
+                        tracked.secondaryCooldown = abil->secondaryCooldown;
+                    }
+                });
+
+            // Reap tracking entries for entities that vanished (disconnect / scene change).
+            for (auto it = playerSfxState_.begin(); it != playerSfxState_.end();) {
+                if (alive.count(it->first) == 0) {
+                    if (it->second.slideLoopHandle != SfxSystem::kInvalidSource)
+                        sfxSystem.stopSource(it->second.slideLoopHandle);
+                    it = playerSfxState_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
 
         uint32_t drawSlot = 0;
         registry.view<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>().each(
@@ -4432,6 +4547,15 @@ SDL_AppResult Game::iterate()
     }
     phaseSnap(phaseStats.imguiRenderMs);
     renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
+    {
+        // Drive scope zoom from PlayerVisState::ads (set in MovementSystem whenever
+        // RMB is held with a charge weapon equipped). 1.5x divides the horizontal
+        // FOV — e.g. 90° → 60° — by the standard game-engine "Nx scope" convention.
+        float zoom = 1.0f;
+        registry.view<LocalPlayer, PlayerVisState>().each(
+            [&](const PlayerVisState& vis) { zoom = vis.ads ? 1.5f : 1.0f; });
+        renderer->scopeZoom = zoom;
+    }
     renderer->drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
     phaseSnap(phaseStats.drawFrameMs);
     if (collectPerf) {

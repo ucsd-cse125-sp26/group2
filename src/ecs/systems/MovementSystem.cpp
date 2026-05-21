@@ -266,6 +266,9 @@ float currentWishSpeed(const PlayerVisState& vis)
 {
     if (vis.moveMode == MoveMode::Sliding)
         return 0.0f; // slide has no wish-speed-driven accel
+    // ADS takes priority — even crouching ADS clamps to the (slower) ADS speed.
+    if (vis.ads)
+        return tms::k_adsSpeed;
     if (vis.crouching)
         return tms::k_crouchSpeed;
     if (vis.sprinting)
@@ -2054,6 +2057,19 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
             // 2. Sprint update
             updateSprint(state, input);
+
+            // 2b. ADS stance — RMB held while a charge (precision) weapon is
+            // equipped caps wish speed via currentWishSpeed(). Derived here so
+            // both client prediction and server agree (both have InputSnapshot
+            // + WeaponState). Resets to false otherwise (no weapon, non-charge
+            // gun, or RMB released).
+            state.vis.ads = false;
+            if (input.scoped) {
+                if (const auto* weapon = registry.try_get<WeaponState>(e)) {
+                    if (getWeaponConfig(getEquippedGun(*weapon).type).isCharge)
+                        state.vis.ads = true;
+                }
+            }
 
             // 3. State transitions (try enter new modes)
             // Order matters: wallrun > slide
