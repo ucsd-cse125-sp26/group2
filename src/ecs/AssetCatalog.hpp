@@ -30,15 +30,7 @@ inline const AssetDefinition kMapAsset{
     .loadScale = 39.3701f,
 };
 
-// Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
-inline const std::array<AssetDefinition, 2> kPropAssets{{
-    {.name = "pallet",
-     .filename = "metallic_pallet_factory_store.glb",
-     .role = AssetRole::Prop,
-     .loadTranslation = {0.0f, 0.0f, 600.0f},
-     .loadScale = 0.25f,
-     .flipUVs = true,
-     .decomposeCollision = true},
+inline const std::array<AssetDefinition, 1> kPropAssets{{
     {.name = "bottle",
      .filename = "bottle_a.glb",
      .role = AssetRole::Prop,

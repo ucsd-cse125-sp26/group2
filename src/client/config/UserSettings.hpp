@@ -7,8 +7,10 @@
 /// @brief Per-user gameplay settings loaded from SDL's pref-path TOML file.
 struct UserSettings
 {
-    InputBindings inputBindings{InputBindings::defaults()}; ///< Configurable keyboard/mouse action bindings.
+    InputBindings inputBindings{InputBindings::defaults()}; ///< Configurable keyboard/mouse and controller bindings.
     float mouseSensitivity{0.0007f};                        ///< Mouse-look sensitivity in radians per pixel.
+    float horizontalFovDegrees{90.0f};                      ///< Player-facing horizontal camera FOV in degrees.
+    bool showControllerBindings{false};                     ///< Settings page shows controller bindings when true.
 };
 
 /// @brief User-settings persistence helpers.

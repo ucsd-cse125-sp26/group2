@@ -1,5 +1,5 @@
 /// @file WallDetection.cpp
-/// @brief Implementation of wall, climb, and ledge detection.
+/// @brief Implementation of wall detection.
 
 #include "WallDetection.hpp"
 
@@ -77,7 +77,7 @@ MeshWallProbe probeTriMeshWalls(glm::vec3 pos,
     dir = glm::normalize(dir);
 
     // Query the player's vertical body segment, not a single sphere. This
-    // keeps wallrun/climb attachment stable when the player is already within
+    // keeps wallrun attachment stable when the player is already within
     // the probe radius or crosses a seam between adjacent wall triangles.
     const float axisHalfHeight = std::max(halfExtents.y - sphereRadius, 0.0f);
     const glm::vec3 segA = pos + glm::vec3{0.0f, axisHalfHeight, 0.0f};
@@ -400,7 +400,7 @@ WallDetectionResult detectWalls(glm::vec3 pos,
         }
     }
 
-    // Front wall detection (for climbing)
+    // Front wall detection for diagnostics.
     {
         const MeshWallProbe meshHit = probeTriMeshWalls(pos, k_forward, halfExtents, world, checkDist, sphereRadius);
         if (meshHit.hit) {
@@ -417,35 +417,6 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                 result.wallFront = true;
                 result.frontNormal = k_hr.normal;
                 result.frontPoint = k_hr.point;
-            }
-        }
-    }
-
-    // Ledge detection
-    if (result.wallFront) {
-        const CapsuleShape ledgeProbeCapsule{
-            .radius = sphereRadius,
-            .halfHeight = 0.0f,
-            .up = worldUp,
-        };
-        const glm::vec3 k_headTop = pos + worldUp * (halfExtents.y + 10.0f);
-        const glm::vec3 k_headTopFwd = k_headTop + k_forward * checkDist;
-        const HitResult k_topFwd = sweepAll(ledgeProbeCapsule, k_headTop, k_headTopFwd, world);
-
-        if (!k_topFwd.hit) {
-            const glm::vec3 k_probeStart = k_headTopFwd;
-            const CapsuleShape topProbeCapsule{
-                .radius = sphereRadius * 0.5f,
-                .halfHeight = 0.0f,
-                .up = worldUp,
-            };
-            const GroundProbeResult k_downHit =
-                probeGround(topProbeCapsule, k_probeStart, halfExtents.y * 2.0f + 40.0f, world);
-
-            if (k_downHit.hit && glm::dot(k_downHit.normal, worldUp) > 0.7f) {
-                result.ledgeDetected = true;
-                result.ledgePoint = k_downHit.point;
-                result.ledgeNormal = result.frontNormal;
             }
         }
     }

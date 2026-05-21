@@ -437,6 +437,21 @@ struct DepenContact
     SurfaceType surfaceType{SurfaceType::Concrete};
 };
 
+struct DepenetrationOptions
+{
+    float maxPushDistance{1e30f};
+    bool allowEmergencyUnstick{true};
+};
+
+struct DepenetrationResult
+{
+    float pushDistance{0.0f};
+    int passes{0};
+    bool emergencyUnstuck{false};
+    bool exceededMaxPush{false};
+    bool unresolvedOverlap{false};
+};
+
 /// @brief Scene-wide deepest single contact (per-primitive, per-feature).
 /// Used by the modern depen as the per-pass oracle: pick the deepest
 /// violation across the whole world, push out of it, re-probe.
@@ -460,6 +475,12 @@ DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec
 /// @param capsule  Player capsule shape.
 /// @param world    World collision geometry.
 void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world);
+
+DepenetrationResult depenetrateCapsuleVsWorldDetailed(glm::vec3& pos,
+                                                      glm::vec3& vel,
+                                                      CapsuleShape capsule,
+                                                      const WorldGeometry& world,
+                                                      DepenetrationOptions options = {});
 
 /// @brief Last-resort recovery for a capsule embedded in geometry with no
 /// clear depen direction.

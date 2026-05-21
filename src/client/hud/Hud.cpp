@@ -3,6 +3,7 @@
 
 #include "Hud.hpp"
 
+#include "config/InputBindings.hpp"
 #include "particles/sdf/SdfAtlas.hpp"
 #include "widgets/AbilitySelectionWidget.hpp"
 #include "widgets/AmmoCounter.hpp"
@@ -60,27 +61,24 @@ void Hud::resize(uint32_t newW, uint32_t newH)
     renderer_.resize(newW, newH);
 }
 
-void Hud::processEvent(const SDL_Event* event)
+void Hud::processEvent(const SDL_Event* event, const InputBindings* bindings)
 {
-    if (event->type == SDL_EVENT_KEY_DOWN) {
-        if (event->key.key == SDLK_TAB) {
-            for (auto& w : widgets_) {
-                if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
-                    sb->setOpen(true);
-            }
+    if (!event || !bindings)
+        return;
+
+    bool down = false;
+    if (bindings->eventMatches(Action::Scoreboard, *event, down)) {
+        for (auto& w : widgets_) {
+            if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
+                sb->setOpen(down);
         }
-        if (event->key.key == SDLK_B) {
-            for (auto& w : widgets_) {
-                if (auto* bm = dynamic_cast<BuyMenu*>(w.get()))
-                    bm->toggle(true);
-            }
-        }
-    } else if (event->type == SDL_EVENT_KEY_UP) {
-        if (event->key.key == SDLK_TAB) {
-            for (auto& w : widgets_) {
-                if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
-                    sb->setOpen(false);
-            }
+    }
+    if (bindings->eventMatches(Action::BuyMenu, *event, down) && down) {
+        if (event->type == SDL_EVENT_KEY_DOWN && event->key.repeat)
+            return;
+        for (auto& w : widgets_) {
+            if (auto* bm = dynamic_cast<BuyMenu*>(w.get()))
+                bm->toggle(true);
         }
     }
 }

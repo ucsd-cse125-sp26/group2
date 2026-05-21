@@ -5,6 +5,7 @@
 
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/GrenadeConfig.hpp"
+#include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
@@ -20,6 +21,7 @@
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/KinematicCharacterController.hpp"
+#include "ecs/systems/MovementSystem.hpp"
 
 #include <glm/geometric.hpp>
 
@@ -384,9 +386,13 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
         auto& vel = registry.get<Velocity>(e);
         const auto& shape = registry.get<CollisionShape>(e);
         auto& state = registry.get<PlayerVisState>(e);
-        const PlayerSimState* sim = registry.try_get<PlayerSimState>(e);
+        PlayerSimState* sim = registry.try_get<PlayerSimState>(e);
         const bool jumpedThisTick = sim != nullptr && sim->jumpedThisTick;
-        runKinematicCharacterController(pos.value, vel.value, shape, state, dt, world, e, jumpedThisTick);
+        const physics::KccFrameResult kcc =
+            runKinematicCharacterController(pos.value, vel.value, shape, state, dt, world, e, jumpedThisTick, sim);
+        const InputSnapshot* input = registry.try_get<InputSnapshot>(e);
+        if (sim != nullptr && input != nullptr)
+            reconcileMovementAfterKcc(pos.value, vel.value, shape, state, *sim, *input, world, kcc, dt);
     };
 
 #if GROUP2_COLLISION_HAS_PARALLEL

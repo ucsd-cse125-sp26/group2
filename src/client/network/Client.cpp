@@ -436,6 +436,15 @@ bool Client::sendChatMessage(std::string_view message)
     return send(payload.data(), static_cast<std::uint32_t>(payload.size()));
 }
 
+bool Client::sendPhysicsDiagRecording(bool enabled)
+{
+    const uint8_t buf[2] = {
+        static_cast<uint8_t>(PacketType::PHYSICS_DIAG_RECORDING),
+        static_cast<uint8_t>(enabled ? 1 : 0),
+    };
+    return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
+}
+
 bool Client::sendVoiceFrame(std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus)
 {
     if (!usingUdpSession_)

@@ -15,11 +15,9 @@
 /// @brief Movement mode — mutually exclusive locomotion states.
 enum class MoveMode : uint8_t
 {
-    OnFoot,        ///< Normal ground/air movement (walk, sprint, crouch, airborne).
-    Sliding,       ///< Momentum slide on the ground.
-    WallRunning,   ///< Running along a wall surface.
-    Climbing,      ///< Climbing vertically up a wall.
-    LedgeGrabbing, ///< Holding onto a ledge at the top of a wall.
+    OnFoot,      ///< Normal ground/air movement (walk, sprint, crouch, airborne).
+    Sliding,     ///< Momentum slide on the ground.
+    WallRunning, ///< Running along a wall surface.
 };
 
 /// @brief Which side a wall is on relative to the player.

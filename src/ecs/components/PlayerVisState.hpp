@@ -49,7 +49,6 @@ struct PlayerVisState
     bool sprinting{false};       ///< True when sprint is active.
     bool pendingUncrouch{false}; ///< Deferred uncrouch (e.g. after slidehop); applied when safe.
     bool exitingWall{false};     ///< Brief grace window after leaving a wall.
-    bool exitingClimb{false};    ///< Brief grace window after leaving a climb.
     bool grappleActive{false};   ///< True while being pulled toward the grapple anchor.
     bool gravityFlipped{false};  ///< True when the player's gravity is inverted (walking on ceilings).
 

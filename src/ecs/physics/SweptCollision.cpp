@@ -1378,25 +1378,59 @@ DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec
     return best;
 }
 
-void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
+DepenetrationResult depenetrateCapsuleVsWorldDetailed(
+    glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world, DepenetrationOptions options)
 {
+    DepenetrationResult result;
+    const glm::vec3 startPos = pos;
     glm::vec3 lastNormal{0.0f};
+    float accumulatedPush = 0.0f;
+
+    auto finish = [&]() {
+        result.pushDistance = glm::length(pos - startPos);
+        return result;
+    };
+
+    auto applyBoundedPush = [&](glm::vec3 push) {
+        const float pushLen = glm::length(push);
+        if (pushLen <= 0.0f)
+            return true;
+
+        const float remaining = options.maxPushDistance - accumulatedPush;
+        if (remaining < pushLen) {
+            result.exceededMaxPush = true;
+            result.unresolvedOverlap = true;
+            if (remaining > 0.0f)
+                pos += push * (remaining / pushLen);
+            accumulatedPush = options.maxPushDistance;
+            return false;
+        }
+
+        pos += push;
+        accumulatedPush += pushLen;
+        return true;
+    };
 
     for (int pass = 0; pass < k_maxDepenPasses; ++pass) {
         DepenContact c = deepestCapsuleContact(capsule, pos, vel, world);
         if (!c.valid || c.depth <= k_contactEpsilon)
-            return;
+            return finish();
+        ++result.passes;
 
         // Oscillation detector: this pass wants to push opposite to the last —
         // the player straddles a two-sided thin volume with no single consistent
         // ejection direction (e.g. mesh authored back-to-back instead of single-
         // sided).  Bail to the emergency probe rather than ping-pong forever.
         if (glm::dot(lastNormal, lastNormal) > 0.0f && glm::dot(c.normal, lastNormal) < -k_floorAngleCos) {
-            emergencyUnstick(pos, vel, capsule, world);
-            return;
+            if (options.allowEmergencyUnstick)
+                result.emergencyUnstuck = emergencyUnstick(pos, vel, capsule, world);
+            result.unresolvedOverlap =
+                !result.emergencyUnstuck && deepestCapsuleContact(capsule, pos, vel, world).valid;
+            return finish();
         }
 
-        pos += c.normal * (c.depth + k_contactEpsilon);
+        if (!applyBoundedPush(c.normal * (c.depth + k_contactEpsilon)))
+            return finish();
 
         const float intoSurface = glm::dot(vel, c.normal);
         if (intoSurface < 0.0f)
@@ -1405,8 +1439,18 @@ void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape caps
         lastNormal = c.normal;
     }
 
-    if (deepestCapsuleContact(capsule, pos, vel, world).valid)
-        emergencyUnstick(pos, vel, capsule, world);
+    if (deepestCapsuleContact(capsule, pos, vel, world).valid) {
+        if (options.allowEmergencyUnstick)
+            result.emergencyUnstuck = emergencyUnstick(pos, vel, capsule, world);
+        result.unresolvedOverlap = !result.emergencyUnstuck && deepestCapsuleContact(capsule, pos, vel, world).valid;
+    }
+
+    return finish();
+}
+
+void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
+{
+    (void)depenetrateCapsuleVsWorldDetailed(pos, vel, capsule, world);
 }
 
 bool emergencyUnstick(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
@@ -1668,7 +1712,7 @@ SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const W
         best.point = hp - n * radius;
     }
 
-    // Test against triangle meshes as a zero-height capsule so wallrun/climb
+    // Test against triangle meshes as a zero-height capsule so wallrun
     // probes use the same bounded face / edge / vertex surface query as the
     // player capsule path.
     forTriMeshCandidates(world, sweptBounds(glm::vec3(radius), start, end), [&](const WorldTriMesh& tm) {

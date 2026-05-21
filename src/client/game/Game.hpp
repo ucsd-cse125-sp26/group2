@@ -239,6 +239,7 @@ private:
 
     // Runtime-tunable loop settings (exposed via ImGui)
     float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
+    float horizontalFovDegrees = 90.0f;    ///< Player-facing horizontal camera field of view in degrees.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)

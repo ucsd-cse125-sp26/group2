@@ -115,6 +115,7 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     // Phase-through diagnostic is intentionally opt-in. It writes multiple
     // CSV rows per player per tick and flushes them for crash-safe debugging,
     // which is far too expensive for normal servers.
+    physics::diag::setFilePrefix("server");
     const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
     const bool phaseDiagEnabled = phaseDiagEnv != nullptr && phaseDiagEnv[0] != '\0' && phaseDiagEnv[0] != '0';
     physics::diag::setEnabled(phaseDiagEnabled);
@@ -397,6 +398,17 @@ void ServerGame::eventHandler(const Event& event)
             // anim history); this keeps memory bounded under abnormal
             // packet rates without requiring a separate LRU.
             pendingShotIntents_.erase(pendingShotIntents_.begin());
+        }
+        break;
+    }
+    case EventType::PhysicsDiagRecording: {
+        GROUP2_PROF_SCOPE("eventPhysicsDiagRecording");
+        if (event.physicsDiagRecording) {
+            physics::diag::startRecording();
+            SDL_Log("[server] physics CSV recording STARTED by client %d", event.clientId.value);
+        } else {
+            physics::diag::stopRecording();
+            SDL_Log("[server] physics CSV recording stopped by client %d", event.clientId.value);
         }
         break;
     }

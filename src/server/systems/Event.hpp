@@ -50,4 +50,5 @@ public:
     ShotIntentPayload shotIntent = {}; ///< Used when `type == ShotIntent` (PR-27).
     TextChatPayload textChat = {};     ///< Used when `type == TextChat`.
     VoiceFramePayload voiceFrame = {}; ///< Used when `type == VoiceFrame`.
+    bool physicsDiagRecording = false; ///< Used when `type == PhysicsDiagRecording`.
 };

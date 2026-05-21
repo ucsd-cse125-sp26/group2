@@ -13,9 +13,11 @@
 #include "Boilerplate.hpp"
 
 #include <backends/imgui_impl_sdlgpu3.h>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/trigonometric.hpp>
 #include <imgui.h>
 #include <iostream>
 #include <unordered_map>
@@ -33,6 +35,13 @@ float ticksToMs(Uint64 elapsed, Uint64 freq)
 /// TODO(graphics): consume these inside `drawModel` when building the
 /// material UBO — currently captured but unused.
 std::unordered_map<int32_t, glm::vec4> g_emissiveOverrides;
+
+float verticalFovDegreesFromHorizontal(float horizontalFovDegrees, float aspect)
+{
+    const float safeAspect = aspect > 0.0f ? aspect : 1.0f;
+    const float horizontalRadians = glm::radians(horizontalFovDegrees);
+    return glm::degrees(2.0f * std::atan(std::tan(horizontalRadians * 0.5f) / safeAspect));
+}
 } // namespace
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
@@ -252,6 +261,8 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
     camera_.setEye(eye);
     camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
+    const float aspect = height == 0 ? 1.0f : static_cast<float>(width) / static_cast<float>(height);
+    camera_.setFov(verticalFovDegreesFromHorizontal(mainHorizontalFovDegrees, aspect));
     camera_.computeViewProjectionMatrix();
 }
 

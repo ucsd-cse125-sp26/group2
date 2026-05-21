@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL_events.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -54,6 +55,13 @@ private:
         DiscardSettings,
     };
 
+    struct ListeningBinding
+    {
+        Action action{Action::Forward};
+        BindingDevice device{BindingDevice::KeyboardMouse};
+        std::size_t slot{0};
+    };
+
     /// @brief Enter settings page with a draft copy of the current live settings.
     void openSettings(const UserSettings& settings);
 
@@ -64,8 +72,10 @@ private:
     bool settingsOpen = false;                               ///< True when the settings page is active.
     InputBindings draftBindings = InputBindings::defaults(); ///< Editable binding draft.
     float draftMouseSensitivity = 0.0007f;                   ///< Editable mouse-sensitivity draft.
+    float draftHorizontalFovDegrees = 90.0f;                 ///< Editable horizontal-FOV draft.
+    bool draftShowControllerBindings = false;                ///< Editable binding device selector.
     bool dirty = false;                                      ///< True when draft settings differ from live settings.
-    std::optional<Action> listeningAction;                   ///< Action waiting for the next key/button input.
+    std::optional<ListeningBinding> listeningBinding;        ///< Binding slot waiting for the next input.
     std::string statusMessage;                               ///< Save status shown in the settings page.
     ConfirmModal confirm_;                                   ///< Reusable modal for destructive/lossy actions.
     PendingConfirm pendingConfirm_ = PendingConfirm::None;   ///< Action awaiting confirmation.

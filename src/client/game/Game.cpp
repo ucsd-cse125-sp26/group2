@@ -251,6 +251,13 @@ void centerMouseInWindow(SDL_Window* window)
     SDL_GetWindowSize(window, &winW, &winH);
     SDL_WarpMouseInWindow(window, static_cast<float>(winW) * 0.5f, static_cast<float>(winH) * 0.5f);
 }
+
+float verticalFovRadiansFromHorizontal(float horizontalFovDegrees, float aspect)
+{
+    const float safeAspect = aspect > 0.0f ? aspect : 1.0f;
+    const float horizontalRadians = glm::radians(horizontalFovDegrees);
+    return 2.0f * std::atan(std::tan(horizontalRadians * 0.5f) / safeAspect);
+}
 } // namespace
 
 bool Game::initDebugUI(const AppContext& ctx)
@@ -316,12 +323,15 @@ bool Game::init(AppContext& ctx)
     userSettings = &ctx.userSettings;
     userSettingsPath_ = ctx.userSettingsPath;
     mouseSensitivity = userSettings->mouseSensitivity;
+    horizontalFovDegrees = userSettings->horizontalFovDegrees;
+    renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
 
     if (const auto latestMatchState = client->getLatestMatchState()) {
         currentMatchPhase = latestMatchState->phase;
         countdownTimer = latestMatchState->countdownTimer;
     }
 
+    physics::diag::setFilePrefix("client");
     const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
     const bool phaseDiagEnabled = phaseDiagEnv != nullptr && phaseDiagEnv[0] != '\0' && phaseDiagEnv[0] != '0';
     physics::diag::setEnabled(phaseDiagEnabled);
@@ -924,6 +934,8 @@ void Game::clearGameplayInputForChat()
     systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
     systems::prevAbilitySelectRight = false;
+    systems::prevGamepadAbilitySelectLeft = false;
+    systems::prevGamepadAbilitySelectRight = false;
     pendingScrollSwitch_ = 0;
 
     registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
@@ -936,6 +948,7 @@ void Game::clearGameplayInputForChat()
         snap.sprint = false;
         snap.grapple = false;
         snap.shooting = false;
+        snap.scoped = false;
         snap.reload = false;
         snap.pickup = false;
         snap.switchToPrimary = false;
@@ -959,7 +972,7 @@ SDL_AppResult Game::event(SDL_Event* event)
     // Forward every event to ImGui first so it can capture keyboard/mouse
     // when the cursor is hovering over a window.
     debugUI.processEvent(event);
-    hud_.processEvent(event);
+    hud_.processEvent(event, userSettings ? &userSettings->inputBindings : nullptr);
 
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
@@ -1164,11 +1177,12 @@ SDL_AppResult Game::event(SDL_Event* event)
     if (pauseMenu.consumeEvent(*event))
         return SDL_APP_CONTINUE;
 
-    // Scroll wheel toggles between primary and secondary weapon slots.
-    if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured) {
-        if (event->wheel.y > 0)
+    // Configurable wheel/button events can toggle between primary and secondary weapon slots.
+    if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured && userSettings) {
+        bool down = false;
+        if (userSettings->inputBindings.eventMatches(Action::PreviousWeapon, *event, down) && down)
             pendingScrollSwitch_ = -1;
-        else if (event->wheel.y < 0)
+        else if (userSettings->inputBindings.eventMatches(Action::NextWeapon, *event, down) && down)
             pendingScrollSwitch_ = 1;
     }
 
@@ -1515,8 +1529,10 @@ SDL_AppResult Game::iterate()
         clearGameplayInputForChat();
     } else if (chatOpen_)
         clearGameplayInputForChat();
-    else
+    else {
         systems::runDeadInput(registry, userSettings->inputBindings);
+        systems::runGamepadDeadInput(registry, activeGamepad_, userSettings->inputBindings);
+    }
 
     // Query local player's gravity flip state — used for mouse/stick
     // inversion AND for swapping A-D / left-stick left-right.
@@ -1547,8 +1563,8 @@ SDL_AppResult Game::iterate()
         systems::runGamepadAimAssist(
             registry, activeGamepad_, aimAssistCfg_, aimAssistState_, gamepadLookSensitivity, frameTime);
         if (!inputSyncedWithPhysics)
-            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
-        systems::runGamepadWeapon(registry, activeGamepad_);
+            systems::runGamepadMovement(registry, activeGamepad_, userSettings->inputBindings, localGravFlipped);
+        systems::runGamepadWeapon(registry, activeGamepad_, userSettings->inputBindings);
 
         // Apply scroll-wheel weapon switch, constrained to primary/secondary.
         if (pendingScrollSwitch_ != 0) {
@@ -1591,7 +1607,7 @@ SDL_AppResult Game::iterate()
             systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
-            systems::runGamepadMovement(registry, activeGamepad_, localGravFlipped);
+            systems::runGamepadMovement(registry, activeGamepad_, userSettings->inputBindings, localGravFlipped);
         }
 
         // PR-24 (off-by-one + capsule staleness fix): the fire detection
@@ -1873,9 +1889,11 @@ SDL_AppResult Game::iterate()
         [&](const Velocity& velocity) { audioListener.velocity = velocity.value; });
     sfxSystem.setListener(audioListener);
 
-    int keyboardCount = 0;
-    const bool* keyboard = SDL_GetKeyboardState(&keyboardCount);
-    const bool pttHeld = keyboard != nullptr && SDL_SCANCODE_V < keyboardCount && keyboard[SDL_SCANCODE_V];
+    const bool* keyboard = SDL_GetKeyboardState(nullptr);
+    const SDL_MouseButtonFlags mouseButtons = SDL_GetMouseState(nullptr, nullptr);
+    const bool pttHeld =
+        userSettings && (userSettings->inputBindings.pressed(Action::PushToTalk, keyboard, mouseButtons) ||
+                         userSettings->inputBindings.controllerPressed(Action::PushToTalk, activeGamepad_));
     const bool imguiTextInput = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantTextInput;
     voiceChat_.setPushToTalk(pttHeld && mouseCaptured && !chatOpen_ && !imguiTextInput);
     voiceChat_.update(frameTime, *client, registry, sfxSystem);
@@ -2834,8 +2852,8 @@ SDL_AppResult Game::iterate()
     {
         WeaponViewmodel vm;
         const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
-        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() &&
-            !hideRailgunViewmodelForScope) {
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() && !hideRailgunViewmodelForScope)
+        {
             vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
 
@@ -3005,8 +3023,11 @@ SDL_AppResult Game::iterate()
         const float cosPitch = std::cos(renderPitch);
         const glm::vec3 fwd{std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
         const glm::mat4 view = glm::lookAt(renderEye, renderEye + fwd, glm::vec3{0, 1, 0});
-        const glm::mat4 proj =
-            glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+        const glm::mat4 proj = glm::perspective(
+            verticalFovRadiansFromHorizontal(horizontalFovDegrees, (winHf > 0.0f) ? winWf / winHf : 1.0f),
+            (winHf > 0.0f) ? winWf / winHf : 1.0f,
+            5.0f,
+            15000.0f);
         const glm::mat4 vp = proj * view;
 
         const auto toScreen = [&](glm::vec3 p) -> glm::vec2 {
@@ -3068,6 +3089,9 @@ SDL_AppResult Game::iterate()
             {"Dynamic Lighting", &showDynLightUI_},
             {"Animation Tester", &animUI_.show},
         });
+        bool physicsCsvRecording = false;
+        if (debugUI.consumePhysicsCsvRecordingRequest(physicsCsvRecording) && client != nullptr)
+            client->sendPhysicsDiagRecording(physicsCsvRecording);
 
         debugUI.buildUI(registry,
                         tickCount,
@@ -3119,8 +3143,11 @@ SDL_AppResult Game::iterate()
             const float winWf = static_cast<float>(winW);
             const float winHf = static_cast<float>(winH);
             const glm::mat4 hbView = glm::lookAt(cachedEye_, cachedEye_ + cachedCamFwd_, glm::vec3{0, 1, 0});
-            const glm::mat4 hbProj =
-                glm::perspective(glm::radians(60.0f), (winHf > 0.0f) ? winWf / winHf : 1.0f, 5.0f, 15000.0f);
+            const glm::mat4 hbProj = glm::perspective(
+                verticalFovRadiansFromHorizontal(horizontalFovDegrees, (winHf > 0.0f) ? winWf / winHf : 1.0f),
+                (winHf > 0.0f) ? winWf / winHf : 1.0f,
+                5.0f,
+                15000.0f);
             const glm::mat4 hbVP = hbProj * hbView;
             debugUI.buildHitboxUI(registry, clientHitboxRig_, hbVP, winWf, winHf);
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
@@ -3889,6 +3916,8 @@ SDL_AppResult Game::iterate()
     const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
     if (pauseResult.settingsApplied) {
         mouseSensitivity = userSettings->mouseSensitivity;
+        horizontalFovDegrees = userSettings->horizontalFovDegrees;
+        renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
         clearGameplayInputForChat();
     }
     if (pauseResult.resumeGame) {
@@ -3925,6 +3954,7 @@ SDL_AppResult Game::iterate()
             currentCameraRoll_ = 0.0f;
     }
     phaseSnap(phaseStats.imgui);
+    renderer->mainHorizontalFovDegrees = horizontalFovDegrees;
     renderer->drawFrame(renderEye, renderYaw, renderPitch, currentCameraRoll_);
     phaseSnap(phaseStats.drawFrame);
 
@@ -3976,6 +4006,7 @@ void Game::quit()
 {
     if (userSettings) {
         userSettings->mouseSensitivity = mouseSensitivity;
+        userSettings->horizontalFovDegrees = horizontalFovDegrees;
     }
     closeChat();
     if (recorder.isRecording())

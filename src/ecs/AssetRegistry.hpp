@@ -29,7 +29,7 @@ enum class AssetRole : uint8_t
 /// @brief One entry in the asset registry.
 struct AssetEntry
 {
-    std::string name;                      ///< Human-readable name (e.g. "porsche", "wraith", "map1").
+    std::string name;                      ///< Human-readable name (e.g. "bottle", "map1").
     std::string filename;                  ///< GLB filename relative to assets/ (empty for procedural).
     AssetRole role = AssetRole::Entity;
     glm::vec3 renderScale{1.0f};           ///< Default per-entity render scale for this asset.
@@ -42,9 +42,9 @@ struct AssetEntry
 /// @brief Central asset registry — maps names to renderer model indices.
 ///
 /// Usage:
-///   int id = assets.add("porsche", "free_1975_porsche_911_930_turbo.glb", AssetRole::Prop);
+///   int id = assets.add("bottle", "bottle_a.glb", AssetRole::Prop);
 ///   assets.setModelIndex(id, renderer.loadSceneModel(...));
-///   int modelIdx = assets.modelIndex("porsche");  // → the renderer index
+///   int modelIdx = assets.modelIndex("bottle");   // → the renderer index
 ///   int modelIdx = assets.modelIndex(id);          // → same thing
 class AssetRegistry
 {

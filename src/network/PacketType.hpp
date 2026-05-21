@@ -71,6 +71,7 @@ enum class PacketType : uint8_t
     TEXT_CHAT,      ///< Client <-> Server: bounded UTF-8 all-chat message.
     VOICE_FRAME,    ///< Client <-> Server: Opus voice frame for proximity chat.
     VOICE_STATE,    ///< Client <-> Server: push-to-talk state hint for HUD indicators.
+    PHYSICS_DIAG_RECORDING,         ///< Client -> Server: start/stop authoritative physics CSV recording.
 
     LOCAL_SERVER_DISCOVERY_REQUEST, ///< client broadcasts to server, which responds with response below
     LOCAL_SERVER_DISCOVERY_RESPONSE,

@@ -1,26 +1,25 @@
 /// @file Parallel.hpp
-/// @brief Thin wrapper around C++17 parallel STL.
+/// @brief Thin wrapper around server-side parallel execution.
 ///
 /// PR-3 (server-perf): the per-system game-thread work is largely
 /// embarrassingly parallel across players (animation update, hitbox
 /// capsule transform, swept collision, etc.). This header gives the
 /// systems a single, opinionated entry point —
 /// `group2::perf::parallelFor(begin, end, fn)` — that hides the
-/// libstdc++ parallel-STL details.
+/// platform/runtime details.
 ///
 /// Implementation policy:
-///   - On Linux with TBB installed (the common dev / CI path), we
-///     route through `std::for_each(std::execution::par_unseq, ...)`,
-///     which libstdc++ implements via TBB's task-group scheduler.
+///   - With TBB installed (the common dev / CI path), we route
+///     through TBB's task-group scheduler directly.
 ///   - On platforms without TBB (currently a CMake fallback path:
 ///     macOS Homebrew without explicit install, some Linux distros),
 ///     we use a small persistent `std::thread` pool. CMake defines
 ///     `GROUP2_HAVE_TBB` when the parallel-STL path is wired.
 ///
 /// Determinism: lag-comp + hitscan rely on the simulation being
-/// deterministic across the network/recording boundary. par_unseq
-/// reorders operations across iterations BUT operates only on
-/// independent per-entity slots, so the observable result is
+/// deterministic across the network/recording boundary. Parallel
+/// execution may reorder operations across iterations BUT operates
+/// only on independent per-entity slots, so the observable result is
 /// identical to a sequential pass. We add a `GROUP2_SERVER_PARALLEL=0`
 /// kill-switch (read once at startup) to fall back to sequential
 /// if a regression turns up — the brain wants the diff to be exactly
@@ -38,7 +37,7 @@
 #include <utility>
 
 #if defined(GROUP2_HAVE_TBB)
-#include <execution>
+#include <tbb/parallel_for_each.h>
 #else
 #include <condition_variable>
 #include <deque>
@@ -220,7 +219,7 @@ inline void parallelFor(Iter begin, Iter end, Fn&& fn)
 #if defined(GROUP2_HAVE_TBB)
     const auto distance = std::distance(begin, end);
     if (parallelEnabled.load(std::memory_order_relaxed) && static_cast<std::size_t>(distance) >= k_parallelThreshold) {
-        std::for_each(std::execution::par_unseq, begin, end, std::forward<Fn>(fn));
+        tbb::parallel_for_each(begin, end, std::forward<Fn>(fn));
         return;
     }
 #else
