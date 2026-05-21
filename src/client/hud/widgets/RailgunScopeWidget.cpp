@@ -18,14 +18,8 @@ float degToRad(float deg)
     return deg * kPi / 180.f;
 }
 
-void drawArc(HudContext& ctx,
-             float cx,
-             float cy,
-             float radius,
-             float startDeg,
-             float endDeg,
-             float thickness,
-             HudColor color)
+void drawArc(
+    HudContext& ctx, float cx, float cy, float radius, float startDeg, float endDeg, float thickness, HudColor color)
 {
     const float sweep = endDeg - startDeg;
     const int steps = std::max(2, static_cast<int>(std::ceil(std::abs(sweep) / 6.f)));
@@ -109,7 +103,8 @@ void RailgunScopeWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
         const float tickLen = (cardinal ? 17.f : major ? 12.f : 7.f) * s;
         const float thickness = (cardinal ? 2.4f : major ? 1.8f : 1.0f) * s;
         const HudColor color = major ? red : pale;
-        drawRadialTick(ctx, cx, cy, static_cast<float>(deg), radius - 34.f * s, radius - 34.f * s + tickLen, thickness, color);
+        drawRadialTick(
+            ctx, cx, cy, static_cast<float>(deg), radius - 34.f * s, radius - 34.f * s + tickLen, thickness, color);
     }
 
     const float lineR = radius - 58.f * s;

@@ -477,7 +477,8 @@ inline void handleGrenadeInput(Registry& registry,
     --grenadeAmmo(grenades, type);
 }
 
-inline void handleScope(Registry& registry, entt::entity shooter, const InputSnapshot& input, WeaponState& weapon, float dt)
+inline void
+handleScope(Registry& registry, entt::entity shooter, const InputSnapshot& input, WeaponState& weapon, float dt)
 {
     GunInstance& gun = getEquippedGun(weapon);
     const WeaponConfig& config = getWeaponConfig(gun.type);
@@ -639,9 +640,9 @@ inline void handleFire(Registry& registry,
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
             gun.chargeTime = std::min(gun.chargeTime, config.maxChargeTime);
 
-            auto outGoingDamage = (config.damage + (config.chargeDamage * (gun.chargeTime/config.maxChargeTime))) * multiplier;
-            chargeDealtDamage =
-                applyDamage(outGoingDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            auto outGoingDamage =
+                (config.damage + (config.chargeDamage * (gun.chargeTime / config.maxChargeTime))) * multiplier;
+            chargeDealtDamage = applyDamage(outGoingDamage, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
@@ -685,7 +686,6 @@ inline void handleFire(Registry& registry,
 
         return;
     }
-
 
     const float eyeDirDiscrete = gravityFlipped ? -1.0f : 1.0f;
     const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDirDiscrete, 0.0f};
@@ -814,7 +814,7 @@ void runWeapon(Registry& registry,
 
         handleGrenadeInput(registry, shooter, input, pos, shape, grenades, vis.gravityFlipped);
 
-        handleScope(registry, shooter, input,  weapon, dt);
+        handleScope(registry, shooter, input, weapon, dt);
 
         handleFire(registry,
                    shooter,
