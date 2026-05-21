@@ -154,26 +154,22 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
                                                      PipelineDescription pipelineDesc
                                                      )
 {
-    SDL_GPUShader* vertexShader;
-    SDL_GPUShader* fragmentShader;
+    SDL_GPUShader* vertexShader = nullptr;
+    SDL_GPUShader* fragmentShader = nullptr;
 
-    if (pipelineDesc.vertexShaderInfo) {
+    if (pipelineDesc.vertexShaderInfo && pipelineDesc.fragmentShaderInfo) {
          vertexShader = loadShader(device, *pipelineDesc.vertexShaderInfo, pipelineDesc.shaderFormat);
+         fragmentShader = loadShader(device, *pipelineDesc.fragmentShaderInfo, pipelineDesc.shaderFormat);
     } else {
         return nullptr;
     }
 
-    if (!vertexShader) {
-        SDL_ReleaseGPUShader(device, vertexShader);
+    if (!vertexShader || !fragmentShader) {
         return nullptr;
     }
 
     if (!pipelineDesc.vertexInputLayout) {
         return nullptr;
-    }
-
-    if (pipelineDesc.fragmentShaderInfo) {
-        fragmentShader = loadShader(device, *pipelineDesc.fragmentShaderInfo, pipelineDesc.shaderFormat);
     }
 
     SDL_GPUVertexInputState vertexInputState{};
@@ -188,7 +184,7 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
     pipelineInfo.vertex_input_state = vertexInputState;
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pipelineInfo.target_info.color_target_descriptions = pipelineDesc.colorTarget;
-    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.num_color_targets = pipelineDesc.colorTarget? 1: 0;
     pipelineInfo.target_info.has_depth_stencil_target = pipelineDesc.depthTest || pipelineDesc.depthWrite;
     pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 
@@ -198,14 +194,21 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
 
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pipelineInfo.rasterizer_state.cull_mode = pipelineDesc.cullMode;
+    SDL_Log("Creating depth pipeline...");
+    SDL_Log("  vertexShader = %p", vertexShader);
+    SDL_Log("  fragmentShader = %p", fragmentShader);
+    SDL_Log("  num_vertex_buffers = %u", vertexInputState.num_vertex_buffers);
+    SDL_Log("  num_vertex_attributes = %u", vertexInputState.num_vertex_attributes);
+    SDL_Log("  depthTest = %d, depthWrite = %d", pipelineDesc.depthTest, pipelineDesc.depthWrite);
+    SDL_Log("  colorTarget = %p", pipelineDesc.colorTarget);
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
+    SDL_Log("  pipeline = %p", pipeline);
+    SDL_Log("  SDL_GetError = %s", SDL_GetError());
+    //SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
 
     SDL_ReleaseGPUShader(device, vertexShader);
-
-    if (fragmentShader) {
-        SDL_ReleaseGPUShader(device, fragmentShader);
-    }
+    SDL_ReleaseGPUShader(device, fragmentShader);
 
     return pipeline;
 }

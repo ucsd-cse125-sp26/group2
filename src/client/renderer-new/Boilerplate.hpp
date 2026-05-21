@@ -12,8 +12,17 @@
 
 namespace Boilerplate
 {
+constexpr SDL_GPUColorTargetBlendState OVER_BLEND_MODE = {
+        .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+        .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+        .color_blend_op = SDL_GPU_BLENDOP_ADD,
+
+        .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+        .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+        .alpha_blend_op = SDL_GPU_BLENDOP_ADD,
+        .enable_blend = true,
+};
 /// @brief Descriptor for a single shader stage: file path, stage, and resource counts.
-///
 struct ShaderInfo
 {
     const char* path = nullptr;

@@ -49,7 +49,7 @@ bool NewRenderer::init(SDL_Window* window)
                                                     | SDL_GPU_SHADERFORMAT_DXIL
 #endif
         ;
-    device_ = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
+    device_ = SDL_CreateGPUDevice(k_wantedFormats, true, nullptr);
     if (!device_) {
         SDL_Log("NewRenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
@@ -85,6 +85,11 @@ bool NewRenderer::init(SDL_Window* window)
         SDL_Log("NewRenderer: failed to create hud pipeline: %s", SDL_GetError());
         return false;
     }
+
+     if (!createDepthPipeline()) {
+         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
+         return false;
+     }
 
     sampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!sampler_) {
@@ -169,9 +174,14 @@ bool NewRenderer::createGeometryPipeline()
 bool NewRenderer::createDepthPipeline()
 {
     Boilerplate::ShaderInfo vertexShader{};
-    vertexShader.path = "shaders-new/geometry.vert";
+    vertexShader.path = "shaders-new/geometry_depth.vert";
     vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
     vertexShader.uniformBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/emtpy.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.uniformBufferCount = 0;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -189,12 +199,12 @@ bool NewRenderer::createDepthPipeline()
     };
 
     Boilerplate::PipelineDescription depthPipelineDesc{};
-    depthPipelineDesc.vertexShaderInfo = nullptr;
-    depthPipelineDesc.fragmentShaderInfo = nullptr;
-    depthPipelineDesc.shaderFormat = shaderFormat_,
-    depthPipelineDesc.vertexInputLayout = nullptr;
+    depthPipelineDesc.vertexShaderInfo = &vertexShader;
+    depthPipelineDesc.fragmentShaderInfo = &fragmentShader;
+    depthPipelineDesc.shaderFormat = shaderFormat_;
+    depthPipelineDesc.vertexInputLayout = &vertexLayout;
     depthPipelineDesc.colorTarget = nullptr;
-    depthPipelineDesc.depthTest = false;
+    depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
     depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_BACK;
 

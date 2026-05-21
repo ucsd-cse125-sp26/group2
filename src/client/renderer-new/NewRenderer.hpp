@@ -333,6 +333,7 @@ private:
     // ─── Existing internal helpers ───────────────────────────────────────────
 
     bool createGeometryPipeline();
+    bool createDepthPipeline();
     bool createHudPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
