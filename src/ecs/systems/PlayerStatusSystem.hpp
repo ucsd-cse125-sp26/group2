@@ -52,4 +52,16 @@ void runPlayerStatus(Registry& registry, float dt);
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
 void runSpawnPointCooldowns(Registry& registry, float dt);
+
+/// @brief Pick a respawn point and resolve it to a safe spawn center.
+///
+/// Uses the same cooldown-aware spawn selection and depenetration logic as
+/// on-death respawn, so initial join spawns share the live respawn behavior.
+/// The player's `CollisionShape` should already be attached so the capsule
+/// recovery sweep matches the player's actual shape.
+///
+/// @param registry  The ECS registry.
+/// @param player    The player entity whose spawn position to resolve.
+/// @return The resolved spawn-center position.
+glm::vec3 chooseAndResolveSpawnPosition(Registry& registry, entt::entity player);
 } // namespace systems
