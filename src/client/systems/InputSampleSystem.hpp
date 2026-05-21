@@ -42,6 +42,11 @@ inline bool prevAbilitySelectRight = false;
 inline bool prevGamepadAbilitySelectLeft = false;
 inline bool prevGamepadAbilitySelectRight = false;
 
+inline bool gamepadConnected(SDL_Gamepad* gamepad)
+{
+    return gamepad != nullptr && SDL_GamepadConnected(gamepad);
+}
+
 inline std::uint8_t grenadeRadialIndexFromAim()
 {
     if (glm::dot(grenadeRadialAim, grenadeRadialAim) < k_grenadeRadialDeadzone * k_grenadeRadialDeadzone) {
@@ -324,7 +329,7 @@ inline float normaliseAxis(Sint16 raw)
 inline void
 runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, float dt, bool gravityFlipped = false)
 {
-    if (!gamepad)
+    if (!gamepadConnected(gamepad))
         return;
 
     float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
@@ -369,7 +374,7 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
 inline void
 runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings, bool gravityFlipped = false)
 {
-    if (!gamepad)
+    if (!gamepadConnected(gamepad))
         return;
 
     const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
@@ -414,7 +419,7 @@ runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, const InputBindings
 /// @param bindings  Controller bindings to sample.
 inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings)
 {
-    if (!gamepad)
+    if (!gamepadConnected(gamepad))
         return;
 
     const bool abilityMenuHeld = bindings.controllerPressed(Action::AbilityMenu, gamepad);
@@ -449,7 +454,7 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
 /// @brief Sample controller skip-respawn input while the local player is dead.
 inline void runGamepadDeadInput(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings)
 {
-    if (!gamepad)
+    if (!gamepadConnected(gamepad))
         return;
     const bool skipRespawn = bindings.controllerPressed(Action::Jump, gamepad);
     registry.view<InputSnapshot, LocalPlayer, RespawnTimer>().each(

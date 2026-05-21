@@ -223,7 +223,7 @@ inline void runGamepadAimAssist(Registry& registry,
                                 float lookSens,
                                 float dt)
 {
-    if (!gamepad || !cfg.enabled) {
+    if (!gamepadConnected(gamepad) || !cfg.enabled) {
         // Drop our memory of any previous target so the next acquisition
         // re-initialises cleanly (otherwise a stale anchor could fire one
         // bogus pull when assist is re-enabled).

@@ -560,9 +560,10 @@ bool Game::init(AppContext& ctx)
             if (!isChargeWeapon && !isServerAuthoritative)
                 return;
 
-            // For charge weapons from self: also dispatch the weapon-fired event
-            // so the shoot sound plays and recoil kicks.
-            if (evt.effectType == ParticleEffectType::HitscanBeam) {
+            // Non-predicted local beam-style events still go through the
+            // dispatcher. Charge-rifle fire audio is predicted locally at input
+            // time so ADS shots are not delayed or swallowed by replication.
+            if (evt.effectType == ParticleEffectType::HitscanBeam && !isChargeWeapon) {
                 WeaponFiredEvent wfe;
                 wfe.shooter = localPlayer;
                 wfe.type = evt.weaponType;
@@ -601,7 +602,7 @@ bool Game::init(AppContext& ctx)
             break;
         case ParticleEffectType::HitscanBeam:
             particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
-            if (sfxSystem.isInitialized()) {
+            if (sfxSystem.isInitialized() && !(evt.source == localPlayer && getWeaponConfig(evt.weaponType).isCharge)) {
                 const std::string_view eventName = fireAudioEventForWeapon(evt.weaponType);
                 if (!eventName.empty()) {
                     const audio::AudioObjectId object = audioObjectForEntity(evt.source);
@@ -1168,9 +1169,12 @@ SDL_AppResult Game::event(SDL_Event* event)
         // would leave us with a dangling-but-non-null handle.
         if (activeGamepad_ && event->gdevice.which == activeGamepadId_) {
             SDL_Log("[input] gamepad disconnected (id=%u)", activeGamepadId_);
-            SDL_CloseGamepad(activeGamepad_);
+            SDL_Gamepad* disconnected = activeGamepad_;
             activeGamepad_ = nullptr;
             activeGamepadId_ = 0;
+            systems::prevGamepadAbilitySelectLeft = false;
+            systems::prevGamepadAbilitySelectRight = false;
+            SDL_CloseGamepad(disconnected);
         }
     }
 
@@ -1264,6 +1268,16 @@ void Game::applyFrameRateLimit()
 
 SDL_AppResult Game::iterate()
 {
+    if (activeGamepad_ && !systems::gamepadConnected(activeGamepad_)) {
+        SDL_Log("[input] gamepad disconnected without removal event (id=%u)", activeGamepadId_);
+        SDL_Gamepad* disconnected = activeGamepad_;
+        activeGamepad_ = nullptr;
+        activeGamepadId_ = 0;
+        systems::prevGamepadAbilitySelectLeft = false;
+        systems::prevGamepadAbilitySelectRight = false;
+        SDL_CloseGamepad(disconnected);
+    }
+
     // Phase-1 debug viz: drain the previous frame's contact accumulator and
     // start a new bucket.  All `physics::debug::pushContact(...)` calls during
     // the upcoming sim ticks accumulate here; the foreground overlay reads
@@ -1782,9 +1796,10 @@ SDL_AppResult Game::iterate()
     {
         const WeaponConfig& wpnCfg = getWeaponConfig(currentEquippedType_);
 
-        // Skip beam weapons (driven by BeamState) and charge weapons
-        // (VFX arrive from server via NetParticleEvent on release).
-        if (!wpnCfg.isBeam && !wpnCfg.isCharge) {
+        // Skip beam weapons (driven by BeamState). Charge VFX still arrive
+        // from the server, but the local fire sound is predicted here so ADS
+        // shots always produce an immediate cue.
+        if (!wpnCfg.isBeam) {
             localFireCooldown_ = std::max(0.0f, localFireCooldown_ - frameTime);
 
             // Read fire intent from the local player's InputSnapshot rather
@@ -1810,7 +1825,21 @@ SDL_AppResult Game::iterate()
                 hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
             });
 
-            if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
+            if (wpnCfg.isCharge) {
+                if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
+                    localFireCooldown_ = wpnCfg.fireCooldown;
+                    if (sfxSystem.isInitialized()) {
+                        const audio::AudioObjectId object = audioObjectForEntity(localShooter);
+                        sfxSystem.setAudioObjectTransform(object, cachedEye_);
+                        sfxSystem.postLocalAudioEvent("weapon.railgun.fire", object, 1.0f);
+                    }
+
+                    const RecoilParams& rp = getRecoilParams(currentEquippedType_);
+                    recoilPitch_ += rp.pitchKick;
+                    recoilPushBack_ += rp.pushBack;
+                    recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
+                }
+            } else if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
                 localFireCooldown_ = wpnCfg.fireCooldown;
 
                 const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
