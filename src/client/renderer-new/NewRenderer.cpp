@@ -270,7 +270,7 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
     if (particleSystem_)
-        particleSystem_->uploadToGpu(cmd); //Must be before render pass
+        particleSystem_->uploadToGpu(cmd); // Must be before render pass
 
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
@@ -310,9 +310,9 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer
     SDL_EndGPURenderPass(geometryPass);
 }
 
-void NewRenderer::drawParticles(SDL_GPURenderPass *renderPass,SDL_GPUCommandBuffer *cmd) const
+void NewRenderer::drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const
 {
-    //if (toggles.particles && particleSystem) {
+    // if (toggles.particles && particleSystem) {
     if (particleSystem_) {
         struct alignas(16) ParticleUniforms
         {

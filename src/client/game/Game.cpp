@@ -724,8 +724,8 @@ bool Game::init(AppContext& ctx)
 
     client->onRawParticleEvent([this](const NetParticleEvent& rawEvt) {
         SDL_Log("raw particle effect=%d source=%d",
-            static_cast<int>(rawEvt.effectType),
-            static_cast<int>(entt::to_integral(rawEvt.source)));
+                static_cast<int>(rawEvt.effectType),
+                static_cast<int>(entt::to_integral(rawEvt.source)));
 
         if (!snapshotLoader_ || !mappedLocalPlayerEntity_)
             return;
@@ -776,7 +776,7 @@ bool Game::init(AppContext& ctx)
         //     always get the correct surface type and normal.
         if (evt.source == localPlayer) {
             SDL_Log("particle event from local player effect=%d", static_cast<int>(evt.effectType));
-            
+
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
             const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
                                                evt.effectType == ParticleEffectType::Smoke ||
