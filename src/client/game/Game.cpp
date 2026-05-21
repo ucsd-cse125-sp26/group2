@@ -1321,8 +1321,7 @@ SDL_AppResult Game::event(SDL_Event* event)
             // Energy beam — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const float ts = cachedGravFlipped_ ? -1.0f : 1.0f;
-            glm::vec3 hip =
-                cachedEye_ + right * (ts * 15.f) - glm::vec3{0, 1, 0} * (ts * 8.f) + cachedCamFwd_ * 5.f;
+            glm::vec3 hip = cachedEye_ + right * (ts * 15.f) - glm::vec3{0, 1, 0} * (ts * 8.f) + cachedCamFwd_ * 5.f;
             if (cachedMuzzleValid_) {
                 hip = cachedMuzzleWorld_;
             }
@@ -1344,8 +1343,7 @@ SDL_AppResult Game::event(SDL_Event* event)
             // Bullet tracer — hits floor or max range
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const float ds = cachedGravFlipped_ ? -1.0f : 1.0f;
-            glm::vec3 hip =
-                cachedEye_ + right * (ds * 15.f) - glm::vec3{0, 1, 0} * (ds * 8.f) + cachedCamFwd_ * 5.f;
+            glm::vec3 hip = cachedEye_ + right * (ds * 15.f) - glm::vec3{0, 1, 0} * (ds * 8.f) + cachedCamFwd_ * 5.f;
             if (cachedMuzzleValid_) {
                 hip = cachedMuzzleWorld_;
             }
@@ -3566,8 +3564,7 @@ SDL_AppResult Game::iterate()
                     const Asset::Model& model = Asset::models_.at(modelId);
 
                     if (model.hasMuzzle) {
-                        cachedMuzzleWorld_ =
-                            glm::vec3(weaponWorld * glm::vec4(model.muzzleLocalPos, 1.0f));
+                        cachedMuzzleWorld_ = glm::vec3(weaponWorld * glm::vec4(model.muzzleLocalPos, 1.0f));
                         cachedMuzzleValid_ = true;
                     }
                 }

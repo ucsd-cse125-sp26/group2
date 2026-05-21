@@ -175,7 +175,7 @@ bool AssetLoader::loadModel(const ModelIdInt id,
                     newModel.muzzleLocalPos.y,
                     newModel.muzzleLocalPos.z);
         }
-        
+
         Asset::ModelNode& currentModelNode = newModel.modelNodes_[currentModelNodeIndex];
         currentModelNode.transform_ = localTransform;
         currentModelNode.childIndices_.reserve(currentNode.mNumChildren);
