@@ -224,7 +224,8 @@ inline void runGamepadAimAssist(Registry& registry,
                                 float yawSensitivity,
                                 float lookDeadzone,
                                 float moveDeadzone,
-                                float dt)
+                                float dt,
+                                bool swapSticks = false)
 {
     if (!gamepadConnected(gamepad) || !cfg.enabled) {
         // Drop our memory of any previous target so the next acquisition
@@ -236,10 +237,13 @@ inline void runGamepadAimAssist(Registry& registry,
     }
 
     // ── Activation gate ───────────────────────────────────────────────────
-    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX), moveDeadzone);
-    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY), moveDeadzone);
-    const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX), lookDeadzone);
-    const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY), lookDeadzone);
+    JoystickAxis moveAxis = getMoveJoystickAxes(swapSticks);
+    JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
+
+    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.x), moveDeadzone);
+    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.y), moveDeadzone);
+    const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x), lookDeadzone);
+    const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.y), lookDeadzone);
 
     const float moveStickMag = std::sqrt(lx * lx + ly * ly);
     const float lookStickMag = std::sqrt(rx * rx + ry * ry);

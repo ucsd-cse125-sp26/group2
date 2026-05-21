@@ -42,6 +42,29 @@ inline bool prevAbilitySelectRight = false;
 inline bool prevGamepadAbilitySelectLeft = false;
 inline bool prevGamepadAbilitySelectRight = false;
 
+/// @brief Gamepad axis mapping configuration for look and move axes, used to support stick swapping in user settings.
+struct JoystickAxis
+{
+    SDL_GamepadAxis x;
+    SDL_GamepadAxis y;
+};
+
+inline JoystickAxis getLookJoystickAxes(bool swapSticks)
+{
+    return {
+        .x = swapSticks ? SDL_GAMEPAD_AXIS_LEFTX : SDL_GAMEPAD_AXIS_RIGHTX,
+        .y = swapSticks ? SDL_GAMEPAD_AXIS_LEFTY : SDL_GAMEPAD_AXIS_RIGHTY,
+    };
+}
+
+inline JoystickAxis getMoveJoystickAxes(bool swapSticks)
+{
+    return {
+        .x = swapSticks ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_LEFTX,
+        .y = swapSticks ? SDL_GAMEPAD_AXIS_RIGHTY : SDL_GAMEPAD_AXIS_LEFTY,
+    };
+}
+
 inline bool gamepadConnected(SDL_Gamepad* gamepad)
 {
     return gamepad != nullptr && SDL_GamepadConnected(gamepad);
@@ -332,13 +355,16 @@ inline void runGamepadLook(Registry& registry,
                            float yawSensitivity,
                            float deadzone,
                            float dt,
-                           bool gravityFlipped = false)
+                           bool gravityFlipped = false,
+                           bool swapSticks = false)
 {
     if (!gamepadConnected(gamepad))
         return;
 
-    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX), deadzone);
-    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY), deadzone);
+    JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
+
+    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x), deadzone);
+    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.y), deadzone);
 
     if (rx == 0.0f && ry == 0.0f)
         return;
@@ -380,13 +406,16 @@ inline void runGamepadMovement(Registry& registry,
                                SDL_Gamepad* gamepad,
                                const InputBindings& bindings,
                                float deadzone,
-                               bool gravityFlipped = false)
+                               bool gravityFlipped = false,
+                               bool swapSticks = false)
 {
     if (!gamepadConnected(gamepad))
         return;
 
-    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX), deadzone);
-    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY), deadzone);
+    JoystickAxis moveAxis = getMoveJoystickAxes(swapSticks);
+
+    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.x), deadzone);
+    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.y), deadzone);
 
     // Movement booleans are derived from a stronger threshold than the deadzone
     // so a player resting their thumb on the stick doesn't drift-walk.  0.3 is
