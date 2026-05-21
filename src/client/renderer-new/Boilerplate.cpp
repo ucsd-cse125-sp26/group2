@@ -187,17 +187,17 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
     pipelineInfo.fragment_shader = fragmentShader;
     pipelineInfo.vertex_input_state = vertexInputState;
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pipelineInfo.target_info.color_target_descriptions = &colorTarget;
+    pipelineInfo.target_info.color_target_descriptions = pipelineDesc.colorTarget;
     pipelineInfo.target_info.num_color_targets = 1;
-    pipelineInfo.target_info.has_depth_stencil_target = enableDepth;
+    pipelineInfo.target_info.has_depth_stencil_target = pipelineDesc.depthTest || pipelineDesc.depthWrite;
     pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 
     pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
-    pipelineInfo.depth_stencil_state.enable_depth_test = enableDepth;
-    pipelineInfo.depth_stencil_state.enable_depth_write = enableDepth;
+    pipelineInfo.depth_stencil_state.enable_depth_test = pipelineDesc.depthTest;
+    pipelineInfo.depth_stencil_state.enable_depth_write = pipelineDesc.depthWrite;
 
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    pipelineInfo.rasterizer_state.cull_mode = pipelineDesc.cullMode;
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
 
@@ -205,7 +205,6 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
 
     if (fragmentShader) {
         SDL_ReleaseGPUShader(device, fragmentShader);
-        return nullptr;
     }
 
     return pipeline;

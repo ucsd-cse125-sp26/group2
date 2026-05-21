@@ -361,6 +361,7 @@ private:
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
 
     SDL_GPUTextureFormat colorTarget_;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};

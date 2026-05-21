@@ -188,8 +188,18 @@ bool NewRenderer::createDepthPipeline()
         Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
     };
 
-    depthPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, nullptr, shaderFormat_, vertexShader, nullptr, vertexLayout, true, false);
+    Boilerplate::PipelineDescription depthPipelineDesc{};
+    depthPipelineDesc.vertexShaderInfo = nullptr;
+    depthPipelineDesc.fragmentShaderInfo = nullptr;
+    depthPipelineDesc.shaderFormat = shaderFormat_,
+    depthPipelineDesc.vertexInputLayout = nullptr;
+    depthPipelineDesc.colorTarget = nullptr;
+    depthPipelineDesc.depthTest = false;
+    depthPipelineDesc.depthWrite = true;
+    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_BACK;
+
+    depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(
+        device_, depthPipelineDesc);
 
     return depthPipeline_ != nullptr;
 }

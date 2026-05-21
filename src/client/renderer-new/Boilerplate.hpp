@@ -40,7 +40,7 @@ struct PipelineDescription
     SDL_GPUShaderFormat shaderFormat;
 
     const VertexInputLayout* vertexInputLayout = nullptr;
-    const SDL_GPUColorTargetDescription colorTarget;
+    const SDL_GPUColorTargetDescription* colorTarget;
 
     bool depthTest = false;
     bool depthWrite = true;
@@ -144,6 +144,10 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 bool enableDepth = true,
                                                 bool overBlending = false);
 
+
+SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
+                                                     PipelineDescription pipelineDesc
+                                                     );
 /// @brief Allocate a GPU buffer of the given size and usage.
 /// @param device The GPU device.
 /// @param bufferSize Size in bytes.
