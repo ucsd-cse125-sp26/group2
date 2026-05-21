@@ -25,7 +25,7 @@ struct AnimationInputs
     bool grounded = false;         ///< Touching the ground this tick.
     bool sprinting = false;        ///< Sprint key currently held.
     bool crouching = false;        ///< Crouch currently held (phase 1: note-only).
-    int moveMode = 0;              ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning, 3=Climbing, 4=LedgeGrabbing.
+    int moveMode = 0;              ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning.
     int wallRunSide = 0;           ///< WallSide value: 0=None, 1=Left, 2=Right.
 };
 

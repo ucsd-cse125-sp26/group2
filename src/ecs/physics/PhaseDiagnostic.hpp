@@ -36,8 +36,6 @@ enum class PhaseFlag : uint32_t
     Grounded = 1u << 0,
     WallRunning = 1u << 1,
     Sliding = 1u << 2,
-    Climbing = 1u << 3,
-    LedgeGrabbing = 1u << 4,
     GrappleActive = 1u << 5,
     DoubleJumped = 1u << 6,
     GravityFlipped = 1u << 7,
@@ -122,10 +120,8 @@ void recordFrame(const PlayerFrame& frame) noexcept;
 
 /// @brief One row captured around MovementSystem, before CollisionSystem/KCC.
 ///
-/// This complements `PlayerFrame`: movement is where climb, ledge, grapple,
-/// jump, and wallrun state mutate velocity. If a stored wall/ledge normal
-/// becomes NaN, this row catches it before the collision step propagates it
-/// into position.
+/// This complements `PlayerFrame`: movement is where wallrun, grapple,
+/// jump, and slide state mutate velocity.
 struct MovementFrame
 {
     entt::entity entity{entt::null};
@@ -147,17 +143,9 @@ struct MovementFrame
     float yaw = 0.0f;
     float pitch = 0.0f;
     bool wallFront = false;
-    bool ledgeDetected = false;
     float groundDistance = 1e30f;
     glm::vec3 frontNormal{0.0f};
     glm::vec3 frontPoint{0.0f};
-    glm::vec3 ledgeNormal{0.0f};
-    glm::vec3 ledgePoint{0.0f};
-    glm::vec3 climbWallNormal{0.0f};
-    glm::vec3 storedLedgeNormal{0.0f};
-    glm::vec3 storedLedgePoint{0.0f};
-    float climbTimer = 0.0f;
-    float ledgeHoldTimer = 0.0f;
     PhaseFlag flags = PhaseFlag::None;
     char note[64] = {0};
 };

@@ -31,8 +31,8 @@ constexpr float k_doubleJumpHorizBoost = 400.0f; ///< Horizontal velocity (u/s) 
                                                  ///< so the second jump becomes an air dash. If no WASD held,
                                                  ///< horizontal momentum is preserved.
 constexpr float k_doubleJumpGroundedRefreshTime = 0.5f; ///< Continuous time grounded (s) needed to refresh DJ.
-                                                        ///< DJ does NOT refresh from wall jump, climb, ledge,
-                                                        ///< slidehop, or instant landing — only by being on the
+                                                        ///< DJ does NOT refresh from wall jump, slidehop, or instant
+                                                        ///< landing — only by being on the
                                                         ///< ground (OnFoot) for this long. Counters DJ-dash spam.
 
 // Coyote time
@@ -102,37 +102,6 @@ constexpr float k_wallrunEntryVerticalCeiling = 320.0f;    ///< Maximum vertical
 constexpr float k_wallrunEntryHorizSnap = 1.0f;            ///< Horizontal speed retention on wallrun entry.
 constexpr float k_wallrunVerticalDecayTau = 0.45f;         ///< Exponential vertical decay while attached (s).
 constexpr float k_wallrunMaxFaceRedirect = 1.57079632679f; ///< Max face-normal rotation accepted per tick (rad).
-
-// Climbing
-
-constexpr float k_climbCheckDist = 35.0f;           ///< Forward sphere-cast distance (u).
-constexpr float k_climbSphereRadius = 12.0f;        ///< Sphere-cast radius for climb detection (u).
-constexpr float k_climbMaxSpeed = 280.0f;           ///< Max upward climbing speed (u/s).
-constexpr float k_climbMinSpeed = 180.0f;           ///< Min climbing speed (after decay) (u/s).
-constexpr float k_climbKickoffDuration = 2.0f;      ///< Max climb time on same wall (s).
-constexpr float k_climbMaxWallLookAngle = 30.0f;    ///< Max angle (degrees) between look dir and wall normal.
-constexpr float k_climbSidewaysMultiplier = 0.1f;   ///< Sideways movement reduction while climbing.
-constexpr float k_climbIntentThreshold = 0.1f;      ///< Min dot(wishDir, -wallNormal) for active upward climb.
-constexpr float k_climbSlipSpeed = 90.0f;           ///< Local-down slip speed while attached without up intent (u/s).
-constexpr float k_climbNonUpDetachTime = 0.25f;     ///< Grace time before slipping/no-up climb detaches (s).
-constexpr float k_climbUpVelocityThreshold = 25.0f; ///< Local-up velocity that counts as committed climb motion (u/s).
-constexpr float k_climbJumpUpForce = 320.0f;        ///< Upward velocity on climb jump (u/s).
-constexpr float k_climbJumpBackForce = 350.0f;      ///< Backward velocity on climb jump (u/s).
-constexpr float k_climbMinGroundDist = 40.0f;       ///< Min height above ground to start climbing (u).
-constexpr float k_climbExitTime = 0.5f;             ///< Duration of "exiting climb" flag (s).
-constexpr float k_climbRegrabLowerHeight = 400.0f;  ///< Must be this much lower to regrab same wall (u).
-
-// Ledge grabbing
-
-constexpr float k_ledgeCheckDist = 35.0f;      ///< Forward trace distance for ledge detection (u).
-constexpr float k_ledgeSphereRadius = 12.0f;   ///< Sphere-cast radius for ledge traces (u).
-constexpr float k_ledgeMaxGrabDist = 35.0f;    ///< Max distance from ledge surface to grab (u).
-constexpr float k_ledgeMinHoldTime = 0.5f;     ///< Min time frozen on ledge before release (s).
-constexpr float k_ledgeMoveAccel = 800.0f;     ///< Acceleration pulling player toward ledge (u/s^2).
-constexpr float k_ledgeMaxSpeed = 400.0f;      ///< Max speed of pull toward ledge (u/s).
-constexpr float k_ledgeJumpUpForce = 350.0f;   ///< Upward velocity on ledge jump / mantle (u/s).
-constexpr float k_ledgeJumpBackForce = 120.0f; ///< Backward velocity on ledge jump (u/s).
-constexpr float k_ledgeExitTime = 0.5f;        ///< Duration of "exiting ledge" flag (s).
 
 // Speed cap
 

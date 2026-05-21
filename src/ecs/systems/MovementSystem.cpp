@@ -105,14 +105,6 @@ glm::vec2 moveInput2D(const InputSnapshot& input)
     return {x, y};
 }
 
-/// @brief Check whether any WASD movement key is pressed.
-/// @param input  Current input snapshot.
-/// @return True if any directional key is held.
-bool anyMoveInput(const InputSnapshot& input)
-{
-    return input.forward || input.back || input.left || input.right;
-}
-
 } // namespace
 
 // Crouch / shape transition
@@ -227,25 +219,13 @@ void tickTimers(PlayerStateRef state, float dt)
         }
     }
 
-    // Exit-wall / exit-climb / exit-ledge timers.
+    // Exit-wall timer.
     if (state.vis.exitingWall) {
         state.sim.exitWallTimer -= dt;
         if (state.sim.exitWallTimer <= 0.0f) {
             state.vis.exitingWall = false;
             state.sim.wasWallRunning = false;
         }
-    }
-    if (state.vis.exitingClimb) {
-        state.sim.exitClimbTimer -= dt;
-        if (state.sim.exitClimbTimer <= 0.0f) {
-            state.vis.exitingClimb = false;
-            state.sim.wasClimbing = false;
-        }
-    }
-    if (state.sim.exitingLedge) {
-        state.sim.exitLedgeTimer -= dt;
-        if (state.sim.exitLedgeTimer <= 0.0f)
-            state.sim.exitingLedge = false;
     }
 
     // Grapple cooldown.
@@ -291,40 +271,21 @@ float currentWishSpeed(const PlayerVisState& vis)
     return tms::k_walkSpeed;
 }
 
-// Jumping (ground, double, coyote, wall, climb, ledge, slidehop)
+// Jumping (ground, double, coyote, wall, slidehop)
 
 namespace
 {
 
-/// @brief Handle all jump types: ground, double, coyote, wall, climb, ledge, slidehop.
+/// @brief Handle all jump types: ground, double, coyote, wall, slidehop.
 /// @param vel     Velocity (modified in place).
 /// @param input   Current input snapshot.
 /// @param state   Player state (modified in place).
 /// @param dt      Fixed physics delta time in seconds (unused).
-/// @param posY    Current world Y for traversal blacklist heights.
 /// @param gravDir +1.0 for normal gravity, -1.0 for flipped (inverts all vertical impulses).
-void handleJump(
-    glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/, float posY, float gravDir = 1.0f)
+void handleJump(glm::vec3& vel, const InputSnapshot& input, PlayerStateRef state, float /*dt*/, float gravDir = 1.0f)
 {
     if (!input.jump)
         return;
-
-    // Ledge jump / mantle
-    if (state.vis.moveMode == MoveMode::LedgeGrabbing) {
-        if (state.sim.ledgeHoldTimer >= tms::k_ledgeMinHoldTime) {
-            // Mantle: jump up onto the ledge.
-            vel.y = tms::k_ledgeJumpUpForce * gravDir;
-            // Push away from wall (which actually pushes over the ledge since normal points away from wall).
-            vel += state.sim.ledgeNormal * tms::k_ledgeJumpBackForce;
-            state.vis.moveMode = MoveMode::OnFoot;
-            state.sim.exitingLedge = true;
-            state.sim.exitLedgeTimer = tms::k_ledgeExitTime;
-            state.vis.grounded = false;
-            state.vis.jumpCount = 1;
-            // DJ no longer refreshes from ledge mantle — only from ground time.
-        }
-        return;
-    }
 
     // Wall-jump is no longer fired on jump PRESS while attached. Lucio-style:
     // releasing jump while wallrunning fires the impulse (see handleWallRunning).
@@ -332,24 +293,6 @@ void handleJump(
     // no ground/double-jump should fire either.
     if (state.vis.moveMode == MoveMode::WallRunning)
         return;
-
-    // Climb jump
-    if (state.vis.moveMode == MoveMode::Climbing) {
-        vel.y = tms::k_climbJumpUpForce * gravDir;
-        vel += state.sim.climbWallNormal * tms::k_climbJumpBackForce;
-        state.vis.moveMode = MoveMode::OnFoot;
-        state.vis.exitingClimb = true;
-        state.sim.exitClimbTimer = tms::k_climbExitTime;
-        state.sim.wasClimbing = true;
-        state.vis.grounded = false;
-        // DJ no longer refreshes from climb jump — only from ground time.
-        state.vis.jumpCount = 1;
-
-        state.sim.climbBlacklistActive = true;
-        state.sim.climbBlacklistNormal = state.sim.climbWallNormal;
-        state.sim.climbBlacklistHeight = posY;
-        return;
-    }
 
     // Coyote wall jump (off wall within grace period). Requires a FRESH press
     // — otherwise, the moment the wallrun silently exits (e.g. wall ends while
@@ -659,15 +602,6 @@ bool isBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNor
     return false;
 }
 
-bool isClimbBlacklisted(const glm::vec3& normal, float height, const glm::vec3& blNormal, float blHeight, bool active)
-{
-    if (!active)
-        return false;
-    if (glm::dot(normal, blNormal) <= 0.9f)
-        return false;
-    return height > blHeight - tms::k_climbRegrabLowerHeight;
-}
-
 physics::CapsuleShape capsuleQueryForWallrun(const CollisionShape& shape)
 {
     return {.radius = shape.radius, .halfHeight = shape.halfHeight, .up = glm::vec3{0.0f, 1.0f, 0.0f}};
@@ -824,7 +758,16 @@ glm::vec3 redirectWallForwardTowardAnchor(
     return redirectWallForward(oldForward, oldNormal, newNormal);
 }
 
-void finishWallrunFrame(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& input, float dt)
+void queueWallrunKccCorrection(PlayerStateRef state, glm::vec3 normal, float correction)
+{
+    if (!std::isfinite(correction) || !usableNormal(normal))
+        return;
+
+    state.sim.pendingKccCorrection += normalizedOrZero(normal) * correction;
+}
+
+void finishWallrunFrame(
+    glm::vec3& vel, PlayerStateRef state, const InputSnapshot& input, float dt, float standoffCorrection = 0.0f)
 {
     const glm::vec3 k_hv = horizVel(vel);
     const float k_hvLen = glm::length(k_hv);
@@ -856,6 +799,7 @@ void finishWallrunFrame(glm::vec3& vel, PlayerStateRef state, const InputSnapsho
 
     vel.y *= std::exp(-dt / tms::k_wallrunVerticalDecayTau);
     vel -= state.sim.wallNormal * glm::dot(vel, state.sim.wallNormal);
+    queueWallrunKccCorrection(state, state.sim.wallNormal, standoffCorrection);
 
     const float sideDot = glm::dot(state.sim.wallNormal, glm::vec3{std::cos(input.yaw), 0.0f, -std::sin(input.yaw)});
     state.vis.wallRunSide = (sideDot < 0.0f) ? WallSide::Right : WallSide::Left;
@@ -1067,6 +1011,7 @@ bool handleWallCornerTransition(glm::vec3& pos,
                                                                state.sim.wallRegion);
         state.sim.wallNormal = fromNormal;
         state.sim.wallForward = fromForward;
+        float standoffCorrection = 0.0f;
         if (oldAttachment.found && glm::dot(oldAttachment.normal, fromNormal) > 0.95f) {
             state.sim.wallAnchor = oldAttachment.anchor;
             state.sim.wallMeshIndex = oldAttachment.meshIndex;
@@ -1075,13 +1020,13 @@ bool handleWallCornerTransition(glm::vec3& pos,
 
             const float desiredStandoff = desiredWallrunStandoff(shape, state.sim.wallNormal);
             const float currentStandoff = glm::dot(pos - state.sim.wallAnchor, state.sim.wallNormal);
-            pos += state.sim.wallNormal * (desiredStandoff - currentStandoff);
+            standoffCorrection = desiredStandoff - currentStandoff;
         }
 
         const float verticalVel = vel.y;
         vel = fromForward * preAttachHorizSpeed;
         vel.y = verticalVel;
-        finishWallrunFrame(vel, state, input, dt);
+        finishWallrunFrame(vel, state, input, dt, standoffCorrection);
         return true;
     }
 
@@ -1110,12 +1055,12 @@ bool handleWallCornerTransition(glm::vec3& pos,
 
     const float desiredStandoff = desiredWallrunStandoff(shape, state.sim.wallNormal);
     const float currentStandoff = glm::dot(pos - state.sim.wallAnchor, state.sim.wallNormal);
-    pos += state.sim.wallNormal * (desiredStandoff - currentStandoff);
+    const float standoffCorrection = desiredStandoff - currentStandoff;
 
     const float verticalVel = vel.y;
     vel = state.sim.wallForward * preAttachHorizSpeed;
     vel.y = verticalVel;
-    finishWallrunFrame(vel, state, input, dt);
+    finishWallrunFrame(vel, state, input, dt, standoffCorrection);
     return true;
 }
 
@@ -1252,10 +1197,7 @@ void handleWallRunning(glm::vec3& pos,
     const float desiredStandoff = desiredWallrunStandoff(shape, state.sim.wallNormal);
     const glm::vec3 preStandoffPos = pos;
     const float currentStandoff = glm::dot(pos - state.sim.wallAnchor, state.sim.wallNormal);
-    pos += state.sim.wallNormal * (desiredStandoff - currentStandoff);
-
-    const float normalVel = glm::dot(vel, state.sim.wallNormal);
-    vel -= state.sim.wallNormal * normalVel;
+    const float standoffCorrection = desiredStandoff - currentStandoff;
 
     if (normalTurn > 0.05f) {
         const glm::vec3 redirectedForward = redirectWallForwardTowardAnchor(
@@ -1273,219 +1215,7 @@ void handleWallRunning(glm::vec3& pos,
         vel.y = verticalVel;
     }
 
-    finishWallrunFrame(vel, state, input, dt);
-}
-
-} // namespace
-
-// Climbing
-
-namespace
-{
-
-/// @brief Attempt to enter climb mode when airborne facing a wall.
-/// @param vel    Velocity (modified in place).
-/// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-/// @param walls  Wall detection result from this tick.
-/// @param posY   Current vertical position of the entity.
-void tryEnterClimb(glm::vec3& vel,
-                   PlayerStateRef state,
-                   const InputSnapshot& input,
-                   const physics::WallDetectionResult& walls,
-                   float posY)
-{
-    if (state.vis.moveMode != MoveMode::OnFoot)
-        return;
-    if (state.vis.grounded || state.vis.exitingClimb)
-        return;
-    if (walls.groundDistance < tms::k_climbMinGroundDist)
-        return;
-    if (!walls.wallFront)
-        return;
-    const glm::vec3 wallNormal = normalizedOrZero(walls.frontNormal);
-    if (glm::dot(wallNormal, wallNormal) <= 0.0f)
-        return;
-
-    // Check look angle: player must be facing the wall.
-    const float k_sinYaw = std::sin(input.yaw);
-    const float k_cosYaw = std::cos(input.yaw);
-    const glm::vec3 k_lookDir{k_sinYaw, 0.0f, k_cosYaw};
-    const float k_lookAngle = std::acos(std::clamp(glm::dot(-k_lookDir, wallNormal), -1.0f, 1.0f));
-    const float k_maxAngleRad = glm::radians(tms::k_climbMaxWallLookAngle);
-    if (k_lookAngle > k_maxAngleRad)
-        return;
-
-    const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    if (glm::dot(wishDir, -wallNormal) < tms::k_climbIntentThreshold)
-        return;
-
-    // Blacklist check.
-    if (isClimbBlacklisted(wallNormal,
-                           posY,
-                           state.sim.climbBlacklistNormal,
-                           state.sim.climbBlacklistHeight,
-                           state.sim.climbBlacklistActive))
-        return;
-
-    // Enter climbing.
-    state.vis.moveMode = MoveMode::Climbing;
-    state.sim.climbWallNormal = wallNormal;
-    state.sim.climbAttachPoint = walls.frontPoint;
-    state.sim.climbAttachHeight = posY;
-    state.sim.climbTimer = 0.0f;
-    state.sim.climbNonUpTimer = 0.0f;
-    state.sim.climbHadUpwardMotion = false;
-    // DJ no longer refreshes from entering climb — only from ground time.
-    state.vis.jumpCount = 0;
-
-    // Reduce horizontal velocity immediately.
-    vel.x *= tms::k_climbSidewaysMultiplier;
-    vel.z *= tms::k_climbSidewaysMultiplier;
-    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
-    if (vel.y * gravDir < 0.0f)
-        vel.y = 0.0f;
-}
-
-/// @brief Exit climb mode and start cooldown timers.
-/// @param state  Player state (modified in place).
-/// @param posY   Current vertical position for blacklist height.
-void exitClimb(PlayerStateRef state, float posY)
-{
-    state.vis.moveMode = MoveMode::OnFoot;
-    state.vis.exitingClimb = true;
-    state.sim.exitClimbTimer = tms::k_climbExitTime;
-    state.sim.wasClimbing = true;
-    state.sim.coyoteTimer = tms::k_coyoteTime;
-    state.sim.climbBlacklistActive = true;
-    state.sim.climbBlacklistNormal = state.sim.climbWallNormal;
-    state.sim.climbBlacklistHeight = posY;
-}
-
-/// @brief Process climbing movement with speed decay and exit conditions.
-/// @param vel    Velocity (modified in place).
-/// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-/// @param walls  Wall detection result from this tick.
-/// @param posY   Current vertical position of the entity.
-/// @param dt     Fixed physics delta time in seconds.
-void handleClimbing(glm::vec3& vel,
-                    PlayerStateRef state,
-                    const InputSnapshot& input,
-                    const physics::WallDetectionResult& walls,
-                    float posY,
-                    float dt)
-{
-    state.sim.climbTimer += dt;
-
-    // Exit conditions
-    if (!walls.wallFront || input.crouch || input.back) {
-        exitClimb(state, posY);
-        return;
-    }
-
-    const glm::vec3 climbNormal = normalizedOrZero(state.sim.climbWallNormal);
-    if (glm::dot(climbNormal, climbNormal) <= 0.0f) {
-        exitClimb(state, posY);
-        return;
-    }
-
-    const glm::vec3 wishDir = physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-    const bool hasUpIntent = glm::dot(wishDir, -climbNormal) >= tms::k_climbIntentThreshold;
-    const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
-
-    if (!hasUpIntent) {
-        state.sim.climbNonUpTimer += dt;
-        if (state.sim.climbNonUpTimer >= tms::k_climbNonUpDetachTime) {
-            exitClimb(state, posY);
-            return;
-        }
-
-        vel.y = -tms::k_climbSlipSpeed * gravDir;
-        vel.x *= tms::k_climbSidewaysMultiplier;
-        vel.z *= tms::k_climbSidewaysMultiplier;
-        vel -= climbNormal * tms::k_wallrunPushForce * dt;
-        state.vis.targetCameraTilt = 0.0f;
-        return;
-    }
-
-    state.sim.climbNonUpTimer = 0.0f;
-
-    // Climbing movement (upward with speed decay)
-    const float k_decayAlpha = std::clamp(state.sim.climbTimer / tms::k_climbKickoffDuration, 0.0f, 1.0f);
-    const float k_climbSpeed = std::lerp(tms::k_climbMaxSpeed, tms::k_climbMinSpeed, k_decayAlpha);
-
-    vel.y = k_climbSpeed * gravDir;
-    state.sim.climbHadUpwardMotion = (vel.y * gravDir) >= tms::k_climbUpVelocityThreshold;
-
-    // Minimal sideways movement.
-    vel.x *= tms::k_climbSidewaysMultiplier;
-    vel.z *= tms::k_climbSidewaysMultiplier;
-
-    // Push toward wall.
-    vel -= climbNormal * tms::k_wallrunPushForce * dt;
-
-    state.vis.targetCameraTilt = 0.0f;
-}
-
-} // namespace
-
-// Ledge grabbing
-
-namespace
-{
-
-/// @brief Attempt to grab a ledge while climbing.
-/// @param state  Player state (modified in place).
-/// @param walls  Wall detection result from this tick.
-void tryEnterLedgeGrab(PlayerStateRef state, const physics::WallDetectionResult& walls)
-{
-    // Can only grab ledges while climbing.
-    if (state.vis.moveMode != MoveMode::Climbing)
-        return;
-    if (!walls.ledgeDetected)
-        return;
-    const glm::vec3 ledgeNormal = normalizedOrZero(walls.ledgeNormal);
-    if (!finiteVec3(walls.ledgePoint) || glm::dot(ledgeNormal, ledgeNormal) <= 0.0f)
-        return;
-    if (state.sim.exitingLedge)
-        return;
-
-    state.vis.moveMode = MoveMode::LedgeGrabbing;
-    state.sim.ledgePoint = walls.ledgePoint;
-    state.sim.ledgeNormal = ledgeNormal;
-    state.sim.ledgeHoldTimer = 0.0f;
-    // DJ no longer refreshes from entering ledge grab — only from ground time.
-    state.vis.jumpCount = 0;
-}
-
-/// @brief Process ledge grab hold, freeze velocity, and auto-mantle.
-/// @param vel    Velocity (modified in place).
-/// @param state  Player state (modified in place).
-/// @param input  Current input snapshot.
-/// @param dt     Fixed physics delta time in seconds.
-void handleLedgeGrab(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& input, float dt)
-{
-    state.sim.ledgeHoldTimer += dt;
-
-    // Freeze velocity (gravity is countered).
-    vel = glm::vec3(0.0f);
-
-    // Auto-mantle: if holding movement keys past min hold time.
-    if (state.sim.ledgeHoldTimer >= tms::k_ledgeMinHoldTime && anyMoveInput(input)) {
-        const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
-        vel.y = tms::k_ledgeJumpUpForce * gravDir;
-        const glm::vec3 ledgeNormal = normalizedOrZero(state.sim.ledgeNormal);
-        if (glm::dot(ledgeNormal, ledgeNormal) > 0.0f)
-            vel += ledgeNormal * tms::k_ledgeJumpBackForce;
-        state.vis.moveMode = MoveMode::OnFoot;
-        state.sim.exitingLedge = true;
-        state.sim.exitLedgeTimer = tms::k_ledgeExitTime;
-        // DJ no longer refreshes from auto-mantle — only from ground time.
-        state.vis.jumpCount = 1;
-    }
-
-    state.vis.targetCameraTilt = 0.0f;
+    finishWallrunFrame(vel, state, input, dt, standoffCorrection);
 }
 
 } // namespace
@@ -1758,6 +1488,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
         auto& sim = registry.get<PlayerSimState>(e);
         auto& shape = registry.get<CollisionShape>(e);
         const auto& input = registry.get<InputSnapshot>(e);
+        sim.pendingKccCorrection = glm::vec3{0.0f};
         {
             // Bundle the two halves into a single ref so the helper functions
             // below don't need a "(vis, sim)" pair on every call.
@@ -1787,14 +1518,12 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // Gravity direction multiplier: +1 normal, -1 flipped.
             const float gravDir = state.vis.gravityFlipped ? -1.0f : 1.0f;
 
-            // 1. Wall / climb / ledge detection
+            // 1. Wall detection
             // Pass the previous wall normal so the detector can trace toward
             // curved surfaces (cylinders, concave walls) whose normal rotates
             // as the player moves along them.
             physics::WallDetectionResult walls{};
-            if (!state.vis.grounded || state.vis.moveMode == MoveMode::WallRunning ||
-                state.vis.moveMode == MoveMode::Climbing)
-            {
+            if (!state.vis.grounded || state.vis.moveMode == MoveMode::WallRunning) {
                 const glm::vec3 prevNormal =
                     (state.vis.moveMode == MoveMode::WallRunning) ? state.sim.wallNormal : glm::vec3(0.0f);
                 walls = physics::detectWalls(pos.value,
@@ -1808,22 +1537,16 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             }
             if (diagOn) {
                 movementDiag.wallFront = walls.wallFront;
-                movementDiag.ledgeDetected = walls.ledgeDetected;
                 movementDiag.groundDistance = walls.groundDistance;
                 movementDiag.frontNormal = walls.frontNormal;
                 movementDiag.frontPoint = walls.frontPoint;
-                movementDiag.ledgeNormal = walls.ledgeNormal;
-                movementDiag.ledgePoint = walls.ledgePoint;
             }
 
             // 2. Sprint update
             updateSprint(state, input);
 
             // 3. State transitions (try enter new modes)
-            // Order matters: ledge > climb > wallrun > slide
-            tryEnterLedgeGrab(state, walls);
-            if (state.vis.moveMode == MoveMode::OnFoot)
-                tryEnterClimb(vel.value, state, input, walls, pos.value.y);
+            // Order matters: wallrun > slide
             if (state.vis.moveMode == MoveMode::OnFoot)
                 tryEnterWallrun(vel.value, state, input, walls, shape, world, pos.value, pos.value.y);
             if (state.vis.moveMode == MoveMode::OnFoot)
@@ -1848,7 +1571,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             //     grapple-rising-edge + jump same-tick is a rare edge case and
             //     handleGrapple's velocity override wins anyway.
             if (!state.vis.grappleActive)
-                handleJump(vel.value, input, state, dt, pos.value.y, gravDir);
+                handleJump(vel.value, input, state, dt, gravDir);
 
             // 5. Mode-specific movement
             switch (state.vis.moveMode) {
@@ -1890,14 +1613,6 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             case MoveMode::WallRunning:
                 handleWallRunning(pos.value, vel.value, state, input, walls, shape, world, pos.value.y, dt);
                 break;
-
-            case MoveMode::Climbing:
-                handleClimbing(vel.value, state, input, walls, pos.value.y, dt);
-                break;
-
-            case MoveMode::LedgeGrabbing:
-                handleLedgeGrab(vel.value, state, input, dt);
-                break;
             }
 
             // 5b. Grappling hook (Widowmaker-style)
@@ -1912,7 +1627,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 state.sim.grappleInputLastTick = input.grapple;
 
                 if (state.vis.grappleActive) {
-                    // Cancel wallrun/climb/slide on grapple.
+                    // Cancel wallrun/slide on grapple.
                     if (state.vis.moveMode != MoveMode::OnFoot) {
                         state.vis.moveMode = MoveMode::OnFoot;
                         if (state.vis.crouching)
@@ -1948,14 +1663,13 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
                 // Double jump: refresh only after enough continuous OnFoot time
                 // on the ground. This is the *only* path that grants DJ — wall
-                // jumps, climb jumps, slidehops, and ledge mantles deliberately
+                // jumps and slidehops deliberately
                 // don't restore it.
                 if (state.sim.groundedDuration >= tms::k_doubleJumpGroundedRefreshTime)
                     state.sim.canDoubleJump = true;
 
                 // Clear blacklists on landing.
                 state.sim.wallBlacklistActive = false;
-                state.sim.climbBlacklistActive = false;
             }
 
             // 10. Auto-uncrouch / pending uncrouch
@@ -1992,11 +1706,6 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 movementDiag.velAfter = vel.value;
                 movementDiag.modeAfter = static_cast<int>(state.vis.moveMode);
                 movementDiag.groundedAfter = state.vis.grounded;
-                movementDiag.climbWallNormal = state.sim.climbWallNormal;
-                movementDiag.storedLedgeNormal = state.sim.ledgeNormal;
-                movementDiag.storedLedgePoint = state.sim.ledgePoint;
-                movementDiag.climbTimer = state.sim.climbTimer;
-                movementDiag.ledgeHoldTimer = state.sim.ledgeHoldTimer;
                 if (state.vis.grounded)
                     movementDiag.flags |= physics::diag::PhaseFlag::Grounded;
                 if (state.vis.grappleActive)
@@ -2007,10 +1716,6 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                     movementDiag.flags |= physics::diag::PhaseFlag::WallRunning;
                 if (state.vis.moveMode == MoveMode::Sliding)
                     movementDiag.flags |= physics::diag::PhaseFlag::Sliding;
-                if (state.vis.moveMode == MoveMode::Climbing)
-                    movementDiag.flags |= physics::diag::PhaseFlag::Climbing;
-                if (state.vis.moveMode == MoveMode::LedgeGrabbing)
-                    movementDiag.flags |= physics::diag::PhaseFlag::LedgeGrabbing;
                 if (state.sim.jumpedThisTick)
                     movementDiag.flags |= physics::diag::PhaseFlag::DoubleJumped;
                 physics::diag::recordMovementFrame(movementDiag);

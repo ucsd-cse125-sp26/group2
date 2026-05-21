@@ -14,8 +14,8 @@ struct ConstPlayerStateRef;
 ///
 /// Any divergence between client and server builds is a bug (breaks prediction).
 ///
-/// Implements the full Titanfall-inspired movement state machine:
-///   OnFoot → Sliding → WallRunning → Climbing → LedgeGrabbing
+/// Implements the Titanfall-inspired movement state machine:
+///   OnFoot → Sliding → WallRunning
 /// with sprint, double jump, coyote time, jump lurch, air strafing, and speed cap.
 ///
 /// @note Position integration is NOT done here — CollisionSystem owns that via swept AABB.
@@ -26,7 +26,7 @@ namespace systems
 ///
 /// @param registry  The ECS registry.
 /// @param dt        Fixed physics delta time in seconds.
-/// @param world     World collision geometry (needed for wall/climb/ledge detection).
+/// @param world     World collision geometry (needed for wall detection).
 void runMovement(Registry& registry, float dt, const physics::WorldGeometry& world);
 
 /// @brief Determine the current ground wish speed based on movement mode and stance.

@@ -384,9 +384,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
         auto& vel = registry.get<Velocity>(e);
         const auto& shape = registry.get<CollisionShape>(e);
         auto& state = registry.get<PlayerVisState>(e);
-        const PlayerSimState* sim = registry.try_get<PlayerSimState>(e);
+        PlayerSimState* sim = registry.try_get<PlayerSimState>(e);
         const bool jumpedThisTick = sim != nullptr && sim->jumpedThisTick;
-        runKinematicCharacterController(pos.value, vel.value, shape, state, dt, world, e, jumpedThisTick);
+        runKinematicCharacterController(pos.value, vel.value, shape, state, dt, world, e, jumpedThisTick, sim);
     };
 
 #if GROUP2_COLLISION_HAS_PARALLEL

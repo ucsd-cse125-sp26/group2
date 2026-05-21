@@ -10,6 +10,8 @@
 #include <entt/entity/fwd.hpp>
 #include <glm/vec3.hpp>
 
+struct PlayerSimState;
+
 namespace systems
 {
 
@@ -25,6 +27,7 @@ void runKinematicCharacterController(glm::vec3& pos,
                                      float dt,
                                      const physics::WorldGeometry& world,
                                      entt::entity entity,
-                                     bool jumpedThisTick);
+                                     bool jumpedThisTick,
+                                     PlayerSimState* simState = nullptr);
 
 } // namespace systems

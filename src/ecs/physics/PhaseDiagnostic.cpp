@@ -120,7 +120,7 @@ void openLazily()
                  "tick,entity,posBeforeX,posBeforeY,posBeforeZ,posAfterDepenX,posAfterDepenY,posAfterDepenZ,"
                  "posAfterX,posAfterY,posAfterZ,velBeforeX,velBeforeY,velBeforeZ,velAfterX,velAfterY,velAfterZ,"
                  "actualDelta,expectedDelta,depenPush,bumpHits,moveMode,wallrunSide,jumpCount,"
-                 "lastNormalX,lastNormalY,lastNormalZ,flagsHex,grounded,wallrun,sliding,climbing,ledge,"
+                 "lastNormalX,lastNormalY,lastNormalZ,flagsHex,grounded,wallrun,sliding,"
                  "grapple,doubleJumped,gravFlipped,depenCancelled,deepPenetration,bumpExhausted,suspectedPhase,"
                  "invalidState,note\n");
     wroteHeader = true;
@@ -146,11 +146,8 @@ void openMovementLazily()
                  "posBeforeX,posBeforeY,posBeforeZ,posAfterX,posAfterY,posAfterZ,"
                  "velBeforeX,velBeforeY,velBeforeZ,velAfterX,velAfterY,velAfterZ,"
                  "inputF,inputB,inputL,inputR,inputJump,inputCrouch,inputGrapple,yaw,pitch,"
-                 "wallFront,ledgeDetected,groundDistance,"
+                 "wallFront,groundDistance,"
                  "frontNx,frontNy,frontNz,frontPx,frontPy,frontPz,"
-                 "ledgeNx,ledgeNy,ledgeNz,ledgePx,ledgePy,ledgePz,"
-                 "climbNx,climbNy,climbNz,storedLedgeNx,storedLedgeNy,storedLedgeNz,"
-                 "storedLedgePx,storedLedgePy,storedLedgePz,climbTimer,ledgeHoldTimer,"
                  "flagsHex,invalidState,note\n");
 }
 
@@ -178,10 +175,6 @@ const char* moveModeName(int m)
         return "Sliding";
     case 2:
         return "WallRunning";
-    case 3:
-        return "Climbing";
-    case 4:
-        return "LedgeGrabbing";
     default:
         return "?";
     }
@@ -333,7 +326,7 @@ void recordFrame(const PlayerFrame& f) noexcept
                  "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
                  "%.3f,%.3f,%.3f,%d,%s,%d,%d,"
                  "%.4f,%.4f,%.4f,0x%X,"
-                 "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
+                 "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
                  "%s\n",
                  static_cast<unsigned long>(tickForRow),
                  entt::to_integral(f.entity),
@@ -366,8 +359,6 @@ void recordFrame(const PlayerFrame& f) noexcept
                  (flagBits & static_cast<uint32_t>(PhaseFlag::Grounded)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::WallRunning)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::Sliding)) ? 1 : 0,
-                 (flagBits & static_cast<uint32_t>(PhaseFlag::Climbing)) ? 1 : 0,
-                 (flagBits & static_cast<uint32_t>(PhaseFlag::LedgeGrabbing)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::GrappleActive)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::DoubleJumped)) ? 1 : 0,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::GravityFlipped)) ? 1 : 0,
@@ -395,8 +386,6 @@ void recordMovementFrame(const MovementFrame& f) noexcept
     PhaseFlag flags = f.flags;
     const bool finite = finiteVec3(f.posBefore) && finiteVec3(f.posAfter) && finiteVec3(f.velBefore) &&
                         finiteVec3(f.velAfter) && finiteVec3(f.frontNormal) && finiteVec3(f.frontPoint) &&
-                        finiteVec3(f.ledgeNormal) && finiteVec3(f.ledgePoint) && finiteVec3(f.climbWallNormal) &&
-                        finiteVec3(f.storedLedgeNormal) && finiteVec3(f.storedLedgePoint) &&
                         std::isfinite(f.groundDistance) && std::isfinite(f.yaw) && std::isfinite(f.pitch);
     if (!finite)
         flags |= PhaseFlag::InvalidState;
@@ -412,11 +401,8 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
                  "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
                  "%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,"
-                 "%d,%d,%.3f,"
+                 "%d,%.3f,"
                  "%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,"
-                 "%.6f,%.6f,%.6f,%.3f,%.3f,%.3f,"
-                 "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
-                 "%.3f,%.3f,%.3f,%.6f,%.6f,"
                  "0x%X,%d,%s\n",
                  static_cast<unsigned long>(movementRowIndex),
                  entt::to_integral(f.entity),
@@ -446,7 +432,6 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  static_cast<double>(f.yaw),
                  static_cast<double>(f.pitch),
                  f.wallFront ? 1 : 0,
-                 f.ledgeDetected ? 1 : 0,
                  static_cast<double>(f.groundDistance),
                  static_cast<double>(f.frontNormal.x),
                  static_cast<double>(f.frontNormal.y),
@@ -454,23 +439,6 @@ void recordMovementFrame(const MovementFrame& f) noexcept
                  static_cast<double>(f.frontPoint.x),
                  static_cast<double>(f.frontPoint.y),
                  static_cast<double>(f.frontPoint.z),
-                 static_cast<double>(f.ledgeNormal.x),
-                 static_cast<double>(f.ledgeNormal.y),
-                 static_cast<double>(f.ledgeNormal.z),
-                 static_cast<double>(f.ledgePoint.x),
-                 static_cast<double>(f.ledgePoint.y),
-                 static_cast<double>(f.ledgePoint.z),
-                 static_cast<double>(f.climbWallNormal.x),
-                 static_cast<double>(f.climbWallNormal.y),
-                 static_cast<double>(f.climbWallNormal.z),
-                 static_cast<double>(f.storedLedgeNormal.x),
-                 static_cast<double>(f.storedLedgeNormal.y),
-                 static_cast<double>(f.storedLedgeNormal.z),
-                 static_cast<double>(f.storedLedgePoint.x),
-                 static_cast<double>(f.storedLedgePoint.y),
-                 static_cast<double>(f.storedLedgePoint.z),
-                 static_cast<double>(f.climbTimer),
-                 static_cast<double>(f.ledgeHoldTimer),
                  flagBits,
                  (flagBits & static_cast<uint32_t>(PhaseFlag::InvalidState)) ? 1 : 0,
                  note);

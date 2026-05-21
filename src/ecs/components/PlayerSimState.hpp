@@ -31,8 +31,8 @@ struct PlayerSimState
 {
     // ── Jump state ─────────────────────────────────────────────────────────
     bool canDoubleJump{true};     ///< Refreshed only after `k_doubleJumpGroundedRefreshTime` of continuous
-                                  ///< grounded OnFoot time. Wall jumps, climb jumps, slidehops, ledge mantles,
-                                  ///< and instant landings do NOT refresh it.
+                                  ///< grounded OnFoot time. Wall jumps, slidehops, and instant landings do NOT
+                                  ///< refresh it.
     bool jumpedThisTick{false};   ///< Set during the tick a jump occurs (for lurch setup).
     bool jumpHeldLastTick{false}; ///< Was jump key held on the previous tick (edge detection).
     float jumpCooldown{0.0f};     ///< Minimum time before double jump is available (s).
@@ -80,33 +80,16 @@ struct PlayerSimState
     glm::vec3 wallCornerIgnoreNormal{0.0f}; ///< Source wall briefly ignored after a corner commit.
     float wallCornerIgnoreTimer{0.0f};      ///< Remaining time to suppress source-wall backtracking.
     bool wasWallRunning{false};             ///< Set briefly after leaving wallrun (coyote wall jump).
+    glm::vec3 pendingKccCorrection{0.0f};   ///< One-tick collision-owned correction requested by movement.
 
     // Wall blacklist: stores the last wall's normal + height to prevent regrab.
     glm::vec3 wallBlacklistNormal{0.0f};
     float wallBlacklistHeight{-1e10f};
     bool wallBlacklistActive{false};
 
-    // ── Climbing ───────────────────────────────────────────────────────────
-    glm::vec3 climbWallNormal{0.0f};  ///< Normal of the wall being climbed.
-    glm::vec3 climbAttachPoint{0.0f}; ///< Surface point where the current climb attached.
-    float climbAttachHeight{0.0f};    ///< World Y at climb attach; used for same-wall regrab gating.
-    float climbNonUpTimer{0.0f};      ///< Time spent attached without upward climb intent/motion (s).
-    float climbTimer{0.0f};           ///< Time on current climb (s).
-    bool climbHadUpwardMotion{false}; ///< True once this climb produces local-up velocity.
-    float exitClimbTimer{0.0f};
-    bool wasClimbing{false};
-
-    // Climb blacklist.
-    glm::vec3 climbBlacklistNormal{0.0f};
-    float climbBlacklistHeight{-1e10f};
-    bool climbBlacklistActive{false};
-
-    // ── Ledge grabbing ─────────────────────────────────────────────────────
-    glm::vec3 ledgePoint{0.0f};  ///< World-space position of the grabbed ledge.
-    glm::vec3 ledgeNormal{0.0f}; ///< Wall normal at the ledge.
-    float ledgeHoldTimer{0.0f};  ///< Time spent holding the ledge (s).
-    bool exitingLedge{false};
-    float exitLedgeTimer{0.0f};
+    // ── Collision recovery ─────────────────────────────────────────────────
+    glm::vec3 lastSafePosition{0.0f}; ///< Last KCC-verified non-penetrating capsule center.
+    bool lastSafePositionValid{false};
 
     // ── Grappling hook (Widowmaker-style: direct pull, look-biased launch) ─
     bool grappleCooldownActive{false}; ///< True during cooldown between uses.
