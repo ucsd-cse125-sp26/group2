@@ -194,18 +194,10 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
 
     pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pipelineInfo.rasterizer_state.cull_mode = pipelineDesc.cullMode;
-    SDL_Log("Creating depth pipeline...");
-    SDL_Log("  vertexShader = %p", vertexShader);
-    SDL_Log("  fragmentShader = %p", fragmentShader);
-    SDL_Log("  num_vertex_buffers = %u", vertexInputState.num_vertex_buffers);
-    SDL_Log("  num_vertex_attributes = %u", vertexInputState.num_vertex_attributes);
-    SDL_Log("  depthTest = %d, depthWrite = %d", pipelineDesc.depthTest, pipelineDesc.depthWrite);
-    SDL_Log("  colorTarget = %p", pipelineDesc.colorTarget);
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
-    SDL_Log("  pipeline = %p", pipeline);
-    SDL_Log("  SDL_GetError = %s", SDL_GetError());
     //SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
+
 
     SDL_ReleaseGPUShader(device, vertexShader);
     SDL_ReleaseGPUShader(device, fragmentShader);
@@ -490,4 +482,19 @@ SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device)
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }
 
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device)
+{
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+
+    samplerInfo.enable_compare = true;
+    samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS;
+
+    return SDL_CreateGPUSampler(device, &samplerInfo);
+}
 } // namespace Boilerplate

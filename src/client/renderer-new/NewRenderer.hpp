@@ -338,6 +338,7 @@ private:
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
+    void drawGeometryDepthPass(SDL_GPUTexture* depthTexture, SDL_GPUCommandBuffer* cmd);
     void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);

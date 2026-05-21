@@ -147,7 +147,7 @@ bool NewRenderer::createGeometryPipeline()
     Boilerplate::ShaderInfo fragmentShader{};
     fragmentShader.path = "shaders-new/geometry.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fragmentShader.samplerCount = 1;
+    fragmentShader.samplerCount = MAX_SHADOW_COUNT + 1;
     fragmentShader.uniformBufferCount = 2;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
@@ -232,11 +232,6 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 
 // ─── Per-frame entry point ──────────────────────────────────────────────────
 
-void NewRenderer::setupSceneSSBOs()
-{
-
-
-}
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
 
@@ -284,12 +279,15 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
-    // uint32_t shadowSize = 10;
-    // SDL_GPUTexture* shadowMap = Boilerplate::createEmptyTextureD32F(device_,shadowSize,shadowSize);
-    //
-    //
-    // setMainCamera(glm::vec3(0.0f), yaw, pitch, 0.0f, shadowSize, shadowSize);
-    // drawGeometryPass(shadowMap, cmd);
+    uint32_t shadowSize = 1024;
+    SDL_GPUTexture* shadowMap = Boilerplate::createEmptyTextureD32F(device_,shadowSize,shadowSize);
+    std::vector<SDL_GPUTextureSamplerBinding> shadowMapBindings;
+    shadowMapBindings.push_back()
+
+
+
+    setMainCamera(glm::vec3(0.0f), yaw, pitch, 0.0f, shadowSize, shadowSize);
+    drawGeometryDepthPass(shadowMap, cmd);
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
 
@@ -318,6 +316,25 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
     camera_.computeViewProjectionMatrix();
 }
 
+void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture );
+
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
+    SDL_BindGPUGraphicsPipeline(geometryPass, depthPipeline_);
+
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+    drawWorldModelInstances(geometryPass, cmd);
+    drawEntityModels(geometryPass, cmd);
+
+    drawSkinnedModels(geometryPass, cmd);
+
+    // drawWeapon(geometryPass, cmd);
+
+    SDL_EndGPURenderPass(geometryPass);
+}
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
     SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);

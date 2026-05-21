@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <vector>
 
+#define MAX_SHADOW_COUNT 16
+
 namespace Boilerplate
 {
 constexpr SDL_GPUColorTargetBlendState OVER_BLEND_MODE = {
