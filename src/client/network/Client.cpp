@@ -53,6 +53,8 @@ ConnectError Client::init(const char* addr,
         }
 
         connectionId_ = session_.clientConnectionId();
+        udpSessionLastBytesSent_ = 0;
+        udpSessionLastBytesRecv_ = 0;
         SDL_Log("Client: UDP session connected to %s:%u, session=0x%llx",
                 addr,
                 port,
@@ -161,6 +163,8 @@ void Client::shutdown()
     std::lock_guard<std::mutex> lock(stateMutex_);
     session_.close();
     usingUdpSession_ = false;
+    udpSessionLastBytesSent_ = 0;
+    udpSessionLastBytesRecv_ = 0;
     if (msgStream.socket) {
         NET_DestroyStreamSocket(msgStream.socket);
         msgStream.socket = nullptr;

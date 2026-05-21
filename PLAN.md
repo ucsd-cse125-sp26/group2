@@ -121,6 +121,15 @@ Goal: track transport counter deltas across network-loop iterations.
 - Optionally reset them in `Client::shutdown()` after `session_.close()` so the
   object's disconnected state is internally consistent.
 
+Status: complete.
+
+Implementation note:
+
+- `Client` now stores `udpSessionLastBytesSent_` and
+  `udpSessionLastBytesRecv_` beside the existing bandwidth window counters.
+- Both snapshots reset after a UDP-session connection succeeds and again during
+  shutdown after the transport is closed.
+
 ### Phase 4: Mirror Transport Deltas in the UDP-Session Network Loop
 
 Goal: feed the existing HUD windows and totals from transport counters.
