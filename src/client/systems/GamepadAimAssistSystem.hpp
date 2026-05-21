@@ -214,8 +214,12 @@ inline glm::vec3 rayOntoAABB(
 /// @param gamepad   Open gamepad handle (nullptr → no-op).
 /// @param cfg       Tuning parameters.
 /// @param state     Persistent per-frame state (anchor + previous-frame snapshot).
-/// @param lookSens  Same value passed to runGamepadLook (rad/s @ full deflection).
+/// @param pitchSensitivity  Pitch radians per second at full stick deflection.
+/// @param yawSensitivity    Yaw radians per second at full stick deflection.
+/// @param lookDeadzone      Look-stick deadzone as a fraction of full deflection.
+/// @param moveDeadzone      Move-stick deadzone as a fraction of full deflection.
 /// @param dt        Frame delta time (seconds).
+/// @param swapSticks  When true, use the swapped stick layout for activation checks.
 inline void runGamepadAimAssist(Registry& registry,
                                 SDL_Gamepad* gamepad,
                                 const GamepadAimAssistConfig& cfg,

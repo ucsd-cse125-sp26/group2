@@ -31,8 +31,8 @@
 #include "ecs/systems/RagdollSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
-#include <ecs/components/RespawnPoint.hpp>
 #include <algorithm>
+#include <ecs/components/RespawnPoint.hpp>
 #include <limits>
 #include <random>
 #include <vector>
