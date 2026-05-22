@@ -422,6 +422,20 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         return true;
     };
 
+    auto forcePalm = [&](const ArmIkChain& chain, const ArmIkTarget& target) {
+        if (!target.enabled || !chain.valid())
+            return false;
+
+        const size_t handIdx = static_cast<size_t>(chain.hand);
+        const glm::vec3 wrist = matrixTranslation(impl_->jointModelMats[handIdx]);
+        const glm::vec3 delta = target.positionModel - wrist;
+        if (glm::dot(delta, delta) < 0.000001f)
+            return false;
+
+        applyDeltaToMask(impl_->jointModelMats, chain.handDescendants, glm::translate(glm::mat4(1.0f), delta));
+        return true;
+    };
+
     auto solveFinger = [&](const ArmIkChain::FingerIkChain& chain, const glm::vec3& targetPos) {
         if (!chain.valid())
             return false;
@@ -458,6 +472,8 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
 
     bool changedLeft = solveArm(impl_->leftArm, targets.left);
     bool changedRight = solveArm(impl_->rightArm, targets.right);
+    changedLeft |= forcePalm(impl_->leftArm, targets.left);
+    changedRight |= forcePalm(impl_->rightArm, targets.right);
     changedLeft |= orientHand(impl_->leftArm, targets.left);
     changedRight |= orientHand(impl_->rightArm, targets.right);
     changedLeft |= solveFingers(impl_->leftArm, targets.left);

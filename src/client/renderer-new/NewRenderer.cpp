@@ -370,6 +370,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     };
     drawAttachment(weapon_.hands.right);
     drawAttachment(weapon_.hands.left);
+    drawAttachment(weapon_.debugPoint);
 }
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)

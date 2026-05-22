@@ -328,6 +328,7 @@ private:
     int weaponAssetIds_[4] = {-1, -1, -1, -1};
     int viewmodelLeftHandModelIdx_ = -1;
     int viewmodelRightHandModelIdx_ = -1;
+    int handMountDebugMarkerModelIdx_ = -1;
 
     int rocketProjectileModelIdx_ = -1;
 
@@ -467,13 +468,44 @@ private:
 
     // Hand mount tuning for third-person player IK / weapon grips.
     WeaponHandMountParams weaponHandMountParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
+    WeaponHandMountParams authoredWeaponHandMountParams_[4]; ///< Defaults loaded from authored weapon assets.
     int handMountTuneWeaponIdx_ = 0;                 ///< Which weapon type is being tuned.
     bool showHandMountUI_ = false;                   ///< Show the Hand Mount Tweaker window.
 
     // First-person arm mount tuning (separate from third-person grips).
     FirstPersonHandMountParams fpHandMountParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
+    FirstPersonHandMountParams authoredFPHandMountParams_[4]; ///< Defaults loaded from authored weapon assets.
     int fpHandMountTuneWeaponIdx_ = 0;                ///< Which weapon type is being tuned.
     bool showFPHandMountUI_ = false;                  ///< Show the FP Arm Tweaker window.
+
+    enum class HandMountDebugSpace : std::uint8_t
+    {
+        None,
+        ThirdPerson,
+        FirstPerson,
+    };
+
+    enum class HandMountDebugPoint : std::uint8_t
+    {
+        Shoulder,
+        Elbow,
+        Palm,
+        Finger0,
+        Finger1,
+        Finger2,
+        Finger3,
+        Finger4,
+    };
+
+    struct HandMountDebugTarget
+    {
+        HandMountDebugSpace space = HandMountDebugSpace::None;
+        int weaponIdx = 0;
+        bool left = false;
+        HandMountDebugPoint point = HandMountDebugPoint::Palm;
+    };
+
+    HandMountDebugTarget handMountDebugTarget_{};
 
     // Weapon spawner model tuning (per weapon type, live-adjustable via ImGui)
     WeaponSpawnerModelParams spawnerWeaponParams_[4]; ///< Runtime-tunable copy; initialised from spawner defaults.

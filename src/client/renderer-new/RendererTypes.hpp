@@ -106,6 +106,7 @@ struct WeaponViewmodel
     int32_t modelIndex = -1;   ///< Renderer-side model handle.
     glm::mat4 transform{1.0f}; ///< Transform in viewmodel space (relative to camera).
     ViewmodelHands hands{};    ///< Optional first-person hands attached to weapon grip mounts.
+    ViewmodelAttachment debugPoint{}; ///< Optional red debug marker for live mount tweaking.
     bool visible = false;      ///< False = skip drawing this frame (e.g. weapon hidden).
 };
 

@@ -21,9 +21,9 @@ struct ViewmodelParams
 struct ThirdPersonWeaponParams
 {
     float scale;
-    glm::vec3 handOffset;                         // relative to player center (right, up, forward)
+    glm::vec3 handOffset;                        // relative to player center (right, up, forward)
     glm::vec3 aimPivotOffset{0.0f, 22.0f, 0.0f}; // pitch orbit pivot, near upper chest / neck
-    float yawOffset, pitchOffset, rollOffset;     // degrees
+    float yawOffset, pitchOffset, rollOffset;    // degrees
 };
 
 /// @brief A weapon-local grip point for either hand.
@@ -44,8 +44,8 @@ inline constexpr std::array<const char*, kHandFingerMountCount> kHandFingerMount
 struct HandMountSet
 {
     glm::vec3 elbowOffset{0.0f};
-    HandMountPoint palm;
-    std::array<HandMountPoint, kHandFingerMountCount> fingers{};
+    HandMountPoint palm;                                         ///< Weapon-local hard anchor for the hand.
+    std::array<HandMountPoint, kHandFingerMountCount> fingers{}; ///< Palm-local child offsets.
 };
 
 /// @brief Per-weapon hand mount targets used by third-person player arm/finger IK.
@@ -61,8 +61,8 @@ struct FirstPersonArmMountSet
 {
     glm::vec3 shoulderOffset{0.0f};
     glm::vec3 elbowOffset{0.0f};
-    HandMountPoint palm;
-    std::array<HandMountPoint, kHandFingerMountCount> fingers{};
+    HandMountPoint palm;                                         ///< Weapon-local hard anchor for the hand.
+    std::array<HandMountPoint, kHandFingerMountCount> fingers{}; ///< Palm-local child offsets.
 };
 
 /// @brief Per-weapon first-person shoulder/elbow/palm/finger target data.

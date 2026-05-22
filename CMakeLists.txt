@@ -1410,30 +1410,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
     )
 endif()
 
-# Copy standalone prop GLBs used by server-side collision. Keep this list
-# explicit so stale local files do not become generated build dependencies.
-set(_server_prop_glbs
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/bottle_a.glb"
-)
-set(_server_existing_prop_glbs)
-foreach(_server_prop_glb IN LISTS _server_prop_glbs)
-    if(EXISTS "${_server_prop_glb}")
-        list(APPEND _server_existing_prop_glbs "${_server_prop_glb}")
-    else()
-        message(WARNING "Server prop asset missing and will not be copied: ${_server_prop_glb}")
-    endif()
-endforeach()
-if(_server_existing_prop_glbs)
-    add_custom_command(TARGET server POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${_server_existing_prop_glbs}
-                "$<TARGET_FILE_DIR:server>/assets/"
-        COMMENT "Copying prop GLBs to server binary directory"
-        VERBATIM
-    )
-endif()
-
 # ===========================================================================
 # Global directory executable
 # ===========================================================================
