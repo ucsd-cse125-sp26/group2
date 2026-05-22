@@ -463,6 +463,15 @@ target_compile_options(imgui_lib PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W0>
 )
 
+# argparse -- header-only command-line argument parser used by the server.
+FetchContent_Declare(
+    argparse
+    GIT_REPOSITORY https://github.com/p-ranav/argparse.git
+    GIT_TAG v3.2
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(argparse)
+
 # ---- Shaders: GLSL → SPIR-V (→ DXIL on Windows / MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
 #   Prefers the vendored glslang CLI (target `glslang-standalone`) built from
@@ -1344,6 +1353,7 @@ target_link_libraries(server PRIVATE
     ozz_animation_offline
     ozz_animation
     ozz_base
+    argparse
 )
 if(TBB_FOUND)
     target_link_libraries(server PRIVATE TBB::tbb)

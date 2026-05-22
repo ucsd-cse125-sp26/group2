@@ -13,9 +13,11 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <algorithm>
+#include <argparse/argparse.hpp>
 #include <array>
 #include <cerrno>
 #include <cinttypes>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -160,8 +162,20 @@ void closeCsv()
 } // namespace
 
 /// @brief Server entry point -- initialises SDL/NET, runs the game loop, and cleans up.
-int main()
+int main(int argc, char* argv[])
 {
+    // Setup argparse
+    argparse::ArgumentParser program("group2_server");
+    program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");
+    program.add_argument("--port").scan<'u', uint16_t>().help("Port to listen on for game clients (default: 9999)");
+
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::exception& err) {
+        SDL_Log("Argument parsing error: %s\n%s", err.what(), program.help().str().c_str());
+        return 1;
+    }
+
     SDL_Init(0);
     NET_Init();
 
@@ -179,7 +193,25 @@ int main()
     std::string cfgPath = std::string(base ? base : "") + "config.toml";
     const NetworkConfig cfg = loadNetworkConfig(cfgPath.c_str());
     const DeveloperConfig developerCfg = loadDeveloperConfig(cfgPath.c_str());
-    const NetworkAddress& serverNet = cfg.serverNetwork;
+    NetworkAddress serverNet = cfg.serverNetwork;
+
+    if (program.is_used("--address")) {
+        serverNet.host = program.get<std::string>("--address");
+    }
+
+    if (program.is_used("--port")) {
+        auto portNum = program.get<uint16_t>("--port");
+        if (portNum < 0 || portNum > 65535) {
+            SDL_Log("Invalid port number: %d", portNum);
+            ::group2::perf::stopAggregator();
+            closeCsv();
+            NET_Quit();
+            SDL_Quit();
+            return 1;
+        }
+
+        serverNet.port = portNum;
+    }
 
     Server server;
     if (!server.init(serverNet.host.c_str(), serverNet.port, cfg.transport, cfg.discovery)) {
