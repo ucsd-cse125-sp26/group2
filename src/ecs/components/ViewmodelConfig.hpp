@@ -149,9 +149,9 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
     static const std::array<ThirdPersonWeaponParams, 4> k_params{{
         // Rifle
         {.scale = 10.0f,
-         .handOffset = {1.5f, -3.5f, 14.0f},
-         .yawOffset = -47.0f,
-         .pitchOffset = 13.0f,
+         .handOffset = {1.5f, 24.5f, 13.5f},
+         .yawOffset = 15.0f,
+         .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
         // Rocket
         {.scale = 0.025f,
