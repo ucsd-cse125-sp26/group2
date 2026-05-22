@@ -569,11 +569,32 @@ void Server::handleSessionPayload(std::uint64_t connId,
     if (!payload || len == 0)
         return;
 
-    std::shared_lock<std::shared_mutex> lock(stateMutex_);
-    auto idIt = connIdToClient_.find(connId);
-    if (idIt == connIdToClient_.end())
+    ClientId clientId{-1};
+    {
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        auto idIt = connIdToClient_.find(connId);
+        if (idIt == connIdToClient_.end())
+            return;
+        auto connIt = clients.find(idIt->second);
+        if (connIt == clients.end())
+            return;
+        clientId = idIt->second;
+    }
+
+    if (payload[0] == static_cast<std::uint8_t>(PacketType::PING)) {
+        constexpr std::uint32_t k_pingPayloadLen = 1 + sizeof(Uint64);
+        if (len != k_pingPayloadLen)
+            return;
+
+        std::uint8_t reply[k_pingPayloadLen];
+        reply[0] = static_cast<std::uint8_t>(PacketType::PONG);
+        std::memcpy(reply + 1, payload + 1, sizeof(Uint64));
+        session_.send(connId, net::ChannelId::InputUnreliable, reply, static_cast<int>(sizeof(reply)));
         return;
-    auto connIt = clients.find(idIt->second);
+    }
+
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+    auto connIt = clients.find(clientId);
     if (connIt == clients.end())
         return;
     if (channel == net::ChannelId::VoiceUnreliableSequenced) {

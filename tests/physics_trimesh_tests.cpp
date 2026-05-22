@@ -982,8 +982,8 @@ bool airborneKccDoesNotGainLiftFromSeparatingSlopedCeiling()
         systems::runKinematicCharacterController(pos, vel, shape, state, dt, world, entt::null, false);
 
     bool ok = true;
-    ok &= expect(glm::dot(beforeVel, ceilingNormal) > 0.0f,
-                 "test setup should move away from the sloped ceiling plane");
+    ok &=
+        expect(glm::dot(beforeVel, ceilingNormal) > 0.0f, "test setup should move away from the sloped ceiling plane");
     ok &= expect(!result.hitCeiling, "separating diagonal motion should not be turned into a ceiling hit");
     ok &= expect(vel.y <= beforeVel.y + 0.001f, "sloped ceiling contact should not add upward velocity");
     ok &= expect(pos.y <= beforePos.y + beforeVel.y * dt + 0.01f,
