@@ -31,6 +31,19 @@ void HudContext::endFrame()
         flushClipSpan();
 }
 
+void HudContext::tintVertices(std::size_t startVertex, HudColor tint)
+{
+    if (startVertex >= vertices_.size())
+        return;
+
+    for (std::size_t i = startVertex; i < vertices_.size(); ++i) {
+        vertices_[i].color[0] *= tint.r;
+        vertices_[i].color[1] *= tint.g;
+        vertices_[i].color[2] *= tint.b;
+        vertices_[i].color[3] *= tint.a;
+    }
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 void HudContext::emitQuad(float x,

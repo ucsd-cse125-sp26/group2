@@ -104,7 +104,9 @@ void Hud::render()
             continue;
         float drawX = 0.f, drawY = 0.f;
         resolveAnchor(*w, drawX, drawY);
+        const std::size_t widgetStartVertex = context_.vertices().size();
         w->draw(context_, drawX, drawY);
+        context_.tintVertices(widgetStartVertex, w->tint);
     }
 
     // Flush any remaining unflushed vertices (e.g. minimap drawn after last clip pop).

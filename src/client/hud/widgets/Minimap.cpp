@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 
 Minimap::Minimap()
@@ -42,7 +43,10 @@ void Minimap::draw(HudContext& ctx, float x, float y)
     const float ms = mapSize * s;
 
     // Frame.
-    drawPanel(ctx, x, y, ms, ms, HudColor{0.10f, 0.09f, 0.08f, 0.85f}, k_line, 1.f);
+    ctx.rect(x, y, ms, ms, HudColor{0.10f, 0.09f, 0.08f, 0.85f});
+    const float borderT = std::max(0.f, borderThickness * s);
+    if (borderT > 0.f)
+        ctx.rectOutline(x, y, ms, ms, borderT, k_line);
 
     // Grid (10×10 cells of light hairlines, like graph paper in the prototype).
     const HudColor grid = HudColor{0.27f, 0.26f, 0.25f, 0.45f};
@@ -91,6 +95,4 @@ void Minimap::draw(HudContext& ctx, float x, float y)
         // Square dot for the mil-spec feel (rotated 45° = diamond).
         ctx.rotatedRect(ex, ey, dotPx, dotPx, 45.f, k_red);
     }
-
-    (void)borderThickness; // border thickness handled by drawPanel.
 }

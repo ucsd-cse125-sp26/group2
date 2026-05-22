@@ -108,6 +108,9 @@ public:
     /// Must be called after all draw() calls, before accessing vertices/clipSpans.
     void endFrame();
 
+    /// @brief Multiply already-emitted vertex colors by a tint.
+    void tintVertices(std::size_t startVertex, HudColor tint);
+
     // ── Access for HudRenderer ──────────────────────────────────────────
 
     [[nodiscard]] const std::vector<HudVertex>& vertices() const { return vertices_; }

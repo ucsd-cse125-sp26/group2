@@ -7,7 +7,7 @@
 
 struct DamageIndicator : HudWidget
 {
-    float arcDistance = 80.f; ///< Distance from center.
+    float arcDistance = 200.f; ///< Distance from center.
     float arcLength = 32.f;   ///< Arc segment length.
     float arcThickness = 6.f;
     float fadeTime = 0.8f;
