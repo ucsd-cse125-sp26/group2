@@ -15,14 +15,14 @@
 namespace Boilerplate
 {
 constexpr SDL_GPUColorTargetBlendState OVER_BLEND_MODE = {
-        .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
-        .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-        .color_blend_op = SDL_GPU_BLENDOP_ADD,
+    .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+    .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+    .color_blend_op = SDL_GPU_BLENDOP_ADD,
 
-        .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
-        .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-        .alpha_blend_op = SDL_GPU_BLENDOP_ADD,
-        .enable_blend = true,
+    .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+    .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+    .alpha_blend_op = SDL_GPU_BLENDOP_ADD,
+    .enable_blend = true,
 };
 /// @brief Descriptor for a single shader stage: file path, stage, and resource counts.
 struct ShaderInfo
@@ -58,7 +58,6 @@ struct PipelineDescription
 
     SDL_GPUCullMode cullMode = SDL_GPU_CULLMODE_BACK;
 };
-
 
 /// @brief Describes a pending CPU-to-GPU buffer upload: target buffer, source data, and byte size.
 struct BufferUpload
@@ -155,10 +154,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 bool enableDepth = true,
                                                 bool overBlending = false);
 
-
-SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device,
-                                                     PipelineDescription pipelineDesc
-                                                     );
+SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, PipelineDescription pipelineDesc);
 /// @brief Allocate a GPU buffer of the given size and usage.
 /// @param device The GPU device.
 /// @param bufferSize Size in bytes.
@@ -219,4 +215,5 @@ SDL_GPUTexture* createDepthTexture(SDL_GPUDevice* device, Uint32 width, Uint32 h
 /// @return The created GPU sampler.
 SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device);
 
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device);
 } // namespace Boilerplate

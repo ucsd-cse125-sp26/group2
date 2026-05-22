@@ -377,6 +377,10 @@ private:
     SDL_GPUTexture* hudTexture_ = nullptr;
     SDL_GPUSampler* hudSampler_ = nullptr;
 
+    SDL_GPUSampler* depthSampler_ = nullptr;
+
+    std::vector<SDL_GPUTextureSamplerBinding> shadowMapBindings_;
+
     NewCamera camera_;
 
     // Per-frame captured state ───────────────────────────────────────────────

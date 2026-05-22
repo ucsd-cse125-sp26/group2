@@ -86,10 +86,10 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-     if (!createDepthPipeline()) {
-         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
-         return false;
-     }
+    if (!createDepthPipeline()) {
+        SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
+        return false;
+    }
 
     sampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!sampler_) {
@@ -99,6 +99,12 @@ bool NewRenderer::init(SDL_Window* window)
 
     hudSampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!hudSampler_) {
+        SDL_Log("NewRenderer: failed to create hud sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    depthSampler_ = Boilerplate::createLinearComparisonSampler(device_);
+    if (!depthSampler_) {
         SDL_Log("NewRenderer: failed to create hud sampler: %s", SDL_GetError());
         return false;
     }
@@ -208,8 +214,7 @@ bool NewRenderer::createDepthPipeline()
     depthPipelineDesc.depthWrite = true;
     depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_BACK;
 
-    depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(
-        device_, depthPipelineDesc);
+    depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
 
     return depthPipeline_ != nullptr;
 }
@@ -267,7 +272,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
-
     // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
     // the first render pass so the copy is sequenced ahead of the draws.
     {
@@ -280,16 +284,13 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
     uint32_t shadowSize = 1024;
-    SDL_GPUTexture* shadowMap = Boilerplate::createEmptyTextureD32F(device_,shadowSize,shadowSize);
-    std::vector<SDL_GPUTextureSamplerBinding> shadowMapBindings;
-    shadowMapBindings.push_back()
-
-
+    SDL_GPUTexture* shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize);
 
     setMainCamera(glm::vec3(0.0f), yaw, pitch, 0.0f, shadowSize, shadowSize);
     drawGeometryDepthPass(shadowMap, cmd);
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
+    shadowMapBindings_.push_back({shadowMap, depthSampler_});
 
     setMainCamera(eye, yaw, pitch, roll, width, height);
     drawGeometryPass(swapchain, cmd);
@@ -303,6 +304,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     const Uint64 t3 = SDL_GetPerformanceCounter();
     lastSubmitMs_ = ticksToMs(t3 - t2, freq);
+
+    for (auto smb : shadowMapBindings_) {
+        SDL_ReleaseGPUTexture(device_, smb.texture);
+    }
+    shadowMapBindings_.clear();
 
     // TODO(graphics): if `pendingScreenshotPath_` is non-empty, schedule a
     // swapchain readback and write a PNG.  See `requestScreenshot` doc.
@@ -318,7 +324,7 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
 
 void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture );
+    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture);
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
     SDL_BindGPUGraphicsPipeline(geometryPass, depthPipeline_);
@@ -338,13 +344,14 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture, SDL_GPUCom
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
     SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
-        //Boilerplate::makeColorTargetLoad(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
+    // Boilerplate::makeColorTargetLoad(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
-    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    SDL_BindGPUFragmentSamplers(geometryPass, 2, shadowMapBindings_.data(), shadowMapBindings_.size());
 
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
 
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd);
