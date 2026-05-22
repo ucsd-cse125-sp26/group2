@@ -45,7 +45,10 @@ constexpr float k_runSpeedRef = 530.0f;         ///< tms::k_sprintSpeed
 constexpr float k_speedLowPassTau = 0.08f;      ///< Low-pass time constant for speed (s).
 constexpr float k_dirLowPassTau = 0.10f;        ///< Low-pass time constant for directional components (s).
 constexpr float k_modeCrossfadeSeconds = 0.15f; ///< Slide/WallRun ↔ locomotion crossfade (s).
-constexpr float k_headPitchMax = 1.0472f;       ///< Max head pitch magnitude (~60 degrees).
+constexpr float k_spinePitchMax = 1.5708f;      ///< Max total spine pitch magnitude (~90 degrees).
+
+/// Number of bones in the spine pitch chain: Spine, Spine1, Spine2, Neck, Head.
+static constexpr size_t kSpineChainLength = 5;
 
 /// Slot layout (kNumSamplerSlots = 5):
 ///  [0] loco primary     (Idle / Walk / Run / RunBackward)
@@ -111,6 +114,29 @@ struct ArmIkChain
     {
         return upperArm >= 0 && foreArm >= 0 && hand >= 0 && !upperDescendants.empty() && !foreDescendants.empty() &&
                !handDescendants.empty();
+    }
+};
+
+/// @brief Procedural spine pitch chain — distributes aim pitch across spine bones.
+///
+/// Order: Spine (lowest) → Spine1 → Spine2 → Neck → Head (highest). Weights must
+/// sum to ≤ 1.0; total pitch is `pitchRad * weights[i]` per bone, cascaded.
+/// Built once at animator construction; bones[] entries are -1 if a joint was
+/// not present in the rig (the chain stays usable as long as the partial
+/// sequence yields a non-zero total weight).
+struct SpineBendChain
+{
+    std::array<int, kSpineChainLength> bones{-1, -1, -1, -1, -1};
+    std::array<std::vector<bool>, kSpineChainLength> descendants;
+    std::array<float, kSpineChainLength> weights{0.10f, 0.25f, 0.35f, 0.20f, 0.10f};
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        for (size_t i = 0; i < kSpineChainLength; ++i) {
+            if (bones[i] >= 0 && !descendants[i].empty())
+                return true;
+        }
+        return false;
     }
 };
 
@@ -217,9 +243,11 @@ struct CharacterAnimator::Impl
     // mirrored in X so the character leans toward the correct wall side.
     bool wallRunMirror = false;
 
-    // Head-look procedural pitch.
-    int headJointIdx = -1;              ///< Runtime index of "mixamorig:Head" (-1 = not found).
-    std::vector<bool> isHeadDescendant; ///< Per-joint flag: true for head + all children.
+    // Procedural spine pitch chain. Distributes aim pitch across spine bones
+    // (Spine → Spine1 → Spine2 → Neck → Head) instead of rotating the head alone.
+    // Runs in runSamplingAndSkinning, so it executes server-side too — hitbox
+    // capsules for spine joints stay consistent with the visible pose.
+    SpineBendChain spineBend;
 
     // Weapon grip IK chains.
     ArmIkChain leftArm;
@@ -251,39 +279,32 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
     impl_->skinMats.resize(static_cast<size_t>(numJoints), glm::mat4(1.0f));
     impl_->jointModelMats.resize(static_cast<size_t>(numJoints), glm::mat4(1.0f));
 
-    // Cache head joint index and build descendant mask for procedural head-look.
+    // Cache spine chain bone indices and build descendant masks for procedural
+    // pitch distribution. Replaces the old head-only pitch — head is now the
+    // last entry in the spine chain.
     if (rig.isLoaded() && rig.skeleton()) {
         const auto& jm = rig.jointMap();
-        auto headIt = jm.find("mixamorig:Head");
-        if (headIt != jm.end()) {
-            impl_->headJointIdx = headIt->second;
 
-            impl_->isHeadDescendant.assign(static_cast<size_t>(numJoints), false);
-            impl_->isHeadDescendant[static_cast<size_t>(impl_->headJointIdx)] = true;
-
-            // Walk the parent chain of every joint; if the head is an ancestor, mark it.
-            const auto parents = rig.skeleton()->joint_parents();
-            for (int j = 0; j < numJoints; ++j) {
-                if (j == impl_->headJointIdx)
-                    continue;
-                int p = static_cast<int>(parents[static_cast<size_t>(j)]);
-                while (p >= 0) {
-                    if (p == impl_->headJointIdx) {
-                        impl_->isHeadDescendant[static_cast<size_t>(j)] = true;
-                        break;
-                    }
-                    p = static_cast<int>(parents[static_cast<size_t>(p)]);
-                }
-            }
-
-            int descCount = 0;
-            for (bool b : impl_->isHeadDescendant)
-                if (b)
-                    ++descCount;
-            SDL_Log("CharacterAnimator: head joint '%s' at index %d, %d descendants",
-                    "mixamorig:Head",
-                    impl_->headJointIdx,
-                    descCount - 1);
+        static constexpr std::array<const char*, kSpineChainLength> k_spineBoneNames = {
+            "mixamorig:Spine",
+            "mixamorig:Spine1",
+            "mixamorig:Spine2",
+            "mixamorig:Neck",
+            "mixamorig:Head",
+        };
+        int foundBones = 0;
+        for (size_t i = 0; i < kSpineChainLength; ++i) {
+            const auto it = jm.find(k_spineBoneNames[i]);
+            if (it == jm.end())
+                continue;
+            impl_->spineBend.bones[i] = it->second;
+            impl_->spineBend.descendants[i] = buildDescendantMask(rig.skeleton(), it->second);
+            ++foundBones;
+        }
+        if (foundBones > 0) {
+            SDL_Log("CharacterAnimator: spine bend chain bound (%d/%d bones found)",
+                    foundBones,
+                    static_cast<int>(kSpineChainLength));
         }
 
         auto makeFingerChain = [&](const char* prefix) {
@@ -422,19 +443,12 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         return true;
     };
 
-    auto forcePalm = [&](const ArmIkChain& chain, const ArmIkTarget& target) {
-        if (!target.enabled || !chain.valid())
-            return false;
-
-        const size_t handIdx = static_cast<size_t>(chain.hand);
-        const glm::vec3 wrist = matrixTranslation(impl_->jointModelMats[handIdx]);
-        const glm::vec3 delta = target.positionModel - wrist;
-        if (glm::dot(delta, delta) < 0.000001f)
-            return false;
-
-        applyDeltaToMask(impl_->jointModelMats, chain.handDescendants, glm::translate(glm::mat4(1.0f), delta));
-        return true;
-    };
+    // NOTE: forcePalm() was removed here. It directly translated the hand bone after
+    // solveArm to snap the palm to the IK target, which silently broke the forearm→hand
+    // bone-length invariant whenever the analytical solver had clamped the wrist target
+    // to the reachable region. The "bones must connect" guarantee is now preserved by
+    // the analytical solver alone (which constrains the elbow on the upperLen/foreLen
+    // cone and never moves the hand off the forearm tip).
 
     auto solveFinger = [&](const ArmIkChain::FingerIkChain& chain, const glm::vec3& targetPos) {
         if (!chain.valid())
@@ -470,12 +484,68 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         return changed;
     };
 
+    // Phase C: pose-based finger grip. Blends each finger bone's animated
+    // local rotation toward the authored grip rotation by `weight` ∈ [0, 1].
+    // Local-space blending (slerp on the local rotation, then re-derive model
+    // rotation via parent's current model rotation) preserves bone lengths and
+    // composes cleanly with everything that ran before (arm IK, hand orient).
+    // The descendant-mask cascade is reused from IK — each finger bone we touch
+    // also re-orients its children so the chain stays connected end-to-end.
+    auto applyGripPose = [&](const ArmIkChain& chain, const GripPose& pose, float weight) {
+        if (!chain.valid() || weight <= 0.0f)
+            return false;
+        const float w = std::clamp(weight, 0.0f, 1.0f);
+        const auto parents = impl_->rig->skeleton()->joint_parents();
+        bool changed = false;
+        for (size_t finger = 0; finger < kHandFingerIkCount; ++finger) {
+            const ArmIkChain::FingerIkChain& fc = chain.fingers[finger];
+            if (!fc.valid())
+                continue;
+            for (size_t jointSlot = 0; jointSlot < kGripPoseBonesPerFinger; ++jointSlot) {
+                const int boneIdx = fc.joints[jointSlot];
+                if (boneIdx < 0)
+                    continue;
+                const int parentIdx = static_cast<int>(parents[static_cast<size_t>(boneIdx)]);
+                if (parentIdx < 0)
+                    continue;
+                const glm::mat4& boneMat = impl_->jointModelMats[static_cast<size_t>(boneIdx)];
+                const glm::mat4& parentMat = impl_->jointModelMats[static_cast<size_t>(parentIdx)];
+
+                // Extract orthonormal model rotations (drop scale baked in).
+                const glm::mat3 boneR(glm::normalize(glm::vec3(boneMat[0])),
+                                      glm::normalize(glm::vec3(boneMat[1])),
+                                      glm::normalize(glm::vec3(boneMat[2])));
+                const glm::mat3 parentR(glm::normalize(glm::vec3(parentMat[0])),
+                                        glm::normalize(glm::vec3(parentMat[1])),
+                                        glm::normalize(glm::vec3(parentMat[2])));
+
+                // Recover the bone's animated local rotation = parent^{-1} * bone.
+                const glm::quat animatedLocal =
+                    glm::normalize(glm::quat_cast(glm::transpose(parentR) * boneR));
+                const glm::quat targetLocal = pose.jointRotations[GripPose::index(finger, jointSlot)];
+                const glm::quat blendedLocal = glm::normalize(glm::slerp(animatedLocal, targetLocal, w));
+
+                // Delta rotation in MODEL space (left-multiply on the bone).
+                const glm::quat deltaRot = glm::normalize(
+                    glm::quat_cast(parentR * glm::mat3_cast(blendedLocal) * glm::transpose(boneR)));
+
+                const glm::vec3 pivot = matrixTranslation(boneMat);
+                applyDeltaToMask(
+                    impl_->jointModelMats, fc.descendants[jointSlot], rotateAround(pivot, deltaRot));
+                changed = true;
+            }
+        }
+        return changed;
+    };
+
     bool changedLeft = solveArm(impl_->leftArm, targets.left);
     bool changedRight = solveArm(impl_->rightArm, targets.right);
-    changedLeft |= forcePalm(impl_->leftArm, targets.left);
-    changedRight |= forcePalm(impl_->rightArm, targets.right);
     changedLeft |= orientHand(impl_->leftArm, targets.left);
     changedRight |= orientHand(impl_->rightArm, targets.right);
+    if (targets.leftGripPose != nullptr)
+        changedLeft |= applyGripPose(impl_->leftArm, *targets.leftGripPose, targets.leftGripWeight);
+    if (targets.rightGripPose != nullptr)
+        changedRight |= applyGripPose(impl_->rightArm, *targets.rightGripPose, targets.rightGripWeight);
     changedLeft |= solveFingers(impl_->leftArm, targets.left);
     changedRight |= solveFingers(impl_->rightArm, targets.right);
     if (!changedLeft && !changedRight)
@@ -939,43 +1009,58 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
     // --- 10. Compose final skin matrices. ---
     //
     // Two optional post-processing transforms:
-    //   (a) Procedural head-look: rotates the head (and children) around its
-    //       local X axis so the character looks up/down matching the camera pitch.
+    //   (a) Procedural spine bend: distributes aim pitch across the spine
+    //       chain (Spine → Spine1 → Spine2 → Neck → Head) by authored weights
+    //       so the upper body leans into the aim direction. Rotation axis is
+    //       the rig's model-space X (a single, fixed axis) — using each bone's
+    //       local X would accumulate twist as bends compose up the chain.
     //   (b) Wallrun mirror: scale(-1,1,1) to flip the pose for left-wall runs.
+    //
+    // Order matters: spine bend operates in the un-mirrored model space first,
+    // then the mirror is applied on top. The mirror flips the X axis globally,
+    // which would otherwise flip the spine-bend rotation direction; keeping the
+    // mirror as the final left-multiplication preserves pitch sign on both walls.
 
     const int nJoints = impl_->rig->numJoints();
     const auto& ibm = impl_->rig->inverseBindMatrices();
 
-    // (a) Head pitch transform.
-    glm::mat4 headPitchTransform(1.0f);
-    bool hasHeadPitch = false;
-    if (impl_->headJointIdx >= 0 && std::abs(inputs.pitchRad) > 0.001f) {
-        const glm::mat4 headModel = anim_utils::ozzToGlm(impl_->models[static_cast<size_t>(impl_->headJointIdx)]);
-        const glm::vec3 headPos(headModel[3]);
-        const glm::vec3 headX = glm::normalize(glm::vec3(headModel[0]));
-
-        const float headPitch = std::clamp(inputs.pitchRad, -k_headPitchMax, k_headPitchMax);
-        headPitchTransform = glm::translate(glm::mat4(1.0f), headPos) * glm::rotate(glm::mat4(1.0f), headPitch, headX) *
-                             glm::translate(glm::mat4(1.0f), -headPos);
-        hasHeadPitch = true;
+    // Step 1: Convert ozz model matrices to glm.
+    for (int j = 0; j < nJoints; ++j) {
+        const size_t uj = static_cast<size_t>(j);
+        impl_->jointModelMats[uj] = anim_utils::ozzToGlm(impl_->models[uj]);
     }
 
-    // (b) Wallrun mirror.
+    // Step 2: Spine bend cascade — distribute aim pitch across the chain.
+    if (impl_->spineBend.valid() && std::abs(inputs.pitchRad) > 0.001f) {
+        const float totalPitch = std::clamp(inputs.pitchRad, -k_spinePitchMax, k_spinePitchMax);
+        // Rig's model-space right axis. Single fixed axis prevents twist
+        // accumulation up the chain. Mixamo rigs in bind pose have X = right.
+        const glm::vec3 axis(1.0f, 0.0f, 0.0f);
+
+        for (size_t i = 0; i < kSpineChainLength; ++i) {
+            const int boneIdx = impl_->spineBend.bones[i];
+            if (boneIdx < 0 || impl_->spineBend.descendants[i].empty())
+                continue;
+            const float angle = totalPitch * impl_->spineBend.weights[i];
+            if (std::abs(angle) < 0.0001f)
+                continue;
+
+            const glm::vec3 pivot = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(boneIdx)]);
+            const glm::quat rot = glm::angleAxis(angle, axis);
+            applyDeltaToMask(impl_->jointModelMats, impl_->spineBend.descendants[i], rotateAround(pivot, rot));
+        }
+    }
+
+    // Step 3: Wallrun mirror (applied last, as a global X flip).
     glm::mat4 mirrorMat(1.0f);
     if (impl_->wallRunMirror)
         mirrorMat[0][0] = -1.0f;
 
     for (int j = 0; j < nJoints; ++j) {
         const size_t uj = static_cast<size_t>(j);
-        glm::mat4 modelMat = anim_utils::ozzToGlm(impl_->models[uj]);
-
-        if (hasHeadPitch && uj < impl_->isHeadDescendant.size() && impl_->isHeadDescendant[uj])
-            modelMat = headPitchTransform * modelMat;
-
-        // Store model-space matrix with procedural xforms (for hitbox capsule placement).
-        impl_->jointModelMats[uj] = mirrorMat * modelMat;
-        // Skin matrix additionally includes inverse bind matrix.
-        impl_->skinMats[uj] = mirrorMat * modelMat * ibm[uj];
+        if (impl_->wallRunMirror)
+            impl_->jointModelMats[uj] = mirrorMat * impl_->jointModelMats[uj];
+        impl_->skinMats[uj] = impl_->jointModelMats[uj] * ibm[uj];
     }
 
     (void)inputs.sprinting;

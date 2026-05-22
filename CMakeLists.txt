@@ -941,6 +941,8 @@ add_executable(group2
         src/ecs/components/GrenadeState.hpp
         src/ecs/components/GrenadeConfig.hpp
         src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/GripPose.hpp
+        src/ecs/components/GripPose.cpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
         src/ecs/components/Explosion.hpp
@@ -1245,6 +1247,8 @@ add_executable(server
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/GripPose.hpp
+        src/ecs/components/GripPose.cpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp

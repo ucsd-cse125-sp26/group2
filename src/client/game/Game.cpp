@@ -1294,6 +1294,37 @@ bool Game::init(AppContext& ctx)
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
             }
+
+            // Cache the right-hand bone index. The third-person weapon mesh
+            // is parented to this bone after IK (AAA pattern: weapon follows
+            // hand, not vice versa), so we look it up once at rig load and
+            // reuse the index every frame in the candidate writeback loop.
+            if (auto it = charRig_.jointMap().find("mixamorig:RightHand"); it != charRig_.jointMap().end()) {
+                rightHandJointIdx_ = it->second;
+                SDL_Log("[client] right-hand bone index = %d", rightHandJointIdx_);
+            } else {
+                SDL_Log("[client] WARNING: right-hand bone not found — weapon parenting disabled");
+            }
+
+            // Load per-weapon hand grip poses (Phase C of the AAA IK overhaul).
+            // Each weapon's grip lives at assets/weapons/<name>.grip.toml. Missing
+            // files are non-fatal — the animator falls back to the idle finger pose
+            // for any (weapon, hand) pair without authored data.
+            const std::string weaponsDir = std::string(base ? base : "") + "assets/weapons/";
+            static constexpr std::array<const char*, 4> k_weaponGripFiles{
+                "rifle.grip.toml",
+                "rocket_launcher.grip.toml",
+                "rail_gun.grip.toml",
+                "energy_gun.grip.toml",
+            };
+            for (std::size_t i = 0; i < k_weaponGripFiles.size(); ++i) {
+                const std::string gripPath = weaponsDir + k_weaponGripFiles[i];
+                if (!loadWeaponGripPose(gripPath, weaponGripPoses_[i])) {
+                    // Already logged by loadWeaponGripPose; leave as default
+                    // (rightHandValid=false, leftHandValid=false) so the animator
+                    // skips the blend for that weapon.
+                }
+            }
         }
 
         // Build and resolve hitbox definitions (client-side, for debug visualization).
@@ -2760,6 +2791,13 @@ SDL_AppResult Game::iterate()
     client->applyInterpolatedTransforms(registry);
     phaseSnap(phaseStats.interpolationMs);
 
+    // Per-frame storage that crosses the animation block → entity-render block boundary:
+    // populated inside the animation candidates writeback (after IK) and consumed when
+    // entityCmds is built below. The weapon is parented to the right-hand bone, so its
+    // world transform can only be computed once the animator has finished running.
+    std::vector<EntityRenderCmd> candidateWeaponCmds;
+    std::unordered_set<entt::entity> entitiesWithCandidateWeapon;
+
     // Update skeletal animation + build the renderer's per-frame skinned
     // palette + instance arrays (perf Phase 1B).
     //
@@ -2802,6 +2840,18 @@ SDL_AppResult Game::iterate()
             bool drawThisFrame = false;             ///< write to instance/palette slots
             bool isLocal = false;
             uint32_t slot = 0;                      ///< index into skinnedInstances + base into bonePalette
+            // Third-person weapon parenting (AAA pattern: weapon follows right-hand bone).
+            // Populated in the candidate writeback loop AFTER applyHandIkTargets so the
+            // weapon's world transform reflects the final bone pose. Replaces the older
+            // free-matrix weapon entity render path.
+            bool hasWeapon = false;
+            int weaponModelIdx = -1;
+            glm::mat4 weaponWorld{1.0f};
+            // Per-weapon authoring data needed to derive weaponWorld from the right-hand
+            // bone matrix (palm offset/rotation in weapon-local frame, weapon scale).
+            // Captured during the prepass; consumed during writeback.
+            HandMountPoint rightPalmAuthored{};
+            float weaponScale = 1.0f;
         };
         // Plain function-local (NOT thread_local — workers must see the
         // main thread's vector through the lambda capture).  Reserved up
@@ -3058,31 +3108,42 @@ SDL_AppResult Game::iterate()
                             const WeaponAttachmentPose pose = buildThirdPersonWeaponAttachment(
                                 renderPos, renderYaw, inp.pitch, tp, mounts, weaponModel);
                             const glm::mat4 invWorld = glm::inverse(world);
-                            c.handIk.right.enabled = true;
+                            // Right hand is no longer IK'd — the weapon is parented to the right-hand
+                            // bone after IK (see candidate writeback loop). Animation drives the right
+                            // hand pose; weapon follows. Only left hand uses IK, reaching the foregrip
+                            // socket on the (still buildThirdPersonWeaponAttachment-positioned) weapon.
+                            c.handIk.right.enabled = false;
+                            c.handIk.right.elbowEnabled = false;
+                            c.handIk.right.orientationEnabled = false;
+                            for (size_t i = 0; i < kHandFingerIkCount; ++i)
+                                c.handIk.right.fingerEnabled[i] = false;
+
                             c.handIk.left.enabled = true;
-                            c.handIk.right.elbowEnabled = true;
                             c.handIk.left.elbowEnabled = true;
-                            c.handIk.right.orientationEnabled = true;
                             c.handIk.left.orientationEnabled = true;
-                            c.handIk.right.positionModel = glm::vec3(invWorld * glm::vec4(pose.rightHand.palm, 1.0f));
                             c.handIk.left.positionModel = glm::vec3(invWorld * glm::vec4(pose.leftHand.palm, 1.0f));
-                            c.handIk.right.elbowPositionModel =
-                                glm::vec3(invWorld * glm::vec4(pose.rightHand.elbow, 1.0f));
                             c.handIk.left.elbowPositionModel =
                                 glm::vec3(invWorld * glm::vec4(pose.leftHand.elbow, 1.0f));
-                            c.handIk.right.orientationModel =
-                                modelSpaceRotation(invWorld, pose.rightHand.palmOrientation);
                             c.handIk.left.orientationModel =
                                 modelSpaceRotation(invWorld, pose.leftHand.palmOrientation);
                             for (size_t i = 0; i < kHandFingerMountCount && i < kHandFingerIkCount; ++i) {
-                                c.handIk.right.fingerEnabled[i] = true;
                                 c.handIk.left.fingerEnabled[i] = true;
-                                c.handIk.right.fingerPositionsModel[i] =
-                                    glm::vec3(invWorld * glm::vec4(pose.rightHand.fingers[i], 1.0f));
                                 c.handIk.left.fingerPositionsModel[i] =
                                     glm::vec3(invWorld * glm::vec4(pose.leftHand.fingers[i], 1.0f));
                             }
                             c.sampleThisFrame = true;
+
+                            // Capture per-weapon authoring data needed to derive the weaponWorld
+                            // matrix from the right-hand bone matrix in the writeback loop.
+                            c.hasWeapon = true;
+                            c.weaponModelIdx = weaponModelIndices_[static_cast<int>(gun.type)];
+                            c.weaponScale = tp.scale;
+                            c.rightPalmAuthored = mounts.rightHand.palm;
+                            // Fallback: until the candidate writeback derives the post-IK weaponWorld
+                            // (i.e. the right-hand bone has been animated), use the old world-space
+                            // weapon pose so the entity render still has a sane transform. This is
+                            // overwritten by the bone-derived transform a few lines later.
+                            c.weaponWorld = pose.weaponWorld;
                         }
                     }
                 }
@@ -3132,9 +3193,50 @@ SDL_AppResult Game::iterate()
             skinnedInstances.reserve(drawSlot);
         }
 
-        for (const auto& c : candidates) {
+        for (auto& c : candidates) {
             if (c.drawThisFrame && c.ac != nullptr && c.ac->animator)
                 c.ac->animator->applyHandIkTargets(c.handIk);
+
+            // Derive the third-person weapon's world transform from the right-hand
+            // bone AFTER IK has finalized the bone pose. This is the AAA pattern:
+            // weapon is parented to the dominant hand, so it tracks every animation
+            // (idle sway, run cycle, crouch, slide, …) and every procedural transform
+            // (spine bend from aim pitch, wallrun mirror) for free. The previously
+            // free-floating weapon entity render command is now driven by this.
+            //
+            // Math: we want to position the weapon such that its authored "right palm"
+            // point coincides with the right-hand bone in world space. Given
+            //   palm_world_pos    = weapon_origin + R_weapon_world * palm.offset
+            //   palm_world_rot    = R_weapon_world * R(palm.rotation)
+            // and demanding palm_world_(pos,rot) == hand_world_(pos,rot), we solve:
+            //   R_weapon_world    = R_hand_world * R(palm.rotation)^{-1}
+            //   weapon_origin     = hand_world_pos - R_weapon_world * palm.offset
+            // The hand bone's matrix carries the entity scale (kRigScale) baked in;
+            // we normalize the rotation columns before solving so palm.offset (which
+            // is authored in world units) doesn't get double-scaled.
+            if (c.hasWeapon && c.drawThisFrame && c.ac != nullptr && c.ac->animator &&
+                rightHandJointIdx_ >= 0) {
+                const auto& joints = c.ac->animator->jointModelMatrices();
+                if (rightHandJointIdx_ < static_cast<int>(joints.size())) {
+                    const glm::mat4 handWorld =
+                        c.worldTransform * joints[static_cast<size_t>(rightHandJointIdx_)];
+                    const glm::vec3 handPos(handWorld[3]);
+                    const glm::mat3 handRot(glm::normalize(glm::vec3(handWorld[0])),
+                                            glm::normalize(glm::vec3(handWorld[1])),
+                                            glm::normalize(glm::vec3(handWorld[2])));
+
+                    const glm::mat3 invPalmRot =
+                        glm::inverse(glm::mat3(handMountRotation(c.rightPalmAuthored)));
+                    const glm::mat3 weaponRot = handRot * invPalmRot;
+                    const glm::vec3 weaponOrigin =
+                        handPos - weaponRot * c.rightPalmAuthored.offset;
+
+                    glm::mat4 W = glm::translate(glm::mat4(1.0f), weaponOrigin) *
+                                  glm::mat4(weaponRot);
+                    W = glm::scale(W, glm::vec3(c.weaponScale));
+                    c.weaponWorld = W;
+                }
+            }
 
             if (c.sampleThisFrame) {
                 auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
@@ -3217,6 +3319,19 @@ SDL_AppResult Game::iterate()
                 bonePalette.insert(bonePalette.end(), skinMatrices.begin(), skinMatrices.end());
                 skinnedInstances.push_back(instance);
             }
+        }
+
+        // Stage third-person weapon entity-render commands derived from the
+        // post-IK right-hand bone matrix for every drawn animated candidate.
+        // These are consumed below when entityCmds is built; tracking the entity
+        // set lets the legacy remote-weapon loop skip duplicates.
+        candidateWeaponCmds.reserve(candidates.size());
+        for (const auto& c : candidates) {
+            if (!c.hasWeapon || !c.drawThisFrame || c.weaponModelIdx < 0)
+                continue;
+            candidateWeaponCmds.push_back(
+                EntityRenderCmd{.modelIndex = c.weaponModelIdx, .worldTransform = c.weaponWorld});
+            entitiesWithCandidateWeapon.insert(c.entity);
         }
 
         if (charRig_.isLoaded() && numJoints > 0) {
@@ -3479,6 +3594,15 @@ SDL_AppResult Game::iterate()
         };
 
         std::vector<EntityRenderCmd> entityCmds;
+
+        // Inject the weapon entity render commands populated during the animation
+        // pass (the right-hand-bone-parented weapons). Done before the Renderable
+        // view so weapons live early in the entity command list — keeps render-order
+        // deterministic across frames.
+        entityCmds.reserve(entityCmds.size() + candidateWeaponCmds.size());
+        entityCmds.insert(entityCmds.end(), candidateWeaponCmds.begin(), candidateWeaponCmds.end());
+        candidateWeaponCmds.clear();
+
         registry.view<Position, Renderable>().each([&](entt::entity e, const Position& pos, const Renderable& rend) {
             if (!rend.visible || rend.modelIndex < 0)
                 return;
@@ -3553,7 +3677,12 @@ SDL_AppResult Game::iterate()
 
         bool emittedThirdPersonHandMountMarker = false;
 
-        // Third-person weapons for remote players
+        // Third-person weapons for remote players.
+        // Legacy path: only handles entities WITHOUT an AnimatedCharacter (those went
+        // through the candidate-based right-hand-bone-parented emission above). For
+        // animated remote players this loop is a no-op — the candidate path already
+        // pushed their weapon. Kept as a fallback so non-animated test fixtures or
+        // future non-skinned actors still get a weapon rendered.
         registry.view<Position, InputSnapshot, WeaponState, CollisionShape>().each([&](entt::entity e,
                                                                                        const Position& pos,
                                                                                        const InputSnapshot& input,
@@ -3563,6 +3692,8 @@ SDL_AppResult Game::iterate()
                 return;
             if (registry.all_of<RespawnTimer>(e))
                 return;
+            if (entitiesWithCandidateWeapon.count(e) > 0)
+                return; // Already emitted above with bone-parented transform.
 
             // PR-11: pull the interpolated player transform so the
             // weapon hangs off the same body the renderer just drew at

@@ -20,6 +20,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/GripPose.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -515,6 +516,8 @@ private:
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
     CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
+    int rightHandJointIdx_ = -1;        ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the third-person weapon mesh to the right-hand bone after IK.
+    std::array<WeaponGripPose, 4> weaponGripPoses_{}; ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from assets/weapons/<name>.grip.toml at startup.
     AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
     CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.

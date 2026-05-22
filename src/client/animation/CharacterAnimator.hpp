@@ -7,6 +7,7 @@
 #include "CharacterRig.hpp"
 #include "SkinningBackend.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
+#include "ecs/components/GripPose.hpp"
 
 #include <array>
 #include <glm/glm.hpp>
@@ -65,10 +66,22 @@ struct ArmIkTarget
 };
 
 /// @brief Optional per-frame IK targets for both hands.
+///
+/// Carries arm-IK targets (positionModel, elbowPositionModel, ...) and
+/// per-hand grip poses (Phase C+ of the AAA IK overhaul). When a grip-pose
+/// pointer is non-null, CharacterAnimator blends the animated finger
+/// local-space rotations toward the authored pose by the matching
+/// `*GripWeight` (1.0 = fully gripped, 0.0 = ignore pose). Grip blending
+/// is applied AFTER arm IK so the finger pose is anchored at the wrist
+/// position determined by the arm.
 struct HandIkTargets
 {
     ArmIkTarget left;
     ArmIkTarget right;
+    const GripPose* leftGripPose = nullptr;
+    const GripPose* rightGripPose = nullptr;
+    float leftGripWeight = 0.0f;
+    float rightGripWeight = 0.0f;
 };
 
 /// @brief Per-entity animator.
