@@ -683,40 +683,12 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
     // to the reachable region. The "bones must connect" guarantee is now preserved by
     // the analytical solver alone (which constrains the elbow on the upperLen/foreLen
     // cone and never moves the hand off the forearm tip).
-
-    auto solveFinger = [&](const ArmIkChain::FingerIkChain& chain, const glm::vec3& targetPos) {
-        if (!chain.valid())
-            return false;
-
-        bool changed = false;
-        for (int iter = 0; iter < 3; ++iter) {
-            for (int jointSlot = 2; jointSlot >= 0; --jointSlot) {
-                const int jointIdx = chain.joints[static_cast<size_t>(jointSlot)];
-                const int tipIdx = chain.joints[3];
-                const glm::vec3 jointPos = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(jointIdx)]);
-                const glm::vec3 tipPos = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(tipIdx)]);
-                const glm::vec3 toTip = tipPos - jointPos;
-                const glm::vec3 toTarget = targetPos - jointPos;
-                if (glm::length(toTip) < 0.0001f || glm::length(toTarget) < 0.0001f)
-                    continue;
-                const glm::quat rot = rotationBetween(toTip, toTarget);
-                applyDeltaToMask(impl_->jointModelMats,
-                                 chain.descendants[static_cast<size_t>(jointSlot)],
-                                 rotateAround(jointPos, rot));
-                changed = true;
-            }
-        }
-        return changed;
-    };
-
-    auto solveFingers = [&](const ArmIkChain& chain, const ArmIkTarget& target) {
-        bool changed = false;
-        for (size_t i = 0; i < kHandFingerIkCount; ++i) {
-            if (target.fingerEnabled[i])
-                changed |= solveFinger(chain.fingers[i], target.fingerPositionsModel[i]);
-        }
-        return changed;
-    };
+    //
+    // NOTE: solveFinger() / solveFingers() were also removed (Phase E). The iterative
+    // CCD-style per-frame finger IK has been replaced wholesale by the authored
+    // GripPose blend below — `applyGripPose` produces a stable, anatomically valid
+    // hand-on-weapon contact without per-frame solver cost or the risk of fingers
+    // folding through the palm under extreme grip positions.
 
     // Phase C: pose-based finger grip. Blends each finger bone's animated
     // local rotation toward the authored grip rotation by `weight` ∈ [0, 1].
@@ -780,8 +752,6 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         changedLeft |= applyGripPose(impl_->leftArm, *targets.leftGripPose, targets.leftGripWeight);
     if (targets.rightGripPose != nullptr)
         changedRight |= applyGripPose(impl_->rightArm, *targets.rightGripPose, targets.rightGripWeight);
-    changedLeft |= solveFingers(impl_->leftArm, targets.left);
-    changedRight |= solveFingers(impl_->rightArm, targets.right);
     if (!changedLeft && !changedRight)
         return;
 

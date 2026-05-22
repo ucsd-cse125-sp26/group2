@@ -1319,11 +1319,20 @@ bool Game::init(AppContext& ctx)
             };
             for (std::size_t i = 0; i < k_weaponGripFiles.size(); ++i) {
                 const std::string gripPath = weaponsDir + k_weaponGripFiles[i];
+                weaponGripPosePaths_[i] = gripPath;
                 if (!loadWeaponGripPose(gripPath, weaponGripPoses_[i])) {
                     // Already logged by loadWeaponGripPose; leave as default
                     // (rightHandValid=false, leftHandValid=false) so the animator
                     // skips the blend for that weapon.
                 }
+                // Capture the file mtime for Phase E hot-reload. Stat failures
+                // (missing file) leave a default-constructed time_point so the
+                // very-old timestamp ensures the first successful save triggers
+                // a reload.
+                std::error_code ec;
+                const auto mtime = std::filesystem::last_write_time(gripPath, ec);
+                if (!ec)
+                    weaponGripPoseMTimes_[i] = mtime;
             }
         }
 
@@ -1948,6 +1957,31 @@ SDL_AppResult Game::iterate()
         phaseStats.frameNumber = frameCount;
         phaseStats.timestampMs = static_cast<double>(SDL_GetTicksNS()) / 1000000.0;
         phaseStats.wallFrameMs = frameTime * 1000.0f;
+    }
+
+    // Phase E hot-reload: poll grip pose TOMLs at ~4 Hz. If the mtime moved,
+    // reload the GripPose data in place. Filesystem stats are cheap, but doing
+    // them every frame is wasteful — the throttle keeps the editing-loop
+    // responsive while staying well under the cost of one rig joint update.
+    gripPoseReloadAccumulator_ += frameTime;
+    if (gripPoseReloadAccumulator_ >= 0.25f) {
+        gripPoseReloadAccumulator_ = 0.0f;
+        for (std::size_t i = 0; i < weaponGripPoses_.size(); ++i) {
+            if (weaponGripPosePaths_[i].empty())
+                continue;
+            std::error_code ec;
+            const auto mtime = std::filesystem::last_write_time(weaponGripPosePaths_[i], ec);
+            if (ec)
+                continue;
+            if (mtime != weaponGripPoseMTimes_[i]) {
+                weaponGripPoseMTimes_[i] = mtime;
+                // Reload into a scratch struct so a partial/parse-failed load
+                // doesn't blank out the working data already in `weaponGripPoses_`.
+                WeaponGripPose scratch{};
+                if (loadWeaponGripPose(weaponGripPosePaths_[i], scratch))
+                    weaponGripPoses_[i] = scratch;
+            }
+        }
     }
 
     static int iterCount = 0;
@@ -3115,8 +3149,6 @@ SDL_AppResult Game::iterate()
                             c.handIk.right.enabled = false;
                             c.handIk.right.elbowEnabled = false;
                             c.handIk.right.orientationEnabled = false;
-                            for (size_t i = 0; i < kHandFingerIkCount; ++i)
-                                c.handIk.right.fingerEnabled[i] = false;
 
                             c.handIk.left.enabled = true;
                             c.handIk.left.elbowEnabled = true;
@@ -3126,11 +3158,9 @@ SDL_AppResult Game::iterate()
                                 glm::vec3(invWorld * glm::vec4(pose.leftHand.elbow, 1.0f));
                             c.handIk.left.orientationModel =
                                 modelSpaceRotation(invWorld, pose.leftHand.palmOrientation);
-                            for (size_t i = 0; i < kHandFingerMountCount && i < kHandFingerIkCount; ++i) {
-                                c.handIk.left.fingerEnabled[i] = true;
-                                c.handIk.left.fingerPositionsModel[i] =
-                                    glm::vec3(invWorld * glm::vec4(pose.leftHand.fingers[i], 1.0f));
-                            }
+                            // Phase E: per-finger IK targets removed — left-hand finger contact is now
+                            // driven by the authored GripPose blend (see weaponGripPoses_ assignment
+                            // below), not by the old iterative finger IK solver.
                             c.sampleThisFrame = true;
 
                             // Capture per-weapon authoring data needed to derive the weaponWorld

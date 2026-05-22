@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <deque>
 #include <entt/entt.hpp>
+#include <filesystem>
 #include <glm/glm.hpp>
 #include <memory>
 #include <optional>
@@ -518,6 +519,9 @@ private:
     CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
     int rightHandJointIdx_ = -1;        ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the third-person weapon mesh to the right-hand bone after IK.
     std::array<WeaponGripPose, 4> weaponGripPoses_{}; ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from assets/weapons/<name>.grip.toml at startup.
+    std::array<std::string, 4> weaponGripPosePaths_{}; ///< Source TOML path for each weapon's grip pose; populated at init and reused for Phase E hot-reload + the per-finger authoring UI's save button.
+    std::array<std::filesystem::file_time_type, 4> weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot reload).
+    float gripPoseReloadAccumulator_ = 0.0f;            ///< Seconds since last hot-reload mtime poll; throttle to ~4 Hz to keep filesystem stats cheap.
     AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
     CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.

@@ -50,16 +50,21 @@ struct ClipSampler
     bool active = false;        ///< False = slot unused this frame.
 };
 
+/// @brief Number of fingers per hand. Used as the iteration count for grip-pose
+/// blending in CharacterAnimator. The IK finger targets that previously lived
+/// here were removed in Phase E — finger contact is fully GripPose-driven now.
 static constexpr size_t kHandFingerIkCount = 5;
 
 /// @brief Model-space IK target for one player hand.
+///
+/// Phase E removed the per-finger IK target arrays (fingerPositionsModel /
+/// fingerEnabled) — finger pose is now driven by the authored GripPose blend
+/// in HandIkTargets, not by per-frame iterative finger IK.
 struct ArmIkTarget
 {
     glm::vec3 positionModel{0.0f};
     glm::vec3 elbowPositionModel{0.0f};
     glm::quat orientationModel{1.0f, 0.0f, 0.0f, 0.0f};
-    std::array<glm::vec3, kHandFingerIkCount> fingerPositionsModel{};
-    std::array<bool, kHandFingerIkCount> fingerEnabled{};
     bool enabled = false;
     bool elbowEnabled = false;
     bool orientationEnabled = false;
