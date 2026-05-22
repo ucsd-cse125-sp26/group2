@@ -1322,6 +1322,12 @@ bool Game::init(AppContext& ctx)
             } else {
                 SDL_Log("[client] WARNING: right-hand bone not found — weapon parenting disabled");
             }
+            if (auto it = charRig_.jointMap().find("mixamorig:Spine2"); it != charRig_.jointMap().end()) {
+                spine2JointIdx_ = it->second;
+                SDL_Log("[client] Spine2 bone index = %d", spine2JointIdx_);
+            } else {
+                SDL_Log("[client] WARNING: Spine2 bone not found — chest-anchored right-hand IK disabled");
+            }
 
             // Load per-weapon hand grip poses (Phase C of the AAA IK overhaul).
             // Each weapon's grip lives at assets/weapons/<name>.grip.toml. Missing
@@ -2931,6 +2937,16 @@ SDL_AppResult Game::iterate()
             // Captured during the prepass; consumed during writeback.
             HandMountPoint rightPalmAuthored{};
             float weaponScale = 1.0f;
+            // Chest-anchored right-hand IK target. When true, the worker pool
+            // recomputes c.handIk.right.positionModel / orientationModel from
+            // Spine2's POST-spine-bend model matrix (chestOffset / chestRotQuat
+            // are in Spine2's local frame). Replaces the idle-clip's hand-at-
+            // side pose with a "weapon held in front of chest" pose so the
+            // weapon (parented to the right-hand bone) sits where authored
+            // instead of dangling at the player's side.
+            bool chestAnchoredRight = false;
+            glm::vec3 chestOffset{0.0f};
+            glm::quat chestRotQuat{1.0f, 0.0f, 0.0f, 0.0f};
         };
         // Plain function-local (NOT thread_local — workers must see the
         // main thread's vector through the lambda capture).  Reserved up
@@ -3201,13 +3217,24 @@ SDL_AppResult Game::iterate()
                             const WeaponAttachmentPose pose = buildThirdPersonWeaponAttachment(
                                 renderPos, renderYaw, inp.pitch, tp, mounts, weaponModel);
                             const glm::mat4 invWorld = glm::inverse(world);
-                            // Right hand is no longer IK'd — the weapon is parented to the right-hand
-                            // bone after IK (see candidate writeback loop). Animation drives the right
-                            // hand pose; weapon follows. Only left hand uses IK, reaching the foregrip
-                            // socket on the (still buildThirdPersonWeaponAttachment-positioned) weapon.
-                            c.handIk.right.enabled = false;
+                            // Right hand IK: re-enabled in chest-anchored mode (the worker pool
+                            // recomputes positionModel/orientationModel from the post-spine-bend
+                            // Spine2 matrix below). Without this the right hand sits at the idle
+                            // clip's side pose and the gun, parented to that hand, hangs at the
+                            // hip. The chest-anchored target is per-weapon and live-tunable in
+                            // the "3P Weapon Tweaker" UI (Right-Hand Hold Anchor section).
+                            c.handIk.right.enabled = spine2JointIdx_ >= 0;
                             c.handIk.right.elbowEnabled = false;
-                            c.handIk.right.orientationEnabled = false;
+                            c.handIk.right.orientationEnabled = spine2JointIdx_ >= 0;
+                            c.chestAnchoredRight = spine2JointIdx_ >= 0;
+                            c.chestOffset = tp.rightHandHoldOffset;
+                            {
+                                const glm::vec3 r = glm::radians(tp.rightHandHoldRotationDeg);
+                                c.chestRotQuat = glm::normalize(
+                                    glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
+                                    glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) *
+                                    glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f}));
+                            }
 
                             c.handIk.left.enabled = true;
                             c.handIk.left.elbowEnabled = true;
@@ -3294,6 +3321,34 @@ SDL_AppResult Game::iterate()
                     // to its own animator state (jointModelMats/skinMats/etc.)
                     // and its own AnimCandidate fields, so the IK + matrix
                     // composition is thread-safe across visible characters.
+
+                    // Chest-anchored right-hand target: now that the animator
+                    // has run its spine-bend pass, Spine2's model matrix
+                    // already reflects the aim pitch. Re-derive the IK target
+                    // from that matrix so the right hand follows the spine as
+                    // it bends (which is the point of the spine-bend phase —
+                    // the gun, parented to the hand, ends up aiming with the
+                    // chest instead of staying stuck at a world-space anchor).
+                    if (c.chestAnchoredRight && c.drawThisFrame && c.ac != nullptr && c.ac->animator &&
+                        spine2JointIdx_ >= 0) {
+                        const auto& joints = c.ac->animator->jointModelMatrices();
+                        if (spine2JointIdx_ < static_cast<int>(joints.size())) {
+                            const glm::mat4& sm = joints[static_cast<size_t>(spine2JointIdx_)];
+                            const glm::mat3 sR(glm::normalize(glm::vec3(sm[0])),
+                                               glm::normalize(glm::vec3(sm[1])),
+                                               glm::normalize(glm::vec3(sm[2])));
+                            const glm::vec3 anchorPos =
+                                glm::vec3(sm * glm::vec4(c.chestOffset, 1.0f));
+                            const glm::quat spineQ = glm::normalize(glm::quat_cast(sR));
+                            c.handIk.right.positionModel = anchorPos;
+                            c.handIk.right.orientationModel = glm::normalize(spineQ * c.chestRotQuat);
+                            // No elbow hint — the analytical solver picks a
+                            // natural elbow direction from the pole-vector
+                            // disambiguation in CharacterAnimator::solveArm.
+                            c.handIk.right.elbowEnabled = false;
+                        }
+                    }
+
                     if (c.drawThisFrame && c.ac != nullptr && c.ac->animator)
                         c.ac->animator->applyHandIkTargets(c.handIk);
 
@@ -4618,6 +4673,26 @@ SDL_AppResult Game::iterate()
             ImGui::SeparatorText("Scale");
             ImGui::DragFloat("TP Scale", &tp.scale, 0.05f, 0.0001f, 30.0f, "%.3f");
 
+            ImGui::SeparatorText("Right-Hand Hold Anchor (Spine2-relative)");
+            ImGui::TextWrapped(
+                "Position of the right hand in Spine2's local frame. The hand is dragged here every "
+                "frame so the gun (which is parented to the right hand) sits in front of the chest "
+                "instead of hanging at the idle-clip side pose. Disabled if the rig has no Spine2 bone.");
+            ImGui::DragFloat("Anchor Right", &tp.rightHandHoldOffset.x, 0.25f, -50.0f, 50.0f, "%.2f");
+            ImGui::DragFloat("Anchor Up", &tp.rightHandHoldOffset.y, 0.25f, -50.0f, 50.0f, "%.2f");
+            ImGui::DragFloat("Anchor Forward", &tp.rightHandHoldOffset.z, 0.25f, -50.0f, 50.0f, "%.2f");
+            ImGui::DragFloat("Anchor Rot X", &tp.rightHandHoldRotationDeg.x, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Anchor Rot Y", &tp.rightHandHoldRotationDeg.y, 1.0f, -180.0f, 180.0f, "%.1f");
+            ImGui::DragFloat("Anchor Rot Z", &tp.rightHandHoldRotationDeg.z, 1.0f, -180.0f, 180.0f, "%.1f");
+            if (spine2JointIdx_ < 0)
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
+                                   "Spine2 not found in rig — anchor disabled, weapon will hang at side.");
+
+            ImGui::SeparatorText("Procedural Layer Tuning");
+            ImGui::DragFloat("Spine Bend Mul", &tp.spineBendMultiplier, 0.05f, 0.0f, 2.0f, "%.2f");
+            ImGui::DragFloat("Hip Lean Mul", &tp.hipLeanMultiplier, 0.01f, -0.5f, 0.5f, "%.3f");
+            ImGui::DragFloat("Recoil Kick (rad)", &tp.recoilKickRad, 0.005f, 0.0f, 0.5f, "%.3f");
+
             ImGui::Separator();
             if (ImGui::Button("Reset to defaults")) {
                 tp = getThirdPersonWeaponParams(static_cast<WeaponType>(tpTuneWeaponIdx_));
@@ -4625,7 +4700,8 @@ SDL_AppResult Game::iterate()
             ImGui::SameLine();
             if (ImGui::Button("Save as new defaults")) {
                 SDL_Log("[client] 3P weapon %d: scale=%.5f offset=(%.1f,%.1f,%.1f) pivot=(%.1f,%.1f,%.1f) "
-                        "yaw=%.1f pitch=%.1f roll=%.1f",
+                        "yaw=%.1f pitch=%.1f roll=%.1f anchor=(%.2f,%.2f,%.2f) anchorRot=(%.1f,%.1f,%.1f) "
+                        "spineMul=%.2f hipLean=%.2f recoil=%.3f",
                         tpTuneWeaponIdx_,
                         static_cast<double>(tp.scale),
                         static_cast<double>(tp.handOffset.x),
@@ -4636,7 +4712,16 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(tp.aimPivotOffset.z),
                         static_cast<double>(tp.yawOffset),
                         static_cast<double>(tp.pitchOffset),
-                        static_cast<double>(tp.rollOffset));
+                        static_cast<double>(tp.rollOffset),
+                        static_cast<double>(tp.rightHandHoldOffset.x),
+                        static_cast<double>(tp.rightHandHoldOffset.y),
+                        static_cast<double>(tp.rightHandHoldOffset.z),
+                        static_cast<double>(tp.rightHandHoldRotationDeg.x),
+                        static_cast<double>(tp.rightHandHoldRotationDeg.y),
+                        static_cast<double>(tp.rightHandHoldRotationDeg.z),
+                        static_cast<double>(tp.spineBendMultiplier),
+                        static_cast<double>(tp.hipLeanMultiplier),
+                        static_cast<double>(tp.recoilKickRad));
             }
         }
         ImGui::End();

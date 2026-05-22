@@ -35,6 +35,18 @@ struct ThirdPersonWeaponParams
     /// Per-weapon-class recoil kick magnitude in radians, applied additively to
     /// the spine bend when the player fires a shot.
     float recoilKickRad = 0.06f;
+    /// Right-hand "weapon hold" anchor in Spine2's local frame (model units).
+    /// The animator pulls the right hand to `Spine2World * rightHandHoldOffset`
+    /// via IK each frame, replacing the idle-clip side-pose with a chest-front
+    /// holding pose. The weapon mesh — still parented to the right-hand bone —
+    /// follows the IK'd hand, so adjusting this slides the gun in space around
+    /// the chest. Without this, the gun visibly hangs at the side because the
+    /// locomotion clips are unarmed.
+    glm::vec3 rightHandHoldOffset{8.0f, 10.0f, 12.0f};
+    /// Right-hand hold orientation in Spine2's local frame (XYZ Euler degrees).
+    /// Combined with the palm-rotation in WeaponHandMountParams it determines
+    /// the final weapon orientation in world space.
+    glm::vec3 rightHandHoldRotationDeg{0.0f, 0.0f, 0.0f};
 };
 
 /// @brief A weapon-local grip point for either hand.
@@ -167,7 +179,9 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .rollOffset = 0.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
-         .recoilKickRad = 0.05f},
+         .recoilKickRad = 0.05f,
+         .rightHandHoldOffset = {6.0f, 6.0f, 14.0f},
+         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
         // Rocket launcher — heavy, slower upper-body response, big kick.
         {.scale = 0.025f,
          .handOffset = {1.5f, -3.5f, 14.0f},
@@ -176,7 +190,9 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .rollOffset = 0.0f,
          .spineBendMultiplier = 0.65f,
          .hipLeanMultiplier = 0.06f,
-         .recoilKickRad = 0.18f},
+         .recoilKickRad = 0.18f,
+         .rightHandHoldOffset = {7.0f, 8.0f, 18.0f},
+         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
         // RailGun / charge rifle — heavy precision rifle, slower bend than the
         // assault rifle, similar kick to a rifle since the energy delivery is smooth.
         {.scale = 7.0f,
@@ -186,7 +202,9 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .rollOffset = 2.0f,
          .spineBendMultiplier = 0.85f,
          .hipLeanMultiplier = 0.08f,
-         .recoilKickRad = 0.07f},
+         .recoilKickRad = 0.07f,
+         .rightHandHoldOffset = {6.0f, 6.0f, 14.0f},
+         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
         // EnergyGun — light pistol, fast spine bend, gentle kick.
         {.scale = 1.0f,
          .handOffset = {7.5f, 7.0f, 6.0f},
@@ -195,7 +213,9 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .rollOffset = 0.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
-         .recoilKickRad = 0.03f},
+         .recoilKickRad = 0.03f,
+         .rightHandHoldOffset = {5.0f, 4.0f, 12.0f},
+         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
     }};
 
     return k_params[static_cast<std::size_t>(type)];

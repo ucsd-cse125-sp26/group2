@@ -518,6 +518,7 @@ private:
     // CharacterAnimators (one per animated entity) hold non-owning refs.
     CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
     int rightHandJointIdx_ = -1;        ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the third-person weapon mesh to the right-hand bone after IK.
+    int spine2JointIdx_ = -1;           ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK target so the gun is held in front of the chest instead of hanging at the side.
     std::array<WeaponGripPose, 4> weaponGripPoses_{}; ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from assets/weapons/<name>.grip.toml at startup.
     std::array<WeaponGripPoseEuler, 4> weaponGripPoseEulers_{}; ///< Editable Euler-degree mirror of weaponGripPoses_, used by the in-game authoring UI.
     /// Per-entity weapon-swap crossfade state (Phase F polish). When an entity's
