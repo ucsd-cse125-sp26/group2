@@ -403,7 +403,7 @@ inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType ty
 inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
 {
     static constexpr std::array<WeaponModelInfo, 4> k_infos{{
-        {.filename = "assault_rifle.glb", .flipUVs = true},
+        {.filename = "assault_rifle_with_mountpoints.glb", .flipUVs = true},
         {.filename = "rocket_launcher.glb", .flipUVs = true},
         {.filename = "rail_gun.glb", .flipUVs = true},
         {.filename = "energy_gun.glb", .flipUVs = true},

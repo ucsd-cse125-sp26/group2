@@ -55,6 +55,7 @@
 #include "network/EntityInterpolation.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
+#include "renderer-new/Asset.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 #include "renderer-new/RendererTypes.hpp"
 #include "systems/InputSampleSystem.hpp"
@@ -91,6 +92,10 @@ namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
 constexpr float kThirdPersonWeaponPitchMax = 0.95993109f; // 55 degrees.
+constexpr std::array<const char*, kHandFingerMountCount> kModelLeftFingerMountNames{{
+    "ik_l_thumb_tip", "ik_l_index_tip", "ik_l_middle_tip", "ik_l_ring_tip", "ik_l_pinky_tip"}};
+constexpr std::array<const char*, kHandFingerMountCount> kModelRightFingerMountNames{{
+    "ik_r_thumb_tip", "ik_r_index_tip", "ik_r_middle_tip", "ik_r_ring_tip", "ik_r_pinky_tip"}};
 
 int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
@@ -135,6 +140,31 @@ glm::vec3 transformDirection(const glm::mat4& basis, const glm::vec3& direction)
     return glm::vec3(basis * glm::vec4(direction, 0.0f));
 }
 
+const Asset::Model* modelFromRendererIndex(int modelIndex)
+{
+    if (modelIndex < 0 || static_cast<std::size_t>(modelIndex) >= Asset::modelInstances_.size())
+        return nullptr;
+
+    const ModelIdInt modelId = Asset::modelInstances_[static_cast<std::size_t>(modelIndex)].modelId_;
+    const auto modelIt = Asset::models_.find(modelId);
+    if (modelIt == Asset::models_.end())
+        return nullptr;
+
+    return &modelIt->second;
+}
+
+const glm::vec3* findModelMountPoint(const Asset::Model* model, const char* name)
+{
+    if (model == nullptr)
+        return nullptr;
+
+    const auto mountIt = model->mountPoints.find(name);
+    if (mountIt == model->mountPoints.end())
+        return nullptr;
+
+    return &mountIt->second;
+}
+
 glm::vec3 resolveThirdPersonOffset(const glm::vec3& offset,
                                    const glm::vec3& authoredRight,
                                    const glm::vec3& up,
@@ -169,7 +199,8 @@ WeaponAttachmentPose buildThirdPersonWeaponAttachment(const glm::vec3& playerPos
                                                       float yaw,
                                                       float pitch,
                                                       const ThirdPersonWeaponParams& tp,
-                                                      const WeaponHandMountParams& mounts)
+                                                      const WeaponHandMountParams& mounts,
+                                                      const Asset::Model* weaponModel)
 {
     const glm::vec3 playerFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
     const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
@@ -191,28 +222,42 @@ WeaponAttachmentPose buildThirdPersonWeaponAttachment(const glm::vec3& playerPos
     WeaponAttachmentPose pose;
     pose.origin = origin;
     pose.weaponOrientation = orientation;
-    auto resolveHand = [&](const HandMountSet& hand) {
-        WeaponAttachmentPose::HandPose handPose;
-        handPose.elbow = origin + transformDirection(orientation, hand.elbowOffset);
-        handPose.palm = origin + transformDirection(orientation, hand.palm.offset);
-        handPose.palmOrientation = orientation * handMountRotation(hand.palm);
-        for (size_t i = 0; i < kHandFingerMountCount; ++i)
-            handPose.fingers[i] = origin + transformDirection(orientation, hand.fingers[i].offset);
-        return handPose;
-    };
-    pose.rightHand = resolveHand(mounts.rightHand);
-    pose.leftHand = resolveHand(mounts.leftHand);
     pose.weaponWorld = glm::translate(glm::mat4(1.0f), origin) * orientation;
     pose.weaponWorld = glm::scale(pose.weaponWorld, glm::vec3(tp.scale));
+    auto resolvePoint = [&](const char* modelMountName, const glm::vec3& fallbackOffset) {
+        if (const glm::vec3* modelPoint = findModelMountPoint(weaponModel, modelMountName); modelPoint != nullptr)
+            return glm::vec3(pose.weaponWorld * glm::vec4(*modelPoint, 1.0f));
+
+        return origin + transformDirection(orientation, fallbackOffset);
+    };
+    auto resolveHand = [&](const HandMountSet& hand,
+                           const char* palmName,
+                           const char* elbowName,
+                           const std::array<const char*, kHandFingerMountCount>& fingerNames) {
+        WeaponAttachmentPose::HandPose handPose;
+        handPose.elbow = resolvePoint(elbowName, hand.elbowOffset);
+        handPose.palm = resolvePoint(palmName, hand.palm.offset);
+        handPose.palmOrientation = orientation * handMountRotation(hand.palm);
+        for (size_t i = 0; i < kHandFingerMountCount; ++i)
+            handPose.fingers[i] = resolvePoint(fingerNames[i], hand.fingers[i].offset);
+        return handPose;
+    };
+    pose.rightHand = resolveHand(mounts.rightHand, "ik_r_palm", "ik_r_elbow", kModelRightFingerMountNames);
+    pose.leftHand = resolveHand(mounts.leftHand, "ik_l_palm", "ik_l_elbow", kModelLeftFingerMountNames);
     return pose;
 }
 
 glm::mat4 makeViewmodelHandTransform(const glm::vec3& weaponOrigin,
+                                     const glm::mat4& weaponWorld,
                                      const glm::mat4& weaponOrientation,
+                                     const Asset::Model* weaponModel,
+                                     const char* modelMountName,
                                      const HandMountPoint& mount,
                                      float handScale)
 {
-    const glm::vec3 target = weaponOrigin + transformDirection(weaponOrientation, mount.offset);
+    const glm::vec3* modelMount = findModelMountPoint(weaponModel, modelMountName);
+    const glm::vec3 target = modelMount != nullptr ? glm::vec3(weaponWorld * glm::vec4(*modelMount, 1.0f))
+                                                   : weaponOrigin + transformDirection(weaponOrientation, mount.offset);
     glm::mat4 handWorld = glm::translate(glm::mat4(1.0f), target);
     handWorld *= weaponOrientation;
     handWorld *= handMountRotation(mount);
@@ -2937,8 +2982,10 @@ SDL_AppResult Game::iterate()
                         if (isRenderableGunType(gun.type)) {
                             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
                             const auto& mounts = weaponHandMountParams_[static_cast<int>(gun.type)];
+                            const Asset::Model* weaponModel =
+                                modelFromRendererIndex(weaponModelIndices_[static_cast<int>(gun.type)]);
                             const WeaponAttachmentPose pose =
-                                buildThirdPersonWeaponAttachment(renderPos, renderYaw, inp.pitch, tp, mounts);
+                                buildThirdPersonWeaponAttachment(renderPos, renderYaw, inp.pitch, tp, mounts, weaponModel);
                             const glm::mat4 invWorld = glm::inverse(world);
                             const auto hasRotation = [](const HandMountPoint& point) {
                                 return glm::dot(point.rotationDegrees, point.rotationDegrees) > 0.0001f;
@@ -3450,7 +3497,9 @@ SDL_AppResult Game::iterate()
 
             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
             const auto& mounts = weaponHandMountParams_[static_cast<int>(gun.type)];
-            const WeaponAttachmentPose pose = buildThirdPersonWeaponAttachment(playerPos, yaw, input.pitch, tp, mounts);
+            const Asset::Model* weaponModel = modelFromRendererIndex(wpnIdx);
+            const WeaponAttachmentPose pose =
+                buildThirdPersonWeaponAttachment(playerPos, yaw, input.pitch, tp, mounts, weaponModel);
 
             entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = pose.weaponWorld});
         });
@@ -3802,34 +3851,35 @@ SDL_AppResult Game::iterate()
 
             vm.transform = weaponWorld;
             const auto& fpHands = fpHandMountParams_[static_cast<int>(currentEquippedType_)];
+            const Asset::Model* currentWeaponModel = modelFromRendererIndex(currentWeaponModelIdx);
             if (viewmodelRightHandModelIdx_ >= 0) {
                 vm.hands.right.modelIndex = viewmodelRightHandModelIdx_;
                 vm.hands.right.visible = true;
-                vm.hands.right.transform =
-                    makeViewmodelHandTransform(weaponPos, weaponOrientation, fpHands.rightArm.palm, fpHands.scale);
+                vm.hands.right.transform = makeViewmodelHandTransform(weaponPos,
+                                                                       weaponWorld,
+                                                                       weaponOrientation,
+                                                                       currentWeaponModel,
+                                                                       "ik_r_palm",
+                                                                       fpHands.rightArm.palm,
+                                                                       fpHands.scale);
             }
             if (viewmodelLeftHandModelIdx_ >= 0) {
                 vm.hands.left.modelIndex = viewmodelLeftHandModelIdx_;
                 vm.hands.left.visible = true;
-                vm.hands.left.transform =
-                    makeViewmodelHandTransform(weaponPos, weaponOrientation, fpHands.leftArm.palm, fpHands.scale);
+                vm.hands.left.transform = makeViewmodelHandTransform(weaponPos,
+                                                                      weaponWorld,
+                                                                      weaponOrientation,
+                                                                      currentWeaponModel,
+                                                                      "ik_l_palm",
+                                                                      fpHands.leftArm.palm,
+                                                                      fpHands.scale);
             }
 
             cachedMuzzleValid_ = false;
 
-            if (currentWeaponModelIdx >= 0 &&
-                static_cast<size_t>(currentWeaponModelIdx) < Asset::modelInstances_.size())
-            {
-                const ModelIdInt modelId = Asset::modelInstances_[currentWeaponModelIdx].modelId_;
-
-                if (Asset::models_.contains(modelId)) {
-                    const Asset::Model& model = Asset::models_.at(modelId);
-
-                    if (model.hasMuzzle) {
-                        cachedMuzzleWorld_ = glm::vec3(weaponWorld * glm::vec4(model.muzzleLocalPos, 1.0f));
-                        cachedMuzzleValid_ = true;
-                    }
-                }
+            if (currentWeaponModel != nullptr && currentWeaponModel->hasMuzzle) {
+                cachedMuzzleWorld_ = glm::vec3(weaponWorld * glm::vec4(currentWeaponModel->muzzleLocalPos, 1.0f));
+                cachedMuzzleValid_ = true;
             }
         }
         renderer->setWeaponViewmodel(vm);

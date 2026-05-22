@@ -13,6 +13,7 @@
 #include "glm/glm.hpp"
 
 #include <stb_image.h>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -100,6 +101,7 @@ struct Model
 {
     std::vector<ModelNode> modelNodes_;
     std::vector<ModelElement> modelElements_;
+    std::unordered_map<std::string, glm::vec3> mountPoints;
     bool hasMuzzle = false;
     glm::vec3 muzzleLocalPos{};
 };
