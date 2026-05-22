@@ -1,5 +1,5 @@
 /// @file Minimap.cpp
-/// @brief Voidfall square radar — grid + mil-spec bracket corners + amber player chevron.
+/// @brief Voidfall circular radar with clipped grid + amber player chevron.
 
 #include "Minimap.hpp"
 
@@ -11,6 +11,21 @@
 
 #include <algorithm>
 #include <cmath>
+
+namespace
+{
+void drawCircleOutline(HudContext& ctx, float cx, float cy, float radius, float thickness, HudColor color)
+{
+    constexpr int kSegments = 64;
+    float points[(kSegments + 1) * 2]{};
+    for (int i = 0; i <= kSegments; ++i) {
+        const float a = (static_cast<float>(i) / kSegments) * 2.f * 3.14159265f;
+        points[i * 2 + 0] = cx + std::cos(a) * radius;
+        points[i * 2 + 1] = cy + std::sin(a) * radius;
+    }
+    ctx.polyline(points, kSegments + 1, thickness, color);
+}
+} // namespace
 
 Minimap::Minimap()
 {
@@ -41,52 +56,50 @@ void Minimap::draw(HudContext& ctx, float x, float y)
 
     const float s = uiScale_;
     const float ms = mapSize * s;
-
-    // Frame.
-    ctx.rect(x, y, ms, ms, HudColor{0.10f, 0.09f, 0.08f, 0.85f});
-    const float borderT = std::max(0.f, borderThickness * s);
-    if (borderT > 0.f)
-        ctx.rectOutline(x, y, ms, ms, borderT, k_line);
-
-    // Grid (10×10 cells of light hairlines, like graph paper in the prototype).
-    const HudColor grid = HudColor{0.27f, 0.26f, 0.25f, 0.45f};
-    const int divisions = 10;
-    for (int i = 1; i < divisions; ++i) {
-        const float t = (static_cast<float>(i) / divisions) * ms;
-        ctx.rect(x + t, y + 1.f, 1.f, ms - 2.f, grid);
-        ctx.rect(x + 1.f, y + t, ms - 2.f, 1.f, grid);
-    }
-
-    // Mil-spec bracket corners (sit slightly outside the frame).
-    drawCornerBrackets(ctx, x, y, ms, ms, 14.f * s, 1.f * s, 2.f * s, k_amber);
-
     const float cx = x + ms * 0.5f;
     const float cy = y + ms * 0.5f;
+    const float radius = ms * 0.5f;
+
+    // Frame.
+    ctx.roundedRect(x, y, ms, ms, radius, HudColor{0.10f, 0.09f, 0.08f, 0.85f});
+    const float borderT = std::max(0.f, borderThickness * s);
+    if (borderT > 0.f)
+        drawCircleOutline(ctx, cx, cy, std::max(0.f, radius - borderT * 0.5f), borderT, k_line);
+
+    // Grid clipped to circular chords.
+    const HudColor grid = HudColor{0.27f, 0.26f, 0.25f, 0.45f};
+    const int divisions = 10;
+    const float lineT = std::max(1.f, 1.f * s);
+    const float gridRadius = std::max(0.f, radius - borderT - lineT * 0.5f);
+    for (int i = 1; i < divisions; ++i) {
+        const float offset = -radius + (static_cast<float>(i) / divisions) * ms;
+        const float halfChord = std::sqrt(std::max(0.f, gridRadius * gridRadius - offset * offset));
+        if (halfChord <= 0.f)
+            continue;
+        ctx.rect(cx + offset - lineT * 0.5f, cy - halfChord, lineT, halfChord * 2.f, grid);
+        ctx.rect(cx - halfChord, cy + offset - lineT * 0.5f, halfChord * 2.f, lineT, grid);
+    }
 
     // Local player chevron — shared notched-arrow glyph from the icon module.
     icons::playerArrow(ctx, std::round(cx), std::round(cy), 14.f * s, k_amber);
 
     // Enemy dots (red), rotated by yaw so player-forward is up. Dots beyond
-    // the radar's range are clamped (max-norm projection) to the nearest edge
+    // the radar's range are clamped radially to the circular edge
     // so the player still gets a directional cue instead of a hard cull.
     const float worldToPixel = ms / (worldRange_ * 2.f);
     const float sinYaw = std::sin(localYaw_);
     const float cosYaw = std::cos(localYaw_);
     const float dotPx = dotSize * s;
-    const float halfMs = ms * 0.5f;
     const float edgeMargin = (dotPx * 0.5f) + 1.f;
-    const float maxAbs = halfMs - edgeMargin;
+    const float maxDist = std::max(0.f, radius - edgeMargin);
     for (const auto& e : enemies_) {
         const float wdx = (e.worldX - localX_) * worldToPixel;
         const float wdz = (e.worldZ - localZ_) * worldToPixel;
         float dx = wdx * cosYaw - wdz * sinYaw;
         float dz = wdx * sinYaw + wdz * cosYaw;
-        const float absDx = std::abs(dx);
-        const float absDz = std::abs(dz);
-        if (absDx > maxAbs || absDz > maxAbs) {
-            // Scale the longer axis to the edge; the other follows along the
-            // same radial direction so the dot lands on the radar border.
-            const float scale = maxAbs / std::max(absDx, absDz);
+        const float dist = std::sqrt(dx * dx + dz * dz);
+        if (dist > maxDist && dist > 1e-3f) {
+            const float scale = maxDist / dist;
             dx *= scale;
             dz *= scale;
         }

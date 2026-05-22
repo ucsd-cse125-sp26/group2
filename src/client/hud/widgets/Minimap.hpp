@@ -7,7 +7,7 @@
 
 struct Minimap : HudWidget
 {
-    float mapSize = 180.f; ///< Pixel width/height of the minimap square.
+    float mapSize = 180.f; ///< Pixel diameter of the minimap circle.
     float dotSize = 6.f;
     float borderThickness = 2.f;
 
