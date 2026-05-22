@@ -53,6 +53,8 @@ ConnectError Client::init(const char* addr,
         }
 
         connectionId_ = session_.clientConnectionId();
+        udpSessionLastBytesSent_ = 0;
+        udpSessionLastBytesRecv_ = 0;
         SDL_Log("Client: UDP session connected to %s:%u, session=0x%llx",
                 addr,
                 port,
@@ -161,6 +163,8 @@ void Client::shutdown()
     std::lock_guard<std::mutex> lock(stateMutex_);
     session_.close();
     usingUdpSession_ = false;
+    udpSessionLastBytesSent_ = 0;
+    udpSessionLastBytesRecv_ = 0;
     if (msgStream.socket) {
         NET_DestroyStreamSocket(msgStream.socket);
         msgStream.socket = nullptr;
@@ -193,13 +197,7 @@ std::vector<uint8_t> frameMessage(const void* data, uint32_t len)
 bool Client::send(const void* data, uint32_t len)
 {
     if (usingUdpSession_) {
-        const bool ok =
-            session_.send(connectionId_, net::ChannelId::ControlReliableOrdered, data, static_cast<int>(len));
-        if (ok) {
-            stats.bytesSentTotal += len + sizeof(net::PacketHeader);
-            bytesSentWindow += len + sizeof(net::PacketHeader);
-        }
-        return ok;
+        return session_.send(connectionId_, net::ChannelId::ControlReliableOrdered, data, static_cast<int>(len));
     }
 
     // Frame outside the lock; lock briefly to push into the outbound queue.
@@ -798,10 +796,28 @@ void Client::networkLoop()
                 }
             }
 
-            const auto& s = session_.stats();
-            if (s.rttMs > 0.0f) {
-                stats.rttMs = s.rttMs;
-                stats.avgRttMs = stats.avgRttMs <= 0.0f ? s.rttMs : stats.avgRttMs * 0.8f + s.rttMs * 0.2f;
+            const auto& sessionStats = session_.stats();
+            const float rttMs = sessionStats.rttMs;
+            const std::uint64_t bytesSent = sessionStats.bytesSent;
+            const std::uint64_t bytesRecv = sessionStats.bytesRecv;
+
+            if (rttMs > 0.0f) {
+                stats.rttMs = rttMs;
+                stats.avgRttMs = stats.avgRttMs <= 0.0f ? rttMs : stats.avgRttMs * 0.8f + rttMs * 0.2f;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(stateMutex_);
+                const std::uint64_t sentDelta =
+                    bytesSent >= udpSessionLastBytesSent_ ? bytesSent - udpSessionLastBytesSent_ : 0;
+                const std::uint64_t recvDelta =
+                    bytesRecv >= udpSessionLastBytesRecv_ ? bytesRecv - udpSessionLastBytesRecv_ : 0;
+                udpSessionLastBytesSent_ = bytesSent;
+                udpSessionLastBytesRecv_ = bytesRecv;
+                stats.bytesSentTotal += sentDelta;
+                stats.bytesRecvTotal += recvDelta;
+                bytesSentWindow += sentDelta;
+                bytesRecvWindow += recvDelta;
             }
 
             SDL_Delay(1);

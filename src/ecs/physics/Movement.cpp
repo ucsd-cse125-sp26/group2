@@ -20,6 +20,13 @@ glm::vec3 applyGravity(glm::vec3 vel, float dt, bool flipped)
     return vel;
 }
 
+glm::vec3 applyPlayerGravity(glm::vec3 vel, float dt, bool flipped)
+{
+    const float dir = flipped ? 1.0f : -1.0f;
+    vel.y += dir * k_playerGravity * dt;
+    return vel;
+}
+
 glm::vec3 applyGroundFriction(glm::vec3 vel, float dt)
 {
     // Only horizontal (XZ) velocity is affected by ground friction.

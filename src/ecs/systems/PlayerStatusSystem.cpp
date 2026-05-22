@@ -173,6 +173,12 @@ inline glm::vec3 chooseRespawnPoint(Registry& registry)
     return glm::vec3(0.0f, 200.0f, 0.0f);
 }
 
+glm::vec3 chooseAndResolveSpawnPosition(Registry& registry, entt::entity player)
+{
+    const glm::vec3 spawnFeet = chooseRespawnPoint(registry);
+    return resolveRespawnPosition(registry, player, spawnFeet);
+}
+
 /// @brief Reset a dead player to a fresh spawn state.
 ///
 /// Clears the respawn timer and death info, restores visibility, resets
@@ -185,9 +191,9 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
 {
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    const glm::vec3 respawnFeet = chooseRespawnPoint(registry);
-    const glm::vec3 respawnCenter = resolveRespawnPosition(registry, player, respawnFeet);
+    const glm::vec3 respawnCenter = chooseAndResolveSpawnPosition(registry, player);
 
+    destroyRagdoll(registry, player);
     registry.erase<RespawnTimer>(player);
     registry.erase<DeathInfo>(player);
     registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = true; });
@@ -273,6 +279,7 @@ inline void handleDeath(entt::entity& player,
         // The renderer hides the kinematic player (Renderable visible=false)
         // and instead reads the 15 ragdoll bone transforms via
         // `RagdollBoneTag` to drive the skinned-mesh palette.
+        destroyRagdoll(registry, player);
         spawnRagdoll(registry, player);
 
         // Update death

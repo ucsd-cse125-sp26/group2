@@ -79,7 +79,11 @@ void RailgunScopeWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
     const float cy = screenH_ * 0.5f;
     const float radius = std::min(screenW_, screenH_) * 0.42f;
 
-    ctx.scopeMask(screenW_, screenH_, radius, HudColor(0.f, 0.f, 0.f, 0.38f));
+    // Vignette outside the scope circle. The scene renders at a narrower FOV
+    // while ADS-ing (driven by renderer->scopeZoom), so the off-scope corners
+    // show a zoomed-in view too — this darker mask softens the visual seam
+    // without going opaque (the user still wants peripheral awareness).
+    ctx.scopeMask(screenW_, screenH_, radius, HudColor(0.f, 0.f, 0.f, 0.62f));
 
     const HudColor red{0.78f, 0.08f, 0.10f, 0.82f};
     const HudColor redDim{0.78f, 0.08f, 0.10f, 0.45f};

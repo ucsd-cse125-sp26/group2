@@ -9,10 +9,17 @@
 #include "animation/CharacterRig.hpp"
 #include "animation/SkinningBackend.hpp"
 #include "app/AppContext.hpp"
+#include "debug/ClientPerfRecorder.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/AssetRegistry.hpp"
 #include "ecs/components/Hitbox.hpp"
+#include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/PlayerSimState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
+#include "ecs/components/Position.hpp"
+#include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -133,6 +140,36 @@ private:
     /// @brief Emplace player-control components onto the mapped local entity and record it.
     void handleLocalPlayerReady(entt::entity local);
 
+    struct PredictedPlayerState
+    {
+        std::uint32_t tick = 0;
+        Position position{};
+        PreviousPosition previousPosition{};
+        Velocity velocity{};
+        PlayerVisState vis{};
+        PlayerSimState sim{};
+        InputSnapshot input{};
+        bool valid = false;
+    };
+
+    struct ReconciliationDecision
+    {
+        bool skip = false;
+        bool missingHistory = false;
+        float positionError = 0.0f;
+        float velocityError = 0.0f;
+    };
+
+    void clearPredictedStateHistory() noexcept;
+    void storePredictedPlayerState(std::uint32_t tick);
+    [[nodiscard]] std::optional<PredictedPlayerState> captureLocalPredictedState() const;
+    [[nodiscard]] const PredictedPlayerState* predictedStateForTick(std::uint32_t tick) const noexcept;
+    void restoreLocalPredictedState(const PredictedPlayerState& state);
+    [[nodiscard]] ReconciliationDecision
+    evaluateReconciliationSkip(const PredictedPlayerState& authoritative,
+                               const PredictedPlayerState* predictedAtAck,
+                               const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept;
+
     /// @brief Enter chat input mode and release normal gameplay input capture.
     void openChat();
 
@@ -207,6 +244,8 @@ private:
     /// runReconciliation can look up the input that was sent for any
     /// recent tick and feed it back into runMovement during replay.
     InputRingBuffer inputRing_;
+
+    std::array<PredictedPlayerState, InputRingBuffer::k_capacity> predictedStateHistory_{};
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
 
     /// @brief Currently-bound gamepad, or nullptr if none is plugged in.
@@ -319,6 +358,21 @@ private:
     SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
     std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
     std::unordered_map<entt::entity, float> footstepCooldowns_;
+
+    // Movement / ability transition tracking for SFX.
+    struct PlayerSfxState
+    {
+        bool initialized = false;
+        bool grounded = false;
+        bool isDead = false;
+        int moveMode = 0;
+        bool gravityFlipped = false;
+        bool grappleActive = false;
+        float primaryCooldown = 0.0f;
+        float secondaryCooldown = 0.0f;
+        SfxSystem::SourceHandle slideLoopHandle = SfxSystem::kInvalidSource;
+    };
+    std::unordered_map<entt::entity, PlayerSfxState> playerSfxState_;
 
     // Hitmarker
     float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
@@ -454,31 +508,12 @@ private:
     static constexpr float k_benchWarmupSeconds = 2.0f; ///< Skip the first N seconds (pipeline warmup).
     std::vector<float> benchFrameTimesMs_;              ///< Per-frame ms after warmup; reservation in init().
 
-    /// Per-frame phase-time breakdown.  Captured every frame in bench mode,
-    /// then the slowest 10 frames' breakdowns are dumped at exit so we can
-    /// attribute p1/p5 spikes to specific subsystems (e.g. "the spike was a
-    /// drawFrame stall waiting for the swapchain" vs "an animation-update
-    /// burst hit several chars at once").
-    struct FrameSectionMs
-    {
-        float total = 0.0f;
-        float input = 0.0f;
-        float networkPoll = 0.0f;
-        float physics = 0.0f;
-        float animation = 0.0f;        ///< ozz pose + skin matrix + hitbox.
-        float skinPaletteBuild = 0.0f; ///< Frustum cull + palette + instance build.
-        float entityCmds = 0.0f;       ///< Renderable + 3p weapon list build.
-        float particles = 0.0f;
-        float imgui = 0.0f;
-        float drawFrame = 0.0f; ///< Renderer drawFrame (CPU + GPU acquire).
-        // Sub-breakdown of drawFrame, populated from Renderer::lastAcquire/Record/SubmitMs.
-        // The "acquire" ms specifically captures swapchain back-pressure stalls — when
-        // the GPU hasn't released a previous swap image, the CPU thread blocks here.
-        float drawAcquire = 0.0f;
-        float drawRecord = 0.0f;
-        float drawSubmit = 0.0f;
-    };
-    std::vector<FrameSectionMs> benchFrameStats_;
+    /// Per-frame phase-time breakdown. Captured every frame in bench mode and
+    /// by GROUP2_CLIENT_PERF=1 play-session recordings.
+    std::vector<ClientPerfFrame> benchFrameStats_;
+    ClientPerfRecorder perfRecorder_;
+    float perfSnapshotApplyMs_ = 0.0f;
+    std::uint32_t perfSnapshotApplyCount_ = 0;
 
     /// @brief Attach a fresh `AnimatedCharacter` component to an entity.
     ///
@@ -498,4 +533,8 @@ private:
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
 
     PauseMenu pauseMenu; ///< In-game pause menu (opened with ESC, blocks input to the game when active).
+
+    // Bullet tracer muzzle
+    glm::vec3 cachedMuzzleWorld_{0.0f};
+    bool cachedMuzzleValid_ = false;
 };

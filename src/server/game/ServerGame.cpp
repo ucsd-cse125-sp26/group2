@@ -834,12 +834,12 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Player>(player, Player{});
     registry.emplace<ClientId>(player, clientId);
     registry.emplace<InputSnapshot>(player);
-    registry.emplace<Position>(player, glm::vec3{0.0f, 200.0f, 0.0f});
-    registry.emplace<Velocity>(player);
     // Phase 5: player is a capsule for smoother movement against ramps and
     // triangulated geometry.  `halfExtents` is the capsule's tight bounding
     // box (32×72×32) so existing axis-aligned swept queries treat the shape
     // exactly; the capsule fields drive Phase-5+ shape-aware paths.
+    // Attach CollisionShape before resolving the spawn position so the
+    // recovery sweep uses the player's actual capsule.
     registry.emplace<CollisionShape>(player,
                                      CollisionShape{
                                          .type = CollisionShapeType::Capsule,
@@ -847,6 +847,8 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                          .radius = 16.0f,
                                          .halfHeight = 20.0f,
                                      });
+    registry.emplace<Position>(player, systems::chooseAndResolveSpawnPosition(registry, player));
+    registry.emplace<Velocity>(player);
     registry.emplace<PlayerVisState>(player);
     registry.emplace<PlayerSimState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
@@ -939,6 +941,7 @@ void ServerGame::deletePlayerEntity(ClientId clientId)
                     }
                 }
             }
+            systems::destroyRagdoll(registry, player);
             registry.destroy(player);
         }
         clientEntities.erase(it);

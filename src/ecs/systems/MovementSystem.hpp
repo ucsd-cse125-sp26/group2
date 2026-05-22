@@ -50,10 +50,11 @@ void reconcileMovementAfterKcc(glm::vec3& pos,
 /// @brief Determine the current ground wish speed based on movement mode and stance.
 ///
 /// Returns the speed the player is accelerating toward on the ground this tick:
-/// `tms::k_crouchSpeed` / `k_sprintSpeed` / `k_walkSpeed`, or `0` during a slide.
-/// For air movement use `physics::k_airMaxSpeed` directly.
+/// `tms::k_adsSpeed` (if ADS-ing a precision weapon), else `tms::k_crouchSpeed` /
+/// `k_sprintSpeed` / `k_walkSpeed`, or `0` during a slide. For air movement use
+/// `physics::k_airMaxSpeed` directly.
 ///
-/// @param vis  Replicated player vis state (for moveMode + crouching + sprinting).
+/// @param vis  Replicated player vis state (for moveMode + crouching + sprinting + ads).
 /// @return Target ground wish speed (u/s).
 float currentWishSpeed(const PlayerVisState& vis);
 

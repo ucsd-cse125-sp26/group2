@@ -19,12 +19,15 @@ constexpr float k_walkSpeed =
     550.0f; ///< Max wish speed when walking (u/s). Sprint removed; this is the only base speed.
 constexpr float k_sprintSpeed = 550.0f; ///< Deprecated: sprint removed. Kept equal to k_walkSpeed for safety.
 constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s).
+constexpr float k_adsSpeed = 280.0f;    ///< Max wish speed while ADS-ing a precision (charge) weapon (u/s).
+                                        ///< 20% slower than crouch — keeps the charge rifle's RMB stance
+                                        ///< deliberate without freezing the player in place.
 
 // Jumping
 
-constexpr float k_jumpSpeed = 330.0f;       ///< Upward velocity on ground jump (u/s). Must mirror physics::k_jumpSpeed.
-constexpr float k_doubleJumpSpeed = 300.0f; ///< Upward velocity on air jump (u/s).
-constexpr float k_slidehopJumpSpeed = 250.0f;    ///< Upward velocity when jumping during slide (u/s).
+constexpr float k_jumpSpeed = 660.0f;       ///< Upward velocity on ground jump (u/s). Must mirror physics::k_jumpSpeed.
+constexpr float k_doubleJumpSpeed = 600.0f; ///< Upward velocity on air jump (u/s).
+constexpr float k_slidehopJumpSpeed = 500.0f;    ///< Upward velocity when jumping during slide (u/s).
 constexpr float k_doubleJumpCooldown = 0.10f;    ///< Min time after first jump before double jump is allowed (s).
 constexpr float k_doubleJumpHorizBoost = 400.0f; ///< Horizontal velocity (u/s) toward WASD wishDir on double jump.
                                                  ///< Replaces horizontal velocity with wishDir * max(this, currentHs)
@@ -95,13 +98,13 @@ constexpr float k_wallrunGripTime = 1.0f;                  ///< Initial zero-gra
 constexpr float k_wallrunGravityRampTime = 2.0f;           ///< Time to ramp gravity 0 → full after grip ends (s).
                                                            ///< Produces a natural slide-off so the player can't
                                                            ///< wallrun indefinitely even before the hard kickoff.
-constexpr float k_wallJumpUpForce = 320.0f;                ///< Upward velocity on wall jump (u/s).
+constexpr float k_wallJumpUpForce = 640.0f;                ///< Upward velocity on wall jump (u/s).
 constexpr float k_wallJumpSideForce = 350.0f;              ///< Sideways velocity on wall jump (away from wall) (u/s).
 constexpr float k_wallrunExitTime = 0.2f;                  ///< Duration of "exiting wall" flag after leaving (s).
 constexpr float k_wallrunCameraTilt = 7.5f;                ///< Camera roll when wallrunning (degrees).
 constexpr float k_wallrunCameraTiltSpeed = 10.0f;          ///< Interpolation speed for camera tilt.
-constexpr float k_wallrunEntryVerticalImpulse = 220.0f;    ///< Lucio-style upward kick when attaching (u/s).
-constexpr float k_wallrunEntryVerticalCeiling = 320.0f;    ///< Maximum vertical speed after the entry kick (u/s).
+constexpr float k_wallrunEntryVerticalImpulse = 440.0f;    ///< Lucio-style upward kick when attaching (u/s).
+constexpr float k_wallrunEntryVerticalCeiling = 640.0f;    ///< Maximum vertical speed after the entry kick (u/s).
 constexpr float k_wallrunEntryHorizSnap = 1.0f;            ///< Horizontal speed retention on wallrun entry.
 constexpr float k_wallrunVerticalDecayTau = 0.45f;         ///< Exponential vertical decay while attached (s).
 constexpr float k_wallrunMaxFaceRedirect = 1.57079632679f; ///< Max face-normal rotation accepted per tick (rad).

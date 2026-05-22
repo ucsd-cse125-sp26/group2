@@ -401,6 +401,196 @@ spatial = true
 max_instances = 4
 
 [[clips]]
+id = "footstep_dirt_01"
+sfx = "DirtFootstep01"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_02"
+sfx = "DirtFootstep02"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_03"
+sfx = "DirtFootstep03"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_04"
+sfx = "DirtFootstep04"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_05"
+sfx = "DirtFootstep05"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_06"
+sfx = "DirtFootstep06"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_07"
+sfx = "DirtFootstep07"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_08"
+sfx = "DirtFootstep08"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_09"
+sfx = "DirtFootstep09"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_10"
+sfx = "DirtFootstep10"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_11"
+sfx = "DirtFootstep11"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_12"
+sfx = "DirtFootstep12"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_13"
+sfx = "DirtFootstep13"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "footstep_dirt_14"
+sfx = "DirtFootstep14"
+bus = "Footsteps"
+gain = 1.05
+priority = 0.85
+cooldown = 0.02
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "slide_loop"
+sfx = "Slide"
+bus = "Player"
+gain = 0.8
+priority = 1.4
+loop = true
+spatial = true
+max_instances = 4
+
+[[clips]]
+id = "ability_dash"
+sfx = "DashSfx"
+bus = "Player"
+gain = 0.9
+priority = 2.0
+cooldown = 0.10
+spatial = true
+max_instances = 6
+
+[[clips]]
+id = "ability_gravity"
+sfx = "GravityFlipSfx"
+bus = "Player"
+gain = 0.9
+priority = 2.0
+cooldown = 0.10
+spatial = true
+max_instances = 6
+
+[[clips]]
+id = "ability_grapple"
+sfx = "GrappleSfx"
+bus = "Player"
+gain = 0.9
+priority = 2.0
+cooldown = 0.10
+spatial = true
+max_instances = 6
+
+[[clips]]
+id = "ability_recall"
+sfx = "RecallSfx"
+bus = "Player"
+gain = 0.9
+priority = 2.0
+cooldown = 0.10
+spatial = true
+max_instances = 6
+
+[[clips]]
 id = "voice_start"
 sfx = "VoiceStart"
 bus = "VoiceChat"
@@ -631,6 +821,121 @@ children = [
 ]
 
 [[nodes]]
+id = "node.footstep_dirt_01"
+type = "sound"
+clip = "footstep_dirt_01"
+
+[[nodes]]
+id = "node.footstep_dirt_02"
+type = "sound"
+clip = "footstep_dirt_02"
+
+[[nodes]]
+id = "node.footstep_dirt_03"
+type = "sound"
+clip = "footstep_dirt_03"
+
+[[nodes]]
+id = "node.footstep_dirt_04"
+type = "sound"
+clip = "footstep_dirt_04"
+
+[[nodes]]
+id = "node.footstep_dirt_05"
+type = "sound"
+clip = "footstep_dirt_05"
+
+[[nodes]]
+id = "node.footstep_dirt_06"
+type = "sound"
+clip = "footstep_dirt_06"
+
+[[nodes]]
+id = "node.footstep_dirt_07"
+type = "sound"
+clip = "footstep_dirt_07"
+
+[[nodes]]
+id = "node.footstep_dirt_08"
+type = "sound"
+clip = "footstep_dirt_08"
+
+[[nodes]]
+id = "node.footstep_dirt_09"
+type = "sound"
+clip = "footstep_dirt_09"
+
+[[nodes]]
+id = "node.footstep_dirt_10"
+type = "sound"
+clip = "footstep_dirt_10"
+
+[[nodes]]
+id = "node.footstep_dirt_11"
+type = "sound"
+clip = "footstep_dirt_11"
+
+[[nodes]]
+id = "node.footstep_dirt_12"
+type = "sound"
+clip = "footstep_dirt_12"
+
+[[nodes]]
+id = "node.footstep_dirt_13"
+type = "sound"
+clip = "footstep_dirt_13"
+
+[[nodes]]
+id = "node.footstep_dirt_14"
+type = "sound"
+clip = "footstep_dirt_14"
+
+[[nodes]]
+id = "node.footstep.dirt"
+type = "random"
+children = [
+  { node = "node.footstep_dirt_01", weight = 1.0 },
+  { node = "node.footstep_dirt_02", weight = 1.0 },
+  { node = "node.footstep_dirt_03", weight = 1.0 },
+  { node = "node.footstep_dirt_04", weight = 1.0 },
+  { node = "node.footstep_dirt_05", weight = 1.0 },
+  { node = "node.footstep_dirt_06", weight = 1.0 },
+  { node = "node.footstep_dirt_07", weight = 1.0 },
+  { node = "node.footstep_dirt_08", weight = 1.0 },
+  { node = "node.footstep_dirt_09", weight = 1.0 },
+  { node = "node.footstep_dirt_10", weight = 1.0 },
+  { node = "node.footstep_dirt_11", weight = 1.0 },
+  { node = "node.footstep_dirt_12", weight = 1.0 },
+  { node = "node.footstep_dirt_13", weight = 1.0 },
+  { node = "node.footstep_dirt_14", weight = 1.0 },
+]
+
+[[nodes]]
+id = "node.slide_loop"
+type = "sound"
+clip = "slide_loop"
+
+[[nodes]]
+id = "node.ability_dash"
+type = "sound"
+clip = "ability_dash"
+
+[[nodes]]
+id = "node.ability_gravity"
+type = "sound"
+clip = "ability_gravity"
+
+[[nodes]]
+id = "node.ability_grapple"
+type = "sound"
+clip = "ability_grapple"
+
+[[nodes]]
+id = "node.ability_recall"
+type = "sound"
+clip = "ability_recall"
+
+[[nodes]]
 id = "node.voice_start"
 type = "sound"
 clip = "voice_start"
@@ -719,6 +1024,30 @@ actions = [{ type = "play", target = "node.footstep_light" }]
 [[events]]
 id = "footstep.heavy"
 actions = [{ type = "play", target = "node.footstep_heavy" }]
+
+[[events]]
+id = "player.land"
+actions = [{ type = "play", target = "node.footstep.dirt" }]
+
+[[events]]
+id = "player.slide_start"
+actions = [{ type = "play", target = "node.slide_loop" }]
+
+[[events]]
+id = "ability.dash"
+actions = [{ type = "play", target = "node.ability_dash" }]
+
+[[events]]
+id = "ability.gravity"
+actions = [{ type = "play", target = "node.ability_gravity" }]
+
+[[events]]
+id = "ability.grapple"
+actions = [{ type = "play", target = "node.ability_grapple" }]
+
+[[events]]
+id = "ability.recall"
+actions = [{ type = "play", target = "node.ability_recall" }]
 
 [[events]]
 id = "voice.start"

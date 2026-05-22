@@ -115,26 +115,64 @@ jobs:
           key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      # Cache the project build tree for incremental cmake reconfigure.
-      # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja
-      # tracks source deps, so stale objects are never used.
-      #
-      # Cache-key segments:
-      #   ImageVersion    bumps when GHA refreshes the runner image
-      #                   (clang/glibc/SDK churn).
-      #   VCToolsVersion  Windows only. Microsoft ships MSVC point
-      #                   releases (e.g. 19.44.35225 -> 19.44.35226)
-      #                   within the same image; PCH files reject the
-      #                   mismatch with "Microsoft Visual C/C++ Version
-      #                   differs in PCH file vs. current file". Set by
-      #                   ilammy/msvc-dev-cmd via GITHUB_ENV; empty
-      #                   (harmless) on non-Windows runners.
+      # Cache the project build tree for incremental CMake reconfigure.
+      # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
+      # source deps, but generated PCH/object files are still tied to the
+      # exact compiler identity. On Windows, clang-cl encodes _MSC_FULL_VER in
+      # its PCH target, which can change even when VCToolsVersion does not.
+      - name: Compute compiler cache fingerprint
+        id: compiler-cache
+        shell: bash
+        env:
+          CC: ${{ matrix.cc || '' }}
+          CXX: ${{ matrix.cxx || '' }}
+        run: |
+          # GHA's `shell: bash` runs with `-e -o pipefail`. Both probes below
+          # close the pipe early (head -n 1, awk … exit), which sends SIGPIPE
+          # to the compiler and surfaces as a non-zero pipe stage that
+          # pipefail would propagate. Disable pipefail for this whole probe
+          # — partial fingerprint data is fine, the fallback inputs
+          # (VCToolsVersion, WindowsSDKVersion) still vary the cache key.
+          set +o pipefail
+          compiler="${CXX:-${CC:-c++}}"
+          version="$("$compiler" --version 2>&1 | head -n 1 | tr -d '\r' || true)"
+          msvc_full_ver=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            msvc_full_ver="$(printf '' | "$compiler" /nologo /EP /clang:-dM /TP - 2>/dev/null \
+              | awk '/#define _MSC_FULL_VER/ { print $3; exit }' || true)"
+          fi
+          fingerprint="${RUNNER_OS}|${compiler}|${version}|${VCToolsVersion:-}|${WindowsSDKVersion:-}|${msvc_full_ver}"
+          echo "Compiler cache fingerprint: $fingerprint"
+          if command -v sha256sum >/dev/null 2>&1; then
+            key="$(printf '%s' "$fingerprint" | sha256sum | cut -d' ' -f1)"
+          else
+            key="$(printf '%s' "$fingerprint" | shasum -a 256 | cut -d' ' -f1)"
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Compiler cache fingerprint: \`$fingerprint\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache build tree
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-
+
+      # Runner images periodically refresh system headers (Linux:
+      # asm-generic/errno-base.h, macOS: SDK rev, Windows: clang-cl PCH
+      # ties to _MSC_FULL_VER). A cached PCH built against the previous
+      # mtime then fails with "file has been modified since the precompiled
+      # header was built". Drop just the PCHs from both the FetchContent
+      # deps cache and the project build tree — the rest of the caches
+      # stay valid and the PCH regenerates on the next build.
+      - name: Drop cached PCH files
+        shell: bash
+        run: |
+          for dir in ".deps/${{ matrix.preset }}" "build/${{ matrix.preset }}"; do
+            [ -d "$dir" ] || continue
+            find "$dir" -type f \( -name "*.pch" -o -name "cmake_pch*.obj" \) -print -delete
+          done
 
       - name: Configure
         shell: bash
@@ -168,6 +206,43 @@ jobs:
             | xargs clang-format-18 --dry-run --Werror
 
   # ------------------------------------------------------------------ #
+  #  Fetch shared assets from the CSE125 server                         #
+  #                                                                      #
+  #  Runs once on Linux and uploads as a workflow artifact so each       #
+  #  matrix release-build can download it without needing rsync          #
+  #  available on Windows runners — and we only hit the server once.   #
+  # ------------------------------------------------------------------ #
+  fetch-assets:
+    name: Fetch Assets
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Set up SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 222 cse125.ucsd.edu >> ~/.ssh/known_hosts
+
+      - name: Fetch assets via rsync
+        run: |
+          mkdir -p assets
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key -p 222 -o StrictHostKeyChecking=yes" \
+            dkatulevskiy@cse125.ucsd.edu:/home/dkatulevskiy/group2-assets/ \
+            ./assets/
+
+      - name: Upload assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-assets
+          path: assets/
+          retention-days: 1
+          include-hidden-files: true
+
+  # ------------------------------------------------------------------ #
   #  Release builds — optimised, no sanitizers                          #
   #  Runs on: push to main  →  auto-versioned release (semver)         #
   #                                                                      #
@@ -177,14 +252,10 @@ jobs:
   release-build:
     name: Release Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    needs: fetch-assets
     if: github.event_name == 'push'
     env:
       SCCACHE_GHA_ENABLED: "true"
-      # Google Drive file ID for the shared assets zip.  Refreshed by a
-      # maintainer when new art lands — gdown's per-file rate limit makes
-      # the folder-download approach unreliable for 50+ files on shared
-      # public links, so we go back to a single archive download here.
-      ASSETS_GDRIVE_ID: "132BZgV26Gc2N-kx5urCRz2pH8q0AkYEI"
     strategy:
       fail-fast: false
       matrix:
@@ -267,12 +338,6 @@ jobs:
           vulkan_version: latest
           cache: true
 
-      # Ensure Python is available consistently across all runners (for gdown).
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
       # Strawberry Perl ships a ccache.exe that hijacks compiler launcher
       # invocations and breaks RC (resource compiler) dep tracking.
       - name: Remove Strawberry ccache (Windows)
@@ -296,16 +361,64 @@ jobs:
           key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
-      # Cache the project build tree for incremental cmake reconfigure.
-      # See the matching comment in the `build:` job above for why
-      # VCToolsVersion is part of the key — short version: prevents
-      # PCH version-mismatch failures after MSVC point updates.
+      # Cache the project build tree for incremental CMake reconfigure.
+      # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
+      # source deps, but generated PCH/object files are still tied to the
+      # exact compiler identity. On Windows, clang-cl encodes _MSC_FULL_VER in
+      # its PCH target, which can change even when VCToolsVersion does not.
+      - name: Compute compiler cache fingerprint
+        id: compiler-cache
+        shell: bash
+        env:
+          CC: ${{ matrix.cc || '' }}
+          CXX: ${{ matrix.cxx || '' }}
+        run: |
+          # GHA's `shell: bash` runs with `-e -o pipefail`. Both probes below
+          # close the pipe early (head -n 1, awk … exit), which sends SIGPIPE
+          # to the compiler and surfaces as a non-zero pipe stage that
+          # pipefail would propagate. Disable pipefail for this whole probe
+          # — partial fingerprint data is fine, the fallback inputs
+          # (VCToolsVersion, WindowsSDKVersion) still vary the cache key.
+          set +o pipefail
+          compiler="${CXX:-${CC:-c++}}"
+          version="$("$compiler" --version 2>&1 | head -n 1 | tr -d '\r' || true)"
+          msvc_full_ver=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            msvc_full_ver="$(printf '' | "$compiler" /nologo /EP /clang:-dM /TP - 2>/dev/null \
+              | awk '/#define _MSC_FULL_VER/ { print $3; exit }' || true)"
+          fi
+          fingerprint="${RUNNER_OS}|${compiler}|${version}|${VCToolsVersion:-}|${WindowsSDKVersion:-}|${msvc_full_ver}"
+          echo "Compiler cache fingerprint: $fingerprint"
+          if command -v sha256sum >/dev/null 2>&1; then
+            key="$(printf '%s' "$fingerprint" | sha256sum | cut -d' ' -f1)"
+          else
+            key="$(printf '%s' "$fingerprint" | shasum -a 256 | cut -d' ' -f1)"
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Compiler cache fingerprint: \`$fingerprint\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache build tree
         uses: actions/cache@v4
         with:
           path: build/${{ matrix.preset }}
-          key: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
-          restore-keys: build-v3-${{ runner.os }}-${{ env.ImageVersion }}-${{ env.VCToolsVersion }}-${{ matrix.preset }}-${{ matrix.cc }}-
+          key: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ github.sha }}
+          restore-keys: build-v4-${{ runner.os }}-${{ env.ImageVersion }}-${{ steps.compiler-cache.outputs.key }}-${{ matrix.preset }}-${{ matrix.cc }}-
+
+      # Runner images periodically refresh system headers (Linux:
+      # asm-generic/errno-base.h, macOS: SDK rev, Windows: clang-cl PCH
+      # ties to _MSC_FULL_VER). A cached PCH built against the previous
+      # mtime then fails with "file has been modified since the precompiled
+      # header was built". Drop just the PCHs from both the FetchContent
+      # deps cache and the project build tree — the rest of the caches
+      # stay valid and the PCH regenerates on the next build.
+      - name: Drop cached PCH files
+        shell: bash
+        run: |
+          for dir in ".deps/${{ matrix.preset }}" "build/${{ matrix.preset }}"; do
+            [ -d "$dir" ] || continue
+            find "$dir" -type f \( -name "*.pch" -o -name "cmake_pch*.obj" \) -print -delete
+          done
 
       - name: Configure
         shell: bash
@@ -323,22 +436,13 @@ jobs:
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }} --target group2 server clientbot --parallel
 
-      # Download the shared assets zip from Google Drive (cached across runs).
-      # The cache key is the file ID, so a maintainer refreshing the Drive
-      # zip should also bump ASSETS_GDRIVE_ID above to invalidate the cache.
-      - name: Cache assets
-        id: assets-cache
-        uses: actions/cache@v4
+      # Pull the shared assets fetched by the fetch-assets job (rsync'd
+      # fresh from cse125.ucsd.edu on each workflow run).
+      - name: Download assets artifact
+        uses: actions/download-artifact@v4
         with:
-          path: assets.zip
-          key: assets-${{ env.ASSETS_GDRIVE_ID }}
-
-      - name: Download assets
-        if: steps.assets-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          pip install --quiet gdown
-          gdown "https://drive.google.com/uc?id=${ASSETS_GDRIVE_ID}" -O assets.zip
+          name: shared-assets
+          path: assets
 
       # Bundle group2 + server + shaders + shaders-new + config + assets into a single zip.
       - name: Package release
@@ -360,8 +464,8 @@ jobs:
           cp -r "${{ matrix.build_dir }}/shaders" "$STAGE/"
           cp -r "${{ matrix.build_dir }}/shaders-new" "$STAGE/"
 
-          # Assets from Google Drive (cross-platform extraction via Python)
-          python3 -c "import zipfile; zipfile.ZipFile('assets.zip').extractall('$STAGE')"
+          # Assets rsync'd from the cse125 server by the fetch-assets job.
+          cp -r assets "$STAGE/"
 
           # Create release zip.
           # Linux/macOS have zip pre-installed; Windows has 7z instead.

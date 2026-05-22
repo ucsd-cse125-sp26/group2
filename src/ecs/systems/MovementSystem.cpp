@@ -15,6 +15,7 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "ecs/physics/PhysicsPerfStats.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/physics/WallDetection.hpp"
@@ -265,6 +266,9 @@ float currentWishSpeed(const PlayerVisState& vis)
 {
     if (vis.moveMode == MoveMode::Sliding)
         return 0.0f; // slide has no wish-speed-driven accel
+    // ADS takes priority — even crouching ADS clamps to the (slower) ADS speed.
+    if (vis.ads)
+        return tms::k_adsSpeed;
     if (vis.crouching)
         return tms::k_crouchSpeed;
     if (vis.sprinting)
@@ -1966,6 +1970,8 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
     moveWork.clear();
     for (auto e : playerView)
         moveWork.push_back(e);
+    physics::perf::add(&physics::perf::FrameStats::movementCalls);
+    physics::perf::add(&physics::perf::FrameStats::movementPlayers, static_cast<std::uint32_t>(moveWork.size()));
 
     auto moveKernel = [&registry, dt, &world](entt::entity e) {
         auto& pos = registry.get<Position>(e);
@@ -2010,16 +2016,37 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             // as the player moves along them.
             physics::WallDetectionResult walls{};
             if (!state.vis.grounded || state.vis.moveMode == MoveMode::WallRunning) {
-                const glm::vec3 prevNormal =
-                    (state.vis.moveMode == MoveMode::WallRunning) ? state.sim.wallNormal : glm::vec3(0.0f);
-                walls = physics::detectWalls(pos.value,
-                                             input.yaw,
-                                             shape.halfExtents,
-                                             world,
-                                             tms::k_wallrunCheckDist,
-                                             tms::k_wallrunSphereRadius,
-                                             prevNormal,
-                                             state.vis.gravityFlipped);
+                const bool alreadyWallrunning = state.vis.moveMode == MoveMode::WallRunning;
+                bool shouldProbeWalls = alreadyWallrunning;
+                bool groundDistanceKnown = false;
+                float knownGroundDistance = walls.groundDistance;
+
+                if (!shouldProbeWalls && state.vis.moveMode == MoveMode::OnFoot && !state.vis.grounded && input.jump &&
+                    glm::length(horizVel(vel.value)) >= tms::k_wallrunMinAttachSpeed)
+                {
+                    walls.groundDistance = physics::probeWallrunGroundDistance(
+                        pos.value, shape.halfExtents, world, tms::k_wallrunSphereRadius, state.vis.gravityFlipped);
+                    knownGroundDistance = walls.groundDistance;
+                    groundDistanceKnown = true;
+                    shouldProbeWalls = walls.groundDistance >= tms::k_wallrunMinGroundDist;
+                }
+
+                if (shouldProbeWalls) {
+                    const glm::vec3 prevNormal = alreadyWallrunning ? state.sim.wallNormal : glm::vec3(0.0f);
+                    walls = physics::detectWalls(pos.value,
+                                                 input.yaw,
+                                                 shape.halfExtents,
+                                                 world,
+                                                 tms::k_wallrunCheckDist,
+                                                 tms::k_wallrunSphereRadius,
+                                                 prevNormal,
+                                                 state.vis.gravityFlipped,
+                                                 !groundDistanceKnown);
+                    if (groundDistanceKnown)
+                        walls.groundDistance = knownGroundDistance;
+                } else {
+                    physics::perf::add(&physics::perf::FrameStats::wallDetectSkippedByGate);
+                }
             }
             if (diagOn) {
                 movementDiag.wallFront = walls.wallFront;
@@ -2030,6 +2057,19 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
 
             // 2. Sprint update
             updateSprint(state, input);
+
+            // 2b. ADS stance — RMB held while a charge (precision) weapon is
+            // equipped caps wish speed via currentWishSpeed(). Derived here so
+            // both client prediction and server agree (both have InputSnapshot
+            // + WeaponState). Resets to false otherwise (no weapon, non-charge
+            // gun, or RMB released).
+            state.vis.ads = false;
+            if (input.scoped) {
+                if (const auto* weapon = registry.try_get<WeaponState>(e)) {
+                    if (getWeaponConfig(getEquippedGun(*weapon).type).isCharge)
+                        state.vis.ads = true;
+                }
+            }
 
             // 3. State transitions (try enter new modes)
             // Order matters: wallrun > slide
@@ -2071,7 +2111,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                     if (glm::length(k_wishDir) > 0.001f)
                         vel.value = physics::accelerate(vel.value, k_wishDir, k_wishSpeed, physics::k_groundAccel, dt);
                 } else {
-                    vel.value = physics::applyGravity(vel.value, dt, state.vis.gravityFlipped);
+                    vel.value = physics::applyPlayerGravity(vel.value, dt, state.vis.gravityFlipped);
                     if (glm::length(k_wishDir) > 0.001f) {
                         // Air wish-speed depends on current horizontal speed:
                         // generous when stalled, classic Quake floor at speed.
