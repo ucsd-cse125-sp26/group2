@@ -216,4 +216,11 @@ bool UdpEndpoint::tryReceive(UdpReceivedMessage& out)
     return false;
 }
 
+uint16_t UdpEndpoint::localPort() const noexcept
+{
+    if (!socket_)
+        return 0;
+    return NET_GetDatagramSocketPort(socket_);
+}
+
 } // namespace net

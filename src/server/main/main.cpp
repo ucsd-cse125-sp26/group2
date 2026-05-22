@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 
 namespace
@@ -222,26 +223,37 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // start server discovery system
-    DiscoveryServer discoveryServer;
-    const DiscoveryServer::ServerInfo serverInfo{
-        .serverName = cfg.discovery.serverName,
-        .gamePort = serverNet.port,
-        .currentPlayers = 0,
-        .maxPlayers = cfg.discovery.maxPlayers,
-    };
-    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
-
+    const uint16_t actualPort = server.listeningPort();
+    if (actualPort == 0) {
+        SDL_Log("Server: failed to determine listening port");
+        server.shutdown();
+        ::group2::perf::stopAggregator();
+        closeCsv();
+        NET_Quit();
+        SDL_Quit();
+        return 1;
+    }
     ServerGame game;
     if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, developerCfg.skipLobby)) {
         server.shutdown();
         ::group2::perf::stopAggregator();
         closeCsv();
-        discoveryServer.stop();
         NET_Quit();
         SDL_Quit();
         return 1;
     }
+
+    // start server discovery system
+    DiscoveryServer discoveryServer;
+    const DiscoveryServer::ServerInfo serverInfo{
+        .serverName = cfg.discovery.serverName,
+        .gamePort = actualPort,
+        .currentPlayers = 0,
+        .maxPlayers = cfg.discovery.maxPlayers,
+    };
+    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+
+    std::cout << "READY " << actualPort << '\n' << std::flush;
 
     game.run();
     game.shutdown();

@@ -178,6 +178,10 @@ public:
     /// @brief Register a callback fired whenever a client disconnects.
     void onClientDisconnected(ClientDisconnectedCallback fn) { clientDisconnectedFn_ = std::move(fn); }
 
+    /// @brief Get the actual port the server is listening on. Useful when the caller requested port 0 (auto-assign) and
+    /// needs to know which port was assigned.
+    uint16_t listeningPort() const;
+
 private:
     ClientConnectedCallback clientConnectedFn_;       ///< Fired by acceptClients() when a new client is accepted.
     ClientDisconnectedCallback clientDisconnectedFn_; ///< Fired by disconnectClient() when a client drops.
