@@ -3144,6 +3144,18 @@ SDL_AppResult Game::iterate()
                             // weapon pose so the entity render still has a sane transform. This is
                             // overwritten by the bone-derived transform a few lines later.
                             c.weaponWorld = pose.weaponWorld;
+
+                            // Phase C wiring: blend authored finger grip poses into the animated
+                            // local-space finger rotations. Pose data is the WeaponGripPose loaded
+                            // at startup from assets/weapons/<name>.grip.toml. A missing hand stays
+                            // invalid → null pointer → animator skips that side's blend (animation
+                            // fingers play through). Hold weight is 1.0 while the player is holding
+                            // the weapon; Phase F will ramp this during weapon swap.
+                            const auto& grip = weaponGripPoses_[static_cast<std::size_t>(gun.type)];
+                            c.handIk.rightGripPose = grip.rightHandValid ? &grip.rightHand : nullptr;
+                            c.handIk.rightGripWeight = grip.rightHandValid ? 1.0f : 0.0f;
+                            c.handIk.leftGripPose = grip.leftHandValid ? &grip.leftHand : nullptr;
+                            c.handIk.leftGripWeight = grip.leftHandValid ? 1.0f : 0.0f;
                         }
                     }
                 }

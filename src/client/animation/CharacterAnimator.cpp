@@ -400,7 +400,24 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         if (targetDist < 0.0001f)
             return false;
 
-        const float maxReach = std::max(0.0001f, upperLen + foreLen - 0.001f);
+        // Phase D reach fade: when the target sits past the arm's physical reach,
+        // fade the IK contribution off so the arm falls back to its sampled pose
+        // instead of visually stretching or popping at the limit. Linear fade
+        // over a small margin past full-extension distance.
+        constexpr float k_reachFadeMargin = 4.0f; // model units (~4 cm).
+        const float rawReach = upperLen + foreLen;
+        const float reachWeight =
+            std::clamp(1.0f - (targetDist - rawReach) / k_reachFadeMargin, 0.0f, 1.0f);
+        if (reachWeight <= 0.0f)
+            return false;
+
+        // Elbow minimum-bend offset: the analytical solver puts the elbow on a
+        // circle of radius `height = sqrt(upperLen^2 - along^2)` around the
+        // shoulder-target line; at full extension height -> 0 and the arm locks
+        // into a "broken straight" silhouette. Pull max reach back by a small
+        // amount so a visible elbow bend is always preserved.
+        constexpr float k_elbowBendMargin = 1.5f; // model units.
+        const float maxReach = std::max(0.0001f, rawReach - k_elbowBendMargin);
         const float minReach = std::max(0.0001f, std::abs(upperLen - foreLen) + 0.001f);
         const float solvedDist = std::clamp(targetDist, minReach, maxReach);
         const glm::vec3 reachDir = toTarget / targetDist;
@@ -420,12 +437,15 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         const float height = std::sqrt(std::max(0.0f, upperLen * upperLen - along * along));
         const glm::vec3 solvedElbow = shoulder + reachDir * along + pole * height;
 
-        const glm::quat upperRot = rotationBetween(elbow - shoulder, solvedElbow - shoulder);
+        const glm::quat identityQuat(1.0f, 0.0f, 0.0f, 0.0f);
+        const glm::quat upperRotRaw = rotationBetween(elbow - shoulder, solvedElbow - shoulder);
+        const glm::quat upperRot = glm::normalize(glm::slerp(identityQuat, upperRotRaw, reachWeight));
         applyDeltaToMask(impl_->jointModelMats, chain.upperDescendants, rotateAround(shoulder, upperRot));
 
         const glm::vec3 currentElbow = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.foreArm)]);
         const glm::vec3 currentWrist = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.hand)]);
-        const glm::quat foreRot = rotationBetween(currentWrist - currentElbow, targetPos - currentElbow);
+        const glm::quat foreRotRaw = rotationBetween(currentWrist - currentElbow, targetPos - currentElbow);
+        const glm::quat foreRot = glm::normalize(glm::slerp(identityQuat, foreRotRaw, reachWeight));
         applyDeltaToMask(impl_->jointModelMats, chain.foreDescendants, rotateAround(currentElbow, foreRot));
         return true;
     };
@@ -435,10 +455,50 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
             return false;
 
         const size_t handIdx = static_cast<size_t>(chain.hand);
+        const size_t foreIdx = static_cast<size_t>(chain.foreArm);
         const glm::vec3 wrist = matrixTranslation(impl_->jointModelMats[handIdx]);
         const glm::quat current = glm::normalize(glm::quat_cast(glm::mat3(impl_->jointModelMats[handIdx])));
         const glm::quat desired = glm::normalize(target.orientationModel);
-        const glm::quat delta = desired * glm::inverse(current);
+        glm::quat delta = desired * glm::inverse(current);
+
+        // Phase D wrist twist clamp: cap the rotation around the forearm axis to
+        // ±90°. The forearm direction in model space is (handPos - elbowPos);
+        // decomposing `delta` into swing+twist around this axis lets us preserve
+        // the swing (pointing the palm) while limiting how far the wrist can
+        // counter-rotate when the desired orientation demands a hyperextended twist.
+        const glm::vec3 elbowPos = matrixTranslation(impl_->jointModelMats[foreIdx]);
+        const glm::vec3 forearmDir = wrist - elbowPos;
+        if (glm::dot(forearmDir, forearmDir) > 0.0001f) {
+            const glm::vec3 twistAxis = glm::normalize(forearmDir);
+            const glm::vec3 deltaVec(delta.x, delta.y, delta.z);
+            const float projLen = glm::dot(deltaVec, twistAxis);
+            const glm::vec3 proj = twistAxis * projLen;
+            const glm::quat twistRaw(delta.w, proj.x, proj.y, proj.z);
+            const float twistMag = std::sqrt(twistRaw.x * twistRaw.x + twistRaw.y * twistRaw.y +
+                                             twistRaw.z * twistRaw.z + twistRaw.w * twistRaw.w);
+            if (twistMag > 1e-6f) {
+                glm::quat twist = twistRaw * (1.0f / twistMag);
+                glm::quat swing = glm::normalize(delta * glm::inverse(twist));
+
+                // Twist angle in (-pi, pi] around twistAxis. atan2 returns the
+                // half-angle since q = (cos(a/2), sin(a/2)*axis), so the full
+                // angle is 2*atan2(projLen, delta.w).
+                float twistAngle = 2.0f * std::atan2(projLen, delta.w);
+                if (twistAngle > glm::pi<float>())
+                    twistAngle -= glm::two_pi<float>();
+                else if (twistAngle < -glm::pi<float>())
+                    twistAngle += glm::two_pi<float>();
+
+                constexpr float k_maxWristTwistRad = 1.5708f; // 90 degrees.
+                const float clampedTwistAngle =
+                    std::clamp(twistAngle, -k_maxWristTwistRad, k_maxWristTwistRad);
+                if (std::abs(twistAngle - clampedTwistAngle) > 1e-4f)
+                    twist = glm::angleAxis(clampedTwistAngle, twistAxis);
+
+                delta = glm::normalize(swing * twist);
+            }
+        }
+
         applyDeltaToMask(impl_->jointModelMats, chain.handDescendants, rotateAround(wrist, delta));
         return true;
     };
