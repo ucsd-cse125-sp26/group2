@@ -40,8 +40,9 @@ namespace gamemap
 
 /// @brief Does this map use SEPARATED collision and visual meshes?
 ///
-///   false → "prototype mode": every mesh in the GLB is both visual *and*
-///           collision. Used for blockout maps like map1.glb.
+///   false → "all-mesh mode": every mesh in the GLB is both visual *and*
+///           collision, loaded as authored triangles with no shape guessing.
+///           Used for blockout maps like map1.glb.
 ///   true  → "separated mode": collision-only nodes are tagged in Blender
 ///           with the prefix `kCollisionPattern` and excluded from the visual
 ///           model. Used for production maps where collision is hand-authored
@@ -49,7 +50,7 @@ namespace gamemap
 ///
 /// IMPORTANT: this flag controls *how* the map is processed, not *which* map
 /// is loaded. The map filename comes solely from `kMapAsset` in `AssetCatalog.hpp`.
-inline constexpr bool k_separatedCollisionMap = true;
+inline constexpr bool k_separatedCollisionMap = false;
 
 /// @brief Substring that identifies collision-only nodes in separated mode.
 /// Matched case-insensitively against Assimp node names.

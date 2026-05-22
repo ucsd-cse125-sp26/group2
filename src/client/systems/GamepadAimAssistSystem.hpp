@@ -214,16 +214,24 @@ inline glm::vec3 rayOntoAABB(
 /// @param gamepad   Open gamepad handle (nullptr → no-op).
 /// @param cfg       Tuning parameters.
 /// @param state     Persistent per-frame state (anchor + previous-frame snapshot).
-/// @param lookSens  Same value passed to runGamepadLook (rad/s @ full deflection).
+/// @param pitchSensitivity  Pitch radians per second at full stick deflection.
+/// @param yawSensitivity    Yaw radians per second at full stick deflection.
+/// @param lookDeadzone      Look-stick deadzone as a fraction of full deflection.
+/// @param moveDeadzone      Move-stick deadzone as a fraction of full deflection.
 /// @param dt        Frame delta time (seconds).
+/// @param swapSticks  When true, use the swapped stick layout for activation checks.
 inline void runGamepadAimAssist(Registry& registry,
                                 SDL_Gamepad* gamepad,
                                 const GamepadAimAssistConfig& cfg,
                                 GamepadAimAssistState& state,
-                                float lookSens,
-                                float dt)
+                                float pitchSensitivity,
+                                float yawSensitivity,
+                                float lookDeadzone,
+                                float moveDeadzone,
+                                float dt,
+                                bool swapSticks = false)
 {
-    if (!gamepad || !cfg.enabled) {
+    if (!gamepadConnected(gamepad) || !cfg.enabled) {
         // Drop our memory of any previous target so the next acquisition
         // re-initialises cleanly (otherwise a stale anchor could fire one
         // bogus pull when assist is re-enabled).
@@ -233,10 +241,13 @@ inline void runGamepadAimAssist(Registry& registry,
     }
 
     // ── Activation gate ───────────────────────────────────────────────────
-    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
-    const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-    const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+    JoystickAxis moveAxis = getMoveJoystickAxes(swapSticks);
+    JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
+
+    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.x), moveDeadzone);
+    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.y), moveDeadzone);
+    const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x), lookDeadzone);
+    const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.y), lookDeadzone);
 
     const float moveStickMag = std::sqrt(lx * lx + ly * ly);
     const float lookStickMag = std::sqrt(rx * rx + ry * ry);
@@ -424,8 +435,8 @@ inline void runGamepadAimAssist(Registry& registry,
             effectiveSlowdown = std::clamp(effectiveSlowdown, 0.0f, 1.0f);
 
             const float refund = (1.0f - effectiveSlowdown) * strength;
-            snap.yaw += rx * lookSens * dt * refund;
-            snap.pitch -= ry * lookSens * dt * refund;
+            snap.yaw += rx * yawSensitivity * dt * refund;
+            snap.pitch -= ry * pitchSensitivity * dt * refund;
         }
 
         // ── 2. Movement-tracking rotational pull.

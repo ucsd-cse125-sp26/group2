@@ -92,6 +92,13 @@ public:
     /// @param color    Tint color with alpha controlling intensity.
     void vignette(float screenW, float screenH, HudColor color);
 
+    /// @brief Draw a full-screen scope mask with a transparent circular cut-out.
+    /// @param screenW Viewport width in pixels.
+    /// @param screenH Viewport height in pixels.
+    /// @param radiusPx Radius of the clear scope glass in pixels.
+    /// @param color Mask tint; alpha controls opacity outside the cut-out.
+    void scopeMask(float screenW, float screenH, float radiusPx, HudColor color);
+
     // ── Clipping ────────────────────────────────────────────────────────
 
     void pushClipRect(float x, float y, float w, float h);

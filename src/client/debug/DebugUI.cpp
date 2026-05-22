@@ -129,6 +129,15 @@ void DebugUI::toggleDebugMenu()
     showDebugMenu = !showDebugMenu;
 }
 
+bool DebugUI::consumePhysicsCsvRecordingRequest(bool& enabled) noexcept
+{
+    if (!pendingPhysicsCsvRecordingRequest_)
+        return false;
+    pendingPhysicsCsvRecordingRequest_ = false;
+    enabled = pendingPhysicsCsvRecordingEnabled_;
+    return true;
+}
+
 void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels)
 {
     if (!showDebugMenu)
@@ -159,6 +168,17 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::Checkbox("Particle System", &showParticleWindow_);
 
     ImGui::SeparatorText("Physics");
+    const bool csvRecording = physics::diag::isEnabled();
+    if (ImGui::Button(csvRecording ? "Stop Physics CSV Recording" : "Start Physics CSV Recording")) {
+        pendingPhysicsCsvRecordingEnabled_ = !csvRecording;
+        pendingPhysicsCsvRecordingRequest_ = true;
+        if (pendingPhysicsCsvRecordingEnabled_)
+            physics::diag::startRecording();
+        else
+            physics::diag::stopRecording();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", csvRecording ? "recording" : "stopped");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
     ImGui::Checkbox("Contact Debug", &showContactDebugWindow);
@@ -444,10 +464,10 @@ void DebugUI::buildInspectorContents(const Registry& registry,
             // PlayerState
             if (showPlayerState && registry.all_of<PlayerVisState>(entity)) {
                 const auto& c = registry.get<PlayerVisState>(entity);
-                static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun", "Climbing", "LedgeGrab"};
+                static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun"};
                 const int k_modeIdx = static_cast<int>(c.moveMode);
                 ImGui::Text("PlayerState   mode:%s  grounded:%-3s  crouching:%-3s  sprint:%-3s",
-                            (k_modeIdx >= 0 && k_modeIdx < 5) ? k_modeNames[k_modeIdx] : "?",
+                            (k_modeIdx >= 0 && k_modeIdx < 3) ? k_modeNames[k_modeIdx] : "?",
                             c.grounded ? "YES" : "NO",
                             c.crouching ? "YES" : "NO",
                             c.sprinting ? "YES" : "NO");
@@ -1934,12 +1954,20 @@ void DebugUI::buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, 
 
             ImGui::Separator();
             ImGui::TextWrapped(
-                "Phase telemetry: per-tick player physics state → phase-diag-*.csv in working dir. "
+                "Phase telemetry: per-tick player physics state -> *-phase-diag-*.csv in working dir. "
                 "Look for the SuspectedPhase column = 1 to find phase-through moments. "
                 "Open the CSV in any spreadsheet; sort by SuspectedPhase, DeepPenetration, or BumpExhausted.");
-            bool phaseDiag = physics::diag::isEnabled();
-            if (ImGui::Checkbox("Record phase telemetry (writes CSV)", &phaseDiag))
-                physics::diag::setEnabled(phaseDiag);
+            const bool phaseDiag = physics::diag::isEnabled();
+            if (ImGui::Button(phaseDiag ? "Stop Physics CSV Recording" : "Start Physics CSV Recording")) {
+                pendingPhysicsCsvRecordingEnabled_ = !phaseDiag;
+                pendingPhysicsCsvRecordingRequest_ = true;
+                if (pendingPhysicsCsvRecordingEnabled_)
+                    physics::diag::startRecording();
+                else
+                    physics::diag::stopRecording();
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", phaseDiag ? "recording" : "stopped");
 
             const auto k_contacts = physics::debug::contacts();
 

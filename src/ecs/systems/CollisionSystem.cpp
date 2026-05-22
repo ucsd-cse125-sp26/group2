@@ -5,6 +5,7 @@
 
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/GrenadeConfig.hpp"
+#include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
@@ -15,11 +16,13 @@
 #include "ecs/physics/Movement.hpp"
 #include "ecs/physics/PhaseDiagnostic.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "ecs/physics/PhysicsPerfStats.hpp"
 #include "ecs/physics/SweptCollision.hpp"
 #include "ecs/physics/TriMeshCollision.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/KinematicCharacterController.hpp"
+#include "ecs/systems/MovementSystem.hpp"
 
 #include <glm/geometric.hpp>
 
@@ -378,15 +381,25 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
     playerWork.clear();
     for (auto e : playerView)
         playerWork.push_back(e);
+    physics::perf::add(&physics::perf::FrameStats::collisionCalls);
+    physics::perf::add(&physics::perf::FrameStats::collisionPlayers, static_cast<std::uint32_t>(playerWork.size()));
 
     auto playerKernel = [&registry, dt, &world](entt::entity e) {
         auto& pos = registry.get<Position>(e);
         auto& vel = registry.get<Velocity>(e);
         const auto& shape = registry.get<CollisionShape>(e);
         auto& state = registry.get<PlayerVisState>(e);
-        const PlayerSimState* sim = registry.try_get<PlayerSimState>(e);
+        PlayerSimState* sim = registry.try_get<PlayerSimState>(e);
         const bool jumpedThisTick = sim != nullptr && sim->jumpedThisTick;
-        runKinematicCharacterController(pos.value, vel.value, shape, state, dt, world, e, jumpedThisTick);
+        const physics::KccFrameResult kcc =
+            runKinematicCharacterController(pos.value, vel.value, shape, state, dt, world, e, jumpedThisTick, sim);
+        physics::perf::add(&physics::perf::FrameStats::kccCalls);
+        physics::perf::add(&physics::perf::FrameStats::kccBumpHits, static_cast<std::uint32_t>(kcc.bumpHits));
+        physics::perf::add(&physics::perf::FrameStats::kccCaIterations, static_cast<std::uint32_t>(kcc.caIterations));
+        physics::perf::add(&physics::perf::FrameStats::kccSweepHits, static_cast<std::uint32_t>(kcc.sweepHits));
+        const InputSnapshot* input = registry.try_get<InputSnapshot>(e);
+        if (sim != nullptr && input != nullptr)
+            reconcileMovementAfterKcc(pos.value, vel.value, shape, state, *sim, *input, world, kcc, dt);
     };
 
 #if GROUP2_COLLISION_HAS_PARALLEL

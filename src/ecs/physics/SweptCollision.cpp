@@ -5,6 +5,7 @@
 
 #include "Movement.hpp"
 #include "PhysicsConstants.hpp"
+#include "PhysicsPerfStats.hpp"
 #include "TriMeshCollision.hpp"
 
 #include <algorithm>
@@ -96,7 +97,7 @@ template <typename Fn>
 void forTriMeshCandidates(const WorldGeometry& world, const WorldAABB& query, Fn&& visit)
 {
     if (world.staticBroadphase != nullptr && !world.staticBroadphase->nodes.empty()) {
-        queryStaticWorldBroadphase(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
+        queryStaticWorldBroadphaseFast(*world.staticBroadphase, query, [&](uint32_t meshIndex) {
             if (meshIndex < world.triMeshes.size())
                 visit(world.triMeshes[meshIndex]);
             return true;
@@ -217,35 +218,7 @@ void queryStaticWorldBroadphase(const StaticWorldBroadphase& broadphase,
                                 const WorldAABB& query,
                                 const std::function<bool(uint32_t meshIndex)>& visit)
 {
-    if (broadphase.nodes.empty())
-        return;
-
-    std::vector<int> stack;
-    stack.reserve(64);
-    stack.push_back(0);
-
-    while (!stack.empty()) {
-        const int nodeIdx = stack.back();
-        stack.pop_back();
-
-        const BVHNode& node = broadphase.nodes[static_cast<size_t>(nodeIdx)];
-        const WorldAABB nodeBounds{.min = node.boundsMin, .max = node.boundsMax};
-        if (!aabbOverlap(nodeBounds, query))
-            continue;
-
-        if (node.count > 0) {
-            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
-                const uint32_t meshIndex = broadphase.meshIndices[static_cast<size_t>(i)];
-                if (meshIndex >= broadphase.meshBounds.size() || !aabbOverlap(broadphase.meshBounds[meshIndex], query))
-                    continue;
-                if (!visit(meshIndex))
-                    return;
-            }
-        } else {
-            stack.push_back(node.leftFirst);
-            stack.push_back(node.leftFirst + 1);
-        }
-    }
+    queryStaticWorldBroadphaseFast(broadphase, query, visit);
 }
 
 HitResult sweepAABB(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, std::span<const Plane> planes)
@@ -882,6 +855,7 @@ HitResult sweepCapsuleVsSphere(CapsuleShape capsule, glm::vec3 start, glm::vec3 
 
 HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
+    perf::add(&perf::FrameStats::sweepAabbAllCalls);
     const glm::vec3 delta = end - start;
     HitResult best = sweepAABB(halfExtents, start, end, world.planes);
 
@@ -920,6 +894,7 @@ HitResult sweepAll(glm::vec3 halfExtents, glm::vec3 start, glm::vec3 end, const 
 
 HitResult sweepAll(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldGeometry& world)
 {
+    perf::add(&perf::FrameStats::sweepCapsuleAllCalls);
     const glm::vec3 delta = end - start;
     HitResult best = sweepCapsuleVsPlanes(capsule, start, end, world.planes);
 
@@ -1356,6 +1331,7 @@ DepenContact deepestVsSphere(CapsuleShape capsule, glm::vec3 pos, const WorldSph
 
 DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldGeometry& world)
 {
+    perf::add(&perf::FrameStats::deepestCapsuleCalls);
     DepenContact best;
     auto consider = [&](DepenContact c) {
         if (c.valid && c.depth > best.depth)
@@ -1378,25 +1354,59 @@ DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec
     return best;
 }
 
-void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
+DepenetrationResult depenetrateCapsuleVsWorldDetailed(
+    glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world, DepenetrationOptions options)
 {
+    DepenetrationResult result;
+    const glm::vec3 startPos = pos;
     glm::vec3 lastNormal{0.0f};
+    float accumulatedPush = 0.0f;
+
+    auto finish = [&]() {
+        result.pushDistance = glm::length(pos - startPos);
+        return result;
+    };
+
+    auto applyBoundedPush = [&](glm::vec3 push) {
+        const float pushLen = glm::length(push);
+        if (pushLen <= 0.0f)
+            return true;
+
+        const float remaining = options.maxPushDistance - accumulatedPush;
+        if (remaining < pushLen) {
+            result.exceededMaxPush = true;
+            result.unresolvedOverlap = true;
+            if (remaining > 0.0f)
+                pos += push * (remaining / pushLen);
+            accumulatedPush = options.maxPushDistance;
+            return false;
+        }
+
+        pos += push;
+        accumulatedPush += pushLen;
+        return true;
+    };
 
     for (int pass = 0; pass < k_maxDepenPasses; ++pass) {
         DepenContact c = deepestCapsuleContact(capsule, pos, vel, world);
         if (!c.valid || c.depth <= k_contactEpsilon)
-            return;
+            return finish();
+        ++result.passes;
 
         // Oscillation detector: this pass wants to push opposite to the last —
         // the player straddles a two-sided thin volume with no single consistent
         // ejection direction (e.g. mesh authored back-to-back instead of single-
         // sided).  Bail to the emergency probe rather than ping-pong forever.
         if (glm::dot(lastNormal, lastNormal) > 0.0f && glm::dot(c.normal, lastNormal) < -k_floorAngleCos) {
-            emergencyUnstick(pos, vel, capsule, world);
-            return;
+            if (options.allowEmergencyUnstick)
+                result.emergencyUnstuck = emergencyUnstick(pos, vel, capsule, world);
+            result.unresolvedOverlap =
+                !result.emergencyUnstuck && deepestCapsuleContact(capsule, pos, vel, world).valid;
+            return finish();
         }
 
-        pos += c.normal * (c.depth + k_contactEpsilon);
+        if (!applyBoundedPush(c.normal * (c.depth + k_contactEpsilon)))
+            return finish();
 
         const float intoSurface = glm::dot(vel, c.normal);
         if (intoSurface < 0.0f)
@@ -1405,8 +1415,18 @@ void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape caps
         lastNormal = c.normal;
     }
 
-    if (deepestCapsuleContact(capsule, pos, vel, world).valid)
-        emergencyUnstick(pos, vel, capsule, world);
+    if (deepestCapsuleContact(capsule, pos, vel, world).valid) {
+        if (options.allowEmergencyUnstick)
+            result.emergencyUnstuck = emergencyUnstick(pos, vel, capsule, world);
+        result.unresolvedOverlap = !result.emergencyUnstuck && deepestCapsuleContact(capsule, pos, vel, world).valid;
+    }
+
+    return finish();
+}
+
+void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
+{
+    (void)depenetrateCapsuleVsWorldDetailed(pos, vel, capsule, world);
 }
 
 bool emergencyUnstick(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world)
@@ -1668,7 +1688,7 @@ SphereHitResult sphereCast(float radius, glm::vec3 start, glm::vec3 end, const W
         best.point = hp - n * radius;
     }
 
-    // Test against triangle meshes as a zero-height capsule so wallrun/climb
+    // Test against triangle meshes as a zero-height capsule so wallrun
     // probes use the same bounded face / edge / vertex surface query as the
     // player capsule path.
     forTriMeshCandidates(world, sweptBounds(glm::vec3(radius), start, end), [&](const WorldTriMesh& tm) {

@@ -323,6 +323,10 @@ public:
 
     AAMode aaMode = AAMode::SMAA_T2x;            ///< Anti-aliasing mode.  Re-applied at the start of each frame.
     float renderScale = 1.0f;                    ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
+    float mainHorizontalFovDegrees = 90.0f;      ///< Main camera horizontal field of view in degrees.
+    float scopeZoom = 1.0f;                      ///< Per-frame scope zoom multiplier (FOV divisor).
+                                                 ///< 1.0 = no zoom; 1.5 = ADS through the charge rifle scope (FOV/1.5).
+                                                 ///< Game.cpp drives this each frame from the local player's ADS state.
     bool imguiEnabled = true;                    ///< Master toggle for the ImGui debug overlay.
     RenderToggles toggles{};                     ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
     std::vector<std::string> availableHDRFiles;  ///< Filled by `scanHDRFiles()`; consumed by debug UI.
@@ -339,6 +343,7 @@ private:
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
     void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
     void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);

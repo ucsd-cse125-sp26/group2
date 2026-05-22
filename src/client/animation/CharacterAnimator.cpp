@@ -62,7 +62,7 @@ enum class Mode : uint8_t
 {
     Locomotion,
     Crouch,
-    Airborne, ///< In the air (not wallrunning/sliding/climbing).
+    Airborne, ///< In the air (not wallrunning/sliding).
     Slide,
     WallRun,
     HoldPose,
@@ -76,8 +76,6 @@ enum MoveModeValue
     MoveModeOnFoot = 0,
     MoveModeSliding = 1,
     MoveModeWallRunning = 2,
-    MoveModeClimbing = 3,
-    MoveModeLedgeGrabbing = 4,
 };
 
 /// WallSide values (lockstep with PlayerState.hpp).
@@ -647,10 +645,6 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
             break;
         case MoveModeWallRunning:
             targetMode = Mode::WallRun;
-            break;
-        case MoveModeClimbing:
-        case MoveModeLedgeGrabbing:
-            targetMode = Mode::HoldPose;
             break;
         default:
             if (!inputs.grounded)

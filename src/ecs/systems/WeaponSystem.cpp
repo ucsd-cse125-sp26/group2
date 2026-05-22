@@ -477,6 +477,23 @@ inline void handleGrenadeInput(Registry& registry,
     --grenadeAmmo(grenades, type);
 }
 
+inline void
+handleScope(Registry& registry, entt::entity shooter, const InputSnapshot& input, WeaponState& weapon, float dt)
+{
+    GunInstance& gun = getEquippedGun(weapon);
+    const WeaponConfig& config = getWeaponConfig(gun.type);
+
+    if (!config.isCharge || gun.fireCooldown > 0.0f) {
+        return;
+    }
+
+    if (input.scoped) {
+        gun.chargeTime = std::min((gun.chargeTime + dt), config.maxChargeTime);
+    } else {
+        gun.chargeTime = 0;
+    }
+}
+
 /// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
 ///
 /// Handles three weapon archetypes:
@@ -577,31 +594,23 @@ inline void handleFire(Registry& registry,
         return;
     }
 
-    // ── Charge weapon path ──
-    // Hold fire to charge, release to fire.  chargeTime accumulates while
-    // holding; the shot fires on the first tick where shooting becomes false.
+    // ── Discrete weapon path ──
+    if (!input.shooting) {
+        return;
+    }
+
+    if (gun.fireCooldown > 0.0f) {
+        return;
+    }
+
+    if (!handleAmmo(gun)) {
+        return;
+    }
+
+    gun.fireCooldown = config.fireCooldown;
+
+    // Railgun handling
     if (config.isCharge) {
-        if (input.shooting) {
-            // Charging — accumulate time, do not fire yet.
-            gun.chargeTime += dt;
-            return;
-        }
-        if (gun.chargeTime <= 0.0f) {
-            // Not charging, not shooting — nothing to do.
-            return;
-        }
-
-        // Button released with charge built up → fire the shot.
-        if (gun.fireCooldown > 0.0f) {
-            gun.chargeTime = 0.0f;
-            return;
-        }
-        if (!handleAmmo(gun)) {
-            gun.chargeTime = 0.0f;
-            return;
-        }
-
-        gun.fireCooldown = config.fireCooldown;
 
         const float eyeDirCharge = gravityFlipped ? -1.0f : 1.0f;
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDirCharge, 0.0f};
@@ -624,18 +633,24 @@ inline void handleFire(Registry& registry,
                 chargeArmorBefore = hp->armor;
         }
 
+        SDL_Log("CURRENT CHARGE: %f", gun.chargeTime);
         // Charge damage with body-region multiplier.
         float chargeDealtDamage = 0.f;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            chargeDealtDamage =
-                applyDamage(config.chargeDamage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            gun.chargeTime = std::min(gun.chargeTime, config.maxChargeTime);
+
+            auto outGoingDamage =
+                (config.damage + (config.chargeDamage * (gun.chargeTime / config.maxChargeTime))) * multiplier;
+            chargeDealtDamage = applyDamage(outGoingDamage, hit.entity, shooter, registry, killEvents, hit.region);
             if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
                         static_cast<double>(chargeDealtDamage));
             }
         }
+
+        gun.chargeTime = 0.0f;
 
         bool chargeShieldBroke = false;
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
@@ -669,24 +684,8 @@ inline void handleFire(Registry& registry,
             outParticles.push_back(impactEvt);
         }
 
-        gun.chargeTime = 0.0f;
         return;
     }
-
-    // ── Discrete weapon path ──
-    if (!input.shooting) {
-        return;
-    }
-
-    if (gun.fireCooldown > 0.0f) {
-        return;
-    }
-
-    if (!handleAmmo(gun)) {
-        return;
-    }
-
-    gun.fireCooldown = config.fireCooldown;
 
     const float eyeDirDiscrete = gravityFlipped ? -1.0f : 1.0f;
     const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDirDiscrete, 0.0f};
@@ -814,6 +813,8 @@ void runWeapon(Registry& registry,
         }
 
         handleGrenadeInput(registry, shooter, input, pos, shape, grenades, vis.gravityFlipped);
+
+        handleScope(registry, shooter, input, weapon, dt);
 
         handleFire(registry,
                    shooter,

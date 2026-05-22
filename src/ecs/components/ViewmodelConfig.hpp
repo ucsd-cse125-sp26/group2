@@ -402,10 +402,10 @@ inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType ty
 inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
 {
     static constexpr std::array<WeaponModelInfo, 4> k_infos{{
-        {.filename = "r-301_-_apex_legends.glb", .flipUVs = true},              // Rifle
-        {.filename = "r-301_-_apex_legends.glb", .flipUVs = true},              // Rocket (fallback)
-        {.filename = "apex_legends_triple_take_marksman.glb", .flipUVs = true}, // RailGun
-        {.filename = "apex_legends_wingman_pistol.glb", .flipUVs = true},       // EnergyGun
+        {.filename = "assault_rifle.glb", .flipUVs = true},
+        {.filename = "rocket_launcher.glb", .flipUVs = true},
+        {.filename = "rail_gun.glb", .flipUVs = true},
+        {.filename = "energy_gun.glb", .flipUVs = true},
     }};
     return k_infos[static_cast<std::size_t>(type)];
 }

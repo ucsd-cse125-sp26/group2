@@ -91,8 +91,6 @@ struct AbilityState
     bool recallMarkerSet = false;
     bool recallMarkerGravityFlipped = false;
     glm::vec3 recallMarkerPosition{0.0f};
-
-    AbilitySlot nextReselectSlot = AbilitySlot::Primary;
 };
 
 inline bool hasPendingAbilitySelection(const AbilityState& state)

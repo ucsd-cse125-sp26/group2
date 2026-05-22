@@ -36,8 +36,6 @@ enum class PhaseFlag : uint32_t
     Grounded = 1u << 0,
     WallRunning = 1u << 1,
     Sliding = 1u << 2,
-    Climbing = 1u << 3,
-    LedgeGrabbing = 1u << 4,
     GrappleActive = 1u << 5,
     DoubleJumped = 1u << 6,
     GravityFlipped = 1u << 7,
@@ -58,6 +56,12 @@ enum class PhaseFlag : uint32_t
     /// @brief A position, velocity, normal, or stored movement vector was
     /// non-finite. This is the "stop and inspect nearby rows" failure mode.
     InvalidState = 1u << 12,
+    /// @brief Wallrun was constrained by a non-traversable blocker contact.
+    WallrunBlocked = 1u << 13,
+    /// @brief Wallrun was vertically constrained by a head/ceiling contact.
+    WallrunCeilingConstrained = 1u << 14,
+    /// @brief KCC detected and resolved a repeated ABAB depen/sweep oscillation.
+    KccOscillationResolved = 1u << 15,
 };
 
 inline PhaseFlag operator|(PhaseFlag a, PhaseFlag b) noexcept
@@ -95,9 +99,24 @@ struct PlayerFrame
     char note[48] = {0}; ///< Free-form annotation slot (e.g., "wallrun-enter").
 };
 
-/// @brief Enable / disable telemetry.  When disabled, every `recordFrame`
-/// call is a wait-free no-op.  Toggle from DebugUI.
-void setEnabled(bool on) noexcept;
+/// @brief Set the filename prefix used for this process's diagnostic CSVs.
+///
+/// Call once during startup with a short role like "client" or "server" so
+/// both processes can record from the same working directory without
+/// clobbering each other's files.
+void setFilePrefix(std::string_view prefix);
+
+/// @brief Start a fresh telemetry session.  New CSV files are created lazily
+/// as each data source emits its first row.
+void startRecording();
+
+/// @brief Stop telemetry and close every open CSV file.
+void stopRecording();
+
+/// @brief Enable / disable telemetry.  Enabling starts a fresh session;
+/// disabling stops and closes the current session.  When disabled, every
+/// `recordFrame` call is a wait-free no-op.  Toggle from DebugUI.
+void setEnabled(bool on);
 [[nodiscard]] bool isEnabled() noexcept;
 
 /// @brief Append a player's per-tick frame to the open CSV log.  Opens the
@@ -107,10 +126,8 @@ void recordFrame(const PlayerFrame& frame) noexcept;
 
 /// @brief One row captured around MovementSystem, before CollisionSystem/KCC.
 ///
-/// This complements `PlayerFrame`: movement is where climb, ledge, grapple,
-/// jump, and wallrun state mutate velocity. If a stored wall/ledge normal
-/// becomes NaN, this row catches it before the collision step propagates it
-/// into position.
+/// This complements `PlayerFrame`: movement is where wallrun, grapple,
+/// jump, and slide state mutate velocity.
 struct MovementFrame
 {
     entt::entity entity{entt::null};
@@ -132,17 +149,9 @@ struct MovementFrame
     float yaw = 0.0f;
     float pitch = 0.0f;
     bool wallFront = false;
-    bool ledgeDetected = false;
     float groundDistance = 1e30f;
     glm::vec3 frontNormal{0.0f};
     glm::vec3 frontPoint{0.0f};
-    glm::vec3 ledgeNormal{0.0f};
-    glm::vec3 ledgePoint{0.0f};
-    glm::vec3 climbWallNormal{0.0f};
-    glm::vec3 storedLedgeNormal{0.0f};
-    glm::vec3 storedLedgePoint{0.0f};
-    float climbTimer = 0.0f;
-    float ledgeHoldTimer = 0.0f;
     PhaseFlag flags = PhaseFlag::None;
     char note[64] = {0};
 };

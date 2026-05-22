@@ -524,6 +524,16 @@ void Server::handleUdpUnreliable(std::uint64_t connId,
         eventQueue.enqueue(event);
         break;
     }
+    case PacketType::PHYSICS_DIAG_RECORDING: {
+        if (subLen != 1)
+            return;
+        Event event{};
+        event.type = EventType::PhysicsDiagRecording;
+        event.clientId = conn.clientId;
+        event.physicsDiagRecording = sub[0] != 0;
+        eventQueue.enqueue(event);
+        break;
+    }
     case PacketType::PING: {
         // Phase 3d-3: PING/PONG over UDP. Echo the timestamp payload
         // back; the client's RTT measurement now isn't poisoned by
@@ -1216,6 +1226,16 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         std::memcpy(&event.shotIntent.shotInputTick, payload, sizeof(uint32_t));
         std::memcpy(&event.shotIntent.targetClientId, payload + sizeof(uint32_t), sizeof(uint16_t));
         event.shotIntent.targetAnim = anim_snapshot::unpackSnapshot(payload + sizeof(uint32_t) + sizeof(uint16_t));
+        eventQueue.enqueue(event);
+        break;
+    }
+    case PacketType::PHYSICS_DIAG_RECORDING: {
+        if (payloadLen != 1)
+            return;
+        Event event{};
+        event.type = EventType::PhysicsDiagRecording;
+        event.clientId = conn.clientId;
+        event.physicsDiagRecording = payload[0] != 0;
         eventQueue.enqueue(event);
         break;
     }

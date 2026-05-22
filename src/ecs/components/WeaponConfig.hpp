@@ -24,6 +24,7 @@ struct WeaponConfig
     float dps = 0.0f;           ///< Damage per second (beam weapons only; discrete weapons use `damage`).
     float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
     float chargeDamage = 0.0f;  ///< Damage dealt on release (charge weapons only).
+    float maxChargeTime = 0.0f; ///< in seconds
 };
 
 struct ProjectileConfig
@@ -73,15 +74,16 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .explosive = true,
         }, // Rocket
         WeaponConfig{
-            .fireCooldown = 0.30f,
+            .fireCooldown = 0.5f,
             .magazineSize = 8,
             .defaultAmmoCapacity = 32,
-            .damage = 60.0f,
+            .damage = 50.0f,
             .hitscan = true,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isCharge = true,
-            .chargeDamage = 150.0f,
+            .chargeDamage = 80.0f,
+            .maxChargeTime = 1.0f,
         }, // RailGun
         WeaponConfig{
             .fireCooldown = 0.0f,
@@ -141,7 +143,7 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .explosionRadius = 250.0f,
             .explosionFalloffExponent = 3.0f, // Cubic: direct hits 1-shot, ~2m away ≈ 65 dmg, ~3m ≈ chip.
             .selfDamageMultiplier = 0.4f,     // 40% self-damage so rocket jumps don't suicide.
-            .maxKnockback = 800.0f,           // Feet-rocket pop ≈ 2.4× normal jump (k_jumpSpeed=330).
+            .maxKnockback = 800.0f,           // Feet-rocket pop scaled against k_jumpSpeed=660; retune if too soft.
             .knockbackFalloffExponent = 2.0f, // Quadratic: push reaches further than damage.
         },                                    // Rocket
         ProjectileConfig{},                   // RailGun

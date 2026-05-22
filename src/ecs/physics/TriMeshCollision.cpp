@@ -17,6 +17,7 @@
 
 #include "ecs/physics/DebugCollisionDraw.hpp"
 #include "ecs/physics/PhaseDiagnostic.hpp"
+#include "ecs/physics/PhysicsPerfStats.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -37,6 +38,25 @@ constexpr float k_hitTieEpsilon = 1e-5f;
 bool finiteVec3(glm::vec3 v) noexcept
 {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+float pointAabbDistanceSq(glm::vec3 p, glm::vec3 bmin, glm::vec3 bmax) noexcept
+{
+    const glm::vec3 clamped = glm::clamp(p, bmin, bmax);
+    const glm::vec3 d = p - clamped;
+    return glm::dot(d, d);
+}
+
+float aabbDistanceSq(glm::vec3 aMin, glm::vec3 aMax, glm::vec3 bMin, glm::vec3 bMax) noexcept
+{
+    glm::vec3 d{0.0f};
+    for (int axis = 0; axis < 3; ++axis) {
+        if (aMax[axis] < bMin[axis])
+            d[axis] = bMin[axis] - aMax[axis];
+        else if (bMax[axis] < aMin[axis])
+            d[axis] = aMin[axis] - bMax[axis];
+    }
+    return glm::dot(d, d);
 }
 
 bool validTriangleArea(glm::vec3 a, glm::vec3 b, glm::vec3 c) noexcept
@@ -1576,6 +1596,7 @@ void depenetrateAABBvsTriMesh(
 
 HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3 end, const WorldTriMesh& mesh)
 {
+    perf::add(&perf::FrameStats::sweepCapsuleTriMeshCalls);
     HitResult best;
     uint32_t bestTri = UINT32_MAX;
     if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
@@ -1593,6 +1614,7 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
 
     while (stackPtr >= 0) {
         const int nodeIdx = stack[stackPtr--];
+        perf::add(&perf::FrameStats::sweepCapsuleTriMeshNodes);
         const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
         if (!sweptAABBOverlapsAABB(he, start, delta, node.boundsMin, node.boundsMax, best.tFirst))
@@ -1600,6 +1622,7 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
 
         if (node.count > 0) {
             for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                perf::add(&perf::FrameStats::sweepCapsuleTriMeshTris);
                 const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
                 const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
                 const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
@@ -1634,6 +1657,7 @@ HitResult sweepCapsuleVsTriMesh(CapsuleShape capsule, glm::vec3 start, glm::vec3
 DepenContact
 deepestCapsuleContactVsTriMesh(CapsuleShape capsule, glm::vec3 pos, glm::vec3 vel, const WorldTriMesh& mesh)
 {
+    perf::add(&perf::FrameStats::deepestCapsuleTriMeshCalls);
     DepenContact best;
     if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
         return best;
@@ -1653,6 +1677,7 @@ deepestCapsuleContactVsTriMesh(CapsuleShape capsule, glm::vec3 pos, glm::vec3 ve
 
     while (stackPtr >= 0) {
         const int nodeIdx = stack[stackPtr--];
+        perf::add(&perf::FrameStats::deepestCapsuleTriMeshNodes);
         const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
         const glm::vec3 expMin = node.boundsMin - he;
@@ -1663,6 +1688,7 @@ deepestCapsuleContactVsTriMesh(CapsuleShape capsule, glm::vec3 pos, glm::vec3 ve
 
         if (node.count > 0) {
             for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                perf::add(&perf::FrameStats::deepestCapsuleTriMeshTris);
                 const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
                 const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
                 const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
@@ -1699,22 +1725,22 @@ deepestCapsuleContactVsTriMesh(CapsuleShape capsule, glm::vec3 pos, glm::vec3 ve
 
 ClosestPointOnMeshResult closestPointOnMesh(glm::vec3 segA, glm::vec3 segB, float maxDist, const WorldTriMesh& mesh)
 {
+    perf::addClosestPointCall();
     ClosestPointOnMeshResult result;
     result.dist = maxDist;
+    float bestDistSq = maxDist * maxDist;
 
     if (mesh.bvhNodes.empty() || mesh.faceNormals.empty())
         return result;
 
-    // Broad-phase: segment AABB expanded by maxDist must overlap the whole-mesh AABB.
+    // Broad-phase: segment AABB must be within the current best radius of the
+    // whole-mesh AABB. The AABB distance is a lower bound, so failed nodes are
+    // safe to cull without a per-node sqrt.
     const glm::vec3 segMin = glm::min(segA, segB);
     const glm::vec3 segMax = glm::max(segA, segB);
-    {
-        const glm::vec3 expMin = segMin - glm::vec3(maxDist);
-        const glm::vec3 expMax = segMax + glm::vec3(maxDist);
-        if (expMax.x < mesh.boundsMin.x || expMin.x > mesh.boundsMax.x || expMax.y < mesh.boundsMin.y ||
-            expMin.y > mesh.boundsMax.y || expMax.z < mesh.boundsMin.z || expMin.z > mesh.boundsMax.z)
-            return result;
-    }
+    const glm::vec3 segMid = (segA + segB) * 0.5f;
+    if (aabbDistanceSq(segMin, segMax, mesh.boundsMin, mesh.boundsMax) > bestDistSq)
+        return result;
 
     int stack[64];
     int stackPtr = 0;
@@ -1722,18 +1748,16 @@ ClosestPointOnMeshResult closestPointOnMesh(glm::vec3 segA, glm::vec3 segB, floa
 
     while (stackPtr >= 0) {
         const int nodeIdx = stack[stackPtr--];
+        perf::addClosestPointNode();
         const BVHNode& node = mesh.bvhNodes[static_cast<size_t>(nodeIdx)];
 
-        // Cull: shrink the search radius as we find closer triangles.
-        const float currentMaxDist = result.dist;
-        const glm::vec3 curExpMin = segMin - glm::vec3(currentMaxDist);
-        const glm::vec3 curExpMax = segMax + glm::vec3(currentMaxDist);
-        if (curExpMax.x < node.boundsMin.x || curExpMin.x > node.boundsMax.x || curExpMax.y < node.boundsMin.y ||
-            curExpMin.y > node.boundsMax.y || curExpMax.z < node.boundsMin.z || curExpMin.z > node.boundsMax.z)
+        // Cull against the squared lower bound instead of expanding by sqrt(bestDistSq).
+        if (aabbDistanceSq(segMin, segMax, node.boundsMin, node.boundsMax) > bestDistSq)
             continue;
 
         if (node.count > 0) {
             for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                perf::addClosestPointTri();
                 const uint32_t ti = mesh.triIndices[static_cast<size_t>(i)];
                 const glm::vec3& v0 = mesh.vertices[mesh.indices[ti * 3 + 0]];
                 const glm::vec3& v1 = mesh.vertices[mesh.indices[ti * 3 + 1]];
@@ -1743,11 +1767,10 @@ ClosestPointOnMeshResult closestPointOnMesh(glm::vec3 segA, glm::vec3 segB, floa
                 glm::vec3 onTri;
                 float distSq;
                 const TriRegion region = closestPointSegmentTriangle(segA, segB, v0, v1, v2, onSeg, onTri, distSq);
-                const float dist = std::sqrt(distSq);
 
-                if (dist < result.dist) {
+                if (distSq < bestDistSq) {
                     result.found = true;
-                    result.dist = dist;
+                    bestDistSq = distSq;
                     result.pointOnSegment = onSeg;
                     result.pointOnMesh = onTri;
                     result.triId = ti;
@@ -1765,11 +1788,24 @@ ClosestPointOnMeshResult closestPointOnMesh(glm::vec3 segA, glm::vec3 segB, floa
                 }
             }
         } else {
-            stack[++stackPtr] = node.leftFirst;
-            stack[++stackPtr] = node.leftFirst + 1;
+            const int left = node.leftFirst;
+            const int right = node.leftFirst + 1;
+            const BVHNode& leftNode = mesh.bvhNodes[static_cast<size_t>(left)];
+            const BVHNode& rightNode = mesh.bvhNodes[static_cast<size_t>(right)];
+            const float leftDist = pointAabbDistanceSq(segMid, leftNode.boundsMin, leftNode.boundsMax);
+            const float rightDist = pointAabbDistanceSq(segMid, rightNode.boundsMin, rightNode.boundsMax);
+            if (leftDist < rightDist) {
+                stack[++stackPtr] = right;
+                stack[++stackPtr] = left;
+            } else {
+                stack[++stackPtr] = left;
+                stack[++stackPtr] = right;
+            }
         }
     }
 
+    if (result.found)
+        result.dist = std::sqrt(bestDistSq);
     return result;
 }
 
@@ -1782,6 +1818,7 @@ closestPointOnMesh(CapsuleShape capsule, glm::vec3 center, float maxDist, const 
 ClosestPointOnMeshResult closestPointOnMeshTriangle(
     CapsuleShape capsule, glm::vec3 center, float maxDist, const WorldTriMesh& mesh, uint32_t triId)
 {
+    perf::add(&perf::FrameStats::closestPointTriangleCalls);
     ClosestPointOnMeshResult result;
     const size_t triBase = static_cast<size_t>(triId) * 3u;
     if (triBase + 2u >= mesh.indices.size() || triId >= mesh.faceNormals.size() || maxDist <= 0.0f)
