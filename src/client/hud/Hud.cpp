@@ -21,7 +21,6 @@
 #include "widgets/HitMarkerWidget.hpp"
 #include "widgets/KdaCounter.hpp"
 #include "widgets/KillFeed.hpp"
-#include "widgets/MatchHeader.hpp"
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
@@ -194,10 +193,6 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
     widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
 
-    // Top center: match header.  (Compass strip removed — gravity flips
-    // make a heading readout meaningless and players found it useless.)
-    widgets_.push_back(std::make_unique<MatchHeader>());
-
     // Top right: KDA counter + killfeed (KDA renders first, KillFeed sits below).
     widgets_.push_back(std::make_unique<KdaCounter>());
     widgets_.push_back(std::make_unique<KillFeed>());
@@ -214,8 +209,7 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<ChatWidget>());       // chat should sit above gameplay chrome
 
     // Modal panels (only visible when toggled).
-    // TeamStatusBar is intentionally omitted in the Voidfall design — its
-    // top-center band would clash with the new MatchHeader + Compass layout.
+    // TeamStatusBar is intentionally omitted in the Voidfall design.
     widgets_.push_back(std::make_unique<Scoreboard>());
     widgets_.push_back(std::make_unique<BuyMenu>());
     widgets_.push_back(std::make_unique<PickupPrompt>());

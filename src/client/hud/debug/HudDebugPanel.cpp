@@ -18,7 +18,6 @@
 #include "hud/widgets/HitMarkerWidget.hpp"
 #include "hud/widgets/KdaCounter.hpp"
 #include "hud/widgets/KillFeed.hpp"
-#include "hud/widgets/MatchHeader.hpp"
 #include "hud/widgets/Minimap.hpp"
 #include "hud/widgets/PickupNotification.hpp"
 #include "hud/widgets/PickupPrompt.hpp"
@@ -103,8 +102,6 @@ const char* widgetName(const HudWidget* widget)
         return "KDA Counter";
     if (dynamic_cast<const KillFeed*>(widget))
         return "Kill Feed";
-    if (dynamic_cast<const MatchHeader*>(widget))
-        return "Match Header";
     if (dynamic_cast<const Minimap*>(widget))
         return "Minimap";
     if (dynamic_cast<const PickupNotification*>(widget))
@@ -259,19 +256,10 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "keyFontSize", grenade->keyFontSize);
     } else if (const auto* health = dynamic_cast<const HealthArmorBar*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", health->panelWidth);
-        writeFloatParam(out, first, "panelPadX", health->panelPadX);
-        writeFloatParam(out, first, "panelPadY", health->panelPadY);
+        writeFloatParam(out, first, "barHeight", health->barHeight);
         writeFloatParam(out, first, "chamferSize", health->chamferSize);
-        writeFloatParam(out, first, "shieldBarHeight", health->shieldBarHeight);
-        writeFloatParam(out, first, "healthBarHeight", health->healthBarHeight);
-        writeFloatParam(out, first, "lvlBarHeight", health->lvlBarHeight);
-        writeFloatParam(out, first, "barSpacing", health->barSpacing);
-        writeIntParam(out, first, "shieldSegments", health->shieldSegments);
-        writeFloatParam(out, first, "shieldSegmentGap", health->shieldSegmentGap);
-        writeFloatParam(out, first, "iconSize", health->iconSize);
-        writeFloatParam(out, first, "iconGap", health->iconGap);
-        writeFloatParam(out, first, "trailHoldSeconds", health->trailHoldSeconds);
-        writeFloatParam(out, first, "trailDrainSeconds", health->trailDrainSeconds);
+        writeFloatParam(out, first, "cornerCutSize", health->cornerCutSize);
+        writeFloatParam(out, first, "outlineThickness", health->outlineThickness);
     } else if (const auto* hit = dynamic_cast<const HitMarkerWidget*>(&widget)) {
         writeFloatParam(out, first, "armLength", hit->armLength);
         writeFloatParam(out, first, "armThickness", hit->armThickness);
@@ -294,15 +282,13 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "fontSize", feed->fontSize);
         writeFloatParam(out, first, "fadeOutDuration", feed->fadeOutDuration);
         writeIntParam(out, first, "maxEntries", feed->maxEntries);
-    } else if (const auto* header = dynamic_cast<const MatchHeader*>(&widget)) {
-        writeFloatParam(out, first, "timeFontSize", header->timeFontSize);
-        writeFloatParam(out, first, "subFontSize", header->subFontSize);
-        writeFloatParam(out, first, "panelPadX", header->panelPadX);
-        writeFloatParam(out, first, "panelPadY", header->panelPadY);
     } else if (const auto* minimap = dynamic_cast<const Minimap*>(&widget)) {
         writeFloatParam(out, first, "mapSize", minimap->mapSize);
         writeFloatParam(out, first, "dotSize", minimap->dotSize);
         writeFloatParam(out, first, "borderThickness", minimap->borderThickness);
+        writeFloatParam(out, first, "levelRingThickness", minimap->levelRingThickness);
+        writeFloatParam(out, first, "levelRingGap", minimap->levelRingGap);
+        writeFloatParam(out, first, "levelRingDrainSeconds", minimap->levelRingDrainSeconds);
     } else if (const auto* pickup = dynamic_cast<const PickupNotification*>(&widget)) {
         writeFloatParam(out, first, "entryHeight", pickup->entryHeight);
         writeFloatParam(out, first, "entryGap", pickup->entryGap);
@@ -470,19 +456,10 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Key Font Size", grenade->keyFontSize, 0.5f, 4.0f, 96.0f);
     } else if (auto* health = dynamic_cast<HealthArmorBar*>(&widget)) {
         editFloat("Panel Width", health->panelWidth, 1.0f, 80.0f, 1200.0f);
-        editFloat("Panel Pad X", health->panelPadX, 0.5f, 0.0f, 120.0f);
-        editFloat("Panel Pad Y", health->panelPadY, 0.5f, 0.0f, 120.0f);
+        editFloat("Bar Height", health->barHeight, 0.5f, 4.0f, 200.0f);
         editFloat("Chamfer Size", health->chamferSize, 0.5f, 0.0f, 120.0f);
-        editFloat("Shield Bar Height", health->shieldBarHeight, 0.25f, 0.0f, 100.0f);
-        editFloat("Health Bar Height", health->healthBarHeight, 0.25f, 0.0f, 100.0f);
-        editFloat("Level Bar Height", health->lvlBarHeight, 0.25f, 0.0f, 100.0f);
-        editFloat("Bar Spacing", health->barSpacing, 0.25f, 0.0f, 80.0f);
-        ImGui::DragInt("Shield Segments", &health->shieldSegments, 0.1f, 1, 12);
-        editFloat("Shield Segment Gap", health->shieldSegmentGap, 0.25f, 0.0f, 40.0f);
-        editFloat("Icon Size", health->iconSize, 0.5f, 0.0f, 120.0f);
-        editFloat("Icon Gap", health->iconGap, 0.5f, 0.0f, 120.0f);
-        editFloat("Trail Hold Seconds", health->trailHoldSeconds, 0.05f, 0.0f, 10.0f);
-        editFloat("Trail Drain Seconds", health->trailDrainSeconds, 0.05f, 0.01f, 10.0f);
+        editFloat("Corner Cut Size", health->cornerCutSize, 0.25f, 0.0f, 80.0f);
+        editFloat("Outline Thickness", health->outlineThickness, 0.25f, 0.0f, 40.0f);
     } else if (auto* hit = dynamic_cast<HitMarkerWidget*>(&widget)) {
         editFloat("Arm Length", hit->armLength, 0.25f, 0.0f, 120.0f);
         editFloat("Arm Thickness", hit->armThickness, 0.1f, 0.0f, 40.0f);
@@ -505,15 +482,13 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Font Size", feed->fontSize, 0.5f, 4.0f, 96.0f);
         editFloat("Fade Out Duration", feed->fadeOutDuration, 0.05f, 0.0f, 20.0f);
         ImGui::DragInt("Max Entries", &feed->maxEntries, 0.1f, 1, 40);
-    } else if (auto* header = dynamic_cast<MatchHeader*>(&widget)) {
-        editFloat("Time Font Size", header->timeFontSize, 0.5f, 4.0f, 120.0f);
-        editFloat("Sub Font Size", header->subFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Panel Pad X", header->panelPadX, 0.5f, 0.0f, 160.0f);
-        editFloat("Panel Pad Y", header->panelPadY, 0.5f, 0.0f, 120.0f);
     } else if (auto* minimap = dynamic_cast<Minimap*>(&widget)) {
         editFloat("Map Size", minimap->mapSize, 1.0f, 20.0f, 800.0f);
         editFloat("Dot Size", minimap->dotSize, 0.25f, 0.0f, 80.0f);
         editFloat("Border Thickness", minimap->borderThickness, 0.25f, 0.0f, 40.0f);
+        editFloat("Level Ring Thickness", minimap->levelRingThickness, 0.25f, 0.0f, 40.0f);
+        editFloat("Level Ring Gap", minimap->levelRingGap, 0.25f, 0.0f, 80.0f);
+        editFloat("Level Ring Drain Seconds", minimap->levelRingDrainSeconds, 0.05f, 0.01f, 10.0f);
     } else if (auto* pickup = dynamic_cast<PickupNotification*>(&widget)) {
         editFloat("Entry Height", pickup->entryHeight, 0.5f, 4.0f, 120.0f);
         editFloat("Entry Gap", pickup->entryGap, 0.25f, 0.0f, 80.0f);

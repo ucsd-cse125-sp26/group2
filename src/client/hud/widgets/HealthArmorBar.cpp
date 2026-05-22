@@ -1,207 +1,164 @@
 /// @file HealthArmorBar.cpp
-/// @brief Voidfall vitals plate — Apex-style chamfered panel, segmented
-///        shield, gradient HP, no numerics.
+/// @brief Layered health and armor silhouette.
 
 #include "HealthArmorBar.hpp"
 
 #include "hud/HudContext.hpp"
-#include "hud/HudIcons.hpp"
-#include "hud/HudTween.hpp"
 #include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
-#include <cstdio>
+#include <array>
+#include <cmath>
+#include <vector>
+
+namespace
+{
+struct Point
+{
+    float x = 0.f;
+    float y = 0.f;
+};
+
+std::array<Point, 6> barShape(float x, float y, float w, float h, float chamfer, float cornerCut)
+{
+    const float cut = std::clamp(chamfer, 0.f, w * 0.45f);
+    const float topCut = std::clamp(cornerCut, 0.f, std::min(cut, h * 0.5f));
+    return {{
+        {x + topCut, y},
+        {x + w - topCut, y},
+        {x + w, y + topCut},
+        {x + w - cut, y + h},
+        {x + cut, y + h},
+        {x, y + topCut},
+    }};
+}
+
+std::vector<Point> clipLeftToRight(const std::array<Point, 6>& points, float clipX)
+{
+    std::vector<Point> out;
+    out.reserve(points.size() + 2);
+
+    auto inside = [clipX](Point p) { return p.x <= clipX; };
+    auto intersect = [clipX](Point a, Point b) {
+        const float denom = b.x - a.x;
+        const float t = (std::abs(denom) > 1e-4f) ? std::clamp((clipX - a.x) / denom, 0.f, 1.f) : 0.f;
+        return Point{clipX, a.y + (b.y - a.y) * t};
+    };
+
+    Point prev = points.back();
+    bool prevInside = inside(prev);
+    for (Point curr : points) {
+        const bool currInside = inside(curr);
+        if (currInside != prevInside)
+            out.push_back(intersect(prev, curr));
+        if (currInside)
+            out.push_back(curr);
+        prev = curr;
+        prevInside = currInside;
+    }
+
+    return out;
+}
+
+HudColor colorAtX(float x, float leftX, float width, HudColor leftColor, HudColor rightColor)
+{
+    const float t = std::clamp((x - leftX) / std::max(1.f, width), 0.f, 1.f);
+    return voidfall::lerpColor(leftColor, rightColor, t);
+}
+
+void drawFilledShape(HudContext& ctx,
+                     float x,
+                     float y,
+                     float w,
+                     float h,
+                     float chamfer,
+                     float cornerCut,
+                     float fill01,
+                     HudColor leftColor,
+                     HudColor rightColor)
+{
+    const float fill = std::clamp(fill01, 0.f, 1.f);
+    if (fill <= 0.f)
+        return;
+
+    const auto shape = barShape(x, y, w, h, chamfer, cornerCut);
+    const std::vector<Point> poly = clipLeftToRight(shape, x + w * fill);
+    if (poly.size() < 3)
+        return;
+
+    const Point origin = poly.front();
+    const HudColor originColor = colorAtX(origin.x, x, w, leftColor, rightColor);
+    for (std::size_t i = 1; i + 1 < poly.size(); ++i) {
+        const Point a = poly[i];
+        const Point b = poly[i + 1];
+        ctx.triangleColors(origin.x,
+                           origin.y,
+                           originColor,
+                           a.x,
+                           a.y,
+                           colorAtX(a.x, x, w, leftColor, rightColor),
+                           b.x,
+                           b.y,
+                           colorAtX(b.x, x, w, leftColor, rightColor));
+    }
+}
+
+void drawShapeOutline(
+    HudContext& ctx, float x, float y, float w, float h, float chamfer, float cornerCut, float thickness, HudColor color)
+{
+    const auto shape = barShape(x, y, w, h, chamfer, cornerCut);
+    const float points[] = {
+        shape[0].x,
+        shape[0].y,
+        shape[1].x,
+        shape[1].y,
+        shape[2].x,
+        shape[2].y,
+        shape[3].x,
+        shape[3].y,
+        shape[4].x,
+        shape[4].y,
+        shape[5].x,
+        shape[5].y,
+        shape[0].x,
+        shape[0].y,
+    };
+    ctx.polyline(points, 7, thickness, color);
+}
+} // namespace
 
 HealthArmorBar::HealthArmorBar()
 {
     anchor = HudAnchor::TopCenter;
     offsetX = -250.f;
     offsetY = 80.f;
+    width = panelWidth;
+    height = barHeight;
 }
 
-void HealthArmorBar::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
+void HealthArmorBar::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     visible = state.isAlive;
 
     maxHealth_ = std::max(1, state.maxHealth);
     maxArmor_ = std::max(1, state.maxArmor);
-
-    const int newHp = state.health;
-    const int newAr = state.armor;
-
-    const float targetHp = static_cast<float>(newHp) / static_cast<float>(maxHealth_);
-    const float targetAr = static_cast<float>(newAr) / static_cast<float>(maxArmor_);
-    const float targetLevel = std::clamp(state.abilityLevelProgress, 0.f, 1.f);
-    const float liveLerp = std::clamp(dt * 12.f, 0.f, 1.f);
-    liveHealth_ += (targetHp - liveHealth_) * liveLerp;
-    liveArmor_ += (targetAr - liveArmor_) * liveLerp;
-    liveLevel_ += (targetLevel - liveLevel_) * liveLerp;
-    trailLevel_ = std::max(trailLevel_, targetLevel);
-
-    if (newHp < displayHealth_) {
-        trailHealth_ = static_cast<float>(displayHealth_) / static_cast<float>(maxHealth_);
-        trailHpHoldTimer_ = trailHoldSeconds;
-    } else if (newHp > displayHealth_) {
-        trailHealth_ = targetHp;
-    }
-    if (newAr < displayArmor_) {
-        trailArmor_ = static_cast<float>(displayArmor_) / static_cast<float>(maxArmor_);
-        trailShHoldTimer_ = trailHoldSeconds;
-    } else if (newAr > displayArmor_) {
-        trailArmor_ = targetAr;
-    }
-
-    if (trailHpHoldTimer_ > 0.f)
-        trailHpHoldTimer_ = std::max(0.f, trailHpHoldTimer_ - dt);
-    if (trailShHoldTimer_ > 0.f)
-        trailShHoldTimer_ = std::max(0.f, trailShHoldTimer_ - dt);
-
-    if (trailHpHoldTimer_ <= 0.f && trailHealth_ > liveHealth_) {
-        const float drainSpeed = 1.f / std::max(0.05f, trailDrainSeconds);
-        trailHealth_ = std::max(liveHealth_, trailHealth_ - drainSpeed * dt);
-    }
-    if (trailShHoldTimer_ <= 0.f && trailArmor_ > liveArmor_) {
-        const float drainSpeed = 1.f / std::max(0.05f, trailDrainSeconds);
-        trailArmor_ = std::max(liveArmor_, trailArmor_ - drainSpeed * dt);
-    }
-    if (trailLevel_ > liveLevel_) {
-        const float drainSpeed = 1.f / std::max(0.05f, trailDrainSeconds);
-        trailLevel_ = std::max(liveLevel_, trailLevel_ - drainSpeed * dt);
-    } else {
-        trailLevel_ = liveLevel_;
-    }
-
-    displayHealth_ = newHp;
-    displayArmor_ = newAr;
-    displayLevel_ = state.abilityLevel;
+    healthFill_ = std::clamp(static_cast<float>(state.health) / static_cast<float>(maxHealth_), 0.f, 1.f);
+    armorFill_ = std::clamp(static_cast<float>(state.armor) / static_cast<float>(maxArmor_), 0.f, 1.f);
 }
-
-namespace
-{
-
-/// @brief Render a chamfered (cut-bottom-right) gradient plate.
-///
-/// The CSS source is `clip-path: polygon(0 0, 100% 0, calc(100% - 14px)
-/// 100%, 0 100%)` plus a horizontal three-stop gradient. We approximate
-/// the gradient with two endpoint colors (left = dark+opaque, right = same
-/// hue but more transparent) — the rasteriser interpolates per-vertex
-/// across each triangle, giving a smooth fade without needing 3 stops.
-void drawChamferedPlate(
-    HudContext& ctx, float x, float y, float w, float h, float chamfer, HudColor leftColor, HudColor rightColor)
-{
-    using voidfall::lerpColor;
-
-    // Pentagon vertices (TL → TR → R_mid → B_mid → BL):
-    const float xTL = x;
-    const float yTL = y;
-    const float xTR = x + w;
-    const float yTR = y;
-    const float xRMid = x + w;
-    const float yRMid = y + h - chamfer;
-    const float xBMid = x + w - chamfer;
-    const float yBMid = y + h;
-    const float xBL = x;
-    const float yBL = y + h;
-
-    // Per-vertex color along the horizontal gradient.
-    auto colorAt = [&](float vx) -> HudColor {
-        const float t = std::clamp((vx - x) / w, 0.f, 1.f);
-        return lerpColor(leftColor, rightColor, t);
-    };
-    const HudColor cTL = colorAt(xTL);
-    const HudColor cTR = colorAt(xTR);
-    const HudColor cRMid = colorAt(xRMid);
-    const HudColor cBMid = colorAt(xBMid);
-    const HudColor cBL = colorAt(xBL);
-
-    // Triangulate as a fan from TL.
-    ctx.triangleColors(xTL, yTL, cTL, xTR, yTR, cTR, xRMid, yRMid, cRMid);
-    ctx.triangleColors(xTL, yTL, cTL, xRMid, yRMid, cRMid, xBMid, yBMid, cBMid);
-    ctx.triangleColors(xTL, yTL, cTL, xBMid, yBMid, cBMid, xBL, yBL, cBL);
-}
-
-} // namespace
 
 void HealthArmorBar::draw(HudContext& ctx, float x, float y)
 {
     using namespace voidfall;
 
     const float s = uiScale_;
-    const float pw = panelWidth * s;
-    const float padX = panelPadX * s;
-    const float padY = panelPadY * s;
-    const float ch = chamferSize * s;
-    const float shH = shieldBarHeight * s;
-    const float hpH = healthBarHeight * s;
-    const float lvH = lvlBarHeight * s;
-    const float gap = barSpacing * s;
-    const float iconW = iconSize * s;
-    const float iconG = iconGap * s;
+    const float w = panelWidth * s;
+    const float h = barHeight * s;
+    const float chamfer = chamferSize * s;
+    const float cornerCut = cornerCutSize * s;
+    const float outline = std::max(1.f, outlineThickness * s);
+    const float topY = y - h;
 
-    // Plate height covers the icon column + the three stacked bars + padding.
-    const float plateH = padY * 2.f + shH + gap + hpH + gap + lvH;
-
-    // Anchor is bottom-left. Plate sits with its bottom edge at y, growing up.
-    const float plateX = x;
-    const float plateY = y - plateH;
-
-    // 1) Chamfered gradient plate background.  Left = darker/opaque (k_bgVoid
-    //    boosted), right = same hue with low alpha so it fades into the world.
-    const HudColor plateLeft{0.06f, 0.055f, 0.05f, 0.92f};
-    const HudColor plateRight{0.10f, 0.095f, 0.085f, 0.55f};
-    drawChamferedPlate(ctx, plateX, plateY, pw, plateH, ch, plateLeft, plateRight);
-
-    // 2) Amber accent stripe along the left edge.
-    ctx.rect(plateX, plateY, 2.f * s, plateH, k_amber);
-
-    // 3) Inside layout: icon column on the left, bars on the right.
-    const float barX = plateX + padX + iconW + iconG;
-    const float barW = pw - (padX * 2.f) - iconW - iconG;
-
-    // Shield row (top).
-    const float shRowY = plateY + padY;
-    const float shIconY = shRowY + (shH - iconW) * 0.5f - 1.f * s;
-    icons::shield(ctx, plateX + padX, shIconY, iconW, k_cyan);
-
-    // Segmented shield bar — N segments with small gaps between them, each
-    // its own gradient + ghost trail. Per-segment fill = clamp(total - i*max).
-    const int segCount = std::max(1, shieldSegments);
-    const float segGap = shieldSegmentGap * s;
-    const float segW = (barW - segGap * static_cast<float>(segCount - 1)) / static_cast<float>(segCount);
-    const float perSegMax = 1.f / static_cast<float>(segCount);
-    for (int i = 0; i < segCount; ++i) {
-        const float segX = barX + static_cast<float>(i) * (segW + segGap);
-        // What fraction of *this* segment is filled? (live and trail)
-        const float segLive = std::clamp((liveArmor_ - static_cast<float>(i) * perSegMax) / perSegMax, 0.f, 1.f);
-        const float segTrail = std::clamp((trailArmor_ - static_cast<float>(i) * perSegMax) / perSegMax, 0.f, 1.f);
-        drawGradientTrailBar(ctx, segX, shRowY, segW, shH, segLive, segTrail, k_cyanDim, k_cyan);
-    }
-
-    // HP row (bottom).
-    const float hpRowY = shRowY + shH + gap;
-    const float hpIconY = hpRowY + (hpH - iconW) * 0.5f;
-    icons::hp(ctx, plateX + padX, hpIconY, iconW, k_red);
-    drawGradientTrailBar(ctx,
-                         barX,
-                         hpRowY,
-                         barW,
-                         hpH,
-                         std::clamp(liveHealth_, 0.f, 1.f),
-                         std::clamp(trailHealth_, 0.f, 1.f),
-                         k_red,
-                         k_redBright);
-    const float abRowY = hpRowY + hpH + gap;
-    const float abIconY = abRowY + (lvH - iconW) * 0.5f;
-    char levelBuf[8];
-    std::snprintf(levelBuf, sizeof(levelBuf), "%d", displayLevel_);
-    ctx.text(levelBuf, plateX + padX + iconW * 0.5f, abIconY, iconW, k_amber, HudAlign::Center, true);
-    drawGradientTrailBar(ctx,
-                         barX,
-                         abRowY,
-                         barW,
-                         lvH,
-                         std::clamp(liveLevel_, 0.f, 1.f),
-                         std::clamp(trailLevel_, 0.f, 1.f),
-                         k_amberDim,
-                         k_amber);
+    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, healthFill_, k_red, k_redBright);
+    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, armorFill_, k_cyanDim, k_cyan);
+    drawShapeOutline(ctx, x, topY, w, h, chamfer, cornerCut, outline, k_lineBright);
 }

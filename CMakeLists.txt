@@ -798,8 +798,6 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"

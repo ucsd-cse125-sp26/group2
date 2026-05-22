@@ -25,6 +25,24 @@ void drawCircleOutline(HudContext& ctx, float cx, float cy, float radius, float 
     }
     ctx.polyline(points, kSegments + 1, thickness, color);
 }
+
+void drawClockwiseRingArc(HudContext& ctx, float cx, float cy, float radius, float progress, float thickness, HudColor color)
+{
+    const float clampedProgress = std::clamp(progress, 0.f, 1.f);
+    if (clampedProgress <= 0.f)
+        return;
+
+    constexpr int kMaxSegments = 96;
+    const int segments = std::max(2, static_cast<int>(std::ceil(kMaxSegments * clampedProgress)));
+    float points[(kMaxSegments + 1) * 2]{};
+    for (int i = 0; i <= segments; ++i) {
+        const float t = (static_cast<float>(i) / static_cast<float>(segments)) * clampedProgress;
+        const float a = -0.5f * 3.14159265f + t * 2.f * 3.14159265f;
+        points[i * 2 + 0] = cx + std::cos(a) * radius;
+        points[i * 2 + 1] = cy + std::sin(a) * radius;
+    }
+    ctx.polyline(points, segments + 1, thickness, color);
+}
 } // namespace
 
 Minimap::Minimap()
@@ -39,12 +57,24 @@ Minimap::Minimap()
     borderThickness = 1.f;
 }
 
-void Minimap::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
+void Minimap::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     localX_ = state.localPlayerX;
     localZ_ = state.localPlayerZ;
     localYaw_ = state.localPlayerYaw;
     worldRange_ = state.minimapWorldRange;
+
+    const float targetLevel = std::clamp(state.abilityLevelProgress, 0.f, 1.f);
+    const float liveLerp = std::clamp(dt * 12.f, 0.f, 1.f);
+    liveLevel_ += (targetLevel - liveLevel_) * liveLerp;
+    trailLevel_ = std::max(trailLevel_, targetLevel);
+    if (trailLevel_ > liveLevel_) {
+        const float drainSpeed = 1.f / std::max(0.05f, levelRingDrainSeconds);
+        trailLevel_ = std::max(liveLevel_, trailLevel_ - drainSpeed * dt);
+    } else {
+        trailLevel_ = liveLevel_;
+    }
+
     enemies_.clear();
     for (const auto& d : state.enemyDots)
         enemies_.push_back({d.worldX, d.worldZ});
@@ -59,8 +89,17 @@ void Minimap::draw(HudContext& ctx, float x, float y)
     const float cx = x + ms * 0.5f;
     const float cy = y + ms * 0.5f;
     const float radius = ms * 0.5f;
+    const float ringT = std::max(0.f, levelRingThickness * s);
+    const float ringRadius = radius + levelRingGap * s + ringT * 0.5f;
 
     // Frame.
+    if (ringT > 0.f) {
+        drawCircleOutline(ctx, cx, cy, ringRadius, ringT, withAlpha(k_lineDim, 0.55f));
+        if (trailLevel_ > liveLevel_)
+            drawClockwiseRingArc(ctx, cx, cy, ringRadius, trailLevel_, ringT, withAlpha(k_amberDim, 0.65f));
+        drawClockwiseRingArc(ctx, cx, cy, ringRadius, liveLevel_, ringT, k_amber);
+    }
+
     ctx.roundedRect(x, y, ms, ms, radius, HudColor{0.10f, 0.09f, 0.08f, 0.85f});
     const float borderT = std::max(0.f, borderThickness * s);
     if (borderT > 0.f)
