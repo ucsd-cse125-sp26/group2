@@ -183,32 +183,15 @@ glm::vec3 mountRotationDegrees(const Asset::MountPoint& mount)
     return glm::degrees(glm::eulerAngles(mount.rotation));
 }
 
-glm::vec3 thirdPersonMountOffset(const Asset::MountPoint& mount, float weaponScale)
-{
-    return mount.position * weaponScale;
-}
-
 glm::vec3 firstPersonMountOffset(const Asset::MountPoint& mount, float weaponScale)
 {
     return glm::vec3{-mount.position.x * weaponScale, mount.position.y * weaponScale, mount.position.z * weaponScale};
-}
-
-void makeFingerOffsetsPalmRelative(HandMountSet& hand)
-{
-    for (HandMountPoint& finger : hand.fingers)
-        finger.offset -= hand.palm.offset;
 }
 
 void makeFingerOffsetsPalmRelative(FirstPersonArmMountSet& arm)
 {
     for (HandMountPoint& finger : arm.fingers)
         finger.offset -= arm.palm.offset;
-}
-
-void makeFingerOffsetsPalmRelative(WeaponHandMountParams& mounts)
-{
-    makeFingerOffsetsPalmRelative(mounts.rightHand);
-    makeFingerOffsetsPalmRelative(mounts.leftHand);
 }
 
 void makeFingerOffsetsPalmRelative(FirstPersonHandMountParams& mounts)
@@ -309,40 +292,22 @@ glm::quat modelSpaceRotation(const glm::mat4& invWorld, const glm::mat4& worldRo
     return glm::normalize(glm::quat_cast(basis));
 }
 
-void applyAuthoredHandMountDefaults(const Asset::Model* model,
-                                    const ThirdPersonWeaponParams& tp,
-                                    const ViewmodelParams& vp,
-                                    WeaponHandMountParams& thirdPerson,
-                                    FirstPersonHandMountParams& firstPerson)
+void applyAuthoredFirstPersonHandMountDefaults(const Asset::Model* model,
+                                               const ViewmodelParams& vp,
+                                               FirstPersonHandMountParams& firstPerson)
 {
     if (model == nullptr)
         return;
 
-    auto applyThirdPersonPoint = [&](HandMountPoint& target, const char* name) {
-        if (const Asset::MountPoint* mount = findModelMountPoint(model, name); mount != nullptr) {
-            target.offset = thirdPersonMountOffset(*mount, tp.scale);
-            target.rotationDegrees = mountRotationDegrees(*mount);
-        }
-    };
     auto applyFirstPersonPoint = [&](HandMountPoint& target, const char* name) {
         if (const Asset::MountPoint* mount = findModelMountPoint(model, name); mount != nullptr) {
             target.offset = firstPersonMountOffset(*mount, vp.scale);
             target.rotationDegrees = mountRotationDegrees(*mount);
         }
     };
-    auto applyThirdPersonElbow = [&](glm::vec3& target, const char* name) {
-        if (const Asset::MountPoint* mount = findModelMountPoint(model, name); mount != nullptr)
-            target = thirdPersonMountOffset(*mount, tp.scale);
-    };
     auto applyFirstPersonElbow = [&](glm::vec3& target, const char* name) {
         if (const Asset::MountPoint* mount = findModelMountPoint(model, name); mount != nullptr)
             target = firstPersonMountOffset(*mount, vp.scale);
-    };
-    auto applyThirdPersonFinger = [&](const HandMountPoint& palm, HandMountPoint& finger, const char* name) {
-        if (const Asset::MountPoint* mount = findModelMountPoint(model, name); mount != nullptr) {
-            finger.offset = thirdPersonMountOffset(*mount, tp.scale) - palm.offset;
-            finger.rotationDegrees = mountRotationDegrees(*mount);
-        }
     };
     auto applyFirstPersonFinger = [&](const HandMountPoint& palm, HandMountPoint& finger, const char* name) {
         if (const Asset::MountPoint* mount = findModelMountPoint(model, name); mount != nullptr) {
@@ -351,24 +316,16 @@ void applyAuthoredHandMountDefaults(const Asset::Model* model,
         }
     };
 
-    applyThirdPersonPoint(thirdPerson.rightHand.palm, "ik_r_palm");
-    applyThirdPersonElbow(thirdPerson.rightHand.elbowOffset, "ik_r_elbow");
     applyFirstPersonPoint(firstPerson.rightArm.palm, "ik_r_palm");
     applyFirstPersonElbow(firstPerson.rightArm.elbowOffset, "ik_r_elbow");
     for (size_t i = 0; i < kHandFingerMountCount; ++i) {
-        applyThirdPersonFinger(
-            thirdPerson.rightHand.palm, thirdPerson.rightHand.fingers[i], kModelRightFingerMountNames[i]);
         applyFirstPersonFinger(
             firstPerson.rightArm.palm, firstPerson.rightArm.fingers[i], kModelRightFingerMountNames[i]);
     }
 
-    applyThirdPersonPoint(thirdPerson.leftHand.palm, "ik_l_palm");
-    applyThirdPersonElbow(thirdPerson.leftHand.elbowOffset, "ik_l_elbow");
     applyFirstPersonPoint(firstPerson.leftArm.palm, "ik_l_palm");
     applyFirstPersonElbow(firstPerson.leftArm.elbowOffset, "ik_l_elbow");
     for (size_t i = 0; i < kHandFingerMountCount; ++i) {
-        applyThirdPersonFinger(
-            thirdPerson.leftHand.palm, thirdPerson.leftHand.fingers[i], kModelLeftFingerMountNames[i]);
         applyFirstPersonFinger(firstPerson.leftArm.palm, firstPerson.leftArm.fingers[i], kModelLeftFingerMountNames[i]);
     }
 }
@@ -1265,13 +1222,10 @@ bool Game::init(AppContext& ctx)
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
         authoredWeaponHandMountParams_[i] = getWeaponHandMountParams(static_cast<WeaponType>(i));
         authoredFPHandMountParams_[i] = getFirstPersonHandMountParams(static_cast<WeaponType>(i));
-        makeFingerOffsetsPalmRelative(authoredWeaponHandMountParams_[i]);
         makeFingerOffsetsPalmRelative(authoredFPHandMountParams_[i]);
-        applyAuthoredHandMountDefaults(modelFromRendererIndex(weaponModelIndices_[i]),
-                                       tpWeaponParams_[i],
-                                       getViewmodelParams(static_cast<WeaponType>(i)),
-                                       authoredWeaponHandMountParams_[i],
-                                       authoredFPHandMountParams_[i]);
+        applyAuthoredFirstPersonHandMountDefaults(modelFromRendererIndex(weaponModelIndices_[i]),
+                                                  getViewmodelParams(static_cast<WeaponType>(i)),
+                                                  authoredFPHandMountParams_[i]);
         weaponHandMountParams_[i] = authoredWeaponHandMountParams_[i];
         fpHandMountParams_[i] = authoredFPHandMountParams_[i];
         spawnerWeaponParams_[i] = defaultSpawnerModelParams(static_cast<WeaponType>(i));
