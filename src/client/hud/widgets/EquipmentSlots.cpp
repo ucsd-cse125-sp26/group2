@@ -18,7 +18,7 @@ EquipmentSlots::EquipmentSlots()
 {
     anchor = HudAnchor::BottomCenter;
     offsetX = 0.f;
-    offsetY = -24.f;
+    offsetY = -60.f;
 }
 
 void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)

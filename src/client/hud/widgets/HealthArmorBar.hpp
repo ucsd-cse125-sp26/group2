@@ -19,7 +19,7 @@
 struct HealthArmorBar : HudWidget
 {
     // Layout constants — Apex-style chamfered plate.
-    float panelWidth = 340.f; ///< Plate width (matches design v2).
+    float panelWidth = 500.f; ///< Plate width (matches design v2).
     float panelPadX = 16.f;   ///< Inner horizontal padding.
     float panelPadY = 10.f;   ///< Inner vertical padding.
     float chamferSize = 14.f; ///< Bottom-right cut-corner depth (px).

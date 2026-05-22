@@ -16,6 +16,7 @@ GrenadeRadialWidget::GrenadeRadialWidget()
     anchor = HudAnchor::Center;
     offsetX = 0.0f;
     offsetY = -20.0f;
+    visible = false;
 }
 
 void GrenadeRadialWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)

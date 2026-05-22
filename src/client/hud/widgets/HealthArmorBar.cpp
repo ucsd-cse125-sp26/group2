@@ -14,9 +14,9 @@
 
 HealthArmorBar::HealthArmorBar()
 {
-    anchor = HudAnchor::BottomLeft;
-    offsetX = 24.f;
-    offsetY = -28.f; // Sits ~28 px above the bottom edge so chrome breathes.
+    anchor = HudAnchor::TopCenter;
+    offsetX = -250.f;
+    offsetY = 80.f;
 }
 
 void HealthArmorBar::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)

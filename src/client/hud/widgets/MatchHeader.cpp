@@ -14,7 +14,7 @@ MatchHeader::MatchHeader()
 {
     anchor = HudAnchor::TopCenter;
     offsetX = 0.f;
-    offsetY = 16.f;
+    offsetY = 105.f;
 }
 
 void MatchHeader::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)

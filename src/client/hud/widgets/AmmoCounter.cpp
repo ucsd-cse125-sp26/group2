@@ -51,8 +51,8 @@ const char* weaponFireMode(int id)
 AmmoCounter::AmmoCounter()
 {
     anchor = HudAnchor::BottomRight;
-    offsetX = -24.f;
-    offsetY = -24.f;
+    offsetX = -80.f;
+    offsetY = -60.f;
     width = panelWidth;
     height = panelHeight;
 }

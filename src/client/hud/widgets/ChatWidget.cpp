@@ -43,12 +43,10 @@ std::string elideToWidth(HudContext& ctx, std::string_view text, float fontSize,
 
 ChatWidget::ChatWidget()
 {
-    anchor = HudAnchor::BottomLeft;
-    offsetX = 24.f;
-    // Bottom HUD widgets resolve their bottom-left anchor to the widget's
-    // bottom edge. Keep chat above the vitals plate and grow upward.
-    offsetY = -104.f;
-    width = 520.f;
+    anchor = HudAnchor::CenterLeft;
+    offsetX = 45.f;
+    offsetY = 0.f;
+    width = 400.f;
     height = 172.f;
 }
 

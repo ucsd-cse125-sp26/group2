@@ -16,6 +16,7 @@ AbilitySelectionWidget::AbilitySelectionWidget()
     anchor = HudAnchor::Center;
     offsetX = 0.0f;
     offsetY = 120.0f;
+    visible = false;
 }
 
 void AbilitySelectionWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)

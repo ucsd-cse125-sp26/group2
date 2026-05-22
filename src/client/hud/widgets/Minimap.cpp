@@ -14,9 +14,9 @@
 
 Minimap::Minimap()
 {
-    anchor = HudAnchor::TopLeft;
-    offsetX = 24.f;
-    offsetY = 24.f;
+    anchor = HudAnchor::BottomLeft;
+    offsetX = 80.f;
+    offsetY = -260.f;
     width = 200.f;
     height = 200.f;
     mapSize = 200.f;
