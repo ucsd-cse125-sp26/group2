@@ -799,9 +799,10 @@ void Client::networkLoop()
             }
 
             const auto& s = session_.stats();
-            stats.rttMs = s.rttMs;
-            if (s.rttMs > 0.0f)
+            if (s.rttMs > 0.0f) {
+                stats.rttMs = s.rttMs;
                 stats.avgRttMs = stats.avgRttMs <= 0.0f ? s.rttMs : stats.avgRttMs * 0.8f + s.rttMs * 0.2f;
+            }
 
             SDL_Delay(1);
         }
