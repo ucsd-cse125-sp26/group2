@@ -21,14 +21,17 @@
 /// `MoveMode` from PlayerVisState (avoids a header dependency here).
 struct AnimationInputs
 {
-    glm::vec3 velocityWorld{0.0f}; ///< World-space velocity (u/s).
-    float yawRad = 0.0f;           ///< Player yaw (radians).
-    float pitchRad = 0.0f;         ///< Player pitch (radians, positive = looking down).
-    bool grounded = false;         ///< Touching the ground this tick.
-    bool sprinting = false;        ///< Sprint key currently held.
-    bool crouching = false;        ///< Crouch currently held (phase 1: note-only).
-    int moveMode = 0;              ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning.
-    int wallRunSide = 0;           ///< WallSide value: 0=None, 1=Left, 2=Right.
+    glm::vec3 velocityWorld{0.0f};        ///< World-space velocity (u/s).
+    float yawRad = 0.0f;                  ///< Player yaw (radians).
+    float pitchRad = 0.0f;                ///< Player pitch (radians, positive = looking down).
+    float spineBendMultiplier = 1.0f;     ///< Per-weapon-class scaler on Phase F spine bend (1.0 = full).
+    float hipLeanMultiplier = 0.0f;       ///< Per-weapon-class hip-lean magnitude (radians of pelvis pitch per radian of camera pitch, opposite sign).
+    float dtSec = 0.0f;                   ///< Frame delta time (s). Used by the breathing oscillator and recoil decay in `runSamplingAndSkinning`.
+    bool grounded = false;                ///< Touching the ground this tick.
+    bool sprinting = false;               ///< Sprint key currently held.
+    bool crouching = false;               ///< Crouch currently held (phase 1: note-only).
+    int moveMode = 0;                     ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning.
+    int wallRunSide = 0;                  ///< WallSide value: 0=None, 1=Left, 2=Right.
 };
 
 /// Number of sampler slots available for the per-frame blend.
@@ -162,6 +165,17 @@ public:
     /// Targets are in rig model space and should be applied after sampling for
     /// the frame, before copying joint/skinning matrices into renderer buffers.
     void applyHandIkTargets(const HandIkTargets& targets);
+
+    /// @brief Phase F additive recoil kick.
+    ///
+    /// Pushes an instantaneous upward pitch impulse onto the spine that decays
+    /// exponentially over ~250 ms (impl detail). Called once per fired shot
+    /// from the client's weapon system; the animator integrates the decay each
+    /// frame inside `runSamplingAndSkinning`.
+    ///
+    /// `strengthRad` is the peak additional pitch in radians, typically
+    /// 0.05–0.15 (≈3–8 degrees) for a rifle and larger for heavier weapons.
+    void applyRecoilImpulse(float strengthRad);
 
     /// @brief Number of joints in the underlying rig.
     [[nodiscard]] int numJoints() const noexcept;

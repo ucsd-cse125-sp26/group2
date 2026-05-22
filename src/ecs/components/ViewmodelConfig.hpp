@@ -24,6 +24,17 @@ struct ThirdPersonWeaponParams
     glm::vec3 handOffset;                        // relative to player center (right, up, forward)
     glm::vec3 aimPivotOffset{0.0f, 22.0f, 0.0f}; // pitch orbit pivot, near upper chest / neck
     float yawOffset, pitchOffset, rollOffset;    // degrees
+    /// Per-weapon-class scaler on the Phase F procedural spine bend (1.0 = full,
+    /// heavier weapons get less so the character looks like it struggles with
+    /// the weight when aiming up/down).
+    float spineBendMultiplier = 1.0f;
+    /// Per-weapon-class hip-lean coupling: pelvis pitch (radians) per radian of
+    /// aim pitch, opposite sign. ~0.10 reads as a confident shooter's stance;
+    /// 0 disables coupling entirely.
+    float hipLeanMultiplier = 0.1f;
+    /// Per-weapon-class recoil kick magnitude in radians, applied additively to
+    /// the spine bend when the player fires a shot.
+    float recoilKickRad = 0.06f;
 };
 
 /// @brief A weapon-local grip point for either hand.
@@ -147,23 +158,44 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type)
 {
     static const std::array<ThirdPersonWeaponParams, 4> k_params{{
-        // Rifle
+        // Rifle — middleweight, full spine bend, moderate recoil.
         {.scale = 10.0f,
          .handOffset = {1.5f, 24.5f, 13.5f},
          .aimPivotOffset = {0.0f, 18.0f, 0.0f},
          .yawOffset = 15.0f,
          .pitchOffset = 0.0f,
-         .rollOffset = 0.0f},
-        // Rocket
+         .rollOffset = 0.0f,
+         .spineBendMultiplier = 1.0f,
+         .hipLeanMultiplier = 0.1f,
+         .recoilKickRad = 0.05f},
+        // Rocket launcher — heavy, slower upper-body response, big kick.
         {.scale = 0.025f,
          .handOffset = {1.5f, -3.5f, 14.0f},
          .yawOffset = -47.0f,
          .pitchOffset = 13.0f,
-         .rollOffset = 0.0f},
-        // RailGun / charge rifle
-        {.scale = 7.0f, .handOffset = {7.5f, 7.5f, 15.0f}, .yawOffset = 0.0f, .pitchOffset = 96.0f, .rollOffset = 2.0f},
-        // EnergyGun
-        {.scale = 1.0f, .handOffset = {7.5f, 7.0f, 6.0f}, .yawOffset = 6.0f, .pitchOffset = 94.0f, .rollOffset = 0.0f},
+         .rollOffset = 0.0f,
+         .spineBendMultiplier = 0.65f,
+         .hipLeanMultiplier = 0.06f,
+         .recoilKickRad = 0.18f},
+        // RailGun / charge rifle — heavy precision rifle, slower bend than the
+        // assault rifle, similar kick to a rifle since the energy delivery is smooth.
+        {.scale = 7.0f,
+         .handOffset = {7.5f, 7.5f, 15.0f},
+         .yawOffset = 0.0f,
+         .pitchOffset = 96.0f,
+         .rollOffset = 2.0f,
+         .spineBendMultiplier = 0.85f,
+         .hipLeanMultiplier = 0.08f,
+         .recoilKickRad = 0.07f},
+        // EnergyGun — light pistol, fast spine bend, gentle kick.
+        {.scale = 1.0f,
+         .handOffset = {7.5f, 7.0f, 6.0f},
+         .yawOffset = 6.0f,
+         .pitchOffset = 94.0f,
+         .rollOffset = 0.0f,
+         .spineBendMultiplier = 1.0f,
+         .hipLeanMultiplier = 0.1f,
+         .recoilKickRad = 0.03f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];

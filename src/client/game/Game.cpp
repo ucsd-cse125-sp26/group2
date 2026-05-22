@@ -5,6 +5,17 @@
 
 #include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+#include <ozz/animation/runtime/skeleton.h>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
 #include "ecs/abilities/AbilityTuning.hpp"
@@ -75,6 +86,8 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/euler_angles.hpp>
 #include <imgui.h>
 #include <iomanip>
 #include <numeric>
@@ -892,6 +905,10 @@ bool Game::init(AppContext& ctx)
         // ExplosionEvent: also play the explosion SFX alongside the particle effect.
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
     }
+    // Phase F: same WeaponFiredEvent → push an additive pitch impulse onto
+    // the shooter's spine via CharacterAnimator. Subscribes regardless of
+    // SFX init result so recoil visuals still work in silent test runs.
+    dispatcher.sink<WeaponFiredEvent>().connect<&Game::onWeaponFired>(*this);
     voiceChat_.init();
 
     // HUD system — needs device + shader format from renderer, SDF atlas from particles.
@@ -1320,7 +1337,7 @@ bool Game::init(AppContext& ctx)
             for (std::size_t i = 0; i < k_weaponGripFiles.size(); ++i) {
                 const std::string gripPath = weaponsDir + k_weaponGripFiles[i];
                 weaponGripPosePaths_[i] = gripPath;
-                if (!loadWeaponGripPose(gripPath, weaponGripPoses_[i])) {
+                if (!loadWeaponGripPoseWithEulers(gripPath, weaponGripPoses_[i], weaponGripPoseEulers_[i])) {
                     // Already logged by loadWeaponGripPose; leave as default
                     // (rightHandValid=false, leftHandValid=false) so the animator
                     // skips the blend for that weapon.
@@ -1975,11 +1992,16 @@ SDL_AppResult Game::iterate()
                 continue;
             if (mtime != weaponGripPoseMTimes_[i]) {
                 weaponGripPoseMTimes_[i] = mtime;
-                // Reload into a scratch struct so a partial/parse-failed load
+                // Reload into scratch structs so a partial/parse-failed load
                 // doesn't blank out the working data already in `weaponGripPoses_`.
+                // Eulers reload alongside the quats so the authoring UI's
+                // slider state stays in sync with whatever was just written.
                 WeaponGripPose scratch{};
-                if (loadWeaponGripPose(weaponGripPosePaths_[i], scratch))
+                WeaponGripPoseEuler scratchEulers{};
+                if (loadWeaponGripPoseWithEulers(weaponGripPosePaths_[i], scratch, scratchEulers)) {
                     weaponGripPoses_[i] = scratch;
+                    weaponGripPoseEulers_[i] = scratchEulers;
+                }
             }
         }
     }
@@ -2558,6 +2580,24 @@ SDL_AppResult Game::iterate()
                 hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
             });
 
+            // Phase F third-person recoil hook. Called from both fire paths
+            // (charge + hitscan) to push an additive pitch impulse onto the
+            // local player's spine via the animator. The impulse magnitude is
+            // per-weapon-class (lighter weapons kick less). Remote players see
+            // their own animator's recoil because the shot event is replicated
+            // through WeaponFiredEvent / the dispatcher, but for now we only
+            // wire the local player — remote recoil can be added later by
+            // listening to WeaponFiredEvent.
+            auto triggerLocalRecoil = [&]() {
+                if (localShooter == entt::null || !registry.valid(localShooter))
+                    return;
+                auto* ac = registry.try_get<AnimatedCharacter>(localShooter);
+                if (ac == nullptr || !ac->animator)
+                    return;
+                const auto& tpRecoil = tpWeaponParams_[static_cast<int>(currentEquippedType_)];
+                ac->animator->applyRecoilImpulse(tpRecoil.recoilKickRad);
+            };
+
             if (wpnCfg.isCharge) {
                 if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
                     localFireCooldown_ = wpnCfg.fireCooldown;
@@ -2571,6 +2611,7 @@ SDL_AppResult Game::iterate()
                     recoilPitch_ += rp.pitchKick;
                     recoilPushBack_ += rp.pushBack;
                     recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
+                    triggerLocalRecoil();
                 }
             } else if (shooting && localFireCooldown_ <= 0.0f && hasAmmo) {
                 localFireCooldown_ = wpnCfg.fireCooldown;
@@ -2613,7 +2654,11 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
                 particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
 
-                // Visual recoil kick (viewmodel-only)
+                // Visual recoil kick (viewmodel-only).
+                // Third-person recoil happens via the WeaponFiredEvent
+                // dispatcher subscriber (`Game::onWeaponFired`) so the same
+                // path handles future remote-shooter events without local
+                // double-application.
                 const RecoilParams& rp = getRecoilParams(currentEquippedType_);
                 recoilPitch_ += rp.pitchKick;
                 recoilPushBack_ += rp.pushBack;
@@ -3070,11 +3115,25 @@ SDL_AppResult Game::iterate()
                 c.ai.velocityWorld = vel.value;
                 c.ai.yawRad = inp.yaw;
                 c.ai.pitchRad = inp.pitch;
+                c.ai.dtSec = frameTime;
                 c.ai.grounded = ps.grounded;
                 c.ai.sprinting = ps.sprinting;
                 c.ai.crouching = ps.crouching;
                 c.ai.moveMode = static_cast<int>(ps.moveMode);
                 c.ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+                // Phase F per-weapon-class procedural multipliers. Pulled from
+                // the equipped weapon's tuning row when one exists; otherwise
+                // we fall through with the default values (full spine bend,
+                // gentle hip lean) so unarmed/dead/dropped-weapon characters
+                // still animate sanely.
+                if (const auto* ws2 = registry.try_get<WeaponState>(e); ws2 != nullptr) {
+                    const GunInstance& gun2 = getEquippedGun(*ws2);
+                    if (isRenderableGunType(gun2.type)) {
+                        const auto& tp2 = tpWeaponParams_[static_cast<int>(gun2.type)];
+                        c.ai.spineBendMultiplier = tp2.spineBendMultiplier;
+                        c.ai.hipLeanMultiplier = tp2.hipLeanMultiplier;
+                    }
+                }
 
                 // Animation tick decoupling: cap remote state-machine updates at
                 // 30 Hz.  The inputs stay populated every render frame because
@@ -3175,17 +3234,25 @@ SDL_AppResult Game::iterate()
                             // overwritten by the bone-derived transform a few lines later.
                             c.weaponWorld = pose.weaponWorld;
 
-                            // Phase C wiring: blend authored finger grip poses into the animated
-                            // local-space finger rotations. Pose data is the WeaponGripPose loaded
-                            // at startup from assets/weapons/<name>.grip.toml. A missing hand stays
-                            // invalid → null pointer → animator skips that side's blend (animation
-                            // fingers play through). Hold weight is 1.0 while the player is holding
-                            // the weapon; Phase F will ramp this during weapon swap.
+                            // Phase C+F wiring: blend authored finger grip poses into the animated
+                            // local-space finger rotations. Hold weight is 1.0 by default but
+                            // ramps 0 → 1 over `kGripSwapDurationSec` after a weapon-type change
+                            // so the hand visibly releases the old grip and re-grips the new one.
+                            constexpr float kGripSwapDurationSec = 0.15f;
+                            auto& swap = gripSwapState_[e];
+                            if (swap.lastType != gun.type) {
+                                swap.lastType = gun.type;
+                                swap.swapElapsedSec = 0.0f;
+                            }
+                            swap.swapElapsedSec = std::min(swap.swapElapsedSec + frameTime, 1.0f);
+                            const float gripFade =
+                                std::clamp(swap.swapElapsedSec / kGripSwapDurationSec, 0.0f, 1.0f);
+
                             const auto& grip = weaponGripPoses_[static_cast<std::size_t>(gun.type)];
                             c.handIk.rightGripPose = grip.rightHandValid ? &grip.rightHand : nullptr;
-                            c.handIk.rightGripWeight = grip.rightHandValid ? 1.0f : 0.0f;
+                            c.handIk.rightGripWeight = grip.rightHandValid ? gripFade : 0.0f;
                             c.handIk.leftGripPose = grip.leftHandValid ? &grip.leftHand : nullptr;
-                            c.handIk.leftGripWeight = grip.leftHandValid ? 1.0f : 0.0f;
+                            c.handIk.leftGripWeight = grip.leftHandValid ? gripFade : 0.0f;
                         }
                     }
                 }
@@ -3221,6 +3288,38 @@ SDL_AppResult Game::iterate()
                                 c.ac->animator->update(c.ai, k_animationTick);
                         }
                     }
+
+                    // Phase F task 14: run IK + grip blend + weapon-world
+                    // derivation inside the worker. Each candidate writes only
+                    // to its own animator state (jointModelMats/skinMats/etc.)
+                    // and its own AnimCandidate fields, so the IK + matrix
+                    // composition is thread-safe across visible characters.
+                    if (c.drawThisFrame && c.ac != nullptr && c.ac->animator)
+                        c.ac->animator->applyHandIkTargets(c.handIk);
+
+                    if (c.hasWeapon && c.drawThisFrame && c.ac != nullptr && c.ac->animator &&
+                        rightHandJointIdx_ >= 0) {
+                        const auto& joints = c.ac->animator->jointModelMatrices();
+                        if (rightHandJointIdx_ < static_cast<int>(joints.size())) {
+                            const glm::mat4 handWorld =
+                                c.worldTransform * joints[static_cast<size_t>(rightHandJointIdx_)];
+                            const glm::vec3 handPos(handWorld[3]);
+                            const glm::mat3 handRot(glm::normalize(glm::vec3(handWorld[0])),
+                                                    glm::normalize(glm::vec3(handWorld[1])),
+                                                    glm::normalize(glm::vec3(handWorld[2])));
+
+                            const glm::mat3 invPalmRot =
+                                glm::inverse(glm::mat3(handMountRotation(c.rightPalmAuthored)));
+                            const glm::mat3 weaponRot = handRot * invPalmRot;
+                            const glm::vec3 weaponOrigin =
+                                handPos - weaponRot * c.rightPalmAuthored.offset;
+
+                            glm::mat4 weaponWorldMat =
+                                glm::translate(glm::mat4(1.0f), weaponOrigin) * glm::mat4(weaponRot);
+                            weaponWorldMat = glm::scale(weaponWorldMat, glm::vec3(c.weaponScale));
+                            c.weaponWorld = weaponWorldMat;
+                        }
+                    }
                 }
             });
         }
@@ -3235,51 +3334,46 @@ SDL_AppResult Game::iterate()
             skinnedInstances.reserve(drawSlot);
         }
 
-        for (auto& c : candidates) {
-            if (c.drawThisFrame && c.ac != nullptr && c.ac->animator)
-                c.ac->animator->applyHandIkTargets(c.handIk);
+        // Phase F task 14: applyHandIkTargets + weapon-world derivation moved
+        // into the worker pool above. This pass is now purely sequential
+        // registry writeback — copying joint matrices to JointMatrices, pushing
+        // skin palettes for the renderer.
 
-            // Derive the third-person weapon's world transform from the right-hand
-            // bone AFTER IK has finalized the bone pose. This is the AAA pattern:
-            // weapon is parented to the dominant hand, so it tracks every animation
-            // (idle sway, run cycle, crouch, slide, …) and every procedural transform
-            // (spine bend from aim pitch, wallrun mirror) for free. The previously
-            // free-floating weapon entity render command is now driven by this.
-            //
-            // Math: we want to position the weapon such that its authored "right palm"
-            // point coincides with the right-hand bone in world space. Given
-            //   palm_world_pos    = weapon_origin + R_weapon_world * palm.offset
-            //   palm_world_rot    = R_weapon_world * R(palm.rotation)
-            // and demanding palm_world_(pos,rot) == hand_world_(pos,rot), we solve:
-            //   R_weapon_world    = R_hand_world * R(palm.rotation)^{-1}
-            //   weapon_origin     = hand_world_pos - R_weapon_world * palm.offset
-            // The hand bone's matrix carries the entity scale (kRigScale) baked in;
-            // we normalize the rotation columns before solving so palm.offset (which
-            // is authored in world units) doesn't get double-scaled.
-            if (c.hasWeapon && c.drawThisFrame && c.ac != nullptr && c.ac->animator &&
-                rightHandJointIdx_ >= 0) {
-                const auto& joints = c.ac->animator->jointModelMatrices();
-                if (rightHandJointIdx_ < static_cast<int>(joints.size())) {
-                    const glm::mat4 handWorld =
-                        c.worldTransform * joints[static_cast<size_t>(rightHandJointIdx_)];
-                    const glm::vec3 handPos(handWorld[3]);
-                    const glm::mat3 handRot(glm::normalize(glm::vec3(handWorld[0])),
-                                            glm::normalize(glm::vec3(handWorld[1])),
-                                            glm::normalize(glm::vec3(handWorld[2])));
-
-                    const glm::mat3 invPalmRot =
-                        glm::inverse(glm::mat3(handMountRotation(c.rightPalmAuthored)));
-                    const glm::mat3 weaponRot = handRot * invPalmRot;
-                    const glm::vec3 weaponOrigin =
-                        handPos - weaponRot * c.rightPalmAuthored.offset;
-
-                    glm::mat4 W = glm::translate(glm::mat4(1.0f), weaponOrigin) *
-                                  glm::mat4(weaponRot);
-                    W = glm::scale(W, glm::vec3(c.weaponScale));
-                    c.weaponWorld = W;
+        // Phase F task 15: aim-assist parity check. Compare the third-person
+        // weapon's barrel direction (derived from the right-hand-bone-parented
+        // matrix) against the gameplay aim ray (`cachedCamFwd_`). Logs a
+        // single-line report every ~2 s when divergence exceeds the threshold,
+        // so per-weapon grip-local offsets can be hand-tuned to align.
+        aimAssistParityAccumSec_ += frameTime;
+        if (aimAssistParityAccumSec_ >= 2.0f) {
+            aimAssistParityAccumSec_ = 0.0f;
+            for (const auto& c : candidates) {
+                if (!c.isLocal || !c.hasWeapon)
+                    continue;
+                // The third-person weapon mesh's local "forward" is +Z in
+                // mesh-local space; transform that through the just-derived
+                // weaponWorld and compare against cachedCamFwd_.
+                const glm::vec4 weaponFwd4 = c.weaponWorld * glm::vec4{0.0f, 0.0f, 1.0f, 0.0f};
+                const glm::vec3 weaponFwd = glm::normalize(glm::vec3(weaponFwd4));
+                const float dot = glm::clamp(glm::dot(weaponFwd, cachedCamFwd_), -1.0f, 1.0f);
+                const float divergenceRad = std::acos(dot);
+                constexpr float k_aimParityThresholdRad = 0.01745f; // 1 degree.
+                if (divergenceRad > k_aimParityThresholdRad) {
+                    SDL_Log("[aim-parity] weapon barrel vs aim ray diverges by %.2f deg "
+                            "(barrel=(%.2f,%.2f,%.2f) aim=(%.2f,%.2f,%.2f))",
+                            static_cast<double>(glm::degrees(divergenceRad)),
+                            static_cast<double>(weaponFwd.x),
+                            static_cast<double>(weaponFwd.y),
+                            static_cast<double>(weaponFwd.z),
+                            static_cast<double>(cachedCamFwd_.x),
+                            static_cast<double>(cachedCamFwd_.y),
+                            static_cast<double>(cachedCamFwd_.z));
                 }
+                break;
             }
+        }
 
+        for (auto& c : candidates) {
             if (c.sampleThisFrame) {
                 auto& jm = registry.get_or_emplace<JointMatrices>(c.entity);
                 jm.matrices = c.ac->animator->jointModelMatrices();
@@ -4301,6 +4395,7 @@ SDL_AppResult Game::iterate()
             {"3P Weapon Tweaker", &showTPWeaponUI_},
             {"Hand Mount Tweaker", &showHandMountUI_},
             {"FP Arm Tweaker", &showFPHandMountUI_},
+            {"Grip Pose Tweaker", &showGripPoseUI_},
             {"Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_},
             {"Dynamic Lighting", &showDynLightUI_},
             {"Animation Tester", &animUI_.show},
@@ -4685,6 +4780,181 @@ SDL_AppResult Game::iterate()
             if (ImGui::Button("Copy All FP Settings")) {
                 const std::string text = buildFirstPersonHandMountClipboardText(fpHandMountParams_);
                 ImGui::SetClipboardText(text.c_str());
+            }
+        }
+        ImGui::End();
+    }
+
+    // Phase E grip pose tweaker — per-finger Euler editing + save to TOML.
+    if (showGripPoseUI_) {
+        if (ImGui::Begin("Grip Pose Tweaker", &showGripPoseUI_)) {
+            const char* weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
+            ImGui::Combo("Weapon", &gripPoseTuneWeaponIdx_, weaponNames, 4);
+
+            const std::size_t wIdx = static_cast<std::size_t>(gripPoseTuneWeaponIdx_);
+            WeaponGripPose& pose = weaponGripPoses_[wIdx];
+            WeaponGripPoseEuler& eulers = weaponGripPoseEulers_[wIdx];
+            ImGui::TextUnformatted(weaponGripPosePaths_[wIdx].c_str());
+            ImGui::Text("Right hand: %s   Left hand: %s",
+                        pose.rightHandValid ? "authored" : "missing",
+                        pose.leftHandValid ? "authored" : "missing");
+
+            // Edits to any slider re-derive the quat for that joint only, so
+            // unrelated joints stay bit-identical to what was on disk (and the
+            // hot-reload poll doesn't fight the editor).
+            auto editFinger = [&](const char* label,
+                                  std::size_t fingerIdx,
+                                  std::array<glm::vec3, kGripPoseJointCount>& handEulers,
+                                  GripPose& handPose) {
+                if (!ImGui::TreeNode(label))
+                    return;
+                static const char* k_jointNames[kGripPoseBonesPerFinger] = {"joint1", "joint2", "joint3", "joint4"};
+                for (std::size_t j = 0; j < kGripPoseBonesPerFinger; ++j) {
+                    ImGui::PushID(static_cast<int>(j));
+                    const std::size_t flat = GripPose::index(fingerIdx, j);
+                    if (ImGui::DragFloat3(k_jointNames[j], &handEulers[flat].x, 1.0f, -180.0f, 180.0f, "%.1f")) {
+                        handPose.jointRotations[flat] = glm::normalize(
+                            glm::angleAxis(glm::radians(handEulers[flat].x), glm::vec3{1.0f, 0.0f, 0.0f}) *
+                            glm::angleAxis(glm::radians(handEulers[flat].y), glm::vec3{0.0f, 1.0f, 0.0f}) *
+                            glm::angleAxis(glm::radians(handEulers[flat].z), glm::vec3{0.0f, 0.0f, 1.0f}));
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            };
+
+            auto editHand = [&](const char* label,
+                                std::array<glm::vec3, kGripPoseJointCount>& handEulers,
+                                GripPose& handPose,
+                                bool& handValid) {
+                ImGui::PushID(label);
+                const bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+                ImGui::SameLine();
+                ImGui::Checkbox("authored", &handValid);
+                if (!open) {
+                    ImGui::PopID();
+                    return;
+                }
+                static const char* k_fingerNames[kGripPoseFingerCount] = {"Thumb", "Index", "Middle", "Ring", "Pinky"};
+                for (std::size_t fingerIdx = 0; fingerIdx < kGripPoseFingerCount; ++fingerIdx)
+                    editFinger(k_fingerNames[fingerIdx], fingerIdx, handEulers, handPose);
+                ImGui::PopID();
+            };
+
+            editHand("Right Hand", eulers.rightHand, pose.rightHand, pose.rightHandValid);
+            editHand("Left Hand", eulers.leftHand, pose.leftHand, pose.leftHandValid);
+
+            ImGui::Separator();
+            if (ImGui::Button("Snap from in-game pose")) {
+                // Phase E authoring tool: capture the local player's currently-
+                // rendered finger local rotations into the active grip pose.
+                // This replaces the plan's literal "Auto-fit left hand to
+                // weapon grip socket" — after Phase E removed finger IK, the
+                // arm pose is what the analytical solver produces every frame,
+                // and the fingers are whatever GripPose was active last frame.
+                // Snapping the current pose is the only way to seed a starting
+                // point that actually reflects the rendered hand.
+                entt::entity local = entt::null;
+                registry.view<LocalPlayer>().each([&](entt::entity en) { local = en; });
+                if (local != entt::null && registry.valid(local)) {
+                    auto* ac = registry.try_get<AnimatedCharacter>(local);
+                    if (ac != nullptr && ac->animator && charRig_.skeleton()) {
+                        const auto& joints = ac->animator->jointModelMatrices();
+                        const auto parents = charRig_.skeleton()->joint_parents();
+                        const auto& jm = charRig_.jointMap();
+                        static constexpr std::array<const char*, kGripPoseFingerCount> k_fingers{
+                            "Thumb", "Index", "Middle", "Ring", "Pinky"};
+                        auto snapHand = [&](const char* prefix,
+                                            std::array<glm::vec3, kGripPoseJointCount>& outE,
+                                            GripPose& outPose,
+                                            bool& outValid) {
+                            bool anyHit = false;
+                            for (std::size_t f = 0; f < kGripPoseFingerCount; ++f) {
+                                for (std::size_t j = 0; j < kGripPoseBonesPerFinger; ++j) {
+                                    const std::string boneName = std::string("mixamorig:") + prefix +
+                                                                 k_fingers[f] + std::to_string(j + 1);
+                                    const auto it = jm.find(boneName);
+                                    if (it == jm.end())
+                                        continue;
+                                    const int boneIdx = it->second;
+                                    if (boneIdx < 0 || boneIdx >= static_cast<int>(joints.size()))
+                                        continue;
+                                    const int parentIdx =
+                                        static_cast<int>(parents[static_cast<size_t>(boneIdx)]);
+                                    if (parentIdx < 0 || parentIdx >= static_cast<int>(joints.size()))
+                                        continue;
+                                    const glm::mat4& bM = joints[static_cast<size_t>(boneIdx)];
+                                    const glm::mat4& pM = joints[static_cast<size_t>(parentIdx)];
+                                    const glm::mat3 bR(glm::normalize(glm::vec3(bM[0])),
+                                                       glm::normalize(glm::vec3(bM[1])),
+                                                       glm::normalize(glm::vec3(bM[2])));
+                                    const glm::mat3 pR(glm::normalize(glm::vec3(pM[0])),
+                                                       glm::normalize(glm::vec3(pM[1])),
+                                                       glm::normalize(glm::vec3(pM[2])));
+                                    const glm::quat localQ =
+                                        glm::normalize(glm::quat_cast(glm::transpose(pR) * bR));
+                                    float ex = 0.0f;
+                                    float ey = 0.0f;
+                                    float ez = 0.0f;
+                                    glm::extractEulerAngleXYZ(glm::mat4_cast(localQ), ex, ey, ez);
+                                    const std::size_t flat = GripPose::index(f, j);
+                                    outE[flat] = glm::vec3{
+                                        glm::degrees(ex), glm::degrees(ey), glm::degrees(ez)};
+                                    outPose.jointRotations[flat] = localQ;
+                                    anyHit = true;
+                                }
+                            }
+                            if (anyHit)
+                                outValid = true;
+                        };
+                        snapHand("RightHand", eulers.rightHand, pose.rightHand, pose.rightHandValid);
+                        snapHand("LeftHand", eulers.leftHand, pose.leftHand, pose.leftHandValid);
+                    }
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset to T-pose (zero curls)")) {
+                for (auto& v : eulers.rightHand)
+                    v = glm::vec3(0.0f);
+                for (auto& v : eulers.leftHand)
+                    v = glm::vec3(0.0f);
+                gripPoseQuatsFromEulers(eulers, pose);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Mirror Right → Left")) {
+                // Mirror the right-hand Eulers onto the left hand. The Y
+                // component (spread) flips sign because the spread axis is
+                // mirrored across the body midline; X (along bone) and Z
+                // (curl) keep their sign so curl direction is preserved.
+                for (std::size_t i = 0; i < kGripPoseJointCount; ++i) {
+                    eulers.leftHand[i] = glm::vec3{eulers.rightHand[i].x,
+                                                   -eulers.rightHand[i].y,
+                                                   eulers.rightHand[i].z};
+                }
+                gripPoseQuatsFromEulers(eulers, pose);
+                pose.leftHandValid = pose.rightHandValid;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reload from disk")) {
+                WeaponGripPose scratch{};
+                WeaponGripPoseEuler scratchEulers{};
+                if (loadWeaponGripPoseWithEulers(weaponGripPosePaths_[wIdx], scratch, scratchEulers)) {
+                    pose = scratch;
+                    eulers = scratchEulers;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Save to TOML")) {
+                if (saveWeaponGripPoseToml(
+                        weaponGripPosePaths_[wIdx], eulers, pose.rightHandValid, pose.leftHandValid)) {
+                    // Update the cached mtime so the hot-reload poll doesn't
+                    // immediately reload our just-saved file (which would race
+                    // any unsaved edits the user might have made meanwhile).
+                    std::error_code ec;
+                    const auto mtime = std::filesystem::last_write_time(weaponGripPosePaths_[wIdx], ec);
+                    if (!ec)
+                        weaponGripPoseMTimes_[wIdx] = mtime;
+                }
             }
         }
         ImGui::End();
@@ -5701,4 +5971,19 @@ void Game::attachAnimatedCharacter(entt::entity e)
     ac.modelIndex = -1;
 
     registry.emplace<AnimatedCharacter>(e, std::move(ac));
+}
+
+void Game::onWeaponFired(const WeaponFiredEvent& evt)
+{
+    if (evt.shooter == entt::null || !registry.valid(evt.shooter))
+        return;
+    auto* ac = registry.try_get<AnimatedCharacter>(evt.shooter);
+    if (ac == nullptr || !ac->animator)
+        return;
+    // Look up the per-weapon-class kick magnitude. Robust to weapon-type out-of-
+    // range (e.g. unrecognized event payloads) — falls through to no impulse.
+    const auto typeIdx = static_cast<std::size_t>(evt.type);
+    if (typeIdx >= std::size(tpWeaponParams_))
+        return;
+    ac->animator->applyRecoilImpulse(tpWeaponParams_[typeIdx].recoilKickRad);
 }

@@ -519,9 +519,24 @@ private:
     CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
     int rightHandJointIdx_ = -1;        ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the third-person weapon mesh to the right-hand bone after IK.
     std::array<WeaponGripPose, 4> weaponGripPoses_{}; ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from assets/weapons/<name>.grip.toml at startup.
+    std::array<WeaponGripPoseEuler, 4> weaponGripPoseEulers_{}; ///< Editable Euler-degree mirror of weaponGripPoses_, used by the in-game authoring UI.
+    /// Per-entity weapon-swap crossfade state (Phase F polish). When an entity's
+    /// equipped weapon changes, we reset `swapElapsedSec` to 0 and ramp the
+    /// `*GripWeight` from 0 → 1 over `kGripSwapDurationSec` so the hands briefly
+    /// release the grip and re-grip the new weapon. `lastType` tracks the last
+    /// observed weapon so we can detect the transition next frame.
+    struct GripSwapState
+    {
+        WeaponType lastType = WeaponType::Rifle;
+        float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full grip.
+    };
+    std::unordered_map<entt::entity, GripSwapState> gripSwapState_{};
     std::array<std::string, 4> weaponGripPosePaths_{}; ///< Source TOML path for each weapon's grip pose; populated at init and reused for Phase E hot-reload + the per-finger authoring UI's save button.
     std::array<std::filesystem::file_time_type, 4> weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot reload).
     float gripPoseReloadAccumulator_ = 0.0f;            ///< Seconds since last hot-reload mtime poll; throttle to ~4 Hz to keep filesystem stats cheap.
+    bool showGripPoseUI_ = false;                       ///< Show the per-finger Grip Pose Tweaker window (Phase E authoring tool).
+    int gripPoseTuneWeaponIdx_ = 0;                     ///< Which weapon's grip pose is being authored in the tweaker UI.
+    float aimAssistParityAccumSec_ = 0.0f;              ///< Seconds since the last aim-assist parity check log line (Phase F).
     AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
     CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
@@ -573,6 +588,14 @@ private:
     /// and emplaces the component.  Safe to call even if the rig failed to load
     /// (logs a warning and leaves the entity un-animated).
     void attachAnimatedCharacter(entt::entity e);
+
+    /// @brief Dispatcher subscriber: when ANY player fires a shot, push a
+    /// per-weapon-class additive pitch impulse onto that player's spine. The
+    /// kick decays inside `CharacterAnimator::runSamplingAndSkinning` so the
+    /// upper body rises and settles back to the sampled aim pose over ~250 ms.
+    /// Wired to the same `WeaponFiredEvent` channel SfxSystem listens on, so
+    /// the same event drives both audio and visuals.
+    void onWeaponFired(const struct WeaponFiredEvent& evt);
 
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.

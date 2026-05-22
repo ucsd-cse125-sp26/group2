@@ -53,6 +53,19 @@ struct WeaponGripPose
     bool leftHandValid = false;
 };
 
+/// @brief Editable Euler-degree mirror of a WeaponGripPose, used by the
+/// authoring UI. The sliders edit Eulers directly (XYZ degrees, intrinsic),
+/// which feed back into `WeaponGripPose::*Hand.jointRotations` via
+/// `gripPoseQuatsFromEulers`. The split keeps the runtime quat data
+/// canonical while letting the editor avoid the gimbal-lock pitfalls of
+/// quat→Euler→quat round-tripping every frame.
+struct WeaponGripPoseEuler
+{
+    /// XYZ Euler degrees per joint, same indexing as GripPose.
+    std::array<glm::vec3, kGripPoseJointCount> rightHand{};
+    std::array<glm::vec3, kGripPoseJointCount> leftHand{};
+};
+
 /// @brief Load a weapon grip pose from a TOML side-table.
 ///
 /// File format (Euler degrees XYZ, intrinsic rotation order):
@@ -70,3 +83,38 @@ struct WeaponGripPose
 ///
 /// @return True if the file parsed successfully (at least one hand valid).
 bool loadWeaponGripPose(const std::string& path, WeaponGripPose& out);
+
+/// @brief Load a weapon grip pose along with its raw Euler representation.
+///
+/// `outEulers` is populated from the same TOML data as `out`, so the
+/// authoring UI can edit the underlying Euler values directly without going
+/// through a lossy quat→Euler conversion. Failure-mode matches
+/// `loadWeaponGripPose` — false if the file couldn't be parsed.
+bool loadWeaponGripPoseWithEulers(const std::string& path, WeaponGripPose& out, WeaponGripPoseEuler& outEulers);
+
+/// @brief Re-derive joint quaternions from a Euler triplet table.
+///
+/// Mirrors the conversion the loader runs on file data (XYZ intrinsic,
+/// `qx * qy * qz`) so the runtime quat data stays bit-identical to whatever
+/// would be re-loaded from disk after a save.
+void gripPoseQuatsFromEulers(const WeaponGripPoseEuler& eulers, WeaponGripPose& out);
+
+/// @brief Convert the runtime quaternion grip pose back into editable Eulers.
+///
+/// Used by the authoring UI when bootstrapping its slider state from a TOML
+/// that lacks side-channel Euler data. The conversion uses XYZ intrinsic
+/// extraction to match the loader's `qx*qy*qz` build order. Near gimbal
+/// lock the round-trip is lossy, so callers should prefer the with-Eulers
+/// loader for editing.
+void gripPoseEulersFromQuats(const WeaponGripPose& pose, WeaponGripPoseEuler& outEulers);
+
+/// @brief Save a grip pose Euler table back to a TOML file.
+///
+/// Writes the same shape the loader expects. Sections for a hand are
+/// omitted when the matching hand is invalid (so a single-hand TOML round-
+/// trips correctly). Returns false on filesystem failure; the caller is
+/// expected to log appropriately.
+bool saveWeaponGripPoseToml(const std::string& path,
+                            const WeaponGripPoseEuler& eulers,
+                            bool rightHandValid,
+                            bool leftHandValid);

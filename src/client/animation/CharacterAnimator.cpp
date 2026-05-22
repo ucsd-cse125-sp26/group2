@@ -345,6 +345,12 @@ struct CharacterAnimator::Impl
     // capsules for spine joints stay consistent with the visible pose.
     SpineBendChain spineBend;
 
+    // Phase F polish state.
+    int hipsJointIdx = -1;          ///< "mixamorig:Hips" index, drives the hip-lean coupling.
+    std::vector<bool> hipsDescendants; ///< Descendant mask for the hip-lean delta.
+    float recoilPitch = 0.0f;       ///< Current additive pitch from recoil (decays each frame).
+    float breathingPhase = 0.0f;    ///< Accumulated time for the breathing oscillator (s, wraps every 2*pi).
+
     // Weapon grip IK chains.
     ArmIkChain leftArm;
     ArmIkChain rightArm;
@@ -397,6 +403,15 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
             impl_->spineBend.descendants[i] = buildDescendantMask(rig.skeleton(), it->second);
             ++foundBones;
         }
+
+        // Phase F hip-lean: a small counter-pitch applied to the hips (and
+        // everything below — Hips is the root of the rig, so the mask is
+        // mostly used for completeness/parity with the spine bend code path).
+        if (const auto hipsIt = jm.find("mixamorig:Hips"); hipsIt != jm.end()) {
+            impl_->hipsJointIdx = hipsIt->second;
+            impl_->hipsDescendants = buildDescendantMask(rig.skeleton(), impl_->hipsJointIdx);
+        }
+
         if (foundBones > 0) {
             SDL_Log("CharacterAnimator: spine bend chain bound (%d/%d bones found)",
                     foundBones,
@@ -473,6 +488,15 @@ const std::array<ClipSampler, kNumSamplerSlots>& CharacterAnimator::samplers() c
 void CharacterAnimator::setDebugPlaybackSpeed(float mul) noexcept
 {
     impl_->debugPlaybackSpeedMul = std::max(0.0f, mul);
+}
+
+void CharacterAnimator::applyRecoilImpulse(float strengthRad)
+{
+    // Recoil kicks are intentionally "looking up" — negative pitch in our
+    // convention (positive = looking down) — so callers pass a positive
+    // magnitude and we set the impulse to its negation. Multiple shots in
+    // quick succession stack until the decay catches up.
+    impl_->recoilPitch -= std::max(0.0f, strengthRad);
 }
 
 void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
@@ -1234,24 +1258,78 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
         impl_->jointModelMats[uj] = anim_utils::ozzToGlm(impl_->models[uj]);
     }
 
-    // Step 2: Spine bend cascade — distribute aim pitch across the chain.
-    if (impl_->spineBend.valid() && std::abs(inputs.pitchRad) > 0.001f) {
-        const float totalPitch = std::clamp(inputs.pitchRad, -k_spinePitchMax, k_spinePitchMax);
-        // Rig's model-space right axis. Single fixed axis prevents twist
-        // accumulation up the chain. Mixamo rigs in bind pose have X = right.
-        const glm::vec3 axis(1.0f, 0.0f, 0.0f);
+    // Step 2: Phase F procedural overlays + spine bend cascade.
+    //
+    // Order: hip-lean first (operates on the root, all other transforms
+    // compose on top), then spine bend (cascades up the chain), then
+    // breathing oscillation on the chest, then the additive recoil pitch
+    // on the chest. The recoil decay runs unconditionally so the impulse
+    // returns to zero whether or not the spine chain is bound.
 
-        for (size_t i = 0; i < kSpineChainLength; ++i) {
-            const int boneIdx = impl_->spineBend.bones[i];
-            if (boneIdx < 0 || impl_->spineBend.descendants[i].empty())
-                continue;
-            const float angle = totalPitch * impl_->spineBend.weights[i];
-            if (std::abs(angle) < 0.0001f)
-                continue;
+    // Decay the recoil impulse exponentially. Half-life ~250 ms gives a
+    // crisp kick that's mostly gone by the time a typical follow-up shot
+    // fires; the spine bend code below picks this up additively.
+    {
+        constexpr float k_recoilHalfLifeSec = 0.25f;
+        const float dt = std::max(0.0f, inputs.dtSec);
+        if (dt > 0.0f && std::abs(impl_->recoilPitch) > 1e-5f) {
+            const float decay = std::exp(-glm::ln_two<float>() * dt / k_recoilHalfLifeSec);
+            impl_->recoilPitch *= decay;
+        }
+        if (std::abs(impl_->recoilPitch) < 1e-5f)
+            impl_->recoilPitch = 0.0f;
+    }
 
-            const glm::vec3 pivot = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(boneIdx)]);
-            const glm::quat rot = glm::angleAxis(angle, axis);
-            applyDeltaToMask(impl_->jointModelMats, impl_->spineBend.descendants[i], rotateAround(pivot, rot));
+    // Advance the breathing oscillator.
+    {
+        constexpr float k_breathFreqHz = 0.4f;
+        impl_->breathingPhase += std::max(0.0f, inputs.dtSec) * k_breathFreqHz * glm::two_pi<float>();
+        if (impl_->breathingPhase > glm::two_pi<float>() * 16.0f)
+            impl_->breathingPhase -= glm::two_pi<float>() * 16.0f;
+    }
+    const float breathPitch = std::sin(impl_->breathingPhase) * glm::radians(0.5f);
+
+    // Hip lean coupling. When the camera pitches forward (positive pitchRad =
+    // looking down in this codebase's convention), the pelvis tips back
+    // slightly so the silhouette reads as leaning rather than folding.
+    if (impl_->hipsJointIdx >= 0 && !impl_->hipsDescendants.empty() && inputs.hipLeanMultiplier != 0.0f) {
+        constexpr float k_hipLeanMaxRad = 0.087266f; // 5 degrees.
+        const float hipPitch = std::clamp(
+            -inputs.pitchRad * inputs.hipLeanMultiplier, -k_hipLeanMaxRad, k_hipLeanMaxRad);
+        if (std::abs(hipPitch) > 1e-4f) {
+            const glm::vec3 axis(1.0f, 0.0f, 0.0f);
+            const glm::vec3 pivot = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(impl_->hipsJointIdx)]);
+            const glm::quat rot = glm::angleAxis(hipPitch, axis);
+            applyDeltaToMask(impl_->jointModelMats, impl_->hipsDescendants, rotateAround(pivot, rot));
+        }
+    }
+
+    // Spine bend cascade — distribute aim pitch across the spine chain,
+    // scaled by the per-weapon-class multiplier (heavy weapons get less aim
+    // bend so the upper body reads as harder-to-move). Recoil and breathing
+    // are folded into the effective pitch — they share the same chain so
+    // each spine bone gets a proportional share of all three sources.
+    if (impl_->spineBend.valid()) {
+        const float scaledAimPitch = inputs.pitchRad * std::max(0.0f, inputs.spineBendMultiplier);
+        const float effectivePitch = scaledAimPitch + impl_->recoilPitch + breathPitch;
+        const float clampedPitch = std::clamp(effectivePitch, -k_spinePitchMax, k_spinePitchMax);
+        if (std::abs(clampedPitch) > 0.0001f) {
+            // Rig's model-space right axis. Single fixed axis prevents twist
+            // accumulation up the chain. Mixamo rigs in bind pose have X = right.
+            const glm::vec3 axis(1.0f, 0.0f, 0.0f);
+
+            for (size_t i = 0; i < kSpineChainLength; ++i) {
+                const int boneIdx = impl_->spineBend.bones[i];
+                if (boneIdx < 0 || impl_->spineBend.descendants[i].empty())
+                    continue;
+                const float angle = clampedPitch * impl_->spineBend.weights[i];
+                if (std::abs(angle) < 0.0001f)
+                    continue;
+
+                const glm::vec3 pivot = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(boneIdx)]);
+                const glm::quat rot = glm::angleAxis(angle, axis);
+                applyDeltaToMask(impl_->jointModelMats, impl_->spineBend.descendants[i], rotateAround(pivot, rot));
+            }
         }
     }
 
