@@ -90,6 +90,7 @@
 namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
+constexpr float kThirdPersonWeaponPitchMax = 0.95993109f; // 55 degrees.
 
 int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
@@ -134,6 +135,14 @@ glm::vec3 transformDirection(const glm::mat4& basis, const glm::vec3& direction)
     return glm::vec3(basis * glm::vec4(direction, 0.0f));
 }
 
+glm::vec3 resolveThirdPersonOffset(const glm::vec3& offset,
+                                   const glm::vec3& authoredRight,
+                                   const glm::vec3& up,
+                                   const glm::vec3& forward)
+{
+    return authoredRight * offset.x + up * offset.y + forward * offset.z;
+}
+
 glm::mat4 handMountRotation(const HandMountPoint& mount)
 {
     return weaponRotationMatrix(mount.rotationDegrees.y, mount.rotationDegrees.x, mount.rotationDegrees.z);
@@ -163,11 +172,18 @@ WeaponAttachmentPose buildThirdPersonWeaponAttachment(const glm::vec3& playerPos
                                                       const WeaponHandMountParams& mounts)
 {
     const glm::vec3 playerFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
-    const glm::vec3 playerRight = glm::normalize(glm::cross(playerFwd, glm::vec3{0, 1, 0}));
-    const glm::vec3 origin =
-        playerPos + playerRight * tp.handOffset.x + glm::vec3{0, 1, 0} * tp.handOffset.y + playerFwd * tp.handOffset.z;
+    const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
+    const glm::vec3 authoredRight = glm::normalize(glm::cross(playerFwd, worldUp));
 
-    const float clampedPitch = std::clamp(pitch, glm::radians(-30.0f), glm::radians(30.0f));
+    const float clampedPitch = std::clamp(pitch, -kThirdPersonWeaponPitchMax, kThirdPersonWeaponPitchMax);
+    const glm::vec3 aimPivot =
+        playerPos + resolveThirdPersonOffset(tp.aimPivotOffset, authoredRight, worldUp, playerFwd);
+    const glm::vec3 neutralOrigin =
+        playerPos + resolveThirdPersonOffset(tp.handOffset, authoredRight, worldUp, playerFwd);
+    const glm::vec3 pitchAxis = glm::normalize(glm::cross(worldUp, playerFwd));
+    const glm::mat4 pitchOrbit = glm::rotate(glm::mat4(1.0f), clampedPitch, pitchAxis);
+    const glm::vec3 origin = aimPivot + transformDirection(pitchOrbit, neutralOrigin - aimPivot);
+
     glm::mat4 orientation = glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
     orientation *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
     orientation *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
@@ -252,8 +268,9 @@ std::string buildHandMountClipboardText(const WeaponHandMountParams* mountParams
     for (int i = 0; i < 4; ++i) {
         const auto& tp = tpParams[i];
         out << "// " << k_weaponNames[i] << ": scale=" << tp.scale << "f handOffset={" << tp.handOffset.x << "f, "
-            << tp.handOffset.y << "f, " << tp.handOffset.z << "f} yaw=" << tp.yawOffset << "f pitch=" << tp.pitchOffset
-            << "f roll=" << tp.rollOffset << "f\n";
+            << tp.handOffset.y << "f, " << tp.handOffset.z << "f} aimPivot={" << tp.aimPivotOffset.x << "f, "
+            << tp.aimPivotOffset.y << "f, " << tp.aimPivotOffset.z << "f} yaw=" << tp.yawOffset << "f pitch="
+            << tp.pitchOffset << "f roll=" << tp.rollOffset << "f\n";
     }
     out << "\n// Current WeaponHandMountParams entries\n";
     out << "static const std::array<WeaponHandMountParams, 4> k_params{{\n";
@@ -4117,6 +4134,11 @@ SDL_AppResult Game::iterate()
             ImGui::DragFloat("TP Up", &tp.handOffset.y, 0.5f, -50.0f, 50.0f, "%.1f");
             ImGui::DragFloat("TP Forward", &tp.handOffset.z, 0.5f, -50.0f, 50.0f, "%.1f");
 
+            ImGui::SeparatorText("Aim Pivot (neck orbit)");
+            ImGui::DragFloat("Pivot Right", &tp.aimPivotOffset.x, 0.5f, -50.0f, 50.0f, "%.1f");
+            ImGui::DragFloat("Pivot Up", &tp.aimPivotOffset.y, 0.5f, -10.0f, 50.0f, "%.1f");
+            ImGui::DragFloat("Pivot Forward", &tp.aimPivotOffset.z, 0.5f, -30.0f, 30.0f, "%.1f");
+
             ImGui::SeparatorText("Rotation (degrees)");
             ImGui::DragFloat("TP Yaw", &tp.yawOffset, 1.0f, -180.0f, 180.0f, "%.1f");
             ImGui::DragFloat("TP Pitch", &tp.pitchOffset, 1.0f, -180.0f, 180.0f, "%.1f");
@@ -4131,12 +4153,16 @@ SDL_AppResult Game::iterate()
             }
             ImGui::SameLine();
             if (ImGui::Button("Save as new defaults")) {
-                SDL_Log("[client] 3P weapon %d: scale=%.5f offset=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f roll=%.1f",
+                SDL_Log("[client] 3P weapon %d: scale=%.5f offset=(%.1f,%.1f,%.1f) pivot=(%.1f,%.1f,%.1f) "
+                        "yaw=%.1f pitch=%.1f roll=%.1f",
                         tpTuneWeaponIdx_,
                         static_cast<double>(tp.scale),
                         static_cast<double>(tp.handOffset.x),
                         static_cast<double>(tp.handOffset.y),
                         static_cast<double>(tp.handOffset.z),
+                        static_cast<double>(tp.aimPivotOffset.x),
+                        static_cast<double>(tp.aimPivotOffset.y),
+                        static_cast<double>(tp.aimPivotOffset.z),
                         static_cast<double>(tp.yawOffset),
                         static_cast<double>(tp.pitchOffset),
                         static_cast<double>(tp.rollOffset));
