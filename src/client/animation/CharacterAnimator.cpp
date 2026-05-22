@@ -97,6 +97,14 @@ struct ArmIkChain
     std::vector<bool> upperDescendants;
     std::vector<bool> foreDescendants;
     std::vector<bool> handDescendants;
+    // Rest-pose local rotations for the three arm joints. Captured at chain
+    // construction from the skeleton's joint_rest_poses() and used as the
+    // reference frame for Phase D swing/twist constraints — clamping is
+    // measured as deviation *from rest* rather than from identity, so the
+    // bind-pose A-pose sits at the center of each constraint cone.
+    glm::quat upperArmRestLocal{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::quat foreArmRestLocal{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::quat handRestLocal{1.0f, 0.0f, 0.0f, 0.0f};
     struct FingerIkChain
     {
         std::array<int, 4> joints{-1, -1, -1, -1};
@@ -204,6 +212,94 @@ void applyDeltaToMask(std::vector<glm::mat4>& matrices, const std::vector<bool>&
         if (mask[i])
             matrices[i] = delta * matrices[i];
     }
+}
+
+/// @brief Extract a joint's rest-pose local rotation quaternion from the skeleton.
+///
+/// ozz stores rest poses as `SoaTransform` (SoaQuaternion etc.) — 4 joints per
+/// SoA slot, with separate {x, y, z, w} simd-float-4 lanes. To pull a single
+/// joint's quaternion we index by `j / 4` for the slot and `j % 4` for the lane,
+/// then read each lane component via the standard ozz `GetByIndex` extractor.
+glm::quat extractRestLocalRotation(const ozz::animation::Skeleton* skeleton, int jointIdx)
+{
+    if (skeleton == nullptr || jointIdx < 0)
+        return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    const auto rest = skeleton->joint_rest_poses();
+    const size_t soaIdx = static_cast<size_t>(jointIdx / 4);
+    const int lane = jointIdx % 4;
+    if (soaIdx >= rest.size())
+        return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+
+    // Each component is a simd-float-4 packed across 4 joints; spill to a
+    // float[4] and read the lane. ozz::math::Store4PtrU expects a 16-byte
+    // aligned buffer for the unaligned-store path, so we declare it explicitly.
+    alignas(16) float x[4];
+    alignas(16) float y[4];
+    alignas(16) float z[4];
+    alignas(16) float w[4];
+    ozz::math::StorePtrU(rest[soaIdx].rotation.x, x);
+    ozz::math::StorePtrU(rest[soaIdx].rotation.y, y);
+    ozz::math::StorePtrU(rest[soaIdx].rotation.z, z);
+    ozz::math::StorePtrU(rest[soaIdx].rotation.w, w);
+    return glm::normalize(glm::quat(w[lane], x[lane], y[lane], z[lane]));
+}
+
+/// @brief Decompose `q` into `swing * twist` where `twist` rotates around `axis`.
+///
+/// `axis` must be a unit vector. The decomposition isolates the rotation
+/// component around the supplied axis (twist) from the perpendicular component
+/// (swing). Used by Phase D constraints to clamp twist independently of swing.
+void swingTwistDecompose(const glm::quat& q, const glm::vec3& axis, glm::quat& outSwing, glm::quat& outTwist)
+{
+    const glm::vec3 r(q.x, q.y, q.z);
+    const float dot = glm::dot(r, axis);
+    glm::quat twist(q.w, axis.x * dot, axis.y * dot, axis.z * dot);
+    const float twistMag2 = twist.x * twist.x + twist.y * twist.y + twist.z * twist.z + twist.w * twist.w;
+    if (twistMag2 < 1e-12f) {
+        outTwist = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    } else {
+        twist *= 1.0f / std::sqrt(twistMag2);
+        outTwist = twist;
+    }
+    outSwing = glm::normalize(q * glm::inverse(outTwist));
+}
+
+/// @brief Clamp a swing+twist pair so the swing magnitude and twist angle stay
+/// inside the requested cone/range.
+///
+/// `swing` is the deviation rotation perpendicular to `axis`. Its magnitude in
+/// radians is `2 * acos(|swing.w|)`. We clamp the magnitude by re-building the
+/// swing from its rotation axis (the unit XYZ vector) at the clamp angle.
+///
+/// `twist` is the rotation around `axis`. Its signed angle is recovered by
+/// dotting the imaginary part with `axis` and using `2 * atan2(proj, w)`.
+void clampSwingTwist(glm::quat& swing, glm::quat& twist, const glm::vec3& axis, float maxSwingRad, float maxTwistRad)
+{
+    // Swing magnitude clamp.
+    swing = glm::normalize(swing);
+    const float swingAngle = 2.0f * std::acos(std::clamp(std::abs(swing.w), 0.0f, 1.0f));
+    if (swingAngle > maxSwingRad && swingAngle > 1e-4f) {
+        glm::vec3 swingAxis(swing.x, swing.y, swing.z);
+        const float swingAxisLen = glm::length(swingAxis);
+        if (swingAxisLen > 1e-6f) {
+            swingAxis /= swingAxisLen;
+            // Re-sign so we clamp toward the same hemisphere.
+            const float sign = (swing.w < 0.0f) ? -1.0f : 1.0f;
+            swing = glm::angleAxis(maxSwingRad * sign, swingAxis * sign);
+        }
+    }
+
+    // Twist angle clamp around `axis`.
+    twist = glm::normalize(twist);
+    const float proj = twist.x * axis.x + twist.y * axis.y + twist.z * axis.z;
+    float twistAngle = 2.0f * std::atan2(proj, twist.w);
+    if (twistAngle > glm::pi<float>())
+        twistAngle -= glm::two_pi<float>();
+    else if (twistAngle < -glm::pi<float>())
+        twistAngle += glm::two_pi<float>();
+    const float clampedTwist = std::clamp(twistAngle, -maxTwistRad, maxTwistRad);
+    if (std::abs(twistAngle - clampedTwist) > 1e-4f)
+        twist = glm::angleAxis(clampedTwist, axis);
 }
 
 } // namespace
@@ -334,6 +430,9 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
             chain.upperDescendants = buildDescendantMask(rig.skeleton(), chain.upperArm);
             chain.foreDescendants = buildDescendantMask(rig.skeleton(), chain.foreArm);
             chain.handDescendants = buildDescendantMask(rig.skeleton(), chain.hand);
+            chain.upperArmRestLocal = extractRestLocalRotation(rig.skeleton(), chain.upperArm);
+            chain.foreArmRestLocal = extractRestLocalRotation(rig.skeleton(), chain.foreArm);
+            chain.handRestLocal = extractRestLocalRotation(rig.skeleton(), chain.hand);
             chain.fingers[0] = makeFingerChain((sidePrefix + "HandThumb").c_str());
             chain.fingers[1] = makeFingerChain((sidePrefix + "HandIndex").c_str());
             chain.fingers[2] = makeFingerChain((sidePrefix + "HandMiddle").c_str());
@@ -380,6 +479,55 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
 {
     if (!impl_->rig || impl_->jointModelMats.empty() || impl_->skinMats.empty())
         return;
+
+    // Phase D joint constraint helper. Clamps the *deviation from rest* of a
+    // single joint, expressed in its parent's local frame, to a swing+twist
+    // envelope around the bone's local X axis (Mixamo convention: X = along
+    // the bone). The clamp is applied as a model-space delta and cascades to
+    // descendants via the supplied mask, so the chain below the constrained
+    // joint moves rigidly with the clamped pose (no extra IK fight).
+    auto applyJointConstraint = [&](int boneIdx,
+                                    const glm::quat& restLocal,
+                                    const std::vector<bool>& descendants,
+                                    float maxSwingRad,
+                                    float maxTwistRad) {
+        if (boneIdx < 0 || descendants.empty())
+            return;
+        const auto parents = impl_->rig->skeleton()->joint_parents();
+        const int parentIdx = static_cast<int>(parents[static_cast<size_t>(boneIdx)]);
+        if (parentIdx < 0)
+            return;
+
+        const glm::mat4& bM = impl_->jointModelMats[static_cast<size_t>(boneIdx)];
+        const glm::mat4& pM = impl_->jointModelMats[static_cast<size_t>(parentIdx)];
+        const glm::mat3 bR(glm::normalize(glm::vec3(bM[0])),
+                           glm::normalize(glm::vec3(bM[1])),
+                           glm::normalize(glm::vec3(bM[2])));
+        const glm::mat3 pR(glm::normalize(glm::vec3(pM[0])),
+                           glm::normalize(glm::vec3(pM[1])),
+                           glm::normalize(glm::vec3(pM[2])));
+
+        const glm::quat localRot = glm::normalize(glm::quat_cast(glm::transpose(pR) * bR));
+        const glm::quat devFromRest = glm::normalize(localRot * glm::inverse(restLocal));
+
+        glm::quat swing(1.0f, 0.0f, 0.0f, 0.0f);
+        glm::quat twist(1.0f, 0.0f, 0.0f, 0.0f);
+        const glm::vec3 axis(1.0f, 0.0f, 0.0f); // Mixamo bone axis = local X.
+        swingTwistDecompose(devFromRest, axis, swing, twist);
+        clampSwingTwist(swing, twist, axis, maxSwingRad, maxTwistRad);
+
+        const glm::quat devClamped = glm::normalize(swing * twist);
+        const glm::quat localClamped = glm::normalize(devClamped * restLocal);
+        const glm::mat3 newBR = pR * glm::mat3_cast(localClamped);
+        const glm::quat newBQ = glm::normalize(glm::quat_cast(newBR));
+        const glm::quat currBQ = glm::normalize(glm::quat_cast(bR));
+        const glm::quat deltaRot = glm::normalize(newBQ * glm::inverse(currBQ));
+        if (std::abs(1.0f - std::abs(deltaRot.w)) < 1e-5f)
+            return; // Effectively identity — nothing to apply.
+
+        const glm::vec3 pivot = matrixTranslation(bM);
+        applyDeltaToMask(impl_->jointModelMats, descendants, rotateAround(pivot, deltaRot));
+    };
 
     auto solveArm = [&](const ArmIkChain& chain, const ArmIkTarget& target) {
         if (!target.enabled || !chain.valid())
@@ -442,11 +590,37 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
         const glm::quat upperRot = glm::normalize(glm::slerp(identityQuat, upperRotRaw, reachWeight));
         applyDeltaToMask(impl_->jointModelMats, chain.upperDescendants, rotateAround(shoulder, upperRot));
 
+        // Phase D shoulder constraint: clamp deviation from rest to a 110°
+        // cone + ±60° twist. Prevents the IK from putting the elbow behind
+        // the head or over-twisting the shoulder when targeting an extreme grip.
+        constexpr float k_shoulderMaxSwingRad = 1.91986f; // 110 degrees.
+        constexpr float k_shoulderMaxTwistRad = 1.04720f; // 60 degrees.
+        applyJointConstraint(chain.upperArm,
+                             chain.upperArmRestLocal,
+                             chain.upperDescendants,
+                             k_shoulderMaxSwingRad,
+                             k_shoulderMaxTwistRad);
+
         const glm::vec3 currentElbow = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.foreArm)]);
         const glm::vec3 currentWrist = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.hand)]);
         const glm::quat foreRotRaw = rotationBetween(currentWrist - currentElbow, targetPos - currentElbow);
         const glm::quat foreRot = glm::normalize(glm::slerp(identityQuat, foreRotRaw, reachWeight));
         applyDeltaToMask(impl_->jointModelMats, chain.foreDescendants, rotateAround(currentElbow, foreRot));
+
+        // Phase D elbow hinge constraint: large swing budget (~160°) but very
+        // little twist (~5°). The elbow is anatomically a single-DOF hinge —
+        // most of its motion is bending along one axis; twist about the
+        // forearm is supposed to live in the wrist or the lower-arm twist
+        // bone, not in this joint. The big swing budget lets the IK still
+        // reach extreme grip distances; the tiny twist budget guarantees the
+        // forearm doesn't spin around its own length.
+        constexpr float k_elbowMaxSwingRad = 2.79253f; // 160 degrees.
+        constexpr float k_elbowMaxTwistRad = 0.08727f; // 5 degrees.
+        applyJointConstraint(chain.foreArm,
+                             chain.foreArmRestLocal,
+                             chain.foreDescendants,
+                             k_elbowMaxSwingRad,
+                             k_elbowMaxTwistRad);
         return true;
     };
 
