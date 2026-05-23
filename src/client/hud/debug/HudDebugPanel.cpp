@@ -244,10 +244,10 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
     } else if (const auto* equipment = dynamic_cast<const EquipmentSlots*>(&widget)) {
         writeFloatParam(out, first, "slotSize", equipment->slotSize);
         writeFloatParam(out, first, "slotGap", equipment->slotGap);
+        writeFloatParam(out, first, "iconSize", equipment->iconSize);
         writeFloatParam(out, first, "keyFontSize", equipment->keyFontSize);
-        writeFloatParam(out, first, "countFontSize", equipment->countFontSize);
-        writeFloatParam(out, first, "statusFontSize", equipment->statusFontSize);
-        writeFloatParam(out, first, "nameFontSize", equipment->nameFontSize);
+        writeFloatParam(out, first, "keyPadX", equipment->keyPadX);
+        writeFloatParam(out, first, "keyPadY", equipment->keyPadY);
     } else if (const auto* gravity = dynamic_cast<const GravityIndicator*>(&widget)) {
         writeFloatParam(out, first, "diskSize", gravity->diskSize);
     } else if (const auto* grenade = dynamic_cast<const GrenadeRadialWidget*>(&widget)) {
@@ -455,10 +455,10 @@ void editWidgetSpecific(HudWidget& widget)
     } else if (auto* equipment = dynamic_cast<EquipmentSlots*>(&widget)) {
         editFloat("Slot Size", equipment->slotSize, 1.0f, 8.0f, 240.0f);
         editFloat("Slot Gap", equipment->slotGap, 0.5f, 0.0f, 80.0f);
+        editFloat("Icon Size", equipment->iconSize, 0.5f, 4.0f, 160.0f);
         editFloat("Key Font Size", equipment->keyFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Count Font Size", equipment->countFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Status Font Size", equipment->statusFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Name Font Size", equipment->nameFontSize, 0.5f, 4.0f, 96.0f);
+        editFloat("Key Pad X", equipment->keyPadX, 0.25f, 0.0f, 40.0f);
+        editFloat("Key Pad Y", equipment->keyPadY, 0.25f, 0.0f, 40.0f);
     } else if (auto* gravity = dynamic_cast<GravityIndicator*>(&widget)) {
         editFloat("Disk Size", gravity->diskSize, 1.0f, 4.0f, 240.0f);
     } else if (auto* grenade = dynamic_cast<GrenadeRadialWidget*>(&widget)) {
