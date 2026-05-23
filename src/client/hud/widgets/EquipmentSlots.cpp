@@ -1,5 +1,5 @@
 /// @file EquipmentSlots.cpp
-/// @brief Voidfall equipment row implementation.
+/// @brief Voidfall ability row implementation.
 
 #include "EquipmentSlots.hpp"
 
@@ -27,7 +27,6 @@ void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPoo
     if (state.bindings) {
         primaryAbilityLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Ability1));
         secondaryAbilityLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Ability2));
-        grenadeLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::CycleGrenade));
     }
     visible = state.isAlive;
 }
@@ -45,7 +44,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
     const float pad = 6.f * s;
     const float iconSize = 24.f * s;
 
-    constexpr int slotCount = 3;
+    constexpr int slotCount = 2;
     const float totalW = static_cast<float>(slotCount) * ss + static_cast<float>(slotCount - 1) * gp;
     const float startX = anchorX - totalW * 0.5f;
     const float y = anchorY - ss;
@@ -57,19 +56,17 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
         int count; // -1 = no count (show RDY/secs)
         std::string name;
         bool isGrapple;
-        bool isGrenade;
         bool isTactical;
         bool available;
         bool marked;
     };
 
-    const SlotConfig slots[3] = {
+    const SlotConfig slots[slotCount] = {
         {&primaryAbilityLabel_,
          state_.primaryAbilityCharge,
          -1,
          state_.primaryAbilityAvailable ? state_.primaryAbilityName : "LOCKED",
          state_.primaryAbilityName == "GRAPPLE",
-         false,
          state_.primaryAbilityName != "GRAPPLE",
          state_.primaryAbilityAvailable,
          false},
@@ -78,19 +75,9 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
          -1,
          state_.secondaryAbilityAvailable ? state_.secondaryAbilityName : "LOCKED",
          false,
-         false,
          true,
          state_.secondaryAbilityAvailable,
          state_.secondaryAbilityMarked},
-        {&grenadeLabel_,
-         state_.grenadeCharge,
-         state_.grenadeCount,
-         state_.grenadeName,
-         false,
-         true,
-         false,
-         true,
-         false},
     };
 
     for (int i = 0; i < slotCount; ++i) {
@@ -108,8 +95,6 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
         const float iy = y + pad;
         if (sl.isGrapple)
             icons::grapple(ctx, ix, iy, iconSize, iconC);
-        else if (sl.isGrenade)
-            icons::grenade(ctx, ix, iy, iconSize, iconC);
         else if (sl.isTactical)
             icons::tactical(ctx, ix, iy, iconSize, iconC);
 

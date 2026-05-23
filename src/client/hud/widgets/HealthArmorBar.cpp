@@ -124,6 +124,9 @@ void drawShapeOutline(
         shape[0].y,
     };
     ctx.polyline(points, 7, thickness, color);
+    const float radius = thickness * 0.5f;
+    for (const Point p : shape)
+        ctx.roundedRect(p.x - radius, p.y - radius, radius * 2.f, radius * 2.f, radius, color);
 }
 } // namespace
 
@@ -131,7 +134,7 @@ HealthArmorBar::HealthArmorBar()
 {
     anchor = HudAnchor::TopCenter;
     offsetX = -250.f;
-    offsetY = 80.f;
+    offsetY = 98.f;
     width = panelWidth;
     height = barHeight;
 }

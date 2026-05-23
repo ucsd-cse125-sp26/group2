@@ -35,5 +35,4 @@ private:
     HudEquipmentState state_;
     std::string primaryAbilityLabel_ = "Left Shift";
     std::string secondaryAbilityLabel_ = "E";
-    std::string grenadeLabel_ = "G";
 };

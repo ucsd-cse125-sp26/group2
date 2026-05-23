@@ -14,6 +14,7 @@
 #include "hud/widgets/EquipmentSlots.hpp"
 #include "hud/widgets/GravityIndicator.hpp"
 #include "hud/widgets/GrenadeRadialWidget.hpp"
+#include "hud/widgets/GrenadeSlotsWidget.hpp"
 #include "hud/widgets/HealthArmorBar.hpp"
 #include "hud/widgets/HitMarkerWidget.hpp"
 #include "hud/widgets/KdaCounter.hpp"
@@ -89,11 +90,13 @@ const char* widgetName(const HudWidget* widget)
     if (dynamic_cast<const EnemyWorldHealthBar*>(widget))
         return "Enemy World Health Bar";
     if (dynamic_cast<const EquipmentSlots*>(widget))
-        return "Equipment Slots";
+        return "Ability Slots";
     if (dynamic_cast<const GravityIndicator*>(widget))
         return "Gravity Indicator";
     if (dynamic_cast<const GrenadeRadialWidget*>(widget))
         return "Grenade Radial";
+    if (dynamic_cast<const GrenadeSlotsWidget*>(widget))
+        return "Grenade Slots";
     if (dynamic_cast<const HealthArmorBar*>(widget))
         return "Health Armor Bar";
     if (dynamic_cast<const HitMarkerWidget*>(widget))
@@ -254,6 +257,17 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "nameFontSize", grenade->nameFontSize);
         writeFloatParam(out, first, "countFontSize", grenade->countFontSize);
         writeFloatParam(out, first, "keyFontSize", grenade->keyFontSize);
+    } else if (const auto* grenades = dynamic_cast<const GrenadeSlotsWidget*>(&widget)) {
+        writeFloatParam(out, first, "slotSize", grenades->slotSize);
+        writeFloatParam(out, first, "slotGap", grenades->slotGap);
+        writeFloatParam(out, first, "iconSize", grenades->iconSize);
+        writeFloatParam(out, first, "countFontSize", grenades->countFontSize);
+        writeFloatParam(out, first, "countPadX", grenades->countPadX);
+        writeFloatParam(out, first, "countPadY", grenades->countPadY);
+        writeFloatParam(out, first, "countCharacterGap", grenades->countCharacterGap);
+        writeFloatParam(out, first, "iconPadRight", grenades->iconPadRight);
+        writeFloatParam(out, first, "cornerCut", grenades->cornerCut);
+        writeFloatParam(out, first, "borderThickness", grenades->borderThickness);
     } else if (const auto* health = dynamic_cast<const HealthArmorBar*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", health->panelWidth);
         writeFloatParam(out, first, "barHeight", health->barHeight);
@@ -454,6 +468,17 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Name Font Size", grenade->nameFontSize, 0.5f, 4.0f, 96.0f);
         editFloat("Count Font Size", grenade->countFontSize, 0.5f, 4.0f, 96.0f);
         editFloat("Key Font Size", grenade->keyFontSize, 0.5f, 4.0f, 96.0f);
+    } else if (auto* grenades = dynamic_cast<GrenadeSlotsWidget*>(&widget)) {
+        editFloat("Slot Size", grenades->slotSize, 1.0f, 8.0f, 160.0f);
+        editFloat("Slot Gap", grenades->slotGap, 0.5f, 0.0f, 80.0f);
+        editFloat("Icon Size", grenades->iconSize, 0.5f, 4.0f, 120.0f);
+        editFloat("Count Font Size", grenades->countFontSize, 0.5f, 4.0f, 96.0f);
+        editFloat("Count Pad X", grenades->countPadX, 0.25f, 0.0f, 40.0f);
+        editFloat("Count Pad Y", grenades->countPadY, 0.25f, 0.0f, 40.0f);
+        editFloat("Count Character Gap", grenades->countCharacterGap, 0.25f, 0.0f, 20.0f);
+        editFloat("Icon Pad Right", grenades->iconPadRight, 0.25f, 0.0f, 40.0f);
+        editFloat("Corner Cut", grenades->cornerCut, 0.25f, 0.0f, 40.0f);
+        editFloat("Border Thickness", grenades->borderThickness, 0.25f, 0.0f, 20.0f);
     } else if (auto* health = dynamic_cast<HealthArmorBar*>(&widget)) {
         editFloat("Panel Width", health->panelWidth, 1.0f, 80.0f, 1200.0f);
         editFloat("Bar Height", health->barHeight, 0.5f, 4.0f, 200.0f);
