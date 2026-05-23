@@ -15,7 +15,7 @@ struct GrenadeSlotsWidget : HudWidget
     float countPadY = 5.f;
     float countCharacterGap = 3.25f;
     float iconPadRight = 3.f;
-    float cornerCut = 9.f;
+    float cornerCut = 2.25f;
     float borderThickness = 4.f;
 
     GrenadeSlotsWidget();
