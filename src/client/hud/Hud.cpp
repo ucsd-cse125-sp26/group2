@@ -20,7 +20,6 @@
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
-#include "widgets/KdaCounter.hpp"
 #include "widgets/KillFeed.hpp"
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
@@ -194,8 +193,7 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
     widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
 
-    // Top right: KDA counter + killfeed (KDA renders first, KillFeed sits below).
-    widgets_.push_back(std::make_unique<KdaCounter>());
+    // Top right: killfeed.
     widgets_.push_back(std::make_unique<KillFeed>());
     widgets_.push_back(std::make_unique<PickupNotification>());
 

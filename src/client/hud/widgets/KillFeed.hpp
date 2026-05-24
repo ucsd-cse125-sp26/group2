@@ -1,5 +1,5 @@
 /// @file KillFeed.hpp
-/// @brief Voidfall sliding kill feed (top-right, below KDA counter).
+/// @brief Voidfall sliding kill feed (top-right).
 ///
 /// Each entry is a thin bracketed pill:
 ///   ┌──────────────────────────┐

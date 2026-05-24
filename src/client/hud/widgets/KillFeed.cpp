@@ -32,7 +32,7 @@ KillFeed::KillFeed()
 {
     anchor = HudAnchor::TopRight;
     offsetX = -20.f;
-    offsetY = 100.f; // sits below the KDA counter
+    offsetY = 20.f;
 }
 
 void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)

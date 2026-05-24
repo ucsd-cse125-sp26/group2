@@ -68,7 +68,7 @@ struct HudVertex
     float position[2];  ///< Pixel coordinates, origin top-left.
     float uv[2];        ///< Texture coords (atlas UV or local quad pos for shapes).
     float color[4];     ///< RGBA, straight alpha.
-    float texMode;      ///< 0=solid, 1=SDF text, 2=sprite, 3=SDF rounded rect.
+    float texMode;      ///< 0=solid, 1=SDF text, 2=sprite, 3=SDF rounded rect, 6=SDF erase mask.
     float shapeData[3]; ///< Mode 3 only: [halfWidth, halfHeight, cornerRadius] in pixels.
 };
 

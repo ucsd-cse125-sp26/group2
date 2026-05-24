@@ -320,6 +320,52 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
     }
 }
 
+void HudContext::knockoutText(const char* str, float x, float y, float size, HudAlign align)
+{
+    if (!sdfAtlas_ || !str || !*str)
+        return;
+
+    const float scale = size / static_cast<float>(SdfAtlas::k_renderPx);
+    float totalWidth = 0.f;
+    if (align != HudAlign::Left)
+        totalWidth = measureText(str, size);
+
+    float startX = x;
+    if (align == HudAlign::Center)
+        startX = x - totalWidth * 0.5f;
+    else if (align == HudAlign::Right)
+        startX = x - totalWidth;
+
+    float cursorX = std::round(startX);
+    const float baselineY = std::round(y + size);
+
+    for (const char* p = str; *p; ++p) {
+        const uint32_t cp = static_cast<uint8_t>(*p);
+        const GlyphInfo* gi = sdfAtlas_->glyph(cp);
+        if (!gi)
+            continue;
+
+        const float gw = gi->width * scale;
+        const float gh = gi->height * scale;
+        if (gw > 0.f && gh > 0.f) {
+            const float gx = std::round(cursorX + gi->bearing.x * scale);
+            const float gy = std::round(baselineY - gi->bearing.y * scale);
+            emitQuad(gx,
+                     gy,
+                     gw,
+                     gh,
+                     gi->uvMin.x,
+                     gi->uvMin.y,
+                     gi->uvMax.x,
+                     gi->uvMax.y,
+                     HudColor::white(),
+                     6.f);
+        }
+
+        cursorX += gi->advance * scale;
+    }
+}
+
 float HudContext::measureText(const char* str, float size) const
 {
     if (!sdfAtlas_ || !str || !*str)
