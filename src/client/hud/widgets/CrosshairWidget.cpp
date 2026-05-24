@@ -15,10 +15,10 @@ CrosshairWidget::CrosshairWidget()
     // lighting (sky-bright maps) was washing the previous 1.5 px reticle out
     // entirely; every arm and the dot now also draw a 1-px black underlay
     // for guaranteed contrast against any background.
-    style.gap = 10.f;
-    style.length = 8.f;
+    style.gap = 5.f;
+    style.length = 6.f;
     style.thickness = 2.0f;
-    style.color = voidfall::k_amber;
+    style.color = voidfall::k_primary;
     style.dot = true;
 }
 

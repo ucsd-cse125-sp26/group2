@@ -2,6 +2,7 @@
 #include "TeamStatusBar.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 TeamStatusBar::TeamStatusBar()
 {
@@ -30,6 +31,8 @@ void TeamStatusBar::update(float /*dt*/, const HudGameState& state, HudTweenPool
 
 void TeamStatusBar::draw(HudContext& ctx, float x, float y)
 {
+    using namespace voidfall;
+
     const float s = uiScale_;
     const float sfs = scoreFontSize * s;
     const float isz = indicatorSize * s;
@@ -38,15 +41,14 @@ void TeamStatusBar::draw(HudContext& ctx, float x, float y)
     // Score: "AllyScore - EnemyScore" centered.
     char scoreText[32];
     SDL_snprintf(scoreText, sizeof(scoreText), "%d - %d", allyScore_, enemyScore_);
-    ctx.text(scoreText, x, y, sfs, HudColor::white(), HudAlign::Center);
+    ctx.text(scoreText, x, y, sfs, k_textBright, HudAlign::Center);
 
     // Ally indicators (left of center).
     const float indicatorY = y + sfs + 4.f * s;
     float curX = x - (static_cast<float>(allyTotal_) * (isz + isp)) * 0.5f;
     for (int i = 0; i < allyTotal_; i++) {
         const bool alive = i < allyAlive_;
-        ctx.rect(
-            curX, indicatorY, isz, isz, alive ? HudColor(0.3f, 0.7f, 1.f, 0.9f) : HudColor(0.3f, 0.3f, 0.3f, 0.5f));
+        ctx.rect(curX, indicatorY, isz, isz, alive ? withAlpha(k_tertiary, 0.9f) : withAlpha(k_secondary, 0.5f));
         curX += isz + isp;
     }
 }

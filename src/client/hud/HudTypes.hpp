@@ -68,7 +68,7 @@ struct HudVertex
     float position[2];  ///< Pixel coordinates, origin top-left.
     float uv[2];        ///< Texture coords (atlas UV or local quad pos for shapes).
     float color[4];     ///< RGBA, straight alpha.
-    float texMode;      ///< 0=solid, 1=SDF text, 2=sprite, 3=SDF rounded rect.
+    float texMode;      ///< 0=solid, 1=SDF text, 2=sprite, 3=SDF rounded rect, 6=SDF erase mask.
     float shapeData[3]; ///< Mode 3 only: [halfWidth, halfHeight, cornerRadius] in pixels.
 };
 
@@ -80,7 +80,7 @@ struct CrosshairStyle
     float gap = 3.f;                      ///< Gap from center to start of each line (pixels).
     float length = 6.f;                   ///< Length of each crosshair arm (pixels).
     float thickness = 2.f;                ///< Line thickness (pixels).
-    HudColor color{0.f, 1.f, 0.f, 0.85f}; ///< Default green.
+    HudColor color{0.168627f, 0.694118f, 0.741176f, 0.85f}; ///< Default primary palette color.
     bool dot = true;                      ///< Draw center dot.
 };
 
@@ -125,7 +125,7 @@ struct HudDamageNumber
 struct HudDamageAccum
 {
     int total = 0;                      ///< Accumulated damage to current target.
-    HudColor color{1.f, 1.f, 1.f, 1.f}; ///< Color matching the latest hit type.
+    HudColor color{0.168627f, 0.694118f, 0.741176f, 1.f}; ///< Color matching the latest hit type.
 };
 
 /// @brief Per-teammate status (for scoreboard / team bar).
