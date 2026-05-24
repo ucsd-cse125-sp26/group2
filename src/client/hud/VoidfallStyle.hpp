@@ -70,6 +70,8 @@ constexpr HudColor k_red{k_primary.r, k_primary.g, k_primary.b, 1.0f};
 constexpr HudColor k_redBright{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 /// @brief Dim red — `oklch(0.50 0.15 28)`.
 constexpr HudColor k_redDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
+constexpr HudColor k_health{0.92f, 0.96f, 0.97f, 1.0f};
+constexpr HudColor k_healthBright{1.0f, 1.0f, 1.0f, 1.0f};
 
 /// @brief Shield cyan — `oklch(0.80 0.10 220)`.
 constexpr HudColor k_cyan{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};

@@ -161,7 +161,7 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float outline = std::max(1.f, outlineThickness * s);
     const float topY = y - h;
 
-    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, healthFill_, k_red, k_redBright);
+    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, healthFill_, k_health, k_healthBright);
     drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, armorFill_, k_cyanDim, k_cyan);
     drawShapeOutline(ctx, x, topY, w, h, chamfer, cornerCut, outline, k_lineBright);
 }

@@ -139,7 +139,7 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
         const float nameTop = std::round(sy - hpH - (e.maxSh > 0 ? shH + 2.f * s : 0.f) - 4.f * s - fs);
         // Name floats over the world → outline-on for legibility against
         // bright sky / textured environments.
-        ctx.text(e.name.c_str(), sx, nameTop, fs, withAlpha(k_red, alpha), HudAlign::Center, /*outlined=*/true);
+        ctx.text(e.name.c_str(), sx, nameTop, fs, withAlpha(k_health, alpha), HudAlign::Center, /*outlined=*/true);
 
         // Shield bar (above HP) — only when target has any shield max.
         // Gradient cyanDim → cyan to match player vitals + design CSS.
@@ -168,8 +168,8 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
                              hpH,
                              std::clamp(e.liveHp, 0.f, 1.f),
                              std::clamp(e.trailHp, 0.f, 1.f),
-                             withAlpha(k_red, alpha),
-                             withAlpha(k_redBright, alpha),
+                             withAlpha(k_health, alpha),
+                             withAlpha(k_healthBright, alpha),
                              withAlpha(k_tertiary, 0.45f * alpha),
                              withAlpha(k_quaternary, 0.70f * alpha),
                              withAlpha(k_lineDim, alpha));

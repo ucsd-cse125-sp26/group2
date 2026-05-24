@@ -4207,13 +4207,13 @@ SDL_AppResult Game::iterate()
             accumTotal_ = 0;
         }
         hudState.damageAccum.total = accumTotal_;
-        // HUD palette: headshot=primary, shield=tertiary, hp=primary.
+        // HUD palette: headshot=primary, shield=tertiary, hp=white.
         if (accumLastHitType_ == 2)
             hudState.damageAccum.color = voidfall::k_primary;
         else if (accumLastHitType_ == 1)
             hudState.damageAccum.color = voidfall::k_tertiary;
         else
-            hudState.damageAccum.color = voidfall::k_primary;
+            hudState.damageAccum.color = voidfall::k_health;
 
         // ── View-projection matrix for world→screen projection ──
         hudState.viewProj = renderer->getCamera().getViewProjectionMatrix();
