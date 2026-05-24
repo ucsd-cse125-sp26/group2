@@ -209,14 +209,8 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "panelWidth", ammo->panelWidth);
         writeFloatParam(out, first, "panelHeight", ammo->panelHeight);
         writeFloatParam(out, first, "clipFontSize", ammo->clipFontSize);
-        writeFloatParam(out, first, "magFontSize", ammo->magFontSize);
         writeFloatParam(out, first, "reserveFontSize", ammo->reserveFontSize);
-        writeFloatParam(out, first, "nameFontSize", ammo->nameFontSize);
-        writeFloatParam(out, first, "fireModeFontSize", ammo->fireModeFontSize);
-        writeFloatParam(out, first, "slotFontSize", ammo->slotFontSize);
-        writeFloatParam(out, first, "slotIndexFontSize", ammo->slotIndexFontSize);
-        writeFloatParam(out, first, "slotTabHeight", ammo->slotTabHeight);
-        writeFloatParam(out, first, "typeUnderlineThickness", ammo->typeUnderlineThickness);
+        writeFloatParam(out, first, "edgePadding", ammo->edgePadding);
     } else if (const auto* buy = dynamic_cast<const BuyMenu*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", buy->panelWidth);
         writeFloatParam(out, first, "panelHeight", buy->panelHeight);
@@ -420,14 +414,8 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Panel Width", ammo->panelWidth, 1.0f, 80.0f, 1200.0f);
         editFloat("Panel Height", ammo->panelHeight, 1.0f, 40.0f, 800.0f);
         editFloat("Clip Font Size", ammo->clipFontSize, 0.5f, 6.0f, 160.0f);
-        editFloat("Magazine Font Size", ammo->magFontSize, 0.5f, 6.0f, 120.0f);
         editFloat("Reserve Font Size", ammo->reserveFontSize, 0.5f, 6.0f, 120.0f);
-        editFloat("Name Font Size", ammo->nameFontSize, 0.5f, 6.0f, 120.0f);
-        editFloat("Fire Mode Font Size", ammo->fireModeFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Slot Font Size", ammo->slotFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Slot Index Font Size", ammo->slotIndexFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Slot Tab Height", ammo->slotTabHeight, 0.5f, 4.0f, 160.0f);
-        editFloat("Type Underline Thickness", ammo->typeUnderlineThickness, 0.25f, 0.0f, 20.0f);
+        editFloat("Edge Padding", ammo->edgePadding, 0.5f, 0.0f, 200.0f);
     } else if (auto* buy = dynamic_cast<BuyMenu*>(&widget)) {
         editFloat("Panel Width", buy->panelWidth, 1.0f, 80.0f, 1400.0f);
         editFloat("Panel Height", buy->panelHeight, 1.0f, 80.0f, 1000.0f);
