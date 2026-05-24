@@ -5,6 +5,7 @@
 
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
+#include "host/HostedServer.hpp"
 #include "menus/home/Home.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
@@ -227,6 +228,26 @@ SDL_AppResult App::iterate()
                 SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
                 transitionTo(Screen::Lobby);
             }
+        }
+
+        if (home->consumeHostRequest()) {
+            // TODO: Move logic when host page is implemented, placeholder to test
+            HostConfigState config{
+                .port = 0,
+                .persistAfterClientExit = false,
+            };
+            std::string error;
+            if (!hostedServer.start(config, error)) {
+                home->setJoinError(error.empty() ? "Failed to start hosted server" : error);
+                break;
+            }
+
+            // TODO: Transition to lobby and connect client to hosted server instead of immediate shutodwn
+            uint16_t serverPort = hostedServer.port();
+
+            SDL_Delay(500);
+            hostedServer.shutdown();
+            home->setJoinError("Hosted server start/shutdown test completed at port " + std::to_string(serverPort));
         }
         break;
     }

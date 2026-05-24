@@ -21,6 +21,7 @@ struct JoinMenuState
 struct JoinMenuResult
 {
     bool connectClicked = false; ///< True if the user pressed "Join" this frame.
+    bool hostClicked = false;    ///< True if the user pressed "Host" this frame.
     bool refreshClicked = false; ///< True if the user requested a global browser refresh.
     int localServerIndex = -1;   ///< Index of a discovered local server to join, or -1.
     int globalServerIndex = -1;  ///< Index of a discovered server to join, or -1.

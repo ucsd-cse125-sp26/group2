@@ -71,6 +71,11 @@ SDL_AppResult Home::iterate()
     if (result.refreshClicked) {
         startGlobalRefresh(true);
     }
+    if (result.hostClicked) {
+        joinError.clear();
+        pendingHostRequest = true;
+    }
+
     if (result.connectClicked) {
         joinError.clear();
         SDL_Log("Join button clicked! IP: %s, Port: %d", joinMenuState.serverIp.c_str(), joinMenuState.serverPort);
@@ -108,6 +113,16 @@ std::optional<JoinRequest> Home::consumeJoinRequest()
     std::optional<JoinRequest> result = pendingJoinRequest;
     pendingJoinRequest.reset();
     return result;
+}
+
+bool Home::consumeHostRequest()
+{
+    if (!pendingHostRequest) {
+        return false;
+    }
+
+    pendingHostRequest = false;
+    return true;
 }
 
 void Home::setJoinError(const std::string& error)

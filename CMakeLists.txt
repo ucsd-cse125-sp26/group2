@@ -1016,6 +1016,8 @@ add_executable(group2
         src/client/menus/pause/ConfirmModal.cpp
         src/client/menus/pause/PauseMenu.hpp
         src/client/menus/pause/PauseMenu.cpp
+        src/client/host/HostedServer.hpp
+        src/client/host/HostedServer.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

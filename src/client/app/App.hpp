@@ -6,6 +6,7 @@
 #include "DeveloperConfig.hpp"
 #include "IScreen.hpp"
 #include "config/UserSettings.hpp"
+#include "host/HostedServer.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
@@ -57,6 +58,7 @@ private:
     UserSettings userSettings;        ///< User-specific input and gameplay settings.
     std::string userSettingsPath;     ///< Path used to load and save user settings.
     Client client;                    ///< Network client connected to the authoritative server.
+    HostedServer hostedServer;        ///< Hosted game server instance.
 
     Screen current = Screen::Home;    ///< Which screen is currently active.
     std::unique_ptr<IScreen> screen_; ///< Active screen instance.

@@ -43,6 +43,10 @@ public:
     /// @return The request, or nullopt if none is pending.
     std::optional<JoinRequest> consumeJoinRequest();
 
+    /// @brief Take the pending host request set when the user clicks "Host", clearing it.
+    /// @return True if a host request was pending.
+    bool consumeHostRequest();
+
     /// @brief Display an error string on the join form (e.g. from a failed connection attempt).
     void setJoinError(const std::string& error);
 
@@ -53,6 +57,7 @@ private:
     JoinMenuState joinMenuState;     ///< Mutable state backing the join form widgets.
     std::optional<JoinRequest>
         pendingJoinRequest;          ///< Set when the user clicks "Join", cleared on App transition to Lobby.
+    bool pendingHostRequest = false; ///< Set when the user clicks "Host", cleared on App transition.
     std::string joinError;           ///< Error message shown on the join form; empty when no error.
 
     std::unique_ptr<DiscoveryClient> localDiscoveryClient = std::make_unique<DiscoveryClient>();
