@@ -546,6 +546,11 @@ void HudDebugPanel::build(Hud& hud, bool* open)
     }
 
     ImGui::TextDisabled("Live edits affect the current HUD instance only.");
+    ImGui::Checkbox("Render Inactive Widgets", &hud.debugRenderInactiveWidgets());
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Draws inactive HUD widgets for layout debugging. Railgun Scope still uses normal visibility.");
+    }
+
     static std::array<char, 260> savePath{"hud_tweaks.json"};
     static std::string saveStatus;
     static bool saveFailed = false;

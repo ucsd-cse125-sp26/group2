@@ -34,7 +34,8 @@ void BuyMenu::update(float /*dt*/, const HudGameState& state, HudTweenPool& twee
 
 void BuyMenu::draw(HudContext& ctx, float cx, float cy)
 {
-    if (openAlpha_ < 0.01f)
+    const float alpha = debugForceOpen_ ? 1.f : openAlpha_;
+    if (alpha < 0.01f)
         return;
 
     const float s = uiScale_;
@@ -46,18 +47,18 @@ void BuyMenu::draw(HudContext& ctx, float cx, float cy)
     const float x = cx - pw * 0.5f;
     const float y = cy - ph * 0.5f;
 
-    ctx.rect(x, y, pw, ph, HudColor(0.06f, 0.06f, 0.12f, 0.9f * openAlpha_));
-    ctx.rectOutline(x, y, pw, ph, 1.f * s, HudColor(0.5f, 0.4f, 0.2f, openAlpha_));
+    ctx.rect(x, y, pw, ph, HudColor(0.06f, 0.06f, 0.12f, 0.9f * alpha));
+    ctx.rectOutline(x, y, pw, ph, 1.f * s, HudColor(0.5f, 0.4f, 0.2f, alpha));
 
-    ctx.text("BUY MENU", cx, y + 10.f * s, 24.f * s, HudColor(1.f, 0.85f, 0.3f, openAlpha_), HudAlign::Center);
+    ctx.text("BUY MENU", cx, y + 10.f * s, 24.f * s, HudColor(1.f, 0.85f, 0.3f, alpha), HudAlign::Center);
 
     // Placeholder weapon list.
     const char* weapons[] = {"1. Rifle", "2. Shotgun", "3. Railgun", "4. Rocket Launcher"};
     float itemY = y + 50.f * s;
     for (const char* w : weapons) {
-        ctx.text(w, x + 20.f * s, itemY, fs, HudColor(1.f, 1.f, 1.f, openAlpha_));
+        ctx.text(w, x + 20.f * s, itemY, fs, HudColor(1.f, 1.f, 1.f, alpha));
         itemY += ih;
     }
 
-    ctx.text("[B] Close", cx, y + ph - 30.f * s, 14.f * s, HudColor(0.6f, 0.6f, 0.6f, openAlpha_), HudAlign::Center);
+    ctx.text("[B] Close", cx, y + ph - 30.f * s, 14.f * s, HudColor(0.6f, 0.6f, 0.6f, alpha), HudAlign::Center);
 }
