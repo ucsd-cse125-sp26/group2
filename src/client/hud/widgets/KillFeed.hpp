@@ -21,12 +21,12 @@
 
 struct KillFeed : HudWidget
 {
-    float entryHeight = 22.f;
-    float entryPadding = 6.f;
+    float entryHeight = 40.f;
+    float entryPadding = 30.f;
     float entryLifetime = 5.f;
-    float fontSize = 11.f;
+    float fontSize = 20.f;
     float fadeOutDuration = 0.6f;
-    int maxEntries = 6;
+    int maxEntries = 4;
 
     KillFeed();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
@@ -40,6 +40,7 @@ private:
         bool isHeadshot = false;
         bool youAreKiller = false;
         bool youAreVictim = false;
+        bool permanent = false;
         float timer = 0.f;
         float slideIn = 1.f; ///< 1 = settled, 0 = just-spawned (animates in).
     };

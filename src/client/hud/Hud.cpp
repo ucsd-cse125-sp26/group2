@@ -14,7 +14,6 @@
 #include "widgets/DamageNumberWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
-#include "widgets/GravityIndicator.hpp"
 #include "widgets/GrenadeRadialWidget.hpp"
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
@@ -205,7 +204,6 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<EquipmentSlots>());   // bottom-center
     widgets_.push_back(std::make_unique<GrenadeSlotsWidget>());
     widgets_.push_back(std::make_unique<AmmoCounter>());      // weapon panel (bottom-right)
-    widgets_.push_back(std::make_unique<GravityIndicator>()); // sits above weapon panel
     widgets_.push_back(std::make_unique<ChatWidget>());       // chat should sit above gameplay chrome
 
     // Modal panels (only visible when toggled).

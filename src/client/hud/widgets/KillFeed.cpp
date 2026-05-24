@@ -31,8 +31,17 @@ bool nameMatchesYou(const std::string& s)
 KillFeed::KillFeed()
 {
     anchor = HudAnchor::TopRight;
-    offsetX = -20.f;
-    offsetY = 20.f;
+    offsetX = -80.f;
+    offsetY = 28.f;
+
+    Entry dummy;
+    dummy.killerName = "VYRE-07";
+    dummy.victimName = "RAIDEN";
+    dummy.isHeadshot = true;
+    dummy.permanent = true;
+    dummy.timer = entryLifetime;
+    dummy.slideIn = 1.f;
+    entries_.push_back(dummy);
 }
 
 void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
@@ -50,14 +59,23 @@ void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tween
     }
 
     for (auto& e : entries_) {
+        if (e.permanent)
+            continue;
         e.timer -= dt;
         e.slideIn = std::min(1.f, e.slideIn + dt * 6.f); // ~0.16s slide-in
     }
-    entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [](const Entry& e) { return e.timer <= 0.f; }),
+    entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [](const Entry& e) {
+                       return !e.permanent && e.timer <= 0.f;
+                   }),
                    entries_.end());
 
-    if (static_cast<int>(entries_.size()) > maxEntries)
-        entries_.resize(static_cast<std::size_t>(maxEntries));
+    while (static_cast<int>(entries_.size()) > maxEntries) {
+        const auto removable =
+            std::find_if(entries_.rbegin(), entries_.rend(), [](const Entry& e) { return !e.permanent; });
+        if (removable == entries_.rend())
+            break;
+        entries_.erase(std::next(removable).base());
+    }
 }
 
 void KillFeed::draw(HudContext& ctx, float anchorX, float y)
@@ -73,7 +91,7 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
 
     float curY = y;
     for (const auto& e : entries_) {
-        const float alpha = std::min(e.timer / fadeOutDuration, 1.f) * e.slideIn;
+        const float alpha = (e.permanent ? 1.f : std::min(e.timer / fadeOutDuration, 1.f)) * e.slideIn;
         const float slideOff = (1.f - e.slideIn) * 16.f * s;
 
         const char* weapon = weaponCallsign(0);

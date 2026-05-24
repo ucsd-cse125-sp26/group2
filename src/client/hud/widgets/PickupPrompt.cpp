@@ -36,7 +36,7 @@ PickupPrompt::PickupPrompt()
     // sit in the player's primary aiming sightline.
     anchor = HudAnchor::Center;
     offsetX = 0.f;
-    offsetY = 260.f;
+    offsetY = 220.f;
     visible = false;
 }
 
