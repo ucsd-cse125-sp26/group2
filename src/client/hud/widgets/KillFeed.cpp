@@ -33,15 +33,6 @@ KillFeed::KillFeed()
     anchor = HudAnchor::TopRight;
     offsetX = -80.f;
     offsetY = 28.f;
-
-    Entry dummy;
-    dummy.killerName = "VYRE-07";
-    dummy.victimName = "RAIDEN";
-    dummy.isHeadshot = true;
-    dummy.permanent = true;
-    dummy.timer = entryLifetime;
-    dummy.slideIn = 1.f;
-    entries_.push_back(dummy);
 }
 
 void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
@@ -107,8 +98,8 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
         const float pillY = curY;
 
         // Background — amber-tinted when the local player is involved.
-        const HudColor bg = e.youAreKiller ? HudColor{0.30f, 0.20f, 0.05f, 0.65f * alpha}
-                                           : HudColor{0.10f, 0.09f, 0.08f, 0.78f * alpha};
+        const HudColor bg =
+            e.youAreKiller ? withAlpha(k_secondary, 0.65f * alpha) : withAlpha(k_quaternary, 0.78f * alpha);
         const HudColor border = e.youAreKiller ? withAlpha(k_amber, alpha) : withAlpha(k_lineDim, alpha);
         ctx.rect(pillX, pillY, pillW, pillH, bg);
         ctx.rectOutline(pillX, pillY, pillW, pillH, 1.f, border);

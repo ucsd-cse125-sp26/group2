@@ -2,6 +2,7 @@
 #include "Scoreboard.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 Scoreboard::Scoreboard()
 {
@@ -19,6 +20,8 @@ void Scoreboard::update(float /*dt*/, const HudGameState& state, HudTweenPool& /
 
 void Scoreboard::draw(HudContext& ctx, float cx, float cy)
 {
+    using namespace voidfall;
+
     const float s = uiScale_;
     const float pw = panelWidth * s;
     const float ph = panelHeight * s;
@@ -30,13 +33,13 @@ void Scoreboard::draw(HudContext& ctx, float cx, float cy)
     const float y = cy - ph * 0.5f;
 
     // Background panel.
-    ctx.rect(x, y, pw, ph, HudColor(0.05f, 0.05f, 0.1f, 0.85f));
-    ctx.rectOutline(x, y, pw, ph, 1.f * s, HudColor(0.4f, 0.4f, 0.5f, 0.8f));
+    ctx.rect(x, y, pw, ph, withAlpha(k_quaternary, 0.85f));
+    ctx.rectOutline(x, y, pw, ph, 1.f * s, withAlpha(k_secondary, 0.80f));
 
     // Header.
     char header[64];
     SDL_snprintf(header, sizeof(header), "SCORE:  %d  -  %d", allyScore_, enemyScore_);
-    ctx.text(header, cx, y + 10.f * s, hfs, HudColor::white(), HudAlign::Center);
+    ctx.text(header, cx, y + 10.f * s, hfs, k_textBright, HudAlign::Center);
 
     // Clip content area.
     ctx.pushClipRect(x + 4.f * s, y + 40.f * s, pw - 8.f * s, ph - 50.f * s);
@@ -48,7 +51,7 @@ void Scoreboard::draw(HudContext& ctx, float cx, float cy)
     const float pingX = x + pw * 0.85f;
 
     // Column headers.
-    const HudColor headerCol(0.7f, 0.7f, 0.7f, 1.f);
+    const HudColor headerCol = k_textDim;
     ctx.text("Name", nameX, rowY, rfs, headerCol);
     ctx.text("K", killsX, rowY, rfs, headerCol);
     ctx.text("D", deathsX, rowY, rfs, headerCol);
@@ -57,7 +60,7 @@ void Scoreboard::draw(HudContext& ctx, float cx, float cy)
 
     // Allies.
     for (const auto& a : allies_) {
-        const HudColor c = a.isAlive ? HudColor(0.3f, 0.7f, 1.f, 1.f) : HudColor(0.4f, 0.4f, 0.4f, 0.7f);
+        const HudColor c = a.isAlive ? k_tertiary : withAlpha(k_secondary, 0.7f);
         ctx.text(a.name.c_str(), nameX, rowY, rfs, c);
         char buf[16];
         SDL_snprintf(buf, sizeof(buf), "%d", a.kills);
@@ -71,12 +74,12 @@ void Scoreboard::draw(HudContext& ctx, float cx, float cy)
 
     // Divider.
     rowY += 4.f * s;
-    ctx.rect(x + 10.f * s, rowY, pw - 20.f * s, 1.f * s, HudColor(0.5f, 0.5f, 0.5f, 0.5f));
+    ctx.rect(x + 10.f * s, rowY, pw - 20.f * s, 1.f * s, withAlpha(k_secondary, 0.5f));
     rowY += 6.f * s;
 
     // Enemies.
     for (const auto& e : enemies_) {
-        const HudColor c = e.isAlive ? HudColor(1.f, 0.4f, 0.3f, 1.f) : HudColor(0.4f, 0.4f, 0.4f, 0.7f);
+        const HudColor c = e.isAlive ? k_primary : withAlpha(k_secondary, 0.7f);
         ctx.text(e.name.c_str(), nameX, rowY, rfs, c);
         char buf[16];
         SDL_snprintf(buf, sizeof(buf), "%d", e.kills);

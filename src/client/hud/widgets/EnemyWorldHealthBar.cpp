@@ -155,8 +155,8 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
                                  std::clamp(e.trailSh, 0.f, 1.f),
                                  withAlpha(k_cyanDim, alpha),
                                  withAlpha(k_cyan, alpha),
-                                 HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
-                                 HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
+                                 withAlpha(k_tertiary, 0.45f * alpha),
+                                 withAlpha(k_quaternary, 0.70f * alpha),
                                  withAlpha(k_lineDim, alpha));
         }
 
@@ -170,8 +170,8 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
                              std::clamp(e.trailHp, 0.f, 1.f),
                              withAlpha(k_red, alpha),
                              withAlpha(k_redBright, alpha),
-                             HudColor{0.95f, 0.95f, 0.95f, 0.45f * alpha},
-                             HudColor{0.04f, 0.04f, 0.04f, 0.7f * alpha},
+                             withAlpha(k_tertiary, 0.45f * alpha),
+                             withAlpha(k_quaternary, 0.70f * alpha),
                              withAlpha(k_lineDim, alpha));
     }
 }

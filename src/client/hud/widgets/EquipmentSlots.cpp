@@ -73,7 +73,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
         const auto& sl = slots[i];
         const float x = startX + static_cast<float>(i) * (ss + gp);
         const bool ready = sl.available && sl.charge >= 0.999f;
-        const HudColor iconC = ready ? k_amber : (sl.available ? k_textDim : withAlpha(k_textDim, 0.45f));
+        const HudColor iconC = ready ? k_amber : (sl.available ? k_textDim : withAlpha(k_textDim, 0.85f));
 
         const float ix = x + (ss - icon) * 0.5f;
         const float iy = y;
@@ -92,7 +92,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
         const float keyH = keyFs + keyPadH * 2.f;
         const float keyX = x + (ss - keyW) * 0.5f;
         const float keyY = y + icon + 7.f * s;
-        const HudColor keyColor = ready ? k_amber : (sl.available ? k_textDim : withAlpha(k_textDim, 0.45f));
+        const HudColor keyColor = ready ? k_amber : (sl.available ? k_textDim : withAlpha(k_textDim, 0.85f));
         ctx.rect(keyX, keyY, keyW, keyH, keyColor);
         ctx.knockoutText(keyLabel, keyX + keyW * 0.5f, keyY + keyPadH - keyFs * 0.18f, keyFs, HudAlign::Center);
     }

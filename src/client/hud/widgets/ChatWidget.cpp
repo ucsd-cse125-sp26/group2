@@ -74,7 +74,7 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
     const float panelH = pad * 2.f + lineH * static_cast<float>(maxLines) + inputH;
     const float panelY = y - panelH;
 
-    const HudColor panel = chat_.open ? HudColor{0.08f, 0.075f, 0.07f, 0.72f} : HudColor{0.08f, 0.075f, 0.07f, 0.28f};
+    const HudColor panel = chat_.open ? withAlpha(k_quaternary, 0.72f) : withAlpha(k_quaternary, 0.28f);
     ctx.rect(x, panelY, w, panelH, panel);
     if (chat_.open)
         ctx.rectOutline(x, panelY, w, panelH, 1.f, k_lineDim);
@@ -129,7 +129,7 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
         return;
 
     const float inputY = panelY + panelH - inputH - pad * 0.35f;
-    ctx.rect(x + pad, inputY, w - pad * 2.f, inputH, HudColor{0.12f, 0.115f, 0.105f, 0.86f});
+    ctx.rect(x + pad, inputY, w - pad * 2.f, inputH, withAlpha(k_quaternary, 0.86f));
     ctx.rectOutline(x + pad, inputY, w - pad * 2.f, inputH, 1.f, k_lineDim);
 
     std::string draft = "> " + chat_.draft;

@@ -11,7 +11,7 @@ struct AbilitySelectionWidget : HudWidget
 {
     float panelWidth = 520.f;
     float choiceWidth = 244.f;
-    float choiceHeight = 86.f;
+    float choiceHeight = 90.f;
     float choiceGap = 12.f;
     float headerFontSize = 20.f;
     float nameFontSize = 20.f;

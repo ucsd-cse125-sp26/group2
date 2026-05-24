@@ -100,7 +100,7 @@ void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
     // Key glyph box (lighter rect with the key letter centered).
     const float boxX = startX;
     const float boxY = midY - boxH * 0.5f;
-    ctx.rect(boxX, boxY, boxW, boxH, HudColor{0.f, 0.f, 0.f, 0.40f});
+    ctx.rect(boxX, boxY, boxW, boxH, withAlpha(k_quaternary, 0.40f));
     ctx.rectOutline(boxX, boxY, boxW, boxH, 1.f, k_lineBright);
     ctx.text(keyStr, boxX + boxW * 0.5f, midY - kfs * 0.64f, kfs, k_textBright, HudAlign::Center);
 

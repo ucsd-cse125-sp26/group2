@@ -39,7 +39,7 @@ void drawKeyTag(HudContext& ctx, const char* label, float x, float y, float fs, 
     const float w = ctx.measureText(label, fs) + padX * 2.0f;
     const float h = fs + padY * 2.0f;
     const HudColor border = active ? k_amber : k_lineBright;
-    const HudColor fill = active ? HudColor{0.32f, 0.22f, 0.07f, 0.88f} : HudColor{0.0f, 0.0f, 0.0f, 0.55f};
+    const HudColor fill = active ? withAlpha(k_secondary, 0.88f) : withAlpha(k_quaternary, 0.55f);
     ctx.rect(x, y, w, h, fill);
     ctx.rectOutline(x, y, w, h, 1.0f, border);
     ctx.text(label, x + w * 0.5f, y + padY - fs * 0.18f, fs, active ? k_amber : k_textDim, HudAlign::Center);
@@ -108,7 +108,7 @@ void AbilitySelectionWidget::draw(HudContext& ctx, float anchorX, float anchorY)
         const float x = anchorX - panelW * 0.5f;
         const float y = anchorY - panelH * 0.5f;
 
-        drawPanel(ctx, x, y, panelW, panelH, HudColor{0.06f, 0.07f, 0.08f, 0.78f}, k_lineBright, 1.0f);
+        drawPanel(ctx, x, y, panelW, panelH, withAlpha(k_quaternary, 0.78f), k_lineBright, 1.0f);
         drawCornerBrackets(ctx, x, y, panelW, panelH, 8.0f * s, 1.0f, 2.0f * s, k_lineBright);
         const float headerY = y + padY - headerFs * 0.28f;
         char prompt[128];
@@ -138,7 +138,7 @@ void AbilitySelectionWidget::draw(HudContext& ctx, float anchorX, float anchorY)
         const float x = x0 + static_cast<float>(i) * (choiceW + gap);
         const bool active = state_.modifierHeld;
         const HudColor border = active ? k_amber : k_lineBright;
-        const HudColor fill = i == 0 ? HudColor{0.09f, 0.10f, 0.11f, 0.92f} : HudColor{0.11f, 0.09f, 0.10f, 0.92f};
+        const HudColor fill = i == 0 ? withAlpha(k_quaternary, 0.92f) : withAlpha(k_secondary, 0.40f);
 
         drawPanel(ctx, x, y0, choiceW, choiceH, fill, border, 1.0f);
         drawCornerBrackets(ctx, x, y0, choiceW, choiceH, 10.0f * s, 1.0f, 2.0f * s, active ? k_amber : k_lineBright);

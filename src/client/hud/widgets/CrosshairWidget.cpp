@@ -18,7 +18,7 @@ CrosshairWidget::CrosshairWidget()
     style.gap = 5.f;
     style.length = 6.f;
     style.thickness = 2.0f;
-    style.color = HudColor{1.0f, 0.71f, 0.18f, 1.0f};
+    style.color = voidfall::k_primary;
     style.dot = true;
 }
 

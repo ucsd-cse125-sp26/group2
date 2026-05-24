@@ -52,6 +52,7 @@
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
+#include "hud/VoidfallStyle.hpp"
 #include "network/EntityInterpolation.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -4206,13 +4207,13 @@ SDL_AppResult Game::iterate()
             accumTotal_ = 0;
         }
         hudState.damageAccum.total = accumTotal_;
-        // Voidfall palette: headshot=red, shield=cyan, hp=amber.
+        // HUD palette: headshot=primary, shield=tertiary, hp=primary.
         if (accumLastHitType_ == 2)
-            hudState.damageAccum.color = HudColor(0.92f, 0.30f, 0.20f, 1.f); // red (headshot)
+            hudState.damageAccum.color = voidfall::k_primary;
         else if (accumLastHitType_ == 1)
-            hudState.damageAccum.color = HudColor(0.45f, 0.78f, 0.96f, 1.f); // cyan (shield)
+            hudState.damageAccum.color = voidfall::k_tertiary;
         else
-            hudState.damageAccum.color = HudColor(1.00f, 0.71f, 0.18f, 1.f); // amber (hp)
+            hudState.damageAccum.color = voidfall::k_primary;
 
         // ── View-projection matrix for world→screen projection ──
         hudState.viewProj = renderer->getCamera().getViewProjectionMatrix();

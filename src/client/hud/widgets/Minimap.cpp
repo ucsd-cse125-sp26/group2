@@ -100,13 +100,13 @@ void Minimap::draw(HudContext& ctx, float x, float y)
         drawClockwiseRingArc(ctx, cx, cy, ringRadius, liveLevel_, ringT, k_amber);
     }
 
-    ctx.roundedRect(x, y, ms, ms, radius, HudColor{0.10f, 0.09f, 0.08f, 0.85f});
+    ctx.roundedRect(x, y, ms, ms, radius, withAlpha(k_quaternary, 0.85f));
     const float borderT = std::max(0.f, borderThickness * s);
     if (borderT > 0.f)
         drawCircleOutline(ctx, cx, cy, std::max(0.f, radius - borderT * 0.5f), borderT, k_line);
 
     // Grid clipped to circular chords.
-    const HudColor grid = HudColor{0.27f, 0.26f, 0.25f, 0.45f};
+    const HudColor grid = withAlpha(k_secondary, 0.45f);
     const int divisions = 10;
     const float lineT = std::max(1.f, 1.f * s);
     const float gridRadius = std::max(0.f, radius - borderT - lineT * 0.5f);
