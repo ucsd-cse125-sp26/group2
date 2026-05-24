@@ -48,6 +48,8 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
         outError = "Could not locate server executable";
         return false;
     }
+
+    std::string addressArg = "--address=0.0.0.0";
     std::string portArg = "--port=" + std::to_string(config.port);
 
     int stdoutPipe[2];
@@ -71,7 +73,7 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
         dup2(stdoutPipe[1], STDOUT_FILENO);
         close(stdoutPipe[1]);
 
-        execl(serverPath.c_str(), serverPath.c_str(), portArg.c_str(), nullptr);
+        execl(serverPath.c_str(), serverPath.c_str(), addressArg.c_str(), portArg.c_str(), nullptr);
 
         _exit(127); // exec failed
     }

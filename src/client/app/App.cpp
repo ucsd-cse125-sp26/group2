@@ -242,12 +242,17 @@ SDL_AppResult App::iterate()
                 break;
             }
 
-            // TODO: Transition to lobby and connect client to hosted server instead of immediate shutodwn
-            uint16_t serverPort = hostedServer.port();
+            SDL_Log("Hosted server started on port %d, connecting client...", hostedServer.port());
+            const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), networkConfig.transport);
 
-            SDL_Delay(500);
-            hostedServer.shutdown();
-            home->setJoinError("Hosted server start/shutdown test completed at port " + std::to_string(serverPort));
+            if (connectError != ConnectError::None) {
+                SDL_Log("Failed to connect to hosted server: %s", connectErrorLogName(connectError));
+                home->setJoinError(joinErrorMessage(connectError));
+                hostedServer.shutdown();
+            } else {
+                SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
+                transitionTo(Screen::Lobby);
+            }
         }
         break;
     }
@@ -258,6 +263,10 @@ SDL_AppResult App::iterate()
 
         if (lobby->consumeReturnToMenu()) {
             client.shutdown();
+            if (hostedServer.isRunning()) {
+                hostedServer.shutdown();
+            }
+
             transitionTo(Screen::Home);
             break;
         }
