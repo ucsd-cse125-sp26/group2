@@ -7,6 +7,7 @@
 struct DeveloperConfig
 {
     bool skipLobby = false; ///< Bypass lobby flow and start matches directly.
+    bool voiceCapture = true;
 };
 
 /// @brief Load developer config from a TOML file.
