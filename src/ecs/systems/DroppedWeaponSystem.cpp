@@ -43,13 +43,11 @@ inline bool tryPickup(Registry& registry, Position dropPos, CollisionShape dropS
             GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
             if (primary.type == dw.type) {
                 primary.totalAmmo = dw.totalAmmo;
-                primary.currentMagAmmo = dw.currentMagAmmo;
                 consumed = true;
                 return;
             }
             if (secondary.type == dw.type) {
                 secondary.totalAmmo = dw.totalAmmo;
-                secondary.currentMagAmmo = dw.currentMagAmmo;
                 consumed = true;
                 return;
             }
