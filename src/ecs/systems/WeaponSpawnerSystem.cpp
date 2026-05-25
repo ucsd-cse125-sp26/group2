@@ -40,12 +40,10 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
             GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
             if (primary.type == spawner.type) {
                 primary.totalAmmo = config.defaultAmmoCapacity;
-                primary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             } else if (secondary.type == spawner.type) {
                 secondary.totalAmmo = config.defaultAmmoCapacity;
-                secondary.currentMagAmmo = config.magazineSize;
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             }

@@ -77,11 +77,14 @@ struct HudVertex
 /// @brief Crosshair appearance parameters.
 struct CrosshairStyle
 {
-    float gap = 3.f;                      ///< Gap from center to start of each line (pixels).
-    float length = 6.f;                   ///< Length of each crosshair arm (pixels).
-    float thickness = 2.f;                ///< Line thickness (pixels).
-    HudColor color{0.168627f, 0.694118f, 0.741176f, 0.85f}; ///< Default primary palette color.
-    bool dot = true;                      ///< Draw center dot.
+    float gap = 3.f;                                              ///< Gap from center to start of each line (pixels).
+    float length = 6.f;                                           ///< Length of each crosshair arm (pixels).
+    float thickness = 2.f;                                        ///< Line thickness (pixels).
+    HudColor color{0.168627f, 0.694118f, 0.741176f, 0.85f};       ///< Default primary palette color.
+    bool dot = true;                                              ///< Draw center dot.
+    float reloadRadius = 20.f;                                    ///< Radius of circular reload indicator (pixels).
+    float reloadThickness = 2.f;                                  ///< Thickness of reload indicator (pixels).
+    HudColor reloadColor{0.168627f, 0.694118f, 0.741176f, 0.85f}; ///< Color of reload indicator
 };
 
 // ── Game State Contract ─────────────────────────────────────────────────────
@@ -124,7 +127,7 @@ struct HudDamageNumber
 /// @brief Current damage accumulator state for the local player.
 struct HudDamageAccum
 {
-    int total = 0;                      ///< Accumulated damage to current target.
+    int total = 0;                                        ///< Accumulated damage to current target.
     HudColor color{0.168627f, 0.694118f, 0.741176f, 1.f}; ///< Color matching the latest hit type.
 };
 
@@ -266,6 +269,8 @@ struct HudGameState
     float roundTimeRemaining = 0.f;
     bool isAlive = true;
     bool isBuyPhase = false;
+    bool isReloading = false;
+    float reloadProgress = 0.0f; ///< 0-1
 
     // Events (valid for this frame only).
     std::span<const HudKillFeedEntry> killFeedEvents;
