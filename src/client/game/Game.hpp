@@ -453,6 +453,9 @@ private:
     float recoilPushBack_ = 0.0f; ///< Current recoil backward offset (Quake units).
     float recoilRoll_ = 0.0f;     ///< Current recoil roll offset (degrees).
 
+    // Visual reload state
+    float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
+
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
 

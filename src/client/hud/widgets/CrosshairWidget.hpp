@@ -12,4 +12,7 @@ struct CrosshairWidget : HudWidget
     CrosshairWidget();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
     void draw(HudContext& ctx, float drawX, float drawY) override;
+
+    bool isReloading = false;
+    float reloadProgress = 0.f;
 };

@@ -51,8 +51,8 @@
 #include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
-#include "hud/debug/HudDebugPanel.hpp"
 #include "hud/VoidfallStyle.hpp"
+#include "hud/debug/HudDebugPanel.hpp"
 #include "network/EntityInterpolation.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
@@ -2161,7 +2161,7 @@ SDL_AppResult Game::iterate()
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 const GunInstance& gun = getEquippedGun(ws);
-                hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
+                hasAmmo = gun.currentMagAmmo > 0 && !gun.isReloading;
             });
 
             if (wpnCfg.isCharge) {
@@ -3487,6 +3487,34 @@ SDL_AppResult Game::iterate()
                     recoilRoll_ = 0.0f;
             }
 
+            // --- Reload animation ---
+            {
+                auto smooth = [](float e0, float e1, float x) {
+                    float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+                    return t * t * (3.0f - 2.0f * t);
+                };
+
+                float reloadOffset = 0.0f;
+                registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                    const GunInstance& gun = getEquippedGun(ws);
+                    const WeaponConfig& cfg = getWeaponConfig(gun.type);
+                    if (gun.isReloading && cfg.reloadTime > 0.0f) {
+                        float t = 1.0f - (gun.reloadTime / cfg.reloadTime);
+                        constexpr float kReloadMaxDrop = 70.0f;
+                        constexpr float kReloadMovePercent = 0.15f;
+                        if (t < kReloadMovePercent) {
+                            reloadOffset = kReloadMaxDrop * smooth(0.0f, kReloadMovePercent, t);
+                        } else if (t < 1.0f - kReloadMovePercent) {
+                            reloadOffset = kReloadMaxDrop;
+                        } else {
+                            reloadOffset = kReloadMaxDrop * (1.0f - smooth(1.0f - kReloadMovePercent, 1.0f, t));
+                        }
+                    }
+                });
+
+                reloadDownwardOffset_ = reloadOffset;
+            }
+
             // --- Velocity-direction-dependent bobbing ---
             float bobPhase = 0.0f;
             float bobAmpFwd = 0.0f;
@@ -3530,6 +3558,8 @@ SDL_AppResult Game::iterate()
             weaponPos += right * bobX + up * bobY;
             // Apply recoil pushback
             weaponPos -= forward * recoilPushBack_;
+            // Apply reload downward offset
+            weaponPos -= up * reloadDownwardOffset_;
 
             // Build world transform: translate -> local-rotate -> camera-orient -> scale.
             //
@@ -4062,6 +4092,11 @@ SDL_AppResult Game::iterate()
             // so the "47/30" rifle bug (HUD hardcoded /30 vs. real /50) is
             // gone — the HUD reads exactly what gameplay says.
             hudState.magCapacity = getWeaponConfig(gun.type).magazineSize;
+            hudState.isReloading = gun.isReloading;
+            const WeaponConfig& config = getWeaponConfig(gun.type);
+            if (gun.isReloading && config.reloadTime > 0.f) {
+                hudState.reloadProgress = 1.0f - (gun.reloadTime / config.reloadTime);
+            }
         });
 
         // ── Round timer / buy phase ──
