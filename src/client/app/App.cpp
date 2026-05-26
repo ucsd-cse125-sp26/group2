@@ -302,12 +302,16 @@ SDL_AppResult App::iterate()
         }
 
         if (lobby->consumeReturnToMenu()) {
+            const bool showServerShutdownNotice = lobby->consumeServerShutdownNotice();
             client.shutdown();
             if (hostedServer.isRunning()) {
                 hostedServer.shutdown();
             }
 
             transitionTo(Screen::Home);
+            if (showServerShutdownNotice) {
+                showHomePopupMessage("Server shutdown");
+            }
             break;
         }
 
@@ -323,8 +327,12 @@ SDL_AppResult App::iterate()
             break;
 
         if (game->consumeReturnToMainMenu()) {
+            const bool showServerShutdownNotice = game->consumeServerShutdownNotice();
             client.shutdown();
             transitionTo(Screen::Home);
+            if (showServerShutdownNotice) {
+                showHomePopupMessage("Server shutdown");
+            }
             break;
         }
 
@@ -448,4 +456,12 @@ AppContext App::screenContext()
         .userSettings = userSettings,
         .userSettingsPath = userSettingsPath,
     };
+}
+
+void App::showHomePopupMessage(const std::string& message)
+{
+    auto* home = dynamic_cast<Home*>(screen_.get());
+    if (home) {
+        home->setPopupMessage(message);
+    }
 }

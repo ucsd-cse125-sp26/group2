@@ -50,6 +50,9 @@ public:
     /// @brief Display an error string on the join form (e.g. from a failed connection attempt).
     void setJoinError(const std::string& error);
 
+    /// @brief Display a modal message on the next home screen frame.
+    void setPopupMessage(const std::string& message);
+
 private:
     NewRenderer* renderer = nullptr; ///< Renderer; not owned.
     SDL_Window* window = nullptr;    ///< Application window; not owned.
@@ -59,6 +62,8 @@ private:
         pendingJoinRequest;          ///< Set when the user clicks "Join", cleared on App transition to Lobby.
     bool pendingHostRequest = false; ///< Set when the user clicks "Host", cleared on App transition.
     std::string joinError;           ///< Error message shown on the join form; empty when no error.
+    std::string popupMessage;        ///< Modal message shown once after returning to home.
+    bool openPopupMessage = false;   ///< True when the modal should be opened next frame.
 
     std::unique_ptr<DiscoveryClient> localDiscoveryClient = std::make_unique<DiscoveryClient>();
 

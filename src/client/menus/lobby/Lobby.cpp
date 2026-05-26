@@ -111,13 +111,16 @@ SDL_AppResult Lobby::event(SDL_Event* event)
 
 SDL_AppResult Lobby::iterate()
 {
+    if (!client->poll()) {
+        SDL_Log("Lobby: lost connection to server; returning to main menu");
+        returnToMenu = true;
+        serverShutdownNotice = true;
+        return SDL_APP_CONTINUE;
+    }
+
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-
-    if (!client->poll()) {
-        return SDL_APP_SUCCESS;
-    }
 
     updateStartCountdown();
 
@@ -231,5 +234,14 @@ bool Lobby::consumeReturnToHostConfig()
         return false;
 
     returnToHostConfig = false;
+    return true;
+}
+
+bool Lobby::consumeServerShutdownNotice()
+{
+    if (!serverShutdownNotice)
+        return false;
+
+    serverShutdownNotice = false;
     return true;
 }

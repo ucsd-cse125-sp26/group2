@@ -37,7 +37,8 @@ public:
     std::optional<MatchStatePacket> consumeStartMatchState();
 
     bool consumeReturnToMenu(); ///< True if the user has requested to return to the main menu, then clear that request.
-    bool consumeReturnToHostConfig(); ///< True if the host requested HostConfig without shutting down the session.
+    bool consumeReturnToHostConfig();   ///< True if the host requested HostConfig without shutting down the session.
+    bool consumeServerShutdownNotice(); ///< True if returning home because the server connection closed, then clear it.
 
 private:
     /// @brief True if the local client is host and all non-host players are ready.
@@ -57,6 +58,7 @@ private:
     Uint64 lastStartCountdownTickNs = 0;             ///< SDL tick timestamp of the last countdown update (ns).
     bool returnToMenu = false;                       ///< Set to true when the user wants to return to the main menu.
     bool returnToHostConfig = false;                 ///< Set when the host wants to return to HostConfig.
+    bool serverShutdownNotice = false;               ///< Set when the server connection closed while in the lobby.
     bool isHosting = false;                          ///< True if App owns a running hosted server.
     std::string hostLanIp = "127.0.0.1";             ///< LAN IPv4 shown in the hosting banner.
     uint16_t hostPort = 0;                           ///< Hosted server port shown in the hosting banner.

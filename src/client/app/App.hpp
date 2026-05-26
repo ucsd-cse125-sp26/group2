@@ -76,4 +76,7 @@ private:
 
     /// @brief Build a borrowed context for screen initialisation.
     AppContext screenContext();
+
+    /// @brief Show a modal message on the active home screen, if it is active.
+    void showHomePopupMessage(const std::string& message);
 };

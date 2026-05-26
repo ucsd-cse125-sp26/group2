@@ -55,6 +55,19 @@ SDL_AppResult Home::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    if (openPopupMessage) {
+        ImGui::OpenPopup("Server Notice");
+        openPopupMessage = false;
+    }
+    if (ImGui::BeginPopupModal("Server Notice", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(popupMessage.c_str());
+        ImGui::Spacing();
+        if (ImGui::Button("OK")) {
+            popupMessage.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
     std::vector<net::discovery::ServerInfo> servers;
     std::string globalError;
     {
@@ -128,6 +141,12 @@ bool Home::consumeHostRequest()
 void Home::setJoinError(const std::string& error)
 {
     joinError = error;
+}
+
+void Home::setPopupMessage(const std::string& message)
+{
+    popupMessage = message;
+    openPopupMessage = !popupMessage.empty();
 }
 
 void Home::startGlobalRefresh(bool force)
