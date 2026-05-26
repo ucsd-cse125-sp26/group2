@@ -1,16 +1,5 @@
 /// @file EquipmentSlots.hpp
-/// @brief Bottom-center equipment row — grapple / grenade / tactical.
-///
-/// Three 64×64 mil-spec slots:
-///   ┌──┐  ┌──┐  ┌──┐
-///   │🪝│  │💣│  │⚡│
-///   │ E│  │ G│  │ Q│
-///   └──┘  └──┘  └──┘
-/// - Each slot's icon goes amber when ready, dimmed when on cooldown.
-/// - Cooldown overlay is a black band that drains from top to bottom
-///   (covers (1 - charge) × height of the slot).
-/// - Slots with a count show the integer; slots without (grapple) show
-///   "RDY" or remaining seconds.
+/// @brief Bottom-center ability cluster with SVG placeholder icons and charge bars.
 
 #pragma once
 
@@ -20,9 +9,12 @@
 
 struct EquipmentSlots : HudWidget
 {
-    float slotSize = 120.f;
-    float slotGap = 50.f;
-    float iconSize = 60.f;
+    float slotSize = 118.f;
+    float slotHeight = 92.f;
+    float slotGap = 24.f;
+    float iconSize = 56.f;
+    float chargeBarWidth = 360.f;
+    float chargeBarHeight = 24.f;
     float keyFontSize = 26.f;
     float keyPadX = 10.f;
     float keyPadY = 3.5f;

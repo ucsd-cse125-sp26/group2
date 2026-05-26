@@ -9,7 +9,99 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace
+{
+constexpr uint32_t k_iconAtlasSize = 128;
+
+float segmentDistance(float px, float py, float ax, float ay, float bx, float by)
+{
+    const float vx = bx - ax;
+    const float vy = by - ay;
+    const float wx = px - ax;
+    const float wy = py - ay;
+    const float denom = vx * vx + vy * vy;
+    const float t = denom > 1e-5f ? std::clamp((wx * vx + wy * vy) / denom, 0.f, 1.f) : 0.f;
+    const float cx = ax + vx * t;
+    const float cy = ay + vy * t;
+    const float dx = px - cx;
+    const float dy = py - cy;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+float coverageFromDistance(float distance, float halfWidth)
+{
+    return std::clamp(halfWidth + 0.75f - distance, 0.f, 1.f);
+}
+
+std::filesystem::path resolveAssetPath(const char* relative)
+{
+    const char* base = SDL_GetBasePath();
+    if (base) {
+        std::filesystem::path path = base;
+        path /= relative;
+        if (std::filesystem::exists(path))
+            return path;
+    }
+
+    std::filesystem::path path = relative;
+    if (std::filesystem::exists(path))
+        return path;
+
+    return {};
+}
+
+std::vector<uint8_t> rasterizeNoIconSvg()
+{
+    // Minimal runtime SVG support for the placeholder atlas icon. The current
+    // asset is a stroked circle plus diagonal slash; rendering it into the atlas
+    // lets HUD widgets use the same SVG-backed path that future custom icons
+    // will occupy.
+    const std::filesystem::path svgPath = resolveAssetPath("assets/icons/no-icon.svg");
+    if (svgPath.empty()) {
+        SDL_Log("HudRenderer: assets/icons/no-icon.svg not found, generating placeholder icon");
+    } else {
+        SDL_Log("HudRenderer: rasterizing SVG icon atlas from %s", svgPath.string().c_str());
+    }
+
+    std::vector<uint8_t> pixels(k_iconAtlasSize * k_iconAtlasSize * 4u, 0u);
+    constexpr float viewBoxSize = 21.f;
+    constexpr float strokeView = 1.25f;
+    const float scale = static_cast<float>(k_iconAtlasSize) / viewBoxSize;
+    const float cx = 10.5f * scale;
+    const float cy = 10.5f * scale;
+    const float radius = 8.f * scale;
+    const float halfStroke = strokeView * scale * 0.5f;
+    const float slashAx = 16.f * scale;
+    const float slashAy = 5.f * scale;
+    const float slashBx = 5.f * scale;
+    const float slashBy = 16.f * scale;
+
+    for (uint32_t y = 0; y < k_iconAtlasSize; ++y) {
+        for (uint32_t x = 0; x < k_iconAtlasSize; ++x) {
+            const float px = static_cast<float>(x) + 0.5f;
+            const float py = static_cast<float>(y) + 0.5f;
+            const float dx = px - cx;
+            const float dy = py - cy;
+            const float circleDist = std::abs(std::sqrt(dx * dx + dy * dy) - radius);
+            const float slashDist = segmentDistance(px, py, slashAx, slashAy, slashBx, slashBy);
+            const float alpha = std::max(coverageFromDistance(circleDist, halfStroke),
+                                         coverageFromDistance(slashDist, halfStroke));
+            const std::size_t off = (static_cast<std::size_t>(y) * k_iconAtlasSize + x) * 4u;
+            pixels[off + 0] = 255;
+            pixels[off + 1] = 255;
+            pixels[off + 2] = 255;
+            pixels[off + 3] = static_cast<uint8_t>(std::round(alpha * 255.f));
+        }
+    }
+    return pixels;
+}
+} // namespace
 
 // ── Init / Quit ─────────────────────────────────────────────────────────────
 
@@ -30,54 +122,8 @@ bool HudRenderer::init(SDL_GPUDevice* device,
     if (!createPipeline())
         return false;
 
-    // Create a 1x1 white fallback icon atlas (replaced when real atlas is loaded).
-    {
-        SDL_GPUTextureCreateInfo tci{};
-        tci.type = SDL_GPU_TEXTURETYPE_2D;
-        tci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-        tci.width = 1;
-        tci.height = 1;
-        tci.layer_count_or_depth = 1;
-        tci.num_levels = 1;
-        tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-        iconAtlasTex_ = SDL_CreateGPUTexture(device_, &tci);
-        if (!iconAtlasTex_) {
-            SDL_Log("HudRenderer: failed to create fallback icon texture");
-            return false;
-        }
-
-        // Upload white pixel.
-        const uint8_t white[4] = {255, 255, 255, 255};
-        SDL_GPUTransferBufferCreateInfo tbci{};
-        tbci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        tbci.size = 4;
-        SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device_, &tbci);
-        void* mapped = SDL_MapGPUTransferBuffer(device_, tb, false);
-        std::memcpy(mapped, white, 4);
-        SDL_UnmapGPUTransferBuffer(device_, tb);
-
-        SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
-        SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
-        SDL_GPUTextureTransferInfo src{};
-        src.transfer_buffer = tb;
-        SDL_GPUTextureRegion dst{};
-        dst.texture = iconAtlasTex_;
-        dst.w = 1;
-        dst.h = 1;
-        dst.d = 1;
-        SDL_UploadToGPUTexture(cp, &src, &dst, false);
-        SDL_EndGPUCopyPass(cp);
-        SDL_SubmitGPUCommandBuffer(cmd);
-        SDL_ReleaseGPUTransferBuffer(device_, tb);
-
-        // Sampler
-        SDL_GPUSamplerCreateInfo sci{};
-        sci.min_filter = SDL_GPU_FILTER_LINEAR;
-        sci.mag_filter = SDL_GPU_FILTER_LINEAR;
-        sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-        sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-        iconAtlasSamp_ = SDL_CreateGPUSampler(device_, &sci);
-    }
+    if (!createIconAtlas())
+        return false;
 
     SDL_Log("HudRenderer: init OK (%ux%u)", screenW, screenH);
     return true;
@@ -392,6 +438,79 @@ bool HudRenderer::createPipeline()
         erasePipeline_ = nullptr;
         return false;
     }
+    return true;
+}
+
+bool HudRenderer::createIconAtlas()
+{
+    const std::vector<uint8_t> pixels = rasterizeNoIconSvg();
+
+    SDL_GPUTextureCreateInfo tci{};
+    tci.type = SDL_GPU_TEXTURETYPE_2D;
+    tci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    tci.width = k_iconAtlasSize;
+    tci.height = k_iconAtlasSize;
+    tci.layer_count_or_depth = 1;
+    tci.num_levels = 1;
+    tci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    iconAtlasTex_ = SDL_CreateGPUTexture(device_, &tci);
+    if (!iconAtlasTex_) {
+        SDL_Log("HudRenderer: failed to create SVG icon atlas texture: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_GPUTransferBufferCreateInfo tbci{};
+    tbci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbci.size = static_cast<uint32_t>(pixels.size());
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device_, &tbci);
+    if (!tb) {
+        SDL_Log("HudRenderer: failed to create SVG icon atlas upload buffer: %s", SDL_GetError());
+        SDL_ReleaseGPUTexture(device_, iconAtlasTex_);
+        iconAtlasTex_ = nullptr;
+        return false;
+    }
+
+    void* mapped = SDL_MapGPUTransferBuffer(device_, tb, false);
+    if (!mapped) {
+        SDL_Log("HudRenderer: failed to map SVG icon atlas upload buffer: %s", SDL_GetError());
+        SDL_ReleaseGPUTransferBuffer(device_, tb);
+        SDL_ReleaseGPUTexture(device_, iconAtlasTex_);
+        iconAtlasTex_ = nullptr;
+        return false;
+    }
+    std::memcpy(mapped, pixels.data(), pixels.size());
+    SDL_UnmapGPUTransferBuffer(device_, tb);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = tb;
+    src.pixels_per_row = k_iconAtlasSize;
+    src.rows_per_layer = k_iconAtlasSize;
+    SDL_GPUTextureRegion dst{};
+    dst.texture = iconAtlasTex_;
+    dst.w = k_iconAtlasSize;
+    dst.h = k_iconAtlasSize;
+    dst.d = 1;
+    SDL_UploadToGPUTexture(cp, &src, &dst, false);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(device_, tb);
+
+    SDL_GPUSamplerCreateInfo sci{};
+    sci.min_filter = SDL_GPU_FILTER_LINEAR;
+    sci.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    iconAtlasSamp_ = SDL_CreateGPUSampler(device_, &sci);
+    if (!iconAtlasSamp_) {
+        SDL_Log("HudRenderer: failed to create SVG icon atlas sampler: %s", SDL_GetError());
+        SDL_ReleaseGPUTexture(device_, iconAtlasTex_);
+        iconAtlasTex_ = nullptr;
+        return false;
+    }
+
     return true;
 }
 

@@ -79,7 +79,7 @@ private:
     // Samplers (bound to fragment set 1)
     SDL_GPUTexture* sdfAtlasTex_ = nullptr;   ///< Non-owning: from SdfAtlas.
     SDL_GPUSampler* sdfAtlasSamp_ = nullptr;  ///< Non-owning: from SdfAtlas.
-    SDL_GPUTexture* iconAtlasTex_ = nullptr;  ///< Owning: 1x1 white fallback until real atlas.
+    SDL_GPUTexture* iconAtlasTex_ = nullptr;  ///< Owning: SVG-backed placeholder icon atlas.
     SDL_GPUSampler* iconAtlasSamp_ = nullptr; ///< Owning.
 
     // Dynamic vertex buffer (recreated if capacity exceeded)
@@ -96,6 +96,7 @@ private:
 
     bool createOffscreenTarget(uint32_t w, uint32_t h);
     bool createPipeline();
+    bool createIconAtlas();
     bool ensureVertexBuffer(uint32_t requiredVertices);
 
     /// @brief Load a compiled shader from the shaders/ directory.

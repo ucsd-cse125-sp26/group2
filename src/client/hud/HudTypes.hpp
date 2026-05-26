@@ -56,8 +56,8 @@ enum class HudAlign
 /// @brief Icon identifiers for the HUD icon atlas.
 enum class HudIcon : uint8_t
 {
-    // Placeholder — populated when the icon atlas is authored.
     None = 0,
+    NoIcon,
 };
 
 // ── Vertex ──────────────────────────────────────────────────────────────────

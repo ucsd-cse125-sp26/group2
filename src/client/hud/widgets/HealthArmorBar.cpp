@@ -247,7 +247,7 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
                             innerChamfer,
                             innerCornerCut,
                             healthFill_,
-                            withAlpha(k_secondary, 0.80f),
+                            withAlpha(k_health, 0.84f),
                             k_healthBright);
     drawFillEdge(ctx, innerX, innerY, innerW, innerH, healthFill_, std::max(2.f, outline * 0.55f), k_textBright);
 
@@ -260,7 +260,7 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
                                 innerChamfer,
                                 innerCornerCut,
                                 armorFill_,
-                                withAlpha(k_primary, 0.80f),
+                                withAlpha(k_secondary, 0.82f),
                                 k_cyan);
         drawFillEdge(ctx, innerX, innerY, innerW, innerH, armorFill_, std::max(2.f, outline * 0.55f), k_cyan);
     }

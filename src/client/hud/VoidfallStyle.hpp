@@ -24,70 +24,71 @@ namespace voidfall
 
 // ── Palette (matches prototype's CSS custom properties) ─────────────────────
 
-/// @brief Deep panel background tint used by translucent HUD glass.
-constexpr HudColor k_primary{0.168627f, 0.694118f, 0.741176f, 1.0f};    // #2BB1BD
-constexpr HudColor k_secondary{0.250980f, 0.478431f, 0.501961f, 1.0f};  // #407A80
-constexpr HudColor k_tertiary{0.615686f, 0.858824f, 0.882353f, 1.0f};   // #9DDBE1
-constexpr HudColor k_quaternary{0.070588f, 0.270588f, 0.290196f, 1.0f}; // #12454A
+/// @brief Prototype palette sampled from hud_proto.png / supplied guide.
+constexpr HudColor k_primary{0.0f, 1.0f, 1.0f, 1.0f};                   // Electric aqua #00FFFF
+constexpr HudColor k_secondary{0.250980f, 0.752941f, 1.0f, 1.0f};       // Aqua blue #40C0FF
+constexpr HudColor k_tertiary{0.690196f, 0.835294f, 1.0f, 1.0f};        // Pale glow #B0D5FF
+constexpr HudColor k_quaternary{0.098039f, 0.098039f, 0.439216f, 1.0f}; // Panel indigo #191970
 
-constexpr HudColor k_bgVoid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.96f};
+constexpr HudColor k_bgVoid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.78f};
 /// @brief Standard panel fill — translucent glass base, reinforced by glow
 /// layers in drawPanel() for readability without a flat sticker look.
-constexpr HudColor k_bgPanel{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.56f};
+constexpr HudColor k_bgPanel{0.09f, 0.12f, 0.30f, 0.46f};
 /// @brief Solid panel — used for hero callouts.
-constexpr HudColor k_bgPanelSolid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.78f};
+constexpr HudColor k_bgPanelSolid{0.07f, 0.09f, 0.22f, 0.68f};
 /// @brief Inset bar background.
-constexpr HudColor k_bgInset{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.58f};
+constexpr HudColor k_bgInset{0.06f, 0.09f, 0.19f, 0.54f};
 
 /// @brief Dim hairline — `oklch(0.32 0.015 60 / 0.6)`.
-constexpr HudColor k_lineDim{k_secondary.r, k_secondary.g, k_secondary.b, 0.7f};
+constexpr HudColor k_lineDim{k_secondary.r, k_secondary.g, k_secondary.b, 0.48f};
 /// @brief Standard hairline — `oklch(0.40 0.018 60)`.
-constexpr HudColor k_line{k_secondary.r, k_secondary.g, k_secondary.b, 0.95f};
+constexpr HudColor k_line{k_secondary.r, k_secondary.g, k_secondary.b, 0.88f};
 /// @brief Bright hairline — `oklch(0.55 0.02 60)`.
 constexpr HudColor k_lineBright{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 
 /// @brief Dim text — bumped luminance from ~0.55 to ~0.78 so secondary
 /// readouts (fire mode, "+reserve", "/mag", "[2] PULSAR") read clearly
 /// against the panel chrome instead of fading into it.
-constexpr HudColor k_textDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
+constexpr HudColor k_textDim{0.74f, 0.83f, 0.94f, 1.0f};
 /// @brief Standard text — bumped slightly toward white for body chrome.
 constexpr HudColor k_text{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 /// @brief Brightest text — kept near-white for hero readouts.
 constexpr HudColor k_textBright{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 
 /// @brief Primary amber — `oklch(0.80 0.165 75)`.
-constexpr HudColor k_amber{k_primary.r, k_primary.g, k_primary.b, 1.0f};
+constexpr HudColor k_amber{1.0f, 0.55f, 0.0f, 1.0f}; // Warning orange #FF8C00
 /// @brief Dimmer amber — `oklch(0.65 0.13 75)`.
-constexpr HudColor k_amberDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
+constexpr HudColor k_amberDim{1.0f, 0.27f, 0.0f, 1.0f}; // Burnt orange #FF4500
 /// @brief Deep amber — `oklch(0.45 0.10 70)`.
-constexpr HudColor k_amberDeep{k_quaternary.r, k_quaternary.g, k_quaternary.b, 1.0f};
+constexpr HudColor k_amberDeep{0.86f, 0.65f, 0.13f, 1.0f}; // Mustard #DAA520
 /// @brief Amber glow tint — `oklch(0.80 0.165 75 / 0.15)`.
-constexpr HudColor k_amberGlow{k_primary.r, k_primary.g, k_primary.b, 0.18f};
+constexpr HudColor k_amberGlow{1.0f, 0.84f, 0.0f, 0.18f};
 constexpr HudColor k_glassHighlight{k_tertiary.r, k_tertiary.g, k_tertiary.b, 0.18f};
 constexpr HudColor k_glassShadow{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.28f};
 constexpr HudColor k_scanline{k_tertiary.r, k_tertiary.g, k_tertiary.b, 0.045f};
 constexpr HudColor k_chromaRed{1.0f, 0.18f, 0.10f, 0.16f};
 constexpr HudColor k_chromaCyan{0.16f, 0.90f, 1.0f, 0.16f};
 
-/// @brief Health red — `oklch(0.65 0.20 28)`.
-constexpr HudColor k_red{k_primary.r, k_primary.g, k_primary.b, 1.0f};
-/// @brief Bright tail of HP gradient — `oklch(0.72 0.18 35)`.
-constexpr HudColor k_redBright{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
-/// @brief Dim red — `oklch(0.50 0.15 28)`.
-constexpr HudColor k_redDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
-constexpr HudColor k_health{0.92f, 0.96f, 0.97f, 1.0f};
-constexpr HudColor k_healthBright{1.0f, 1.0f, 1.0f, 1.0f};
+constexpr HudColor k_red{1.0f, 0.36f, 0.28f, 1.0f};
+constexpr HudColor k_redBright{1.0f, 0.54f, 0.30f, 1.0f};
+constexpr HudColor k_redDim{0.55f, 0.18f, 0.16f, 1.0f};
+constexpr HudColor k_health{0.196078f, 0.803922f, 0.196078f, 1.0f};       // #32CD32
+constexpr HudColor k_healthBright{0.0f, 1.0f, 0.498039f, 1.0f};           // #00FF7F
 
 /// @brief Shield cyan — `oklch(0.80 0.10 220)`.
-constexpr HudColor k_cyan{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
+constexpr HudColor k_cyan{k_primary.r, k_primary.g, k_primary.b, 1.0f};
 /// @brief Dim cyan — `oklch(0.55 0.08 220)`.
 constexpr HudColor k_cyanDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
 
 /// @brief Status green — `oklch(0.78 0.16 145)`.
-constexpr HudColor k_green{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
+constexpr HudColor k_green{k_healthBright.r, k_healthBright.g, k_healthBright.b, 1.0f};
+constexpr HudColor k_purple{0.541176f, 0.168627f, 0.886275f, 1.0f};       // #8A2BE2
+constexpr HudColor k_purpleBright{1.0f, 0.0f, 1.0f, 1.0f};               // #FF00FF
+constexpr HudColor k_infoBlue{0.254902f, 0.411765f, 0.882353f, 1.0f};    // #4169E1
+constexpr HudColor k_yellow{1.0f, 0.843137f, 0.0f, 1.0f};                // #FFD700
 
 /// @brief Pickup amber-trim background.
-constexpr HudColor k_pickupBg{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.82f};
+constexpr HudColor k_pickupBg{k_bgPanel.r, k_bgPanel.g, k_bgPanel.b, 0.74f};
 
 // ── Weapon-type accent colors (Apex convention) ───────────────────────────
 //
