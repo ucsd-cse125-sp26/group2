@@ -6,24 +6,35 @@
 #include "hud/HudContext.hpp"
 #include "hud/VoidfallStyle.hpp"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
-#include <cstring>
+#include <cmath>
 
 namespace
 {
 
-/// @brief Map weapon ID to a four-letter mil-spec callsign for the kill feed.
-const char* weaponCallsign(int /*weaponId*/)
-{
-    // The HudKillFeedEntry currently only carries a numeric weaponId; we don't
-    // have a typed map yet.  Default to "ARC-9" until the feed payload grows
-    // to include weapon names — same fallback as the prototype.
-    return "ARC-9";
-}
-
 bool nameMatchesYou(const std::string& s)
 {
     return s == "You" || s == "YOU";
+}
+
+void drawCircle(HudContext& ctx, float cx, float cy, float radius, HudColor color)
+{
+    constexpr int kSegments = 20;
+    for (int i = 0; i < kSegments; ++i) {
+        const float a0 = (static_cast<float>(i) / static_cast<float>(kSegments)) * 2.f * 3.14159265f;
+        const float a1 = (static_cast<float>(i + 1) / static_cast<float>(kSegments)) * 2.f * 3.14159265f;
+        ctx.triangle(cx, cy, cx + std::cos(a0) * radius, cy + std::sin(a0) * radius, cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color);
+    }
+}
+
+void drawSwords(HudContext& ctx, float cx, float cy, float size, HudColor color)
+{
+    ctx.rotatedRect(cx - size * 0.10f, cy, size * 0.12f, size * 0.90f, 45.f, color);
+    ctx.rotatedRect(cx + size * 0.10f, cy, size * 0.12f, size * 0.90f, -45.f, color);
+    ctx.rotatedRect(cx - size * 0.24f, cy + size * 0.24f, size * 0.08f, size * 0.34f, 45.f, color);
+    ctx.rotatedRect(cx + size * 0.24f, cy + size * 0.24f, size * 0.08f, size * 0.34f, -45.f, color);
 }
 
 } // namespace
@@ -31,12 +42,16 @@ bool nameMatchesYou(const std::string& s)
 KillFeed::KillFeed()
 {
     anchor = HudAnchor::TopRight;
-    offsetX = -80.f;
-    offsetY = 28.f;
+    offsetX = -60.f;
+    offsetY = 55.f;
 }
 
 void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
+    allyScore_ = state.allyScore;
+    enemyScore_ = state.enemyScore;
+    localScore_ = state.kda.kills * 100 + state.kda.assists * 50;
+
     for (const auto& ev : state.killFeedEvents) {
         Entry e;
         e.killerName = ev.killerName;
@@ -75,56 +90,70 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
     const float s = uiScale_;
     const float fs = fontSize * s;
     const float eh = entryHeight * s;
-    const float ep = entryPadding * s;
-    const float padX = 8.f * s;
-    const float gap = 7.f * s;
+    const float padX = 24.f * s;
+    const float panelW = panelWidth * s;
+    const float lbH = leaderboardHeight * s;
+    const float feedH = feedHeight * s;
+    const float x = anchorX - panelW;
 
-    float curY = y;
+    drawHoloPanel(ctx,
+                  x,
+                  y,
+                  panelW,
+                  lbH,
+                  18.f * s,
+                  withAlpha(k_bgPanelSolid, 0.68f),
+                  withAlpha(k_bgPanel, 0.50f),
+                  withAlpha(k_lineBright, 0.78f),
+                  std::max(1.f, 2.f * s));
+
+    char bestScore[32];
+    SDL_snprintf(bestScore, sizeof(bestScore), "%d", std::max(allyScore_, enemyScore_));
+    char youScore[32];
+    SDL_snprintf(youScore, sizeof(youScore), "%d", localScore_);
+    const float row1 = y + 30.f * s;
+    const float row2 = y + 83.f * s;
+    const float labelX = x + 74.f * s;
+    const float dotX = x + 214.f * s;
+    const float valueX = x + 250.f * s;
+    ctx.text("BEST", labelX, row1, fs, k_textBright, HudAlign::Left, true);
+    drawCircle(ctx, dotX, row1 + fs * 0.48f, 18.f * s, k_primary);
+    ctx.text(": LEADER -", valueX, row1, fs, k_textBright, HudAlign::Left, true);
+    ctx.text(bestScore, x + panelW - 24.f * s, row1, fs, k_textBright, HudAlign::Right, true);
+    ctx.text("YOU", labelX + 18.f * s, row2, fs, k_textBright, HudAlign::Left, true);
+    drawCircle(ctx, dotX, row2 + fs * 0.48f, 18.f * s, HudColor{1.f, 0.46f, 0.26f, 1.f});
+    ctx.text(": PLAYER -", valueX, row2, fs, k_textBright, HudAlign::Left, true);
+    ctx.text(youScore, x + panelW - 24.f * s, row2, fs, k_textBright, HudAlign::Right, true);
+
+    const float feedY = y + lbH + feedGap * s;
+    drawHoloPanel(ctx,
+                  x,
+                  feedY,
+                  panelW,
+                  feedH,
+                  18.f * s,
+                  withAlpha(k_bgPanelSolid, 0.54f),
+                  withAlpha(k_bgPanel, 0.42f),
+                  withAlpha(k_lineBright, 0.50f),
+                  std::max(1.f, 1.5f * s));
+
+    const float lineX = x + 18.f * s;
+    const float lineW = panelW - 36.f * s;
+    for (int i = 1; i < maxEntries; ++i)
+        ctx.rect(lineX, feedY + static_cast<float>(i) * eh, lineW, std::max(1.f, s), withAlpha(k_lineDim, 0.23f));
+
+    float curY = feedY;
+    int drawn = 0;
     for (const auto& e : entries_) {
+        if (drawn >= maxEntries)
+            break;
         const float alpha = (e.permanent ? 1.f : std::min(e.timer / fadeOutDuration, 1.f)) * e.slideIn;
-        const float slideOff = (1.f - e.slideIn) * 16.f * s;
-
-        const char* weapon = weaponCallsign(0);
-        const float killerW = ctx.measureText(e.killerName.c_str(), fs);
-        const float weaponW = ctx.measureText(weapon, fs);
-        const float victimW = ctx.measureText(e.victimName.c_str(), fs);
-        const float hsW = e.isHeadshot ? (10.f * s + gap) : 0.f;
-        const float contentW = killerW + gap + weaponW + hsW + gap + victimW;
-        const float pillW = contentW + padX * 2.f;
-        const float pillH = eh;
-
-        const float pillX = anchorX - pillW + slideOff;
-        const float pillY = curY;
-
-        // Background — amber-tinted when the local player is involved.
-        const HudColor bg =
-            e.youAreKiller ? withAlpha(k_secondary, 0.65f * alpha) : withAlpha(k_quaternary, 0.78f * alpha);
-        const HudColor border = e.youAreKiller ? withAlpha(k_amber, alpha) : withAlpha(k_lineDim, alpha);
-        drawPanel(ctx, pillX, pillY, pillW, pillH, bg, border, 1.f);
-
-        // Killer name (amber-tinted if local player).
-        const float textY = pillY + (pillH - fs) * 0.5f - fs * 0.18f;
-        float cursorX = pillX + padX;
-        const HudColor killerColor = e.youAreKiller ? withAlpha(k_textBright, alpha) : withAlpha(k_text, alpha);
-        ctx.text(e.killerName.c_str(), cursorX, textY, fs, killerColor, HudAlign::Left);
-        cursorX += killerW + gap;
-
-        // Weapon abbreviation in amber.
-        ctx.text(weapon, cursorX, textY, fs, withAlpha(k_amber, alpha), HudAlign::Left);
-        cursorX += weaponW + gap;
-
-        // Headshot glyph: small red diamond.
-        if (e.isHeadshot) {
-            const float hsSize = 8.f * s;
-            ctx.rotatedRect(
-                cursorX + hsSize * 0.5f, pillY + pillH * 0.5f, hsSize, hsSize, 45.f, withAlpha(k_red, alpha));
-            cursorX += 10.f * s + gap;
-        }
-
-        // Victim name in red.
-        const HudColor victimColor = e.youAreVictim ? withAlpha(k_red, alpha) : withAlpha(k_textDim, alpha);
-        ctx.text(e.victimName.c_str(), cursorX, textY, fs, victimColor, HudAlign::Left);
-
-        curY += pillH + ep;
+        const float slideOff = (1.f - e.slideIn) * 18.f * s;
+        const float rowY = curY + (eh - fs) * 0.5f - fs * 0.18f;
+        ctx.text(e.killerName.c_str(), x + padX - slideOff, rowY, fs, withAlpha(k_textBright, alpha), HudAlign::Left, true);
+        drawSwords(ctx, x + panelW * 0.50f, curY + eh * 0.52f, 28.f * s, withAlpha(k_textBright, alpha));
+        ctx.text(e.victimName.c_str(), x + panelW - padX + slideOff, rowY, fs, withAlpha(k_textBright, alpha), HudAlign::Right, true);
+        curY += eh;
+        ++drawn;
     }
 }

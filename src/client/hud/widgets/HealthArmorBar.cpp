@@ -192,8 +192,8 @@ void drawGlassFrame(HudContext& ctx, float x, float y, float w, float h, float c
 HealthArmorBar::HealthArmorBar()
 {
     anchor = HudAnchor::TopCenter;
-    offsetX = -375.f;
-    offsetY = 98.f;
+    offsetX = -325.f;
+    offsetY = 92.f;
     width = panelWidth;
     height = barHeight;
 }
@@ -226,6 +226,41 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float innerH = h - inset * 2.f;
     const float innerChamfer = std::max(0.f, chamfer - inset);
     const float innerCornerCut = std::max(0.f, cornerCut - inset);
+    const float centerX = x + w * 0.5f;
+
+    const float visorW = 1020.f * s;
+    const float visorLeft = centerX - visorW * 0.5f;
+    const float visorRight = centerX + visorW * 0.5f;
+    const float visorY = std::max(1.f, 1.5f * s);
+    const float frameY = topY + h * 0.46f;
+    const float framePoints[] = {
+        visorLeft,
+        visorY,
+        visorLeft + 230.f * s,
+        frameY,
+        x - 58.f * s,
+        frameY,
+        x - 18.f * s,
+        topY - 10.f * s,
+        x + w + 18.f * s,
+        topY - 10.f * s,
+        x + w + 58.f * s,
+        frameY,
+        visorRight - 230.f * s,
+        frameY,
+        visorRight,
+        visorY,
+    };
+    ctx.polyline(framePoints, 8, std::max(1.f, 8.f * s), withAlpha(k_primary, 0.08f));
+    ctx.polyline(framePoints, 8, std::max(1.f, 4.f * s), withAlpha(k_primary, 0.20f));
+    ctx.polyline(framePoints, 8, std::max(1.f, 2.5f * s), withAlpha(k_tertiary, 0.72f));
+    ctx.polyline(framePoints, 8, std::max(1.f, 1.f * s), k_primary);
+
+    const float tabW = 52.f * s;
+    const float tabGap = 10.f * s;
+    const float tabY = topY - 24.f * s;
+    ctx.rect(centerX - tabW - tabGap, tabY, tabW, std::max(2.f, 4.f * s), withAlpha(k_tertiary, 0.54f));
+    ctx.rect(centerX + tabGap, tabY, tabW, std::max(2.f, 4.f * s), withAlpha(k_tertiary, 0.54f));
 
     drawGradientFilledShape(ctx,
                             x,

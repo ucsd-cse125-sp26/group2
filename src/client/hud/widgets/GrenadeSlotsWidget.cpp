@@ -9,7 +9,6 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <array>
 #include <string>
 
 namespace
@@ -88,15 +87,16 @@ HudColor grenadeColor(const std::string& name, bool selected, bool available)
         return k_cyan;
     return k_green;
 }
+
 } // namespace
 
 GrenadeSlotsWidget::GrenadeSlotsWidget()
 {
     anchor = HudAnchor::TopLeft;
-    offsetX = 184.f;
-    offsetY = 28.f;
-    width = slotSize * static_cast<float>(kHudGrenadeSlots) + slotGap * static_cast<float>(kHudGrenadeSlots - 1);
-    height = slotSize;
+    offsetX = 60.f;
+    offsetY = 55.f;
+    width = trayWidth;
+    height = trayHeight;
 }
 
 void GrenadeSlotsWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
@@ -112,24 +112,25 @@ void GrenadeSlotsWidget::draw(HudContext& ctx, float anchorX, float anchorY)
     const float s = uiScale_;
     const float ss = slotSize * s;
     const float gap = slotGap * s;
-    const float totalW = ss * static_cast<float>(kHudGrenadeSlots) + gap * static_cast<float>(kHudGrenadeSlots - 1);
-    const float startX = anchorX - totalW * 0.5f;
-    const float y = anchorY;
+    const float trayW = trayWidth * s;
+    const float trayH = trayHeight * s;
+    const float startX = anchorX + 28.f * s;
+    const float y = anchorY + (trayH - ss) * 0.5f;
     const float icon = iconSize * s;
     const float fs = countFontSize * s;
     const float countX = countPadX * s;
     const float countY = countPadY * s;
     const float countGap = countCharacterGap * s;
-    const float panelPad = 12.f * s;
-
-    drawPanel(ctx,
-              startX - panelPad,
-              y - panelPad,
-              totalW + panelPad * 2.f,
-              ss + panelPad * 2.f,
-              withAlpha(k_bgPanelSolid, 0.72f),
-              k_lineBright,
-              std::max(1.f, 1.5f * s));
+    drawHoloPanel(ctx,
+                  anchorX,
+                  anchorY,
+                  trayW,
+                  trayH,
+                  18.f * s,
+                  withAlpha(k_bgPanelSolid, 0.52f),
+                  withAlpha(k_bgPanel, 0.42f),
+                  withAlpha(k_lineBright, 0.82f),
+                  std::max(1.f, 2.f * s));
 
     for (std::size_t i = 0; i < state_.items.size(); ++i) {
         const auto& item = state_.items[i];
@@ -138,21 +139,23 @@ void GrenadeSlotsWidget::draw(HudContext& ctx, float anchorX, float anchorY)
         const bool available = item.available;
         const HudColor color = grenadeColor(item.name, selected, available);
 
-        drawPanel(ctx,
-                  x,
-                  y,
-                  ss,
-                  ss,
-                  selected ? withAlpha(k_amberDeep, 0.34f) : withAlpha(k_bgPanel, 0.32f),
-                  selected ? k_yellow : withAlpha(k_lineBright, 0.56f),
-                  selected ? std::max(1.f, borderThickness * s * 0.45f) : std::max(1.f, s));
+        drawHoloPanel(ctx,
+                      x,
+                      y,
+                      ss,
+                      ss,
+                      cornerCut * 4.f * s,
+                      selected ? withAlpha(k_amberDeep, 0.22f) : withAlpha(k_bgPanel, 0.18f),
+                      withAlpha(k_bgPanelSolid, 0.20f),
+                      selected ? k_yellow : withAlpha(k_lineBright, 0.32f),
+                      selected ? std::max(1.f, borderThickness * s * 0.35f) : std::max(1.f, s));
         if (selected) {
             drawCutCornerOutline(ctx, x, y, ss, cornerCut * 2.0f * s, std::max(1.f, borderThickness * s), k_yellow);
         }
 
         char count[8];
         SDL_snprintf(count, sizeof(count), "%d", item.count);
-        ctx.icon(HudIcon::NoIcon, x + (ss - icon) * 0.5f, y + 9.f * s, icon, color);
+        ctx.icon(HudIcon::NoIcon, x + (ss - icon) * 0.5f, y + 12.f * s, icon, color);
         drawSpacedText(ctx, count, x + countX, y + ss - fs - countY, fs, countGap, k_textBright);
     }
 }

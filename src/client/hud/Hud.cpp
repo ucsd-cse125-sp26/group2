@@ -30,8 +30,8 @@
 
 namespace
 {
-constexpr float k_designWidth = 1920.f;
-constexpr float k_designHeight = 1080.f;
+constexpr float k_designWidth = 2848.f;
+constexpr float k_designHeight = 1494.f;
 
 float hudResolutionScale(float screenW, float screenH)
 {

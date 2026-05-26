@@ -9,15 +9,17 @@
 
 struct EquipmentSlots : HudWidget
 {
-    float slotSize = 118.f;
-    float slotHeight = 92.f;
-    float slotGap = 24.f;
-    float iconSize = 56.f;
-    float chargeBarWidth = 360.f;
-    float chargeBarHeight = 24.f;
-    float keyFontSize = 26.f;
-    float keyPadX = 10.f;
-    float keyPadY = 3.5f;
+    float clusterWidth = 1040.f;
+    float clusterHeight = 180.f;
+    float slotSize = 170.f;
+    float slotHeight = 122.f;
+    float slotGap = 50.f;
+    float iconSize = 82.f;
+    float chargeBarWidth = 450.f;
+    float chargeBarHeight = 32.f;
+    float keyFontSize = 34.f;
+    float keyPadX = 13.f;
+    float keyPadY = 7.f;
 
     EquipmentSlots();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

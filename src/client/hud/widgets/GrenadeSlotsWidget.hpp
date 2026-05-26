@@ -7,12 +7,14 @@
 
 struct GrenadeSlotsWidget : HudWidget
 {
-    float slotSize = 70.f;
-    float slotGap = 8.f;
-    float iconSize = 40.f;
-    float countFontSize = 20.f;
-    float countPadX = 9.f;
-    float countPadY = 5.f;
+    float trayWidth = 500.f;
+    float trayHeight = 150.f;
+    float slotSize = 128.f;
+    float slotGap = 18.f;
+    float iconSize = 76.f;
+    float countFontSize = 34.f;
+    float countPadX = 88.f;
+    float countPadY = 28.f;
     float countCharacterGap = 3.25f;
     float iconPadRight = 3.f;
     float cornerCut = 2.25f;

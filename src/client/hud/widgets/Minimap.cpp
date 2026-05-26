@@ -1,10 +1,9 @@
 /// @file Minimap.cpp
-/// @brief Voidfall circular radar with clipped grid + amber player chevron.
+/// @brief Prototype circular radar with polar grid and hologram ring.
 
 #include "Minimap.hpp"
 
 #include "hud/HudContext.hpp"
-#include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
 
 #include <SDL3/SDL.h>
@@ -49,13 +48,13 @@ void drawClockwiseRingArc(
 Minimap::Minimap()
 {
     anchor = HudAnchor::BottomLeft;
-    offsetX = 80.f;
-    offsetY = -260.f;
-    width = 200.f;
-    height = 200.f;
-    mapSize = 200.f;
-    dotSize = 6.f;
-    borderThickness = 1.f;
+    offsetX = 65.f;
+    offsetY = -410.f;
+    width = 360.f;
+    height = 360.f;
+    mapSize = 360.f;
+    dotSize = 12.f;
+    borderThickness = 2.f;
 }
 
 void Minimap::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
@@ -95,33 +94,44 @@ void Minimap::draw(HudContext& ctx, float x, float y)
 
     // Frame.
     if (ringT > 0.f) {
-        drawCircleOutline(ctx, cx, cy, ringRadius, ringT, withAlpha(k_lineDim, 0.55f));
+        drawCircleOutline(ctx, cx, cy, ringRadius + 3.f * s, std::max(1.f, ringT * 1.3f), withAlpha(k_primary, 0.10f));
+        drawCircleOutline(ctx, cx, cy, ringRadius, ringT, withAlpha(k_textDim, 0.28f));
         if (trailLevel_ > liveLevel_)
             drawClockwiseRingArc(ctx, cx, cy, ringRadius, trailLevel_, ringT, withAlpha(k_amberDim, 0.65f));
-        drawClockwiseRingArc(ctx, cx, cy, ringRadius, liveLevel_, ringT, k_amber);
+        drawClockwiseRingArc(ctx, cx, cy, ringRadius, liveLevel_, ringT, withAlpha(k_primary, 0.80f));
     }
 
-    ctx.roundedRect(x, y, ms, ms, radius, withAlpha(k_quaternary, 0.85f));
+    ctx.roundedRect(x, y, ms, ms, radius, HudColor{0.07f, 0.13f, 0.15f, 0.65f});
     const float borderT = std::max(0.f, borderThickness * s);
     if (borderT > 0.f)
-        drawCircleOutline(ctx, cx, cy, std::max(0.f, radius - borderT * 0.5f), borderT, k_line);
+        drawCircleOutline(ctx, cx, cy, std::max(0.f, radius - borderT * 0.5f), borderT, withAlpha(k_textDim, 0.48f));
 
-    // Grid clipped to circular chords.
-    const HudColor grid = withAlpha(k_secondary, 0.45f);
-    const int divisions = 10;
+    // Polar grid clipped to circular chords.
+    const HudColor grid = HudColor{0.2745f, 0.4706f, 0.5333f, 0.25f};
     const float lineT = std::max(1.f, 1.f * s);
     const float gridRadius = std::max(0.f, radius - borderT - lineT * 0.5f);
-    for (int i = 1; i < divisions; ++i) {
-        const float offset = -radius + (static_cast<float>(i) / divisions) * ms;
-        const float halfChord = std::sqrt(std::max(0.f, gridRadius * gridRadius - offset * offset));
-        if (halfChord <= 0.f)
-            continue;
-        ctx.rect(cx + offset - lineT * 0.5f, cy - halfChord, lineT, halfChord * 2.f, grid);
-        ctx.rect(cx - halfChord, cy + offset - lineT * 0.5f, halfChord * 2.f, lineT, grid);
+    for (int i = 1; i <= 4; ++i)
+        drawCircleOutline(ctx, cx, cy, gridRadius * (static_cast<float>(i) / 4.f), lineT, grid);
+    ctx.rect(cx - lineT * 0.5f, cy - gridRadius, lineT, gridRadius * 2.f, grid);
+    ctx.rect(cx - gridRadius, cy - lineT * 0.5f, gridRadius * 2.f, lineT, grid);
+    for (int i = 0; i < 8; ++i) {
+        const float a = static_cast<float>(i) * 3.14159265f * 0.25f;
+        const float px = std::cos(a) * gridRadius;
+        const float py = std::sin(a) * gridRadius;
+        const float pts[] = {cx - px, cy - py, cx + px, cy + py};
+        ctx.polyline(pts, 2, lineT, withAlpha(grid, i % 2 == 0 ? 0.72f : 0.38f));
     }
 
-    // Local player chevron — shared notched-arrow glyph from the icon module.
-    icons::playerArrow(ctx, std::round(cx), std::round(cy), 14.f * s, k_amber);
+    ctx.text("N", cx, y + 34.f * s, 28.f * s, k_textBright, HudAlign::Center, true);
+    ctx.text("S", cx, y + ms - 48.f * s, 24.f * s, withAlpha(k_textBright, 0.62f), HudAlign::Center, true);
+    ctx.text("W", x + 28.f * s, cy - 16.f * s, 24.f * s, withAlpha(k_textBright, 0.72f), HudAlign::Center, true);
+    ctx.text("E", x + ms - 28.f * s, cy - 16.f * s, 24.f * s, withAlpha(k_textBright, 0.72f), HudAlign::Center, true);
+    ctx.text("1", cx, y - 42.f * s, 34.f * s, k_textBright, HudAlign::Center, true);
+
+    // Local player pointer.
+    const float p = 30.f * s;
+    ctx.triangle(cx, cy - p, cx - p * 0.58f, cy + p * 0.74f, cx + p * 0.58f, cy + p * 0.74f, k_primary);
+    ctx.triangle(cx, cy - p * 0.45f, cx - p * 0.25f, cy + p * 0.35f, cx + p * 0.25f, cy + p * 0.35f, withAlpha(k_quaternary, 0.65f));
 
     // Enemy dots (red), rotated by yaw so player-forward is up. Dots beyond
     // the radar's range are clamped radially to the circular edge
@@ -145,7 +155,7 @@ void Minimap::draw(HudContext& ctx, float x, float y)
         }
         const float ex = cx - dx;
         const float ey = cy - dz;
-        // Square dot for the mil-spec feel (rotated 45° = diamond).
-        ctx.rotatedRect(ex, ey, dotPx, dotPx, 45.f, k_red);
+        // Prototype-style yellow triangular blips.
+        ctx.triangle(ex, ey - dotPx, ex - dotPx * 0.68f, ey + dotPx * 0.68f, ex + dotPx * 0.68f, ey + dotPx * 0.68f, k_yellow);
     }
 }

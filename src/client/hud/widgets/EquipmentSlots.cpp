@@ -51,7 +51,7 @@ void drawSegmentedChargeBar(HudContext& ctx,
     using namespace voidfall;
 
     const float fill = std::clamp(fill01, 0.f, 1.f);
-    drawPanel(ctx, x, y, w, h, withAlpha(k_bgInset, 0.72f), withAlpha(k_lineBright, 0.50f), 1.f);
+    drawHoloPanel(ctx, x, y, w, h, h * 0.32f, withAlpha(k_bgInset, 0.72f), withAlpha(k_bgPanelSolid, 0.34f), withAlpha(k_lineBright, 0.48f), 1.f);
 
     const float pad = std::max(1.f, h * 0.18f);
     const float gap = std::max(1.f, h * 0.16f);
@@ -80,15 +80,16 @@ void drawSegmentedChargeBar(HudContext& ctx,
         }
     }
 }
+
 } // namespace
 
 EquipmentSlots::EquipmentSlots()
 {
     anchor = HudAnchor::BottomCenter;
     offsetX = 0.f;
-    offsetY = -40.f;
-    width = slotSize * 2.f + slotGap * 2.f + chargeBarWidth;
-    height = slotHeight + keyFontSize + keyPadY * 2.f + 8.f;
+    offsetY = -20.f;
+    width = clusterWidth;
+    height = clusterHeight;
 }
 
 void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
@@ -115,10 +116,12 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
     const float barW = chargeBarWidth * s;
     const float barH = chargeBarHeight * s;
     const float gap = slotGap * s;
-    const float totalW = frameW * 2.f + barW + gap * 2.f;
+    const float totalW = clusterWidth * s;
     const float x = anchorX - totalW * 0.5f;
-    const float y = anchorY - frameH;
-    const float barsX = x + frameW + gap;
+    const float y = anchorY - clusterHeight * s;
+    const float moduleY = y + 33.f * s;
+    const float leftSlotX = x + 152.f * s;
+    const float barsX = leftSlotX + frameW + gap;
     const float rightX = barsX + barW + gap;
 
     constexpr int slotCount = 2;
@@ -141,46 +144,56 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
          state_.secondaryAbilityMarked ? k_yellow : k_cyan},
     };
 
-    drawPanel(ctx,
-              x - 20.f * s,
-              y + frameH * 0.46f,
-              totalW + 40.f * s,
-              frameH * 0.70f,
-              withAlpha(k_bgPanel, 0.28f),
-              withAlpha(k_lineBright, 0.38f),
-              std::max(1.f, s));
+    const float framePoints[] = {
+        x,
+        y + clusterHeight * s,
+        x + 115.f * s,
+        y + 110.f * s,
+        x + 155.f * s,
+        y + 92.f * s,
+        x + totalW - 155.f * s,
+        y + 92.f * s,
+        x + totalW - 115.f * s,
+        y + 110.f * s,
+        x + totalW,
+        y + clusterHeight * s,
+    };
+    ctx.polyline(framePoints, 6, std::max(1.f, 9.f * s), withAlpha(k_primary, 0.08f));
+    ctx.polyline(framePoints, 6, std::max(1.f, 4.f * s), withAlpha(k_primary, 0.22f));
+    ctx.polyline(framePoints, 6, std::max(1.f, 2.f * s), withAlpha(k_tertiary, 0.70f));
+    ctx.polyline(framePoints, 6, std::max(1.f, 1.f * s), k_primary);
 
     drawSegmentedChargeBar(ctx,
                            barsX,
-                           y + 11.f * s,
-                           barW * 0.52f,
+                           moduleY + 12.f * s,
+                           barW * 0.47f,
                            barH,
                            slots[0].available ? slots[0].charge : 0.f,
-                           8,
+                           5,
                            k_purple,
                            k_purpleBright);
     drawSegmentedChargeBar(ctx,
-                           barsX + barW * 0.57f,
-                           y + 11.f * s,
-                           barW * 0.34f,
+                           barsX + barW * 0.55f,
+                           moduleY + 12.f * s,
+                           barW * 0.35f,
                            barH,
                            slots[1].available ? slots[1].charge : 0.f,
-                           4,
+                           5,
                            k_amberDeep,
                            k_yellow);
     drawSegmentedChargeBar(ctx,
                            barsX,
-                           y + 58.f * s,
-                           barW * 0.45f,
+                           moduleY + 72.f * s,
+                           barW * 0.47f,
                            barH,
                            0.f,
                            1,
                            k_health,
                            k_healthBright);
     drawSegmentedChargeBar(ctx,
-                           barsX + barW * 0.57f,
-                           y + 58.f * s,
-                           barW * 0.38f,
+                           barsX + barW * 0.55f,
+                           moduleY + 72.f * s,
+                           barW * 0.35f,
                            barH,
                            0.f,
                            1,
@@ -189,22 +202,24 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
 
     for (int i = 0; i < slotCount; ++i) {
         const auto& sl = slots[i];
-        const float sx = i == 0 ? x : rightX;
+        const float sx = i == 0 ? leftSlotX : rightX;
         const bool ready = sl.available && sl.charge >= 0.999f;
         const HudColor accent = ready ? sl.accent : (sl.available ? withAlpha(sl.accent, 0.58f) : withAlpha(k_textDim, 0.36f));
 
-        drawPanel(ctx,
+        drawHoloPanel(ctx,
                   sx,
-                  y,
+                  moduleY,
                   frameW,
                   frameH,
+                  20.f * s,
                   withAlpha(k_bgPanelSolid, ready ? 0.52f : 0.34f),
+                  withAlpha(k_bgPanel, 0.28f),
                   ready ? accent : withAlpha(k_lineBright, 0.56f),
                   std::max(1.f, 1.25f * s));
-        drawCutCornerOutline(ctx, sx, y, frameW, frameH, 17.f * s, std::max(1.f, 1.5f * s), withAlpha(accent, 0.86f));
+        drawCutCornerOutline(ctx, sx, moduleY, frameW, frameH, 20.f * s, std::max(1.f, 1.5f * s), withAlpha(accent, 0.86f));
 
         const float ix = sx + (frameW - icon) * 0.5f;
-        const float iy = y + 14.f * s;
+        const float iy = moduleY + (frameH - icon) * 0.5f;
         ctx.icon(HudIcon::NoIcon, ix, iy, icon, accent);
 
         const char* keyLabel = sl.keyLabel->c_str();
@@ -214,8 +229,8 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
             keyFs -= 0.5f * s;
         }
         const float keyW = std::min(maxKeyW, ctx.measureText(keyLabel, keyFs) + keyPadX * s * 2.f);
-        const float keyX = sx + (frameW - keyW) * 0.5f;
-        const float keyY = y + frameH + 5.f * s;
+        const float keyX = i == 0 ? sx - keyW - 16.f * s : sx + frameW + 16.f * s;
+        const float keyY = moduleY + frameH - (keyFs + keyPadY * s * 2.f);
         drawKeyTab(ctx,
                    keyLabel,
                    keyX,

@@ -21,12 +21,16 @@
 
 struct KillFeed : HudWidget
 {
-    float entryHeight = 40.f;
-    float entryPadding = 30.f;
+    float panelWidth = 540.f;
+    float leaderboardHeight = 142.f;
+    float feedHeight = 325.f;
+    float feedGap = 20.f;
+    float entryHeight = 46.f;
+    float entryPadding = 0.f;
     float entryLifetime = 5.f;
-    float fontSize = 20.f;
+    float fontSize = 31.f;
     float fadeOutDuration = 0.6f;
-    int maxEntries = 4;
+    int maxEntries = 6;
 
     KillFeed();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
@@ -45,4 +49,7 @@ private:
         float slideIn = 1.f; ///< 1 = settled, 0 = just-spawned (animates in).
     };
     std::vector<Entry> entries_;
+    int allyScore_ = 0;
+    int enemyScore_ = 0;
+    int localScore_ = 0;
 };

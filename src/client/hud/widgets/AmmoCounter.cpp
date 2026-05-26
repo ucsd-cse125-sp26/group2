@@ -21,13 +21,44 @@ void drawAmmoSpark(HudContext& ctx, float cx, float cy, float size, HudColor col
     ctx.rotatedRect(cx, cy, size * 0.20f, size * 0.82f, 45.f, color);
     ctx.rotatedRect(cx, cy, size * 0.20f, size * 0.82f, -45.f, color);
 }
+
+void drawWeaponSlot(HudContext& ctx, float x, float y, float w, float h, float s, int key, bool active)
+{
+    using namespace voidfall;
+    const HudColor border = active ? k_primary : withAlpha(k_textDim, 0.38f);
+    const HudColor iconColor = active ? k_textBright : withAlpha(k_textDim, 0.72f);
+    drawHoloPanel(ctx,
+                  x,
+                  y,
+                  w,
+                  h,
+                  22.f * s,
+                  active ? withAlpha(k_infoBlue, 0.24f) : withAlpha(k_bgPanelSolid, 0.42f),
+                  withAlpha(k_bgPanel, active ? 0.40f : 0.30f),
+                  border,
+                  (active ? 2.5f : 1.5f) * s);
+    char keyText[4];
+    SDL_snprintf(keyText, sizeof(keyText), "%d", key);
+    drawKeyTab(ctx,
+               keyText,
+               x - 58.f * s,
+               y + h * 0.5f - 22.f * s,
+               34.f * s,
+               10.f * s,
+               5.f * s,
+               withAlpha(k_bgPanelSolid, 0.72f),
+               border,
+               k_textBright);
+    const float icon = h * 0.62f;
+    ctx.icon(HudIcon::NoIcon, x + (w - icon) * 0.5f, y + (h - icon) * 0.5f, icon, iconColor);
+}
 } // namespace
 
 AmmoCounter::AmmoCounter()
 {
     anchor = HudAnchor::BottomRight;
-    offsetX = -80.f;
-    offsetY = -60.f;
+    offsetX = -55.f;
+    offsetY = -40.f;
     width = panelWidth;
     height = panelHeight;
 }
@@ -38,6 +69,7 @@ void AmmoCounter::update(float /*dt*/, const HudGameState& state, HudTweenPool& 
     displayClip_ = state.ammoClip;
     displayReserve_ = state.ammoReserve;
     weaponId_ = state.weaponId;
+    secondaryKeybind_ = state.secondaryKeybind;
 }
 
 void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
@@ -49,6 +81,15 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
     const float ph = panelHeight * s;
     const float x = anchorX - pw;
     const float y = anchorY - ph;
+    const float slotW = weaponSlotWidth * s;
+    const float slotH = weaponSlotHeight * s;
+    const float slotGap = weaponSlotGap * s;
+    const float slotBottomGap = weaponSlotBottomGap * s;
+
+    const float slot2Y = y - slotBottomGap - slotH;
+    const float slot1Y = slot2Y - slotGap - slotH;
+    drawWeaponSlot(ctx, x, slot1Y, slotW, slotH, s, secondaryKeybind_ == 1 ? 1 : 1, false);
+    drawWeaponSlot(ctx, x, slot2Y, slotW, slotH, s, 2, true);
 
     const float clipFs = clipFontSize * s;
     const float reserveFs = reserveFontSize * s;
@@ -60,8 +101,17 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
     constexpr const char* slashText = "/";
 
     const HudColor accent = weaponTypeAccent(weaponId_);
-    drawPanel(ctx, x, y, pw, ph, withAlpha(k_bgPanelSolid, 0.70f), k_lineBright, std::max(1.f, 1.5f * s));
-    drawCornerBrackets(ctx, x, y, pw, ph, 20.f * s, std::max(1.f, s), 3.f * s, accent);
+    drawHoloPanel(ctx,
+                  x,
+                  y,
+                  pw,
+                  ph,
+                  25.f * s,
+                  withAlpha(k_bgPanelSolid, 0.74f),
+                  withAlpha(k_bgPanel, 0.48f),
+                  k_lineBright,
+                  std::max(1.f, 2.5f * s));
+    drawCornerBrackets(ctx, x, y, pw, ph, 30.f * s, std::max(1.f, 1.5f * s), 3.f * s, accent);
 
     const float innerPad = 13.f * s;
     ctx.gradientRect(x + innerPad,
@@ -104,5 +154,5 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
              HudAlign::Right);
     ctx.text(reserveText, rightX, centerY - reserveFs * 0.38f, reserveFs, k_textDim, HudAlign::Right);
 
-    drawAmmoSpark(ctx, x + pw - 34.f * s, y + ph * 0.50f, 42.f * s, withAlpha(k_textBright, 0.50f));
+    drawAmmoSpark(ctx, x + pw - 38.f * s, y + ph * 0.50f, 56.f * s, withAlpha(k_textDim, 0.48f));
 }
