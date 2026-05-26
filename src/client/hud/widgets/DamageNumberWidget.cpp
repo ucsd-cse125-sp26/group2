@@ -42,13 +42,13 @@ void DamageNumberWidget::update(float dt, const HudGameState& state, HudTweenPoo
         e.damage = dn.damage;
         e.life = 0.8f;
         e.maxLife = 0.8f;
-        // Voidfall palette: red headshots, cyan shield, amber on-hp.
+        // Voidfall palette: primary headshots, blue shield, white on-hp.
         if (dn.headshot)
             e.color = voidfall::k_red;
         else if (dn.shielded)
             e.color = voidfall::k_cyan;
         else
-            e.color = voidfall::k_amber;
+            e.color = voidfall::k_health;
     }
 }
 

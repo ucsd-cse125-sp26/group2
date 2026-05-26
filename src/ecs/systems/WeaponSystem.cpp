@@ -67,9 +67,15 @@ inline bool combatLogEnabled()
 /// @param weapon  Weapon state (modified in place).
 void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
 {
-    if (input.switchToPrimary) {
+    if (input.switchToPrimary && weapon.current != WeaponSlot::PRIMARY) {
+        auto& gun = getEquippedGun(weapon);
+        gun.isReloading = false;
+        gun.reloadTime = 0.0f;
         weapon.current = WeaponSlot::PRIMARY;
-    } else if (input.switchToSecondary) {
+    } else if (input.switchToSecondary && weapon.current != WeaponSlot::SECONDARY) {
+        auto& gun = getEquippedGun(weapon);
+        gun.isReloading = false;
+        gun.reloadTime = 0.0f;
         weapon.current = WeaponSlot::SECONDARY;
     }
 }
@@ -79,10 +85,25 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
 /// @param dt      Fixed physics delta time in seconds.
 inline void handleCooldown(WeaponState& weapon, float dt)
 {
-    auto reduce = [dt](GunInstance& gun) { gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt); };
-
     for (auto& gun : weapon.slots) {
-        reduce(gun);
+        gun.fireCooldown = std::max(0.0f, gun.fireCooldown - dt);
+
+        if (gun.isReloading) {
+            gun.reloadTime -= dt;
+            if (gun.reloadTime <= 0.0f) {
+                const WeaponConfig& config = getWeaponConfig(gun.type);
+                int reloadAmount = config.magazineSize - gun.currentMagAmmo;
+                if (gun.totalAmmo >= reloadAmount) {
+                    gun.currentMagAmmo += reloadAmount;
+                    gun.totalAmmo -= reloadAmount;
+                } else {
+                    gun.currentMagAmmo += gun.totalAmmo;
+                    gun.totalAmmo = 0;
+                }
+                gun.isReloading = false;
+                gun.reloadTime = 0.0f;
+            }
+        }
     }
 }
 
@@ -96,15 +117,9 @@ inline void handleGrenadeCooldown(GrenadeState& grenades, float dt)
 inline void handleReload(GunInstance& gun)
 {
     const WeaponConfig& config = getWeaponConfig(gun.type);
-    if (gun.totalAmmo > 0 && gun.currentMagAmmo < config.magazineSize) {
-        int reloadAmount = config.magazineSize - gun.currentMagAmmo;
-        if ((gun.totalAmmo - reloadAmount) >= 0) {
-            gun.currentMagAmmo += reloadAmount;
-            gun.totalAmmo -= reloadAmount;
-        } else {
-            gun.currentMagAmmo += gun.totalAmmo;
-            gun.totalAmmo = 0;
-        }
+    if (!gun.isReloading && gun.totalAmmo > 0 && gun.currentMagAmmo < config.magazineSize) {
+        gun.isReloading = true;
+        gun.reloadTime = config.reloadTime;
     }
 }
 
@@ -114,7 +129,6 @@ inline void handleReload(GunInstance& gun)
 inline bool handleAmmo(GunInstance& gun)
 {
     if (gun.currentMagAmmo <= 0) {
-        // TODO: Need to implement reload state so it is not instant.
         handleReload(gun);
         return false;
     }
@@ -487,6 +501,11 @@ handleScope(Registry& registry, entt::entity shooter, const InputSnapshot& input
         return;
     }
 
+    if (gun.isReloading) {
+        gun.chargeTime = 0; // lose change if you reload
+        return;
+    }
+
     if (input.scoped) {
         gun.chargeTime = std::min((gun.chargeTime + dt), config.maxChargeTime);
     } else {
@@ -534,6 +553,13 @@ inline void handleFire(Registry& registry,
 {
     GunInstance& gun = getEquippedGun(weapon);
     const WeaponConfig& config = getWeaponConfig(gun.type);
+
+    if (gun.isReloading) {
+        if (auto* beam = registry.try_get<BeamState>(shooter)) {
+            beam->active = false; // turn off beam visuals during reload
+        }
+        return;
+    }
 
     // ── Beam weapon path ──
     if (config.isBeam) {

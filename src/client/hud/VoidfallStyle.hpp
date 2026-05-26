@@ -23,59 +23,66 @@ namespace voidfall
 // ── Palette (matches prototype's CSS custom properties) ─────────────────────
 
 /// @brief Deep panel background — opaque so HUD chrome doesn't pick up sky tint.
-constexpr HudColor k_bgVoid{0.08f, 0.075f, 0.07f, 0.96f};
+constexpr HudColor k_primary{0.168627f, 0.694118f, 0.741176f, 1.0f};    // #2BB1BD
+constexpr HudColor k_secondary{0.250980f, 0.478431f, 0.501961f, 1.0f};  // #407A80
+constexpr HudColor k_tertiary{0.615686f, 0.858824f, 0.882353f, 1.0f};   // #9DDBE1
+constexpr HudColor k_quaternary{0.070588f, 0.270588f, 0.290196f, 1.0f}; // #12454A
+
+constexpr HudColor k_bgVoid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.96f};
 /// @brief Standard panel fill — bumped to 0.92α (was 0.78).
 /// At 0.78 the world bled through enough that bright-sky maps washed the
 /// chrome out and made dim text grey-on-grey.  0.92 keeps a faint sense of
 /// translucency without sacrificing readability against any background.
-constexpr HudColor k_bgPanel{0.10f, 0.095f, 0.085f, 0.92f};
+constexpr HudColor k_bgPanel{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.92f};
 /// @brief Solid panel — used for hero callouts.
-constexpr HudColor k_bgPanelSolid{0.09f, 0.085f, 0.075f, 0.96f};
+constexpr HudColor k_bgPanelSolid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.96f};
 /// @brief Inset bar background.
-constexpr HudColor k_bgInset{0.12f, 0.115f, 0.105f, 0.92f};
+constexpr HudColor k_bgInset{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.92f};
 
 /// @brief Dim hairline — `oklch(0.32 0.015 60 / 0.6)`.
-constexpr HudColor k_lineDim{0.32f, 0.30f, 0.28f, 0.7f};
+constexpr HudColor k_lineDim{k_secondary.r, k_secondary.g, k_secondary.b, 0.7f};
 /// @brief Standard hairline — `oklch(0.40 0.018 60)`.
-constexpr HudColor k_line{0.42f, 0.40f, 0.37f, 0.95f};
+constexpr HudColor k_line{k_secondary.r, k_secondary.g, k_secondary.b, 0.95f};
 /// @brief Bright hairline — `oklch(0.55 0.02 60)`.
-constexpr HudColor k_lineBright{0.62f, 0.59f, 0.56f, 1.0f};
+constexpr HudColor k_lineBright{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 
 /// @brief Dim text — bumped luminance from ~0.55 to ~0.78 so secondary
 /// readouts (fire mode, "+reserve", "/mag", "[2] PULSAR") read clearly
 /// against the panel chrome instead of fading into it.
-constexpr HudColor k_textDim{0.78f, 0.76f, 0.73f, 1.0f};
+constexpr HudColor k_textDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
 /// @brief Standard text — bumped slightly toward white for body chrome.
-constexpr HudColor k_text{0.92f, 0.90f, 0.87f, 1.0f};
+constexpr HudColor k_text{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 /// @brief Brightest text — kept near-white for hero readouts.
-constexpr HudColor k_textBright{1.00f, 0.99f, 0.97f, 1.0f};
+constexpr HudColor k_textBright{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 
 /// @brief Primary amber — `oklch(0.80 0.165 75)`.
-constexpr HudColor k_amber{1.00f, 0.71f, 0.18f, 1.0f};
+constexpr HudColor k_amber{k_primary.r, k_primary.g, k_primary.b, 1.0f};
 /// @brief Dimmer amber — `oklch(0.65 0.13 75)`.
-constexpr HudColor k_amberDim{0.78f, 0.55f, 0.14f, 1.0f};
+constexpr HudColor k_amberDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
 /// @brief Deep amber — `oklch(0.45 0.10 70)`.
-constexpr HudColor k_amberDeep{0.50f, 0.35f, 0.10f, 1.0f};
+constexpr HudColor k_amberDeep{k_quaternary.r, k_quaternary.g, k_quaternary.b, 1.0f};
 /// @brief Amber glow tint — `oklch(0.80 0.165 75 / 0.15)`.
-constexpr HudColor k_amberGlow{1.00f, 0.71f, 0.18f, 0.18f};
+constexpr HudColor k_amberGlow{k_primary.r, k_primary.g, k_primary.b, 0.18f};
 
 /// @brief Health red — `oklch(0.65 0.20 28)`.
-constexpr HudColor k_red{0.92f, 0.30f, 0.20f, 1.0f};
+constexpr HudColor k_red{k_primary.r, k_primary.g, k_primary.b, 1.0f};
 /// @brief Bright tail of HP gradient — `oklch(0.72 0.18 35)`.
-constexpr HudColor k_redBright{0.95f, 0.45f, 0.25f, 1.0f};
+constexpr HudColor k_redBright{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 /// @brief Dim red — `oklch(0.50 0.15 28)`.
-constexpr HudColor k_redDim{0.65f, 0.20f, 0.15f, 1.0f};
+constexpr HudColor k_redDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
+constexpr HudColor k_health{0.92f, 0.96f, 0.97f, 1.0f};
+constexpr HudColor k_healthBright{1.0f, 1.0f, 1.0f, 1.0f};
 
 /// @brief Shield cyan — `oklch(0.80 0.10 220)`.
-constexpr HudColor k_cyan{0.45f, 0.78f, 0.96f, 1.0f};
+constexpr HudColor k_cyan{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 /// @brief Dim cyan — `oklch(0.55 0.08 220)`.
-constexpr HudColor k_cyanDim{0.20f, 0.50f, 0.70f, 1.0f};
+constexpr HudColor k_cyanDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f};
 
 /// @brief Status green — `oklch(0.78 0.16 145)`.
-constexpr HudColor k_green{0.30f, 0.86f, 0.45f, 1.0f};
+constexpr HudColor k_green{k_tertiary.r, k_tertiary.g, k_tertiary.b, 1.0f};
 
 /// @brief Pickup amber-trim background.
-constexpr HudColor k_pickupBg{0.13f, 0.12f, 0.11f, 0.82f};
+constexpr HudColor k_pickupBg{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.82f};
 
 // ── Weapon-type accent colors (Apex convention) ───────────────────────────
 //
@@ -84,11 +91,11 @@ constexpr HudColor k_pickupBg{0.13f, 0.12f, 0.11f, 0.82f};
 // underline, fire-mode tag border, slot-tab top-edge, and slot-index pill
 // background — so the player parses *what* they're holding by color
 // before reading the name.
-constexpr HudColor k_typeAr{0.20f, 0.65f, 0.70f, 1.0f};      // teal
-constexpr HudColor k_typeSniper{0.40f, 0.30f, 0.75f, 1.0f};  // purple
-constexpr HudColor k_typePistol{0.20f, 0.75f, 0.45f, 1.0f};  // green
-constexpr HudColor k_typeSmg{0.95f, 0.65f, 0.18f, 1.0f};     // amber
-constexpr HudColor k_typeShotgun{0.85f, 0.30f, 0.20f, 1.0f}; // red
+constexpr HudColor k_typeAr = k_primary;
+constexpr HudColor k_typeSniper = k_tertiary;
+constexpr HudColor k_typePistol = k_secondary;
+constexpr HudColor k_typeSmg = k_primary;
+constexpr HudColor k_typeShotgun = k_secondary;
 
 /// @brief Map a weapon-type id (matching `WeaponType` integer order in
 /// `ecs/components/WeaponState.hpp`: 0=Rifle, 1=Rocket, 2=RailGun,
@@ -177,7 +184,7 @@ inline void drawTrailBar(HudContext& ctx,
                          float fill01,
                          float trail01,
                          HudColor fillColor,
-                         HudColor trailColor = HudColor{0.95f, 0.95f, 0.95f, 0.45f},
+                         HudColor trailColor = HudColor{k_tertiary.r, k_tertiary.g, k_tertiary.b, 0.45f},
                          HudColor bgColor = k_bgInset,
                          HudColor borderColor = k_lineDim)
 {
@@ -224,7 +231,7 @@ inline void drawGradientTrailBar(HudContext& ctx,
                                  float trail01,
                                  HudColor fillLeft,
                                  HudColor fillRight,
-                                 HudColor trailColor = HudColor{0.95f, 0.95f, 0.95f, 0.45f},
+                                 HudColor trailColor = HudColor{k_tertiary.r, k_tertiary.g, k_tertiary.b, 0.45f},
                                  HudColor bgColor = k_bgInset,
                                  HudColor borderColor = k_lineDim)
 {
@@ -251,7 +258,7 @@ inline void drawKeyTab(HudContext& ctx,
                        float fontSize,
                        float padX = 3.f,
                        float padY = 1.f,
-                       HudColor bgColor = HudColor{0.f, 0.f, 0.f, 0.45f},
+                       HudColor bgColor = HudColor{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.45f},
                        HudColor borderColor = k_lineBright,
                        HudColor textColor = k_textDim)
 {

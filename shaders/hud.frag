@@ -92,6 +92,15 @@ void main()
         float alpha = mix(alphaNoOutline, alphaOutlined, outlineAmount) * vColor.a;
         outColor = premul(rgb, alpha);
 
+    } else if (mode == 6) {
+        // SDF alpha mask for knockout text. The erase blend pipeline ignores
+        // src RGB and uses src alpha to remove existing HUD target coverage.
+        float sdf = texture(sdfAtlas, vUV).r;
+        float pxRange = screenPxRange();
+        float screenPxDistance = pxRange * (sdf - 0.5);
+        float alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0) * vColor.a;
+        outColor = vec4(0.0, 0.0, 0.0, alpha);
+
     } else if (mode == 2) {
         // Sprite / icon — texture is RGBA straight-alpha; tint and convert.
         vec4 texel = texture(iconAtlas, vUV) * vColor;

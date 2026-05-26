@@ -4,6 +4,7 @@
 #include "HudIcons.hpp"
 
 #include "HudContext.hpp"
+#include "VoidfallStyle.hpp"
 
 #include <cmath>
 #include <numbers>
@@ -147,8 +148,8 @@ void skull(HudContext& ctx, float x, float y, float size, HudColor color)
     ctx.rect(x + 3.f * u, y + 7.5f * u, 2.5f * u, 2.5f * u, color);
     ctx.rect(x + 6.5f * u, y + 7.5f * u, 2.5f * u, 2.5f * u, color);
     // Eye sockets (knocked out as small black squares).
-    ctx.rect(x + 4.f * u, y + 5.f * u, 1.5f * u, 1.5f * u, HudColor{0.f, 0.f, 0.f, 0.85f});
-    ctx.rect(x + 6.5f * u, y + 5.f * u, 1.5f * u, 1.5f * u, HudColor{0.f, 0.f, 0.f, 0.85f});
+    ctx.rect(x + 4.f * u, y + 5.f * u, 1.5f * u, 1.5f * u, withAlpha(k_quaternary, 0.85f));
+    ctx.rect(x + 6.5f * u, y + 5.f * u, 1.5f * u, 1.5f * u, withAlpha(k_quaternary, 0.85f));
 }
 
 void headshot(HudContext& ctx, float x, float y, float size, HudColor color)

@@ -38,7 +38,9 @@ struct GunInstance
     int totalAmmo = 0;
     int currentMagAmmo = 0;
     float fireCooldown = 0.f;
-    float chargeTime = 0.f; ///< Accumulated charge time (charge weapons only).
+    float chargeTime = 0.f;   ///< Accumulated charge time (charge weapons only).
+    bool isReloading = false; ///< True while reload is in progress
+    float reloadTime = 0.f;   ///< Time remaining to complete a reload
 };
 
 /// @brief Component attached to armed entities (players).
