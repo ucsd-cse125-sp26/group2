@@ -36,6 +36,11 @@ std::string getServerBinaryPath()
 
 bool HostedServer::start(HostConfigState const& config, std::string& outError)
 {
+    // TODO: Add Windows support (CreateProcess with redirected stdout, WaitForSingleObject for shutdown)\
+    // TODO: Add persistence option (need to spawn process detached from parent, and a way to track it for shutdown if requested)
+    // NOTE: Also need a way to differentiate between server spawned by client vs an independently launched server for
+    // shutdown logic; maybe a command-line arg that makes the server write its bound port to a well-known file on
+    // startup, which the client can read to find and connect to it?
     if (isRunning()) {
         outError = "Hosted server is already running";
         return false;

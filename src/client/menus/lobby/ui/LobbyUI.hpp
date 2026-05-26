@@ -5,6 +5,7 @@
 #include "network/lobby/LobbyStatus.hpp"
 
 #include <optional>
+#include <string_view>
 #include <vector>
 
 /// @brief Output from a single lobby UI frame.
@@ -13,7 +14,8 @@ struct BuildResult
     std::optional<bool>
         readyChange;                ///< Desired ready state change: true = ready, false = unready, nullopt = unchanged.
     bool startMatchClicked = false; ///< True if the host pressed "Start Match" this frame.
-    bool returnToMenuClicked = false; ///< True if the user pressed "Return to Main Menu" this frame.
+    bool returnToMenuClicked = false;       ///< True if the user pressed "Return to Main Menu" this frame.
+    bool returnToHostConfigClicked = false; ///< True if the host wants to return to HostConfig without disconnecting.
 };
 
 /// @brief Input data consumed by lobby_ui::buildPlayerList each frame.
@@ -25,6 +27,9 @@ struct LobbyUIConfig
     bool canStartMatch;                      ///< True when all non-host players are ready.
     bool startCountdownActive;               ///< True while the pre-match countdown is running.
     float startCountdownRemaining;           ///< Seconds remaining in the countdown.
+    bool isHosting;                          ///< True if this client owns a local hosted server process.
+    std::string_view hostLanIp;              ///< LAN IPv4 shown to other local players.
+    uint16_t hostPort;                       ///< Port shown to other players when hosting locally.
 };
 
 namespace lobby_ui

@@ -7,6 +7,7 @@
 #include "game/Game.hpp"
 #include "host/HostedServer.hpp"
 #include "menus/home/Home.hpp"
+#include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
@@ -99,6 +100,7 @@ bool App::init()
 
         networkConfig = loadNetworkConfig(cfgPath.c_str());
         developerConfig = loadDeveloperConfig(cfgPath.c_str());
+        hostConfigState.port = networkConfig.serverNetwork.port;
     }
 
     // Pull user-specific settings once; App owns the live copy while screens borrow it.
@@ -231,28 +233,50 @@ SDL_AppResult App::iterate()
         }
 
         if (home->consumeHostRequest()) {
-            // TODO: Move logic when host page is implemented, placeholder to test
-            HostConfigState config{
-                .port = 0,
-                .persistAfterClientExit = false,
-            };
+            transitionTo(Screen::HostConfig);
+        }
+        break;
+    }
+    case Screen::HostConfig: {
+        auto* hostConfig = dynamic_cast<HostConfig*>(screen_.get());
+        if (!hostConfig)
+            break;
+
+        if (hostConfig->consumeLaunchRequest()) {
+            HostConfigState config = hostConfig->draftConfig();
+            hostConfigState = config;
+
             std::string error;
             if (!hostedServer.start(config, error)) {
-                home->setJoinError(error.empty() ? "Failed to start hosted server" : error);
+                hostConfig->setLaunchError(error.empty() ? "Failed to start hosted server" : error);
                 break;
             }
 
             SDL_Log("Hosted server started on port %d, connecting client...", hostedServer.port());
             const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), networkConfig.transport);
-
             if (connectError != ConnectError::None) {
                 SDL_Log("Failed to connect to hosted server: %s", connectErrorLogName(connectError));
-                home->setJoinError(joinErrorMessage(connectError));
+                hostConfig->setLaunchError(joinErrorMessage(connectError));
                 hostedServer.shutdown();
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
-                transitionTo(Screen::Lobby);
             }
+        }
+
+        if (hostConfig->consumeShutdownRequest()) {
+            client.shutdown();
+            if (hostedServer.isRunning()) {
+                hostedServer.shutdown();
+            }
+        }
+
+        if (hostConfig->consumeGoToLobbyRequest() && hostedServer.isRunning()) {
+            transitionTo(Screen::Lobby);
+            break;
+        }
+
+        if (hostConfig->consumeBackToHomeRequest()) {
+            transitionTo(Screen::Home);
         }
         break;
     }
@@ -260,6 +284,11 @@ SDL_AppResult App::iterate()
         auto* lobby = dynamic_cast<Lobby*>(screen_.get());
         if (!lobby)
             break;
+
+        if (lobby->consumeReturnToHostConfig()) {
+            transitionTo(Screen::HostConfig);
+            break;
+        }
 
         if (lobby->consumeReturnToMenu()) {
             client.shutdown();
@@ -339,6 +368,16 @@ void App::transitionTo(Screen next)
         }
         break;
     }
+    case Screen::HostConfig: {
+        auto hostConfig = std::make_unique<HostConfig>();
+        if (hostConfig->init(ctx)) {
+            screen_ = std::move(hostConfig);
+            current = next;
+        } else {
+            hostConfig->quit();
+        }
+        break;
+    }
     case Screen::Home: {
         auto homeScreen = std::make_unique<Home>();
         if (homeScreen->init(ctx)) {
@@ -361,6 +400,9 @@ void App::cleanup()
     }
     if (!userSettingsPath.empty()) {
         user_settings::save(userSettingsPath, userSettings);
+    }
+    if (hostedServer.isRunning()) {
+        hostedServer.shutdown();
     }
     client.shutdown();
     renderer.quit();
@@ -388,6 +430,8 @@ AppContext App::screenContext()
         .window = *window,
         .renderer = renderer,
         .client = client,
+        .hostedServer = hostedServer,
+        .hostConfigState = hostConfigState,
         .networkConfig = networkConfig,
         .developerConfig = developerConfig,
         .userSettings = userSettings,

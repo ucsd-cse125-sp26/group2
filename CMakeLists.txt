@@ -1018,6 +1018,12 @@ add_executable(group2
         src/client/menus/pause/PauseMenu.cpp
         src/client/host/HostedServer.hpp
         src/client/host/HostedServer.cpp
+        src/client/menus/host/HostConfig.hpp
+        src/client/menus/host/HostConfig.cpp
+        src/client/menus/host/ui/HostConfigUI.hpp
+        src/client/menus/host/ui/HostConfigUI.cpp
+        src/client/util/LocalAddress.hpp
+        src/client/util/LocalAddress.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

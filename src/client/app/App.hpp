@@ -41,9 +41,10 @@ public:
     /// @brief Named screens the application can display.
     enum class Screen
     {
-        Home,  ///< Main menu screen.
-        Lobby, ///< Pre-match lobby waiting room.
-        InGame ///< Active match session.
+        Home,       ///< Main menu screen.
+        HostConfig, ///< Local hosting configuration screen.
+        Lobby,      ///< Pre-match lobby waiting room.
+        InGame      ///< Active match session.
     };
 
     /// @brief Destroy the current screen and activate the requested one.
@@ -51,14 +52,15 @@ public:
     void transitionTo(Screen next);
 
 private:
-    SDL_Window* window = nullptr;     ///< Main application window.
-    NewRenderer renderer;             ///< SDL_GPU PBR renderer, shared across screens.
-    NetworkConfig networkConfig;      ///< Host/port/transport loaded from config.toml.
-    DeveloperConfig developerConfig;  ///< Developer toggles loaded from config.toml.
-    UserSettings userSettings;        ///< User-specific input and gameplay settings.
-    std::string userSettingsPath;     ///< Path used to load and save user settings.
-    Client client;                    ///< Network client connected to the authoritative server.
-    HostedServer hostedServer;        ///< Hosted game server instance.
+    SDL_Window* window = nullptr;    ///< Main application window.
+    NewRenderer renderer;            ///< SDL_GPU PBR renderer, shared across screens.
+    NetworkConfig networkConfig;     ///< Host/port/transport loaded from config.toml.
+    DeveloperConfig developerConfig; ///< Developer toggles loaded from config.toml.
+    UserSettings userSettings;       ///< User-specific input and gameplay settings.
+    std::string userSettingsPath;    ///< Path used to load and save user settings.
+    Client client;                   ///< Network client connected to the authoritative server.
+    HostedServer hostedServer;       ///< Hosted game server instance.
+    HostConfigState hostConfigState{.port = 9999, .persistAfterClientExit = false}; ///< Host screen draft state.
 
     Screen current = Screen::Home;    ///< Which screen is currently active.
     std::unique_ptr<IScreen> screen_; ///< Active screen instance.
