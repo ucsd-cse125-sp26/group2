@@ -852,6 +852,11 @@ int CharacterAnimator::numJoints() const noexcept
     return impl_->rig ? impl_->rig->numJoints() : 0;
 }
 
+int CharacterAnimator::currentModeValue() const noexcept
+{
+    return static_cast<int>(impl_->currentMode);
+}
+
 const std::vector<glm::mat4>& CharacterAnimator::jointModelMatrices() const noexcept
 {
     return impl_->jointModelMats;

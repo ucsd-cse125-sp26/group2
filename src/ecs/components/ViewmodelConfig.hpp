@@ -17,13 +17,50 @@ struct ViewmodelParams
     float yawOffset, pitchOffset, rollOffset; // degrees
 };
 
-/// @brief Third-person weapon attachment params for remote players.
+/// @brief Mid-level character stance the right-hand anchor varies on. Matches
+/// CharacterAnimator's internal `Mode` enum 1:1 except `HoldPose` /
+/// `DebugOverride` (which both fall back to Locomotion). Authoring one anchor
+/// per stance lets crouch / slide / wallrun have visibly different gun
+/// positions — a crouched character pulls the gun in tighter, a sliding
+/// character punches it forward, etc.
+enum class HoldStance : std::uint8_t
+{
+    Locomotion = 0,
+    Crouch,
+    Airborne,
+    Slide,
+    WallRun,
+    Count,
+};
+
+inline constexpr std::size_t kHoldStanceCount = static_cast<std::size_t>(HoldStance::Count);
+inline constexpr std::array<const char*, kHoldStanceCount> kHoldStanceNames{
+    "Locomotion", "Crouch", "Airborne", "Slide", "WallRun"};
+
+/// @brief A single (position, rotation) anchor for the right-hand weapon hold.
+///
+/// `offset` is in the parent bone's (Spine2's) local frame; `rotation` is a
+/// quaternion in that same frame. Stored as a quat — not Euler — to keep the
+/// editor free of gimbal-lock surprises near pitch ≈ ±90°.
+struct HoldAnchor
+{
+    glm::vec3 offset{0.0f};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
+/// @brief Third-person weapon attachment params.
+///
+/// The weapon mesh is parented to the right-hand bone after IK runs, so its
+/// world placement is fully determined by:
+///   1. `rightHandHolds[stance]` — where the wrist sits (Spine2-local).
+///   2. `WeaponHandMountParams::rightHand.palm` — where the weapon meets the wrist (weapon-local).
+/// There is no longer a separate "weapon hand offset" or "aim pivot" or
+/// per-weapon yaw/pitch/roll because none of them participated in the bone-
+/// parented derivation — they only fed the legacy fallback path that the
+/// animated-character pipeline overrode.
 struct ThirdPersonWeaponParams
 {
-    float scale;
-    glm::vec3 handOffset;                        // relative to player center (right, up, forward)
-    glm::vec3 aimPivotOffset{0.0f, 22.0f, 0.0f}; // pitch orbit pivot, near upper chest / neck
-    float yawOffset, pitchOffset, rollOffset;    // degrees
+    float scale = 1.0f;
     /// Per-weapon-class scaler on the Phase F procedural spine bend (1.0 = full,
     /// heavier weapons get less so the character looks like it struggles with
     /// the weight when aiming up/down).
@@ -35,18 +72,13 @@ struct ThirdPersonWeaponParams
     /// Per-weapon-class recoil kick magnitude in radians, applied additively to
     /// the spine bend when the player fires a shot.
     float recoilKickRad = 0.06f;
-    /// Right-hand "weapon hold" anchor in Spine2's local frame (model units).
-    /// The animator pulls the right hand to `Spine2World * rightHandHoldOffset`
-    /// via IK each frame, replacing the idle-clip side-pose with a chest-front
-    /// holding pose. The weapon mesh — still parented to the right-hand bone —
-    /// follows the IK'd hand, so adjusting this slides the gun in space around
-    /// the chest. Without this, the gun visibly hangs at the side because the
-    /// locomotion clips are unarmed.
-    glm::vec3 rightHandHoldOffset{8.0f, 10.0f, 12.0f};
-    /// Right-hand hold orientation in Spine2's local frame (XYZ Euler degrees).
-    /// Combined with the palm-rotation in WeaponHandMountParams it determines
-    /// the final weapon orientation in world space.
-    glm::vec3 rightHandHoldRotationDeg{0.0f, 0.0f, 0.0f};
+    /// Right-hand weapon-hold anchor per stance. The animator pulls the right
+    /// hand to `Spine2World × rightHandHolds[stance].offset` via IK each
+    /// frame; the weapon mesh — parented to the right-hand bone — follows.
+    /// Different stances can hold the weapon differently (e.g. crouched vs
+    /// sliding); the candidate populator picks the entry matching the
+    /// entity's current animator mode.
+    std::array<HoldAnchor, kHoldStanceCount> rightHandHolds{};
 };
 
 /// @brief A weapon-local grip point for either hand.
@@ -169,53 +201,59 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 /// @brief Returns third-person weapon attachment params for remote players.
 inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type)
 {
+    // Per-stance offset deltas, applied additively on top of the weapon's
+    // Locomotion anchor. Same values for every weapon for now — visually
+    // sensible defaults that the user can override per-weapon via the
+    // tweaker UI. Crouched: gun pulled in tight and slightly up.
+    // Airborne: slightly forward (running/jumping leans into the weapon).
+    // Slide: punched forward and down (gun aimed past sliding feet).
+    // WallRun: pulled in tight (silhouette stays narrow against the wall).
+    const HoldAnchor k_idleAnchor{.offset = {6.0f, 6.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)};
+    const HoldAnchor k_crouchAnchor{.offset = {4.0f, 8.0f, 12.0f}, .rotation = glm::quat(1, 0, 0, 0)};
+    const HoldAnchor k_airborneAnchor{.offset = {6.0f, 4.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)};
+    const HoldAnchor k_slideAnchor{.offset = {6.0f, 2.0f, 18.0f}, .rotation = glm::quat(1, 0, 0, 0)};
+    const HoldAnchor k_wallRunAnchor{.offset = {3.0f, 6.0f, 10.0f}, .rotation = glm::quat(1, 0, 0, 0)};
+    const std::array<HoldAnchor, kHoldStanceCount> k_defaultHolds{
+        k_idleAnchor, k_crouchAnchor, k_airborneAnchor, k_slideAnchor, k_wallRunAnchor};
+
     static const std::array<ThirdPersonWeaponParams, 4> k_params{{
         // Rifle — middleweight, full spine bend, moderate recoil.
         {.scale = 10.0f,
-         .handOffset = {1.5f, 24.5f, 13.5f},
-         .aimPivotOffset = {0.0f, 18.0f, 0.0f},
-         .yawOffset = 15.0f,
-         .pitchOffset = 0.0f,
-         .rollOffset = 0.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.05f,
-         .rightHandHoldOffset = {6.0f, 6.0f, 14.0f},
-         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
+         .rightHandHolds = k_defaultHolds},
         // Rocket launcher — heavy, slower upper-body response, big kick.
         {.scale = 0.025f,
-         .handOffset = {1.5f, -3.5f, 14.0f},
-         .yawOffset = -47.0f,
-         .pitchOffset = 13.0f,
-         .rollOffset = 0.0f,
          .spineBendMultiplier = 0.65f,
          .hipLeanMultiplier = 0.06f,
          .recoilKickRad = 0.18f,
-         .rightHandHoldOffset = {7.0f, 8.0f, 18.0f},
-         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
+         .rightHandHolds = {{
+             {.offset = {7.0f, 8.0f, 18.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {5.0f, 10.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {7.0f, 6.0f, 20.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {7.0f, 4.0f, 22.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {4.0f, 8.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+         }}},
         // RailGun / charge rifle — heavy precision rifle, slower bend than the
         // assault rifle, similar kick to a rifle since the energy delivery is smooth.
         {.scale = 7.0f,
-         .handOffset = {7.5f, 7.5f, 15.0f},
-         .yawOffset = 0.0f,
-         .pitchOffset = 96.0f,
-         .rollOffset = 2.0f,
          .spineBendMultiplier = 0.85f,
          .hipLeanMultiplier = 0.08f,
          .recoilKickRad = 0.07f,
-         .rightHandHoldOffset = {6.0f, 6.0f, 14.0f},
-         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
+         .rightHandHolds = k_defaultHolds},
         // EnergyGun — light pistol, fast spine bend, gentle kick.
         {.scale = 1.0f,
-         .handOffset = {7.5f, 7.0f, 6.0f},
-         .yawOffset = 6.0f,
-         .pitchOffset = 94.0f,
-         .rollOffset = 0.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.03f,
-         .rightHandHoldOffset = {5.0f, 4.0f, 12.0f},
-         .rightHandHoldRotationDeg = {0.0f, 0.0f, 0.0f}},
+         .rightHandHolds = {{
+             {.offset = {5.0f, 4.0f, 12.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {3.0f, 6.0f, 10.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {5.0f, 2.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {5.0f, 0.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {3.0f, 4.0f, 8.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+         }}},
     }};
 
     return k_params[static_cast<std::size_t>(type)];

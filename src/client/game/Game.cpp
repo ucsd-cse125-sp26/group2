@@ -104,7 +104,9 @@
 namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
-constexpr float kThirdPersonWeaponPitchMax = 0.95993109f; // 55 degrees.
+// (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
+// the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
+// max-pitch in CharacterAnimator handles that.)
 constexpr std::array<const char*, kHandFingerMountCount> kModelLeftFingerMountNames{
     {"ik_l_thumb_tip", "ik_l_index_tip", "ik_l_middle_tip", "ik_l_ring_tip", "ik_l_pinky_tip"}};
 constexpr std::array<const char*, kHandFingerMountCount> kModelRightFingerMountNames{
@@ -131,6 +133,31 @@ WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
 bool isRenderableGunType(WeaponType type)
 {
     return static_cast<std::size_t>(type) < kWeaponAssets.size();
+}
+
+/// @brief Translate CharacterAnimator's internal Mode enum value into the
+/// authoring-facing HoldStance enum. The animator's enum order is
+/// Locomotion, Crouch, Airborne, Slide, WallRun, HoldPose, DebugOverride.
+/// HoldPose / DebugOverride don't have their own anchor table entry — they
+/// fall back to Locomotion (the visually closest "standing-with-gun" pose).
+HoldStance mapAnimModeToHoldStance(int animMode)
+{
+    switch (animMode) {
+    case 0:
+        return HoldStance::Locomotion;
+    case 1:
+        return HoldStance::Crouch;
+    case 2:
+        return HoldStance::Airborne;
+    case 3:
+        return HoldStance::Slide;
+    case 4:
+        return HoldStance::WallRun;
+    case 5: // HoldPose
+    case 6: // DebugOverride
+    default:
+        return HoldStance::Locomotion;
+    }
 }
 
 glm::quat spawnerModelRotation(const WeaponSpawnerModelParams& params, float timeSeconds, bool active)
@@ -178,14 +205,6 @@ const Asset::MountPoint* findModelMountPoint(const Asset::Model* model, const ch
     return &mountIt->second;
 }
 
-glm::vec3 resolveThirdPersonOffset(const glm::vec3& offset,
-                                   const glm::vec3& authoredRight,
-                                   const glm::vec3& up,
-                                   const glm::vec3& forward)
-{
-    return authoredRight * offset.x + up * offset.y + forward * offset.z;
-}
-
 glm::mat4 handMountRotation(const HandMountPoint& mount)
 {
     return weaponRotationMatrix(mount.rotationDegrees.y, mount.rotationDegrees.x, mount.rotationDegrees.z);
@@ -213,69 +232,10 @@ void makeFingerOffsetsPalmRelative(FirstPersonHandMountParams& mounts)
     makeFingerOffsetsPalmRelative(mounts.leftArm);
 }
 
-struct WeaponAttachmentPose
-{
-    struct HandPose
-    {
-        glm::vec3 elbow{0.0f};
-        glm::vec3 palm{0.0f};
-        glm::mat4 palmOrientation{1.0f};
-        std::array<glm::vec3, kHandFingerMountCount> fingers{};
-    };
-
-    glm::mat4 weaponWorld{1.0f};
-    glm::mat4 weaponOrientation{1.0f};
-    glm::vec3 origin{0.0f};
-    HandPose rightHand{};
-    HandPose leftHand{};
-};
-
-WeaponAttachmentPose buildThirdPersonWeaponAttachment(const glm::vec3& playerPos,
-                                                      float yaw,
-                                                      float pitch,
-                                                      const ThirdPersonWeaponParams& tp,
-                                                      const WeaponHandMountParams& mounts,
-                                                      const Asset::Model* /*weaponModel*/)
-{
-    const glm::vec3 playerFwd{std::sin(yaw), 0.0f, std::cos(yaw)};
-    const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
-    const glm::vec3 authoredRight = glm::normalize(glm::cross(playerFwd, worldUp));
-
-    const float clampedPitch = std::clamp(pitch, -kThirdPersonWeaponPitchMax, kThirdPersonWeaponPitchMax);
-    const glm::vec3 aimPivot =
-        playerPos + resolveThirdPersonOffset(tp.aimPivotOffset, authoredRight, worldUp, playerFwd);
-    const glm::vec3 neutralOrigin =
-        playerPos + resolveThirdPersonOffset(tp.handOffset, authoredRight, worldUp, playerFwd);
-    const glm::vec3 pitchAxis = glm::normalize(glm::cross(worldUp, playerFwd));
-    const glm::mat4 pitchOrbit = glm::rotate(glm::mat4(1.0f), clampedPitch, pitchAxis);
-    const glm::vec3 origin = aimPivot + transformDirection(pitchOrbit, neutralOrigin - aimPivot);
-
-    glm::mat4 orientation = glm::rotate(glm::mat4(1.0f), yaw + glm::radians(tp.yawOffset), glm::vec3{0, 1, 0});
-    orientation *= glm::rotate(glm::mat4(1.0f), clampedPitch + glm::radians(tp.pitchOffset), glm::vec3{1, 0, 0});
-    orientation *= glm::rotate(glm::mat4(1.0f), glm::radians(tp.rollOffset), glm::vec3{0, 0, 1});
-
-    WeaponAttachmentPose pose;
-    pose.origin = origin;
-    pose.weaponOrientation = orientation;
-    pose.weaponWorld = glm::translate(glm::mat4(1.0f), origin) * orientation;
-    pose.weaponWorld = glm::scale(pose.weaponWorld, glm::vec3(tp.scale));
-    auto resolvePoint = [&](const glm::vec3& offset) { return origin + transformDirection(orientation, offset); };
-    auto resolveHand = [&](const HandMountSet& hand,
-                           const char* /*palmName*/,
-                           const char* /*elbowName*/,
-                           const std::array<const char*, kHandFingerMountCount>& /*fingerNames*/) {
-        WeaponAttachmentPose::HandPose handPose;
-        handPose.elbow = resolvePoint(hand.elbowOffset);
-        handPose.palm = resolvePoint(hand.palm.offset);
-        handPose.palmOrientation = orientation * handMountRotation(hand.palm);
-        for (size_t i = 0; i < kHandFingerMountCount; ++i)
-            handPose.fingers[i] = handPose.palm + transformDirection(handPose.palmOrientation, hand.fingers[i].offset);
-        return handPose;
-    };
-    pose.rightHand = resolveHand(mounts.rightHand, "ik_r_palm", "ik_r_elbow", kModelRightFingerMountNames);
-    pose.leftHand = resolveHand(mounts.leftHand, "ik_l_palm", "ik_l_elbow", kModelLeftFingerMountNames);
-    return pose;
-}
+// (Legacy `WeaponAttachmentPose` + `buildThirdPersonWeaponAttachment` were
+// removed — the weapon is now derived from the right-hand bone matrix post-IK,
+// so the player-relative origin/orientation/aim-pivot data they produced was
+// completely overridden by the bone-parented pipeline.)
 
 glm::mat4 makeViewmodelHandTransform(const glm::vec3& weaponOrigin,
                                      const glm::mat4& weaponWorld,
@@ -369,13 +329,10 @@ std::string buildHandMountClipboardText(const WeaponHandMountParams* mountParams
     static constexpr const char* k_weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
     std::ostringstream out;
     out << std::fixed << std::setprecision(3);
-    out << "// Current third-person weapon settings\n";
+    out << "// Current third-person weapon scales\n";
     for (int i = 0; i < 4; ++i) {
         const auto& tp = tpParams[i];
-        out << "// " << k_weaponNames[i] << ": scale=" << tp.scale << "f handOffset={" << tp.handOffset.x << "f, "
-            << tp.handOffset.y << "f, " << tp.handOffset.z << "f} aimPivot={" << tp.aimPivotOffset.x << "f, "
-            << tp.aimPivotOffset.y << "f, " << tp.aimPivotOffset.z << "f} yaw=" << tp.yawOffset
-            << "f pitch=" << tp.pitchOffset << "f roll=" << tp.rollOffset << "f\n";
+        out << "// " << k_weaponNames[i] << ": scale=" << tp.scale << "f\n";
     }
     out << "\n// Current WeaponHandMountParams entries\n";
     out << "static const std::array<WeaponHandMountParams, 4> k_params{{\n";
@@ -2935,6 +2892,7 @@ SDL_AppResult Game::iterate()
             bool chestAnchoredRight = false;
             glm::vec3 chestOffset{0.0f};
             glm::quat chestRotQuat{1.0f, 0.0f, 0.0f, 0.0f};
+            HoldStance currentStance = HoldStance::Locomotion;
         };
         // Plain function-local (NOT thread_local — workers must see the
         // main thread's vector through the lambda capture).  Reserved up
@@ -3200,11 +3158,6 @@ SDL_AppResult Game::iterate()
                         if (isRenderableGunType(gun.type)) {
                             const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
                             const auto& mounts = weaponHandMountParams_[static_cast<int>(gun.type)];
-                            const Asset::Model* weaponModel =
-                                modelFromRendererIndex(weaponModelIndices_[static_cast<int>(gun.type)]);
-                            const WeaponAttachmentPose pose = buildThirdPersonWeaponAttachment(
-                                renderPos, renderYaw, inp.pitch, tp, mounts, weaponModel);
-                            const glm::mat4 invWorld = glm::inverse(world);
                             // Right hand IK: re-enabled in chest-anchored mode (the worker pool
                             // recomputes positionModel/orientationModel from the post-spine-bend
                             // Spine2 matrix below). Without this the right hand sits at the idle
@@ -3215,13 +3168,19 @@ SDL_AppResult Game::iterate()
                             c.handIk.right.elbowEnabled = false;
                             c.handIk.right.orientationEnabled = spine2JointIdx_ >= 0;
                             c.chestAnchoredRight = spine2JointIdx_ >= 0;
-                            c.chestOffset = tp.rightHandHoldOffset;
+                            // Per-stance lookup: pull the anchor matching the
+                            // entity's current animator mode (Locomotion vs
+                            // Crouch vs Slide …). The animator's Mode is
+                            // mapped to HoldStance via the helper at the top
+                            // of this file.
                             {
-                                const glm::vec3 r = glm::radians(tp.rightHandHoldRotationDeg);
-                                c.chestRotQuat = glm::normalize(
-                                    glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
-                                    glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) *
-                                    glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f}));
+                                const int animMode = (ac.animator) ? ac.animator->currentModeValue() : 0;
+                                const HoldStance stance = mapAnimModeToHoldStance(animMode);
+                                const HoldAnchor& anchor =
+                                    tp.rightHandHolds[static_cast<std::size_t>(stance)];
+                                c.chestOffset = anchor.offset;
+                                c.chestRotQuat = glm::normalize(anchor.rotation);
+                                c.currentStance = stance;
                             }
 
                             // Left hand IK: position/orientation are computed LATER in the worker,
@@ -3237,8 +3196,6 @@ SDL_AppResult Game::iterate()
                             // the left-hand IK target from the actual weapon world matrix.
                             c.leftPalmAuthored = mounts.leftHand.palm;
                             c.leftElbowAuthored = mounts.leftHand.elbowOffset;
-                            (void)invWorld;
-                            (void)pose;
 
                             // Capture per-weapon authoring data needed to derive the weaponWorld
                             // matrix from the right-hand bone matrix in the writeback loop.
@@ -3246,11 +3203,11 @@ SDL_AppResult Game::iterate()
                             c.weaponModelIdx = weaponModelIndices_[static_cast<int>(gun.type)];
                             c.weaponScale = tp.scale;
                             c.rightPalmAuthored = mounts.rightHand.palm;
-                            // Fallback: until the candidate writeback derives the post-IK weaponWorld
-                            // (i.e. the right-hand bone has been animated), use the old world-space
-                            // weapon pose so the entity render still has a sane transform. This is
-                            // overwritten by the bone-derived transform a few lines later.
-                            c.weaponWorld = pose.weaponWorld;
+                            // Identity fallback. The worker always overwrites this with the
+                            // bone-derived transform before it's used, so anything reasonable
+                            // works here — the value only shows on the first frame, before
+                            // the worker has run, when the entity isn't drawn yet anyway.
+                            c.weaponWorld = glm::mat4(1.0f);
 
                             // Phase C+F wiring: blend authored finger grip poses into the animated
                             // local-space finger rotations. Hold weight is 1.0 by default but
@@ -3562,6 +3519,85 @@ SDL_AppResult Game::iterate()
             candidateWeaponCmds.push_back(
                 EntityRenderCmd{.modelIndex = c.weaponModelIdx, .worldTransform = c.weaponWorld});
             entitiesWithCandidateWeapon.insert(c.entity);
+        }
+
+        // Red-cube anchor wish-point visualizer for the Right-Hand Hold Anchor.
+        //
+        // Reads STRAIGHT from the local-player entity (animator + WeaponState +
+        // worldTransform), not from the AnimCandidate vector, because that
+        // vector skips entities whose body isn't drawn (first-person local
+        // player). The user needs to see the marker in first-person too — that's
+        // the most common authoring view.
+        //
+        // Layout: a big red sphere at the wish-point, plus three smaller R/G/B
+        // axis markers along +X/+Y/+Z of the anchor's world frame so the
+        // rotation is readable at a glance.
+        if (showTPWeaponUI_ && tpAnchorShowDebugMarker_ && handMountDebugMarkerModelIdx_ >= 0 &&
+            spine2JointIdx_ >= 0) {
+            registry.view<LocalPlayer, AnimatedCharacter, Position, InputSnapshot, WeaponState>().each(
+                [&](entt::entity /*e*/,
+                    AnimatedCharacter& ac,
+                    const Position& pos,
+                    const InputSnapshot& inp,
+                    const WeaponState& ws) {
+                    if (!ac.animator)
+                        return;
+                    const GunInstance& gun = getEquippedGun(ws);
+                    if (!isRenderableGunType(gun.type))
+                        return;
+                    const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
+                    const auto& joints = ac.animator->jointModelMatrices();
+                    if (spine2JointIdx_ >= static_cast<int>(joints.size()))
+                        return;
+
+                    const HoldStance stance = mapAnimModeToHoldStance(ac.animator->currentModeValue());
+                    const HoldAnchor& anchor = tp.rightHandHolds[static_cast<std::size_t>(stance)];
+
+                    // Reproduce the entity world transform the same way the
+                    // candidate populator does: translate by position, yaw,
+                    // scale by kRigScale_, lift by kRigVerticalOffset_.
+                    glm::mat4 worldT = glm::translate(glm::mat4(1.0f), pos.value);
+                    worldT *= glm::mat4_cast(
+                        glm::angleAxis(inp.yaw, glm::vec3{0.0f, 1.0f, 0.0f}));
+                    worldT = glm::translate(worldT, glm::vec3{0.0f, kRigVerticalOffset_, 0.0f});
+                    worldT = glm::scale(worldT, glm::vec3(kRigScale_));
+
+                    const glm::mat4& sm = joints[static_cast<size_t>(spine2JointIdx_)];
+                    const glm::mat3 sR(glm::normalize(glm::vec3(sm[0])),
+                                       glm::normalize(glm::vec3(sm[1])),
+                                       glm::normalize(glm::vec3(sm[2])));
+                    const glm::vec3 wishPosModel = glm::vec3(sm * glm::vec4(anchor.offset, 1.0f));
+                    const glm::vec4 wishPosWorld4 = worldT * glm::vec4(wishPosModel, 1.0f);
+                    const glm::vec3 wishPosWorld(wishPosWorld4.x, wishPosWorld4.y, wishPosWorld4.z);
+                    const glm::mat3 entityR(glm::normalize(glm::vec3(worldT[0])),
+                                            glm::normalize(glm::vec3(worldT[1])),
+                                            glm::normalize(glm::vec3(worldT[2])));
+                    const glm::mat3 wishR =
+                        entityR * sR * glm::mat3_cast(glm::normalize(anchor.rotation));
+
+                    const auto pushMarker = [&](const glm::vec3& worldPos, float scale, const glm::vec4& tint) {
+                        glm::mat4 m = glm::translate(glm::mat4(1.0f), worldPos);
+                        m = glm::scale(m, glm::vec3(scale));
+                        candidateWeaponCmds.push_back(
+                            EntityRenderCmd{.modelIndex = handMountDebugMarkerModelIdx_,
+                                            .worldTransform = m,
+                                            .tint = tint});
+                    };
+
+                    constexpr float k_centerScale = 12.0f;
+                    constexpr float k_axisScale = 5.0f;
+                    constexpr float k_axisLen = 18.0f;
+                    pushMarker(wishPosWorld, k_centerScale, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+                    pushMarker(wishPosWorld + wishR * glm::vec3(k_axisLen, 0.0f, 0.0f),
+                               k_axisScale,
+                               glm::vec4(1.0f, 0.3f, 0.3f, 1.0f));
+                    pushMarker(wishPosWorld + wishR * glm::vec3(0.0f, k_axisLen, 0.0f),
+                               k_axisScale,
+                               glm::vec4(0.3f, 1.0f, 0.3f, 1.0f));
+                    pushMarker(wishPosWorld + wishR * glm::vec3(0.0f, 0.0f, k_axisLen),
+                               k_axisScale,
+                               glm::vec4(0.3f, 0.5f, 1.0f, 1.0f));
+                });
         }
 
         if (charRig_.isLoaded() && numJoints > 0) {
@@ -3879,101 +3915,9 @@ SDL_AppResult Game::iterate()
             entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world, .tint = tint});
         });
 
-        auto resolveThirdPersonDebugMountPoint = [&](const WeaponAttachmentPose& pose,
-                                                     const WeaponHandMountParams& mounts) {
-            const HandMountSet& hand = handMountDebugTarget_.left ? mounts.leftHand : mounts.rightHand;
-            const WeaponAttachmentPose::HandPose& handPose =
-                handMountDebugTarget_.left ? pose.leftHand : pose.rightHand;
-            switch (handMountDebugTarget_.point) {
-            case HandMountDebugPoint::Elbow:
-            case HandMountDebugPoint::Shoulder:
-                return handPose.elbow;
-            case HandMountDebugPoint::Palm:
-                return handPose.palm;
-            case HandMountDebugPoint::Finger0:
-            case HandMountDebugPoint::Finger1:
-            case HandMountDebugPoint::Finger2:
-            case HandMountDebugPoint::Finger3:
-            case HandMountDebugPoint::Finger4: {
-                const auto index = static_cast<std::size_t>(handMountDebugTarget_.point) -
-                                   static_cast<std::size_t>(HandMountDebugPoint::Finger0);
-                if (index < handPose.fingers.size())
-                    return handPose.fingers[index];
-                break;
-            }
-            }
-            return pose.origin + transformDirection(pose.weaponOrientation, hand.palm.offset);
-        };
-
-        bool emittedThirdPersonHandMountMarker = false;
-
-        // Third-person weapons for remote players.
-        // Legacy path: only handles entities WITHOUT an AnimatedCharacter (those went
-        // through the candidate-based right-hand-bone-parented emission above). For
-        // animated remote players this loop is a no-op — the candidate path already
-        // pushed their weapon. Kept as a fallback so non-animated test fixtures or
-        // future non-skinned actors still get a weapon rendered.
-        registry.view<Position, InputSnapshot, WeaponState, CollisionShape>().each([&](entt::entity e,
-                                                                                       const Position& pos,
-                                                                                       const InputSnapshot& input,
-                                                                                       const WeaponState& ws,
-                                                                                       const CollisionShape&) {
-            if (registry.all_of<LocalPlayer>(e))
-                return;
-            if (registry.all_of<RespawnTimer>(e))
-                return;
-            if (entitiesWithCandidateWeapon.count(e) > 0)
-                return; // Already emitted above with bone-parented transform.
-
-            // PR-11: pull the interpolated player transform so the
-            // weapon hangs off the same body the renderer just drew at
-            // line 1730.  Without this, the player skin animates at
-            // `now − N × snapshotInterval` while the weapon sticks to
-            // the most-recent server position, separating the two by
-            // ~62 ms of motion (visible "ghost gun").
-            // PR-19: pos.value + input.yaw are already pre-interpolated
-            // by `Client::applyInterpolatedTransforms` when buffered
-            // render-delay is active, so the weapon naturally hangs
-            // off the same body the skinned-character pass just drew.
-            // No explicit sample() call needed any more — single
-            // source of truth = pos.value (and InputSnapshot.yaw).
-            const glm::vec3 playerPos = pos.value;
-            const float yaw = input.yaw;
-            // Phase 3f: a remote third-person weapon ~50 world-units long;
-            // a 100-unit cull radius around the player position is a tight
-            // fit and skips the entire weapon draw when off-screen.
-            if (!entityVisible(playerPos, 100.0f))
-                return;
-
-            const GunInstance& gun = getEquippedGun(ws);
-            if (!isRenderableGunType(gun.type))
-                return;
-            const int wpnIdx = weaponModelIndices_[static_cast<int>(gun.type)];
-            if (wpnIdx < 0)
-                return;
-
-            const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
-            const auto& mounts = weaponHandMountParams_[static_cast<int>(gun.type)];
-            const Asset::Model* weaponModel = modelFromRendererIndex(wpnIdx);
-            const WeaponAttachmentPose pose =
-                buildThirdPersonWeaponAttachment(playerPos, yaw, input.pitch, tp, mounts, weaponModel);
-
-            entityCmds.push_back(EntityRenderCmd{.modelIndex = wpnIdx, .worldTransform = pose.weaponWorld});
-            if (!emittedThirdPersonHandMountMarker && handMountDebugMarkerModelIdx_ >= 0 &&
-                handMountDebugTarget_.space == HandMountDebugSpace::ThirdPerson &&
-                handMountDebugTarget_.weaponIdx == static_cast<int>(gun.type))
-            {
-                const glm::vec3 markerPos = resolveThirdPersonDebugMountPoint(pose, mounts);
-                glm::mat4 markerWorld = glm::translate(glm::mat4(1.0f), markerPos);
-                markerWorld = glm::scale(markerWorld, glm::vec3(2.5f));
-                entityCmds.push_back(EntityRenderCmd{
-                    .modelIndex = handMountDebugMarkerModelIdx_,
-                    .worldTransform = markerWorld,
-                    .tint = glm::vec4{1.0f, 0.05f, 0.05f, 1.0f},
-                });
-                emittedThirdPersonHandMountMarker = true;
-            }
-        });
+        // (Legacy third-person remote-weapon emission removed. Every player
+        // gets an AnimatedCharacter at spawn, so weapons always come from the
+        // candidate-based bone-parented pipeline above.)
 
         // // Glow sphere — always rendered at a fixed world position for bloom testing.
         // constexpr glm::vec3 glowSpherePos{0.0f, 80.0f, 300.0f};
@@ -4694,35 +4638,78 @@ SDL_AppResult Game::iterate()
 
             auto& tp = tpWeaponParams_[tpTuneWeaponIdx_];
 
-            ImGui::SeparatorText("Hand Offset (right, up, forward)");
-            ImGui::DragFloat("TP Right", &tp.handOffset.x, 0.5f, -50.0f, 50.0f, "%.1f");
-            ImGui::DragFloat("TP Up", &tp.handOffset.y, 0.5f, -50.0f, 50.0f, "%.1f");
-            ImGui::DragFloat("TP Forward", &tp.handOffset.z, 0.5f, -50.0f, 50.0f, "%.1f");
-
-            ImGui::SeparatorText("Aim Pivot (neck orbit)");
-            ImGui::DragFloat("Pivot Right", &tp.aimPivotOffset.x, 0.5f, -50.0f, 50.0f, "%.1f");
-            ImGui::DragFloat("Pivot Up", &tp.aimPivotOffset.y, 0.5f, -10.0f, 50.0f, "%.1f");
-            ImGui::DragFloat("Pivot Forward", &tp.aimPivotOffset.z, 0.5f, -30.0f, 30.0f, "%.1f");
-
-            ImGui::SeparatorText("Rotation (degrees)");
-            ImGui::DragFloat("TP Yaw", &tp.yawOffset, 1.0f, -180.0f, 180.0f, "%.1f");
-            ImGui::DragFloat("TP Pitch", &tp.pitchOffset, 1.0f, -180.0f, 180.0f, "%.1f");
-            ImGui::DragFloat("TP Roll", &tp.rollOffset, 1.0f, -180.0f, 180.0f, "%.1f");
-
             ImGui::SeparatorText("Scale");
             ImGui::DragFloat("TP Scale", &tp.scale, 0.05f, 0.0001f, 30.0f, "%.3f");
 
             ImGui::SeparatorText("Right-Hand Hold Anchor (Spine2-relative)");
             ImGui::TextWrapped(
-                "Position of the right hand in Spine2's local frame. The hand is dragged here every "
-                "frame so the gun (which is parented to the right hand) sits in front of the chest "
-                "instead of hanging at the idle-clip side pose. Disabled if the rig has no Spine2 bone.");
-            ImGui::DragFloat("Anchor Right", &tp.rightHandHoldOffset.x, 0.25f, -50.0f, 50.0f, "%.2f");
-            ImGui::DragFloat("Anchor Up", &tp.rightHandHoldOffset.y, 0.25f, -50.0f, 50.0f, "%.2f");
-            ImGui::DragFloat("Anchor Forward", &tp.rightHandHoldOffset.z, 0.25f, -50.0f, 50.0f, "%.2f");
-            ImGui::DragFloat("Anchor Rot X", &tp.rightHandHoldRotationDeg.x, 1.0f, -180.0f, 180.0f, "%.1f");
-            ImGui::DragFloat("Anchor Rot Y", &tp.rightHandHoldRotationDeg.y, 1.0f, -180.0f, 180.0f, "%.1f");
-            ImGui::DragFloat("Anchor Rot Z", &tp.rightHandHoldRotationDeg.z, 1.0f, -180.0f, 180.0f, "%.1f");
+                "The right hand is IK'd to `Spine2World × offset` each frame; rotation is `Spine2Rot × quat`. "
+                "Per-stance — each Mode (Locomotion / Crouch / Airborne / Slide / WallRun) has its own anchor "
+                "so e.g. crouched can hold the gun higher and tighter than standing. Rotation editing uses "
+                "delta-around-axis buttons (gimbal-lock free).");
+
+            const int activeAnimMode = [&]() {
+                entt::entity local = entt::null;
+                registry.view<LocalPlayer>().each([&](entt::entity en) { local = en; });
+                if (local != entt::null && registry.valid(local)) {
+                    if (const auto* ac = registry.try_get<AnimatedCharacter>(local); ac != nullptr && ac->animator)
+                        return ac->animator->currentModeValue();
+                }
+                return -1;
+            }();
+            const HoldStance activeStance =
+                activeAnimMode >= 0 ? mapAnimModeToHoldStance(activeAnimMode) : HoldStance::Locomotion;
+            if (activeAnimMode >= 0) {
+                ImGui::Text("Active stance (local player): %s",
+                            kHoldStanceNames[static_cast<std::size_t>(activeStance)]);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Edit active"))
+                    tpAnchorTuneStanceIdx_ = static_cast<int>(activeStance);
+            }
+            ImGui::Combo(
+                "Stance", &tpAnchorTuneStanceIdx_, kHoldStanceNames.data(), static_cast<int>(kHoldStanceCount));
+
+            HoldAnchor& anchor = tp.rightHandHolds[static_cast<std::size_t>(tpAnchorTuneStanceIdx_)];
+            ImGui::DragFloat("Anchor Right", &anchor.offset.x, 0.25f, -50.0f, 50.0f, "%.2f");
+            ImGui::DragFloat("Anchor Up", &anchor.offset.y, 0.25f, -50.0f, 50.0f, "%.2f");
+            ImGui::DragFloat("Anchor Forward", &anchor.offset.z, 0.25f, -50.0f, 50.0f, "%.2f");
+
+            ImGui::DragFloat("Rot Step (deg)", &tpAnchorRotStepDeg_, 0.5f, 0.1f, 90.0f, "%.1f");
+            ImGui::PushButtonRepeat(true);
+            auto rotateBy = [&](const glm::vec3& axis, float deltaDeg) {
+                const glm::quat q = glm::angleAxis(glm::radians(deltaDeg), axis);
+                anchor.rotation = glm::normalize(q * anchor.rotation);
+            };
+            if (ImGui::Button("Rot X -"))
+                rotateBy(glm::vec3{1.0f, 0.0f, 0.0f}, -tpAnchorRotStepDeg_);
+            ImGui::SameLine();
+            if (ImGui::Button("Rot X +"))
+                rotateBy(glm::vec3{1.0f, 0.0f, 0.0f}, tpAnchorRotStepDeg_);
+            ImGui::SameLine();
+            if (ImGui::Button("Rot Y -"))
+                rotateBy(glm::vec3{0.0f, 1.0f, 0.0f}, -tpAnchorRotStepDeg_);
+            ImGui::SameLine();
+            if (ImGui::Button("Rot Y +"))
+                rotateBy(glm::vec3{0.0f, 1.0f, 0.0f}, tpAnchorRotStepDeg_);
+            ImGui::SameLine();
+            if (ImGui::Button("Rot Z -"))
+                rotateBy(glm::vec3{0.0f, 0.0f, 1.0f}, -tpAnchorRotStepDeg_);
+            ImGui::SameLine();
+            if (ImGui::Button("Rot Z +"))
+                rotateBy(glm::vec3{0.0f, 0.0f, 1.0f}, tpAnchorRotStepDeg_);
+            ImGui::PopButtonRepeat();
+            if (ImGui::Button("Identity rotation"))
+                anchor.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("Copy from Locomotion") && tpAnchorTuneStanceIdx_ != 0)
+                anchor = tp.rightHandHolds[0];
+            ImGui::Text("Quat (w,x,y,z): (%.3f, %.3f, %.3f, %.3f)",
+                        static_cast<double>(anchor.rotation.w),
+                        static_cast<double>(anchor.rotation.x),
+                        static_cast<double>(anchor.rotation.y),
+                        static_cast<double>(anchor.rotation.z));
+
+            ImGui::Checkbox("Show debug marker", &tpAnchorShowDebugMarker_);
             if (spine2JointIdx_ < 0)
                 ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
                                    "Spine2 not found in rig — anchor disabled, weapon will hang at side.");
@@ -4738,29 +4725,24 @@ SDL_AppResult Game::iterate()
             }
             ImGui::SameLine();
             if (ImGui::Button("Save as new defaults")) {
-                SDL_Log("[client] 3P weapon %d: scale=%.5f offset=(%.1f,%.1f,%.1f) pivot=(%.1f,%.1f,%.1f) "
-                        "yaw=%.1f pitch=%.1f roll=%.1f anchor=(%.2f,%.2f,%.2f) anchorRot=(%.1f,%.1f,%.1f) "
-                        "spineMul=%.2f hipLean=%.2f recoil=%.3f",
+                SDL_Log("[client] 3P weapon %d: scale=%.5f spineMul=%.2f hipLean=%.2f recoil=%.3f",
                         tpTuneWeaponIdx_,
                         static_cast<double>(tp.scale),
-                        static_cast<double>(tp.handOffset.x),
-                        static_cast<double>(tp.handOffset.y),
-                        static_cast<double>(tp.handOffset.z),
-                        static_cast<double>(tp.aimPivotOffset.x),
-                        static_cast<double>(tp.aimPivotOffset.y),
-                        static_cast<double>(tp.aimPivotOffset.z),
-                        static_cast<double>(tp.yawOffset),
-                        static_cast<double>(tp.pitchOffset),
-                        static_cast<double>(tp.rollOffset),
-                        static_cast<double>(tp.rightHandHoldOffset.x),
-                        static_cast<double>(tp.rightHandHoldOffset.y),
-                        static_cast<double>(tp.rightHandHoldOffset.z),
-                        static_cast<double>(tp.rightHandHoldRotationDeg.x),
-                        static_cast<double>(tp.rightHandHoldRotationDeg.y),
-                        static_cast<double>(tp.rightHandHoldRotationDeg.z),
                         static_cast<double>(tp.spineBendMultiplier),
                         static_cast<double>(tp.hipLeanMultiplier),
                         static_cast<double>(tp.recoilKickRad));
+                for (std::size_t s = 0; s < kHoldStanceCount; ++s) {
+                    const HoldAnchor& a = tp.rightHandHolds[s];
+                    SDL_Log("[client]   hold[%s]: offset=(%.2f,%.2f,%.2f) rot=(%.4f, %.4f, %.4f, %.4f)",
+                            kHoldStanceNames[s],
+                            static_cast<double>(a.offset.x),
+                            static_cast<double>(a.offset.y),
+                            static_cast<double>(a.offset.z),
+                            static_cast<double>(a.rotation.w),
+                            static_cast<double>(a.rotation.x),
+                            static_cast<double>(a.rotation.y),
+                            static_cast<double>(a.rotation.z));
+                }
             }
         }
         ImGui::End();

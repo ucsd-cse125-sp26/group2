@@ -206,6 +206,14 @@ public:
     /// @brief Number of joints in the underlying rig.
     [[nodiscard]] int numJoints() const noexcept;
 
+    /// @brief Current high-level animator mode, mapped to the values used by
+    /// `HoldStance` in ViewmodelConfig.hpp. Used by Game.cpp to pick the right
+    /// per-stance weapon anchor each frame (crouched-hold vs standing-hold
+    /// etc.). Returns the underlying int of CharacterAnimator's private Mode
+    /// enum — callers should treat 0..N as opaque and translate via the
+    /// codebase's MapAnimModeToHoldStance helper.
+    [[nodiscard]] int currentModeValue() const noexcept;
+
     /// @brief Model-space joint matrices with all procedural transforms applied
     ///        (head pitch, wallrun mirror) but WITHOUT inverse-bind-matrix multiplication.
     ///

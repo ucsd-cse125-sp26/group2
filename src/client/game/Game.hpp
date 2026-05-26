@@ -466,6 +466,9 @@ private:
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
     int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
+    int tpAnchorTuneStanceIdx_ = 0;             ///< Which HoldStance the right-hand anchor sliders are editing.
+    float tpAnchorRotStepDeg_ = 5.0f;           ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
+    bool tpAnchorShowDebugMarker_ = true;       ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
     bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
 
     // Hand mount tuning for third-person player IK / weapon grips.
