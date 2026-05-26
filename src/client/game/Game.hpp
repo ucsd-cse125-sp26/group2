@@ -519,8 +519,7 @@ private:
     CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
     int rightHandJointIdx_ = -1;        ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the third-person weapon mesh to the right-hand bone after IK.
     int spine2JointIdx_ = -1;           ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK target so the gun is held in front of the chest instead of hanging at the side.
-    std::array<WeaponGripPose, 4> weaponGripPoses_{}; ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from assets/weapons/<name>.grip.toml at startup.
-    std::array<WeaponGripPoseEuler, 4> weaponGripPoseEulers_{}; ///< Editable Euler-degree mirror of weaponGripPoses_, used by the in-game authoring UI.
+    std::array<WeaponGripPose, 4> weaponGripPoses_{}; ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw) degrees so the editor can drive sliders directly against the runtime data; the animator builds a local-space quat per joint on the fly via fingerLocalQuat.
     /// Per-entity weapon-swap crossfade state (Phase F polish). When an entity's
     /// equipped weapon changes, we reset `swapElapsedSec` to 0 and ramp the
     /// `*GripWeight` from 0 → 1 over `kGripSwapDurationSec` so the hands briefly

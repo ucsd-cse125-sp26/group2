@@ -264,6 +264,23 @@ void swingTwistDecompose(const glm::quat& q, const glm::vec3& axis, glm::quat& o
     outSwing = glm::normalize(q * glm::inverse(outTwist));
 }
 
+/// @brief Convert a per-finger-joint (pitch, yaw) pair to a local-space quaternion.
+///
+/// `pitchDeg` rotates around the bone's local Z axis (Mixamo "curl" axis —
+/// positive bends the finger toward the palm). `yawDeg` rotates around the
+/// local Y axis (Mixamo "splay" axis — positive spreads the finger outward).
+/// There is no roll DOF because fingers cannot physically twist about their
+/// own length. Composition order is `qYaw * qPitch` — pitch (curl) applied
+/// in the bone's rest frame, then yaw (splay) rotates the curled tip
+/// laterally. This is what produces a natural "curl into a fist that opens
+/// at an angle" when both axes are non-zero.
+inline glm::quat fingerLocalQuat(float pitchDeg, float yawDeg)
+{
+    const glm::quat qPitch = glm::angleAxis(glm::radians(pitchDeg), glm::vec3{0.0f, 0.0f, 1.0f});
+    const glm::quat qYaw = glm::angleAxis(glm::radians(yawDeg), glm::vec3{0.0f, 1.0f, 0.0f});
+    return glm::normalize(qYaw * qPitch);
+}
+
 /// @brief Clamp a swing+twist pair so the swing magnitude and twist angle stay
 /// inside the requested cone/range.
 ///
@@ -500,6 +517,44 @@ void CharacterAnimator::applyRecoilImpulse(float strengthRad)
 }
 
 void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
+{
+    applyHandIkTargetsImpl(targets, true);
+}
+
+void CharacterAnimator::applyArmIk(bool isLeft, const ArmIkTarget& target)
+{
+    HandIkTargets t;
+    if (isLeft)
+        t.left = target;
+    else
+        t.right = target;
+    applyHandIkTargetsImpl(t, false);
+}
+
+void CharacterAnimator::applyGripPose(bool isLeft, const GripPose& pose, float weight)
+{
+    HandIkTargets t;
+    if (isLeft) {
+        t.leftGripPose = &pose;
+        t.leftGripWeight = weight;
+    } else {
+        t.rightGripPose = &pose;
+        t.rightGripWeight = weight;
+    }
+    applyHandIkTargetsImpl(t, false);
+}
+
+void CharacterAnimator::updateSkinMatrices()
+{
+    if (!impl_->rig || impl_->skinMats.empty())
+        return;
+    const std::vector<glm::mat4>& inverseBind = impl_->rig->inverseBindMatrices();
+    const size_t count = std::min(impl_->skinMats.size(), inverseBind.size());
+    for (size_t i = 0; i < count; ++i)
+        impl_->skinMats[i] = impl_->jointModelMats[i] * inverseBind[i];
+}
+
+void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, bool finalize)
 {
     if (!impl_->rig || impl_->jointModelMats.empty() || impl_->skinMats.empty())
         return;
@@ -752,7 +807,12 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
                 // Recover the bone's animated local rotation = parent^{-1} * bone.
                 const glm::quat animatedLocal =
                     glm::normalize(glm::quat_cast(glm::transpose(parentR) * boneR));
-                const glm::quat targetLocal = pose.jointRotations[GripPose::index(finger, jointSlot)];
+                // Build the target local rotation from the authored (pitch, yaw)
+                // pair. fingerLocalQuat enforces the no-roll constraint by
+                // construction — any roll the editor might try to author has
+                // nowhere to live in the 2-DOF parameterization.
+                const glm::vec2& angles = pose.jointAngles[GripPose::index(finger, jointSlot)];
+                const glm::quat targetLocal = fingerLocalQuat(angles.x, angles.y);
                 const glm::quat blendedLocal = glm::normalize(glm::slerp(animatedLocal, targetLocal, w));
 
                 // Delta rotation in MODEL space (left-multiply on the bone).
@@ -779,6 +839,8 @@ void CharacterAnimator::applyHandIkTargets(const HandIkTargets& targets)
     if (!changedLeft && !changedRight)
         return;
 
+    if (!finalize)
+        return;
     const std::vector<glm::mat4>& inverseBind = impl_->rig->inverseBindMatrices();
     const size_t count = std::min(impl_->skinMats.size(), inverseBind.size());
     for (size_t i = 0; i < count; ++i)

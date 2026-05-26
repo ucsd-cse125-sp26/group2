@@ -296,15 +296,6 @@ glm::mat4 makeViewmodelHandTransform(const glm::vec3& weaponOrigin,
     return handWorld;
 }
 
-glm::quat modelSpaceRotation(const glm::mat4& invWorld, const glm::mat4& worldRotation)
-{
-    glm::mat3 basis = glm::mat3(invWorld) * glm::mat3(worldRotation);
-    basis[0] = glm::normalize(basis[0]);
-    basis[1] = glm::normalize(basis[1]);
-    basis[2] = glm::normalize(basis[2]);
-    return glm::normalize(glm::quat_cast(basis));
-}
-
 void applyAuthoredFirstPersonHandMountDefaults(const Asset::Model* model,
                                                const ViewmodelParams& vp,
                                                FirstPersonHandMountParams& firstPerson)
@@ -1343,7 +1334,7 @@ bool Game::init(AppContext& ctx)
             for (std::size_t i = 0; i < k_weaponGripFiles.size(); ++i) {
                 const std::string gripPath = weaponsDir + k_weaponGripFiles[i];
                 weaponGripPosePaths_[i] = gripPath;
-                if (!loadWeaponGripPoseWithEulers(gripPath, weaponGripPoses_[i], weaponGripPoseEulers_[i])) {
+                if (!loadWeaponGripPose(gripPath, weaponGripPoses_[i])) {
                     // Already logged by loadWeaponGripPose; leave as default
                     // (rightHandValid=false, leftHandValid=false) so the animator
                     // skips the blend for that weapon.
@@ -1998,16 +1989,11 @@ SDL_AppResult Game::iterate()
                 continue;
             if (mtime != weaponGripPoseMTimes_[i]) {
                 weaponGripPoseMTimes_[i] = mtime;
-                // Reload into scratch structs so a partial/parse-failed load
+                // Reload into a scratch struct so a partial/parse-failed load
                 // doesn't blank out the working data already in `weaponGripPoses_`.
-                // Eulers reload alongside the quats so the authoring UI's
-                // slider state stays in sync with whatever was just written.
                 WeaponGripPose scratch{};
-                WeaponGripPoseEuler scratchEulers{};
-                if (loadWeaponGripPoseWithEulers(weaponGripPosePaths_[i], scratch, scratchEulers)) {
+                if (loadWeaponGripPose(weaponGripPosePaths_[i], scratch))
                     weaponGripPoses_[i] = scratch;
-                    weaponGripPoseEulers_[i] = scratchEulers;
-                }
             }
         }
     }
@@ -2936,6 +2922,8 @@ SDL_AppResult Game::iterate()
             // bone matrix (palm offset/rotation in weapon-local frame, weapon scale).
             // Captured during the prepass; consumed during writeback.
             HandMountPoint rightPalmAuthored{};
+            HandMountPoint leftPalmAuthored{};
+            glm::vec3 leftElbowAuthored{0.0f};
             float weaponScale = 1.0f;
             // Chest-anchored right-hand IK target. When true, the worker pool
             // recomputes c.handIk.right.positionModel / orientationModel from
@@ -3236,18 +3224,21 @@ SDL_AppResult Game::iterate()
                                     glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f}));
                             }
 
+                            // Left hand IK: position/orientation are computed LATER in the worker,
+                            // once the right hand has been IK'd and the weapon world is known.
+                            // Computing here would give a stale target derived from the player-relative
+                            // buildThirdPersonWeaponAttachment guess; deferring lets the left hand grab
+                            // the gun where it actually ends up after the right-hand IK + spine bend.
                             c.handIk.left.enabled = true;
                             c.handIk.left.elbowEnabled = true;
                             c.handIk.left.orientationEnabled = true;
-                            c.handIk.left.positionModel = glm::vec3(invWorld * glm::vec4(pose.leftHand.palm, 1.0f));
-                            c.handIk.left.elbowPositionModel =
-                                glm::vec3(invWorld * glm::vec4(pose.leftHand.elbow, 1.0f));
-                            c.handIk.left.orientationModel =
-                                modelSpaceRotation(invWorld, pose.leftHand.palmOrientation);
-                            // Phase E: per-finger IK targets removed — left-hand finger contact is now
-                            // driven by the authored GripPose blend (see weaponGripPoses_ assignment
-                            // below), not by the old iterative finger IK solver.
                             c.sampleThisFrame = true;
+                            // Authored left-grip data (weapon-local). Used by the worker to derive
+                            // the left-hand IK target from the actual weapon world matrix.
+                            c.leftPalmAuthored = mounts.leftHand.palm;
+                            c.leftElbowAuthored = mounts.leftHand.elbowOffset;
+                            (void)invWorld;
+                            (void)pose;
 
                             // Capture per-weapon authoring data needed to derive the weaponWorld
                             // matrix from the right-hand bone matrix in the writeback loop.
@@ -3316,44 +3307,46 @@ SDL_AppResult Game::iterate()
                         }
                     }
 
-                    // Phase F task 14: run IK + grip blend + weapon-world
-                    // derivation inside the worker. Each candidate writes only
-                    // to its own animator state (jointModelMats/skinMats/etc.)
-                    // and its own AnimCandidate fields, so the IK + matrix
-                    // composition is thread-safe across visible characters.
+                    // Phase F task 14 + AAA grip rework: stage IK in the
+                    // worker so the left hand can target the *actual* weapon
+                    // world (which depends on the right hand being IK'd
+                    // first). All writes here touch only this candidate's
+                    // animator state + AnimCandidate fields — safe across
+                    // candidates.
 
-                    // Chest-anchored right-hand target: now that the animator
-                    // has run its spine-bend pass, Spine2's model matrix
-                    // already reflects the aim pitch. Re-derive the IK target
-                    // from that matrix so the right hand follows the spine as
-                    // it bends (which is the point of the spine-bend phase —
-                    // the gun, parented to the hand, ends up aiming with the
-                    // chest instead of staying stuck at a world-space anchor).
-                    if (c.chestAnchoredRight && c.drawThisFrame && c.ac != nullptr && c.ac->animator &&
-                        spine2JointIdx_ >= 0) {
+                    if (!c.drawThisFrame || c.ac == nullptr || !c.ac->animator) {
+                        continue;
+                    }
+
+                    // ── 1. Recompute the chest-anchored right-hand target from
+                    // Spine2's post-spine-bend matrix, so the hand (and the
+                    // weapon parented to it) follows the bend.
+                    if (c.chestAnchoredRight && spine2JointIdx_ >= 0) {
                         const auto& joints = c.ac->animator->jointModelMatrices();
                         if (spine2JointIdx_ < static_cast<int>(joints.size())) {
                             const glm::mat4& sm = joints[static_cast<size_t>(spine2JointIdx_)];
                             const glm::mat3 sR(glm::normalize(glm::vec3(sm[0])),
                                                glm::normalize(glm::vec3(sm[1])),
                                                glm::normalize(glm::vec3(sm[2])));
-                            const glm::vec3 anchorPos =
+                            c.handIk.right.positionModel =
                                 glm::vec3(sm * glm::vec4(c.chestOffset, 1.0f));
-                            const glm::quat spineQ = glm::normalize(glm::quat_cast(sR));
-                            c.handIk.right.positionModel = anchorPos;
-                            c.handIk.right.orientationModel = glm::normalize(spineQ * c.chestRotQuat);
-                            // No elbow hint — the analytical solver picks a
-                            // natural elbow direction from the pole-vector
-                            // disambiguation in CharacterAnimator::solveArm.
+                            c.handIk.right.orientationModel =
+                                glm::normalize(glm::quat_cast(sR) * c.chestRotQuat);
                             c.handIk.right.elbowEnabled = false;
                         }
                     }
 
-                    if (c.drawThisFrame && c.ac != nullptr && c.ac->animator)
-                        c.ac->animator->applyHandIkTargets(c.handIk);
+                    // ── 2. Run the right-hand IK first so the right wrist
+                    // settles at the chest anchor before we derive the weapon
+                    // world from it.
+                    if (c.handIk.right.enabled || c.handIk.right.orientationEnabled)
+                        c.ac->animator->applyArmIk(/*isLeft=*/false, c.handIk.right);
 
-                    if (c.hasWeapon && c.drawThisFrame && c.ac != nullptr && c.ac->animator &&
-                        rightHandJointIdx_ >= 0) {
+                    // ── 3. Derive the weapon world from the freshly-IK'd
+                    // right-hand bone. Same algebra as before: solve
+                    // weapon × R(palm) = hand, so weapon = hand × inv(R(palm)),
+                    // origin = hand_pos − weapon_rot × palm.offset.
+                    if (c.hasWeapon && rightHandJointIdx_ >= 0) {
                         const auto& joints = c.ac->animator->jointModelMatrices();
                         if (rightHandJointIdx_ < static_cast<int>(joints.size())) {
                             const glm::mat4 handWorld =
@@ -3366,15 +3359,61 @@ SDL_AppResult Game::iterate()
                             const glm::mat3 invPalmRot =
                                 glm::inverse(glm::mat3(handMountRotation(c.rightPalmAuthored)));
                             const glm::mat3 weaponRot = handRot * invPalmRot;
-                            const glm::vec3 weaponOrigin =
-                                handPos - weaponRot * c.rightPalmAuthored.offset;
+                            const glm::vec3 weaponOrigin = handPos - weaponRot * c.rightPalmAuthored.offset;
 
                             glm::mat4 weaponWorldMat =
                                 glm::translate(glm::mat4(1.0f), weaponOrigin) * glm::mat4(weaponRot);
                             weaponWorldMat = glm::scale(weaponWorldMat, glm::vec3(c.weaponScale));
                             c.weaponWorld = weaponWorldMat;
+
+                            // ── 4. Derive the left-hand IK target from the
+                            // ACTUAL weapon world. The authored leftPalm is
+                            // weapon-local (offset = m units in the weapon
+                            // frame, rotationDegrees = orientation of the
+                            // palm). Project it through the unscaled rotation
+                            // part of weaponWorldMat (using weaponRot directly
+                            // avoids the scale baked into the matrix) so the
+                            // target ends up at the weapon's authored grip in
+                            // world space, then transform back to model space.
+                            const glm::vec3 leftPalmWorld =
+                                weaponOrigin + weaponRot * c.leftPalmAuthored.offset;
+                            const glm::mat3 leftPalmRotWorld =
+                                weaponRot * glm::mat3(handMountRotation(c.leftPalmAuthored));
+                            const glm::vec3 leftElbowWorld =
+                                weaponOrigin + weaponRot * c.leftElbowAuthored;
+
+                            const glm::mat4 invWorld = glm::inverse(c.worldTransform);
+                            c.handIk.left.positionModel =
+                                glm::vec3(invWorld * glm::vec4(leftPalmWorld, 1.0f));
+                            c.handIk.left.elbowPositionModel =
+                                glm::vec3(invWorld * glm::vec4(leftElbowWorld, 1.0f));
+                            const glm::mat3 leftPalmRotModel = glm::mat3(invWorld) * leftPalmRotWorld;
+                            const glm::vec3 col0 = glm::normalize(leftPalmRotModel[0]);
+                            const glm::vec3 col1 = glm::normalize(leftPalmRotModel[1]);
+                            const glm::vec3 col2 = glm::normalize(leftPalmRotModel[2]);
+                            c.handIk.left.orientationModel =
+                                glm::normalize(glm::quat_cast(glm::mat3(col0, col1, col2)));
                         }
                     }
+
+                    // ── 5. Now IK the left arm to the just-derived target.
+                    if (c.handIk.left.enabled || c.handIk.left.orientationEnabled)
+                        c.ac->animator->applyArmIk(/*isLeft=*/true, c.handIk.left);
+
+                    // ── 6. Apply grip pose blends per hand. Same data as
+                    // before, just split-call to match the new API shape.
+                    if (c.handIk.rightGripPose != nullptr)
+                        c.ac->animator->applyGripPose(/*isLeft=*/false,
+                                                      *c.handIk.rightGripPose,
+                                                      c.handIk.rightGripWeight);
+                    if (c.handIk.leftGripPose != nullptr)
+                        c.ac->animator->applyGripPose(/*isLeft=*/true,
+                                                      *c.handIk.leftGripPose,
+                                                      c.handIk.leftGripWeight);
+
+                    // ── 7. Recompute the skin palette once, after all IK +
+                    // grip work for this character has settled.
+                    c.ac->animator->updateSkinMatrices();
                 }
             });
         }
@@ -4761,17 +4800,15 @@ SDL_AppResult Game::iterate()
                     ImGui::PopID();
                     return;
                 }
-                ImGui::SeparatorText("Elbow");
+                // Per-finger offsets/rotations were removed — finger pose is now
+                // pure pitch+yaw in the Grip Pose Tweaker, no per-finger positions.
+                // Palm = where the wrist meets the weapon (used by left-hand IK
+                // target derivation); Elbow = pole-vector hint for the IK solver.
+                ImGui::SeparatorText("Elbow (IK pole hint)");
                 ImGui::DragFloat3("Elbow Offset", &hand.elbowOffset.x, 0.25f, -80.0f, 80.0f, "%.2f");
                 if (ImGui::IsItemActive() || ImGui::IsItemHovered())
                     setDebugTarget(left, HandMountDebugPoint::Elbow);
-                drawMountPoint("Palm", hand.palm, left, HandMountDebugPoint::Palm);
-                for (size_t i = 0; i < kHandFingerMountCount; ++i)
-                    drawMountPoint(kHandFingerMountNames[i],
-                                   hand.fingers[i],
-                                   left,
-                                   static_cast<HandMountDebugPoint>(static_cast<int>(HandMountDebugPoint::Finger0) +
-                                                                    static_cast<int>(i)));
+                drawMountPoint("Palm (weapon grip socket)", hand.palm, left, HandMountDebugPoint::Palm);
                 ImGui::PopID();
             };
 
@@ -4842,15 +4879,12 @@ SDL_AppResult Game::iterate()
                     ImGui::PopID();
                     return;
                 }
+                // Per-finger position/rotation sliders were removed — fingers
+                // are now driven purely by the Grip Pose Tweaker (pitch+yaw
+                // per joint). Shoulder/elbow/palm still drive the arm IK.
                 drawOffset("Shoulder", arm.shoulderOffset, left, HandMountDebugPoint::Shoulder);
                 drawOffset("Elbow", arm.elbowOffset, left, HandMountDebugPoint::Elbow);
-                drawMountPoint("Palm", arm.palm, left, HandMountDebugPoint::Palm);
-                for (size_t i = 0; i < kHandFingerMountCount; ++i)
-                    drawMountPoint(kHandFingerMountNames[i],
-                                   arm.fingers[i],
-                                   left,
-                                   static_cast<HandMountDebugPoint>(static_cast<int>(HandMountDebugPoint::Finger0) +
-                                                                    static_cast<int>(i)));
+                drawMountPoint("Palm (weapon grip socket)", arm.palm, left, HandMountDebugPoint::Palm);
                 ImGui::PopID();
             };
 
@@ -4870,7 +4904,10 @@ SDL_AppResult Game::iterate()
         ImGui::End();
     }
 
-    // Phase E grip pose tweaker — per-finger Euler editing + save to TOML.
+    // Grip pose tweaker — per-finger-joint (pitch, yaw) editor + save to TOML.
+    // The GripPose data itself stores (pitch, yaw) per joint, so the sliders
+    // drive the runtime data directly — no quat/Euler round-tripping, no
+    // gimbal lock to worry about, and no impossible-to-pose-mistakenly roll DOF.
     if (showGripPoseUI_) {
         if (ImGui::Begin("Grip Pose Tweaker", &showGripPoseUI_)) {
             const char* weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
@@ -4878,40 +4915,32 @@ SDL_AppResult Game::iterate()
 
             const std::size_t wIdx = static_cast<std::size_t>(gripPoseTuneWeaponIdx_);
             WeaponGripPose& pose = weaponGripPoses_[wIdx];
-            WeaponGripPoseEuler& eulers = weaponGripPoseEulers_[wIdx];
             ImGui::TextUnformatted(weaponGripPosePaths_[wIdx].c_str());
             ImGui::Text("Right hand: %s   Left hand: %s",
                         pose.rightHandValid ? "authored" : "missing",
                         pose.leftHandValid ? "authored" : "missing");
+            ImGui::TextDisabled("pitch = curl (toward palm), yaw = splay (sideways)");
 
-            // Edits to any slider re-derive the quat for that joint only, so
-            // unrelated joints stay bit-identical to what was on disk (and the
-            // hot-reload poll doesn't fight the editor).
-            auto editFinger = [&](const char* label,
-                                  std::size_t fingerIdx,
-                                  std::array<glm::vec3, kGripPoseJointCount>& handEulers,
-                                  GripPose& handPose) {
+            auto editFinger = [&](const char* label, std::size_t fingerIdx, GripPose& handPose) {
                 if (!ImGui::TreeNode(label))
                     return;
-                static const char* k_jointNames[kGripPoseBonesPerFinger] = {"joint1", "joint2", "joint3", "joint4"};
+                static const char* k_jointNames[kGripPoseBonesPerFinger] = {
+                    "joint1 (root)", "joint2", "joint3", "joint4 (tip)"};
                 for (std::size_t j = 0; j < kGripPoseBonesPerFinger; ++j) {
                     ImGui::PushID(static_cast<int>(j));
                     const std::size_t flat = GripPose::index(fingerIdx, j);
-                    if (ImGui::DragFloat3(k_jointNames[j], &handEulers[flat].x, 1.0f, -180.0f, 180.0f, "%.1f")) {
-                        handPose.jointRotations[flat] = glm::normalize(
-                            glm::angleAxis(glm::radians(handEulers[flat].x), glm::vec3{1.0f, 0.0f, 0.0f}) *
-                            glm::angleAxis(glm::radians(handEulers[flat].y), glm::vec3{0.0f, 1.0f, 0.0f}) *
-                            glm::angleAxis(glm::radians(handEulers[flat].z), glm::vec3{0.0f, 0.0f, 1.0f}));
-                    }
+                    ImGui::DragFloat2(k_jointNames[j],
+                                      &handPose.jointAngles[flat].x,
+                                      1.0f,
+                                      -180.0f,
+                                      180.0f,
+                                      "%.1f");
                     ImGui::PopID();
                 }
                 ImGui::TreePop();
             };
 
-            auto editHand = [&](const char* label,
-                                std::array<glm::vec3, kGripPoseJointCount>& handEulers,
-                                GripPose& handPose,
-                                bool& handValid) {
+            auto editHand = [&](const char* label, GripPose& handPose, bool& handValid) {
                 ImGui::PushID(label);
                 const bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
                 ImGui::SameLine();
@@ -4920,121 +4949,47 @@ SDL_AppResult Game::iterate()
                     ImGui::PopID();
                     return;
                 }
-                static const char* k_fingerNames[kGripPoseFingerCount] = {"Thumb", "Index", "Middle", "Ring", "Pinky"};
+                static const char* k_fingerNames[kGripPoseFingerCount] = {
+                    "Thumb", "Index", "Middle", "Ring", "Pinky"};
                 for (std::size_t fingerIdx = 0; fingerIdx < kGripPoseFingerCount; ++fingerIdx)
-                    editFinger(k_fingerNames[fingerIdx], fingerIdx, handEulers, handPose);
+                    editFinger(k_fingerNames[fingerIdx], fingerIdx, handPose);
                 ImGui::PopID();
             };
 
-            editHand("Right Hand", eulers.rightHand, pose.rightHand, pose.rightHandValid);
-            editHand("Left Hand", eulers.leftHand, pose.leftHand, pose.leftHandValid);
+            editHand("Right Hand", pose.rightHand, pose.rightHandValid);
+            editHand("Left Hand", pose.leftHand, pose.leftHandValid);
 
             ImGui::Separator();
-            if (ImGui::Button("Snap from in-game pose")) {
-                // Phase E authoring tool: capture the local player's currently-
-                // rendered finger local rotations into the active grip pose.
-                // This replaces the plan's literal "Auto-fit left hand to
-                // weapon grip socket" — after Phase E removed finger IK, the
-                // arm pose is what the analytical solver produces every frame,
-                // and the fingers are whatever GripPose was active last frame.
-                // Snapping the current pose is the only way to seed a starting
-                // point that actually reflects the rendered hand.
-                entt::entity local = entt::null;
-                registry.view<LocalPlayer>().each([&](entt::entity en) { local = en; });
-                if (local != entt::null && registry.valid(local)) {
-                    auto* ac = registry.try_get<AnimatedCharacter>(local);
-                    if (ac != nullptr && ac->animator && charRig_.skeleton()) {
-                        const auto& joints = ac->animator->jointModelMatrices();
-                        const auto parents = charRig_.skeleton()->joint_parents();
-                        const auto& jm = charRig_.jointMap();
-                        static constexpr std::array<const char*, kGripPoseFingerCount> k_fingers{
-                            "Thumb", "Index", "Middle", "Ring", "Pinky"};
-                        auto snapHand = [&](const char* prefix,
-                                            std::array<glm::vec3, kGripPoseJointCount>& outE,
-                                            GripPose& outPose,
-                                            bool& outValid) {
-                            bool anyHit = false;
-                            for (std::size_t f = 0; f < kGripPoseFingerCount; ++f) {
-                                for (std::size_t j = 0; j < kGripPoseBonesPerFinger; ++j) {
-                                    const std::string boneName = std::string("mixamorig:") + prefix +
-                                                                 k_fingers[f] + std::to_string(j + 1);
-                                    const auto it = jm.find(boneName);
-                                    if (it == jm.end())
-                                        continue;
-                                    const int boneIdx = it->second;
-                                    if (boneIdx < 0 || boneIdx >= static_cast<int>(joints.size()))
-                                        continue;
-                                    const int parentIdx =
-                                        static_cast<int>(parents[static_cast<size_t>(boneIdx)]);
-                                    if (parentIdx < 0 || parentIdx >= static_cast<int>(joints.size()))
-                                        continue;
-                                    const glm::mat4& bM = joints[static_cast<size_t>(boneIdx)];
-                                    const glm::mat4& pM = joints[static_cast<size_t>(parentIdx)];
-                                    const glm::mat3 bR(glm::normalize(glm::vec3(bM[0])),
-                                                       glm::normalize(glm::vec3(bM[1])),
-                                                       glm::normalize(glm::vec3(bM[2])));
-                                    const glm::mat3 pR(glm::normalize(glm::vec3(pM[0])),
-                                                       glm::normalize(glm::vec3(pM[1])),
-                                                       glm::normalize(glm::vec3(pM[2])));
-                                    const glm::quat localQ =
-                                        glm::normalize(glm::quat_cast(glm::transpose(pR) * bR));
-                                    float ex = 0.0f;
-                                    float ey = 0.0f;
-                                    float ez = 0.0f;
-                                    glm::extractEulerAngleXYZ(glm::mat4_cast(localQ), ex, ey, ez);
-                                    const std::size_t flat = GripPose::index(f, j);
-                                    outE[flat] = glm::vec3{
-                                        glm::degrees(ex), glm::degrees(ey), glm::degrees(ez)};
-                                    outPose.jointRotations[flat] = localQ;
-                                    anyHit = true;
-                                }
-                            }
-                            if (anyHit)
-                                outValid = true;
-                        };
-                        snapHand("RightHand", eulers.rightHand, pose.rightHand, pose.rightHandValid);
-                        snapHand("LeftHand", eulers.leftHand, pose.leftHand, pose.leftHandValid);
-                    }
-                }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Reset to T-pose (zero curls)")) {
-                for (auto& v : eulers.rightHand)
-                    v = glm::vec3(0.0f);
-                for (auto& v : eulers.leftHand)
-                    v = glm::vec3(0.0f);
-                gripPoseQuatsFromEulers(eulers, pose);
+            if (ImGui::Button("Reset to T-pose (zero angles)")) {
+                for (auto& a : pose.rightHand.jointAngles)
+                    a = glm::vec2(0.0f);
+                for (auto& a : pose.leftHand.jointAngles)
+                    a = glm::vec2(0.0f);
             }
             ImGui::SameLine();
             if (ImGui::Button("Mirror Right → Left")) {
-                // Mirror the right-hand Eulers onto the left hand. The Y
-                // component (spread) flips sign because the spread axis is
-                // mirrored across the body midline; X (along bone) and Z
-                // (curl) keep their sign so curl direction is preserved.
+                // Mirror right-hand angles onto the left. Yaw (splay) flips
+                // sign because the splay direction is mirrored across the body
+                // midline; pitch (curl) keeps its sign — both hands curl
+                // toward their own palm.
                 for (std::size_t i = 0; i < kGripPoseJointCount; ++i) {
-                    eulers.leftHand[i] = glm::vec3{eulers.rightHand[i].x,
-                                                   -eulers.rightHand[i].y,
-                                                   eulers.rightHand[i].z};
+                    pose.leftHand.jointAngles[i] = glm::vec2{pose.rightHand.jointAngles[i].x,
+                                                             -pose.rightHand.jointAngles[i].y};
                 }
-                gripPoseQuatsFromEulers(eulers, pose);
                 pose.leftHandValid = pose.rightHandValid;
             }
             ImGui::SameLine();
             if (ImGui::Button("Reload from disk")) {
                 WeaponGripPose scratch{};
-                WeaponGripPoseEuler scratchEulers{};
-                if (loadWeaponGripPoseWithEulers(weaponGripPosePaths_[wIdx], scratch, scratchEulers)) {
+                if (loadWeaponGripPose(weaponGripPosePaths_[wIdx], scratch))
                     pose = scratch;
-                    eulers = scratchEulers;
-                }
             }
             ImGui::SameLine();
             if (ImGui::Button("Save to TOML")) {
                 if (saveWeaponGripPoseToml(
-                        weaponGripPosePaths_[wIdx], eulers, pose.rightHandValid, pose.leftHandValid)) {
-                    // Update the cached mtime so the hot-reload poll doesn't
-                    // immediately reload our just-saved file (which would race
-                    // any unsaved edits the user might have made meanwhile).
+                        weaponGripPosePaths_[wIdx], pose, pose.rightHandValid, pose.leftHandValid)) {
+                    // Update cached mtime so the hot-reload poll doesn't
+                    // immediately reload our just-saved file.
                     std::error_code ec;
                     const auto mtime = std::filesystem::last_write_time(weaponGripPosePaths_[wIdx], ec);
                     if (!ec)

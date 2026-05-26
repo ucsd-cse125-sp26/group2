@@ -164,7 +164,33 @@ public:
     ///
     /// Targets are in rig model space and should be applied after sampling for
     /// the frame, before copying joint/skinning matrices into renderer buffers.
+    /// Convenience wrapper around `applyArmIk` + `applyGripPose` + `updateSkinMatrices`.
     void applyHandIkTargets(const HandIkTargets& targets);
+
+    /// @brief Apply two-bone arm IK + optional wrist orientation to one arm.
+    ///
+    /// Mutates `jointModelMatrices()` in place. The caller is responsible for
+    /// calling `updateSkinMatrices()` once after all per-frame IK + grip
+    /// operations have run, so the LBS palette reflects the final pose.
+    ///
+    /// Splitting per-arm lets the right hand be IK'd first (placing the
+    /// weapon, which is parented to it) and the left-hand target then be
+    /// derived from the resulting weapon world transform — so the support
+    /// hand actually grabs the gun where it is, not where some precomputed
+    /// player-relative offset thinks it should be.
+    void applyArmIk(bool isLeft, const ArmIkTarget& target);
+
+    /// @brief Blend an authored GripPose into the animated finger rotations
+    /// for one hand. Same semantics as the grip-pose half of
+    /// `applyHandIkTargets`, but per-hand.
+    void applyGripPose(bool isLeft, const GripPose& pose, float weight);
+
+    /// @brief Recompute `skinMatrices()` = jointModelMats * inverseBindMats.
+    ///
+    /// Call once after `applyArmIk` / `applyGripPose` calls have settled the
+    /// per-bone model matrices for the frame. The LBS skinning palette and
+    /// hitbox-tracking code both read these matrices.
+    void updateSkinMatrices();
 
     /// @brief Phase F additive recoil kick.
     ///
@@ -206,6 +232,13 @@ private:
     /// `update()`).  Consumes `inputs` only for head-pitch and
     /// wallrun-mirror post-processing.
     void runSamplingAndSkinning(const AnimationInputs& inputs);
+
+    /// @brief Shared implementation behind `applyHandIkTargets`,
+    /// `applyArmIk`, and `applyGripPose`. When `finalize` is true the
+    /// skin-matrix palette is recomputed at the end — used by the all-in-one
+    /// public entry point. When false, the caller is responsible for invoking
+    /// `updateSkinMatrices()` once after staging multiple per-arm operations.
+    void applyHandIkTargetsImpl(const HandIkTargets& targets, bool finalize);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
