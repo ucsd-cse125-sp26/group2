@@ -8,6 +8,7 @@
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 
 namespace
 {
@@ -55,7 +56,19 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
     }
 
     std::string addressArg = "--address=0.0.0.0";
-    std::string portArg = "--port=" + std::to_string(config.port);
+    const int requestedPort = config.useSpecificPort ? config.port : 0;
+    std::string portArg = "--port=" + std::to_string(requestedPort);
+    std::vector<std::string> args{serverPath, addressArg, portArg};
+    if (config.useLegacyTcp) {
+        args.emplace_back("--legacy-tcp");
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (std::string& arg : args) {
+        argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
 
     int stdoutPipe[2];
     if (pipe(stdoutPipe) != 0) {
@@ -78,7 +91,7 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
         dup2(stdoutPipe[1], STDOUT_FILENO);
         close(stdoutPipe[1]);
 
-        execl(serverPath.c_str(), serverPath.c_str(), addressArg.c_str(), portArg.c_str(), nullptr);
+        execv(serverPath.c_str(), argv.data());
 
         _exit(127); // exec failed
     }

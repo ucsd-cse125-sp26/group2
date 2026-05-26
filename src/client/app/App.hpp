@@ -60,7 +60,12 @@ private:
     std::string userSettingsPath;    ///< Path used to load and save user settings.
     Client client;                   ///< Network client connected to the authoritative server.
     HostedServer hostedServer;       ///< Hosted game server instance.
-    HostConfigState hostConfigState{.port = 9999, .persistAfterClientExit = false}; ///< Host screen draft state.
+    HostConfigState hostConfigState{
+        .port = 9999,
+        .useSpecificPort = false,
+        .useLegacyTcp = false,
+        .persistAfterClientExit = false,
+    }; ///< Host screen draft state.
 
     Screen current = Screen::Home;    ///< Which screen is currently active.
     std::unique_ptr<IScreen> screen_; ///< Active screen instance.

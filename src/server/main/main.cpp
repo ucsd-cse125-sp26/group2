@@ -169,6 +169,7 @@ int main(int argc, char* argv[])
     argparse::ArgumentParser program("group2_server");
     program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");
     program.add_argument("--port").scan<'u', uint16_t>().help("Port to listen on for game clients (default: 9999)");
+    program.add_argument("--legacy-tcp").flag().help("Force legacy TCP transport for hosted-client launches");
 
     try {
         program.parse_args(argc, argv);
@@ -192,7 +193,7 @@ int main(int argc, char* argv[])
 
     const char* base = SDL_GetBasePath();
     std::string cfgPath = std::string(base ? base : "") + "config.toml";
-    const NetworkConfig cfg = loadNetworkConfig(cfgPath.c_str());
+    NetworkConfig cfg = loadNetworkConfig(cfgPath.c_str());
     const DeveloperConfig developerCfg = loadDeveloperConfig(cfgPath.c_str());
     NetworkAddress serverNet = cfg.serverNetwork;
 
@@ -212,6 +213,10 @@ int main(int argc, char* argv[])
         }
 
         serverNet.port = portNum;
+    }
+
+    if (program.get<bool>("--legacy-tcp")) {
+        cfg.transport.useUdpSessions = false;
     }
 
     Server server;

@@ -6,8 +6,10 @@
 
 struct HostConfigState
 {
-    int port; // 0 = auto
-    bool persistAfterClientExit;
+    int port;                    ///< Requested port when useSpecificPort is true; 0 means auto.
+    bool useSpecificPort;        ///< True when the user explicitly selected a port.
+    bool useLegacyTcp;           ///< True to force the hosted server to legacy TCP transport.
+    bool persistAfterClientExit; ///< UI-only persistence request; not wired yet.
 };
 
 struct HostSessionInfo

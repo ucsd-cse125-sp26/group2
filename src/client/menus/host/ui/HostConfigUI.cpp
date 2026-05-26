@@ -10,23 +10,12 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
     HostConfigState& draft = inputs.draft;
 
     ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(420.0f, 300.0f), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(480.0f, 360.0f), ImGuiCond_Once);
     if (ImGui::Begin("Host Game")) {
         ImGui::SeparatorText("Settings");
         if (ImGui::BeginTable("HostSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableSetupColumn("Value");
-
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            ImGui::TextUnformatted("Port");
-            ImGui::TableSetColumnIndex(1);
-            ImGui::BeginDisabled(inputs.serverRunning);
-            ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("##HostPort", &draft.port);
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::TextDisabled("0 = auto");
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
@@ -37,6 +26,50 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::EndDisabled();
             ImGui::SameLine();
             ImGui::TextDisabled("not yet wired");
+
+            ImGui::EndTable();
+        }
+
+        ImGui::SeparatorText("Advanced");
+        if (ImGui::BeginTable("HostAdvancedSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+            ImGui::TableSetupColumn("Value");
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Specific Port");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning);
+            ImGui::Checkbox("##UseSpecificPort", &draft.useSpecificPort);
+            if (draft.useSpecificPort) {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(120.0f);
+                ImGui::InputInt("##HostPort", &draft.port);
+            } else {
+                ImGui::SameLine();
+                ImGui::TextDisabled("auto");
+            }
+            ImGui::EndDisabled();
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Transport");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning);
+            ImGui::Checkbox("Legacy TCP", &draft.useLegacyTcp);
+            ImGui::EndDisabled();
+            if (draft.useLegacyTcp && !draft.useSpecificPort) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("requires a specific port");
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Auto Port");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(draft.useSpecificPort ? "Off" : "On");
+            ImGui::SameLine();
+            ImGui::TextDisabled("UDP session only");
 
             ImGui::EndTable();
         }

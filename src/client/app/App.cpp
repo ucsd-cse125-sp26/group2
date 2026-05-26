@@ -101,6 +101,8 @@ bool App::init()
         networkConfig = loadNetworkConfig(cfgPath.c_str());
         developerConfig = loadDeveloperConfig(cfgPath.c_str());
         hostConfigState.port = networkConfig.serverNetwork.port;
+        hostConfigState.useSpecificPort = false;
+        hostConfigState.useLegacyTcp = false;
     }
 
     // Pull user-specific settings once; App owns the live copy while screens borrow it.
@@ -246,6 +248,11 @@ SDL_AppResult App::iterate()
             HostConfigState config = hostConfig->draftConfig();
             hostConfigState = config;
 
+            if (config.useLegacyTcp && !config.useSpecificPort) {
+                hostConfig->setLaunchError("Legacy TCP requires a specific port");
+                break;
+            }
+
             std::string error;
             if (!hostedServer.start(config, error)) {
                 hostConfig->setLaunchError(error.empty() ? "Failed to start hosted server" : error);
@@ -253,7 +260,11 @@ SDL_AppResult App::iterate()
             }
 
             SDL_Log("Hosted server started on port %d, connecting client...", hostedServer.port());
-            const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), networkConfig.transport);
+            TransportConfig hostedTransport = networkConfig.transport;
+            if (config.useLegacyTcp) {
+                hostedTransport.useUdpSessions = false;
+            }
+            const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), hostedTransport);
             if (connectError != ConnectError::None) {
                 SDL_Log("Failed to connect to hosted server: %s", connectErrorLogName(connectError));
                 hostConfig->setLaunchError(joinErrorMessage(connectError));

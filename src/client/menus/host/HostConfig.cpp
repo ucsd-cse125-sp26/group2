@@ -15,7 +15,7 @@ bool HostConfig::init(AppContext& ctx)
     client = &ctx.client;
     hostedServer = &ctx.hostedServer;
     draft = &ctx.hostConfigState;
-    if (!hostedServer->isRunning()) {
+    if (!hostedServer->isRunning() && !draft->useSpecificPort) {
         draft->port = ctx.networkConfig.serverNetwork.port;
     }
     return true;
@@ -113,7 +113,12 @@ bool HostConfig::consumeBackToHomeRequest()
 HostConfigState HostConfig::draftConfig() const
 {
     if (!draft)
-        return HostConfigState{.port = 9999, .persistAfterClientExit = false};
+        return HostConfigState{
+            .port = 9999,
+            .useSpecificPort = false,
+            .useLegacyTcp = false,
+            .persistAfterClientExit = false,
+        };
 
     HostConfigState result = *draft;
     result.port = std::clamp(result.port, 0, 65535);
