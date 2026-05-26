@@ -581,7 +581,8 @@ bool Game::init(AppContext& ctx)
         // ExplosionEvent: also play the explosion SFX alongside the particle effect.
         dispatcher.sink<ExplosionEvent>().connect<&SfxSystem::onExplosion>(sfxSystem);
     }
-    voiceChat_.init();
+    if (ctx.developerConfig.voiceCapture)
+        voiceChat_.init();
 
     // HUD system — needs device + shader format from renderer, SDF atlas from particles.
     if (particleSystem.sdfReady()) {
