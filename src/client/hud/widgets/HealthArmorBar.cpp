@@ -60,12 +60,6 @@ std::vector<Point> clipLeftToRight(const std::array<Point, 6>& points, float cli
     return out;
 }
 
-HudColor colorAtX(float x, float leftX, float width, HudColor leftColor, HudColor rightColor)
-{
-    const float t = std::clamp((x - leftX) / std::max(1.f, width), 0.f, 1.f);
-    return voidfall::lerpColor(leftColor, rightColor, t);
-}
-
 void drawFilledShape(HudContext& ctx,
                      float x,
                      float y,
@@ -74,8 +68,7 @@ void drawFilledShape(HudContext& ctx,
                      float chamfer,
                      float cornerCut,
                      float fill01,
-                     HudColor leftColor,
-                     HudColor rightColor)
+                     HudColor color)
 {
     const float fill = std::clamp(fill01, 0.f, 1.f);
     if (fill <= 0.f)
@@ -87,19 +80,10 @@ void drawFilledShape(HudContext& ctx,
         return;
 
     const Point origin = poly.front();
-    const HudColor originColor = colorAtX(origin.x, x, w, leftColor, rightColor);
     for (std::size_t i = 1; i + 1 < poly.size(); ++i) {
         const Point a = poly[i];
         const Point b = poly[i + 1];
-        ctx.triangleColors(origin.x,
-                           origin.y,
-                           originColor,
-                           a.x,
-                           a.y,
-                           colorAtX(a.x, x, w, leftColor, rightColor),
-                           b.x,
-                           b.y,
-                           colorAtX(b.x, x, w, leftColor, rightColor));
+        ctx.triangle(origin.x, origin.y, a.x, a.y, b.x, b.y, color);
     }
 }
 
@@ -168,7 +152,7 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float outline = std::max(1.f, outlineThickness * s);
     const float topY = y - h;
 
-    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, healthFill_, k_health, k_healthBright);
-    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, armorFill_, k_cyanDim, k_cyan);
+    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, healthFill_, k_health);
+    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, armorFill_, k_cyan);
     drawShapeOutline(ctx, x, topY, w, h, chamfer, cornerCut, outline, k_lineBright);
 }

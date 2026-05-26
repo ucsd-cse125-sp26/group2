@@ -20,7 +20,7 @@ struct HudWidget
     float offsetX = 0.f, offsetY = 0.f;
     float width = 0.f, height = 0.f;
     HudColor tint{1.f, 1.f, 1.f, 1.f};
-    float uiScale_ = 1.f; ///< Set by Hud each frame (screenH / 1080).
+    float uiScale_ = 1.f; ///< Set by Hud each frame from a 1920x1080 reference canvas.
 
     virtual ~HudWidget() = default;
 

@@ -35,7 +35,7 @@ flowchart TD
 ## 2. Coordinates & style
 
 - Top-left origin, pixel space.
-- Scaled per frame by `uiScale_ = screenH / 1080.f` — every widget multiplies its `offsetX/Y`/`width`/`height` by this when rendering.
+- Scaled per frame from a 1920x1080 reference canvas: `uiScale_ = min(screenW / 1920.f, screenH / 1080.f)`. Every widget multiplies its `offsetX/Y`/`width`/`height` by this when rendering, preserving proportions while keeping HUD chrome inside narrower or unusual aspect ratios.
 - 9-way anchor (`HudAnchor`): TopLeft, Top, TopRight, Left, Center, Right, BottomLeft, Bottom, BottomRight. Resolved in `Hud::resolveAnchor`.
 
 ### Style tokens (`VoidfallStyle.hpp`)
