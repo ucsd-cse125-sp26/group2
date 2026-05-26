@@ -109,10 +109,12 @@ jobs:
       # try_compile results, compiler probes, feature detection).
       # Keeping build dirs lets cmake skip ~68 compile probes on re-runs.
       - name: Cache FetchContent deps
+        id: deps-cache
         uses: actions/cache@v4
         with:
           path: .deps/${{ matrix.preset }}
           key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('cmake/dependencies.json') }}
+          restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       # Cache the project build tree for incremental CMake reconfigure.
       # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
@@ -182,7 +184,7 @@ jobs:
           cmake --preset ${{ matrix.preset }} \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=${{ steps.deps-cache.outputs.cache-hit == 'true' && 'ON' || 'OFF' }} \
             ${{ matrix.extra_cmake || '' }}
 
       - name: Build
@@ -354,10 +356,12 @@ jobs:
       # Cache dep sources AND their build dirs (CMakeCache.txt holds
       # try_compile results, compiler probes, feature detection).
       - name: Cache FetchContent deps
+        id: deps-cache
         uses: actions/cache@v4
         with:
           path: .deps/${{ matrix.preset }}
           key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('cmake/dependencies.json') }}
+          restore-keys: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-
 
       # Cache the project build tree for incremental CMake reconfigure.
       # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
@@ -427,7 +431,7 @@ jobs:
           cmake --preset ${{ matrix.preset }} \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=${{ steps.deps-cache.outputs.cache-hit == 'true' && 'ON' || 'OFF' }} \
             ${{ matrix.extra_cmake || '' }}
 
       - name: Build
