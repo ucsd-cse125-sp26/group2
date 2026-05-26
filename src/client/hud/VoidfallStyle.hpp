@@ -17,27 +17,27 @@
 #include "HudContext.hpp"
 #include "HudTypes.hpp"
 
+#include <algorithm>
+
 namespace voidfall
 {
 
 // ── Palette (matches prototype's CSS custom properties) ─────────────────────
 
-/// @brief Deep panel background — opaque so HUD chrome doesn't pick up sky tint.
+/// @brief Deep panel background tint used by translucent HUD glass.
 constexpr HudColor k_primary{0.168627f, 0.694118f, 0.741176f, 1.0f};    // #2BB1BD
 constexpr HudColor k_secondary{0.250980f, 0.478431f, 0.501961f, 1.0f};  // #407A80
 constexpr HudColor k_tertiary{0.615686f, 0.858824f, 0.882353f, 1.0f};   // #9DDBE1
 constexpr HudColor k_quaternary{0.070588f, 0.270588f, 0.290196f, 1.0f}; // #12454A
 
 constexpr HudColor k_bgVoid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.96f};
-/// @brief Standard panel fill — bumped to 0.92α (was 0.78).
-/// At 0.78 the world bled through enough that bright-sky maps washed the
-/// chrome out and made dim text grey-on-grey.  0.92 keeps a faint sense of
-/// translucency without sacrificing readability against any background.
-constexpr HudColor k_bgPanel{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.92f};
+/// @brief Standard panel fill — translucent glass base, reinforced by glow
+/// layers in drawPanel() for readability without a flat sticker look.
+constexpr HudColor k_bgPanel{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.56f};
 /// @brief Solid panel — used for hero callouts.
-constexpr HudColor k_bgPanelSolid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.96f};
+constexpr HudColor k_bgPanelSolid{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.78f};
 /// @brief Inset bar background.
-constexpr HudColor k_bgInset{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.92f};
+constexpr HudColor k_bgInset{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.58f};
 
 /// @brief Dim hairline — `oklch(0.32 0.015 60 / 0.6)`.
 constexpr HudColor k_lineDim{k_secondary.r, k_secondary.g, k_secondary.b, 0.7f};
@@ -63,6 +63,11 @@ constexpr HudColor k_amberDim{k_secondary.r, k_secondary.g, k_secondary.b, 1.0f}
 constexpr HudColor k_amberDeep{k_quaternary.r, k_quaternary.g, k_quaternary.b, 1.0f};
 /// @brief Amber glow tint — `oklch(0.80 0.165 75 / 0.15)`.
 constexpr HudColor k_amberGlow{k_primary.r, k_primary.g, k_primary.b, 0.18f};
+constexpr HudColor k_glassHighlight{k_tertiary.r, k_tertiary.g, k_tertiary.b, 0.18f};
+constexpr HudColor k_glassShadow{k_quaternary.r, k_quaternary.g, k_quaternary.b, 0.28f};
+constexpr HudColor k_scanline{k_tertiary.r, k_tertiary.g, k_tertiary.b, 0.045f};
+constexpr HudColor k_chromaRed{1.0f, 0.18f, 0.10f, 0.16f};
+constexpr HudColor k_chromaCyan{0.16f, 0.90f, 1.0f, 0.16f};
 
 /// @brief Health red — `oklch(0.65 0.20 28)`.
 constexpr HudColor k_red{k_primary.r, k_primary.g, k_primary.b, 1.0f};
@@ -157,7 +162,53 @@ inline void drawCornerBrackets(HudContext& ctx,
     ctx.rect(bx + bw - thickness, by + bh - armLen, thickness, armLen, color);
 }
 
-/// @brief Draw a Voidfall panel: solid fill + 1 px outline.
+/// @brief Draw a lightweight projected-glass material over a panel.
+inline void drawGlassMaterial(HudContext& ctx,
+                              float x,
+                              float y,
+                              float w,
+                              float h,
+                              HudColor fill,
+                              HudColor border,
+                              float thickness)
+{
+    const float edge = std::max(1.f, thickness);
+    const float materialAlpha = std::clamp(std::max(fill.a, border.a), 0.f, 1.f);
+
+    // Soft outer bloom and red/cyan edge offsets simulate projected optics.
+    ctx.rectOutline(x - 3.f, y - 3.f, w + 6.f, h + 6.f, edge, withAlpha(border, 0.08f));
+    ctx.rectOutline(x - 1.f, y - 1.f, w + 2.f, h + 2.f, edge, withAlpha(border, 0.16f));
+    ctx.rectOutline(x - 1.f, y, w, h, edge, withAlpha(k_chromaRed, materialAlpha));
+    ctx.rectOutline(x + 1.f, y, w, h, edge, withAlpha(k_chromaCyan, materialAlpha));
+
+    // Frosted-glass approximation: translucent body plus subtle top glint and
+    // inner shadow. True backdrop blur would require sampling the scene buffer.
+    ctx.rect(x, y, w, h, fill);
+    ctx.gradientRect(x,
+                     y,
+                     w,
+                     std::max(1.f, h * 0.18f),
+                     withAlpha(k_glassHighlight, 0.65f * materialAlpha),
+                     HudColor{0.f, 0.f, 0.f, 0.f});
+    ctx.rect(x,
+             y + h - std::max(1.f, h * 0.20f),
+             w,
+             std::max(1.f, h * 0.20f),
+             withAlpha(k_glassShadow, materialAlpha));
+
+    ctx.pushClipRect(x, y, w, h);
+    for (float yy = y + 2.f; yy < y + h; yy += 4.f)
+        ctx.rect(x, yy, w, 1.f, withAlpha(k_scanline, materialAlpha));
+    ctx.popClipRect();
+
+    const float inset = std::min(3.f, std::min(w, h) * 0.08f);
+    if (w > inset * 2.f && h > inset * 2.f)
+        ctx.rectOutline(x + inset, y + inset, w - inset * 2.f, h - inset * 2.f, 1.f, withAlpha(border, 0.20f));
+
+    ctx.rectOutline(x, y, w, h, edge, border);
+}
+
+/// @brief Draw a Voidfall panel: projected glass fill + light-emitting outline.
 inline void drawPanel(HudContext& ctx,
                       float x,
                       float y,
@@ -167,8 +218,7 @@ inline void drawPanel(HudContext& ctx,
                       HudColor border = k_line,
                       float thickness = 1.f)
 {
-    ctx.rect(x, y, w, h, fill);
-    ctx.rectOutline(x, y, w, h, thickness, border);
+    drawGlassMaterial(ctx, x, y, w, h, fill, border, thickness);
 }
 
 /// @brief Draw a horizontal stat bar with a damage-trail ghost (solid fill).

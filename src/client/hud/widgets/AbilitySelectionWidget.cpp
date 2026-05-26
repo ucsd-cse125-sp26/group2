@@ -39,9 +39,8 @@ void drawKeyTag(HudContext& ctx, const char* label, float x, float y, float fs, 
     const float w = ctx.measureText(label, fs) + padX * 2.0f;
     const float h = fs + padY * 2.0f;
     const HudColor border = active ? k_amber : k_lineBright;
-    const HudColor fill = active ? withAlpha(k_secondary, 0.88f) : withAlpha(k_quaternary, 0.55f);
-    ctx.rect(x, y, w, h, fill);
-    ctx.rectOutline(x, y, w, h, 1.0f, border);
+    const HudColor fill = active ? withAlpha(k_secondary, 0.68f) : withAlpha(k_bgPanel, 0.70f);
+    drawPanel(ctx, x, y, w, h, fill, border, 1.0f);
     ctx.text(label, x + w * 0.5f, y + padY - fs * 0.18f, fs, active ? k_amber : k_textDim, HudAlign::Center);
 }
 

@@ -74,10 +74,9 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
     const float panelH = pad * 2.f + lineH * static_cast<float>(maxLines) + inputH;
     const float panelY = y - panelH;
 
-    const HudColor panel = chat_.open ? withAlpha(k_quaternary, 0.72f) : withAlpha(k_quaternary, 0.28f);
-    ctx.rect(x, panelY, w, panelH, panel);
-    if (chat_.open)
-        ctx.rectOutline(x, panelY, w, panelH, 1.f, k_lineDim);
+    const HudColor panel = chat_.open ? withAlpha(k_bgPanel, 0.95f) : withAlpha(k_bgPanel, 0.48f);
+    const HudColor border = chat_.open ? k_lineDim : withAlpha(k_lineDim, 0.45f);
+    drawPanel(ctx, x, panelY, w, panelH, panel, border, 1.f);
 
     const auto& messages = chat_.messages;
     int visibleMessages = 0;
@@ -129,8 +128,7 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
         return;
 
     const float inputY = panelY + panelH - inputH - pad * 0.35f;
-    ctx.rect(x + pad, inputY, w - pad * 2.f, inputH, withAlpha(k_quaternary, 0.86f));
-    ctx.rectOutline(x + pad, inputY, w - pad * 2.f, inputH, 1.f, k_lineDim);
+    drawPanel(ctx, x + pad, inputY, w - pad * 2.f, inputH, withAlpha(k_bgInset, 0.90f), k_lineDim, 1.f);
 
     std::string draft = "> " + chat_.draft;
     if (static_cast<int>(SDL_GetTicks() / 450u) % 2 == 0)

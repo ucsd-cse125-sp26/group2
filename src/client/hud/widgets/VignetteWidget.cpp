@@ -48,6 +48,13 @@ void VignetteWidget::update(float /*dt*/, const HudGameState& state, HudTweenPoo
 
 void VignetteWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
 {
+    // Persistent visor artifacts: subtle enough to read as optical projection,
+    // not a damage state.
+    ctx.rect(0.f, 0.f, 1.f, screenH_, withAlpha(k_chromaRed, 0.18f));
+    ctx.rect(screenW_ - 1.f, 0.f, 1.f, screenH_, withAlpha(k_chromaCyan, 0.18f));
+    ctx.rect(0.f, 0.f, screenW_, 1.f, withAlpha(k_chromaCyan, 0.10f));
+    ctx.rect(0.f, screenH_ - 1.f, screenW_, 1.f, withAlpha(k_chromaRed, 0.10f));
+
     // Draw order: death (back) → shield → damage (front).
     if (deathAlpha_ > 0.01f)
         ctx.vignette(screenW_, screenH_, withAlpha(k_quaternary, deathAlpha_));

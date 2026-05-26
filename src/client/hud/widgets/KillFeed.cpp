@@ -100,8 +100,7 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
         const HudColor bg =
             e.youAreKiller ? withAlpha(k_secondary, 0.65f * alpha) : withAlpha(k_quaternary, 0.78f * alpha);
         const HudColor border = e.youAreKiller ? withAlpha(k_amber, alpha) : withAlpha(k_lineDim, alpha);
-        ctx.rect(pillX, pillY, pillW, pillH, bg);
-        ctx.rectOutline(pillX, pillY, pillW, pillH, 1.f, border);
+        drawPanel(ctx, pillX, pillY, pillW, pillH, bg, border, 1.f);
 
         // Killer name (amber-tinted if local player).
         const float textY = pillY + (pillH - fs) * 0.5f - fs * 0.18f;

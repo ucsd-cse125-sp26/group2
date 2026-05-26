@@ -50,8 +50,7 @@ void BuyMenu::draw(HudContext& ctx, float cx, float cy)
     const float x = cx - pw * 0.5f;
     const float y = cy - ph * 0.5f;
 
-    ctx.rect(x, y, pw, ph, withAlpha(k_quaternary, 0.9f * alpha));
-    ctx.rectOutline(x, y, pw, ph, 1.f * s, withAlpha(k_secondary, alpha));
+    drawPanel(ctx, x, y, pw, ph, withAlpha(k_bgPanelSolid, alpha), withAlpha(k_secondary, alpha), 1.f * s);
 
     ctx.text("BUY MENU", cx, y + 10.f * s, 24.f * s, withAlpha(k_primary, alpha), HudAlign::Center);
 
