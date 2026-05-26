@@ -25,6 +25,7 @@ struct WeaponConfig
     float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
     float chargeDamage = 0.0f;  ///< Damage dealt on release (charge weapons only).
     float maxChargeTime = 0.0f; ///< in seconds
+    float reloadTime = 0.0f;    ///< Time to complete a reload, in seconds.
 };
 
 struct ProjectileConfig
@@ -63,6 +64,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = true,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
+            .reloadTime = 1.25f,
         }, // Rifle
         WeaponConfig{
             .fireCooldown = 1.0f,
@@ -72,6 +74,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = false,
             .initialProjectileSpeed = 3000.0f,
             .explosive = true,
+            .reloadTime = 2.5f,
         }, // Rocket
         WeaponConfig{
             .fireCooldown = 0.5f,
@@ -84,6 +87,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .isCharge = true,
             .chargeDamage = 80.0f,
             .maxChargeTime = 1.0f,
+            .reloadTime = 2.0f,
         }, // RailGun
         WeaponConfig{
             .fireCooldown = 0.0f,
@@ -96,6 +100,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .isBeam = true,
             .dps = 80.0f,
             .ammoPerSecond = 20.0f,
+            .reloadTime = 0.0f,
         }, // EnergyGun
         WeaponConfig{
             .fireCooldown = 0.4f,

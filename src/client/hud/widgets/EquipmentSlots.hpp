@@ -20,12 +20,12 @@
 
 struct EquipmentSlots : HudWidget
 {
-    float slotSize = 64.f;
-    float slotGap = 6.f;
-    float keyFontSize = 8.f;
-    float countFontSize = 14.f;
-    float statusFontSize = 10.f;
-    float nameFontSize = 7.f;
+    float slotSize = 120.f;
+    float slotGap = 50.f;
+    float iconSize = 60.f;
+    float keyFontSize = 26.f;
+    float keyPadX = 10.f;
+    float keyPadY = 3.5f;
 
     EquipmentSlots();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
@@ -35,5 +35,4 @@ private:
     HudEquipmentState state_;
     std::string primaryAbilityLabel_ = "Left Shift";
     std::string secondaryAbilityLabel_ = "E";
-    std::string grenadeLabel_ = "G";
 };

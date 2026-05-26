@@ -5,6 +5,7 @@
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
 #include "ui/LobbyUI.hpp"
+#include "util/LocalAddress.hpp"
 
 #include <algorithm>
 #include <backends/imgui_impl_sdl3.h>
@@ -17,6 +18,9 @@ bool Lobby::init(AppContext& ctx)
     renderer = &ctx.renderer;
     window = &ctx.window;
     client = &ctx.client;
+    isHosting = ctx.hostedServer.isRunning();
+    hostPort = ctx.hostedServer.port();
+    hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
 
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
         players = snapshot;
@@ -107,13 +111,16 @@ SDL_AppResult Lobby::event(SDL_Event* event)
 
 SDL_AppResult Lobby::iterate()
 {
+    if (!client->poll()) {
+        SDL_Log("Lobby: lost connection to server; returning to main menu");
+        returnToMenu = true;
+        serverShutdownNotice = true;
+        return SDL_APP_CONTINUE;
+    }
+
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-
-    if (!client->poll()) {
-        return SDL_APP_SUCCESS;
-    }
 
     updateStartCountdown();
 
@@ -125,6 +132,9 @@ SDL_AppResult Lobby::iterate()
         .canStartMatch = canHostStartMatch() && !startCountdownActive,
         .startCountdownActive = startCountdownActive,
         .startCountdownRemaining = startCountdownRemaining,
+        .isHosting = isHosting,
+        .hostLanIp = hostLanIp,
+        .hostPort = hostPort,
     };
 
     const auto result = lobby_ui::buildPlayerList(config);
@@ -138,6 +148,9 @@ SDL_AppResult Lobby::iterate()
 
     if (result.returnToMenuClicked) {
         returnToMenu = true;
+    }
+    if (result.returnToHostConfigClicked) {
+        returnToHostConfig = true;
     }
 
     ImGui::Render();
@@ -212,5 +225,23 @@ bool Lobby::consumeReturnToMenu()
         return false;
 
     returnToMenu = false;
+    return true;
+}
+
+bool Lobby::consumeReturnToHostConfig()
+{
+    if (!returnToHostConfig)
+        return false;
+
+    returnToHostConfig = false;
+    return true;
+}
+
+bool Lobby::consumeServerShutdownNotice()
+{
+    if (!serverShutdownNotice)
+        return false;
+
+    serverShutdownNotice = false;
     return true;
 }

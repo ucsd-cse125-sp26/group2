@@ -66,6 +66,13 @@ bool Server::init(const char* addr,
             SDL_Log("Server: failed to create UDP session listener on port %u", port);
             return false;
         }
+        listenPort_ = session_.localPort();
+        if (listenPort_ == 0) {
+            SDL_Log("Server: failed to query UDP session listener port: %s", SDL_GetError());
+            session_.close();
+            return false;
+        }
+
         session_.preferRelay(transportConfig_.forceRelay);
 
         if (discoveryConfig_.enabled && discoveryConfig_.advertiseServer) {
@@ -79,10 +86,15 @@ bool Server::init(const char* addr,
             }
         }
 
-        SDL_Log("Server: UDP session listening on port %d", static_cast<int>(port));
+        SDL_Log("Server: UDP session listening on port %d", static_cast<int>(listenPort_));
         shouldStop_.store(false, std::memory_order_relaxed);
         networkThread_ = std::thread(&Server::networkLoop, this);
         return true;
+    }
+
+    if (port == 0) {
+        SDL_Log("Server: --port=0 requires UDP session transport so the actual port can be queried");
+        return false;
     }
 
     NET_Address* netAddr = NET_ResolveHostname(addr);
@@ -569,11 +581,32 @@ void Server::handleSessionPayload(std::uint64_t connId,
     if (!payload || len == 0)
         return;
 
-    std::shared_lock<std::shared_mutex> lock(stateMutex_);
-    auto idIt = connIdToClient_.find(connId);
-    if (idIt == connIdToClient_.end())
+    ClientId clientId{-1};
+    {
+        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+        auto idIt = connIdToClient_.find(connId);
+        if (idIt == connIdToClient_.end())
+            return;
+        auto connIt = clients.find(idIt->second);
+        if (connIt == clients.end())
+            return;
+        clientId = idIt->second;
+    }
+
+    if (payload[0] == static_cast<std::uint8_t>(PacketType::PING)) {
+        constexpr std::uint32_t k_pingPayloadLen = 1 + sizeof(Uint64);
+        if (len != k_pingPayloadLen)
+            return;
+
+        std::uint8_t reply[k_pingPayloadLen];
+        reply[0] = static_cast<std::uint8_t>(PacketType::PONG);
+        std::memcpy(reply + 1, payload + 1, sizeof(Uint64));
+        session_.send(connId, net::ChannelId::InputUnreliable, reply, static_cast<int>(sizeof(reply)));
         return;
-    auto connIt = clients.find(idIt->second);
+    }
+
+    std::shared_lock<std::shared_mutex> lock(stateMutex_);
+    auto connIt = clients.find(clientId);
     if (connIt == clients.end())
         return;
     if (channel == net::ChannelId::VoiceUnreliableSequenced) {
@@ -1695,4 +1728,9 @@ void Server::broadcastLobbyUpdate(const LobbyUpdateEvent& event)
     std::memcpy(buf.data() + 1, &event, sizeof(LobbyUpdateEvent));
     enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
     SDL_Log("Server: broadcasted lobby update: player %d is %s", event.id.value, action);
+}
+
+uint16_t Server::listeningPort() const
+{
+    return listenPort_;
 }

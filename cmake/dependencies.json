@@ -1,0 +1,69 @@
+{
+  "SDL3": {
+    "repository": "https://github.com/libsdl-org/SDL.git",
+    "tag": "release-3.4.4"
+  },
+  "SDL3_net": {
+    "repository": "https://github.com/cedricdvd/SDL_net.git",
+    "tag": "55c01afab84f3d30823e8868844f071b26d0c6ad"
+  },
+  "SPIRV-Cross": {
+    "repository": "https://github.com/KhronosGroup/SPIRV-Cross.git",
+    "tag": "vulkan-sdk-1.4.309.0"
+  },
+  "dxc_binaries": {
+    "url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2024_07_31.zip"
+  },
+  "SDL_shadercross": {
+    "repository": "https://github.com/libsdl-org/SDL_shadercross.git",
+    "tag": "main"
+  },
+  "glslang": {
+    "repository": "https://github.com/KhronosGroup/glslang.git",
+    "tag": "vulkan-sdk-1.4.309.0"
+  },
+  "glm": {
+    "repository": "https://github.com/g-truc/glm.git",
+    "tag": "1.0.1"
+  },
+  "EnTT": {
+    "repository": "https://github.com/skypjack/entt.git",
+    "tag": "v3.14.0"
+  },
+  "tomlplusplus": {
+    "repository": "https://github.com/marzer/tomlplusplus.git",
+    "tag": "v3.4.0"
+  },
+  "assimp": {
+    "repository": "https://github.com/assimp/assimp.git",
+    "tag": "v5.4.3"
+  },
+  "stb": {
+    "repository": "https://github.com/nothings/stb.git",
+    "tag": "master"
+  },
+  "minimp3": {
+    "repository": "https://github.com/lieff/minimp3.git",
+    "tag": "master"
+  },
+  "opus": {
+    "repository": "https://github.com/xiph/opus.git",
+    "tag": "v1.5.2"
+  },
+  "vhacd_src": {
+    "repository": "https://github.com/kmammou/v-hacd.git",
+    "tag": "v4.1.0"
+  },
+  "ozz-animation": {
+    "repository": "https://github.com/guillaumeblanc/ozz-animation.git",
+    "tag": "0.15.0"
+  },
+  "imgui": {
+    "repository": "https://github.com/ocornut/imgui.git",
+    "tag": "v1.92.0"
+  },
+  "argparse": {
+    "repository": "https://github.com/p-ranav/argparse.git",
+    "tag": "v3.2"
+  }
+}

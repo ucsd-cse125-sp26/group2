@@ -2,10 +2,10 @@
 /// @brief Smoke particle vertex shader with rotation around camera-forward axis.
 #version 450
 
-/// @brief SmokeParticle (64 bytes = 16 floats):
+/// @brief SmokeParticle (48 bytes = 12 floats):
 ///   [0..2]  pos.xyz  [3] size
 ///   [4..7]  color (pre-multiplied rgba)
-///   [8]     rotation  [9] normalizedAge  [10] maxLifetime  [11] _pad
+///   [8]     rotation  [9] normalizedAge  [10] maxLifetime  [11] kind (unused by shader)
 
 /// @brief Per-particle SSBO data.
 layout(set = 0, binding = 0) readonly buffer SmokeData { float data[]; };

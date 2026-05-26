@@ -89,6 +89,7 @@ void HudRenderer::quit()
         return;
 
     SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
+    SDL_ReleaseGPUGraphicsPipeline(device_, erasePipeline_);
     SDL_ReleaseGPUTexture(device_, msaaTarget_);
     SDL_ReleaseGPUTexture(device_, offscreenTarget_);
     SDL_ReleaseGPUTexture(device_, iconAtlasTex_);
@@ -97,6 +98,7 @@ void HudRenderer::quit()
     SDL_ReleaseGPUTransferBuffer(device_, transferBuffer_);
 
     pipeline_ = nullptr;
+    erasePipeline_ = nullptr;
     msaaTarget_ = nullptr;
     offscreenTarget_ = nullptr;
     iconAtlasTex_ = nullptr;
@@ -123,7 +125,7 @@ void HudRenderer::resize(uint32_t newW, uint32_t newH)
 
 void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const std::array<float, 6>> clipRects)
 {
-    if (vertices.empty() || !pipeline_ || !offscreenTarget_)
+    if (vertices.empty() || !pipeline_ || !erasePipeline_ || !offscreenTarget_)
         return;
 
     const uint32_t vertexCount = static_cast<uint32_t>(vertices.size());
@@ -167,7 +169,15 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
     ct.cycle_resolve_texture = false;
 
     SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &ct, 1, nullptr);
-    SDL_BindGPUGraphicsPipeline(pass, pipeline_);
+
+    SDL_GPUGraphicsPipeline* boundPipeline = nullptr;
+    const auto bindPipeline = [&](SDL_GPUGraphicsPipeline* pipeline) {
+        if (boundPipeline != pipeline) {
+            SDL_BindGPUGraphicsPipeline(pass, pipeline);
+            boundPipeline = pipeline;
+        }
+    };
+    bindPipeline(pipeline_);
 
     // Bind vertex buffer.
     SDL_GPUBufferBinding vbBinding{};
@@ -187,10 +197,31 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
     };
     SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
 
+    const auto isEraseVertex = [&](uint32_t vertexIndex) {
+        return vertexIndex < vertexCount && static_cast<int>(vertices[vertexIndex].texMode + 0.5f) == 6;
+    };
+
+    const auto drawSpan = [&](uint32_t startVtx, uint32_t vtxCount) {
+        if (startVtx >= vertexCount)
+            return;
+
+        uint32_t cursor = startVtx;
+        const uint32_t endVtx = startVtx + std::min(vtxCount, vertexCount - startVtx);
+        while (cursor < endVtx) {
+            const bool erase = isEraseVertex(cursor);
+            const uint32_t subStart = cursor++;
+            while (cursor < endVtx && isEraseVertex(cursor) == erase)
+                ++cursor;
+
+            bindPipeline(erase ? erasePipeline_ : pipeline_);
+            SDL_DrawGPUPrimitives(pass, cursor - subStart, 1, subStart, 0);
+        }
+    };
+
     // Draw with optional scissor rects.
     if (clipRects.empty()) {
         // No clipping — single draw call.
-        SDL_DrawGPUPrimitives(pass, vertexCount, 1, 0, 0);
+        drawSpan(0, vertexCount);
     } else {
         for (const auto& cr : clipRects) {
             const uint32_t startVtx = static_cast<uint32_t>(cr[0]);
@@ -208,7 +239,7 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
                 SDL_Rect fullVP{0, 0, static_cast<int>(width_), static_cast<int>(height_)};
                 SDL_SetGPUScissor(pass, &fullVP);
             }
-            SDL_DrawGPUPrimitives(pass, vtxCount, 1, startVtx, 0);
+            drawSpan(startVtx, vtxCount);
         }
     }
 
@@ -317,34 +348,48 @@ bool HudRenderer::createPipeline()
     // care of the rest.  Premultiplied alpha is also a hard requirement for
     // correct MSAA resolve — averaging straight-alpha sub-samples produces
     // dark fringes around glyph edges; premultiplied averages cleanly.
-    SDL_GPUColorTargetDescription ctDesc{};
-    ctDesc.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    ctDesc.blend_state.enable_blend = true;
-    ctDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    ctDesc.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    ctDesc.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    ctDesc.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    ctDesc.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    ctDesc.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    SDL_GPUColorTargetDescription normalCtDesc{};
+    normalCtDesc.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    normalCtDesc.blend_state.enable_blend = true;
+    normalCtDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    normalCtDesc.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    normalCtDesc.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    normalCtDesc.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    normalCtDesc.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    normalCtDesc.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
 
-    SDL_GPUGraphicsPipelineCreateInfo pci{};
-    pci.vertex_shader = vert;
-    pci.fragment_shader = frag;
-    pci.vertex_input_state = vertexInput;
-    pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pci.target_info.color_target_descriptions = &ctDesc;
-    pci.target_info.num_color_targets = 1;
-    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-    // 4× MSAA sample-count must match the multisample target we render into.
-    pci.multisample_state.sample_count = k_sampleCount;
+    SDL_GPUColorTargetDescription eraseCtDesc = normalCtDesc;
+    eraseCtDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    eraseCtDesc.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    eraseCtDesc.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    eraseCtDesc.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 
-    pipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &pci);
+    const auto createWithTarget = [&](const SDL_GPUColorTargetDescription& targetDesc) {
+        SDL_GPUGraphicsPipelineCreateInfo pci{};
+        pci.vertex_shader = vert;
+        pci.fragment_shader = frag;
+        pci.vertex_input_state = vertexInput;
+        pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+        pci.target_info.color_target_descriptions = &targetDesc;
+        pci.target_info.num_color_targets = 1;
+        pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+        pci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+        // 4× MSAA sample-count must match the multisample target we render into.
+        pci.multisample_state.sample_count = k_sampleCount;
+        return SDL_CreateGPUGraphicsPipeline(device_, &pci);
+    };
+
+    pipeline_ = createWithTarget(normalCtDesc);
+    erasePipeline_ = createWithTarget(eraseCtDesc);
     SDL_ReleaseGPUShader(device_, vert);
     SDL_ReleaseGPUShader(device_, frag);
 
-    if (!pipeline_) {
+    if (!pipeline_ || !erasePipeline_) {
         SDL_Log("HudRenderer: pipeline creation failed: %s", SDL_GetError());
+        SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
+        SDL_ReleaseGPUGraphicsPipeline(device_, erasePipeline_);
+        pipeline_ = nullptr;
+        erasePipeline_ = nullptr;
         return false;
     }
     return true;

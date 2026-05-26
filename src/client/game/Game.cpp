@@ -62,6 +62,7 @@
 #include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
+#include "hud/VoidfallStyle.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
 #include "network/EntityInterpolation.hpp"
 #include "network/ShotEvent.hpp"
@@ -822,16 +823,12 @@ bool Game::init(AppContext& ctx)
     physics::diag::setEnabled(phaseDiagEnabled);
     SDL_Log("[client] physics diagnostic %s", phaseDiagEnabled ? "ENABLED" : "disabled");
 
-    // Particle system needs the device + formats from the renderer.
-    // colorFmt is the format particles draw into (RGBA16F was the legacy
-    // renderer's HDR target); kept here so the particle pipelines compile,
-    // but NewRenderer does not yet route particles into a render pass.
-    if (!particleSystem.init(
-            renderer->getDevice(), SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, renderer->getShaderFormat()))
-    {
+    // Particle pipelines must match the active render-pass color format.
+    // NewRenderer renders particles inside the swapchain pass, not an HDR
+    // intermediate, so use the renderer's current swapchain format here.
+    if (!particleSystem.init(renderer->getDevice(), renderer->getSwapchainColorFormat(), renderer->getShaderFormat())) {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
-        // TODO(renderer-migration): renderer->setParticleSystem(&particleSystem);
         renderer->setParticleSystem(&particleSystem);
 
         // Wire dispatcher events to particle system.
@@ -857,7 +854,8 @@ bool Game::init(AppContext& ctx)
     // the shooter's spine via CharacterAnimator. Subscribes regardless of
     // SFX init result so recoil visuals still work in silent test runs.
     dispatcher.sink<WeaponFiredEvent>().connect<&Game::onWeaponFired>(*this);
-    voiceChat_.init();
+    if (ctx.developerConfig.voiceCapture)
+        voiceChat_.init();
 
     // HUD system — needs device + shader format from renderer, SDF atlas from particles.
     if (particleSystem.sdfReady()) {
@@ -1913,7 +1911,12 @@ SDL_AppResult Game::iterate()
         accumulator = k_physicsDt; // run exactly one tick to apply latest state
         // Drain the network now so we snap to the current server state
         // without fast-forwarding through every intermediate update.
-        client->poll();
+        if (!client->poll()) {
+            SDL_Log("Game: lost connection to server; returning to main menu");
+            returnToMainMenuRequested_ = true;
+            serverShutdownNoticeRequested_ = true;
+            return SDL_APP_CONTINUE;
+        }
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
@@ -2381,8 +2384,10 @@ SDL_AppResult Game::iterate()
 
         const std::optional<PredictedPlayerState> currentBeforeSnapshot = captureLocalPredictedState();
         if (!client->poll()) {
-            // TODO: Update so reset to menu or some other non-crash state
-            return SDL_APP_SUCCESS;
+            SDL_Log("Game: lost connection to server; returning to main menu");
+            returnToMainMenuRequested_ = true;
+            serverShutdownNoticeRequested_ = true;
+            return SDL_APP_CONTINUE;
         }
         phaseSnap(phaseStats.networkPollMs);
         phaseStats.snapshotApplyMs = perfSnapshotApplyMs_;
@@ -2526,7 +2531,7 @@ SDL_AppResult Game::iterate()
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 const GunInstance& gun = getEquippedGun(ws);
-                hasAmmo = gun.currentMagAmmo > 0 || gun.totalAmmo > 0;
+                hasAmmo = gun.currentMagAmmo > 0 && !gun.isReloading;
             });
 
             // Phase F third-person recoil hook. Called from both fire paths
@@ -4216,6 +4221,34 @@ SDL_AppResult Game::iterate()
                     recoilRoll_ = 0.0f;
             }
 
+            // --- Reload animation ---
+            {
+                auto smooth = [](float e0, float e1, float x) {
+                    float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+                    return t * t * (3.0f - 2.0f * t);
+                };
+
+                float reloadOffset = 0.0f;
+                registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                    const GunInstance& gun = getEquippedGun(ws);
+                    const WeaponConfig& cfg = getWeaponConfig(gun.type);
+                    if (gun.isReloading && cfg.reloadTime > 0.0f) {
+                        float t = 1.0f - (gun.reloadTime / cfg.reloadTime);
+                        constexpr float kReloadMaxDrop = 70.0f;
+                        constexpr float kReloadMovePercent = 0.15f;
+                        if (t < kReloadMovePercent) {
+                            reloadOffset = kReloadMaxDrop * smooth(0.0f, kReloadMovePercent, t);
+                        } else if (t < 1.0f - kReloadMovePercent) {
+                            reloadOffset = kReloadMaxDrop;
+                        } else {
+                            reloadOffset = kReloadMaxDrop * (1.0f - smooth(1.0f - kReloadMovePercent, 1.0f, t));
+                        }
+                    }
+                });
+
+                reloadDownwardOffset_ = reloadOffset;
+            }
+
             // --- Velocity-direction-dependent bobbing ---
             float bobPhase = 0.0f;
             float bobAmpFwd = 0.0f;
@@ -4259,6 +4292,8 @@ SDL_AppResult Game::iterate()
             weaponPos += right * bobX + up * bobY;
             // Apply recoil pushback
             weaponPos -= forward * recoilPushBack_;
+            // Apply reload downward offset
+            weaponPos -= up * reloadDownwardOffset_;
 
             // Build world transform: translate -> local-rotate -> camera-orient -> scale.
             //
@@ -5294,6 +5329,11 @@ SDL_AppResult Game::iterate()
             // so the "47/30" rifle bug (HUD hardcoded /30 vs. real /50) is
             // gone — the HUD reads exactly what gameplay says.
             hudState.magCapacity = getWeaponConfig(gun.type).magazineSize;
+            hudState.isReloading = gun.isReloading;
+            const WeaponConfig& config = getWeaponConfig(gun.type);
+            if (gun.isReloading && config.reloadTime > 0.f) {
+                hudState.reloadProgress = 1.0f - (gun.reloadTime / config.reloadTime);
+            }
         });
 
         // ── Round timer / buy phase ──
@@ -5439,13 +5479,13 @@ SDL_AppResult Game::iterate()
             accumTotal_ = 0;
         }
         hudState.damageAccum.total = accumTotal_;
-        // Voidfall palette: headshot=red, shield=cyan, hp=amber.
+        // HUD palette: headshot=primary, shield=tertiary, hp=white.
         if (accumLastHitType_ == 2)
-            hudState.damageAccum.color = HudColor(0.92f, 0.30f, 0.20f, 1.f); // red (headshot)
+            hudState.damageAccum.color = voidfall::k_primary;
         else if (accumLastHitType_ == 1)
-            hudState.damageAccum.color = HudColor(0.45f, 0.78f, 0.96f, 1.f); // cyan (shield)
+            hudState.damageAccum.color = voidfall::k_tertiary;
         else
-            hudState.damageAccum.color = HudColor(1.00f, 0.71f, 0.18f, 1.f); // amber (hp)
+            hudState.damageAccum.color = voidfall::k_health;
 
         // ── View-projection matrix for world→screen projection ──
         hudState.viewProj = renderer->getCamera().getViewProjectionMatrix();
@@ -5926,6 +5966,15 @@ bool Game::consumeReturnToMainMenu()
         return false;
 
     returnToMainMenuRequested_ = false;
+    return true;
+}
+
+bool Game::consumeServerShutdownNotice()
+{
+    if (!serverShutdownNoticeRequested_)
+        return false;
+
+    serverShutdownNoticeRequested_ = false;
     return true;
 }
 

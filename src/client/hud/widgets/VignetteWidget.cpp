@@ -3,8 +3,11 @@
 
 #include "hud/HudContext.hpp"
 #include "hud/HudTween.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
+
+using namespace voidfall;
 
 VignetteWidget::VignetteWidget()
 {
@@ -47,11 +50,11 @@ void VignetteWidget::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/)
 {
     // Draw order: death (back) → shield → damage (front).
     if (deathAlpha_ > 0.01f)
-        ctx.vignette(screenW_, screenH_, HudColor(0.f, 0.f, 0.f, deathAlpha_));
+        ctx.vignette(screenW_, screenH_, withAlpha(k_quaternary, deathAlpha_));
 
     if (shieldAlpha_ > 0.01f)
-        ctx.vignette(screenW_, screenH_, HudColor(0.2f, 0.5f, 1.f, shieldAlpha_));
+        ctx.vignette(screenW_, screenH_, withAlpha(k_tertiary, shieldAlpha_));
 
     if (damageAlpha_ > 0.01f)
-        ctx.vignette(screenW_, screenH_, HudColor(1.0f, 0.0f, 0.0f, damageAlpha_));
+        ctx.vignette(screenW_, screenH_, withAlpha(k_primary, damageAlpha_));
 }

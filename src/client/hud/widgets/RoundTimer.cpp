@@ -2,6 +2,7 @@
 #include "RoundTimer.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
 
@@ -19,6 +20,8 @@ void RoundTimer::update(float /*dt*/, const HudGameState& state, HudTweenPool& /
 
 void RoundTimer::draw(HudContext& ctx, float x, float y)
 {
+    using namespace voidfall;
+
     const float s = uiScale_;
     const int minutes = static_cast<int>(timeRemaining_) / 60;
     const int seconds = static_cast<int>(timeRemaining_) % 60;
@@ -26,7 +29,7 @@ void RoundTimer::draw(HudContext& ctx, float x, float y)
     char buf[16];
     SDL_snprintf(buf, sizeof(buf), "%d:%02d", minutes, seconds);
 
-    const HudColor color = (timeRemaining_ <= lowTimeThreshold) ? HudColor(1.f, 0.2f, 0.2f, 1.f) : HudColor::white();
+    const HudColor color = (timeRemaining_ <= lowTimeThreshold) ? k_primary : k_textBright;
 
     ctx.text(buf, x, y, fontSize * s, color, HudAlign::Center);
 }

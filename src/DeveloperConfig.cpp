@@ -25,5 +25,8 @@ DeveloperConfig loadDeveloperConfig(const char* path)
     if (auto v = developer["skip_lobby"].value<bool>())
         cfg.skipLobby = *v;
 
+    if (auto v = developer["voice_capture"].value<bool>())
+        cfg.voiceCapture = *v;
+
     return cfg;
 }

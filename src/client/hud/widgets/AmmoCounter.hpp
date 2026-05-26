@@ -1,40 +1,18 @@
 /// @file AmmoCounter.hpp
-/// @brief Voidfall weapon panel — name + clip/mag/reserve in mil-spec frame.
-///
-/// Kept under AmmoCounter.* to preserve existing #includes and CMake entries.
-/// Renders the bottom-right weapon block from the VOIDFALL prototype:
-///
-///   ┌─ ARC-9 ─────── AUTO ─┐
-///   │   17 / 30   +90      │
-///   │ ─── (hairline) ──────│
-///   │ [2] PULSAR    7/12   │
-///   └──────────────────────┘
-///
-/// Corner brackets are amber; the live clip count is the hero numeral.
+/// @brief Minimal bottom-right ammo readout.
 
 #pragma once
 
 #include "hud/HudWidget.hpp"
 
-#include <string>
-
-/// @brief Apex-style weapon cluster: weapon body up top with a type-color
-/// underline + bracketed fire-mode tag, then **two slot tabs side-by-side**
-/// at the bottom (one per slot, both visible). The active tab gets the
-/// type-color top border and full opacity; the inactive tab is faded.
+/// @brief Shows current magazine ammo and reserve ammo without panel chrome.
 struct AmmoCounter : HudWidget
 {
-    float panelWidth = 380.f;
-    float panelHeight = 124.f;
-    float clipFontSize = 52.f;          ///< Hero numeral.
-    float magFontSize = 22.f;           ///< "/<capacity>" caption.
-    float reserveFontSize = 20.f;       ///< "+<reserve>" caption.
-    float nameFontSize = 18.f;          ///< Weapon name.
-    float fireModeFontSize = 11.f;      ///< Fire-mode tag.
-    float slotFontSize = 12.f;          ///< Bottom slot-tab text.
-    float slotIndexFontSize = 10.f;     ///< Slot-tab binding pill.
-    float slotTabHeight = 26.f;         ///< Height of each bottom slot tab.
-    float typeUnderlineThickness = 2.f; ///< Underline below weapon body, in type color.
+    float panelWidth = 200.f;
+    float panelHeight = 100.f;
+    float clipFontSize = 125.5f;  ///< Current ammo in the magazine.
+    float reserveFontSize = 75.f; ///< Reserve / total ammo.
+    float edgePadding = 0.f;      ///< Inset from the panel edge to the rightmost number.
 
     AmmoCounter();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
@@ -43,14 +21,5 @@ struct AmmoCounter : HudWidget
 private:
     int displayClip_ = 0;
     int displayReserve_ = 0;
-    int displayMag_ = 0; ///< Live magazine capacity from WeaponConfig.magazineSize.
     int weaponId_ = 0;
-
-    int secondaryClip_ = 0;
-    int secondaryReserve_ = 0;
-    int secondaryMag_ = 0;
-    int secondaryWeaponId_ = -1;
-    int secondaryKeybind_ = 2; ///< Inactive slot index used to infer which slot is active.
-    std::string switchToPrimaryLabel_ = "1";
-    std::string switchToSecondaryLabel_ = "2";
 };

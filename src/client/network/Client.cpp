@@ -801,9 +801,10 @@ void Client::networkLoop()
             const std::uint64_t bytesSent = sessionStats.bytesSent;
             const std::uint64_t bytesRecv = sessionStats.bytesRecv;
 
-            stats.rttMs = rttMs;
-            if (rttMs > 0.0f)
+            if (rttMs > 0.0f) {
+                stats.rttMs = rttMs;
                 stats.avgRttMs = stats.avgRttMs <= 0.0f ? rttMs : stats.avgRttMs * 0.8f + rttMs * 0.2f;
+            }
 
             {
                 std::lock_guard<std::mutex> lock(stateMutex_);

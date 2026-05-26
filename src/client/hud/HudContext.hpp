@@ -74,6 +74,7 @@ public:
               HudColor color,
               HudAlign align = HudAlign::Left,
               bool outlined = false);
+    void knockoutText(const char* str, float x, float y, float size, HudAlign align = HudAlign::Left);
     float measureText(const char* str, float size) const;
 
     // ── Icons ───────────────────────────────────────────────────────────
@@ -107,6 +108,9 @@ public:
     /// @brief Flush any remaining unflushed vertices into a final clip span.
     /// Must be called after all draw() calls, before accessing vertices/clipSpans.
     void endFrame();
+
+    /// @brief Multiply already-emitted vertex colors by a tint.
+    void tintVertices(std::size_t startVertex, HudColor tint);
 
     // ── Access for HudRenderer ──────────────────────────────────────────
 

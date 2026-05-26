@@ -2,7 +2,7 @@
 /// @brief Floating HP/shield bar above each on-screen enemy.
 ///
 /// Mirrors `EnemyHpBar` from the prototype: name + numeric on top, optional
-/// thin cyan shield bar, then a thicker red HP bar with the same ghost-trail
+/// thin blue shield bar, then a thicker white HP bar with the same ghost-trail
 /// drain animation as the local-player vitals.  Each enemy in the
 /// `HudGameState::worldEnemies` span is projected to screen space; bars are
 /// drawn only when the projected point is in front of the camera and inside
