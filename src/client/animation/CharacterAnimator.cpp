@@ -376,6 +376,13 @@ struct CharacterAnimator::Impl
     ClipId debugOverrideId = ClipId::_Count;
     float debugPlaybackSpeedMul = 1.0f;
 
+    // Freeze playback flag (3P Weapon Tweaker uses this so world-space anchor
+    // sliders don't drift from the idle bob). When true, update() and
+    // renderFromServer() skip everything except runSamplingAndSkinning, which
+    // re-derives the pose from the last-known sampler timeRatios — so the
+    // base pose is identical every frame and IK can mutate it cleanly.
+    bool frozen = false;
+
     // One-time "clip missing" log gate per clip slot.
     std::array<bool, static_cast<size_t>(ClipId::_Count)> missingClipLogged{};
 };
@@ -862,6 +869,11 @@ int CharacterAnimator::currentModeValue() const noexcept
     return static_cast<int>(impl_->currentMode);
 }
 
+void CharacterAnimator::setFrozen(bool frozen) noexcept
+{
+    impl_->frozen = frozen;
+}
+
 const std::vector<glm::mat4>& CharacterAnimator::jointModelMatrices() const noexcept
 {
     return impl_->jointModelMats;
@@ -999,6 +1011,17 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
 {
     if (!impl_->rig || !impl_->rig->isLoaded() || !impl_->library)
         return;
+
+    // Freeze toggle (debug authoring): re-sample the same pose every frame
+    // without advancing any internal time/state. The existing sampler entries
+    // (chosen on the last unfrozen frame) keep their timeRatios; we just
+    // re-run the ozz pipeline + procedural overlays so the IK pass has a
+    // clean base pose to mutate. Spine bend still picks up live inputs.pitchRad
+    // so the camera aim stays responsive while the body locomotion freezes.
+    if (impl_->frozen) {
+        runSamplingAndSkinning(inputs);
+        return;
+    }
 
     // --- 1. Low-pass smoothed speed + directional components. ---
     const glm::vec3 vhoriz{inputs.velocityWorld.x, 0.0f, inputs.velocityWorld.z};
@@ -1207,6 +1230,16 @@ void CharacterAnimator::renderFromServer(const AnimSnapshot& serverState, const 
 {
     if (!impl_->rig || !impl_->rig->isLoaded() || !impl_->library)
         return;
+
+    // Freeze toggle: ignore the incoming snapshot, replay the last known
+    // sampler state. Procedural overlays still run so the gun follows aim
+    // pitch while the body itself stays static — matches the behaviour of
+    // update()'s freeze path above so toggling on/off looks the same on
+    // local and remote characters.
+    if (impl_->frozen) {
+        runSamplingAndSkinning(inputs);
+        return;
+    }
 
     // Override the per-slot sampler state directly from the server's
     // snapshot.  Server's animator is authoritative for clipId,

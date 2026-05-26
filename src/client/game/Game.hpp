@@ -472,6 +472,7 @@ private:
     bool tpAnchorShowDebugMarker_ = true;       ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
     bool tpEnableJointConstraints_ = true;      ///< Debug toggle: pass enableJointConstraints into the arm IK targets. Off = no shoulder/elbow/wrist clamps (useful while authoring extreme anchor positions).
     bool tpEnableReachFade_ = true;             ///< Debug toggle: pass enableReachFade into the arm IK targets. Off = no fade-out when target is past arm reach.
+    bool tpFreezeAnimations_ = false;           ///< Debug toggle: freeze every animator's playback so world-space anchor sliders don't drift from idle bob.
     bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
 
     // Hand mount tuning for third-person player IK / weapon grips.

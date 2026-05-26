@@ -3255,6 +3255,14 @@ SDL_AppResult Game::iterate()
         // pipeline; that path is gone, but the animator update is still
         // required so JointMatrices/AnimSnapshot below reflect this frame.
         if (workerPool_ && !candidates.empty()) {
+            // Freeze toggle: apply once per frame, BEFORE the worker fires so
+            // the flag is visible to update()/renderFromServer() across all
+            // workers without a race.
+            for (auto& c : candidates) {
+                if (c.ac != nullptr && c.ac->animator)
+                    c.ac->animator->setFrozen(tpFreezeAnimations_);
+            }
+
             workerPool_->parallelFor(static_cast<int>(candidates.size()), [&](int begin, int end) {
                 for (int i = begin; i < end; ++i) {
                     auto& c = candidates[static_cast<size_t>(i)];
@@ -3529,23 +3537,26 @@ SDL_AppResult Game::iterate()
 
         // Red-cube anchor wish-point visualizer for the Right-Hand Hold Anchor.
         //
-        // Reads STRAIGHT from the local-player entity (animator + WeaponState +
-        // worldTransform), not from the AnimCandidate vector, because that
-        // vector skips entities whose body isn't drawn (first-person local
-        // player). The user needs to see the marker in first-person too — that's
-        // the most common authoring view.
+        // Renders on REMOTE animated characters only — the user observes them
+        // in third person from the local player's first-person view, so that's
+        // where the marker needs to be visible. Reads animator + Position +
+        // InputSnapshot + WeaponState straight from the registry (not from the
+        // AnimCandidate vector) so behaviour doesn't depend on drawBody.
         //
-        // Layout: a big red sphere at the wish-point, plus three smaller R/G/B
-        // axis markers along +X/+Y/+Z of the anchor's world frame so the
-        // rotation is readable at a glance.
+        // Layout: a tiny red sphere at the wish-point, plus three R/G/B axis
+        // markers offset along +X/+Y/+Z of the anchor's world frame.
         if (showTPWeaponUI_ && tpAnchorShowDebugMarker_ && handMountDebugMarkerModelIdx_ >= 0 &&
             spine2JointIdx_ >= 0) {
-            registry.view<LocalPlayer, AnimatedCharacter, Position, InputSnapshot, WeaponState>().each(
-                [&](entt::entity /*e*/,
+            registry.view<AnimatedCharacter, Position, InputSnapshot, WeaponState>().each(
+                [&](entt::entity e,
                     AnimatedCharacter& ac,
                     const Position& pos,
                     const InputSnapshot& inp,
                     const WeaponState& ws) {
+                    // Skip local player — markers are for observing remote players
+                    // in third-person while tuning the anchor.
+                    if (registry.all_of<LocalPlayer>(e))
+                        return;
                     if (!ac.animator)
                         return;
                     const GunInstance& gun = getEquippedGun(ws);
@@ -3560,8 +3571,7 @@ SDL_AppResult Game::iterate()
                     const HoldAnchor& anchor = tp.rightHandHolds[static_cast<std::size_t>(stance)];
 
                     // Reproduce the entity world transform the same way the
-                    // candidate populator does: translate by position, yaw,
-                    // scale by kRigScale_, lift by kRigVerticalOffset_.
+                    // candidate populator does.
                     glm::mat4 worldT = glm::translate(glm::mat4(1.0f), pos.value);
                     worldT *= glm::mat4_cast(
                         glm::angleAxis(inp.yaw, glm::vec3{0.0f, 1.0f, 0.0f}));
@@ -3590,9 +3600,10 @@ SDL_AppResult Game::iterate()
                                             .tint = tint});
                     };
 
-                    constexpr float k_centerScale = 12.0f;
-                    constexpr float k_axisScale = 5.0f;
-                    constexpr float k_axisLen = 18.0f;
+                    // ~30× smaller than the previous (12 / 5 / 18) values.
+                    constexpr float k_centerScale = 0.4f;
+                    constexpr float k_axisScale = 0.17f;
+                    constexpr float k_axisLen = 5.0f;
                     pushMarker(wishPosWorld, k_centerScale, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
                     pushMarker(wishPosWorld + wishR * glm::vec3(k_axisLen, 0.0f, 0.0f),
                                k_axisScale,
@@ -4838,15 +4849,18 @@ SDL_AppResult Game::iterate()
             // appears to lag and not move linearly with the sliders; disabling
             // constraints lets you see the pure IK solution. Reach fade similarly
             // hides "the gun snapped back" issues when the wish-point is past the
-            // arm's max reach.
+            // arm's max reach. Freeze animations stops idle-bob drift so the
+            // world-space sliders read steady values.
             ImGui::SeparatorText("Debug Toggles (re-enable when done!)");
             ImGui::Checkbox("Joint constraints (shoulder/elbow/wrist clamps)",
                             &tpEnableJointConstraints_);
             ImGui::Checkbox("Reach fade (IK falls back when target is past arm length)",
                             &tpEnableReachFade_);
-            if (!tpEnableJointConstraints_ || !tpEnableReachFade_) {
+            ImGui::Checkbox("Freeze animations (every animator pauses time advance)",
+                            &tpFreezeAnimations_);
+            if (!tpEnableJointConstraints_ || !tpEnableReachFade_ || tpFreezeAnimations_) {
                 ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f),
-                                   "⚠  Constraints/reach-fade off — re-enable before shipping.");
+                                   "⚠  Constraints/reach-fade off or animation frozen — re-enable before shipping.");
             }
 
             ImGui::SeparatorText("Procedural Layer Tuning");

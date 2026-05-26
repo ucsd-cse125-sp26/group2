@@ -224,6 +224,16 @@ public:
     /// codebase's MapAnimModeToHoldStance helper.
     [[nodiscard]] int currentModeValue() const noexcept;
 
+    /// @brief Freeze animation playback. While frozen, `update()` and
+    /// `renderFromServer()` skip the state-machine + sampler-time updates,
+    /// but still run the ozz sample → blend → LocalToModel pipeline using
+    /// the last-known sampler state. This keeps the IK pass's base pose
+    /// reproducible and stable — needed so the world-space anchor sliders
+    /// don't drift from the idle bob while authoring. The procedural
+    /// overlays (spine bend etc.) keep responding to live `inputs` so the
+    /// gun still tracks aim pitch when the user pans the camera.
+    void setFrozen(bool frozen) noexcept;
+
     /// @brief Model-space joint matrices with all procedural transforms applied
     ///        (head pitch, wallrun mirror) but WITHOUT inverse-bind-matrix multiplication.
     ///
