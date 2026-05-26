@@ -374,10 +374,16 @@ float HudContext::measureText(const char* str, float size) const
 
 // ── Icons ───────────────────────────────────────────────────────────────────
 
-void HudContext::icon(HudIcon /*id*/, float x, float y, float size, HudColor tint)
+void HudContext::icon(HudIcon id, float x, float y, float size, HudColor tint)
 {
-    // TODO: look up icon UV rect from atlas by id.  For now, full 1x1 fallback.
-    emitQuad(x, y, size, size, 0.f, 0.f, 1.f, 1.f, tint, 2.f);
+    switch (id) {
+    case HudIcon::NoIcon:
+        emitQuad(x, y, size, size, 0.f, 0.f, 1.f, 1.f, tint, 2.f);
+        break;
+    case HudIcon::None:
+    default:
+        break;
+    }
 }
 
 // ── Crosshair ───────────────────────────────────────────────────────────────

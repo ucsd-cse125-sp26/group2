@@ -1,18 +1,18 @@
 /// @file AmmoCounter.hpp
-/// @brief Minimal bottom-right ammo readout.
+/// @brief Bottom-right glass ammo readout.
 
 #pragma once
 
 #include "hud/HudWidget.hpp"
 
-/// @brief Shows current magazine ammo and reserve ammo without panel chrome.
+/// @brief Shows current magazine ammo and reserve ammo in prototype HUD chrome.
 struct AmmoCounter : HudWidget
 {
-    float panelWidth = 200.f;
-    float panelHeight = 100.f;
-    float clipFontSize = 125.5f;  ///< Current ammo in the magazine.
-    float reserveFontSize = 75.f; ///< Reserve / total ammo.
-    float edgePadding = 0.f;      ///< Inset from the panel edge to the rightmost number.
+    float panelWidth = 260.f;
+    float panelHeight = 116.f;
+    float clipFontSize = 92.f;    ///< Current ammo in the magazine.
+    float reserveFontSize = 47.f; ///< Reserve / total ammo.
+    float edgePadding = 22.f;     ///< Inset from the panel edge to the rightmost number.
 
     AmmoCounter();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

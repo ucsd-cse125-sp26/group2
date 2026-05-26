@@ -4,7 +4,6 @@
 #include "GrenadeSlotsWidget.hpp"
 
 #include "hud/HudContext.hpp"
-#include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
 
 #include <SDL3/SDL.h>
@@ -76,32 +75,18 @@ void drawSpacedText(HudContext& ctx, const char* text, float x, float y, float s
     }
 }
 
-void drawMolotovIcon(HudContext& ctx, float x, float y, float size, HudColor color)
+HudColor grenadeColor(const std::string& name, bool selected, bool available)
 {
-    const float u = size / 16.f;
-    ctx.rotatedRect(x + 8.f * u, y + 9.f * u, 5.f * u, 9.f * u, -18.f, color);
-    ctx.rotatedRect(x + 6.2f * u, y + 3.8f * u, 3.f * u, 4.f * u, -18.f, color);
-    ctx.triangle(x + 8.f * u, y + 0.5f * u, x + 11.f * u, y + 5.f * u, x + 6.f * u, y + 5.f * u, color);
-}
-
-void drawImpulseIcon(HudContext& ctx, float x, float y, float size, HudColor color)
-{
-    using namespace voidfall::icons;
-    const float cx = x + size * 0.5f;
-    const float cy = y + size * 0.54f;
-    strokedCircle(ctx, cx, cy, size * 0.34f, std::max(1.f, size * 0.10f), 18, color);
-    filledCircle(ctx, cx, cy, size * 0.11f, 10, color);
-}
-
-void drawGrenadeTypeIcon(HudContext& ctx, const std::string& name, float x, float y, float size, HudColor color)
-{
-    if (name == "MOLOTOV") {
-        drawMolotovIcon(ctx, x, y, size, color);
-    } else if (name == "IMPULSE") {
-        drawImpulseIcon(ctx, x, y, size, color);
-    } else {
-        voidfall::icons::grenade(ctx, x, y, size, color);
-    }
+    using namespace voidfall;
+    if (!available)
+        return withAlpha(k_textDim, 0.42f);
+    if (selected)
+        return k_yellow;
+    if (name == "MOLOTOV")
+        return k_amber;
+    if (name == "IMPULSE")
+        return k_cyan;
+    return k_green;
 }
 } // namespace
 
@@ -135,21 +120,39 @@ void GrenadeSlotsWidget::draw(HudContext& ctx, float anchorX, float anchorY)
     const float countX = countPadX * s;
     const float countY = countPadY * s;
     const float countGap = countCharacterGap * s;
-    const float iconRight = iconPadRight * s;
+    const float panelPad = 12.f * s;
+
+    drawPanel(ctx,
+              startX - panelPad,
+              y - panelPad,
+              totalW + panelPad * 2.f,
+              ss + panelPad * 2.f,
+              withAlpha(k_bgPanelSolid, 0.72f),
+              k_lineBright,
+              std::max(1.f, 1.5f * s));
 
     for (std::size_t i = 0; i < state_.items.size(); ++i) {
         const auto& item = state_.items[i];
         const float x = startX + static_cast<float>(i) * (ss + gap);
         const bool selected = static_cast<int>(i) == state_.selectedIndex;
         const bool available = item.available;
-        const HudColor color = available ? (selected ? k_amber : k_textDim) : withAlpha(k_textDim, 0.38f);
+        const HudColor color = grenadeColor(item.name, selected, available);
 
-        if (selected)
-            drawCutCornerOutline(ctx, x, y, ss, cornerCut * s, std::max(1.f, borderThickness * s), k_lineBright);
+        drawPanel(ctx,
+                  x,
+                  y,
+                  ss,
+                  ss,
+                  selected ? withAlpha(k_amberDeep, 0.34f) : withAlpha(k_bgPanel, 0.32f),
+                  selected ? k_yellow : withAlpha(k_lineBright, 0.56f),
+                  selected ? std::max(1.f, borderThickness * s * 0.45f) : std::max(1.f, s));
+        if (selected) {
+            drawCutCornerOutline(ctx, x, y, ss, cornerCut * 2.0f * s, std::max(1.f, borderThickness * s), k_yellow);
+        }
 
         char count[8];
         SDL_snprintf(count, sizeof(count), "%d", item.count);
-        drawSpacedText(ctx, count, x + countX, y + countY, fs, countGap, color);
-        drawGrenadeTypeIcon(ctx, item.name, x + ss - icon - iconRight, y + (ss - icon) * 0.5f, icon, color);
+        ctx.icon(HudIcon::NoIcon, x + (ss - icon) * 0.5f, y + 9.f * s, icon, color);
+        drawSpacedText(ctx, count, x + countX, y + ss - fs - countY, fs, countGap, k_textBright);
     }
 }
