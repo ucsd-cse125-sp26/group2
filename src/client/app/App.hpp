@@ -19,7 +19,8 @@
 /// @brief Root application class; owns shared resources and manages screen transitions.
 ///
 /// Implements the SDL3 app-callback contract (init/event/iterate/quit).  Exactly
-/// one IScreen is active at a time; App drives transitions between Lobby and InGame.
+/// one IScreen is active at a time; App drives transitions among Home, host
+/// configuration, Lobby, and InGame screens.
 class App
 {
 public:
@@ -58,14 +59,14 @@ private:
     DeveloperConfig developerConfig; ///< Developer toggles loaded from config.toml.
     UserSettings userSettings;       ///< User-specific input and gameplay settings.
     std::string userSettingsPath;    ///< Path used to load and save user settings.
-    Client client;                   ///< Network client connected to the authoritative server.
-    HostedServer hostedServer;       ///< Hosted game server instance.
+    Client client;                   ///< Network client connected to the authoritative server when in a session.
+    HostedServer hostedServer;       ///< Optional local server process launched by the host screen.
     HostConfigState hostConfigState{
         .port = 9999,
         .useSpecificPort = false,
         .useLegacyTcp = false,
         .persistAfterClientExit = false,
-    }; ///< Host screen draft state.
+    }; ///< Persistent host screen draft state.
 
     Screen current = Screen::Home;    ///< Which screen is currently active.
     std::unique_ptr<IScreen> screen_; ///< Active screen instance.

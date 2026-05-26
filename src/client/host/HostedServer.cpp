@@ -1,3 +1,6 @@
+/// @file HostedServer.cpp
+/// @brief Platform-specific process management for locally hosted servers.
+
 #include "HostedServer.hpp"
 
 #include <SDL3/SDL.h>

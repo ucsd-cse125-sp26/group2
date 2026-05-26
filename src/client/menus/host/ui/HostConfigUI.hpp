@@ -1,3 +1,6 @@
+/// @file HostConfigUI.hpp
+/// @brief ImGui widget for local server hosting controls.
+
 #pragma once
 
 #include "host/HostedServer.hpp"
@@ -5,6 +8,7 @@
 #include <cstdint>
 #include <string_view>
 
+/// @brief Inputs needed to render the host-configuration UI for one frame.
 struct HostConfigUIInputs
 {
     HostConfigState& draft;        ///< Mutable draft settings bound to the widgets.
@@ -13,6 +17,7 @@ struct HostConfigUIInputs
     std::string_view errorMessage; ///< Last launch error, empty when none.
 };
 
+/// @brief User actions emitted by the host-configuration UI for one frame.
 struct HostConfigResult
 {
     bool launchClicked = false;     ///< True if the user pressed "Launch" this frame.
@@ -23,5 +28,9 @@ struct HostConfigResult
 
 namespace host_config_ui
 {
+
+/// @brief Render the host-configuration window and return requested actions.
+/// @param inputs Current host settings and hosted-server status.
+/// @return Buttons/actions selected by the user this frame.
 HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs);
 } // namespace host_config_ui

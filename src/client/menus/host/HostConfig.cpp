@@ -1,3 +1,6 @@
+/// @file HostConfig.cpp
+/// @brief Host-configuration screen lifecycle and App transition requests.
+
 #include "HostConfig.hpp"
 
 #include "ui/HostConfigUI.hpp"

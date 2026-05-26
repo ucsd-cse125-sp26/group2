@@ -36,9 +36,14 @@ public:
     /// @return The packet that triggered the match start, or nullopt if none was pending.
     std::optional<MatchStatePacket> consumeStartMatchState();
 
-    bool consumeReturnToMenu(); ///< True if the user has requested to return to the main menu, then clear that request.
-    bool consumeReturnToHostConfig();   ///< True if the host requested HostConfig without shutting down the session.
-    bool consumeServerShutdownNotice(); ///< True if returning home because the server connection closed, then clear it.
+    /// @brief True if the user requested returning to the main menu, then clear that request.
+    bool consumeReturnToMenu();
+
+    /// @brief True if the host requested HostConfig without shutting down the session, then clear that request.
+    bool consumeReturnToHostConfig();
+
+    /// @brief True if returning home because the server connection closed, then clear that reason.
+    bool consumeServerShutdownNotice();
 
 private:
     /// @brief True if the local client is host and all non-host players are ready.

@@ -37,7 +37,7 @@ namespace lobby_ui
 
 /// @brief Render the lobby player list window and return any player actions this frame.
 /// @param config Read-only snapshot of lobby state for this frame.
-/// @return Actions the caller should apply (ready toggle, start match).
+/// @return Actions the caller should apply (ready toggle, start match, or navigation).
 BuildResult buildPlayerList(const LobbyUIConfig& config);
 
 } // namespace lobby_ui

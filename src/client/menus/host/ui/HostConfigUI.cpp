@@ -1,3 +1,6 @@
+/// @file HostConfigUI.cpp
+/// @brief ImGui implementation of local server hosting controls.
+
 #include "HostConfigUI.hpp"
 
 #include <imgui.h>

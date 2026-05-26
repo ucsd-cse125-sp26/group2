@@ -95,6 +95,7 @@ public:
     [[nodiscard]] bool isClientConnected() const noexcept { return clientConnectionId_ != 0; }
     [[nodiscard]] std::uint64_t clientConnectionId() const noexcept { return clientConnectionId_; }
     [[nodiscard]] std::uint32_t clientNonce() const noexcept { return clientNonce_; }
+    /// @brief Get the local UDP port used by this session transport.
     [[nodiscard]] Uint16 localPort() const noexcept { return endpoint_.localPort(); }
     [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
 

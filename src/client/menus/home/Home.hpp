@@ -31,7 +31,7 @@ struct JoinRequest
 class Home : public IScreen
 {
 public:
-    /// @brief Bind renderer and window; must be called before iterate().
+    /// @brief Bind renderer, window, and discovery configuration; must be called before iterate().
     /// @return False if either pointer is null.
     bool init(AppContext& ctx);
 
@@ -67,14 +67,17 @@ private:
 
     std::unique_ptr<DiscoveryClient> localDiscoveryClient = std::make_unique<DiscoveryClient>();
 
+    /// @brief Start an asynchronous global server-browser refresh when allowed by throttling.
     void startGlobalRefresh(bool force = false);
+
+    /// @brief Join the global browser worker once it has finished.
     void joinRefreshThreadIfFinished();
 
-    std::vector<net::discovery::ServerInfo> globalServers;
-    std::vector<DiscoveryClient::DiscoveredServer> localServers;
-    std::string browserError;
-    std::mutex browserMutex;
-    std::thread browserThread;
-    std::atomic<bool> browserRefreshing{false};
-    uint64_t lastBrowserRefreshMs = 0;
+    std::vector<net::discovery::ServerInfo> globalServers;       ///< Latest directory-server browser snapshot.
+    std::vector<DiscoveryClient::DiscoveredServer> localServers; ///< Latest LAN browser snapshot.
+    std::string browserError;                                    ///< Last global browser error, empty when none.
+    std::mutex browserMutex;                                     ///< Guards global browser results from worker thread.
+    std::thread browserThread;                                   ///< Worker used for global server-browser requests.
+    std::atomic<bool> browserRefreshing{false};                  ///< True while browserThread is fetching.
+    uint64_t lastBrowserRefreshMs = 0;                           ///< SDL tick timestamp of the last global refresh.
 };
