@@ -105,7 +105,7 @@ block()
     FetchContent_Declare(
         SDL3_net
         GIT_REPOSITORY https://github.com/cedricdvd/SDL_net.git
-        GIT_TAG        datagram-local-port # TODO: switch back to main once branch merged into main
+        GIT_TAG        main
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(SDL3_net)
