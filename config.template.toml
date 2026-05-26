@@ -36,9 +36,9 @@ snapshot-hz = 128
 # screen, and relay fallback uses the same UDP service.
 enabled = true
 advertise-server = true
-directory-host = "cse125.ucsd.edu"
+directory-host = "157.245.233.91"
 directory-udp-port = 10081
-server-name = "Group 2 Server"
+server-name = "Palantir"
 max-players = 8
 refresh-seconds = 5
 connect-punch-timeout-ms = 900

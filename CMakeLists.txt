@@ -1025,8 +1025,14 @@ add_executable(group2
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
         src/ecs/components/RespawnPoint.hpp
+        src/ecs/components/JumpPad.hpp
+        src/ecs/components/Killzone.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/JumpPadSystem.hpp
+        src/ecs/systems/JumpPadSystem.cpp
+        src/ecs/systems/KillzoneSystem.hpp
+        src/ecs/systems/KillzoneSystem.cpp
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/AbilityState.hpp
@@ -1339,8 +1345,14 @@ add_executable(server
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/components/JumpPad.hpp
+        src/ecs/components/Killzone.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/JumpPadSystem.hpp
+        src/ecs/systems/JumpPadSystem.cpp
+        src/ecs/systems/KillzoneSystem.hpp
+        src/ecs/systems/KillzoneSystem.cpp
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/Hitbox.hpp
