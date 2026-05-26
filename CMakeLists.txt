@@ -105,7 +105,7 @@ block()
     FetchContent_Declare(
         SDL3_net
         GIT_REPOSITORY https://github.com/cedricdvd/SDL_net.git
-        GIT_TAG        main
+        GIT_TAG        55c01afab84f3d30823e8868844f071b26d0c6ad
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(SDL3_net)
