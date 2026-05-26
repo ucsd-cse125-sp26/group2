@@ -2,7 +2,12 @@
 
 #include <cstdint>
 #include <string>
+
+#if defined(_WIN32)
+#include <cstddef>
+#else
 #include <sys/types.h>
+#endif
 
 struct HostConfigState
 {
@@ -25,6 +30,11 @@ public:
 
 private:
     void detachForPersistence();
+#if defined(_WIN32)
+    void* childProcess = nullptr;
+    std::uint32_t childPid = 0;
+#else
     pid_t childPid = -1;
+#endif
     uint16_t boundPort = 0;
 };
