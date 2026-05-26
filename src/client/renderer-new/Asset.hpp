@@ -11,8 +11,10 @@
 #define MODEL_ROOT_NODE_INDEX 0
 #define ASSETS_DIR "assets"
 #include "glm/glm.hpp"
+#include <glm/gtc/quaternion.hpp>
 
 #include <stb_image.h>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -96,10 +98,17 @@ struct ModelNode
     glm::mat4 transform_;
 };
 
+struct MountPoint
+{
+    glm::vec3 position{0.0f};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
 struct Model
 {
     std::vector<ModelNode> modelNodes_;
     std::vector<ModelElement> modelElements_;
+    std::unordered_map<std::string, MountPoint> mountPoints;
     bool hasMuzzle = false;
     glm::vec3 muzzleLocalPos{};
 };

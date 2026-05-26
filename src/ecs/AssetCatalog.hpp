@@ -30,14 +30,7 @@ inline const AssetDefinition kMapAsset{
     .loadScale = 39.3701f,
 };
 
-inline const std::array<AssetDefinition, 1> kPropAssets{{
-    {.name = "bottle",
-     .filename = "bottle_a.glb",
-     .role = AssetRole::Prop,
-     .loadTranslation = {100.0f, 0.0f, 400.0f},
-     .loadScale = 20.0f,
-     .decomposeCollision = true},
-}};
+inline const std::array<AssetDefinition, 0> kPropAssets{};
 
 inline const AssetDefinition kRocketProjectile{
     .name = "rocket_projectile",
@@ -49,7 +42,7 @@ inline const AssetDefinition kRocketProjectile{
 
 inline const std::array<AssetDefinition, 4> kWeaponAssets{{
     {.name = "weapon_rifle",
-     .filename = "assault_rifle.glb",
+     .filename = "assault_rifle_with_mountpoints.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f}},
