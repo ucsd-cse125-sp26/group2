@@ -89,6 +89,13 @@ public:
     /// Sub-renderers consult this to pick the right precompiled shader binary.
     [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const { return shaderFormat_; }
 
+    /// @brief Color format of the active swapchain render pass.
+    ///
+    /// Sub-renderers that draw inside NewRenderer's main pass must create
+    /// pipelines with this format so backends such as Metal can validate the
+    /// pipeline against the render-pass texture.
+    [[nodiscard]] SDL_GPUTextureFormat getSwapchainColorFormat() const { return colorTarget_; }
+
     /// @brief Current camera (updated every `drawFrame` call).
     ///
     /// Game code reads this for projection-dependent operations: picking,
@@ -101,13 +108,11 @@ public:
     /// `Asset::models_`, which is populated by `loadSceneModel()`.
     [[nodiscard]] int modelCount() const;
 
-    /// @brief Format of the HDR colour render target.
+    /// @brief Legacy HDR colour render target format.
     ///
-    /// Sub-renderers that render INTO the main HDR pass (particles, beams,
-    /// glow) must declare this as their pipeline's colour target format.
-    /// Returning RGBA16F matches the legacy renderer; graphics team may
-    /// change this if they pick a different intermediate format, BUT must
-    /// update every sub-renderer pipeline to match.
+    /// NewRenderer currently draws directly into the swapchain, so
+    /// sub-renderers registered with it should use getSwapchainColorFormat().
+    /// Keep this for code paths that actually render into an HDR intermediate.
     [[nodiscard]] static constexpr SDL_GPUTextureFormat getHdrFormat()
     {
         return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -366,7 +371,7 @@ private:
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
 
-    SDL_GPUTextureFormat colorTarget_;
+    SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;

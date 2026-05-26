@@ -554,16 +554,12 @@ bool Game::init(AppContext& ctx)
     physics::diag::setEnabled(phaseDiagEnabled);
     SDL_Log("[client] physics diagnostic %s", phaseDiagEnabled ? "ENABLED" : "disabled");
 
-    // Particle system needs the device + formats from the renderer.
-    // colorFmt is the format particles draw into (RGBA16F was the legacy
-    // renderer's HDR target); kept here so the particle pipelines compile,
-    // but NewRenderer does not yet route particles into a render pass.
-    if (!particleSystem.init(
-            renderer->getDevice(), SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, renderer->getShaderFormat()))
-    {
+    // Particle pipelines must match the active render-pass color format.
+    // NewRenderer renders particles inside the swapchain pass, not an HDR
+    // intermediate, so use the renderer's current swapchain format here.
+    if (!particleSystem.init(renderer->getDevice(), renderer->getSwapchainColorFormat(), renderer->getShaderFormat())) {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
-        // TODO(renderer-migration): renderer->setParticleSystem(&particleSystem);
         renderer->setParticleSystem(&particleSystem);
 
         // Wire dispatcher events to particle system.

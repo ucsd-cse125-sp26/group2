@@ -71,7 +71,7 @@ struct SmokeParticle
     float rotation;      ///< Slow random spin (0.1–0.3 rad/s).
     float normalizedAge; ///< 0 (just spawned) → 1 (about to die).
     float maxLifetime;   ///< 3–5 s.
-    float _pad;
+    float kind;          ///< CPU-side only: 0 = smoke, 1 = fire; shader ignores it.
 };
 static_assert(sizeof(SmokeParticle) == 48);
 
