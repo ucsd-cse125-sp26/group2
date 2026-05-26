@@ -206,6 +206,10 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
     } else if (const auto* ammo = dynamic_cast<const AmmoCounter*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", ammo->panelWidth);
         writeFloatParam(out, first, "panelHeight", ammo->panelHeight);
+        writeFloatParam(out, first, "weaponSlotWidth", ammo->weaponSlotWidth);
+        writeFloatParam(out, first, "weaponSlotHeight", ammo->weaponSlotHeight);
+        writeFloatParam(out, first, "weaponSlotGap", ammo->weaponSlotGap);
+        writeFloatParam(out, first, "weaponSlotBottomGap", ammo->weaponSlotBottomGap);
         writeFloatParam(out, first, "clipFontSize", ammo->clipFontSize);
         writeFloatParam(out, first, "reserveFontSize", ammo->reserveFontSize);
         writeFloatParam(out, first, "edgePadding", ammo->edgePadding);
@@ -234,9 +238,14 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "showAfterDamageSecs", enemy->showAfterDamageSecs);
         writeFloatParam(out, first, "fadeOutSecs", enemy->fadeOutSecs);
     } else if (const auto* equipment = dynamic_cast<const EquipmentSlots*>(&widget)) {
+        writeFloatParam(out, first, "clusterWidth", equipment->clusterWidth);
+        writeFloatParam(out, first, "clusterHeight", equipment->clusterHeight);
         writeFloatParam(out, first, "slotSize", equipment->slotSize);
+        writeFloatParam(out, first, "slotHeight", equipment->slotHeight);
         writeFloatParam(out, first, "slotGap", equipment->slotGap);
         writeFloatParam(out, first, "iconSize", equipment->iconSize);
+        writeFloatParam(out, first, "chargeBarWidth", equipment->chargeBarWidth);
+        writeFloatParam(out, first, "chargeBarHeight", equipment->chargeBarHeight);
         writeFloatParam(out, first, "keyFontSize", equipment->keyFontSize);
         writeFloatParam(out, first, "keyPadX", equipment->keyPadX);
         writeFloatParam(out, first, "keyPadY", equipment->keyPadY);
@@ -250,6 +259,8 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "countFontSize", grenade->countFontSize);
         writeFloatParam(out, first, "keyFontSize", grenade->keyFontSize);
     } else if (const auto* grenades = dynamic_cast<const GrenadeSlotsWidget*>(&widget)) {
+        writeFloatParam(out, first, "trayWidth", grenades->trayWidth);
+        writeFloatParam(out, first, "trayHeight", grenades->trayHeight);
         writeFloatParam(out, first, "slotSize", grenades->slotSize);
         writeFloatParam(out, first, "slotGap", grenades->slotGap);
         writeFloatParam(out, first, "iconSize", grenades->iconSize);
@@ -282,6 +293,10 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "panelPadY", kda->panelPadY);
         writeFloatParam(out, first, "colGap", kda->colGap);
     } else if (const auto* feed = dynamic_cast<const KillFeed*>(&widget)) {
+        writeFloatParam(out, first, "panelWidth", feed->panelWidth);
+        writeFloatParam(out, first, "leaderboardHeight", feed->leaderboardHeight);
+        writeFloatParam(out, first, "feedHeight", feed->feedHeight);
+        writeFloatParam(out, first, "feedGap", feed->feedGap);
         writeFloatParam(out, first, "entryHeight", feed->entryHeight);
         writeFloatParam(out, first, "entryPadding", feed->entryPadding);
         writeFloatParam(out, first, "entryLifetime", feed->entryLifetime);
@@ -411,6 +426,10 @@ void editWidgetSpecific(HudWidget& widget)
     } else if (auto* ammo = dynamic_cast<AmmoCounter*>(&widget)) {
         editFloat("Panel Width", ammo->panelWidth, 1.0f, 80.0f, 1200.0f);
         editFloat("Panel Height", ammo->panelHeight, 1.0f, 40.0f, 800.0f);
+        editFloat("Weapon Slot Width", ammo->weaponSlotWidth, 1.0f, 80.0f, 1200.0f);
+        editFloat("Weapon Slot Height", ammo->weaponSlotHeight, 1.0f, 20.0f, 600.0f);
+        editFloat("Weapon Slot Gap", ammo->weaponSlotGap, 0.5f, 0.0f, 200.0f);
+        editFloat("Weapon Slot Bottom Gap", ammo->weaponSlotBottomGap, 0.5f, 0.0f, 240.0f);
         editFloat("Clip Font Size", ammo->clipFontSize, 0.5f, 6.0f, 160.0f);
         editFloat("Reserve Font Size", ammo->reserveFontSize, 0.5f, 6.0f, 120.0f);
         editFloat("Edge Padding", ammo->edgePadding, 0.5f, 0.0f, 200.0f);
@@ -439,9 +458,14 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Show After Damage Secs", enemy->showAfterDamageSecs, 0.1f, 0.0f, 30.0f);
         editFloat("Fade Out Secs", enemy->fadeOutSecs, 0.05f, 0.0f, 10.0f);
     } else if (auto* equipment = dynamic_cast<EquipmentSlots*>(&widget)) {
-        editFloat("Slot Size", equipment->slotSize, 1.0f, 8.0f, 240.0f);
-        editFloat("Slot Gap", equipment->slotGap, 0.5f, 0.0f, 80.0f);
-        editFloat("Icon Size", equipment->iconSize, 0.5f, 4.0f, 160.0f);
+        editFloat("Cluster Width", equipment->clusterWidth, 1.0f, 100.0f, 1800.0f);
+        editFloat("Cluster Height", equipment->clusterHeight, 1.0f, 40.0f, 600.0f);
+        editFloat("Slot Size", equipment->slotSize, 1.0f, 8.0f, 400.0f);
+        editFloat("Slot Height", equipment->slotHeight, 1.0f, 8.0f, 360.0f);
+        editFloat("Slot Gap", equipment->slotGap, 0.5f, 0.0f, 240.0f);
+        editFloat("Icon Size", equipment->iconSize, 0.5f, 4.0f, 260.0f);
+        editFloat("Charge Bar Width", equipment->chargeBarWidth, 1.0f, 20.0f, 1000.0f);
+        editFloat("Charge Bar Height", equipment->chargeBarHeight, 0.5f, 4.0f, 160.0f);
         editFloat("Key Font Size", equipment->keyFontSize, 0.5f, 4.0f, 96.0f);
         editFloat("Key Pad X", equipment->keyPadX, 0.25f, 0.0f, 40.0f);
         editFloat("Key Pad Y", equipment->keyPadY, 0.25f, 0.0f, 40.0f);
@@ -455,12 +479,14 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Count Font Size", grenade->countFontSize, 0.5f, 4.0f, 96.0f);
         editFloat("Key Font Size", grenade->keyFontSize, 0.5f, 4.0f, 96.0f);
     } else if (auto* grenades = dynamic_cast<GrenadeSlotsWidget*>(&widget)) {
-        editFloat("Slot Size", grenades->slotSize, 1.0f, 8.0f, 160.0f);
-        editFloat("Slot Gap", grenades->slotGap, 0.5f, 0.0f, 80.0f);
-        editFloat("Icon Size", grenades->iconSize, 0.5f, 4.0f, 120.0f);
+        editFloat("Tray Width", grenades->trayWidth, 1.0f, 80.0f, 1200.0f);
+        editFloat("Tray Height", grenades->trayHeight, 1.0f, 20.0f, 600.0f);
+        editFloat("Slot Size", grenades->slotSize, 1.0f, 8.0f, 320.0f);
+        editFloat("Slot Gap", grenades->slotGap, 0.5f, 0.0f, 160.0f);
+        editFloat("Icon Size", grenades->iconSize, 0.5f, 4.0f, 240.0f);
         editFloat("Count Font Size", grenades->countFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Count Pad X", grenades->countPadX, 0.25f, 0.0f, 40.0f);
-        editFloat("Count Pad Y", grenades->countPadY, 0.25f, 0.0f, 40.0f);
+        editFloat("Count Pad X", grenades->countPadX, 0.25f, 0.0f, 200.0f);
+        editFloat("Count Pad Y", grenades->countPadY, 0.25f, 0.0f, 160.0f);
         editFloat("Count Character Gap", grenades->countCharacterGap, 0.25f, 0.0f, 20.0f);
         editFloat("Icon Pad Right", grenades->iconPadRight, 0.25f, 0.0f, 40.0f);
         editFloat("Corner Cut", grenades->cornerCut, 0.25f, 0.0f, 40.0f);
@@ -487,6 +513,10 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Panel Pad Y", kda->panelPadY, 0.5f, 0.0f, 120.0f);
         editFloat("Column Gap", kda->colGap, 0.5f, 0.0f, 120.0f);
     } else if (auto* feed = dynamic_cast<KillFeed*>(&widget)) {
+        editFloat("Panel Width", feed->panelWidth, 1.0f, 80.0f, 1200.0f);
+        editFloat("Leaderboard Height", feed->leaderboardHeight, 1.0f, 20.0f, 600.0f);
+        editFloat("Feed Height", feed->feedHeight, 1.0f, 20.0f, 1000.0f);
+        editFloat("Feed Gap", feed->feedGap, 0.5f, 0.0f, 240.0f);
         editFloat("Entry Height", feed->entryHeight, 0.5f, 4.0f, 120.0f);
         editFloat("Entry Padding", feed->entryPadding, 0.5f, 0.0f, 80.0f);
         editFloat("Entry Lifetime", feed->entryLifetime, 0.1f, 0.1f, 60.0f);

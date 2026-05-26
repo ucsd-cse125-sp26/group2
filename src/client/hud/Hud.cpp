@@ -32,6 +32,7 @@ namespace
 {
 constexpr float k_designWidth = 2848.f;
 constexpr float k_designHeight = 1494.f;
+constexpr HudColor k_globalHudOpacity{1.f, 1.f, 1.f, 1.0f};
 
 float hudResolutionScale(float screenW, float screenH)
 {
@@ -119,6 +120,7 @@ void Hud::render()
         const std::size_t widgetStartVertex = context_.vertices().size();
         w->draw(context_, drawX, drawY);
         context_.tintVertices(widgetStartVertex, w->tint);
+        context_.tintVertices(widgetStartVertex, k_globalHudOpacity);
 
         w->visible = originalVisible;
     }
