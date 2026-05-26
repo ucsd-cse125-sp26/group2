@@ -26,6 +26,22 @@
 #include "widgets/Scoreboard.hpp"
 #include "widgets/VignetteWidget.hpp"
 
+#include <algorithm>
+
+namespace
+{
+constexpr float k_designWidth = 1920.f;
+constexpr float k_designHeight = 1080.f;
+
+float hudResolutionScale(float screenW, float screenH)
+{
+    if (screenW <= 0.f || screenH <= 0.f)
+        return 1.f;
+
+    return std::min(screenW / k_designWidth, screenH / k_designHeight);
+}
+} // namespace
+
 bool Hud::init(SDL_GPUDevice* device,
                SDL_GPUShaderFormat shaderFormat,
                const SdfAtlas& sdfAtlas,
@@ -75,7 +91,7 @@ void Hud::processEvent(const SDL_Event* event, const InputBindings* bindings)
 void Hud::update(float dt, const HudGameState& state)
 {
     tweens_.update(dt);
-    const float scale = screenH_ / 1080.f;
+    const float scale = hudResolutionScale(screenW_, screenH_);
     // Update ALL widgets (not just visible ones) so data stays fresh
     // when toggled on (e.g. Scoreboard on TAB shows current frame data).
     for (auto& w : widgets_) {
