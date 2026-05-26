@@ -4,6 +4,7 @@
 #include "Minimap.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
 
 #include <SDL3/SDL.h>
@@ -122,16 +123,10 @@ void Minimap::draw(HudContext& ctx, float x, float y)
         ctx.polyline(pts, 2, lineT, withAlpha(grid, i % 2 == 0 ? 0.72f : 0.38f));
     }
 
-    ctx.text("N", cx, y + 34.f * s, 28.f * s, k_textBright, HudAlign::Center, true);
-    ctx.text("S", cx, y + ms - 48.f * s, 24.f * s, withAlpha(k_textBright, 0.62f), HudAlign::Center, true);
-    ctx.text("W", x + 28.f * s, cy - 16.f * s, 24.f * s, withAlpha(k_textBright, 0.72f), HudAlign::Center, true);
-    ctx.text("E", x + ms - 28.f * s, cy - 16.f * s, 24.f * s, withAlpha(k_textBright, 0.72f), HudAlign::Center, true);
     ctx.text("1", cx, y - 42.f * s, 34.f * s, k_textBright, HudAlign::Center, true);
 
-    // Local player pointer.
-    const float p = 30.f * s;
-    ctx.triangle(cx, cy - p, cx - p * 0.58f, cy + p * 0.74f, cx + p * 0.58f, cy + p * 0.74f, k_primary);
-    ctx.triangle(cx, cy - p * 0.45f, cx - p * 0.25f, cy + p * 0.35f, cx + p * 0.25f, cy + p * 0.35f, withAlpha(k_quaternary, 0.65f));
+    // Local player pointer — old notched triangle shape, current HUD cyan.
+    icons::playerArrow(ctx, std::round(cx), std::round(cy), 42.f * s, k_primary);
 
     // Enemy dots (red), rotated by yaw so player-forward is up. Dots beyond
     // the radar's range are clamped radially to the circular edge
@@ -155,7 +150,6 @@ void Minimap::draw(HudContext& ctx, float x, float y)
         }
         const float ex = cx - dx;
         const float ey = cy - dz;
-        // Prototype-style yellow triangular blips.
-        ctx.triangle(ex, ey - dotPx, ex - dotPx * 0.68f, ey + dotPx * 0.68f, ex + dotPx * 0.68f, ey + dotPx * 0.68f, k_yellow);
+        icons::filledCircle(ctx, ex, ey, dotPx * 0.5f, 14, k_red);
     }
 }
