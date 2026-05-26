@@ -55,10 +55,9 @@ void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tween
         e.timer -= dt;
         e.slideIn = std::min(1.f, e.slideIn + dt * 6.f); // ~0.16s slide-in
     }
-    entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [](const Entry& e) {
-                       return !e.permanent && e.timer <= 0.f;
-                   }),
-                   entries_.end());
+    entries_.erase(
+        std::remove_if(entries_.begin(), entries_.end(), [](const Entry& e) { return !e.permanent && e.timer <= 0.f; }),
+        entries_.end());
 
     while (static_cast<int>(entries_.size()) > maxEntries) {
         const auto removable =

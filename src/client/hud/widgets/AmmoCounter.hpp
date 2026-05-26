@@ -10,7 +10,7 @@ struct AmmoCounter : HudWidget
 {
     float panelWidth = 200.f;
     float panelHeight = 100.f;
-    float clipFontSize = 125.5f; ///< Current ammo in the magazine.
+    float clipFontSize = 125.5f;  ///< Current ammo in the magazine.
     float reserveFontSize = 75.f; ///< Reserve / total ammo.
     float edgePadding = 0.f;      ///< Inset from the panel edge to the rightmost number.
 

@@ -26,7 +26,8 @@ void drawCircleOutline(HudContext& ctx, float cx, float cy, float radius, float 
     ctx.polyline(points, kSegments + 1, thickness, color);
 }
 
-void drawClockwiseRingArc(HudContext& ctx, float cx, float cy, float radius, float progress, float thickness, HudColor color)
+void drawClockwiseRingArc(
+    HudContext& ctx, float cx, float cy, float radius, float progress, float thickness, HudColor color)
 {
     const float clampedProgress = std::clamp(progress, 0.f, 1.f);
     if (clampedProgress <= 0.f)

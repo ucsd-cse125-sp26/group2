@@ -103,8 +103,15 @@ void drawFilledShape(HudContext& ctx,
     }
 }
 
-void drawShapeOutline(
-    HudContext& ctx, float x, float y, float w, float h, float chamfer, float cornerCut, float thickness, HudColor color)
+void drawShapeOutline(HudContext& ctx,
+                      float x,
+                      float y,
+                      float w,
+                      float h,
+                      float chamfer,
+                      float cornerCut,
+                      float thickness,
+                      HudColor color)
 {
     const auto shape = barShape(x, y, w, h, chamfer, cornerCut);
     const float points[] = {

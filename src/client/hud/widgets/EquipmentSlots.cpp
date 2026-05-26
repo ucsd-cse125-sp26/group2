@@ -62,11 +62,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
          state_.primaryAbilityName == "GRAPPLE",
          state_.primaryAbilityName != "GRAPPLE",
          state_.primaryAbilityAvailable},
-        {&secondaryAbilityLabel_,
-         state_.secondaryAbilityCharge,
-         false,
-         true,
-         state_.secondaryAbilityAvailable},
+        {&secondaryAbilityLabel_, state_.secondaryAbilityCharge, false, true, state_.secondaryAbilityAvailable},
     };
 
     for (int i = 0; i < slotCount; ++i) {

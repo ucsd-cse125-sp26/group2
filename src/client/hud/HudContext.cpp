@@ -350,16 +350,7 @@ void HudContext::knockoutText(const char* str, float x, float y, float size, Hud
         if (gw > 0.f && gh > 0.f) {
             const float gx = std::round(cursorX + gi->bearing.x * scale);
             const float gy = std::round(baselineY - gi->bearing.y * scale);
-            emitQuad(gx,
-                     gy,
-                     gw,
-                     gh,
-                     gi->uvMin.x,
-                     gi->uvMin.y,
-                     gi->uvMax.x,
-                     gi->uvMax.y,
-                     HudColor::white(),
-                     6.f);
+            emitQuad(gx, gy, gw, gh, gi->uvMin.x, gi->uvMin.y, gi->uvMax.x, gi->uvMax.y, HudColor::white(), 6.f);
         }
 
         cursorX += gi->advance * scale;

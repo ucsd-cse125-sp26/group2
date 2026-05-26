@@ -28,10 +28,9 @@
 #include "hud/widgets/TeamStatusBar.hpp"
 #include "hud/widgets/VignetteWidget.hpp"
 
-#include <imgui.h>
-
 #include <array>
 #include <fstream>
+#include <imgui.h>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -182,8 +181,7 @@ void writeBoolParam(std::ostream& out, bool& first, std::string_view name, bool 
 
 void writeColorValue(std::ostream& out, HudColor color)
 {
-    out << "{ \"r\": " << color.r << ", \"g\": " << color.g << ", \"b\": " << color.b << ", \"a\": " << color.a
-        << " }";
+    out << "{ \"r\": " << color.r << ", \"g\": " << color.g << ", \"b\": " << color.b << ", \"a\": " << color.a << " }";
 }
 
 void writeColorParam(std::ostream& out, bool& first, std::string_view name, HudColor color)
@@ -548,7 +546,8 @@ void HudDebugPanel::build(Hud& hud, bool* open)
     ImGui::TextDisabled("Live edits affect the current HUD instance only.");
     ImGui::Checkbox("Render Inactive Widgets", &hud.debugRenderInactiveWidgets());
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Draws inactive HUD widgets for layout debugging. Railgun Scope still uses normal visibility.");
+        ImGui::SetTooltip(
+            "Draws inactive HUD widgets for layout debugging. Railgun Scope still uses normal visibility.");
     }
 
     static std::array<char, 260> savePath{"hud_tweaks.json"};
