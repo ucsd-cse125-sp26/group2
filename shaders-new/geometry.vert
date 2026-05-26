@@ -6,6 +6,7 @@ layout(location = 2) in vec2 vt;    // Model texture coord
 
 layout(location = 0) out vec3 frag_normal;
 layout(location = 1) out vec2 frag_vt;
+layout(location = 2) out vec3 frag_worldPos;
 
 layout(set = 1, binding = 0) uniform Camera {
     mat4 view_projection;
@@ -17,7 +18,11 @@ layout(set = 1, binding = 1) uniform Object {
 
 void main()
 {
-    gl_Position = camera.view_projection * object.model * vec4(v, 1.0f);
+    vec4 worldPos = object.model * vec4(v, 1.0f);
+    frag_worldPos = worldPos.xyz;
+
     frag_normal = normalize(transpose(inverse(mat3(object.model))) * vn);
     frag_vt = vt;
+
+    gl_Position = camera.view_projection * worldPos;
 }
