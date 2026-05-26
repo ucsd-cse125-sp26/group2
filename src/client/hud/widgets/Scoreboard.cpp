@@ -33,8 +33,7 @@ void Scoreboard::draw(HudContext& ctx, float cx, float cy)
     const float y = cy - ph * 0.5f;
 
     // Background panel.
-    ctx.rect(x, y, pw, ph, withAlpha(k_quaternary, 0.85f));
-    ctx.rectOutline(x, y, pw, ph, 1.f * s, withAlpha(k_secondary, 0.80f));
+    drawPanel(ctx, x, y, pw, ph, withAlpha(k_bgPanelSolid, 0.92f), withAlpha(k_secondary, 0.80f), 1.f * s);
 
     // Header.
     char header[64];

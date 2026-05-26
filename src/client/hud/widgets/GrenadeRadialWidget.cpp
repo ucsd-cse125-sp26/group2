@@ -46,8 +46,7 @@ void drawKeyTag(HudContext& ctx, const char* label, float x, float y, float fs)
     const float padX = 8.0f;
     const float w = std::max(26.0f, ctx.measureText(label, fs) + padX * 2.0f);
     const float h = 20.0f;
-    ctx.rect(x - w * 0.5f, y - h * 0.5f, w, h, withAlpha(k_quaternary, 0.58f));
-    ctx.rectOutline(x - w * 0.5f, y - h * 0.5f, w, h, 1.0f, k_amber);
+    drawPanel(ctx, x - w * 0.5f, y - h * 0.5f, w, h, withAlpha(k_bgPanel, 0.72f), k_amber, 1.0f);
     ctx.text(label, x, y - fs * 0.42f, fs, k_amber, HudAlign::Center, true);
 }
 

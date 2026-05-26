@@ -60,8 +60,7 @@ void PickupNotification::draw(HudContext& ctx, float anchorX, float y)
         const float pillX = anchorX - totalW + slideOff;
         const float pillY = curY;
 
-        ctx.rect(pillX, pillY, totalW, eh, withAlpha(k_pickupBg, alpha));
-        ctx.rectOutline(pillX, pillY, totalW, eh, 1.f, withAlpha(k_line, alpha));
+        drawPanel(ctx, pillX, pillY, totalW, eh, withAlpha(k_pickupBg, alpha), withAlpha(k_line, alpha), 1.f);
         // Amber left edge accent.
         ctx.rect(pillX, pillY, 2.f * s, eh, withAlpha(k_amber, alpha));
 

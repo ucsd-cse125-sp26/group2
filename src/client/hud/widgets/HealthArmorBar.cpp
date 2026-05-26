@@ -22,14 +22,14 @@ struct Point
 std::array<Point, 6> barShape(float x, float y, float w, float h, float chamfer, float cornerCut)
 {
     const float cut = std::clamp(chamfer, 0.f, w * 0.45f);
-    const float topCut = std::clamp(cornerCut, 0.f, std::min(cut, h * 0.5f));
+    const float bottomCut = std::clamp(cornerCut, 0.f, std::min(cut, h * 0.5f));
     return {{
-        {x + topCut, y},
-        {x + w - topCut, y},
-        {x + w, y + topCut},
-        {x + w - cut, y + h},
-        {x + cut, y + h},
-        {x, y + topCut},
+        {x + cut, y},
+        {x + w - cut, y},
+        {x + w, y + h - bottomCut},
+        {x + w - bottomCut, y + h},
+        {x + bottomCut, y + h},
+        {x, y + h - bottomCut},
     }};
 }
 
@@ -60,15 +60,22 @@ std::vector<Point> clipLeftToRight(const std::array<Point, 6>& points, float cli
     return out;
 }
 
-void drawFilledShape(HudContext& ctx,
-                     float x,
-                     float y,
-                     float w,
-                     float h,
-                     float chamfer,
-                     float cornerCut,
-                     float fill01,
-                     HudColor color)
+HudColor colorAtX(float x, float leftX, float width, HudColor leftColor, HudColor rightColor)
+{
+    const float t = std::clamp((x - leftX) / std::max(1.f, width), 0.f, 1.f);
+    return voidfall::lerpColor(leftColor, rightColor, t);
+}
+
+void drawGradientFilledShape(HudContext& ctx,
+                             float x,
+                             float y,
+                             float w,
+                             float h,
+                             float chamfer,
+                             float cornerCut,
+                             float fill01,
+                             HudColor leftColor,
+                             HudColor rightColor)
 {
     const float fill = std::clamp(fill01, 0.f, 1.f);
     if (fill <= 0.f)
@@ -80,11 +87,48 @@ void drawFilledShape(HudContext& ctx,
         return;
 
     const Point origin = poly.front();
+    const HudColor originColor = colorAtX(origin.x, x, w, leftColor, rightColor);
     for (std::size_t i = 1; i + 1 < poly.size(); ++i) {
         const Point a = poly[i];
         const Point b = poly[i + 1];
-        ctx.triangle(origin.x, origin.y, a.x, a.y, b.x, b.y, color);
+        ctx.triangleColors(origin.x,
+                           origin.y,
+                           originColor,
+                           a.x,
+                           a.y,
+                           colorAtX(a.x, x, w, leftColor, rightColor),
+                           b.x,
+                           b.y,
+                           colorAtX(b.x, x, w, leftColor, rightColor));
     }
+}
+
+void drawFillEdge(HudContext& ctx,
+                  float x,
+                  float y,
+                  float w,
+                  float h,
+                  float fill01,
+                  float thickness,
+                  HudColor color)
+{
+    const float fill = std::clamp(fill01, 0.f, 1.f);
+    if (fill <= 0.01f)
+        return;
+
+    const float fillX = x + w * fill;
+    const float edgeH = h * 0.82f;
+    const float edgeY = y + (h - edgeH) * 0.5f;
+    ctx.rect(fillX - thickness * 0.5f,
+             edgeY,
+             thickness,
+             edgeH,
+             voidfall::withAlpha(color, fill < 0.995f ? 0.90f : 0.55f));
+    ctx.rect(fillX - thickness * 1.5f,
+             edgeY,
+             thickness * 3.f,
+             edgeH,
+             voidfall::withAlpha(color, fill < 0.995f ? 0.22f : 0.12f));
 }
 
 void drawShapeOutline(HudContext& ctx,
@@ -119,12 +163,36 @@ void drawShapeOutline(HudContext& ctx,
     for (const Point p : shape)
         ctx.roundedRect(p.x - radius, p.y - radius, radius * 2.f, radius * 2.f, radius, color);
 }
+
+void drawGlassFrame(HudContext& ctx, float x, float y, float w, float h, float chamfer, float cornerCut, float outline)
+{
+    using namespace voidfall;
+
+    drawShapeOutline(ctx, x, y, w, h, chamfer, cornerCut, outline * 2.6f, withAlpha(k_chromaCyan, 0.12f));
+    drawShapeOutline(ctx, x, y, w, h, chamfer, cornerCut, outline * 1.7f, withAlpha(k_secondary, 0.48f));
+    drawShapeOutline(ctx, x, y, w, h, chamfer, cornerCut, outline, k_lineBright);
+    drawShapeOutline(ctx, x, y, w, h, chamfer, cornerCut, std::max(1.f, outline * 0.36f), k_cyan);
+
+    const float insetX = outline * 1.25f;
+    const float insetY = outline * 0.85f;
+    if (w > insetX * 2.f && h > insetY * 2.f) {
+        drawShapeOutline(ctx,
+                         x + insetX,
+                         y + insetY,
+                         w - insetX * 2.f,
+                         h - insetY * 2.f,
+                         std::max(0.f, chamfer - insetX),
+                         std::max(0.f, cornerCut - insetY),
+                         std::max(1.f, outline * 0.30f),
+                         withAlpha(k_textBright, 0.72f));
+    }
+}
 } // namespace
 
 HealthArmorBar::HealthArmorBar()
 {
     anchor = HudAnchor::TopCenter;
-    offsetX = -250.f;
+    offsetX = -375.f;
     offsetY = 98.f;
     width = panelWidth;
     height = barHeight;
@@ -151,8 +219,49 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float cornerCut = cornerCutSize * s;
     const float outline = std::max(1.f, outlineThickness * s);
     const float topY = y - h;
+    const float inset = outline * 1.5f;
+    const float innerX = x + inset;
+    const float innerY = topY + inset;
+    const float innerW = w - inset * 2.f;
+    const float innerH = h - inset * 2.f;
+    const float innerChamfer = std::max(0.f, chamfer - inset);
+    const float innerCornerCut = std::max(0.f, cornerCut - inset);
 
-    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, healthFill_, k_health);
-    drawFilledShape(ctx, x, topY, w, h, chamfer, cornerCut, armorFill_, k_cyan);
-    drawShapeOutline(ctx, x, topY, w, h, chamfer, cornerCut, outline, k_lineBright);
+    drawGradientFilledShape(ctx,
+                            x,
+                            topY,
+                            w,
+                            h,
+                            chamfer,
+                            cornerCut,
+                            1.f,
+                            withAlpha(k_quaternary, 0.88f),
+                            withAlpha(k_secondary, 0.56f));
+    drawGlassFrame(ctx, x, topY, w, h, chamfer, cornerCut, outline);
+
+    drawGradientFilledShape(ctx,
+                            innerX,
+                            innerY,
+                            innerW,
+                            innerH,
+                            innerChamfer,
+                            innerCornerCut,
+                            healthFill_,
+                            withAlpha(k_secondary, 0.80f),
+                            k_healthBright);
+    drawFillEdge(ctx, innerX, innerY, innerW, innerH, healthFill_, std::max(2.f, outline * 0.55f), k_textBright);
+
+    if (armorFill_ > 0.01f) {
+        drawGradientFilledShape(ctx,
+                                innerX,
+                                innerY,
+                                innerW,
+                                innerH,
+                                innerChamfer,
+                                innerCornerCut,
+                                armorFill_,
+                                withAlpha(k_primary, 0.80f),
+                                k_cyan);
+        drawFillEdge(ctx, innerX, innerY, innerW, innerH, armorFill_, std::max(2.f, outline * 0.55f), k_cyan);
+    }
 }
